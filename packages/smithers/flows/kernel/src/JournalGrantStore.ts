@@ -60,6 +60,7 @@ const journalFailed = (message: string, cause: unknown): GrantStoreError =>
 const knownEventTypes: ReadonlySet<string> = new Set([
   "flows.kernel.grant.once.v1",
   "flows.kernel.grant.run.v1",
+  "flows.kernel.grant.run.v2",
   "flows.kernel.grant.remembered.v1",
   "flows.kernel.grant.denied.v1",
   "flows.kernel.grant.envelope.v1"
@@ -68,7 +69,7 @@ const knownEventTypes: ReadonlySet<string> = new Set([
 const invalidReplay = (message: string): GrantStoreError => new GrantStoreError({ code: "invalid_resolution", message })
 
 const appendReplayedRule = (
-  rules: Array<Rule>,
+  rules: Array<NonNullable<GrantStore.MakeOptions["runRules"]>[number]>,
   seen: Set<string>,
   pattern: Capability.CapabilityPattern
 ): void => {
@@ -103,6 +104,9 @@ const decodeTrustedEntry = (
 ): Effect.Effect<GrantEvent | undefined, GrantStoreError> => {
   if (entry.sourceId !== sourceId || !knownEventTypes.has(entry.eventType)) {
     return Effect.succeed(undefined)
+  }
+  if (entry.eventType === "flows.kernel.grant.run.v1") {
+    return Effect.fail(invalidReplay(`legacy run grant has no captured ceiling at journal sequence ${entry.seq}`))
   }
   const event = decode(entry.payload)
   if (event._tag === "Failure") {
@@ -194,7 +198,7 @@ const replayRunRules = (
 ) =>
   Effect.gen(function*() {
     const journal = yield* JournalModule.Journal
-    const rules: Array<Rule> = []
+    const rules: Array<NonNullable<GrantStore.MakeOptions["runRules"]>[number]> = []
     const seenRules = new Set<string>()
     const envelopeSignatures = new Set<string>()
     let after: JournalEvent.Seq | undefined
@@ -221,14 +225,18 @@ const replayRunRules = (
         if (event.eventType === "flows.kernel.grant.once.v1" || event.eventType === "flows.kernel.grant.denied.v1") {
           continue
         }
-        if (event.eventType === "flows.kernel.grant.run.v1") {
+        if (event.eventType === "flows.kernel.grant.run.v2") {
           if (event.planDigest !== planDigest) {
             continue
           }
           if (!GrantStore.isValidGrantPattern(event.pattern, event.capability, event.tier, workspaceRoot)) {
             return yield* Effect.fail(invalidReplay(`unsafe run grant event: ${entry.seq}`))
           }
-          appendReplayedRule(rules, seenRules, event.pattern)
+          const key = `run:${JSON.stringify([event.pattern, event.ceiling])}`
+          if (!seenRules.has(key)) {
+            seenRules.add(key)
+            rules.push({ rule: new Rule({ effect: "allow", pattern: event.pattern }), ceiling: event.ceiling })
+          }
           continue
         }
         if (event.eventType === "flows.kernel.grant.envelope.v1" && event.scope === "run") {

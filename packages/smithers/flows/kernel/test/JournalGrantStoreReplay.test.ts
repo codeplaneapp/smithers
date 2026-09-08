@@ -9,6 +9,7 @@ import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import type * as Scope from "effect/Scope"
 import { spawnSync } from "node:child_process"
+import { attenuate } from "../src/CapabilitySet.ts"
 import * as GrantEvent from "../src/GrantEvent.ts"
 import { GrantStore, maximumRules } from "../src/GrantStore.ts"
 import * as JournalGrantStore from "../src/JournalGrantStore.ts"
@@ -153,15 +154,20 @@ const rememberedGrant = (pattern: Capability.CapabilityPattern, tier: "compensab
 
 const runGrant = (
   pattern: Capability.CapabilityPattern,
-  overrides: { readonly runId?: string; readonly planDigest?: string } = {}
+  overrides: {
+    readonly runId?: string
+    readonly planDigest?: string
+    readonly ceiling?: ReadonlyArray<ReadonlyArray<Capability.CapabilityPattern>>
+  } = {}
 ) =>
   new GrantEvent.RunGrant({
-    eventType: "flows.kernel.grant.run.v1",
+    eventType: "flows.kernel.grant.run.v2",
     requestId: "request",
     runId: overrides.runId ?? options.runId,
     planDigest: overrides.planDigest ?? options.planDigest,
     capability: insideWrite,
     pattern,
+    ceiling: overrides.ceiling ?? [],
     scope: "run",
     tier: "compensable"
   })
@@ -178,6 +184,99 @@ const envelopeGrant = (
     patterns,
     scope
   })
+
+describe("JournalGrantStore captured run ceilings", () => {
+  itEffect("preserves the requesting ceiling when reopened under an unrestricted parent", () =>
+    Effect.gen(function*() {
+      const store = yield* JournalGrantStore.make({ ...options, attended: true })
+      const narrow = new Capability.CapabilityPattern({ action: "fs:write", resource: insideWrite.resource })
+      const outside = new Capability.Capability({ action: "fs:write", resource: "/workspace/other.txt" })
+      const first = yield* store.check(insideWrite).pipe(
+        attenuate([narrow]),
+        Effect.forkChild({ startImmediately: true })
+      )
+      const [request] = yield* store.list
+      expect(request).toBeDefined()
+      yield* store.reply(request!.requestId, "run", insidePattern)
+      yield* Fiber.join(first)
+      const second = yield* store.check(outside).pipe(Effect.forkChild({ startImmediately: true }))
+      expect((yield* store.list).map((pending) => pending.capability)).toEqual([outside])
+      yield* Fiber.interrupt(second)
+
+      const reopened = yield* JournalGrantStore.make(options)
+      yield* reopened.check(insideWrite)
+      expect(yield* Effect.result(reopened.check(outside))).toMatchObject({
+        _tag: "Failure",
+        failure: { code: "permission_required" }
+      })
+    }).pipe(
+      Effect.provide(TestJournal.layer({ redact: (value) => value })),
+      Effect.provide(Workspace.layer(workspaceRoot)),
+      Effect.scoped
+    ))
+
+  itEffect("intersects every captured group with the constructor ceiling", () =>
+    run(Effect.gen(function*() {
+      const readme = new Capability.Capability({ action: "fs:write", resource: "/workspace/a.md" })
+      const other = new Capability.Capability({ action: "fs:write", resource: "/workspace/b.md" })
+      const text = new Capability.Capability({ action: "fs:write", resource: "/workspace/a.txt" })
+      const markdown = new Capability.CapabilityPattern({ action: "fs:write", resource: "/workspace/*.md" })
+      const aFiles = new Capability.CapabilityPattern({ action: "fs:write", resource: "/workspace/a.*" })
+      yield* emit(options.runId, runGrant(insidePattern, { ceiling: [[insidePattern], [markdown]] }))
+      const store = yield* JournalGrantStore.make(options).pipe(attenuate([aFiles]))
+      // These checks run in the unrestricted parent after construction.
+      yield* store.check(readme)
+      expect(yield* Effect.flip(store.check(other))).toBeInstanceOf(PermissionRequired)
+      expect(yield* Effect.flip(store.check(text))).toBeInstanceOf(PermissionRequired)
+    })))
+
+  itEffect(
+    "retains distinct ceilings for the same approved pattern and deduplicates exact repeats",
+    () =>
+      run(Effect.gen(function*() {
+        const other = new Capability.Capability({ action: "fs:write", resource: "/workspace/other.txt" })
+        const narrow = new Capability.CapabilityPattern({ action: "fs:write", resource: insideWrite.resource })
+        const otherPattern = new Capability.CapabilityPattern({ action: "fs:write", resource: other.resource })
+        const first = runGrant(insidePattern, { ceiling: [[narrow]] })
+        yield* emit(options.runId, first)
+        yield* emit(options.runId, first)
+        yield* emit(options.runId, runGrant(insidePattern, { ceiling: [[otherPattern]] }))
+        const store = yield* JournalGrantStore.make({
+          ...options,
+          rules: [Array.from({ length: maximumRules - 2 }, () => new Rule({ effect: "ask", pattern: insidePattern }))]
+        })
+        yield* store.check(insideWrite)
+        yield* store.check(other)
+        const third = new Capability.Capability({ action: "fs:write", resource: "/workspace/third.txt" })
+        expect(yield* Effect.flip(store.check(third))).toBeInstanceOf(PermissionRequired)
+      }))
+  )
+
+  itEffect("replays an empty ceiling group as no authority", () =>
+    run(Effect.gen(function*() {
+      yield* emit(options.runId, runGrant(insidePattern, { ceiling: [[]] }))
+      const store = yield* JournalGrantStore.make(options)
+      expect(yield* Effect.flip(store.check(insideWrite))).toBeInstanceOf(PermissionRequired)
+    })))
+
+  itEffect("fails closed on legacy run grants without a recoverable ceiling", () =>
+    run(Effect.gen(function*() {
+      const journal = yield* Journal
+      const payload = encoded(runGrant(insidePattern)) as Record<string, unknown>
+      const { ceiling: _ceiling, ...legacy } = payload
+      yield* journal.emitDurableUnfenced(
+        new Input({
+          runId: runId(options.runId),
+          sourceId: sourceId(options.sourceId),
+          eventType: "flows.kernel.grant.run.v1",
+          payload: { ...legacy, eventType: "flows.kernel.grant.run.v1" }
+        })
+      )
+      const failure = yield* Effect.flip(JournalGrantStore.make(options))
+      expect(failure.code).toBe("invalid_resolution")
+      expect(failure.message).toContain("legacy run grant has no captured ceiling")
+    })))
+})
 
 describe("JournalGrantStore replay rejection", () => {
   itEffect("rejects a corrupt payload under a known grant event type", () =>
@@ -285,12 +384,13 @@ describe("JournalGrantStore replay rejection", () => {
         yield* emit(
           options.runId,
           new GrantEvent.RunGrant({
-            eventType: "flows.kernel.grant.run.v1",
+            eventType: "flows.kernel.grant.run.v2",
             requestId: "request",
             runId: options.runId,
             planDigest: options.planDigest,
             capability,
             pattern,
+            ceiling: [],
             scope: "run",
             tier: "irreversible"
           })
@@ -417,7 +517,7 @@ describe("JournalGrantStore replay filtering", () => {
           new Input({
             runId: runId(options.runId),
             sourceId: sourceId("other-source"),
-            eventType: "flows.kernel.grant.run.v1",
+            eventType: "flows.kernel.grant.run.v2",
             payload: encoded(runGrant(insidePattern))
           })
         )
@@ -908,12 +1008,13 @@ describe("JournalGrantStore paging and journal failures", () => {
                 entry(
                   2,
                   new GrantEvent.RunGrant({
-                    eventType: "flows.kernel.grant.run.v1",
+                    eventType: "flows.kernel.grant.run.v2",
                     requestId: "request-read",
                     runId: options.runId,
                     planDigest: options.planDigest,
                     capability: read,
                     pattern: readPattern,
+                    ceiling: [],
                     scope: "run",
                     tier: "sealed"
                   }),

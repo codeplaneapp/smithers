@@ -179,7 +179,14 @@ describe("GrantStore", () => {
   itEffect("a run grant cannot outlive the capability ceiling captured by its request", () =>
     Effect.scoped(
       Effect.gen(function*() {
-        const store = yield* make({ planDigest: "plan-1" })
+        const events: Array<GrantEvent> = []
+        const store = yield* make({
+          planDigest: "plan-1",
+          persist: (event) =>
+            Effect.sync(() => {
+              events.push(event)
+            })
+        })
         const first = yield* store.check(readme).pipe(
           attenuate([
             new CapabilityPattern({
@@ -196,6 +203,12 @@ describe("GrantStore", () => {
           workspaceReads
         )
         yield* Fiber.join(first)
+
+        expect(events).toMatchObject([{
+          eventType: "flows.kernel.grant.run.v2",
+          pattern: workspaceReads,
+          ceiling: [[{ action: "fs:read", resource: readme.resource }]]
+        }])
 
         const second = yield* store.check(notes).pipe(
           Effect.forkChild({ startImmediately: true })

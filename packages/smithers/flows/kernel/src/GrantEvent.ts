@@ -73,17 +73,22 @@ export class RememberedGrant extends Schema.TaggedClass<RememberedGrant>()(
 /**
  * A grant scoped to the current run.
  *
+ * Version 2 captures the requesting fiber's normalized conjunction of any-of
+ * capability-pattern groups. Replay intersects it with the constructor ceiling.
+ * Version 1 omitted this boundary and cannot safely activate authority.
+ *
  * @category models
  * @since 1.0.0-rc.0
  * @slop
  */
 export class RunGrant extends Schema.TaggedClass<RunGrant>()("@smthrs/kernel/GrantEvent/RunGrant", {
-  eventType: Schema.Literal("flows.kernel.grant.run.v1"),
+  eventType: Schema.Literal("flows.kernel.grant.run.v2"),
   requestId: Schema.String,
   runId: Schema.String,
   planDigest: Schema.String,
   capability: Capability,
   pattern: CapabilityPattern,
+  ceiling: Schema.Array(Schema.Array(CapabilityPattern)),
   scope: Schema.Literal("run"),
   tier: GrantTier
 }) {}

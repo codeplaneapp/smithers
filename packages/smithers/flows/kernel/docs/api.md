@@ -219,7 +219,10 @@ A bulk approval. `scope` defaults to `"run"`.
 interface MakeOptions {
   readonly attended?: boolean | undefined
   readonly rules?: ReadonlyArray<Rule> | ReadonlyArray<ReadonlyArray<Rule>> | undefined
-  readonly runRules?: ReadonlyArray<Rule> | undefined
+  readonly runRules?: ReadonlyArray<Rule | {
+    readonly rule: Rule
+    readonly ceiling: ReadonlyArray<ReadonlyArray<CapabilityPattern>>
+  }> | undefined
   readonly envelope?: EnvelopeGrantOptions | undefined
   readonly envelopeSignatures?: ReadonlyArray<string> | undefined
   readonly runId?: string | undefined
@@ -368,26 +371,33 @@ Durable audit evidence, deliberately never replayed as active authority.
 
 ```ts
 class RunGrant extends Schema.TaggedClass<RunGrant>()("@smthrs/kernel/GrantEvent/RunGrant", {
-  eventType: Schema.Literal("flows.kernel.grant.run.v1")
+  eventType: Schema.Literal("flows.kernel.grant.run.v2")
   requestId: Schema.String
   runId: Schema.String
   planDigest: Schema.String
   capability: Capability
   pattern: CapabilityPattern
+  ceiling: Schema.Array(Schema.Array(CapabilityPattern))
   scope: Schema.Literal("run")
   tier: GrantTier
 }) {}
 ```
 
 Replayed as active authority only for its own run and the current plan digest.
-`planDigest` is required here and optional on every other member.
+`ceiling` stores the requesting fiber's normalized conjunction of any-of pattern
+groups. An empty outer array is unrestricted; an empty inner group denies all.
+Replay intersects this ceiling with the constructor's ceiling. Trusted legacy
+`flows.kernel.grant.run.v1` entries fail construction with `invalid_resolution`
+because their captured ceiling cannot be recovered.
+
+Both `RunGrant` and `EnvelopeGrant` require `planDigest`; other members make it optional.
 
 ### GrantEvent.RememberedGrant
 
 ```ts
 class RememberedGrant extends Schema.TaggedClass<RememberedGrant>()(
   "@smthrs/kernel/GrantEvent/RememberedGrant",
-  { eventType: Schema.Literal("flows.kernel.grant.remembered.v1") /* as RunGrant, planDigest optional */ }
+  { eventType: Schema.Literal("flows.kernel.grant.remembered.v1") /* as OnceGrant, scope "remembered" */ }
 ) {}
 ```
 

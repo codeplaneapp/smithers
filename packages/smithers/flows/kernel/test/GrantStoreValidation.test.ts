@@ -267,7 +267,7 @@ describe("GrantStore.reply", () => {
 
         expect(events).toMatchObject([
           {
-            eventType: "flows.kernel.grant.run.v1",
+            eventType: "flows.kernel.grant.run.v2",
             pattern: { action: "fs:read", resource: "/workspace/readme.md" }
           }
         ])

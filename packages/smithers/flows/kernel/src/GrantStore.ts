@@ -29,7 +29,7 @@ import {
   Rule
 } from "@smthrs/capability/Permission"
 import { Context, Deferred, Effect, Layer, Option, type Scope, Semaphore } from "effect"
-import { allows, type CapabilitySet, current } from "./CapabilitySet.ts"
+import { allows, type CapabilitySet, current, fromPatterns, intersect } from "./CapabilitySet.ts"
 import { DeniedGrant, EnvelopeGrant, type GrantEvent, OnceGrant, RememberedGrant, RunGrant } from "./GrantEvent.ts"
 import { Workspace } from "./Workspace.ts"
 
@@ -122,7 +122,15 @@ export type Persist = (event: GrantEvent) => Effect.Effect<void, GrantStoreError
 export interface MakeOptions {
   readonly attended?: boolean | undefined
   readonly rules?: ReadonlyArray<Rule> | ReadonlyArray<ReadonlyArray<Rule>> | undefined
-  readonly runRules?: ReadonlyArray<Rule> | undefined
+  /** Bare rules use the constructor ceiling; captured groups intersect it. */
+  readonly runRules?:
+    | ReadonlyArray<
+      Rule | {
+        readonly rule: Rule
+        readonly ceiling: ReadonlyArray<ReadonlyArray<CapabilityPattern>>
+      }
+    >
+    | undefined
   readonly envelope?: EnvelopeGrantOptions | undefined
   /**
    * {@link envelopeSignature} values of envelopes that are already durable —
@@ -565,16 +573,24 @@ export const make = (
     const initialRunRules = yield* attemptSnapshot("runRules", () => {
       const values = options.runRules ?? []
       if (values.length > maximumRules) throw invalid(`runRules exceed ${maximumRules} entries`)
-      return values.map(snapshotRule)
+      return values.map((value) =>
+        "rule" in value
+          ? {
+            rule: snapshotRule(value.rule),
+            ceiling: value.ceiling.reduce(
+              (ceiling, group) => intersect(ceiling, fromPatterns(group)),
+              initialCeiling
+            )
+          }
+          : { rule: snapshotRule(value), ceiling: initialCeiling }
+      )
     })
     if (initial.configured.length + initial.remembered.length + initialRunRules.length > maximumRules) {
       return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
     }
     const configuredRules = initial.configured
     const envelopeRules: Array<Rule> = []
-    const runRules: Array<{ readonly rule: Rule; readonly ceiling: CapabilitySet }> = initialRunRules.map(
-      (rule) => ({ rule, ceiling: initialCeiling })
-    )
+    const runRules = initialRunRules
     const rememberedRules = [...initial.remembered]
     const pending = new Map<string, PendingEntry>()
     const persist = options.persist ?? (() => Effect.void)
@@ -870,12 +886,13 @@ export const make = (
                 const rule = snapshotRule(new Rule({ effect: "allow", pattern }))
                 yield* persistEvent(
                   new RunGrant({
-                    eventType: "flows.kernel.grant.run.v1",
+                    eventType: "flows.kernel.grant.run.v2",
                     requestId,
                     runId: runId ?? "",
                     planDigest,
                     capability: entry.capability,
                     pattern,
+                    ceiling: entry.ceiling.groups,
                     scope: "run",
                     tier: entry.tier
                   })

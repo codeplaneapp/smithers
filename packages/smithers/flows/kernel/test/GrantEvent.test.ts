@@ -17,12 +17,13 @@ const events: ReadonlyArray<GrantEvent.GrantEvent> = [
     tier: "sealed"
   }),
   new GrantEvent.RunGrant({
-    eventType: "flows.kernel.grant.run.v1",
+    eventType: "flows.kernel.grant.run.v2",
     requestId: "request-run",
     runId: "run-1",
     planDigest: "plan-1",
     capability,
     pattern,
+    ceiling: [],
     scope: "run",
     tier: "sealed"
   }),
@@ -88,7 +89,7 @@ const goldenPayloads = [
     event: events[1]!,
     payload: Object.freeze({
       _tag: "@smthrs/kernel/GrantEvent/RunGrant",
-      eventType: "flows.kernel.grant.run.v1",
+      eventType: "flows.kernel.grant.run.v2",
       requestId: "request-run",
       runId: "run-1",
       planDigest: "plan-1",
@@ -100,6 +101,7 @@ const goldenPayloads = [
         action: "fs:read",
         resource: "/workspace/**"
       }),
+      ceiling: [],
       scope: "run",
       tier: "sealed"
     })
@@ -197,7 +199,7 @@ describe("GrantEvent schema", () => {
     ["a tag and payload from different grant variants", {
       ...once,
       _tag: "@smthrs/kernel/GrantEvent/RunGrant",
-      eventType: "flows.kernel.grant.run.v1"
+      eventType: "flows.kernel.grant.run.v2"
     }],
     ["an envelope with a once scope", { ...envelope, scope: "once" }]
   ]
@@ -207,6 +209,14 @@ describe("GrantEvent schema", () => {
       expect(GrantEvent.decode(input)._tag).toBe("Failure")
     })
   }
+
+  it("requires a ceiling on v2 run grants and rejects the legacy version", () => {
+    const run = encode(events[1]!)
+    const { ceiling: _ceiling, ...withoutCeiling } = run
+    expect(GrantEvent.decode(withoutCeiling)._tag).toBe("Failure")
+    expect(GrantEvent.decode({ ...withoutCeiling, eventType: "flows.kernel.grant.run.v1" })._tag).toBe("Failure")
+    expect(GrantEvent.decode({ ...run, ceiling: [pattern] })._tag).toBe("Failure")
+  })
 
   it("rejects an envelope carrying request-only payload fields", () => {
     expect(

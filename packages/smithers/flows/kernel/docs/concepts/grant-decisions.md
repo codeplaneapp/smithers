@@ -69,7 +69,19 @@ so an operator can still write an exception after a broad denial.
 
 Run rules carry the ceiling of the fiber that requested them and are filtered
 out for any capability that ceiling would not allow. A grant handed to an
-attenuated fiber therefore cannot leak back up to a broader one.
+attenuated fiber therefore cannot leak back up to a broader one, including after
+restart. Each `flows.kernel.grant.run.v2` event persists the normalized captured
+ceiling as a conjunction of any-of pattern groups. Replay intersects it with
+the constructor's ceiling; reopening under a broader parent cannot widen it.
+
+Trusted legacy `flows.kernel.grant.run.v1` events have no captured ceiling.
+The journal store refuses construction with `invalid_resolution` when it finds
+one. Their original boundary cannot be recovered, so obtain fresh approval in
+a new run instead of replaying legacy authority.
+
+A bare rule in `MakeOptions.runRules` uses the constructor's ceiling. A
+`{ rule, ceiling }` entry carries captured pattern groups and intersects them
+with that ceiling, as journal replay does.
 
 ## The four resolutions
 

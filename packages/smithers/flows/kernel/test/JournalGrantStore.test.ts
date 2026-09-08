@@ -326,7 +326,7 @@ describe("JournalGrantStore", () => {
           new Input({
             runId: runId(options.policyRunId),
             sourceId: sourceId(options.sourceId),
-            eventType: "flows.kernel.grant.run.v1",
+            eventType: "flows.kernel.grant.run.v2",
             payload: payload.success
           })
         )
