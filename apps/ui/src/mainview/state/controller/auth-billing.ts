@@ -6,12 +6,15 @@ import {
   AUTH_LOGOUT_PATH,
   AUTH_NATIVE_CLAIM_PATH,
   AUTH_NATIVE_START_PATH,
+  AUTH_RETURN_TO_PARAM,
   AUTH_SCOPES_PATH,
   AUTH_SESSION_PATH,
   AUTH_SIGN_IN_PATH,
+  AUTH_SIGNED_IN_PARAM,
   BILLING_BALANCE_PATH,
   IDENTITY_REQUEST_ACCESS_PATH
 } from "@smthrs/rpc/AgentApiRoutes"
+import { signInReturnTo } from "../../RepoLink"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 
@@ -50,9 +53,16 @@ export const createAuthBillingController = (
   const withToast = ctx.withToast
   const resumeWorkflowRuns = (): void => ctx.resumeWorkflowRuns()
   const resumeDeferredCommand = (): void => ctx.resumeDeferredCommand()
-  /** Returning from a failed OAuth redirect is a chat message, never a bare page. */
+  /**
+   * Returning from a failed OAuth redirect is a chat message, never a bare
+   * page. Returning from a finished one carries `?signed-in=github` on
+   * whichever page asked (`/` or `/owner/name`); the session probe already
+   * says who signed in, so the marker is only reported as handled and the
+   * boot strips it from the address bar.
+   */
   const handleAuthReturn = (search: string): boolean => {
     const params = new URLSearchParams(search)
+    if (params.has(AUTH_SIGNED_IN_PARAM)) return true
     const auth = params.get("auth")
     if (auth !== "failed" && auth !== "error") return false
     store.dispatch({
@@ -423,7 +433,12 @@ export const createAuthBillingController = (
       void nativeSignIn(openExternal)
       return
     }
-    if (typeof window !== "undefined") window.location.assign(`${baseUrl}${AUTH_SIGN_IN_PATH}`)
+    if (typeof window === "undefined") return
+    // A sign-in from a repository page comes back to that page (the server
+    // validates the path against its own origin and ignores anything else).
+    const returnTo = signInReturnTo(window.location)
+    const query = returnTo === null ? "" : `?${AUTH_RETURN_TO_PARAM}=${encodeURIComponent(returnTo)}`
+    window.location.assign(`${baseUrl}${AUTH_SIGN_IN_PATH}${query}`)
   }
 
   /*

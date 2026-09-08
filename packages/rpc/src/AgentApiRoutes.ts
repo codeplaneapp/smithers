@@ -87,6 +87,26 @@ export const AUTH_NATIVE_CLAIM_PATH = "/api/auth/native/claim"
  */
 export const AUTH_CALLBACK_PATH = "/api/auth/github/callback"
 /**
+ * The optional query parameter on the sign-in start route naming the
+ * same-origin page the callback returns the visitor to. The server accepts a
+ * single absolute path only (`/owner/name`, at most 512 bytes) and ignores
+ * anything else, so a crafted link can never turn the callback into an open
+ * redirect.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const AUTH_RETURN_TO_PARAM = "return_to"
+/**
+ * The query parameter the callback appends to the page it returns the
+ * visitor to (`?signed-in=github`), so the app's auth-return handling fires
+ * on any return page and strips the marker afterwards.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const AUTH_SIGNED_IN_PARAM = "signed-in"
+/**
  * The auth logout route shared by server and client.
  *
  * @since 1.0.0

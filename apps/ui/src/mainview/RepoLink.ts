@@ -1,3 +1,4 @@
+import { AUTH_SIGNED_IN_PARAM } from "@smthrs/rpc/AgentApiRoutes"
 import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 import type { AppController } from "./state/AppController"
 
@@ -68,6 +69,28 @@ export const catalogRepository = (catalog: unknown, requested: string): CatalogR
     }
   }
   return null
+}
+
+/*
+ * The server drops a longer return path (apps/server validReturnTo), so the
+ * client sends the bare page rather than lose the whole return.
+ */
+const RETURN_TO_MAX_BYTES = 512
+
+/**
+ * The page a sign-in started from a repository path returns to: the path and
+ * its query, minus the auth markers a previous return spent (`signed-in`,
+ * `auth`), so they are never replayed. Null anywhere but `/owner/name`: the
+ * landing page is where the callback lands on its own.
+ */
+export const signInReturnTo = (location: Pick<Location, "pathname" | "search">): string | null => {
+  if (pathRepo(location.pathname) === null) return null
+  const params = new URLSearchParams(location.search)
+  params.delete(AUTH_SIGNED_IN_PARAM)
+  params.delete("auth")
+  const search = params.toString()
+  const withSearch = `${location.pathname}${search === "" ? "" : `?${search}`}`
+  return new TextEncoder().encode(withSearch).byteLength > RETURN_TO_MAX_BYTES ? location.pathname : withSearch
 }
 
 /** The same location without the repo parameter; other parameters and the fragment stay. */

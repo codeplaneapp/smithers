@@ -7,9 +7,11 @@ import {
   ADMIN_REQUESTS_PATH,
   ADMIN_ROUTE_PREFIX,
   AUTH_CALLBACK_PATH,
+  AUTH_RETURN_TO_PARAM,
   AUTH_ROUTE_PREFIX,
   AUTH_SESSION_PATH,
   AUTH_SIGN_IN_PATH,
+  AUTH_SIGNED_IN_PARAM,
   BILLING_ROUTE_PREFIX,
   CANCEL_PATH,
   IDENTITY_ROUTE_PREFIX,
@@ -1262,11 +1264,123 @@ const oauthCallbackRefusal = (url: URL): { status: number; heading: string; deta
   }
 }
 
+/*
+ * The return path. A sign-in started from a repository page
+ * (`/smithersai/smithers`) finished on the landing page, because the identity
+ * worker knows one landing (`/?signed-in=github`) and this Worker forwarded
+ * the callback's answer untouched. The page that asked travels as
+ * `?return_to=` on the start route; this Worker (never the identity worker,
+ * which cannot know this origin's pages) keeps it in a short-lived cookie
+ * scoped to the two OAuth legs and, once identity answers the callback with
+ * its success redirect, sends the browser back to that page with the same
+ * `signed-in=github` marker the landing page would have carried.
+ *
+ * SECURITY. `return_to` is attacker-controllable (any site can link a user at
+ * the start route with a crafted query string) and the callback turns it into
+ * a redirect, which is the open-redirect shape. It is accepted only as a
+ * same-origin absolute path: one leading slash; no scheme, host, or second
+ * slash (`//evil` and `/\evil` both resolve off-origin in browsers); no
+ * backslash, control character, or newline anywhere (header injection); at
+ * most 512 bytes; never an `/api/` route (a page, not a redirect loop). The
+ * value is re-validated when the cookie is read, so a tampered cookie is
+ * ignored the same way a crafted query is. Anything rejected is dropped and
+ * the callback lands where it always did.
+ */
+const RETURN_TO_COOKIE = "smithers_return_to"
+const RETURN_TO_COOKIE_PATH = "/api/auth"
+const RETURN_TO_MAX_AGE_SECONDS = 10 * 60
+const RETURN_TO_MAX_BYTES = 512
+const RETURN_TO_CONTROL = /[\u0000-\u001f\u007f\\]/
+
+/** The same-origin page path `value` names, or undefined when it is anything else. */
+const validReturnTo = (value: string | null | undefined): string | undefined => {
+  if (typeof value !== "string" || value === "" || value === "/") return undefined
+  if (new TextEncoder().encode(value).byteLength > RETURN_TO_MAX_BYTES) return undefined
+  if (!value.startsWith("/") || value.startsWith("//") || RETURN_TO_CONTROL.test(value)) return undefined
+  if (value.startsWith("/api/") || value === "/api") return undefined
+  // Belt and braces: the URL parser must agree the path stays on this origin.
+  const probe = "https://return-to.invalid"
+  let resolved: URL
+  try {
+    resolved = new URL(value, probe)
+  } catch {
+    return undefined
+  }
+  if (resolved.origin !== probe || !resolved.pathname.startsWith("/")) return undefined
+  return value
+}
+
+const returnToCookie = (value: string | undefined): string =>
+  value === undefined
+    ? `${RETURN_TO_COOKIE}=; Path=${RETURN_TO_COOKIE_PATH}; Max-Age=0; HttpOnly; Secure; SameSite=Lax`
+    : `${RETURN_TO_COOKIE}=${encodeURIComponent(value)}; Path=${RETURN_TO_COOKIE_PATH}; Max-Age=${RETURN_TO_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=Lax`
+
+/** The validated return path the request's cookie carries, or undefined. */
+const readReturnToCookie = (request: Request): string | undefined => {
+  const header = request.headers.get("cookie")
+  if (header === null) return undefined
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=")
+    if (eq === -1) continue
+    if (part.slice(0, eq).trim() !== RETURN_TO_COOKIE) continue
+    const raw = part.slice(eq + 1).trim()
+    try {
+      return validReturnTo(decodeURIComponent(raw))
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+const hasReturnToCookie = (request: Request): boolean =>
+  (request.headers.get("cookie") ?? "").split(";").some((part) => part.trim().startsWith(`${RETURN_TO_COOKIE}=`))
+
+const withSetCookie = (response: Response, cookie: string, location?: string): Response => {
+  const headers = new Headers(response.headers)
+  headers.append("set-cookie", cookie)
+  if (location !== undefined) headers.set("location", location)
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+}
+
+/**
+ * The page the callback sends the browser to: the return path plus the marker
+ * the identity redirect carried (`signed-in=github` today), or that marker
+ * verbatim when identity's redirect carried none.
+ */
+const returnToLocation = (returnTo: string, upstreamLocation: string, requestUrl: URL): string => {
+  const target = new URL(returnTo, requestUrl.origin)
+  let upstream: URL | undefined
+  try {
+    upstream = new URL(upstreamLocation, requestUrl.origin)
+  } catch {
+    upstream = undefined
+  }
+  if (upstream !== undefined && upstream.origin === requestUrl.origin) {
+    for (const [name, value] of upstream.searchParams) target.searchParams.set(name, value)
+  }
+  if (!target.searchParams.has(AUTH_SIGNED_IN_PARAM)) target.searchParams.set(AUTH_SIGNED_IN_PARAM, "github")
+  return `${target.pathname}${target.search}${target.hash}`
+}
+
 const handleAuthNavigation = async (
   request: Request,
   env: WorkerEnv,
   route: "start" | "callback"
 ): Promise<Response> => {
+  // The start leg reads the page that asked and keeps it out of the forwarded
+  // query: the identity worker has no use for it, and GitHub must never see it.
+  let returnTo: string | undefined
+  if (route === "start") {
+    const url = new URL(request.url)
+    if (url.searchParams.has(AUTH_RETURN_TO_PARAM)) {
+      returnTo = validReturnTo(url.searchParams.get(AUTH_RETURN_TO_PARAM))
+      url.searchParams.delete(AUTH_RETURN_TO_PARAM)
+      request = new Request(url.toString(), request)
+    }
+  } else {
+    returnTo = readReturnToCookie(request)
+  }
   if (route === "callback") {
     const refusal = oauthCallbackRefusal(new URL(request.url))
     if (refusal !== undefined) {
@@ -1305,8 +1419,18 @@ const handleAuthNavigation = async (
     )
   }
   // The happy path is a redirect: to GitHub from start, back here from callback.
-  if (response.status >= 300 && response.status < 400 && response.headers.get("location") !== null) {
-    return response
+  const location = response.headers.get("location")
+  if (response.status >= 300 && response.status < 400 && location !== null) {
+    if (route === "start") {
+      return returnTo === undefined ? response : withSetCookie(response, returnToCookie(returnTo))
+    }
+    // Identity's success redirect names its one landing; with a return path
+    // on file the browser goes back to the page that asked instead, and the
+    // cookie is spent either way.
+    if (returnTo !== undefined) {
+      return withSetCookie(response, returnToCookie(undefined), returnToLocation(returnTo, location, new URL(request.url)))
+    }
+    return hasReturnToCookie(request) ? withSetCookie(response, returnToCookie(undefined)) : response
   }
   /*
    * The OTHER happy path (native sign-in handoff): a callback bound to a

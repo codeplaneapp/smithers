@@ -117,3 +117,75 @@ describe("signed-in session adoption", () => {
     ])
   })
 })
+
+/*
+ * The sign-in return path. From a repository page (`/owner/name`) the
+ * sign-in door names that page as `return_to`; from the landing page it
+ * names nothing. Coming back, `?signed-in=github` on either page counts as
+ * handled (so the boot strips it) without a chat message: the session probe
+ * already says who signed in.
+ */
+describe("sign-in return path", () => {
+  interface WindowStub {
+    location: { pathname: string; search: string; assign: (url: string) => void }
+  }
+  const withWindow = async (pathname: string, search: string, run: (assigned: string[]) => Promise<void>) => {
+    const assigned: string[] = []
+    const stub: WindowStub = { location: { pathname, search, assign: (url) => void assigned.push(url) } }
+    const globals = globalThis as unknown as { window?: unknown }
+    const had = "window" in globals
+    const previous = globals.window
+    globals.window = stub
+    try {
+      await run(assigned)
+    } finally {
+      if (had) globals.window = previous
+      else delete globals.window
+    }
+  }
+
+  const signedOutController = async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const ctx = createControllerContext(store, repositories, agent, {
+      fetchImpl: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } })
+    })
+    store.dispatch({
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-out",
+      login: null,
+      allowlisted: false,
+      admin: false,
+      scopesPlain: null
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    return { store, controller: createAuthBillingController(ctx, () => 0) }
+  }
+
+  test("from a repository page the sign-in door names that page as return_to", async () => {
+    const { controller } = await signedOutController()
+    await withWindow("/smithersai/smithers", "?tab=issues", async (assigned) => {
+      controller.signIn()
+      expect(assigned).toEqual(["/api/auth/github/start?return_to=%2Fsmithersai%2Fsmithers%3Ftab%3Dissues"])
+    })
+  })
+
+  test("from the landing page the sign-in door carries no return path", async () => {
+    const { controller } = await signedOutController()
+    await withWindow("/", "?repo=smithersai/smithers", async (assigned) => {
+      controller.signIn()
+      expect(assigned).toEqual(["/api/auth/github/start"])
+    })
+  })
+
+  test("the signed-in marker is handled silently; a failed return still speaks", async () => {
+    const { store, controller } = await signedOutController()
+    const messages = () => [...store.collections.messages.values()].length
+    const before = messages()
+    expect(controller.handleAuthReturn("?signed-in=github")).toBe(true)
+    expect(messages()).toBe(before)
+    expect(controller.handleAuthReturn("?tab=issues")).toBe(false)
+    expect(controller.handleAuthReturn("?auth=failed")).toBe(true)
+    expect(messages()).toBe(before + 1)
+  })
+})

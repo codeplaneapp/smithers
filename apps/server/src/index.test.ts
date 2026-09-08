@@ -563,6 +563,17 @@ describe("smithers mvp worker", () => {
   })
 })
 
+const withMockedFetchResult = async <T>(
+  handler: (request: Request) => Response | Promise<Response> | undefined,
+  run: () => Promise<T>
+): Promise<T> => {
+  let result: T | undefined
+  await withMockedFetch(handler, async () => {
+    result = await run()
+  })
+  return result as T
+}
+
 const withMockedFetch = async (
   handler: (request: Request) => Response | Promise<Response> | undefined,
   run: () => Promise<void>
@@ -906,6 +917,167 @@ describe("auth navigation seam (wave 8)", () => {
         const response = await worker.fetch(new Request("https://mvp.test/api/auth/session"), env)
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ login: "will", allowlisted: true })
+      }
+    )
+  })
+})
+
+/*
+ * The sign-in return path. A sign-in started from `/smithersai/smithers`
+ * finished on `/?signed-in=github` (a real round trip on smithers.sh): the
+ * identity worker knows one landing. The page that asked travels as
+ * `?return_to=` on the start route, waits in a short-lived cookie scoped to
+ * the OAuth legs, and the callback's success redirect goes back there with
+ * the same marker. The value becomes a redirect, so every off-origin shape is
+ * dropped and the callback lands where it always did.
+ */
+describe("sign-in return path", () => {
+  const env: WorkerEnv = { ...assetsEnv(), IDENTITY_UPSTREAM_URL: "https://identity.test" }
+  const BROWSER_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+  const COOKIE = "smithers_return_to"
+
+  const identityRedirect = (location: string, request: Request): Response | undefined =>
+    new URL(request.url).hostname === "identity.test"
+      ? new Response(null, { status: 302, headers: { location } })
+      : undefined
+
+  const start = (query: string, seen: Request[] = []): Promise<Response> =>
+    withMockedFetchResult(
+      (request) => {
+        seen.push(request)
+        return identityRedirect("https://github.com/login/oauth/authorize?state=s", request)
+      },
+      () =>
+        worker.fetch(new Request(`https://mvp.test/api/auth/github/start${query}`, { headers: { accept: BROWSER_ACCEPT } }), env)
+    )
+
+  const callback = (cookie: string | undefined, location = "/?signed-in=github"): Promise<Response> =>
+    withMockedFetchResult(
+      (request) => identityRedirect(location, request),
+      () =>
+        worker.fetch(
+          new Request("https://mvp.test/api/auth/github/callback?code=x&state=s", {
+            headers: { accept: BROWSER_ACCEPT, ...(cookie === undefined ? {} : { cookie }) }
+          }),
+          env
+        )
+    )
+
+  const setCookies = (response: Response): ReadonlyArray<string> => response.headers.getSetCookie()
+  const returnToCookie = (response: Response): string | undefined =>
+    setCookies(response).find((cookie) => cookie.startsWith(`${COOKIE}=`))
+
+  test("a repository page round-trips: cookie on start, redirect on callback, cookie cleared", async () => {
+    const seen: Request[] = []
+    const started = await start("?return_to=%2Fsmithersai%2Fsmithers", seen)
+    expect(started.status).toBe(302)
+    expect(started.headers.get("location")).toBe("https://github.com/login/oauth/authorize?state=s")
+    const cookie = returnToCookie(started)
+    expect(cookie).toBe(
+      `${COOKIE}=%2Fsmithersai%2Fsmithers; Path=/api/auth; Max-Age=600; HttpOnly; Secure; SameSite=Lax`
+    )
+    // The identity worker never sees the page (and GitHub never sees it in the state).
+    expect(seen).toHaveLength(1)
+    expect(new URL(seen[0]!.url).searchParams.has("return_to")).toBe(false)
+
+    const returned = await callback(`other=1; ${COOKIE}=%2Fsmithersai%2Fsmithers`)
+    expect(returned.status).toBe(302)
+    expect(returned.headers.get("location")).toBe("/smithersai/smithers?signed-in=github")
+    expect(returnToCookie(returned)).toBe(`${COOKIE}=; Path=/api/auth; Max-Age=0; HttpOnly; Secure; SameSite=Lax`)
+  })
+
+  test("the page's own query survives and identity's marker is appended when its redirect carries none", async () => {
+    const returned = await callback(`${COOKIE}=%2Fsmithersai%2Fsmithers%3Ftab%3Dissues`, "/")
+    expect(returned.headers.get("location")).toBe("/smithersai/smithers?tab=issues&signed-in=github")
+  })
+
+  test("an off-origin identity redirect is replaced by the return page, never followed with its query", async () => {
+    const returned = await callback(`${COOKIE}=%2Fsmithersai%2Fsmithers`, "https://canary.smithers.sh/?signed-in=github&x=1")
+    expect(returned.headers.get("location")).toBe("/smithersai/smithers?signed-in=github")
+  })
+
+  test("without a cookie the callback lands where it always did", async () => {
+    const returned = await callback(undefined)
+    expect(returned.status).toBe(302)
+    expect(returned.headers.get("location")).toBe("/?signed-in=github")
+    expect(setCookies(returned)).toEqual([])
+  })
+
+  test("a start without return_to sets no cookie", async () => {
+    const started = await start("")
+    expect(started.status).toBe(302)
+    expect(setCookies(started)).toEqual([])
+  })
+
+  test.each([
+    ["an absolute URL", "https://evil.example/"],
+    ["a protocol-relative URL", "//evil.example/"],
+    ["a backslash after the slash", "/\\evil.example"],
+    ["a backslash anywhere", "/smithersai\\evil"],
+    ["a javascript: URL", "javascript:alert(1)"],
+    ["a newline", "/smithersai/smithers\nSet-Cookie: x=y"],
+    ["a carriage return", "/smithersai/smithers\r"],
+    ["a relative path", "smithersai/smithers"],
+    ["the landing page itself", "/"],
+    ["an API route", "/api/auth/github/start"],
+    ["a value over 512 bytes", `/${"a".repeat(512)}`]
+  ])("start ignores %s", async (_label, value) => {
+    const started = await start(`?return_to=${encodeURIComponent(value)}`)
+    expect(started.status).toBe(302)
+    expect(setCookies(started)).toEqual([])
+  })
+
+  test.each([
+    ["an absolute URL", "https://evil.example/"],
+    ["a protocol-relative URL", "//evil.example/"],
+    ["a backslash after the slash", "/\\evil.example"],
+    ["a newline", "/smithersai/smithers\nx"]
+  ])("a tampered cookie carrying %s falls back to the landing page and is cleared", async (_label, value) => {
+    const returned = await callback(`${COOKIE}=${encodeURIComponent(value)}`)
+    expect(returned.status).toBe(302)
+    expect(returned.headers.get("location")).toBe("/?signed-in=github")
+    expect(returnToCookie(returned)).toContain("Max-Age=0")
+  })
+
+  test("a cancelled consent screen still lands on the cancellation page, cookie or not", async () => {
+    let upstreamCalls = 0
+    await withMockedFetch(
+      (request) => {
+        if (new URL(request.url).hostname !== "identity.test") return undefined
+        upstreamCalls += 1
+        return new Response("{}", { status: 400 })
+      },
+      async () => {
+        const response = await worker.fetch(
+          new Request("https://mvp.test/api/auth/github/callback?error=access_denied&state=zzz", {
+            headers: { accept: BROWSER_ACCEPT, cookie: `${COOKIE}=%2Fsmithersai%2Fsmithers` }
+          }),
+          env
+        )
+        expect(response.status).toBe(200)
+        expect(response.headers.get("location")).toBeNull()
+        expect(await response.text()).toContain("You cancelled the GitHub sign-in.")
+        expect(upstreamCalls).toBe(0)
+      }
+    )
+  })
+
+  test("a failed exchange keeps the honest error page and never redirects to the return page", async () => {
+    await withMockedFetch(
+      (request) =>
+        new URL(request.url).hostname === "identity.test"
+          ? new Response(JSON.stringify({ error: "bad state" }), { status: 400 })
+          : undefined,
+      async () => {
+        const response = await worker.fetch(
+          new Request("https://mvp.test/api/auth/github/callback?code=x&state=s", {
+            headers: { accept: BROWSER_ACCEPT, cookie: `${COOKIE}=%2Fsmithersai%2Fsmithers` }
+          }),
+          env
+        )
+        expect(response.status).toBe(400)
+        expect(response.headers.get("location")).toBeNull()
+        expect(await response.text()).toContain("GitHub sign-in didn't finish.")
       }
     )
   })

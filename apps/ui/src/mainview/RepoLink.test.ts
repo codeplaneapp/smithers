@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { catalogRepository, openRequestedRepo, paramRepo, pathRepo, requestedRepo, withoutRepoParam } from "./RepoLink"
+import {
+  catalogRepository,
+  openRequestedRepo,
+  paramRepo,
+  pathRepo,
+  requestedRepo,
+  signInReturnTo,
+  withoutRepoParam
+} from "./RepoLink"
 import { createAppStore } from "./state/AppStore"
 import { createTabsController } from "./state/controller/tabs"
 import type { ControllerContext } from "./state/controller/context"
@@ -147,6 +155,40 @@ describe("withoutRepoParam", () => {
   test("keeps the repository path in the address bar", () => {
     expect(withoutRepoParam({ pathname: "/smithersai/smithers", search: "", hash: "" })).toBe("/smithersai/smithers")
     expect(withoutRepoParam({ pathname: "/smithersai/smithers", search: "?repo=someone/else", hash: "" })).toBe(
+      "/smithersai/smithers"
+    )
+  })
+})
+
+/*
+ * A sign-in that starts on a repository page comes back to it: the page is
+ * the return path the start route carries. The landing page needs none (the
+ * callback lands there on its own), and a spent auth marker never replays.
+ */
+describe("signInReturnTo", () => {
+  test("a repository page returns to itself, query included", () => {
+    expect(signInReturnTo({ pathname: "/smithersai/smithers", search: "" })).toBe("/smithersai/smithers")
+    expect(signInReturnTo({ pathname: "/smithersai/smithers/", search: "?tab=issues" })).toBe(
+      "/smithersai/smithers/?tab=issues"
+    )
+  })
+
+  test("spent auth markers never replay", () => {
+    expect(signInReturnTo({ pathname: "/smithersai/smithers", search: "?signed-in=github" })).toBe("/smithersai/smithers")
+    expect(signInReturnTo({ pathname: "/smithersai/smithers", search: "?auth=failed&tab=issues" })).toBe(
+      "/smithersai/smithers?tab=issues"
+    )
+  })
+
+  test("the landing page and non-repository paths carry no return path", () => {
+    expect(signInReturnTo({ pathname: "/", search: "" })).toBeNull()
+    expect(signInReturnTo({ pathname: "/", search: "?repo=smithersai/smithers" })).toBeNull()
+    expect(signInReturnTo({ pathname: "/smithersai", search: "" })).toBeNull()
+    expect(signInReturnTo({ pathname: "/a/b/c", search: "" })).toBeNull()
+  })
+
+  test("a query the server would drop is left behind rather than losing the page", () => {
+    expect(signInReturnTo({ pathname: "/smithersai/smithers", search: `?q=${"x".repeat(600)}` })).toBe(
       "/smithersai/smithers"
     )
   })
