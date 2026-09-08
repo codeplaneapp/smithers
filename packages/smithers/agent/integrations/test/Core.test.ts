@@ -9,7 +9,7 @@ import {
   MAX_MESSAGE_LENGTH,
   toIntegrationError
 } from "../src/core/ActionFailure.ts"
-import { buildAuthorizationUrl, RESERVED_PARAMS } from "../src/core/AuthorizationUrl.ts"
+import { buildAuthorizationUrl } from "../src/core/AuthorizationUrl.ts"
 import * as ExternalEvent from "../src/core/ExternalEvent.ts"
 import {
   IntegrationError,
@@ -356,12 +356,17 @@ describe("buildAuthorizationUrl", () => {
   // `extraParams` used to be able to replace `state`, `code_challenge`, and
   // its method, which disables exactly the CSRF and PKCE protections the
   // validation above exists to guarantee.
-  it("refuses an extra parameter that would overwrite a security parameter", () => {
-    for (const key of RESERVED_PARAMS) {
+  // Keep these cases independent of the implementation's reserved list so
+  // removing a protected name cannot silently remove its rejection test.
+  it.each(["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method"])(
+    "refuses an extra parameter overriding %s",
+    (key) => {
       expect(() => buildAuthorizationUrl({ ...BASE, extraParams: { [key]: "attacker" } }))
         .toThrow(new RegExp(`reserved parameter "${key}"`))
     }
-    // The validated values survive.
+  )
+
+  it("preserves the validated bindings with a permitted extra parameter", () => {
     const url = new URL(buildAuthorizationUrl({ ...BASE, extraParams: { audience: "a" } }))
     expect(url.searchParams.get("state")).toBe(BASE.state)
     expect(url.searchParams.get("code_challenge")).toBe(BASE.codeChallenge)

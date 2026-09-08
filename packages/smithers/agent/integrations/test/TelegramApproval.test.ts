@@ -131,6 +131,12 @@ describe("keyboard", () => {
 
 describe("decision", () => {
   const spec = { mode: "approve" as const, token: TOKEN, allowedChatIds: [42] }
+  const selectSpec = {
+    mode: "select" as const,
+    token: TOKEN,
+    allowedChatIds: [42],
+    options: [{ key: "a", label: "A" }]
+  }
 
   it.each(
     [
@@ -149,12 +155,6 @@ describe("decision", () => {
   })
 
   it("refuses an unlisted sender's selection even with valid callback data", () => {
-    const selectSpec = {
-      mode: "select" as const,
-      token: TOKEN,
-      options: [{ key: "a", label: "A" }],
-      allowedChatIds: [42]
-    }
     const query = { data: keyboard(selectSpec)[0]?.[0]?.callback_data, from: { id: 7 } }
     expect(decision(query, selectSpec, NOW)).toEqual({ selected: "", notes: null })
   })
@@ -197,19 +197,29 @@ describe("decision", () => {
     expect(approverLabel({})).toBeNull()
   })
 
-  it("selects only a key this approval offered", () => {
-    const selectSpec = {
-      mode: "select" as const,
-      token: TOKEN,
-      allowedChatIds: [42],
-      options: [{ key: "a", label: "A" }]
-    }
+  it("selects an offered key with this approval's token and an allowed sender", () => {
     expect(decision({ data: callbackData({ kind: "select", key: "a" }, TOKEN), from: { id: "42" } }, selectSpec, NOW))
       .toEqual({ selected: "a", notes: null })
-    expect(decision({ data: callbackData({ kind: "select", key: "b" }, TOKEN) }, selectSpec, NOW))
+  })
+
+  // Each rejection keeps the other selection guards satisfied so one guard
+  // cannot mask a missing check in another.
+  it("refuses a selection with an unoffered key", () => {
+    expect(decision({ data: callbackData({ kind: "select", key: "b" }, TOKEN), from: { id: "42" } }, selectSpec, NOW))
       .toEqual({ selected: "", notes: null })
-    expect(decision({ data: callbackData({ kind: "select", key: "a" }, token("other")) }, selectSpec, NOW))
-      .toEqual({ selected: "", notes: null })
+  })
+
+  it("refuses a selection carrying another approval's token", () => {
+    expect(
+      decision(
+        { data: callbackData({ kind: "select", key: "a" }, token("other")), from: { id: "42" } },
+        selectSpec,
+        NOW
+      )
+    ).toEqual({ selected: "", notes: null })
+  })
+
+  it("returns no selection for unrecognized data", () => {
     expect(decision({ data: "garbage" }, { mode: "select", token: TOKEN }, NOW))
       .toEqual({ selected: "", notes: null })
   })
