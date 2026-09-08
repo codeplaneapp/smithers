@@ -329,10 +329,11 @@ Fails with `invalid_input`.
 
 ## fetch
 
-| Input     | Type                       | Meaning                         |
-| --------- | -------------------------- | ------------------------------- |
-| `url`     | string                     | Absolute `http` or `https` URL. |
-| `headers` | record of string, optional | Additional request headers.     |
+| Input     | Type                            | Meaning                                                                  |
+| --------- | ------------------------------- | ------------------------------------------------------------------------ |
+| `url`     | string                          | Absolute `http` or `https` URL.                                          |
+| `headers` | record of string, optional      | Additional request headers.                                              |
+| `timeout` | finite number above 0, optional | Total request and body budget in seconds. Defaults to 30, capped at 120. |
 
 | Output      | Type             | Meaning                                        |
 | ----------- | ---------------- | ---------------------------------------------- |
@@ -342,16 +343,19 @@ Fails with `invalid_input`.
 | `notice`    | string, optional | The truncation disclosure.                     |
 
 Fails with `invalid_input` for a URL that is not `http` or `https` or that
-carries user information, `request_failed`, or `response_too_large` past 5 MiB.
+carries user information or for an invalid timeout, `request_failed`,
+`response_too_large` past 5 MiB, or `timeout` when the total request and body
+budget expires. Interruption aborts the request and closes the body reader.
 
 ## http-post
 
-| Input         | Type                       | Meaning                         |
-| ------------- | -------------------------- | ------------------------------- |
-| `url`         | string                     | Absolute `http` or `https` URL. |
-| `body`        | string                     | Request body, sent verbatim.    |
-| `contentType` | string, optional           | Defaults to `application/json`. |
-| `headers`     | record of string, optional | Additional request headers.     |
+| Input         | Type                            | Meaning                                                                  |
+| ------------- | ------------------------------- | ------------------------------------------------------------------------ |
+| `url`         | string                          | Absolute `http` or `https` URL.                                          |
+| `body`        | string                          | Request body, sent verbatim.                                             |
+| `contentType` | string, optional                | Defaults to `application/json`.                                          |
+| `headers`     | record of string, optional      | Additional request headers.                                              |
+| `timeout`     | finite number above 0, optional | Total request and body budget in seconds. Defaults to 30, capped at 120. |
 
 `Output` and the failures match `fetch`. This flow is declared `irreversible`,
 because the remote side may already have acted.
@@ -408,9 +412,11 @@ redirect limit is exceeded.
 | `results` | array of `WebSearch.Result` | `title`, `url`, `snippet`, optional `publishedAt`. |
 
 The failures are the provider's. `ExaWebSearch` maps a 429 or a refusal carrying
-`Retry-After` to `timeout`, a 401 or 403 to `provider_unavailable`, a 5xx to
+`Retry-After` to `rate_limited`, a 401 or 403 to `provider_unavailable`, a 5xx to
 `provider_unavailable`, and any other non-2xx to `request_failed`. A host with no
-provider bound fails with `provider_unavailable`.
+provider bound fails with `provider_unavailable`. Throttling messages include
+the retry delay in seconds when `Retry-After` supplies a valid delay or date.
+`timeout` is reserved for an elapsed request or response body budget.
 
 ## lsp
 
@@ -459,6 +465,7 @@ all values.
 | `command_failed`           | The process could not start, or a host operation failed.      |
 | `request_failed`           | The HTTP or language-server request failed.                   |
 | `timeout`                  | The call exceeded its wall-clock budget.                      |
+| `rate_limited`             | Provider rate limit reached; back off before retrying.      |
 | `provider_unavailable`     | No host bound the service this flow needs, or it refused.     |
 | `unsupported`              | The service does not implement this query.                    |
 | `unsupported_content_type` | The response is not a type this flow renders.                 |

@@ -27,6 +27,7 @@ export const Code = Schema.Literals([
   "command_failed",
   "request_failed",
   "timeout",
+  "rate_limited",
   "provider_unavailable",
   "unsupported",
   "unsupported_content_type",

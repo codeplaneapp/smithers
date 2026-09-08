@@ -146,7 +146,7 @@ describe("WebSearch", () => {
 
     const cases = [
       { status: 401, headers: {}, code: "provider_unavailable" },
-      { status: 429, headers: { "retry-after": "17" }, code: "timeout" },
+      { status: 429, headers: { "retry-after": "17" }, code: "rate_limited" },
       { status: 500, headers: {}, code: "provider_unavailable" }
     ] as const
     for (const current of cases) {
@@ -191,10 +191,31 @@ describe("WebSearch", () => {
         Effect.exit(WebSearch.run({ query: "throttled" }).pipe(Effect.provide(providerLayer(client.http))))
       )
       expect(failureOf(exit), String(status)).toMatchObject({
-        code: "timeout",
-        message: "Exa search was throttled; retry after 17"
+        code: "rate_limited",
+        message: "Exa search was throttled; retry after 17 seconds"
       })
     }
+  })
+
+  it.each(
+    [
+      [undefined, "Exa search was throttled"],
+      ["invalid", "Exa search was throttled"],
+      ["0", "Exa search was throttled; retry after 0 seconds"],
+      ["Thu, 08 Jan 2026 00:00:17 GMT", "Exa search was throttled; retry after 17 seconds"]
+    ] as const
+  )("reports 429 Retry-After %s as rate_limited", async (retryAfter, message) => {
+    const client = responseClient("slow down", {
+      status: 429,
+      headers: retryAfter === undefined ? {} : { "Retry-After": retryAfter }
+    })
+    const exit = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* TestClock.setTime(Date.parse("2026-01-08T00:00:00.000Z"))
+        return yield* Effect.exit(WebSearch.run({ query: "paced" }).pipe(Effect.provide(providerLayer(client.http))))
+      }).pipe(Effect.provide(TestClock.layer()))
+    )
+    expect(failureOf(exit)).toMatchObject({ code: "rate_limited", message })
   })
 
   it("fails typed on non-JSON and schema-invalid success bodies", async () => {

@@ -95,6 +95,7 @@ Every limit is a display budget disclosed to the caller, never a silent cut. A c
 | `ShellCommand.MAX_CAPTURE_BYTES`  | 8,000,000   | the command output one `shell_command` call holds in memory  |
 | `NativeSearch.MAX_CAPTURE_BYTES`  | 64 MiB      | one `rg` invocation's captured output, refused past the cap  |
 | HTTP response bytes               | 5 MiB       | `fetch`, `http-post` and `webfetch`, refused past the cap    |
+| `fetch` / `http-post` timeout     | 30 s        | total request and body budget; `timeout` seconds, capped at 120 |
 | `webfetch` request timeout        | 120 s cap   | the request and the body read                                |
 | Language-server frame             | 8 MiB       | one JSON-RPC frame, with an 8 KiB header bound               |
 | `MAX_QUEUED_FRAMES`               | 256         | frames buffered for one language server's stdin              |
@@ -123,6 +124,7 @@ Handlers keep ordinary outcomes in the success channel: a non-zero exit code, an
 | `command_failed`           | The process could not start, or a host operation failed.      |
 | `request_failed`           | The HTTP or language-server request failed.                   |
 | `timeout`                  | The call exceeded its wall-clock budget.                      |
+| `rate_limited`             | Provider rate limit reached; back off before retrying.      |
 | `provider_unavailable`     | No host bound the service this flow needs, or it refused.     |
 | `unsupported`              | The service does not implement this query.                    |
 | `unsupported_content_type` | The response is not a type this flow renders.                 |

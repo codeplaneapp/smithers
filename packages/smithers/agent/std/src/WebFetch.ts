@@ -8,14 +8,13 @@ import * as Flow from "@smthrs/core/Flow"
 import * as HttpClient from "@smthrs/kernel/HttpClient"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { capability, envelope } from "./internal/Declaration.ts"
 import { toMarkdown, toText } from "./internal/Html.ts"
+import { header, MAX_RESPONSE_BYTES, readBounded } from "./internal/Http.ts"
 import { parseHttpUrl } from "./internal/Url.ts"
 import * as StdError from "./StdError.ts"
 
-const maxBytes = 5 * 1024 * 1024
 const maxRedirects = 10
 /**
  * The registry name of the `webfetch` flow.
@@ -90,39 +89,6 @@ export const flow = Flow.make({ name, description, input: Input, output: Output,
 
 const error = (code: StdError.Code, message: string, path?: string): StdError.StdError =>
   new StdError.StdError({ code, message, ...(path === undefined ? {} : { path }) })
-const header = (headers: Readonly<Record<string, string | undefined>>, name: string): string | undefined =>
-  headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()]
-
-interface BodyState {
-  readonly chunks: Array<Uint8Array>
-  size: number
-}
-
-const readBounded = <E, R>(
-  stream: Stream.Stream<Uint8Array, E, R>
-): Effect.Effect<Uint8Array, E | StdError.StdError, R> =>
-  Stream.runFoldEffect(
-    stream,
-    (): BodyState => ({ chunks: [], size: 0 }),
-    (state, chunk) => {
-      const size = state.size + chunk.byteLength
-      if (size > maxBytes) return Effect.fail(error("response_too_large", "Response exceeds the 5 MiB limit"))
-      state.chunks.push(chunk)
-      state.size = size
-      return Effect.succeed(state)
-    }
-  ).pipe(
-    Effect.map((state) => {
-      const output = new Uint8Array(state.size)
-      let offset = 0
-      for (const chunk of state.chunks) {
-        output.set(chunk, offset)
-        offset += chunk.byteLength
-      }
-      return output
-    })
-  )
-
 /**
  * Runs the `webfetch` flow: fetches one HTTP URL and renders it as text.
  *
@@ -184,10 +150,10 @@ export const run = Effect.fn("WebFetch.run")(function*(
       )
     }
     const length = Number(header(response.headers, "content-length"))
-    if (Number.isFinite(length) && length > maxBytes) {
+    if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
       return yield* Effect.fail(error("response_too_large", "Response exceeds the 5 MiB limit"))
     }
-    const body = yield* readBounded(response.stream).pipe(
+    const body = yield* readBounded(response.stream, url.toString()).pipe(
       Effect.timeout(timeout),
       Effect.mapError((cause) =>
         cause instanceof StdError.StdError

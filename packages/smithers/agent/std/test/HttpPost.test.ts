@@ -1,5 +1,6 @@
 import * as HttpClient from "@smthrs/kernel/HttpClient"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Option, Schema, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { describe, expect, it } from "vitest"
@@ -26,6 +27,73 @@ const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined => {
 }
 
 describe("HttpPost", () => {
+  it.each(
+    [
+      ["headers", undefined, 30],
+      ["body", undefined, 30],
+      ["headers", 2, 2],
+      ["body", 2, 2],
+      ["body", 200, 120]
+    ] as const
+  )("bounds stalled %s with timeout %s and closes the transport", async (phase, timeout, seconds) => {
+    let signal: AbortSignal | undefined
+    let bodyClosed = false
+    const http = HttpClient.make((request, _url, requestSignal) => {
+      signal = requestSignal
+      if (phase === "headers") return Effect.never
+      const response = HttpClientResponse.fromWeb(request, new Response("prefix"))
+      return Effect.succeed(
+        new Proxy(response, {
+          get(target, property, receiver) {
+            return property === "stream"
+              ? Stream.concat(Stream.make(new TextEncoder().encode("prefix")), Stream.never).pipe(
+                Stream.ensuring(Effect.sync(() => {
+                  bodyClosed = true
+                }))
+              )
+              : Reflect.get(target, property, receiver)
+          }
+        })
+      ).pipe(Effect.delay(500))
+    })
+    const settled = await Effect.runPromise(
+      Effect.gen(function*() {
+        const fiber = yield* Effect.exit(
+          HttpPost.run({
+            url: "https://example.test/stalled",
+            body: "{}",
+            ...(timeout === undefined ? {} : { timeout })
+          }).pipe(
+            Effect.provideService(HttpClient.HttpClient, http)
+          )
+        ).pipe(Effect.timeoutOption((seconds + 1) * 1_000), Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* TestClock.adjust(seconds * 1_000 - 1)
+        expect(fiber.pollUnsafe()).toBeUndefined()
+        yield* TestClock.adjust(1)
+        // The body has only had seconds - 0.5 seconds: the budget must not restart after headers.
+        const atDeadline = fiber.pollUnsafe()
+        yield* TestClock.adjust("1 second")
+        const result = yield* Fiber.join(fiber)
+        expect(atDeadline).toBeDefined()
+        return result
+      }).pipe(Effect.provide(TestClock.layer()))
+    )
+    expect(Option.isSome(settled)).toBe(true)
+    if (Option.isSome(settled)) expect(failureOf(settled.value)).toMatchObject({ code: "timeout" })
+    expect(signal?.aborted).toBe(true)
+    if (phase === "body") expect(bodyClosed).toBe(true)
+  })
+
+  it.each([0, -1, NaN, Infinity, -Infinity])("rejects invalid timeout %s before dispatch", async (timeout) => {
+    const input = { url: "https://example.test/invalid", body: "{}", timeout }
+    expect(Schema.is(HttpPost.Input)(input)).toBe(false)
+    const stub = responseStub("unexpected")
+    const exit = await Effect.runPromise(Effect.exit(HttpPost.run(input).pipe(Effect.provide(stub.layer))))
+    expect(failureOf(exit)).toMatchObject({ code: "invalid_input" })
+    expect(stub.requests).toHaveLength(0)
+  })
+
   it("returns HTTP error statuses as successful values with their body", async () => {
     const stub = responseStub("server detail", 500)
     const result = await Effect.runPromise(

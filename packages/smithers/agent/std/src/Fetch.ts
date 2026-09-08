@@ -7,9 +7,9 @@ import * as Flow from "@smthrs/core/Flow"
 import * as HttpClient from "@smthrs/kernel/HttpClient"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { capability, envelope } from "./internal/Declaration.ts"
+import { readBounded, requestError, Timeout, withDeadline } from "./internal/Http.ts"
 import { MAX_OUTPUT_BYTES, notice, truncateBytes } from "./internal/Text.ts"
 import { parseHttpUrl } from "./internal/Url.ts"
 import * as StdError from "./StdError.ts"
@@ -41,6 +41,9 @@ export const Input = Schema.Struct({
   url: Schema.String.annotate({ description: "Absolute http or https URL to retrieve" }),
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({
     description: "Additional request headers"
+  }),
+  timeout: Schema.optional(Timeout).annotate({
+    description: "Total request and response body timeout in seconds; defaults to 30, capped at 120"
   })
 })
 
@@ -95,53 +98,6 @@ export const capabilities = [capability("net:get", "*")]
  */
 export const flow = Flow.make({ name, description, input: Input, output: Output, capabilities, effects })
 
-const maxResponseBytes = 5 * 1024 * 1024
-
-interface BodyState {
-  readonly chunks: Array<Uint8Array>
-  size: number
-}
-
-const readBounded = <E, R>(
-  stream: Stream.Stream<Uint8Array, E, R>,
-  url: string
-): Effect.Effect<Uint8Array, E | StdError.StdError, R> =>
-  Stream.runFoldEffect(
-    stream,
-    (): BodyState => ({ chunks: [], size: 0 }),
-    (state, chunk) => {
-      const size = state.size + chunk.byteLength
-      if (size > maxResponseBytes) {
-        return Effect.fail(
-          new StdError.StdError({
-            code: "response_too_large",
-            message: "Response exceeds the 5 MiB limit",
-            path: url
-          })
-        )
-      }
-      state.chunks.push(chunk)
-      state.size = size
-      return Effect.succeed(state)
-    }
-  ).pipe(
-    Effect.map((state) => {
-      const output = new Uint8Array(state.size)
-      let offset = 0
-      for (const chunk of state.chunks) {
-        output.set(chunk, offset)
-        offset += chunk.byteLength
-      }
-      return output
-    })
-  )
-
-const requestError = (url: string, error: unknown): StdError.StdError =>
-  new StdError.StdError({
-    code: "request_failed",
-    message: `Request failed: ${url}${error instanceof Error ? ` (${error.message})` : ""}`
-  })
-
 /**
  * Retrieves a URL through the permission-aware kernel HTTP client.
  *
@@ -168,16 +124,23 @@ export const run = Effect.fn("Fetch.run")(function*(
   const request = input.headers === undefined
     ? HttpClientRequest.get(url.toString())
     : HttpClientRequest.setHeaders(HttpClientRequest.get(url.toString()), input.headers)
-  const response = yield* client.execute(request).pipe(
-    Effect.mapError((error) => requestError(input.url, error))
-  )
-  const bytes = yield* readBounded(response.stream, input.url).pipe(
-    Effect.mapError((error) => error instanceof StdError.StdError ? error : requestError(input.url, error))
+  const { status, bytes } = yield* withDeadline(
+    Effect.gen(function*() {
+      const response = yield* client.execute(request).pipe(
+        Effect.mapError((error) => requestError(input.url, error))
+      )
+      const bytes = yield* readBounded(response.stream, input.url).pipe(
+        Effect.mapError((error) => requestError(input.url, error))
+      )
+      return { status: response.status, bytes }
+    }),
+    input.url,
+    input.timeout
   )
   const text = new TextDecoder().decode(bytes)
   const rendered = truncateBytes(text, MAX_OUTPUT_BYTES, { keep: "head" })
   return {
-    status: response.status,
+    status,
     body: rendered.text,
     truncated: rendered.truncated,
     ...(rendered.truncated

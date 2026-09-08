@@ -8,6 +8,7 @@ import * as Credential from "@smthrs/control/Credential"
 import * as HttpClient from "@smthrs/kernel/HttpClient"
 import { Clock, Effect, Layer, Redacted, Schema } from "effect"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import { header } from "./internal/Http.ts"
 import * as StdError from "./StdError.ts"
 import * as WebSearch from "./WebSearch.ts"
 
@@ -30,9 +31,6 @@ const freshnessDays = {
 } as const
 
 const failure = (code: StdError.Code, message: string): StdError.StdError => new StdError.StdError({ code, message })
-
-const header = (headers: Readonly<Record<string, string | undefined>>, name: string): string | undefined =>
-  headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()]
 
 /**
  * Provides {@link WebSearch.WebSearch} backed by the Exa API, reading its
@@ -88,19 +86,20 @@ export const layer = (
               )
             )
             const retryAfter = header(response.headers, "retry-after")
-            // `Retry-After` is pacing advice, not an outcome: a CDN or proxy
-            // may attach it to a perfectly good 200, and reading it alone
-            // discarded a decoded result set as a `timeout`. It only tells us
-            // the request was refused when the status already says so, so the
-            // header is consulted for its wording and the status decides.
+            // Successful responses may carry pacing advice too; status decides refusal.
             const refused = response.status < 200 || response.status >= 300
             if (response.status === 429 || (refused && retryAfter !== undefined)) {
+              const delay = retryAfter === undefined
+                ? NaN
+                : /^\d+$/.test(retryAfter.trim())
+                ? Number(retryAfter)
+                : Math.max(0, Math.ceil((Date.parse(retryAfter) - (yield* Clock.currentTimeMillis)) / 1_000))
               return yield* Effect.fail(
                 failure(
-                  "timeout",
-                  retryAfter === undefined
-                    ? "Exa search was throttled"
-                    : `Exa search was throttled; retry after ${retryAfter}`
+                  "rate_limited",
+                  Number.isFinite(delay)
+                    ? `Exa search was throttled; retry after ${delay} seconds`
+                    : "Exa search was throttled"
                 )
               )
             }
