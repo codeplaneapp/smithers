@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1659 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1660 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -1526,6 +1526,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **style:** format packages touched today with dprint ([4f23732766](https://github.com/smithersai/smithers/commit/4f2373276615da2e75987e1a673b298a5b177965))
 - **ci(release):** mirror the flow catalog and home pane drift gates ([9d102e44a9](https://github.com/smithersai/smithers/commit/9d102e44a9e163d19cce3b986ce8667460a85a10))
 - **test(ui):** pin the History chrome door to the countless empty state ([48045efd27](https://github.com/smithersai/smithers/commit/48045efd27f077bd4ccf372244227ee2f5bdadac))
 - **build:** refresh bun.lock for the site island dependencies ([64660abee8](https://github.com/smithersai/smithers/commit/64660abee8a1f925be489cadb6675fb66f0b2017))
