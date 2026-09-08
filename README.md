@@ -9,7 +9,7 @@
 ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
 </pre>
 
-<p align="center"><strong>Smithers enables automations to make maintaining a repository in the agentic era effortless.</strong></p>
+<p align="center"><strong>Build smart workflows for your codebase. Enable agents to work smarter, faster, and cheaper.</strong></p>
 
 Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code.
 

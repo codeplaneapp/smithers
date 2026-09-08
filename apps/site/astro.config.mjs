@@ -32,6 +32,8 @@ import project from "./src/data/project.json" with { type: "json" }
 export default defineConfig({
   site: "https://smithers.sh",
   output: "static",
+  prefetch: { defaultStrategy: "hover" },
+  experimental: { clientPrerender: true },
   vite: {
     plugins: [tailwindcss()],
     resolve: {
@@ -61,7 +63,7 @@ export default defineConfig({
       description: project.description,
       logo: { src: "./src/docs-assets/logo.png", alt: "Smithers" },
       favicon: "/favicon.png",
-      customCss: ["./src/styles/starlight.css"],
+      customCss: ["./src/styles/starlight.css", "./src/styles/navigation.css"],
       // Inter and IBM Plex Mono are the product UI's pairing. They come from
       // Google Fonts rather than an npm package so the docs add no dependency,
       // and src/styles/starlight.css names a system stack behind each one.

@@ -4,7 +4,7 @@ import RepoRequests from "../components/RepoRequests.astro"
 import AvailableRepos from "../components/AvailableRepos.astro"
 import project from "../data/project.json"
 
-const title = "Smither your repo"
+const title = "Smithers"
 const description = project.tagline
 const prompt =
   `Install the Smithers CLI globally with \`${project.install.cli}\`, then run \`smthrs suggest\` to start onboarding me onto Smithers.`
@@ -12,7 +12,7 @@ const prompt =
 
 <Base title={title} description={description} header={false} footer={false}>
   <main class="wrap hero">
-    <h1>Smither your repo</h1>
+    <h1>The workflow framework</h1>
     <p class="sub">{project.tagline}</p>
     <div class="actions">
       <span class="copy" id="copy-shell">
@@ -26,8 +26,8 @@ const prompt =
           <span class="tip tip-error">Copy failed. The prompt: {prompt}</span>
         </span>
       </span>
-      <a class="btn" href="/docs/">Documentation</a>
-      <a class="btn ghost" href="/demo/">Get a demo</a>
+      <a class="btn" href="/docs/" data-astro-prefetch="hover">Documentation</a>
+      <a class="btn ghost" href="/demo/" data-astro-prefetch="hover">Get a demo</a>
     </div>
   </main>
   <RepoRequests />

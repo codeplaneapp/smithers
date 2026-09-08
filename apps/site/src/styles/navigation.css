@@ -1,0 +1,12 @@
+/* Native document transitions keep page scripts and browser history intact. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 100ms;
+    animation-timing-function: ease-out;
+  }
+}
