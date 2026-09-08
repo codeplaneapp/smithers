@@ -51,6 +51,14 @@ const call = (store: TriggerStore.Service, method: keyof TriggerStore.Service) =
       return store.claimPending({ triggerId: "daily", expectedRevision: 1 })
     case "clearActive":
       return store.clearActive("daily", "run-1")
+    case "history":
+      return store.history()
+    case "inspect":
+      return store.inspect("daily")
+    case "heartbeat":
+      return store.heartbeat("local")
+    case "lastHeartbeat":
+      return store.lastHeartbeat()
   }
 }
 
@@ -66,7 +74,11 @@ const methods: ReadonlyArray<keyof TriggerStore.Service> = [
   "activeRun",
   "activeOccurrence",
   "claimPending",
-  "clearActive"
+  "clearActive",
+  "history",
+  "inspect",
+  "heartbeat",
+  "lastHeartbeat"
 ]
 
 describe("TriggerStore.makeNoop", () => {
@@ -107,6 +119,36 @@ describe("TriggerStore.makeNoop", () => {
   })
 })
 
+describe("TriggerStore history ordering", () => {
+  // The cursor is the last record of the previous page. A record equal to
+  // the cursor is that record, so it must fall outside the next page; every
+  // other position resolves by occurrence first and trigger id second.
+  it("orders newest first, breaks ties by descending trigger id, and excludes the cursor itself", () => {
+    const older = { triggerId: "a", occurrence: 1 }
+    const newer = { triggerId: "a", occurrence: 2 }
+    const peer = { triggerId: "b", occurrence: 2 }
+    expect(TriggerStore.compareNewestFirst(newer, older)).toBeLessThan(0)
+    expect(TriggerStore.compareNewestFirst(older, newer)).toBeGreaterThan(0)
+    expect(TriggerStore.compareNewestFirst(peer, newer)).toBeLessThan(0)
+    expect(TriggerStore.compareNewestFirst(newer, peer)).toBeGreaterThan(0)
+    expect(TriggerStore.compareNewestFirst(newer, { ...newer })).toBe(0)
+    expect(TriggerStore.isAfterCursor(newer, { ...newer })).toBe(false)
+    expect(TriggerStore.isAfterCursor(older, newer)).toBe(true)
+    expect(TriggerStore.isAfterCursor(newer, peer)).toBe(true)
+    expect(TriggerStore.isAfterCursor(peer, newer)).toBe(false)
+  })
+
+  it("cuts a page at the limit and names the last kept record as the next cursor", () => {
+    const records = [3, 2, 1].map((occurrence) => ({ triggerId: "a", occurrence, outcome: null }))
+    expect(TriggerStore.historyPage(records, undefined)).toEqual({ items: records })
+    expect(TriggerStore.historyPage(records, 3)).toEqual({ items: records })
+    expect(TriggerStore.historyPage(records, 2)).toEqual({
+      items: records.slice(0, 2),
+      nextCursor: { triggerId: "a", occurrence: 2 }
+    })
+  })
+})
+
 describe("TriggerStore reservation ids", () => {
   // The reservation id is a cross-process wire contract: the SQL store writes
   // it and both stores and the scheduler read it back with `isReservation`.
@@ -129,7 +171,7 @@ describe("TriggerStore reservation ids", () => {
 describe("package boundaries", () => {
   // A database built from 0001 alone has no `active_claimed_at_ms`, which every
   // claim and active-run query reads, so the individual migration files are not
-  // a supported entry point. `SqlTriggerStore.layer` applies both in order.
+  // a supported entry point. `SqlTriggerStore.layer` applies all of them in order.
   it("keeps every migration subpath out of the export map", () => {
     const exports = manifest.exports as Record<string, unknown>
     const published = manifest.publishConfig.exports as Record<string, unknown>
@@ -142,6 +184,7 @@ describe("package boundaries", () => {
     expect(exports["./*"]).toBeUndefined()
     expect(published["./*"]).toBeUndefined()
     expect(exports["./TriggerStore"]).toBe("./src/TriggerStore.ts")
+    expect(exports["./DispatchReader"]).toBe("./src/DispatchReader.ts")
     expect(exports["./test/TestTriggers"]).toBe("./src/test/TestTriggers.ts")
   })
 

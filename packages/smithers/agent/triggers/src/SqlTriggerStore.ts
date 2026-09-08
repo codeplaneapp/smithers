@@ -21,7 +21,12 @@ import { fromSchemaError, TriggerError } from "./TriggerError.ts"
 import {
   type Claim,
   type ClaimFire,
+  type FireRecord,
+  type Heartbeat,
+  historyLimit,
+  historyPage,
   isReservation,
+  type Outcome,
   type Registered,
   reservationId,
   reservationLeaseMs,
@@ -46,6 +51,22 @@ interface Row {
   readonly revision: number
   readonly last_fired_at_ms: number | null
 }
+
+interface FireRow {
+  readonly trigger_id: string
+  readonly occurrence_at_ms: number
+  readonly outcome: Outcome | null
+  readonly run_id: string | null
+  readonly error: string | null
+}
+
+const fireRecord = (row: FireRow): FireRecord => ({
+  triggerId: row.trigger_id,
+  occurrence: row.occurrence_at_ms,
+  outcome: row.outcome,
+  ...(row.run_id === null ? {} : { runId: row.run_id }),
+  ...(row.error === null ? {} : { error: row.error })
+})
 
 interface ClaimRow {
   readonly enabled: number
@@ -531,6 +552,58 @@ export const make: Effect.Effect<
       write(sql`UPDATE flows_triggers SET active_run_id = NULL, active_claimed_at_ms = NULL
         WHERE trigger_id = ${triggerId} AND active_run_id = ${runId}`).pipe(
         Effect.asVoid
+      ),
+    history: (query = {}) =>
+      historyLimit(query.limit).pipe(
+        Effect.flatMap((limit) =>
+          // One statement for every query shape: a null parameter disables
+          // its predicate, and SQLite reads `LIMIT -1` as no limit. One row
+          // past the limit is fetched so the page knows whether a next page
+          // exists without a second count query.
+          read(sql<FireRow>`
+            SELECT trigger_id, occurrence_at_ms, outcome, run_id, error FROM flows_trigger_fires
+            WHERE (${query.triggerId ?? null} IS NULL OR trigger_id = ${query.triggerId ?? null})
+              AND (${query.runId ?? null} IS NULL OR run_id = ${query.runId ?? null})
+              AND (${query.outcome ?? null} IS NULL OR outcome = ${query.outcome ?? null})
+              AND (${query.cursor?.occurrence ?? null} IS NULL
+                OR occurrence_at_ms < ${query.cursor?.occurrence ?? null}
+                OR (occurrence_at_ms = ${query.cursor?.occurrence ?? null} AND trigger_id < ${
+            query.cursor?.triggerId ?? null
+          }))
+            ORDER BY occurrence_at_ms DESC, trigger_id DESC
+            LIMIT ${limit === undefined ? -1 : limit + 1}
+          `).pipe(Effect.map((rows) => historyPage(rows.map(fireRecord), limit)))
+        )
+      ),
+    inspect: (triggerId) =>
+      read(sql<{ readonly active_run_id: string | null; readonly pending_at_ms: number | null }>`
+        SELECT active_run_id, pending_at_ms FROM flows_triggers WHERE trigger_id = ${triggerId}
+      `).pipe(
+        Effect.flatMap((rows) => {
+          const row = rows[0]
+          if (row === undefined) return Effect.fail(unknownTrigger(triggerId))
+          return Effect.succeed({
+            ...(row.active_run_id === null ? {} : { activeRunId: row.active_run_id }),
+            ...(row.pending_at_ms === null ? {} : { pendingAt: row.pending_at_ms })
+          })
+        })
+      ),
+    heartbeat: (host) =>
+      Effect.flatMap(
+        Clock.currentTimeMillis,
+        (tickedAt) =>
+          write(sql`INSERT INTO flows_scheduler_heartbeat (host, ticked_at_ms) VALUES (${host}, ${tickedAt})
+          ON CONFLICT (host) DO UPDATE SET ticked_at_ms = excluded.ticked_at_ms`)
+      ).pipe(Effect.asVoid),
+    lastHeartbeat: () =>
+      read(sql<{ readonly host: string; readonly ticked_at_ms: number }>`
+        SELECT host, ticked_at_ms FROM flows_scheduler_heartbeat ORDER BY ticked_at_ms DESC, host ASC LIMIT 1
+      `).pipe(
+        Effect.map((rows) =>
+          rows[0] === undefined
+            ? Option.none<Heartbeat>()
+            : Option.some({ host: rows[0].host, tickedAt: rows[0].ticked_at_ms })
+        )
       )
   }
 })

@@ -38,7 +38,7 @@ All three are ordinary dependencies of the package and install with it.
 The root entry point re-exports every module as a namespace:
 
 ```ts
-import { Cron, Scheduler, SqlTriggerStore, Trigger, TriggerStore, Webhook } from "@smthrs/triggers"
+import { Cron, DispatchReader, Scheduler, SqlTriggerStore, Trigger, TriggerStore, Webhook } from "@smthrs/triggers"
 ```
 
 Each module is also importable from its own subpath, which is the form these

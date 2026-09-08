@@ -57,6 +57,9 @@ integer between 0 and 1000; `input` must be JSON, which excludes `undefined`,
   `Infinity`.
 - A scheduler interval was not a finite, positive Effect duration. `path` is
   `"pollInterval"` or `"runPollInterval"`.
+- A `TriggerStore.history` limit was not a positive safe integer. `path` is
+  `"limit"`. Zero is refused here because a zero-row page can never carry a
+  cursor.
 
 **What to change.** Pass a real count, or a real duration. Zero and infinity are
 both refused, because zero polls a CPU-tight loop and infinity never completes,
@@ -175,7 +178,11 @@ method was called.
 
 ## The trigger did not fire, and nothing failed
 
-Four behaviors are correct and surprising.
+First ask whether anything is polling. `store.lastHeartbeat()` answers `None`
+when no scheduler has ever ticked against this store, and a `TriggerSummary`
+from `Control.list` carries no `schedulerLastTickMs` in the same case. A
+heartbeat older than `pollInterval` by a wide margin means the scheduler's scope
+closed. Then, four behaviors are correct and surprising.
 
 **The first tick after a restart fires nothing.** A trigger with no
 `lastFiredAt` establishes a watermark at the latest boundary on first sight and

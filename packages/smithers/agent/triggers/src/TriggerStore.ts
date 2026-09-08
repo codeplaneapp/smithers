@@ -153,6 +153,127 @@ export interface Result extends Fire {
 }
 
 /**
+ * One row of the fire ledger: a claimed occurrence and what became of it.
+ *
+ * `outcome` is `null` between a claim and its `recordResult`, the window in
+ * which a launch is reserved but not yet reported.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface FireRecord extends Fire {
+  readonly outcome: Outcome | null
+  readonly runId?: string | undefined
+  readonly error?: string | undefined
+}
+
+/**
+ * A ledger query. Every filter narrows; `cursor` is the last record of the
+ * previous page, so the page after it holds only older records; `limit` caps
+ * a page and must be a positive safe integer when stated. With no limit the
+ * whole ledger answers in one page.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface HistoryQuery {
+  readonly triggerId?: string | undefined
+  readonly runId?: string | undefined
+  readonly outcome?: Outcome | undefined
+  readonly cursor?: Fire | undefined
+  readonly limit?: number | undefined
+}
+
+/**
+ * One page of the ledger, newest occurrence first, with the cursor that
+ * addresses the next page when the limit cut the page short.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface HistoryPage {
+  readonly items: ReadonlyArray<FireRecord>
+  readonly nextCursor?: Fire | undefined
+}
+
+/**
+ * What one trigger holds right now: the run or launch reservation on its row
+ * and the occurrence buffered behind it. A plain read; `activeRun` is the read
+ * that expires a stale reservation.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface Held {
+  readonly activeRunId?: string | undefined
+  readonly pendingAt?: number | undefined
+}
+
+/**
+ * The last poll one scheduler host recorded.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface Heartbeat {
+  readonly host: string
+  readonly tickedAt: number
+}
+
+/**
+ * Validates a {@link HistoryQuery} limit: absent, or a positive safe integer.
+ * Both stores apply this before reading so swapping one for the other cannot
+ * change which queries are refused.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const historyLimit = (limit: number | undefined): Effect.Effect<number | undefined, TriggerError> =>
+  limit === undefined || (Number.isSafeInteger(limit) && limit > 0)
+    ? Effect.succeed(limit)
+    : Effect.fail(
+      new TriggerError({
+        code: "invalid_options",
+        message: `history limit must be a positive safe integer, received ${limit}`,
+        path: "limit"
+      })
+    )
+
+/**
+ * Newest occurrence first; equal occurrences of different triggers order by
+ * descending trigger id so a cursor names one position.
+ *
+ * @category ordering
+ * @since 1.0.0-rc.0
+ */
+export const compareNewestFirst = (left: Fire, right: Fire): number =>
+  right.occurrence - left.occurrence ||
+  (right.triggerId < left.triggerId ? -1 : right.triggerId > left.triggerId ? 1 : 0)
+
+/**
+ * Whether a record lies after `cursor` in {@link compareNewestFirst} order.
+ *
+ * @category predicates
+ * @since 1.0.0-rc.0
+ */
+export const isAfterCursor = (record: Fire, cursor: Fire): boolean => compareNewestFirst(cursor, record) < 0
+
+/**
+ * Cuts an ordered, filtered record list to one page. The caller fetches one
+ * record past the limit; that record's presence is what says a next page
+ * exists, and the page's last record is the cursor addressing it.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const historyPage = (records: ReadonlyArray<FireRecord>, limit: number | undefined): HistoryPage => {
+  if (limit === undefined || records.length <= limit) return { items: records }
+  const items = records.slice(0, limit)
+  const last = items[items.length - 1] as FireRecord
+  return { items, nextCursor: { triggerId: last.triggerId, occurrence: last.occurrence } }
+}
+
+/**
  * Durable trigger state: registration, enabled-trigger listing, and the claim
  * protocol that keeps two schedulers from firing the same occurrence.
  *
@@ -163,7 +284,8 @@ export interface Result extends Fire {
  * Every method addressing one trigger fails with `unknown_trigger` when no
  * such row exists, except `clearActive`, whose compare-and-swap cannot tell a
  * missing trigger from a run id that no longer matches and so stays a no-op
- * for both.
+ * for both, and `history`, `heartbeat`, and `lastHeartbeat`, which address the
+ * whole store.
  *
  * @category models
  * @since 0.1.0
@@ -204,6 +326,21 @@ export interface Service {
     runId: string
   ) => Effect.Effect<Option.Option<number>, TriggerError>
   readonly clearActive: (triggerId: string, runId: string) => Effect.Effect<void, TriggerError>
+  /**
+   * Reads the fire ledger newest first. See {@link HistoryQuery} for the
+   * filters and paging contract; a limit that is not a positive safe integer
+   * is refused with `invalid_options`.
+   */
+  readonly history: (query?: HistoryQuery) => Effect.Effect<HistoryPage, TriggerError>
+  /**
+   * Reads what one trigger holds without expiring anything, so a listing can
+   * report a reservation or a buffered occurrence exactly as the row has it.
+   */
+  readonly inspect: (triggerId: string) => Effect.Effect<Held, TriggerError>
+  /** Records that `host` polled the store at the store clock's current time. */
+  readonly heartbeat: (host: string) => Effect.Effect<void, TriggerError>
+  /** The most recent heartbeat across every host, or `None` when no scheduler has ever polled. */
+  readonly lastHeartbeat: () => Effect.Effect<Option.Option<Heartbeat>, TriggerError>
 }
 
 /**
@@ -237,6 +374,10 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
   activeRun: () => unavailable("activeRun"),
   activeOccurrence: () => unavailable("activeOccurrence"),
   clearActive: () => unavailable("clearActive"),
+  history: () => unavailable("history"),
+  inspect: () => unavailable("inspect"),
+  heartbeat: () => unavailable("heartbeat"),
+  lastHeartbeat: () => unavailable("lastHeartbeat"),
   ...overrides
 })
 

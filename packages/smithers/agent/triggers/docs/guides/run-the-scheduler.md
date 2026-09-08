@@ -51,10 +51,11 @@ every trigger in the process with nothing written down.
 Scheduler.layer({ pollInterval: "30 seconds", runPollInterval: "5 seconds" })
 ```
 
-| Option            | Default      | What it paces                                                                  |
-| ----------------- | ------------ | ------------------------------------------------------------------------------ |
-| `pollInterval`    | `"1 minute"` | How often a tick lists triggers and evaluates due work.                        |
-| `runPollInterval` | `"1 second"` | How often a launched run's monitor asks the runner whether it is still active. |
+| Option            | Default      | What it paces                                                                          |
+| ----------------- | ------------ | -------------------------------------------------------------------------------------- |
+| `pollInterval`    | `"1 minute"` | How often a tick lists triggers and evaluates due work.                                |
+| `runPollInterval` | `"1 second"` | How often a launched run's monitor asks the runner whether it is still active.         |
+| `host`            | `"local"`    | The name every tick records its heartbeat under, so a listing can say who last polled. |
 
 Both must be finite, positive Effect durations. Zero polls a CPU-tight loop and
 an infinite interval never completes, and `Duration.fromInput` accepts both, so
@@ -64,6 +65,28 @@ the scheduler refuses them itself with `invalid_options` and
 Set `pollInterval` below the tightest schedule you run. A one-minute cron under
 a five-minute poll still fires, because catch-up replays the boundaries the poll
 skipped, but only if the declaration asked for catch-up.
+
+## Let the control plane read the store
+
+`Control.list` answers `{ _tag: "triggers" }` and `{ _tag: "fires" }` through
+the `DispatchReader` port declared in `@smthrs/control`. This package serves
+that port from the store. Provide it beside the scheduler, over the same store:
+
+```ts
+import * as DispatchReader from "@smthrs/triggers/DispatchReader"
+
+export const dispatchReader = DispatchReader.layer.pipe(
+  Layer.provide(SqlTriggerStore.layer),
+  Layer.provide(database)
+)
+```
+
+Each trigger summary carries its last fire, its buffered occurrence, the run it
+holds, the next five occurrences, and `schedulerLastTickMs` from the newest
+heartbeat. A summary with no `schedulerLastTickMs` means no scheduler has ever
+polled this store, so an enabled trigger is not going to fire. Without the
+layer, `Control.list` refuses both variants with `InvalidInput` naming the
+missing store; it never answers an empty page it cannot stand behind.
 
 ## Tick without a supervisor
 

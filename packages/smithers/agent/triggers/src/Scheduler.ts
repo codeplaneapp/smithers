@@ -243,7 +243,21 @@ export const layerControlRunner: Layer.Layer<Runner, never, Control.Control> = L
 export interface Options {
   readonly pollInterval?: Duration.Input | undefined
   readonly runPollInterval?: Duration.Input | undefined
+  /**
+   * The name this scheduler records its heartbeat under, so a listing can say
+   * which host last polled the store. Defaults to {@link defaultHost}.
+   */
+  readonly host?: string | undefined
 }
+
+/**
+ * The heartbeat host name a scheduler records under when its options name
+ * none.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultHost = "local"
 
 /**
  * Scheduler operations.
@@ -300,7 +314,7 @@ export const idempotencyKey = (triggerId: string, occurrence: number): string =>
  * closing, not a trigger failing.
  */
 const attempted = (
-  triggerId: string,
+  annotations: Record<string, string>,
   work: string,
   effect: Effect.Effect<void, TriggerError>
 ): Effect.Effect<boolean, TriggerError> =>
@@ -308,15 +322,15 @@ const attempted = (
     Cause.hasInterrupts(cause)
       ? Effect.failCause(cause)
       : Effect.as(
-        Effect.annotateLogs(Effect.logWarning(`A trigger ${work} failed`, cause), { triggerId }),
+        Effect.annotateLogs(Effect.logWarning(`A trigger ${work} failed`, cause), annotations),
         false
       ))
 
 const isolate = (
-  triggerId: string,
+  annotations: Record<string, string>,
   work: string,
   effect: Effect.Effect<void, TriggerError>
-): Effect.Effect<void, TriggerError> => Effect.asVoid(attempted(triggerId, work, effect))
+): Effect.Effect<void, TriggerError> => Effect.asVoid(attempted(annotations, work, effect))
 
 /**
  * Constructs a scheduler service in the current Scope.
@@ -821,7 +835,7 @@ export const make = (
         let interrupted = false
         for (const occurrence of due.occurrences) {
           const settledHere = yield* attempted(
-            trigger.id,
+            { triggerId: trigger.id },
             `dispatch of occurrence ${occurrence}`,
             claimAndDispatch(trigger, occurrence)
           )
@@ -832,13 +846,19 @@ export const make = (
         if (dispatched !== undefined) yield* observe(trigger.id, dispatched)
       })
 
+    const host = options.host ?? defaultHost
+
     const runOnce = semaphore.withPermits(1)(
       Effect.gen(function*() {
         const now = yield* Clock.currentTimeMillis
+        // The heartbeat is observability, not dispatch: a store that cannot
+        // record it is logged and the tick goes on, so a listing's "nothing is
+        // listening" can never be caused by the row that reports it.
+        yield* isolate({ host }, "heartbeat", store.heartbeat(host))
         const triggers = yield* store.list()
         yield* Effect.forEach(
           triggers,
-          (trigger) => isolate(trigger.id, "tick", processTrigger(trigger, now)),
+          (trigger) => isolate({ triggerId: trigger.id }, "tick", processTrigger(trigger, now)),
           { discard: true }
         )
       })

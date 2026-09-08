@@ -4,7 +4,7 @@ description: "Every public export of @smthrs/triggers: trigger and schedule decl
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/triggers/docs/api.md"
 ---
 
-`@smthrs/triggers` exports eleven modules from its root entry point, and each is
+`@smthrs/triggers` exports twelve modules from its root entry point, and each is
 also importable from `@smthrs/triggers/<Module>`:
 
 ```ts
@@ -13,7 +13,7 @@ import { Scheduler, Trigger, TriggerStore } from "@smthrs/triggers"
 import * as Scheduler from "@smthrs/triggers/Scheduler"
 ```
 
-The in-memory store for tests is a twelfth module at
+The in-memory store for tests is a thirteenth module at
 `@smthrs/triggers/test/TestTriggers`.
 
 Services and tags are Effect constructs: a `Layer` provides a service, and an
@@ -372,6 +372,10 @@ interface Service {
     runId: string
   ) => Effect.Effect<Option.Option<number>, TriggerError>
   readonly clearActive: (triggerId: string, runId: string) => Effect.Effect<void, TriggerError>
+  readonly history: (query?: HistoryQuery) => Effect.Effect<HistoryPage, TriggerError>
+  readonly inspect: (triggerId: string) => Effect.Effect<Held, TriggerError>
+  readonly heartbeat: (host: string) => Effect.Effect<void, TriggerError>
+  readonly lastHeartbeat: () => Effect.Effect<Option.Option<Heartbeat>, TriggerError>
 }
 ```
 
@@ -389,10 +393,69 @@ interface Service {
 | `activeRun`        | The run id or launch reservation the trigger currently holds. Expires a stale reservation as a side effect.                                                                                    |
 | `activeOccurrence` | The occurrence owned by one active run or reservation. `lastFiredAt` cannot answer this, because later skipped and buffered occurrences advance that cursor while an older run remains active. |
 | `clearActive`      | Compare-and-swap release of one run id.                                                                                                                                                        |
+| `history`          | The fire ledger, newest occurrence first, filtered and paged by a `HistoryQuery`. A limit that is not a positive safe integer is refused with `invalid_options` and `path` `"limit"`.          |
+| `inspect`          | The run or reservation and the buffered occurrence one trigger holds, read as the row has them. Expires nothing; `activeRun` is the read that expires a stale reservation.                     |
+| `heartbeat`        | Records that `host` polled the store at the store clock's current time. One row per host; a later poll overwrites.                                                                             |
+| `lastHeartbeat`    | The newest heartbeat across every host, or `None` when no scheduler has ever polled. Equal times fall to the lower host name so the answer is one row.                                         |
 
 Every method addressing one trigger fails with `unknown_trigger` when no such
 row exists, except `clearActive`, whose compare-and-swap cannot tell a missing
-trigger from a run id that no longer matches and so stays a no-op for both.
+trigger from a run id that no longer matches and so stays a no-op for both, and
+`history`, `heartbeat`, and `lastHeartbeat`, which address the whole store.
+
+### TriggerStore.FireRecord, HistoryQuery, HistoryPage, Held, and Heartbeat
+
+```ts
+interface FireRecord extends Fire {
+  readonly outcome: Outcome | null
+  readonly runId?: string | undefined
+  readonly error?: string | undefined
+}
+
+interface HistoryQuery {
+  readonly triggerId?: string | undefined
+  readonly runId?: string | undefined
+  readonly outcome?: Outcome | undefined
+  readonly cursor?: Fire | undefined
+  readonly limit?: number | undefined
+}
+
+interface HistoryPage {
+  readonly items: ReadonlyArray<FireRecord>
+  readonly nextCursor?: Fire | undefined
+}
+
+interface Held {
+  readonly activeRunId?: string | undefined
+  readonly pendingAt?: number | undefined
+}
+
+interface Heartbeat {
+  readonly host: string
+  readonly tickedAt: number
+}
+```
+
+A `FireRecord` is one row of the fire ledger. Its `outcome` is `null` between a
+claim and its `recordResult`, the window in which a launch is reserved but not
+yet reported. Every `HistoryQuery` filter narrows; `cursor` is the last record
+of the previous page, so the page after it holds only older records; with no
+`limit` the whole ledger answers in one page. `nextCursor` is present only when
+the limit cut the page short. `Held.activeRunId` may be a launch reservation;
+`isReservation` tells the two apart.
+
+### TriggerStore history helpers
+
+```ts
+const historyLimit: (limit: number | undefined) => Effect.Effect<number | undefined, TriggerError>
+const compareNewestFirst: (left: Fire, right: Fire) => number
+const isAfterCursor: (record: Fire, cursor: Fire) => boolean
+const historyPage: (records: ReadonlyArray<FireRecord>, limit: number | undefined) => HistoryPage
+```
+
+Both stores apply these, so swapping one for the other cannot change which
+queries are refused, how equal occurrences of different triggers order
+(descending trigger id, so a cursor names one position), or where a page ends.
 
 ### TriggerStore.TriggerStore
 
@@ -522,11 +585,14 @@ const parkedAttempts: number
 interface Options {
   readonly pollInterval?: Duration.Input | undefined
   readonly runPollInterval?: Duration.Input | undefined
+  readonly host?: string | undefined
 }
 
 interface Service {
   readonly runOnce: Effect.Effect<void, TriggerError>
 }
+
+const defaultHost: string
 ```
 
 `pollInterval` defaults to one minute and paces the tick loop.
@@ -534,6 +600,13 @@ interface Service {
 Both must be finite, positive Effect durations; zero polls a CPU-tight loop and
 an infinite interval never completes, and both are refused with
 `invalid_options` and `TriggerError.path` naming the field.
+
+`host` is the name every tick records its heartbeat under through
+`TriggerStore.heartbeat`, so a listing can say which host last polled the
+store. It defaults to `defaultHost`, which is `"local"`. The heartbeat is
+observability, not dispatch: a store that cannot record it is logged with the
+host annotated and the tick goes on, so a listing's "nothing is listening" can
+never be caused by the row that reports it.
 
 `runOnce` holds a semaphore permit, so concurrent calls on one scheduler
 serialize.
@@ -563,6 +636,55 @@ tick rather than the typed error alone.
 Scope closure detaches every run monitor and cancels nothing. The runs are
 durable and outlive the process; the next incarnation re-attaches to them from
 the store. Cancellation happens only through a `supersede` claim.
+
+## DispatchReader
+
+The [`@smthrs/control`](https://control.smithers.sh/reference/api/) `DispatchReader` port served from a
+`TriggerStore`. `Control.list` answers `{ _tag: "triggers" }` and
+`{ _tag: "fires" }` through that port. The port is declared in control because
+this package depends on control; the adapter lives here because only this
+package can read the store. A host composes the two by providing
+`DispatchReader.layer` over the same store its scheduler writes; without it,
+`Control.list` refuses both variants with `InvalidInput` naming the missing
+store.
+
+### DispatchReader.make and layer
+
+```ts
+const make: Effect.Effect<Port.Service, never, TriggerStore.TriggerStore>
+const layer: Layer.Layer<Port.DispatchReader, never, TriggerStore.TriggerStore>
+```
+
+`list` answers every trigger the store holds as a control `TriggerSummary`:
+the declaration, `lastFiredAtMs`, `pendingAtMs`, `activeRunId` for a launched
+run (a launch reservation is not a run the runtime knows about and is reported
+as no active run), the next `nextOccurrenceCount` occurrences after the store
+clock, and `schedulerLastTickMs` from the newest heartbeat when any scheduler
+has polled. `fires` pushes the request's `triggerId`, `runId`, and `outcome`
+filters into `TriggerStore.history` and answers every matching row newest
+first; `Control.list` applies the filters again and pages. A store failure is a
+control `PersistenceError` whose `operation` names the listing, `triggers` or
+`fires`.
+
+### DispatchReader.nextOccurrences, toTriggerSummary, toFireSummary, and nextOccurrenceCount
+
+```ts
+const nextOccurrenceCount: number
+const nextOccurrences: (
+  trigger: Pick<TriggerStore.Registered, "cron" | "timezone">,
+  now: number
+) => Effect.Effect<ReadonlyArray<number>, TriggerError>
+const toTriggerSummary: (
+  trigger: TriggerStore.Registered,
+  held: TriggerStore.Held,
+  nextOccurrencesMs: ReadonlyArray<number>,
+  schedulerLastTickMs: Option.Option<number>
+) => TriggerSummary
+const toFireSummary: (record: TriggerStore.FireRecord) => FireSummary
+```
+
+`nextOccurrenceCount` is 5. `nextOccurrences` lists that many occurrences
+strictly after `now`, ascending, as epoch milliseconds.
 
 ## Channel
 
@@ -723,20 +845,20 @@ testing the protocol rather than the implementation.
 `TriggerError.code` is stable. Branch on the code instead of parsing the
 message.
 
-| Code                      | Raised when                                                                                             |
-| ------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `unknown_trigger`         | A claim, result, pending-state, or active-run operation requires a trigger row that does not exist.     |
-| `trigger_disabled`        | A claim reads a disabled trigger inside its transaction.                                                |
-| `revision_mismatch`       | `ClaimFire.expectedRevision` differs from the revision read by the claim transaction.                   |
-| `invalid_schedule`        | `Schedule.make` cannot decode the schedule declaration.                                                 |
-| `invalid_trigger`         | `Trigger.make` cannot decode a trigger, or SQL registration receives input with no JSON representation. |
-| `invalid_options`         | A cron occurrence limit or scheduler polling interval violates its contract.                            |
-| `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                               |
-| `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                              |
-| `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.      |
-| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.  |
-| `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.               |
-| `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.      |
+| Code                      | Raised when                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `unknown_trigger`         | A claim, result, pending-state, active-run, or inspect operation requires a trigger row that does not exist. |
+| `trigger_disabled`        | A claim reads a disabled trigger inside its transaction.                                                     |
+| `revision_mismatch`       | `ClaimFire.expectedRevision` differs from the revision read by the claim transaction.                        |
+| `invalid_schedule`        | `Schedule.make` cannot decode the schedule declaration.                                                      |
+| `invalid_trigger`         | `Trigger.make` cannot decode a trigger, or SQL registration receives input with no JSON representation.      |
+| `invalid_options`         | A cron occurrence limit, a history page limit, or a scheduler polling interval violates its contract.        |
+| `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                                    |
+| `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                                   |
+| `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.           |
+| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.       |
+| `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.                    |
+| `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.           |
 
 `TriggerError.path` optionally identifies the offending declaration or option
 as a dotted field path. Schema and option failures set it when they can locate
@@ -858,6 +980,6 @@ accepting traffic.
 
 Migrations are internal. The export map null-maps
 `@smthrs/triggers/migrations/*`. Use `SqlTriggerStore.layer`; it applies
-`0001_triggers` and then `0002_reservation_lease`. The package exports
+`0001_triggers`, `0002_reservation_lease`, and `0003_heartbeat` in order. The package exports
 `@smthrs/triggers/package.json`. It does not export `internal/*` or nested
 `*/index` subpaths.

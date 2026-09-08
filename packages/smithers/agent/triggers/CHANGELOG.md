@@ -1,5 +1,23 @@
 # @smthrs/triggers
 
+## [Unreleased]
+
+### Added
+
+- `TriggerStore.history` reads the fire ledger newest first, filtered by
+  trigger, run, or outcome and paged by cursor and limit, so a listing can show
+  what a trigger did without joining the runtime's run table.
+- `TriggerStore.inspect` reads the run or reservation and the buffered
+  occurrence one trigger holds without expiring anything.
+- `TriggerStore.heartbeat` and `lastHeartbeat`, backed by the
+  `0003_heartbeat` migration, record which scheduler host last polled the
+  store. `Scheduler.Options.host` names the host; `Scheduler.defaultHost` is
+  `"local"`. A heartbeat the store cannot record is logged and the tick goes on.
+- `DispatchReader`, the `@smthrs/control` read port served from a
+  `TriggerStore`, so `Control.list` can answer `triggers` and `fires` from the
+  store the scheduler writes: last fire, buffered occurrence, active run, the
+  next five occurrences, and the newest heartbeat.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

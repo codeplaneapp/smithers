@@ -41,7 +41,8 @@ export const storeConformance = <LayerError>(
             Effect.flip(store.takePending("absent")),
             Effect.flip(store.activeRun("absent")),
             Effect.flip(store.activeOccurrence("absent", "run-1")),
-            Effect.flip(store.claimPending({ triggerId: "absent", expectedRevision: 1 }))
+            Effect.flip(store.claimPending({ triggerId: "absent", expectedRevision: 1 })),
+            Effect.flip(store.inspect("absent"))
           ])
         })
       )
@@ -708,6 +709,137 @@ export const storeConformance = <LayerError>(
       )
       expect(result.active).toMatchObject({ _tag: "None" })
       expect(result.pending).toMatchObject({ _tag: "Some", value: 2 })
+    })
+
+    it("reads the ledger newest first with each occurrence's outcome, run, and error", async () => {
+      const result = await run(
+        Effect.gen(function*() {
+          const store = yield* TriggerStore.TriggerStore
+          const registered = yield* store.register(declaration)
+          const claim = { triggerId: declaration.id, expectedRevision: registered.revision }
+          yield* store.claimFire({ ...claim, occurrence: 1 })
+          yield* store.recordResult({ triggerId: declaration.id, occurrence: 1, outcome: "launched", runId: "run-1" })
+          // Skipped inside the claim: run-1 is still active under the skip policy.
+          yield* store.claimFire({ ...claim, occurrence: 2 })
+          yield* store.recordResult({
+            triggerId: declaration.id,
+            occurrence: 1,
+            outcome: "failed",
+            runId: "run-1",
+            error: "exit 1"
+          })
+          // Claimed and not yet reported: the ledger shows the open window.
+          yield* store.claimFire({ ...claim, occurrence: 3 })
+          return {
+            all: yield* store.history({ triggerId: declaration.id }),
+            byRun: yield* store.history({ runId: "run-1" }),
+            skipped: yield* store.history({ outcome: "skipped" }),
+            other: yield* store.history({ triggerId: "other" }),
+            everything: yield* store.history()
+          }
+        })
+      )
+      expect(result.all).toEqual({
+        items: [
+          { triggerId: "daily", occurrence: 3, outcome: null },
+          { triggerId: "daily", occurrence: 2, outcome: "skipped" },
+          { triggerId: "daily", occurrence: 1, outcome: "failed", runId: "run-1", error: "exit 1" }
+        ]
+      })
+      expect(result.byRun.items).toEqual([result.all.items[2]])
+      expect(result.skipped.items).toEqual([result.all.items[1]])
+      expect(result.other.items).toEqual([])
+      expect(result.everything).toEqual(result.all)
+    })
+
+    it("pages the ledger by cursor across triggers that share an occurrence", async () => {
+      const result = await run(
+        Effect.gen(function*() {
+          const store = yield* TriggerStore.TriggerStore
+          for (const id of ["a", "b"]) {
+            const registered = yield* store.register({ ...declaration, id })
+            yield* store.claimFire({ triggerId: id, occurrence: 5, expectedRevision: registered.revision })
+            yield* store.claimFire({ triggerId: id, occurrence: 3, expectedRevision: registered.revision })
+          }
+          const first = yield* store.history({ limit: 3 })
+          const second = yield* store.history({ limit: 3, cursor: first.nextCursor })
+          const exact = yield* store.history({ limit: 4 })
+          return { first, second, exact }
+        })
+      )
+      const position = (record: TriggerStore.FireRecord) => `${record.triggerId}:${record.occurrence}`
+      expect(result.first.items.map(position)).toEqual(["b:5", "a:5", "b:3"])
+      expect(result.first.nextCursor).toEqual({ triggerId: "b", occurrence: 3 })
+      expect(result.second.items.map(position)).toEqual(["a:3"])
+      expect(result.second.nextCursor).toBeUndefined()
+      expect(result.exact.items).toHaveLength(4)
+      expect(result.exact.nextCursor).toBeUndefined()
+    })
+
+    it("refuses a history limit that is not a positive safe integer", async () => {
+      const errors = await run(
+        Effect.gen(function*() {
+          const store = yield* TriggerStore.TriggerStore
+          return yield* Effect.all([
+            Effect.flip(store.history({ limit: 0 })),
+            Effect.flip(store.history({ limit: -1 })),
+            Effect.flip(store.history({ limit: 1.5 }))
+          ])
+        })
+      )
+      for (const error of errors) {
+        expect(error.code).toBe("invalid_options")
+        expect(error.path).toBe("limit")
+      }
+      expect(errors[0]?.message).toBe("history limit must be a positive safe integer, received 0")
+    })
+
+    it("inspects the reservation, run, and buffered occurrence a trigger holds without expiring them", async () => {
+      const result = await run(
+        Effect.gen(function*() {
+          const store = yield* TriggerStore.TriggerStore
+          const registered = yield* store.register({ ...declaration, overlap: "buffer-one" })
+          const claim = { triggerId: declaration.id, expectedRevision: registered.revision }
+          const empty = yield* store.inspect(declaration.id)
+          yield* store.claimFire({ ...claim, occurrence: 1 })
+          const reserved = yield* store.inspect(declaration.id)
+          yield* store.claimFire({ ...claim, occurrence: 2 })
+          yield* store.recordResult({ triggerId: declaration.id, occurrence: 1, outcome: "launched", runId: "run-1" })
+          const running = yield* store.inspect(declaration.id)
+          yield* TestClock.adjust(reservationLeaseMs + 1)
+          const later = yield* store.inspect(declaration.id)
+          return { empty, reserved, running, later }
+        })
+      )
+      expect(result.empty).toEqual({})
+      expect(result.reserved).toEqual({ activeRunId: TriggerStore.reservationId(declaration.id, 1) })
+      expect(result.running).toEqual({ activeRunId: "run-1", pendingAt: 2 })
+      expect(result.later).toEqual(result.running)
+    })
+
+    it("records heartbeats at the store clock and reports the newest host", async () => {
+      const result = await run(
+        Effect.gen(function*() {
+          const store = yield* TriggerStore.TriggerStore
+          const none = yield* store.lastHeartbeat()
+          yield* store.heartbeat("b")
+          const b0 = yield* store.lastHeartbeat()
+          yield* store.heartbeat("a")
+          const tie0 = yield* store.lastHeartbeat()
+          yield* TestClock.adjust(10)
+          yield* store.heartbeat("b")
+          const b10 = yield* store.lastHeartbeat()
+          yield* store.heartbeat("a")
+          const tie10 = yield* store.lastHeartbeat()
+          return { none, b0, tie0, b10, tie10 }
+        })
+      )
+      expect(result.none).toMatchObject({ _tag: "None" })
+      expect(result.b0).toMatchObject({ _tag: "Some", value: { host: "b", tickedAt: 0 } })
+      // Equal times fall to the lower host name so the answer is one row.
+      expect(result.tie0).toMatchObject({ _tag: "Some", value: { host: "a", tickedAt: 0 } })
+      expect(result.b10).toMatchObject({ _tag: "Some", value: { host: "b", tickedAt: 10 } })
+      expect(result.tie10).toMatchObject({ _tag: "Some", value: { host: "a", tickedAt: 10 } })
     })
   })
 }

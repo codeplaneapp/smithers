@@ -957,3 +957,54 @@ describe("Scheduler.layerControlRunner", () => {
     expect(fixture.calls).not.toContain("approve")
   })
 })
+
+describe("Scheduler heartbeat", () => {
+  const tick = (options: Scheduler.Options, store: Layer.Layer<TriggerStore.TriggerStore>) =>
+    Effect.gen(function*() {
+      const scheduler = yield* Scheduler.make(options)
+      yield* scheduler.runOnce
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(Scheduler.Runner, runnerFixture().service),
+      Effect.provide(store)
+    )
+
+  it("records nothing before its first poll and its host at every poll after", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const before = yield* store.lastHeartbeat()
+        yield* tick({ host: "box-1" }, Layer.succeed(TriggerStore.TriggerStore)(store))
+        const first = yield* store.lastHeartbeat()
+        yield* TestClock.adjust(hour)
+        yield* tick({ host: "box-1" }, Layer.succeed(TriggerStore.TriggerStore)(store))
+        const second = yield* store.lastHeartbeat()
+        yield* TestClock.adjust(hour)
+        yield* tick({}, Layer.succeed(TriggerStore.TriggerStore)(store))
+        const unnamed = yield* store.lastHeartbeat()
+        return { before, first, second, unnamed }
+      }).pipe(Effect.provide(TestTriggers.layer), Effect.provide(TestClock.layer()))
+    )
+    expect(result.before).toMatchObject({ _tag: "None" })
+    expect(result.first).toMatchObject({ _tag: "Some", value: { host: "box-1", tickedAt: 0 } })
+    expect(result.second).toMatchObject({ _tag: "Some", value: { host: "box-1", tickedAt: hour } })
+    expect(result.unnamed).toMatchObject({ _tag: "Some", value: { host: Scheduler.defaultHost, tickedAt: 2 * hour } })
+  })
+
+  it("keeps dispatching when the store cannot record the heartbeat", async () => {
+    let listed = 0
+    const store = TriggerStore.makeNoop({
+      list: () =>
+        Effect.sync(() => {
+          listed++
+          return []
+        })
+    })
+    await Effect.runPromise(
+      tick({ host: "box-1" }, Layer.succeed(TriggerStore.TriggerStore)(store)).pipe(
+        Effect.provide(TestClock.layer())
+      )
+    )
+    expect(listed).toBe(1)
+  })
+})

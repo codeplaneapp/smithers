@@ -41,6 +41,7 @@
     "./CatchUp": "./src/CatchUp.ts",
     "./Channel": "./src/Channel.ts",
     "./Cron": "./src/Cron.ts",
+    "./DispatchReader": "./src/DispatchReader.ts",
     "./Overlap": "./src/Overlap.ts",
     "./Schedule": "./src/Schedule.ts",
     "./Scheduler": "./src/Scheduler.ts",
@@ -91,6 +92,11 @@
         "types": "./dist/esm/Cron.d.ts",
         "import": "./dist/esm/Cron.js",
         "require": "./dist/cjs/Cron.js"
+      },
+      "./DispatchReader": {
+        "types": "./dist/esm/DispatchReader.d.ts",
+        "import": "./dist/esm/DispatchReader.js",
+        "require": "./dist/cjs/DispatchReader.js"
       },
       "./Overlap": {
         "types": "./dist/esm/Overlap.d.ts",

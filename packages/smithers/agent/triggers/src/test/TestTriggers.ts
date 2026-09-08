@@ -9,6 +9,12 @@ import { TriggerError } from "../TriggerError.ts"
 import {
   type Claim,
   type ClaimFire,
+  compareNewestFirst,
+  type FireRecord,
+  type Heartbeat,
+  historyLimit,
+  historyPage,
+  isAfterCursor,
   isReservation,
   type Outcome,
   type Registered,
@@ -35,11 +41,16 @@ import {
  * - `fireRunIds` names a run only for a fire that a claim or a result attached
  *   one to, and every such run was recorded `launched` first, so
  *   `runOccurrences` knows the occurrence it belongs to.
+ *
+ * `fireErrors` and `heartbeats` are the SQL store's `error` column and its
+ * `flows_scheduler_heartbeat` table.
  */
 interface State {
   readonly triggers: ReadonlyMap<string, Registered>
   readonly fires: ReadonlyMap<string, Outcome | null>
   readonly fireRunIds: ReadonlyMap<string, string>
+  readonly fireErrors: ReadonlyMap<string, string>
+  readonly heartbeats: ReadonlyMap<string, number>
   readonly runOccurrences: ReadonlyMap<string, number>
   readonly pending: ReadonlyMap<string, number>
   readonly active: ReadonlyMap<string, string>
@@ -48,6 +59,21 @@ interface State {
 }
 
 const key = (triggerId: string, occurrence: number) => `${triggerId}:${occurrence}`
+
+// The occurrence is the numeric tail, so a trigger id holding a colon still
+// splits at the right place.
+const fireRecord = (current: State, fireKey: string, outcome: Outcome | null): FireRecord => {
+  const at = fireKey.lastIndexOf(":")
+  const runId = current.fireRunIds.get(fireKey)
+  const error = current.fireErrors.get(fireKey)
+  return {
+    triggerId: fireKey.slice(0, at),
+    occurrence: Number(fireKey.slice(at + 1)),
+    outcome,
+    ...(runId === undefined ? {} : { runId }),
+    ...(error === undefined ? {} : { error })
+  }
+}
 const unknown = (triggerId: string) =>
   new TriggerError({ code: "unknown_trigger", message: `unknown trigger ${triggerId}` })
 
@@ -218,6 +244,8 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
     triggers: new Map(),
     fires: new Map(),
     fireRunIds: new Map(),
+    fireErrors: new Map(),
+    heartbeats: new Map(),
     runOccurrences: new Map(),
     pending: new Map(),
     active: new Map(),
@@ -306,6 +334,7 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
         const activeClaimedAt = new Map(current.activeClaimedAt)
         const fires = new Map(current.fires)
         const fireRunIds = new Map(current.fireRunIds)
+        const fireErrors = new Map(current.fireErrors)
         const runOccurrences = new Map(current.runOccurrences)
         const fireKey = key(result.triggerId, result.occurrence)
         const recordedRunId = current.fireRunIds.get(fireKey)
@@ -316,6 +345,9 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
           fires.set(fireKey, result.outcome)
           if (result.runId !== undefined) fireRunIds.set(fireKey, result.runId)
           else if (!terminal) fireRunIds.delete(fireKey)
+          // The SQL store overwrites the error column on every result.
+          if (result.error === undefined) fireErrors.delete(fireKey)
+          else fireErrors.set(fireKey, result.error)
         }
         if (result.outcome === "launched") {
           if (result.runId === undefined) {
@@ -342,7 +374,17 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
         }
         return [
           undefined,
-          { ...current, triggers, fires, fireRunIds, runOccurrences, active, activeOccurrences, activeClaimedAt }
+          {
+            ...current,
+            triggers,
+            fires,
+            fireRunIds,
+            fireErrors,
+            runOccurrences,
+            active,
+            activeOccurrences,
+            activeClaimedAt
+          }
         ]
       }),
     setPending: (fire) =>
@@ -421,6 +463,52 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
         activeOccurrences.delete(triggerId)
         activeClaimedAt.delete(triggerId)
         return { ...current, active, activeOccurrences, activeClaimedAt }
-      })
+      }),
+    history: (query = {}) =>
+      Effect.flatMap(historyLimit(query.limit), (limit) =>
+        Ref.get(state).pipe(Effect.map((current) => {
+          const records = [...current.fires.entries()]
+            .map(([fireKey, outcome]) => fireRecord(current, fireKey, outcome))
+            .filter((record) =>
+              (query.triggerId === undefined || record.triggerId === query.triggerId) &&
+              (query.runId === undefined || record.runId === query.runId) &&
+              (query.outcome === undefined || record.outcome === query.outcome) &&
+              (query.cursor === undefined || isAfterCursor(record, query.cursor))
+            )
+            .sort(compareNewestFirst)
+          return historyPage(records, limit)
+        }))),
+    inspect: (triggerId) =>
+      requireTrigger(triggerId, (_trigger, current) => {
+        const activeRunId = current.active.get(triggerId)
+        const pendingAt = current.pending.get(triggerId)
+        return [
+          {
+            ...(activeRunId === undefined ? {} : { activeRunId }),
+            ...(pendingAt === undefined ? {} : { pendingAt })
+          },
+          current
+        ]
+      }),
+    heartbeat: (host) =>
+      Effect.flatMap(
+        Clock.currentTimeMillis,
+        (tickedAt) =>
+          Ref.update(state, (current) => ({ ...current, heartbeats: new Map(current.heartbeats).set(host, tickedAt) }))
+      ),
+    lastHeartbeat: () =>
+      Ref.get(state).pipe(Effect.map((current) => {
+        let latest: Heartbeat | undefined
+        for (const [host, tickedAt] of current.heartbeats) {
+          // Newest wins; equal times fall to the lower host name, as the SQL
+          // store's ORDER BY does.
+          if (
+            latest === undefined || tickedAt > latest.tickedAt || (tickedAt === latest.tickedAt && host < latest.host)
+          ) {
+            latest = { host, tickedAt }
+          }
+        }
+        return latest === undefined ? Option.none() : Option.some(latest)
+      }))
   })
 }))

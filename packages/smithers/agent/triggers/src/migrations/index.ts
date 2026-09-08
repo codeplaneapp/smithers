@@ -3,6 +3,7 @@ import * as Layer from "effect/Layer"
 import * as Migrator from "effect/unstable/sql/Migrator"
 import { triggers } from "./0001_triggers.ts"
 import { reservationLease } from "./0002_reservation_lease.ts"
+import { schedulerHeartbeat } from "./0003_heartbeat.ts"
 
 /**
  * The migration record {@link run} applies, keyed by migration file name.
@@ -13,7 +14,11 @@ import { reservationLease } from "./0002_reservation_lease.ts"
  * @category migrations
  * @since 1.0.0-rc.0
  */
-export const migrations = { "0001_triggers": triggers, "0002_reservation_lease": reservationLease }
+export const migrations = {
+  "0001_triggers": triggers,
+  "0002_reservation_lease": reservationLease,
+  "0003_heartbeat": schedulerHeartbeat
+}
 
 /**
  * Applies the triggers schema migrations.

@@ -22,6 +22,8 @@ export * as TriggerStore from "./TriggerStore.ts"
 export * as SqlTriggerStore from "./SqlTriggerStore.ts"
 /** @category scheduling @since 0.1.0 */
 export * as Scheduler from "./Scheduler.ts"
+/** @category services @since 1.0.0-rc.0 */
+export * as DispatchReader from "./DispatchReader.ts"
 /** @category channels @since 0.1.0 */
 export * as Channel from "./Channel.ts"
 /** @category webhooks @since 0.1.0 */
