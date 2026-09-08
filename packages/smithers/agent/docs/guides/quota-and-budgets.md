@@ -107,7 +107,8 @@ budget declared for the run. Five rules make it usable:
   projected from the journal.** Every accounted call writes a
   `flows.agent.usage.v1` record on the durable channel, and the run's first
   decision writes its latency clock zero as a `flows.agent.budget-started.v1`
-  record. A budget entering a resumed run folds both back before it decides
+  record. A skip-remaining refusal writes `flows.agent.budget-latched.v1`.
+  A budget entering a resumed run folds all three back before it decides
   anything, because the engine resumes from recorded results and never
   re-enters a settled step: an in-memory accumulator would hand a resumed run
   a second full allowance.
@@ -185,6 +186,15 @@ forget an old run's allowance.
 | `fail`           | The step fails with `BudgetExceeded { scope, used, max, next }`.                                       |
 | `warn`           | A `flows.agent.budget-warning.v1` record is written and the call proceeds.                             |
 | `skip-remaining` | The budget latches. Every later model call in the run fails typed `skipped` without asking a provider. |
+
+The skip-remaining decision is written durably before the refusal returns.
+Recovery after restart or cache eviction restores the first decision and its
+original numbers independently of usage and transient reservations. A peer
+reservation can trigger the latch without recording any usage; releasing that
+reservation does not reopen admission. Already counted steps may still replay.
+The latch write must run outside a journal transaction so rollback cannot erase
+a returned decision. Failed writes and unreadable latch records raise
+`Budget.AccountingUnavailable`.
 
 A latched refusal is its own failure, `Budget.Skipped`, carrying the
 `BudgetExceeded` it latched on. The distinction is what an operator needs: one

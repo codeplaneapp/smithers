@@ -452,11 +452,16 @@ declared for the run. Five rules make it usable:
   one run's spend, from its live accumulator when the run is here and from its
   records when it is not. `Budget.defaultMaxRuns` bounds how many tallies are
   held in memory; `Budget.layer(policy, { maxRuns })` sets it.
-- **Refusal is a projection.** The check runs _before_ a call and projects its
-  cost as the largest call the run has made. A budget that noticed afterwards
-  would always be exceeded by the call that exceeded it.
-- **The first call is never refused.** With nothing recorded, the only honest
-  projection is zero.
+- **Admission reserves a projection.** Before dispatch, `reserve(stepKey)`
+  atomically counts actual spend plus estimates for all in-flight calls. The
+  largest observed call sets the estimate; larger completed calls raise
+  outstanding estimates. Recorded usage replaces the estimate, and scope exit
+  releases the reservation, including failure or cancellation.
+- **An unmeasured call holds capacity.** Until a positive cost is known, one
+  call reserves the full token allowance. A zero allowance refuses even the
+  first call unless `warn` permits it. Concurrent distinct calls compete for
+  the reserved capacity; duplicates of the same sealed key share a reservation
+  until every holder finishes.
 - **The accounting fails closed.** A record that could not be written, a ledger
   that could not be read, and a ledger longer than one recovery reads
   (`Budget.defaultRecoveryEntries`, overridable with
@@ -468,6 +473,20 @@ declared for the run. Five rules make it usable:
   recorded answer, so a re-dispatch pays the ledger again and not the provider.
   The `flows.agent.budget-warning.v1` record is the one this module still lets
   go: nothing reads it back.
+
+These are soft admission bounds: an admitted call can cost more than its
+forecast, including the first call. Concurrent admission requires one shared
+`Budget` instance per run. `check(stepKey)` is an advisory preview; custom
+model boundaries must use scoped `reserve` through the provider call and its
+`record`.
+
+A `skip-remaining` refusal durably records the original decision as
+`flows.agent.budget-latched.v1` before returning. Recovery restores that latch
+independently of usage and transient reservations, including after cache
+eviction. Releasing a peer reservation without usage cannot reopen the run.
+Already counted steps may still replay. See the
+[quota and budget guide](docs/guides/quota-and-budgets.md#limit-admission-using-a-spending-forecast)
+for the admission and recovery contract.
 
 `onExceeded` decides what running out means: `fail` reports a typed
 `BudgetExceeded { scope, used, max, next }` at the step, `warn` writes a

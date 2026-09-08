@@ -21,8 +21,9 @@
  * - **The accumulator is per run, keyed by the model step's content key, and
  *   projected from the journal.** Every call writes a {@link usageEvent}
  *   record and the run's first question writes a {@link budgetStartedEvent}
- *   record on the journal's DURABLE channel. A budget entering a run folds
- *   both back before it decides anything. This is what makes a budget survive
+ *   record on the journal's DURABLE channel. A skip-remaining refusal writes a
+ *   {@link budgetLatchedEvent} record there too. A budget entering a run folds
+ *   all three back before it decides anything. This is what makes a budget survive
  *   a restart: the engine resumes a run from its recorded NODE results and
  *   never re-enters a settled step's body, so memory-only usage would hand a
  *   resumed run a second token allowance and a memory-only clock would re-arm
@@ -480,6 +481,16 @@ export const BudgetStartedRecord = Schema.Struct({
   startedAt: Schema.Finite
 })
 
+/**
+ * The durable skip-remaining decision, encoded as {@link BudgetExceeded}.
+ * Recovery keeps the first decision even if its peer reservations were released
+ * without usage. An undecodable record fails accounting closed.
+ *
+ * @category records
+ * @since 1.0.0-rc.0
+ */
+export const budgetLatchedEvent = "flows.agent.budget-latched.v1"
+
 /** The journal source every record this module writes is attributed to. */
 const recordSource = JournalEvent.SourceId.make("/agent/budget")
 
@@ -704,10 +715,11 @@ export const defaultRecoveryEntries = 1_000_000
 interface RecoveredLedger {
   readonly usage: ReadonlyMap<string, number>
   readonly startedAt: number | undefined
+  readonly latched: BudgetExceeded | undefined
 }
 
 /**
- * Reads back the usage and latency zero one run already recorded.
+ * Reads back the usage, latency zero, and skip-remaining decision one run recorded.
  *
  * Returns calls keyed by step, so the caller folds them through the same
  * accumulator a live call goes through and the dedupe applies to both. The
@@ -726,8 +738,9 @@ const recoverUsage = (
   Effect.gen(function*() {
     const recovered = new Map<string, number>()
     let startedAt = Number.POSITIVE_INFINITY
+    let latched: BudgetExceeded | undefined
     const journal = yield* Effect.serviceOption(Journal.Journal)
-    if (Option.isNone(journal)) return { usage: recovered, startedAt: undefined }
+    if (Option.isNone(journal)) return { usage: recovered, startedAt: undefined, latched: undefined }
     // Recovery flushes and reads committed history. Running it while holding
     // a write transaction can deadlock its lossy writer or recover a clock
     // zero that is later rolled back. Refuse before either operation.
@@ -772,6 +785,14 @@ const recoverUsage = (
             Effect.mapError(() => undecodable(entry, "budget-started"))
           )
           startedAt = Math.min(startedAt, payload.startedAt)
+        } else if (entry.eventType === budgetLatchedEvent) {
+          const payload = yield* Schema.decodeUnknownEffect(BudgetExceeded)(entry.payload).pipe(
+            Effect.mapError(() => undecodable(entry, "budget-latched"))
+          )
+          if (payload.onExceeded !== "skip-remaining") {
+            return yield* Effect.fail(undecodable(entry, "budget-latched"))
+          }
+          latched ??= payload
         }
       }
       scanned += read.entries.length
@@ -779,7 +800,8 @@ const recoverUsage = (
       if (!read.hasMore || last === undefined) {
         return {
           usage: recovered,
-          startedAt: startedAt === Number.POSITIVE_INFINITY ? undefined : startedAt
+          startedAt: startedAt === Number.POSITIVE_INFINITY ? undefined : startedAt,
+          latched
         }
       }
       if (scanned >= entryLimit) {
@@ -851,7 +873,7 @@ export const looseRunId = ""
  * an upper bound, not permission to forget spend: active operations,
  * uncommitted usage, and memory-only accounts cannot be evicted. If all slots
  * are pinned, admission fails with AccountingUnavailable. An evicted durable
- * account recovers its spend and original latency zero from the journal.
+ * account recovers its spend, original latency zero, and latch from the journal.
  *
  * @category constructors
  * @since 0.1.0
@@ -1033,7 +1055,7 @@ export const make = (
         }).pipe(Effect.flatMap(Effect.fromResult))
       )
 
-    /** Recovers one run's earlier spend and latency zero once, before its first decision. */
+    /** Recovers one run's earlier spend, latency zero, and latch before its first decision. */
     const ensureRecovered = (run: RunAccount, runId: string): Effect.Effect<void, AccountingUnavailable> =>
       run.recovery.withPermits(1)(
         Effect.suspend(() => {
@@ -1058,6 +1080,7 @@ export const make = (
                   ([stepKey, spent]) => account(run, runId, stepKey, spent),
                   { discard: true }
                 )
+                yield* Ref.update(run.state, (current) => ({ ...current, latched: ledger.latched }))
                 run.evictable = Option.isSome(yield* Effect.serviceOption(Journal.Journal))
               })
             ),
@@ -1110,10 +1133,36 @@ export const make = (
       )
 
     /** Applies one exceeded budget: latch, journal, or simply report. */
-    const settle = (run: RunAccount, failure: BudgetExceeded): Effect.Effect<Verdict> =>
+    const settle = (
+      run: RunAccount,
+      runId: string,
+      failure: BudgetExceeded
+    ): Effect.Effect<Verdict, AccountingUnavailable> =>
       Effect.gen(function*() {
         if (failure.onExceeded === "skip-remaining") {
-          yield* Ref.update(run.state, (current) => ({ ...current, latched: failure }))
+          // The refusal can outlive the reservation that triggered it. Commit
+          // its ledger record before publishing the latch or returning a verdict.
+          yield* Effect.gen(function*() {
+            const journal = yield* Effect.serviceOption(Journal.Journal)
+            if (runId !== looseRunId && Option.isSome(journal)) {
+              let outsideTransaction = false
+              yield* journal.value.whenCommitted(Effect.sync(() => {
+                outsideTransaction = true
+              }))
+              if (!outsideTransaction) {
+                return yield* Effect.fail(
+                  unavailable("record", runId, "a budget latch must be recorded outside a journal transaction")
+                )
+              }
+              const payload = Schema.encodeSync(BudgetExceeded)(failure)
+              yield* emit(
+                (journal, input) => journal.emitDurableUnfenced(input),
+                budgetLatchedEvent,
+                payload
+              ).pipe(Effect.mapError((cause) => unavailable("record", runId, String(cause), cause)))
+            }
+            yield* Ref.update(run.state, (current) => ({ ...current, latched: failure }))
+          }).pipe(Effect.uninterruptible)
         }
         if (failure.onExceeded === "warn") {
           yield* journalWarning({
@@ -1129,6 +1178,7 @@ export const make = (
 
     const checkAccount = (
       run: RunAccount,
+      runId: string,
       stepKey: string | undefined,
       reserving: boolean
     ): Effect.Effect<Verdict, AccountingUnavailable> =>
@@ -1153,6 +1203,7 @@ export const make = (
         if (latency !== undefined && now - run.startedAt > latency.maxMillis) {
           return yield* settle(
             run,
+            runId,
             exceeded(
               "latency",
               latency.onExceeded ?? "fail",
@@ -1174,6 +1225,7 @@ export const make = (
         if (tokens !== undefined && (tokens.max === 0 || current.tokens + reserved + next > tokens.max)) {
           return yield* settle(
             run,
+            runId,
             exceeded(
               "tokens",
               tokens.onExceeded ?? "fail",
@@ -1188,13 +1240,13 @@ export const make = (
       })
 
     const check = (stepKey: string | undefined): Effect.Effect<Verdict, AccountingUnavailable> =>
-      withRecovered((run) => run.admission.withPermits(1)(checkAccount(run, stepKey, false)))
+      withRecovered((run, runId) => run.admission.withPermits(1)(checkAccount(run, runId, stepKey, false)))
 
     const reserve = (stepKey: string): Effect.Effect<Verdict, AccountingUnavailable, Scope.Scope> =>
-      withRecovered((run) =>
+      withRecovered((run, runId) =>
         run.admission.withPermits(1)(Effect.uninterruptibleMask((restore) =>
           Effect.gen(function*() {
-            const verdict = yield* restore(checkAccount(run, stepKey, true))
+            const verdict = yield* restore(checkAccount(run, runId, stepKey, true))
             if (verdict._tag === "refuse") return verdict
             const current = yield* Ref.get(run.state)
             if (current.counted.has(stepKey)) return verdict

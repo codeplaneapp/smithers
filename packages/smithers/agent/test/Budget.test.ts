@@ -978,6 +978,162 @@ const budgetLedger = () => {
   return { journal, recorded }
 }
 
+describe("recovering a run's skip-remaining latch", () => {
+  it.each(["restart", "eviction"] as const)("keeps a reservation-only refusal after %s", async (recovery) => {
+    const { journal, recorded } = budgetLedger()
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const policy: Budget.Policy = { tokens: { max: 100, onExceeded: "skip-remaining" } }
+        const budget = yield* Budget.make(policy, { maxRuns: 1 })
+        const refusal = yield* Effect.scoped(Effect.gen(function*() {
+          expect((yield* budget.reserve("peer"))._tag).toBe("proceed")
+          const verdict = yield* budget.reserve("refused")
+          expect(recorded.filter((entry) => entry.eventType === Budget.budgetLatchedEvent)).toHaveLength(1)
+          return verdict
+        }))
+        expect(refusal).toMatchObject({
+          _tag: "refuse",
+          exceeded: { used: 0, reserved: 100, next: 100, onExceeded: "skip-remaining" }
+        })
+        expect(yield* budget.check("same-instance")).toEqual(refusal)
+        if (recovery === "eviction") {
+          yield* budget.check("other").pipe(
+            Effect.provideService(FlowRuntime.FlowInstance, instanceFor("other-run"))
+          )
+        }
+        const recovered = recovery === "restart" ? yield* Budget.make(policy) : budget
+        return {
+          refusal,
+          usage: yield* recovered.usage,
+          next: yield* Effect.scoped(recovered.reserve("next"))
+        }
+      }).pipe(
+        Effect.provideService(Journal.Journal, journal),
+        Effect.provideService(FlowRuntime.FlowInstance, instanceFor("latched-run"))
+      )
+    )
+
+    expect(observed.usage).toEqual({ tokens: 0, calls: 0, largestCall: 0 })
+    expect(observed.next).toEqual(observed.refusal)
+  })
+})
+
+describe("the durable skip-remaining decision", () => {
+  it("fails closed if the latch write fails, then retries the write", async () => {
+    const { journal, recorded } = budgetLedger()
+    const unwritable = Journal.make({
+      ...journal,
+      emitDurableUnfenced: (input) =>
+        input.eventType === Budget.budgetLatchedEvent
+          ? Effect.fail(new Journal.JournalError({ code: "journal_closed", message: "latch write refused" }))
+          : journal.emitDurableUnfenced(input)
+    })
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 100, onExceeded: "skip-remaining" } })
+        yield* budget.reserve("peer")
+        const exit = yield* Effect.exit(
+          budget.reserve("refused").pipe(
+            Effect.provideService(Journal.Journal, unwritable)
+          )
+        )
+        expect(failureOf(exit)).toMatchObject({
+          _tag: "flows/agent/BudgetAccountingUnavailable",
+          phase: "record",
+          runId: "latched-run"
+        })
+        expect(recorded.filter((entry) => entry.eventType === Budget.budgetLatchedEvent)).toHaveLength(0)
+        expect((yield* budget.reserve("retry"))._tag).toBe("refuse")
+        expect(recorded.filter((entry) => entry.eventType === Budget.budgetLatchedEvent)).toHaveLength(1)
+      })).pipe(
+        Effect.provideService(Journal.Journal, journal),
+        Effect.provideService(FlowRuntime.FlowInstance, instanceFor("latched-run"))
+      )
+    )
+  })
+
+  it("refuses a speculative latch inside a transaction after initial recovery", async () => {
+    const { journal, recorded } = budgetLedger()
+    const transaction = Journal.make({ ...journal, whenCommitted: () => Effect.succeed(true) })
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 100, onExceeded: "skip-remaining" } })
+        yield* budget.reserve("peer")
+        const exit = yield* Effect.exit(
+          budget.reserve("refused").pipe(
+            Effect.provideService(Journal.Journal, transaction)
+          )
+        )
+        expect(failureOf(exit)).toMatchObject({
+          _tag: "flows/agent/BudgetAccountingUnavailable",
+          phase: "record",
+          message: expect.stringContaining("outside a journal transaction")
+        })
+        expect(recorded.filter((entry) => entry.eventType === Budget.budgetLatchedEvent)).toHaveLength(0)
+      })).pipe(
+        Effect.provideService(Journal.Journal, journal),
+        Effect.provideService(FlowRuntime.FlowInstance, instanceFor("latched-run"))
+      )
+    )
+  })
+
+  it.each(["malformed", "not-skip"])("fails closed on a %s latch record", async (kind) => {
+    const payload = kind === "malformed" ? { private: "unreadable" } : {
+      _tag: "flows/agent/BudgetExceeded",
+      scope: "tokens",
+      onExceeded: "warn",
+      used: 0,
+      max: 100,
+      next: 100,
+      message: "not a latch"
+    }
+    const exit = await Effect.runPromise(Effect.exit(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({})
+        return yield* budget.check("next")
+      }).pipe(
+        Effect.provide(pagedJournal([[budgetEntry(1, Budget.budgetLatchedEvent, payload)]])),
+        Effect.provideService(FlowRuntime.FlowInstance, instanceFor("usage-pages"))
+      )
+    ))
+    expect(failureOf(exit)).toMatchObject({
+      _tag: "flows/agent/BudgetAccountingUnavailable",
+      phase: "recover",
+      message: expect.stringContaining("budget-latched record at seq 1")
+    })
+  })
+
+  it("keeps the first durable decision and permits counted replays", async () => {
+    const failure = new Budget.BudgetExceeded({
+      scope: "latency",
+      onExceeded: "skip-remaining",
+      used: 2_000,
+      max: 1_000,
+      next: 0,
+      message: "original latency refusal"
+    })
+    const payload = Redaction.make()(Schema.encodeSync(Budget.BudgetExceeded)(failure))
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({})
+        return { next: yield* budget.check("next"), replay: yield* budget.check("counted") }
+      }).pipe(
+        Effect.provide(pagedJournal([[
+          budgetEntry(1, Budget.budgetLatchedEvent, payload),
+          usageEntry(2, { stepKey: "counted", spent: 10 }),
+          budgetEntry(3, Budget.budgetLatchedEvent, {
+            ...Schema.encodeSync(Budget.BudgetExceeded)(failure),
+            used: 3_000
+          })
+        ]])),
+        Effect.provideService(FlowRuntime.FlowInstance, instanceFor("usage-pages"))
+      )
+    )
+    expect(observed.next).toMatchObject({ _tag: "refuse", exceeded: failure, failure: { _tag: Budget.skippedTag } })
+    expect(observed.replay._tag).toBe("proceed")
+  })
+})
+
 describe("recovering a run's earlier spend", () => {
   it("reads every page of the run's journal, not just the first", async () => {
     const observed = await Effect.runPromise(
