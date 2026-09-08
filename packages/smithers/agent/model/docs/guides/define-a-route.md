@@ -92,12 +92,14 @@ Ollama ignores the header entirely.
 To ask the provider to enforce a JSON Schema on the answer, configure the
 route with `structuredOutput`. Such a route refuses a request that also
 declares tools; [Handle failures](./handle-failures.md) explains the refusal.
+The Cerebras example uses the origin as `baseUrl` with the default
+`/v1/chat/completions` path described above.
 
 ```ts
 const route = Result.getOrThrow(
   Route.openaiChatCompatible({
     id: "cerebras",
-    baseUrl: "https://api.cerebras.ai/v1",
+    baseUrl: "https://api.cerebras.ai",
     apiKey: Redacted.make(process.env["CEREBRAS_API_KEY"] ?? ""),
     structuredOutput: {
       name: "answer",
