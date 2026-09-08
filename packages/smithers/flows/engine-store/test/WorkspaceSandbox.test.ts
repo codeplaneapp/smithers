@@ -10,6 +10,7 @@ import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
+import { spawn } from "node:child_process"
 import * as WorkspaceSandbox from "../src/WorkspaceSandbox.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
 
@@ -999,11 +1000,81 @@ describe("WorkspaceSandbox filesystem host", () => {
 })
 
 /**
- * Copy-back is all-or-nothing on the failure path too: every precondition
- * runs before the first byte lands, and a host refusal mid-apply restores
- * every path the loop already touched from the pre-image journal.
+ * Copy-back checks preconditions before file changes and journals pre-images
+ * for in-process rollback. Competing commits wait through rollback, including
+ * failures that leave partial changes for the caller to reconcile.
  */
 describe("WorkspaceSandbox filesystem host atomicity", () => {
+  for (const failRollback of [false, true]) {
+    it.effect(`serializes separate sandboxes through ${failRollback ? "a failed rollback" : "apply"}`, () =>
+      withCrypto(Effect.gen(function*() {
+        let content = encoder.encode("base")
+        let writes = 0
+        let preflightReads = 0
+        let committing = false
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const fs = FileSystem.makeNoop({
+          readFile: () =>
+            Effect.sync(() => {
+              if (committing) preflightReads++
+              return content.slice()
+            }),
+          exists: () => Effect.die("copy-back must not probe directories"),
+          makeDirectory: () => Effect.void,
+          writeFile: (path, value) =>
+            Effect.gen(function*() {
+              writes++
+              if (writes === 1) {
+                if (failRollback) {
+                  content = value.slice()
+                  return yield* Effect.fail(injected(path))
+                }
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+              } else if (writes === 2 && failRollback) {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+                return yield* Effect.fail(injected(path))
+              }
+              content = value.slice()
+            })
+        })
+        const a = WorkspaceSandbox.makeFileSystem(fs, ArtifactStore.makeNoop(), "")
+        const b = WorkspaceSandbox.makeFileSystem(fs, ArtifactStore.makeNoop(), "")
+        const execute = (sandbox: WorkspaceSandbox.Service, value: string) =>
+          sandbox.execute({
+            descriptor: descriptor({ readSet: [read("nested/file", "base")], writeSet: ["nested/file"] }),
+            workflow: Effect.flatMap(WorkspaceSandbox.Workspace, (ws) =>
+              ws.writeFile("nested/file", encoder.encode(value)))
+          })
+        const first = yield* execute(a, "A")
+        const second = yield* execute(b, "B")
+        if (first._tag !== "Accepted" || second._tag !== "Accepted") throw new Error("expected accepted executions")
+        committing = true
+        const running = yield* Effect.forkChild(Effect.exit(a.materialize(first)))
+        yield* Deferred.await(entered)
+        const competing = yield* Effect.forkChild(Effect.exit(b.materialize(second)))
+        // Give the competing fiber a turn while the first host call is held.
+        for (let i = 0; i < 20; i++) yield* Effect.yieldNow
+        const readsWhileHeld = preflightReads
+        yield* Deferred.succeed(release, undefined)
+        const results = [yield* Fiber.join(running), yield* Fiber.join(competing)] as const
+        expect(readsWhileHeld).toBe(1)
+        expect(results[0]._tag).toBe(failRollback ? "Failure" : "Success")
+        if (failRollback && results[0]._tag === "Failure") {
+          expect(results[0].cause.reasons.filter(Cause.isFailReason)).toHaveLength(2)
+        }
+        expect(results[1]._tag).toBe("Failure")
+        if (results[1]._tag === "Failure") {
+          expect(results[1].cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error))
+            .toMatchObject([{ _tag: "@smthrs/engine-store/MaterializationConflict", paths: ["nested/file"] }])
+        }
+        expect(decoder.decode(content)).toBe("A")
+        expect(writes).toBe(failRollback ? 2 : 1)
+      })))
+  }
+
   const faultLayer = (files: Map<string, Uint8Array>, failOn: (call: number) => boolean) => {
     let calls = 0
     const fs = FileSystem.makeNoop({
@@ -1183,6 +1254,159 @@ describe("WorkspaceSandbox filesystem host confinement", () => {
       if (accepted._tag !== "Accepted") throw new Error("expected accepted execution")
       return accepted
     })
+
+  it.effect("interrupts a lock wait without removing another owner's lock or leaking a permit", () =>
+    withCrypto(
+      Effect.scoped(Effect.gen(function*() {
+        const { fs, root } = yield* temp
+        const lock = `${root}/.smithers-workspace-lock`
+        yield* fs.makeDirectory(lock)
+        const attempted = yield* Deferred.make<void>()
+        const waitingFs: FileSystem.FileSystem = {
+          ...fs,
+          makeDirectory: (path, options) =>
+            fs.makeDirectory(path, options).pipe(
+              Effect.tapError(() => Deferred.succeed(attempted, undefined))
+            )
+        }
+        const sandbox = WorkspaceSandbox.makeFileSystem(waitingFs, yield* ArtifactStore.ArtifactStore, root)
+        const accepted = yield* write(sandbox, [["file", "new"]], ["file"])
+        const waiting = yield* Effect.forkChild(sandbox.materialize(accepted))
+        yield* Deferred.await(attempted)
+        yield* Fiber.interrupt(waiting)
+        expect(yield* fs.exists(lock)).toBe(true)
+        expect(yield* fs.exists(`${root}/file`)).toBe(false)
+        yield* fs.remove(lock, { recursive: true })
+        yield* sandbox.materialize(accepted)
+        expect(yield* fs.readFileString(`${root}/file`)).toBe("new")
+        expect(yield* fs.exists(lock)).toBe(false)
+      })).pipe(Effect.provide(nodeLayer))
+    ))
+
+  for (const path of [".smithers-workspace-lock", "alias", "alias/nested"]) {
+    it.effect(`reserves the coordination directory through ${path}`, () =>
+      withCrypto(
+        Effect.scoped(Effect.gen(function*() {
+          const { fs, root } = yield* temp
+          const lock = `${root}/.smithers-workspace-lock`
+          yield* fs.symlink(lock, `${root}/alias`)
+          const sandbox = WorkspaceSandbox.makeFileSystem(fs, yield* ArtifactStore.ArtifactStore, root)
+          const accepted = yield* write(sandbox, [[path, "new"]], [path])
+          expect(yield* Effect.flip(sandbox.materialize(accepted))).toMatchObject({ code: "host_unavailable" })
+          expect(yield* fs.exists(lock)).toBe(false)
+        })).pipe(Effect.provide(nodeLayer))
+      ))
+  }
+
+  it.effect("reserves lock aliases on unrooted hosts without confining their other symlinks", () =>
+    withCrypto(
+      Effect.scoped(Effect.gen(function*() {
+        const { fs, outside, root } = yield* temp
+        const target = (path: string) => path.startsWith("/") ? path : `${root}/${path}`
+        const unrooted: FileSystem.FileSystem = {
+          ...fs,
+          realPath: (path) => fs.realPath(target(path)),
+          readFile: (path) => fs.readFile(target(path)),
+          readLink: (path) => fs.readLink(target(path)),
+          makeDirectory: (path, options) => fs.makeDirectory(target(path), options),
+          remove: (path, options) => fs.remove(target(path), options),
+          writeFile: (path, data, options) => fs.writeFile(target(path), data, options)
+        }
+        yield* fs.symlink(`${root}/.smithers-workspace-lock/nested`, `${root}/alias`)
+        yield* fs.symlink(`${outside}/file`, `${root}/external`)
+        const sandbox = WorkspaceSandbox.makeFileSystem(unrooted, yield* ArtifactStore.ArtifactStore, "")
+        const accepted = yield* write(sandbox, [["alias", "new"]], ["alias"])
+        expect(yield* Effect.flip(sandbox.materialize(accepted))).toMatchObject({ code: "host_unavailable" })
+        const external = yield* write(sandbox, [["external", "allowed"]], ["external"])
+        yield* sandbox.materialize(external)
+        expect(yield* fs.readFileString(`${outside}/file`)).toBe("allowed")
+        expect(yield* fs.exists(`${root}/.smithers-workspace-lock`)).toBe(false)
+      })).pipe(Effect.provide(nodeLayer))
+    ))
+
+  it.live("serializes copy-back with a separate process and a root alias", () =>
+    withCrypto(
+      Effect.scoped(Effect.gen(function*() {
+        const { fs, outside, root } = yield* temp
+        yield* fs.writeFileString(`${root}/file`, "base")
+        const alias = `${outside}/alias`
+        yield* fs.symlink(root, alias)
+        const contended = yield* Deferred.make<void>()
+        const waitingFs: FileSystem.FileSystem = {
+          ...fs,
+          makeDirectory: (path, options) =>
+            fs.makeDirectory(path, options).pipe(
+              Effect.tapError(() => Deferred.succeed(contended, undefined))
+            )
+        }
+        const sandbox = WorkspaceSandbox.makeFileSystem(waitingFs, yield* ArtifactStore.ArtifactStore, alias)
+        const accepted = yield* write(sandbox, [["file", "B"]], ["file"])
+        // The child holds its first data write after acquiring the advisory lock.
+        const script = `
+        import * as Effect from "effect/Effect";
+        import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+        import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+        import * as FileSystem from "effect/FileSystem";
+        import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore";
+        import * as Sandbox from "./src/WorkspaceSandbox.ts";
+        import { createHash } from "node:crypto";
+        const root = process.argv[1];
+        const bytes = new TextEncoder().encode("A");
+        await Effect.runPromise(Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const sandbox = Sandbox.makeFileSystem({ ...fs, writeFile: (path, data, options) =>
+            Effect.promise(() => new Promise(resolve => {
+              process.stdin.once("data", resolve);
+              process.stdout.write("applying\\n");
+            })).pipe(Effect.andThen(fs.writeFile(path, data, options)))
+          }, ArtifactStore.makeNoop(), root);
+          yield* sandbox.materialize({ _tag: "Accepted", cache: { status: "disabled" }, violations: [], result: {
+            output: null, effects: [], provenance: { baseRevision: "base", inputs: [], outputs: [] },
+            files: [{ path: "file", beforeDigest: createHash("sha256").update("base").digest("hex"),
+              afterDigest: createHash("sha256").update(bytes).digest("hex"), after: bytes }]
+          }});
+        }).pipe(Effect.provide(NodeFileSystem.layer), Effect.provide(NodeCrypto.layer)));
+        process.stdin.destroy();
+      `
+        const child = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "--eval", script, root], {
+              cwd: new URL("..", import.meta.url),
+              stdio: ["pipe", "pipe", "pipe"]
+            })
+          ),
+          (child) =>
+            Effect.sync(() => {
+              child.kill()
+            })
+        )
+        let stderr = ""
+        child.stderr.on("data", (data) => {
+          stderr += String(data)
+        })
+        const exited = new Promise<number | null>((resolve) => child.once("exit", resolve))
+        yield* Effect.promise(() =>
+          new Promise<void>((resolve, reject) => {
+            child.stdout.once("data", () => resolve())
+            child.once("error", reject)
+            child.once("exit", (code) => reject(new Error(`child exited ${code}: ${stderr}`)))
+          })
+        )
+        const running = yield* Effect.forkChild(Effect.exit(sandbox.materialize(accepted)))
+        yield* Deferred.await(contended)
+        expect(yield* fs.readFileString(`${root}/file`)).toBe("base")
+        child.stdin.write("release")
+        expect(yield* Effect.promise(() => exited)).toBe(0)
+        const result = yield* Fiber.join(running)
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure") {
+          expect(result.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error))
+            .toMatchObject([{ _tag: "@smthrs/engine-store/MaterializationConflict", paths: ["file"] }])
+        }
+        expect(yield* fs.readFileString(`${root}/file`)).toBe("A")
+        expect(yield* fs.exists(`${root}/.smithers-workspace-lock`)).toBe(false)
+      })).pipe(Effect.provide(nodeLayer))
+    ))
 
   it.effect("refuses to write through a file symlink whose target escapes the root", () =>
     Effect.gen(function*() {

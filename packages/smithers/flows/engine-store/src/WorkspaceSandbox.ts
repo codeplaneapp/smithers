@@ -6,7 +6,7 @@
  * after the fact. This module takes the third one. The body runs against an
  * **isolated workspace** seeded with exactly its declared read set; its writes
  * are a value — a whole-tree diff — that reaches the host only through an
- * explicit, all-or-nothing {@link Service.materialize} step.
+ * explicit {@link Service.materialize} step with preconditions and rollback.
  *
  * Two consequences follow, and they are the reason this exists:
  *
@@ -56,6 +56,7 @@ import * as PlatformError from "effect/PlatformError"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Semaphore from "effect/Semaphore"
 import * as EngineStoreMetrics from "./EngineStoreMetrics.ts"
 import * as FileBoundarySnapshot from "./internal/FileBoundarySnapshot.ts"
 import * as FileEnumeration from "./internal/FileEnumeration.ts"
@@ -418,7 +419,7 @@ export const isMaterializationConflict = (error: unknown): boolean => {
  * The two-phase workspace transaction service.
  *
  * `execute` is speculative and never touches the host. `materialize` is the
- * only host write, and it is all-or-nothing.
+ * only host write. See its filesystem failure limits below.
  *
  * @category models
  * @since 0.1.0
@@ -427,6 +428,20 @@ export interface Service {
   readonly execute: <Output, Error>(
     execution: Execution<Output, Error>
   ) => Effect.Effect<ExecutionResult<Output>, Error | WorkspaceError, Crypto.Crypto>
+  /**
+   * Checks all copy-back preconditions before applying any file change.
+   * The filesystem host serializes cooperating commits through confinement,
+   * preflight, apply, and rollback. On apply failure it attempts restoration
+   * from an in-memory pre-image journal; this is not crash-atomic. A failed
+   * rollback returns a compound cause containing both the apply failure and
+   * a `WorkspaceError` carrying the rollback cause. The caller must reconcile
+   * host files after a crash or failed rollback before resuming work.
+   *
+   * Filesystem coordination reserves `.smithers-workspace-lock` under the
+   * root. A killed process can leave this advisory lock directory behind;
+   * remove it only after confirming the owner has stopped and reconciling
+   * the workspace. Writers that ignore the lock are outside this guarantee.
+   */
   readonly materialize: <Output>(
     accepted: Accepted<Output>
   ) => Effect.Effect<void, MaterializationConflict | WorkspaceError, Crypto.Crypto>
@@ -673,10 +688,11 @@ export interface Host {
     bytes: Uint8Array
   ) => Effect.Effect<Uint8Array | undefined, WorkspaceError, Crypto.Crypto>
   /**
-   * Applies the diff to the host, all-or-nothing, as a compare-and-set on
-   * every `beforeDigest`. All-or-nothing binds the failure path too: a commit
-   * that refuses mid-apply must restore every path it already touched before
-   * it surfaces the refusal.
+   * Applies the diff as a compare-and-set on every `beforeDigest`. Hosts must
+   * serialize preflight through apply and rollback with competing commits.
+   * Check every precondition before changing files; on apply failure attempt
+   * to restore every touched path and preserve both causes if rollback fails.
+   * Crash recovery and host reconciliation remain the caller's responsibility.
    */
   readonly commit: (
     changes: ReadonlyArray<FileChange>
@@ -1161,6 +1177,29 @@ export interface FileSystemOptions {
   readonly maxInlineBytes?: number | undefined
 }
 
+// Shared across separately constructed sandboxes. Entries live only while a
+// commit is running or waiting, so short-lived workspace roots do not leak.
+const commitCoordinators = new Map<string, { semaphore: Semaphore.Semaphore; users: number }>()
+const commitLockName = ".smithers-workspace-lock"
+
+const coordinateCommit = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      let entry = commitCoordinators.get(root)
+      if (entry === undefined) {
+        entry = { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+        commitCoordinators.set(root, entry)
+      }
+      entry.users++
+      return entry
+    }),
+    (entry) => entry.semaphore.withPermits(1)(effect),
+    (entry) =>
+      Effect.sync(() => {
+        if (--entry.users === 0) commitCoordinators.delete(root)
+      })
+  )
+
 const defaultMaxInlineBytes = 1024 * 1024
 
 const hostFailure = (cause: unknown): WorkspaceError =>
@@ -1199,14 +1238,14 @@ const escapesWorkspace = (path: string, resolved: string): WorkspaceError =>
  * **Copy-back is confined and journaled.** Materialization refuses any change
  * whose canonical location — after resolving symlinks — escapes the workspace
  * root, so a pre-existing link inside the tree cannot redirect the one host
- * write this module performs to a path outside it. And every precondition
- * that can refuse runs before the first byte lands, while the apply loop
- * itself keeps each target's pre-image: a host refusal on the Nth write
- * restores the N − 1 already applied instead of stranding a half-materialized
- * tree. A staged-rename commit was rejected for this seam because `rename` is
- * not part of the surface every host implements — the in-memory conformance
- * hosts and a browser filesystem have no atomic rename to offer — and a
- * multi-file rename sequence is not atomic anyway.
+ * write this module performs to a path outside it. A root-keyed semaphore and
+ * an exclusively created advisory lock directory serialize cooperating
+ * callers, including separate processes. Preconditions run before file
+ * changes, and the apply loop keeps each target's pre-image for in-process
+ * rollback. A crash or rollback failure can leave partial changes; see
+ * {@link Service.materialize} for the caller's reconciliation obligations.
+ * Hosts must implement exclusive non-recursive `makeDirectory` creation and
+ * removal of the reserved `.smithers-workspace-lock` directory.
  *
  * @category constructors
  * @since 0.1.0
@@ -1241,7 +1280,7 @@ export const makeFileSystem = (
   // same "nothing to resolve" answer.
   const symlinkTarget = (path: string): Effect.Effect<string | undefined> =>
     fs.readLink(path).pipe(Effect.catch(() => Effect.succeed(undefined)))
-  const canonicalRoot = fs.realPath(root).pipe(
+  const canonicalRoot = fs.realPath(root === "" ? "." : root).pipe(
     Effect.map((resolved) => resolved.replaceAll(/\/+$/g, "")),
     Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
     Effect.mapError(hostFailure)
@@ -1269,7 +1308,10 @@ export const makeFileSystem = (
       const target = hostPath(path)
       const resolved = yield* realPathIfPresent(target)
       if (resolved !== undefined) {
-        if (!contained(canonical, resolved)) return yield* Effect.fail(escapesWorkspace(path, resolved))
+        if (resolved === `${canonical}/${commitLockName}` || resolved.startsWith(`${canonical}/${commitLockName}/`)) {
+          return yield* Effect.fail(hostFailure("the workspace coordination path is reserved"))
+        }
+        if (root !== "" && !contained(canonical, resolved)) return yield* Effect.fail(escapesWorkspace(path, resolved))
         return
       }
       const segments = path.split("/")
@@ -1284,23 +1326,29 @@ export const makeFileSystem = (
         }
       }
       const speculative = `${anchor}/${remaining}`
-      if (!contained(canonical, speculative)) return yield* Effect.fail(escapesWorkspace(path, speculative))
+      if (
+        speculative === `${canonical}/${commitLockName}` || speculative.startsWith(`${canonical}/${commitLockName}/`)
+      ) {
+        return yield* Effect.fail(hostFailure("the workspace coordination path is reserved"))
+      }
+      if (root !== "" && !contained(canonical, speculative)) {
+        return yield* Effect.fail(escapesWorkspace(path, speculative))
+      }
       const link = yield* symlinkTarget(target)
       if (link === undefined) return
       if (fuel <= 0) return yield* Effect.fail(escapesWorkspace(path, link))
       // `speculative` is absolute, so the final component always has a parent.
       const referent = collapseDots(link.startsWith("/") ? link : `${parentDirectory(speculative)!}/${link}`)
-      if (referent === undefined || !contained(canonical, referent)) {
+      if (referent === undefined || (root !== "" && !contained(canonical, referent))) {
         return yield* Effect.fail(escapesWorkspace(path, referent ?? link))
       }
-      return yield* confine(canonical, referent.slice(canonical.length + 1), fuel - 1)
+      return yield* confine(canonical, root === "" ? referent : referent.slice(canonical.length + 1), fuel - 1)
     })
   const assertConfined = Effect.fn("WorkspaceSandbox.assertConfined")(function*(
     changes: ReadonlyArray<FileChange>
   ) {
-    // An unrooted host names host paths verbatim; there is no boundary to
-    // confine them to.
-    if (root === "") return
+    // Unrooted hosts have no confinement boundary, but still reserve aliases
+    // of the coordination directory rooted at their current directory.
     const resolvedRoot = yield* canonicalRoot
     // A root that does not resolve holds nothing beneath it, so no symlink
     // can redirect a write. Hosts without `realPath` at all — the in-memory
@@ -1311,6 +1359,41 @@ export const makeFileSystem = (
       yield* confine(resolvedRoot, change.path, 8)
     }
   })
+  const withCommitLock = <E, R>(effect: Effect.Effect<void, E, R>, changes: ReadonlyArray<FileChange>) =>
+    Effect.gen(function*() {
+      if (changes.some((change) => change.path === commitLockName || change.path.startsWith(`${commitLockName}/`))) {
+        return yield* Effect.fail(hostFailure("the workspace coordination path is reserved"))
+      }
+      // mkdir without recursive is an exclusive create on filesystem hosts.
+      // Unlike a file write, acquisition cannot leave a partly written lock.
+      yield* fs.makeDirectory(root === "" ? "." : root, { recursive: true }).pipe(Effect.mapError(hostFailure))
+      const canonical = yield* canonicalRoot
+      const lockPath = hostPath(commitLockName)
+      return yield* coordinateCommit(
+        canonical ?? root,
+        Effect.gen(function*() {
+          while (true) {
+            const committed = yield* Effect.acquireUseRelease(
+              fs.makeDirectory(lockPath).pipe(
+                Effect.as(true),
+                Effect.catchReason("PlatformError", "AlreadyExists", () => Effect.succeed(false)),
+                Effect.mapError(hostFailure)
+              ),
+              (acquired) => acquired ? effect.pipe(Effect.as(true)) : Effect.succeed(false),
+              (acquired) =>
+                acquired
+                  ? fs.remove(lockPath, { recursive: true }).pipe(Effect.mapError(hostFailure))
+                  : Effect.void
+            )
+            if (committed) return
+            // Wait outside acquireUseRelease's uninterruptible acquisition.
+            // A killed owner leaves a stale lock for the caller to reconcile;
+            // never steal a lock based on its age while another writer may live.
+            yield* Effect.sleep("10 millis")
+          }
+        })
+      )
+    })
   return makeHosted({
     root,
     snapshot: Effect.fn("WorkspaceSandbox.snapshot")(function*(descriptor) {
@@ -1360,14 +1443,8 @@ export const makeFileSystem = (
         : artifacts.put(bytes).pipe(Effect.mapError(artifactFailure), Effect.as(undefined)),
     commit: Effect.fn("WorkspaceSandbox.commit")(function*(changes) {
       yield* Effect.annotateCurrentSpan({ changes: changes.length })
-      // PRECONDITIONS FIRST, WRITES SECOND — and the writes are journaled.
-      // Confinement, the compare-and-set, artifact resolution, and the
-      // directory plan all run before any byte lands, so every refusal they
-      // raise leaves the tree exactly as it was found; the apply loop then
-      // restores from the journal when the host refuses mid-sequence, which
-      // is what makes this commit all-or-nothing rather than
-      // conflict-checked-then-hopeful. A process killed mid-apply is the one
-      // failure no in-process journal can undo.
+      // The advisory lock and process semaphore cover confinement, preflight,
+      // apply, and rollback. Preconditions run only after both are acquired.
       yield* assertConfined(changes)
       const { before, conflict } = yield* preflight(changes, (path) => readIfPresent(hostPath(path)))
       if (conflict !== undefined) {
@@ -1389,23 +1466,6 @@ export const makeFileSystem = (
           )
         ))
         resolved.set(change.path, bytes)
-      }
-      const present = new Map<string, boolean>()
-      for (const change of changes) {
-        if (change.afterDigest === undefined) continue
-        const ancestors: Array<string> = []
-        for (
-          let directory = parentDirectory(hostPath(change.path));
-          directory !== undefined && directory !== root;
-          directory = parentDirectory(directory)
-        ) {
-          ancestors.unshift(directory)
-        }
-        for (const directory of ancestors) {
-          if (present.has(directory)) continue
-          const exists = yield* fs.exists(directory).pipe(Effect.mapError(hostFailure))
-          present.set(directory, exists)
-        }
       }
       const applied: Array<FileChange> = []
       const apply = Effect.gen(function*() {
@@ -1471,7 +1531,7 @@ export const makeFileSystem = (
         // closes before the fiber answers the interrupt.
         Effect.uninterruptible
       )
-    })
+    }, withCommitLock)
   })
 }
 

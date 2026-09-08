@@ -1,6 +1,6 @@
 ---
 title: "Workspace transactions"
-description: "The two-phase workspace sandbox: a body runs against an isolated tree and returns its writes, and one all-or-nothing copy-back applies them to the host."
+description: "The two-phase workspace sandbox: a body runs against an isolated tree and returns its writes, and a separate copy-back checks preconditions and applies them to the host."
 sidebar:
   order: 4
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/engine-store/docs/concepts/workspace-transactions.md"
@@ -8,8 +8,9 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 
 `WorkspaceSandbox` is a functional transaction over a filesystem. A sealed
 action's body runs in an isolated workspace and returns its writes rather than
-performing them. Applying those writes to the host is a separate, single,
-all-or-nothing call.
+performing them. Applying those writes to the host is a separate call that
+checks all preconditions before changing files and attempts in-process rollback
+on failure. Filesystem copy-back is not crash-atomic.
 
 ```ts
 interface Service {
@@ -62,10 +63,29 @@ Two more properties bind the write:
 - Every change whose canonical location, after resolving symlinks, escapes the
   workspace root is refused, so a pre-existing link inside the tree cannot
   redirect the one host write this module performs.
-- Every precondition that can refuse runs before the first byte lands, and the
-  apply loop keeps each target's pre-image, so a host refusal on the Nth write
-  restores the N minus 1 already applied rather than stranding a half
-  materialized tree.
+- Confinement, digest checks, and retained-byte resolution finish before any
+  file change. The apply loop journals each target's pre-image before touching
+  it, including the target of a write that fails partway through. An apply
+  failure triggers an attempt to restore those files. Empty parent directories
+  can remain after rollback.
+
+The filesystem host serializes confinement, preflight, apply, and rollback with
+other cooperating commits. A semaphore is shared by workspace root in the
+process. An exclusively created `.smithers-workspace-lock` directory under the
+root coordinates separate processes, including callers using symlink aliases
+of the same root. This path is reserved: bundles cannot materialize it or its
+children. Filesystem hosts must support exclusive non-recursive directory
+creation and removal. Writers that ignore the advisory lock are not serialized.
+
+The undo journal exists only in memory. A process crash can leave partial file
+changes and the lock directory behind. Rollback can also fail: the returned
+compound cause preserves the original apply failure and a `WorkspaceError`
+with code `host_unavailable` whose cause contains the rollback failure. Neither
+case guarantees restoration. The caller owns host reconciliation before
+resuming work: inspect affected paths and restore or accept their state. Remove
+a stale lock only after confirming its owner has stopped and reconciling the
+workspace. Waiting for a lock is interruptible; its age never authorizes stealing
+it from a possibly live writer.
 
 ## Queued effects are dispatched after copy-back, never inside it
 
@@ -85,7 +105,7 @@ what a transaction queued and sends nothing. The journal records
 `makeHosted(host)` is the transaction. A `Host` supplies four things: `snapshot`
 (the base), `baseline` (the host's digest for a path the transaction never
 observed), `retain` (whether a produced file travels inline or by content
-address), and `commit` (the all-or-nothing apply), plus a `root`.
+address), and `commit` (the serialized, preconditions-first apply), plus a `root`.
 
 Two hosts ship:
 

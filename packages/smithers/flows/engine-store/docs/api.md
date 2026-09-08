@@ -348,6 +348,20 @@ interface Service {
 }
 ```
 
+`materialize` checks confinement, digests, and retained bytes before changing
+files. The filesystem host serializes cooperating commits through preflight,
+apply, and rollback, using a workspace-root semaphore and the exclusively
+created `.smithers-workspace-lock` advisory directory. The directory and its
+children are reserved. Hosts must support exclusive non-recursive directory
+creation and removal; writers that ignore the lock are outside this guarantee.
+
+Rollback uses in-memory file pre-images. Copy-back is not crash-atomic, and
+rollback can fail. A compound cause preserves the apply failure plus a
+`WorkspaceError` (`host_unavailable`) carrying the rollback cause. The caller
+must reconcile host files after a crash or failed rollback before resuming.
+A crash can leave a stale lock; remove it only after confirming the owner has
+stopped and reconciling the workspace. Lock waits are interruptible.
+
 | Export                      | Signature                                                                                                                          | Meaning                                                                                                                     |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `WorkspaceSandbox`          | `Context.Service<Service>`                                                                                                         | Service tag.                                                                                                                |
