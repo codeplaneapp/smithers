@@ -155,10 +155,12 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1660 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1665 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **targets,build-cli,ui:** declare the factory in .smithers/FACTORY.ts ([c2f81942db](https://github.com/smithersai/smithers/commit/c2f81942dbbb07361da58acc5a17e090efeef8f0))
+- **ui:** read the mythical history signed out, read-only, with its wait on the toast stack ([68711aa468](https://github.com/smithersai/smithers/commit/68711aa4685971af7851e957553056a8e8a7c102))
 - **ui:** order the chrome Wiki, Dispatcher, Flows, Secrets, History, Account ([ec7841bb75](https://github.com/smithersai/smithers/commit/ec7841bb755bf8d5a7f4b9fbfa1e4ae5e7726ec3))
 - **ui,server,rpc:** show the dispatcher signed out from the declared rules ([8dcfce5629](https://github.com/smithersai/smithers/commit/8dcfce56293b1ac8853ff6be57c1a2cd95b284ee))
 - **ui,rpc:** the run card renders a run as a trace ([bdbdc1cf93](https://github.com/smithersai/smithers/commit/bdbdc1cf93f6810efe2908168cf5cec601e5a7d5))
@@ -382,6 +384,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **ui,server,rpc:** run-trace is the card kind and a missing prototype flow is refused honestly ([07e3394ae0](https://github.com/smithersai/smithers/commit/07e3394ae0182d0c01d7c1fa31a9470c3abdd5be))
 - **server:** a triggers read never provisions or resumes a box ([34a0566d5a](https://github.com/smithersai/smithers/commit/34a0566d5a760d5dd6f20717a548a807771b6960))
 - **ui:** render the history count clause only when a seam exposes a count ([335fa4a763](https://github.com/smithersai/smithers/commit/335fa4a763de4ea5847d532bcde7f8c0bc5bda4b))
 - **ui:** never call a .smithers file absent from a tree the factory never read ([6bcbaa2d03](https://github.com/smithersai/smithers/commit/6bcbaa2d03a10afe8fe59934dabe262f55f012e7))
@@ -1167,6 +1170,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- resync generated package docs sites ([6630d4dea0](https://github.com/smithersai/smithers/commit/6630d4dea0a19f1723b67386c21eafc632ccc2a7))
 - **site:** reposition the project description around repository automation ([38ed1d3399](https://github.com/smithersai/smithers/commit/38ed1d33991cbf7ca468d86cdba78c3ade42e041))
 - **ui:** rewrite the wiki coverage gap for the Wiki namespace ([49d51ca763](https://github.com/smithersai/smithers/commit/49d51ca763d73a8f63ab86b94df199fbf556620b))
 - **site:** describe the shipped cron trigger and mark S.Automation as planned ([e66cfecedf](https://github.com/smithersai/smithers/commit/e66cfecedf21a924d541238bc8f7c0b2ac333c43))
@@ -1526,6 +1530,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **style:** dprint the packages this lane touched ([aad6af27ed](https://github.com/smithersai/smithers/commit/aad6af27edef3971239c46ee67b0a65a37065959))
 - **style:** format packages touched today with dprint ([4f23732766](https://github.com/smithersai/smithers/commit/4f2373276615da2e75987e1a673b298a5b177965))
 - **ci(release):** mirror the flow catalog and home pane drift gates ([9d102e44a9](https://github.com/smithersai/smithers/commit/9d102e44a9e163d19cce3b986ce8667460a85a10))
 - **test(ui):** pin the History chrome door to the countless empty state ([48045efd27](https://github.com/smithersai/smithers/commit/48045efd27f077bd4ccf372244227ee2f5bdadac))
