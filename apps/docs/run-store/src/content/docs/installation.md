@@ -50,6 +50,13 @@ so they carry no database of their own. A composition supplies two services:
 - `DurableWriter` from `@smthrs/database`, which serializes and retries the
   write transactions the stores run inside.
 
+The `SqlClient` must execute this package's SQLite migration and statement
+dialect, including triggers, `randomblob`, `typeof`, and `json_valid`. The
+composition must also satisfy the `DurableWriter` serialization contract:
+concurrent write transactions cannot both commit from snapshots that exclude
+each other's writes. Other databases require a dialect-specific migration and
+statement implementation, which does not exist yet.
+
 Using `NodeDatabase` or the in-memory `TestRunStore` helper selects the optional
 Node SQLite driver:
 

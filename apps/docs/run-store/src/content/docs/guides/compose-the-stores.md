@@ -39,9 +39,17 @@ export const storage = (filename: string) =>
 ```
 
 `Layer.provideMerge` is what keeps the database and the writer in the output
-context, so the rest of the host can reach them too. `NodeDatabase` is one
-driver; anything that provides `SqlClient` works, because the stores name no
-driver.
+context, so the rest of the host can reach them too.
+
+The `SqlClient` must execute this package's SQLite migration and statement
+dialect, including triggers, `randomblob`, `typeof`, and `json_valid`. The
+composition must also satisfy the `DurableWriter` serialization contract:
+concurrent write transactions cannot both commit from snapshots that exclude
+each other's writes. The supported driver is
+`@smthrs/database/node/NodeDatabase`, backed by `@effect/sql-sqlite-node` and
+`node:sqlite`. Other databases require a dialect-specific migration and
+statement implementation, which does not exist yet. Providing an arbitrary
+Effect `SqlClient`, such as PostgreSQL, does not translate this package's SQL.
 
 ## Compose the migration set, do not run it twice
 
