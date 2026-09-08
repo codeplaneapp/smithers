@@ -41,15 +41,19 @@ A policy is an annotation, and an annotation takes no part in flow identity. App
 
 ### Reading a policy back
 
-`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` read the policy, and `Flows.handlersFor(flow)` is the pair a host binds. The policy supplies defaults and never overrides:
+`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` read the policy, and `Flows.handlersFor(flow)` is the pair a host binds. The policy namespace is the only namespace these scoped handlers may read or write:
 
-- `runRecallFor` fills in the policy bank when the caller names no banks, and the policy budget when the caller states no `maxTokens`. A caller that names its own keeps them.
-- `runRememberFor` resolves an empty bank to the policy namespace.
+- `runRecallFor` fills an empty `banks` list with the policy bank. Every explicit bank must resolve to the policy namespace, matching both `kind` and `id`. A foreign bank fails the whole request with `invalid_namespace` before the recall service runs, including requests that mix allowed and foreign banks.
+- `runRememberFor` resolves an empty bank to the policy namespace. An explicit foreign bank fails with `invalid_namespace` before the store runs.
+- Equivalent spellings are allowed: `release-notes` and `flow-release-notes` both resolve to `{ kind: "flow", id: "release-notes" }`. There is no additional readable-bank list.
+- `maxTokens` remains a default: the policy budget applies only when the caller omits it.
 
-Two policy values are refusals rather than defaults, and they win over what the caller asked for:
+Two policy values short-circuit before bank validation or I/O:
 
 - `recall: "none"` returns no rows and never reaches the recall service.
 - `retain: "never"` drops the write. The caller still receives the key it asked for, and nothing reaches the store.
+
+The boundary applies through `Flows.handlersFor` on a policy-carrying declaration, or through `runRecallFor` and `runRememberFor`. Bare handlers, direct `runRecall` / `runRemember` calls, recall services, and store methods do not enforce flow policies. Hosts must bind the scoped declarations for model-facing access.
 
 ```ts
 import { Flows, WithMemory } from "@smthrs/memory"
@@ -224,8 +228,8 @@ The `mode`, `onConflict`, and `tier` values in the two effect declarations below
 | `runRememberWith`     | `(provenance) => (input: RememberInput) => Effect<RememberOutput, MemoryError, MemoryStore>` | Runtime binding carrying explicit provenance, bound once when a host builds the handler. Stores the fact value `{ content: text }`.                                 |
 | `runRemember`         | `(input: RememberInput) => Effect<RememberOutput, MemoryError, MemoryStore>`                 | Runtime binding with no provenance. Takes exactly one argument so a host can hand it to `FlowBinding.make`.                                                         |
 | `runRecall`           | `(input: RecallInput) => Effect<RecallOutput, MemoryError, Recall>`                          | Delegates to whichever recall service the context provides.                                                                                                         |
-| `runRecallFor`        | `(flow: Flow.Any, input: RecallInput) => Effect<RecallOutput, MemoryError, Recall>`          | Applies the flow's policy as defaults. `recall: "none"` answers no rows and never reaches the service.                                                              |
-| `runRememberFor`      | `(flow, input, provenance = {}) => Effect<RememberOutput, MemoryError, MemoryStore>`         | Applies the flow's policy: an empty bank resolves to the policy namespace, and `retain: "never"` drops the write while still answering `{ key }`.                   |
+| `runRecallFor`        | `(flow: Flow.Any, input: RecallInput) => Effect<RecallOutput, MemoryError, Recall>`          | Defaults empty banks and the budget; rejects foreign namespaces with `invalid_namespace` before recall. `recall: "none"` short-circuits to no rows.                                                              |
+| `runRememberFor`      | `(flow, input, provenance = {}) => Effect<RememberOutput, MemoryError, MemoryStore>`         | Defaults an empty bank; rejects foreign namespaces with `invalid_namespace` before writing. `retain: "never"` short-circuits to `{ key }`.                   |
 | `Handlers`            | interface                                                                                    | The one-argument `remember` and `recall` handlers one bound declaration answers with.                                                                               |
 | `handlersFor`         | `(flow: Flow.Any, provenance = {}) => Handlers`                                              | Builds the handlers for one memory declaration, reading the policy it carries and binding provenance once.                                                          |
 | `handlers`            | `Handlers`                                                                                   | The handlers for the bare declarations this module exports. They carry no policy, so they behave as unscoped memory.                                                |

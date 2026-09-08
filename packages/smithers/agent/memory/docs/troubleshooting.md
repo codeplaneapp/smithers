@@ -19,6 +19,8 @@ A full text read reached a namespace kind that has not opted into FTS. Call `ena
 
 A namespace or bank name is empty or malformed. An empty bank string is the common case, including a `remember` input whose `bank` is empty outside a policy. An invalid `enableFts` kind raises the same code.
 
+For a policy-carrying declaration, `Flows.handlersFor`, `Flows.runRecallFor`, and `Flows.runRememberFor` also reject an explicit bank whose resolved kind or id differs from `policy.namespace`. Rejection happens before any I/O; one foreign bank fails the entire recall request. Empty bank selections use the policy namespace. `recall: "none"` and `retain: "never"` short-circuit before bank validation.
+
 ### `invalid_tag`
 
 A tag or tag group violates the vocabulary or a published ceiling. Tags must start with `branch:`, `stream:`, `source:`, or `scope:`, must be unique per record, and number at most 16. A tag group accepts at most 8 levels and 64 expression nodes.
