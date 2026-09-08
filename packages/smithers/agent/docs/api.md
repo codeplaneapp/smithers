@@ -1480,11 +1480,24 @@ const makeFileSystem: (fs: FileSystem.FileSystem, path: Path.Path, root: string)
 const layerFileSystem: (root: string) => Layer.Layer<FlowStore, never, FileSystem.FileSystem | Path.Path>
 ```
 
-A store over a directory on the host filesystem. Every path is checked before
-the first byte is written, so a rejected file cannot leave a half-saved flow on
-disk. A path that reaches its file through a symbolic link is refused with
-`FlowStoreError { code: "invalid_path" }` rather than followed, so a link
-already in the checkout cannot redirect a save outside the root.
+A store over a directory on the host filesystem. Before creating directories,
+it validates every path with the injected `Path` service. Absolute paths,
+paths that resolve outside the root (including Windows backslash traversal),
+root directory targets, and overlapping file paths are refused. Symbolic links
+below the root are refused with `FlowStoreError { code: "invalid_path" }`.
+
+Writes to the same resolved root are serialized within this process, including
+across store instances and saves of the same flow.
+Each save stages all new files and copies of existing files in a temporary
+directory inside the root. Each target is then replaced by an atomic rename.
+A publication failure restores replaced files and removes newly published
+files. Staging is cleaned on failure or interruption; interruption during
+publication waits for the full set to be installed or restored. If rollback
+also fails, the error reports the directory where recovery files are retained.
+
+Individual renames are atomic. External readers can observe the file set
+between renames. This does not provide crash recovery or coordinate writers
+in other processes.
 `PromoteFlows` writes `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`.
 
 ### FlowStore.makeMemory, FlowStore.layerMemory

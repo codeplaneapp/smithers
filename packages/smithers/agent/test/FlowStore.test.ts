@@ -8,16 +8,34 @@
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
-import { Cause, Effect, Exit, Layer } from "effect"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, PlatformError } from "effect"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import * as FlowStore from "../src/FlowStore.ts"
 
 const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
 
-const root = (): string => mkdtempSync(join(tmpdir(), "flows-store-"))
+const roots = new Set<string>()
+const root = (): string => {
+  const directory = mkdtempSync(join(tmpdir(), "flows-store-"))
+  roots.add(directory)
+  return directory
+}
+afterEach(() => {
+  for (const directory of roots) rmSync(directory, { recursive: true, force: true })
+  roots.clear()
+})
 
 const files = (id: string): Record<string, string> => ({
   [`flows/${id}/flow.ts`]: `export default Flow.make({ name: "${id}" })`,
@@ -113,6 +131,388 @@ describe("FlowStore.makeMemory", () => {
 })
 
 describe("FlowStore.layerFileSystem", () => {
+  it.each([1, 2])("preserves the previous file set when staged write %i runs out of space", async (failAt) => {
+    const directory = root()
+    const original = files("triage")
+    await onDisk(directory, (store) => store.write("triage", original))
+    const writes: Array<string> = []
+    const result = await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const failing = FileSystem.FileSystem.of({
+        ...fs,
+        writeFileString: (target, source, options) =>
+          Effect.suspend(() => {
+            writes.push(target)
+            return writes.length === failAt
+              ? Effect.fail(PlatformError.systemError({
+                _tag: "Unknown",
+                module: "FileSystem",
+                method: "writeFileString",
+                description: "ENOSPC"
+              }))
+              : fs.writeFileString(target, source, options)
+          })
+      })
+      return yield* FlowStore.makeFileSystem(failing, path, directory).write("triage", {
+        "flows/triage/flow.ts": "new flow",
+        "flows/triage/flow.e2e.ts": "new test"
+      })
+    }).pipe(Effect.provide(platform), Effect.runPromiseExit)
+
+    expect(refused(result).code).toBe("write_failed")
+    for (const [relative, source] of Object.entries(original)) {
+      expect(existsSync(join(directory, relative))).toBe(true)
+      expect(readFileSync(join(directory, relative), "utf8")).toBe(source)
+    }
+    expect(writes).toHaveLength(failAt)
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it.each([true, false])("rolls back a later rename failure (previous files: %s)", async (existing) => {
+    const directory = root()
+    const original = files("triage")
+    if (existing) await onDisk(directory, (store) => store.write("triage", original))
+    const result = await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const failing = FileSystem.FileSystem.of({
+        ...fs,
+        rename: (from, to) =>
+          to.endsWith("flow.e2e.ts")
+            ? Effect.fail(PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "FileSystem",
+              method: "rename"
+            }))
+            : fs.rename(from, to)
+      })
+      return yield* FlowStore.makeFileSystem(failing, path, directory).write("triage", {
+        "flows/triage/flow.ts": "new flow",
+        "flows/triage/flow.e2e.ts": "new test"
+      })
+    }).pipe(Effect.provide(platform), Effect.runPromiseExit)
+
+    expect(refused(result).code).toBe("write_failed")
+    for (const [relative, source] of Object.entries(original)) {
+      expect(existsSync(join(directory, relative))).toBe(existing)
+      if (existing) expect(readFileSync(join(directory, relative), "utf8")).toBe(source)
+    }
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it("keeps backups if the filesystem also refuses rollback", async () => {
+    const directory = root()
+    await onDisk(directory, (store) => store.write("triage", files("triage")))
+    const result = await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const failing = FileSystem.FileSystem.of({
+        ...fs,
+        rename: (from, to) =>
+          from.endsWith(".old") || to.endsWith("flow.e2e.ts")
+            ? Effect.fail(PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "FileSystem",
+              method: "rename"
+            }))
+            : fs.rename(from, to)
+      })
+      return yield* FlowStore.makeFileSystem(failing, path, directory).write("triage", {
+        "flows/triage/flow.ts": "new flow",
+        "flows/triage/flow.e2e.ts": "new test"
+      })
+    }).pipe(Effect.provide(platform), Effect.runPromiseExit)
+
+    const generation = readdirSync(directory).find((name) => name.startsWith(".flow-store-"))!
+    expect(generation).toBeDefined()
+    expect(refused(result).message).toContain(join(directory, generation))
+    expect(readFileSync(join(directory, generation, "0.old"), "utf8")).toBe(files("triage")["flows/triage/flow.ts"])
+    expect(readFileSync(join(directory, "flows/triage/flow.e2e.ts"), "utf8")).toBe(
+      files("triage")["flows/triage/flow.e2e.ts"]
+    )
+  })
+
+  it("leaves previous files intact when retaining a backup runs out of space", async () => {
+    const directory = root()
+    const original = files("triage")
+    await onDisk(directory, (store) => store.write("triage", original))
+    const result = await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const failing = FileSystem.FileSystem.of({
+        ...fs,
+        copyFile: () =>
+          Effect.fail(PlatformError.systemError({
+            _tag: "Unknown",
+            module: "FileSystem",
+            method: "copyFile",
+            description: "ENOSPC"
+          }))
+      })
+      return yield* FlowStore.makeFileSystem(failing, path, directory).write("triage", {
+        "flows/triage/flow.ts": "new flow",
+        "flows/triage/flow.e2e.ts": "new test"
+      })
+    }).pipe(Effect.provide(platform), Effect.runPromiseExit)
+
+    expect(refused(result).code).toBe("write_failed")
+    for (const [relative, source] of Object.entries(original)) {
+      expect(readFileSync(join(directory, relative), "utf8")).toBe(source)
+    }
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it("cleans staging on interruption without changing existing files", async () => {
+    const directory = root()
+    const original = files("triage")
+    await onDisk(directory, (store) => store.write("triage", original))
+    await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const entered = yield* Deferred.make<void>()
+      let writes = 0
+      const interrupted = FileSystem.FileSystem.of({
+        ...fs,
+        writeFileString: (target, source, options) =>
+          Effect.suspend(() =>
+            ++writes === 2
+              ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+              : fs.writeFileString(target, source, options)
+          )
+      })
+      const store = FlowStore.makeFileSystem(interrupted, path, directory)
+      const saving = yield* store.write("triage", original).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(saving)
+    }).pipe(Effect.provide(platform), Effect.runPromise)
+
+    for (const [relative, source] of Object.entries(original)) {
+      expect(readFileSync(join(directory, relative), "utf8")).toBe(source)
+    }
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it("finishes publishing the entire set before honoring interruption", async () => {
+    const directory = root()
+    await onDisk(directory, (store) => store.write("triage", files("triage")))
+    await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const delayed = FileSystem.FileSystem.of({
+        ...fs,
+        rename: (from, to) =>
+          fs.rename(from, to).pipe(Effect.andThen(
+            to.endsWith("flow.ts")
+              ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+              : Effect.void
+          ))
+      })
+      const store = FlowStore.makeFileSystem(delayed, path, directory)
+      const saving = yield* store.write("triage", {
+        "flows/triage/flow.ts": "new flow",
+        "flows/triage/flow.e2e.ts": "new test"
+      }).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const interrupting = yield* Fiber.interrupt(saving).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(interrupting)
+    }).pipe(Effect.provide(platform), Effect.runPromise)
+
+    expect(readFileSync(join(directory, "flows/triage/flow.ts"), "utf8")).toBe("new flow")
+    expect(readFileSync(join(directory, "flows/triage/flow.e2e.ts"), "utf8")).toBe("new test")
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it.each([false, true])("serializes concurrent saves of the same flow (separate stores: %s)", async (separate) => {
+    const directory = root()
+    const writes: Array<string> = []
+    await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const secondRequested = yield* Deferred.make<void>()
+      const recording = FileSystem.FileSystem.of({
+        ...fs,
+        writeFileString: (target, source, options) =>
+          Effect.gen(function*() {
+            if (source === "first") yield* Deferred.await(secondRequested)
+            writes.push(source)
+            yield* fs.writeFileString(target, source, options)
+          })
+      })
+      const store = FlowStore.makeFileSystem(recording, path, directory)
+      const first = yield* store.write("triage", {
+        "flows/triage/flow.ts": "first",
+        "flows/triage/flow.e2e.ts": "first"
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      const other = separate ? FlowStore.makeFileSystem(recording, path, directory) : store
+      const second = yield* Deferred.succeed(secondRequested, undefined).pipe(
+        Effect.andThen(
+          other.write("triage", { "flows/triage/flow.ts": "second", "flows/triage/flow.e2e.ts": "second" })
+        ),
+        Effect.forkChild
+      )
+      yield* Fiber.join(first)
+      yield* Fiber.join(second)
+    }).pipe(Effect.provide(platform), Effect.runPromise)
+
+    expect(writes).toStrictEqual(["first", "first", "second", "second"])
+    expect(readFileSync(join(directory, "flows/triage/flow.ts"), "utf8")).toBe("second")
+    expect(readFileSync(join(directory, "flows/triage/flow.e2e.ts"), "utf8")).toBe("second")
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it("preserves earlier files when a later destination is a directory", async () => {
+    const directory = root()
+    mkdirSync(join(directory, "flows/triage/flow.e2e.ts"), { recursive: true })
+    writeFileSync(join(directory, "flows/triage/flow.ts"), "old flow")
+
+    const result = await onDisk(directory, (store) => store.write("triage", files("triage")))
+
+    expect(refused(result).code).toBe("write_failed")
+    expect(readFileSync(join(directory, "flows/triage/flow.ts"), "utf8")).toBe("old flow")
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it.each([
+    ["win32", String.raw`C:\workspace\flows-root`, String.raw`..\outside.ts`],
+    ["win32", String.raw`C:\workspace\flows-root`, String.raw`nested\..\..\outside.ts`],
+    ["posix", "/workspace/flows-root", "../outside.ts"]
+  ])("rejects %s traversal %s %s before creating directories", async (platformName, directory, relative) => {
+    const mutations: Array<string> = []
+    const fs = FileSystem.makeNoop({
+      makeDirectory: (target) =>
+        Effect.sync(() => {
+          mutations.push(target)
+        }),
+      writeFileString: (target) =>
+        Effect.sync(() => {
+          mutations.push(target)
+        }),
+      remove: (target) =>
+        Effect.sync(() => {
+          mutations.push(target)
+        })
+    })
+    const result = await Effect.gen(function*() {
+      const path = yield* Path.Path
+      return yield* FlowStore.makeFileSystem(fs, path, directory).write("safe", {
+        "flows/safe/flow.ts": "safe",
+        [relative]: "outside"
+      })
+    }).pipe(
+      Effect.provide(platformName === "win32" ? NodePath.layerWin32 : NodePath.layerPosix),
+      Effect.runPromiseExit
+    )
+
+    expect(refused(result).code).toBe("invalid_path")
+    expect(mutations).toStrictEqual([])
+  })
+
+  it.each([
+    ["flows/triage/flow.ts", "flows/triage/./flow.ts"],
+    ["flows/triage", "flows/triage/flow.ts"],
+    ["flows/triage/flow.ts", "flows/triage"]
+  ])("rejects overlapping targets %s and %s before any mkdir", async (first, second) => {
+    const mutations: Array<string> = []
+    const fs = FileSystem.makeNoop({
+      makeDirectory: (target) =>
+        Effect.sync(() => {
+          mutations.push(target)
+        })
+    })
+    const result = await Effect.gen(function*() {
+      const path = yield* Path.Path
+      return yield* FlowStore.makeFileSystem(fs, path, "/workspace").write("triage", {
+        [first]: "first",
+        [second]: "second"
+      })
+    }).pipe(Effect.provide(NodePath.layerPosix), Effect.runPromiseExit)
+
+    expect(refused(result).code).toBe("invalid_path")
+    expect(mutations).toStrictEqual([])
+  })
+
+  it("checks each backslash-delimited Windows component for symbolic links", async () => {
+    const mutations: Array<string> = []
+    const noop = FileSystem.makeNoop({})
+    const fs = FileSystem.FileSystem.of({
+      ...noop,
+      readLink: (target) =>
+        target === String.raw`C:\workspace\flows\triage`
+          ? Effect.succeed(String.raw`C:\outside`)
+          : noop.readLink(target),
+      makeDirectory: (target) =>
+        Effect.sync(() => {
+          mutations.push(target)
+        })
+    })
+    const result = await Effect.gen(function*() {
+      const path = yield* Path.Path
+      return yield* FlowStore.makeFileSystem(fs, path, String.raw`C:\workspace`).write("triage", {
+        [String.raw`flows\triage\flow.ts`]: "new flow"
+      })
+    }).pipe(Effect.provide(NodePath.layerWin32), Effect.runPromiseExit)
+
+    expect(refused(result).code).toBe("invalid_path")
+    expect(mutations).toStrictEqual([])
+  })
+
+  it("refuses a directory link planted while creating a parent", async () => {
+    const directory = root()
+    const outside = root()
+    const result = await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const planted = FileSystem.FileSystem.of({
+        ...fs,
+        makeDirectory: (target, options) =>
+          Effect.gen(function*() {
+            if (target === join(directory, "flows")) symlinkSync(outside, target)
+            yield* fs.makeDirectory(target, options)
+          })
+      })
+      return yield* FlowStore.makeFileSystem(planted, path, directory).write("triage", files("triage"))
+    }).pipe(Effect.provide(platform), Effect.runPromiseExit)
+
+    expect(refused(result).code).toBe("write_failed")
+    expect(readdirSync(outside)).toStrictEqual([])
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
+  it("does not treat a failed stat as a missing previous file", async () => {
+    const directory = root()
+    const original = files("triage")
+    await onDisk(directory, (store) => store.write("triage", original))
+    const result = await Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const failing = FileSystem.FileSystem.of({
+        ...fs,
+        stat: (target) =>
+          target.endsWith("flow.e2e.ts")
+            ? Effect.fail(PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "FileSystem",
+              method: "stat"
+            }))
+            : fs.stat(target)
+      })
+      return yield* FlowStore.makeFileSystem(failing, path, directory).write("triage", {
+        "flows/triage/flow.ts": "new flow",
+        "flows/triage/flow.e2e.ts": "new test"
+      })
+    }).pipe(Effect.provide(platform), Effect.runPromiseExit)
+
+    expect(refused(result).code).toBe("write_failed")
+    for (const [relative, source] of Object.entries(original)) {
+      expect(readFileSync(join(directory, relative), "utf8")).toBe(source)
+    }
+    expect(readdirSync(directory)).toStrictEqual(["flows"])
+  })
+
   it("writes the flow, its test, and its fixture under the root", async () => {
     const directory = root()
 

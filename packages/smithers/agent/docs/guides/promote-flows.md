@@ -62,7 +62,16 @@ before any path is built from it: lowercase letters, digits, and hyphens,
 starting with a letter (`/^[a-z][a-z0-9-]*$/`). A `../escape` is refused as a
 bad id, not caught as a surprising write outside the root, and the filesystem
 store checks every file path before the first byte is written, so a rejected
-file cannot leave a half-saved flow on disk. `flows/write-flow` validates the
-id again before it asks the store, so a noop store answers a bad id with
-"invalid id" rather than "nowhere to save" and sends the model to fix the right
+file cannot leave a half-saved flow on disk. It uses the injected `Path`
+semantics for confinement, including Windows separators. Saves to the same
+resolved root are serialized within the process, including across store
+instances. All new files and backups are staged inside the root before
+publication; a failed publication restores the previous files. Staging
+is cleaned on interruption, or publication finishes before interruption takes
+effect. If rollback also fails, the error identifies retained recovery files.
+External readers can see individual renames in progress; this is not crash
+recovery or coordination between processes.
+
+`flows/write-flow` validates the id again before it asks the store, so a noop
+store answers a bad id with "invalid id" rather than "nowhere to save" and sends the model to fix the right
 thing.
