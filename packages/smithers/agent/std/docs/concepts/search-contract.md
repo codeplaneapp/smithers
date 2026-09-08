@@ -56,6 +56,7 @@ meaning. A pattern is rejected with `invalid_pattern` when it:
 - nests a character class, leaves one empty, or uses a class set operation
   (`&&`, `--`, `~~`);
 - names a counted repetition above 1,000;
+- exceeds 128 nested groups or 8,192 compiled states after repetition expansion;
 - fails to compile as a JavaScript regular expression.
 
 `fixedStrings: true` skips the grammar entirely except for the ASCII and length
@@ -64,6 +65,19 @@ checks, because a literal is escaped rather than compiled.
 Inside the shared compiler, `.` matches any character except a newline and `$`
 anchors at the end of the whole input, which is what makes a line-oriented
 search behave the same in both peers.
+
+Portable grep evaluates this grammar with a Thompson state machine. Matching
+work is linear in line length times the bounded state count, including nested
+quantifiers and ambiguous alternatives. It yields every 4,096 state visits so
+host timers and Effect interruption can run during a long match. JavaScript
+regular expressions are used only for individual character predicates.
+
+The portable scan reads files in chunks and counts overflow without retaining
+all hits. It keeps the first `limit` hits and their context, plus one boundary
+hit to preserve context ownership at truncation. Symbol source is loaded only
+for files with returned hits and released after annotating each file. Memory
+still includes the current line and, with `symbols: true`, one retained hit's
+source file; `limit` is a result budget, not a byte limit on that source.
 
 ## Globs are relative to the root, never absolute
 

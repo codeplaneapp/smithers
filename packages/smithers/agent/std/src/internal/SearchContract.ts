@@ -13,6 +13,7 @@ import type * as Path from "@smthrs/kernel/Path"
 import { Effect } from "effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as StdError from "../StdError.ts"
+import * as LinearRegex from "./LinearRegex.ts"
 import * as Walk from "./Walk.ts"
 
 /**
@@ -48,15 +49,16 @@ export const notFound = (path: string): StdError.StdError =>
  * ASCII character classes and ordinary quantifiers. Lookaround,
  * backreferences, named/inline groups, Unicode/shorthand classes and control
  * escapes are rejected before either implementation runs. Patterns are
- * limited to 4096 bytes and counted repetitions to 1000 so both engines also
- * share the same compilation boundary.
+ * limited to 4096 bytes, counted repetitions to 1000, group nesting to 128
+ * and expanded state machines to 8192 states. Both peers share this
+ * compilation boundary; portable matching never backtracks over input.
  *
  * @private
  * @since 0.1.0
  */
 export const validatePattern = (pattern: string, fixedStrings: boolean): StdError.StdError | undefined => {
-  if (!/^[\x20-\x7e]*$/.test(pattern)) return invalidPattern(pattern, "patterns must contain printable ASCII only")
   if (pattern.length > 4096) return invalidPattern(pattern, "patterns must not exceed 4096 bytes")
+  if (!/^[\x20-\x7e]*$/.test(pattern)) return invalidPattern(pattern, "patterns must contain printable ASCII only")
   if (fixedStrings) return undefined
   if (pattern.includes("(?")) return invalidPattern(pattern, "special groups and lookaround are not supported")
   let inClass = false
@@ -109,9 +111,14 @@ export const validatePattern = (pattern: string, fixedStrings: boolean): StdErro
   }
   try {
     new RegExp(pattern, "u")
-    return undefined
   } catch {
     return invalidPattern(pattern, "invalid Smithers Ripgrep ASCII v1 expression")
+  }
+  try {
+    LinearRegex.compile(pattern, false)
+    return undefined
+  } catch (error) {
+    return invalidPattern(pattern, error instanceof Error ? error.message : "pattern compilation exceeds its budget")
   }
 }
 

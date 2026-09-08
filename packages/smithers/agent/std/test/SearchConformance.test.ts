@@ -14,6 +14,7 @@ import * as NativeSearch from "../src/NativeSearch.ts"
 import * as PortableSearch from "../src/PortableSearch.ts"
 import * as Search from "../src/Search.ts"
 import * as SearchConformance from "../src/SearchConformance.ts"
+import * as StdError from "../src/StdError.ts"
 
 const root = mkdtempSync(join(tmpdir(), "flows-search-conformance-"))
 const linkedRoot = join(root, "linked-root")
@@ -731,5 +732,112 @@ describe("Search conformance (generated)", () => {
 
     expect(SearchConformance.report(divergences)).toBe("")
     expect(divergences).toEqual([])
+  })
+})
+
+describe("Search conformance (regression detector)", () => {
+  const generated = SearchConformance.plan({ seed: 1, root: "/tiny", files: 0, calls: 1 })
+  const grepInput = generated.grep[0]!
+  const globInput = generated.glob[0]!
+  const plan = { ...generated, grep: [grepInput], glob: [globInput] }
+  const grepValue: Search.GrepOutput = {
+    matches: [],
+    files: [],
+    filesSearched: 1,
+    skippedBinary: 0,
+    truncated: false
+  }
+  const globValue: Search.GlobOutput = { paths: ["/tiny/a"], total: 1, truncated: false }
+  const refused = (code: StdError.Code, message = "refused") => Effect.fail(new StdError.StdError({ code, message }))
+  const peer = (
+    grep: Effect.Effect<Search.GrepOutput, StdError.StdError>,
+    glob: Effect.Effect<Search.GlobOutput, StdError.StdError>
+  ) => Search.make({ grep: () => grep, glob: () => glob })
+
+  it("detects exact grep and glob value divergences", async () => {
+    const otherGrep = { ...grepValue, filesSearched: 2 }
+    const otherGlob = { paths: ["/tiny/b"], total: 1, truncated: false }
+    const differences = await Effect.runPromise(SearchConformance.compare({
+      plan,
+      subject: peer(Effect.succeed(grepValue), Effect.succeed(globValue)),
+      reference: peer(Effect.succeed(otherGrep), Effect.succeed(otherGlob))
+    }))
+    expect(differences).toEqual([
+      { call: "grep", input: grepInput, subject: JSON.stringify(grepValue), reference: JSON.stringify(otherGrep) },
+      { call: "glob", input: globInput, subject: JSON.stringify(globValue), reference: JSON.stringify(otherGlob) }
+    ])
+    expect(SearchConformance.report(differences)).toBe(
+      `grep(${JSON.stringify(grepInput)})\n  subject:   ${JSON.stringify(grepValue)}\n  reference: ${
+        JSON.stringify(otherGrep)
+      }` +
+        `\n\nglob(${JSON.stringify(globInput)})\n  subject:   ${JSON.stringify(globValue)}\n  reference: ${
+          JSON.stringify(otherGlob)
+        }`
+    )
+  })
+
+  it("detects successes versus refusals in either direction", async () => {
+    const differences = await Effect.runPromise(SearchConformance.compare({
+      plan,
+      subject: peer(Effect.succeed(grepValue), refused("not_found")),
+      reference: peer(refused("invalid_pattern"), Effect.succeed(globValue))
+    }))
+    expect(differences).toEqual([
+      {
+        call: "grep",
+        input: grepInput,
+        subject: JSON.stringify(grepValue),
+        reference: "{\"failure\":\"invalid_pattern\"}"
+      },
+      { call: "glob", input: globInput, subject: "{\"failure\":\"not_found\"}", reference: JSON.stringify(globValue) }
+    ])
+    expect(SearchConformance.report(differences)).toBe(
+      `grep(${JSON.stringify(grepInput)})\n  subject:   ${
+        JSON.stringify(grepValue)
+      }\n  reference: {"failure":"invalid_pattern"}` +
+        `\n\nglob(${JSON.stringify(globInput)})\n  subject:   {"failure":"not_found"}\n  reference: ${
+          JSON.stringify(globValue)
+        }`
+    )
+  })
+
+  it("detects differing refusal codes for both operations", async () => {
+    const differences = await Effect.runPromise(SearchConformance.compare({
+      plan,
+      subject: peer(refused("invalid_pattern"), refused("not_found")),
+      reference: peer(refused("not_found"), refused("invalid_pattern"))
+    }))
+    expect(differences).toEqual([
+      {
+        call: "grep",
+        input: grepInput,
+        subject: "{\"failure\":\"invalid_pattern\"}",
+        reference: "{\"failure\":\"not_found\"}"
+      },
+      {
+        call: "glob",
+        input: globInput,
+        subject: "{\"failure\":\"not_found\"}",
+        reference: "{\"failure\":\"invalid_pattern\"}"
+      }
+    ])
+    expect(SearchConformance.report(differences)).toBe(
+      `grep(${
+        JSON.stringify(grepInput)
+      })\n  subject:   {"failure":"invalid_pattern"}\n  reference: {"failure":"not_found"}` +
+        `\n\nglob(${
+          JSON.stringify(globInput)
+        })\n  subject:   {"failure":"not_found"}\n  reference: {"failure":"invalid_pattern"}`
+    )
+  })
+
+  it("agrees on matching refusals even when messages differ", async () => {
+    const differences = await Effect.runPromise(SearchConformance.compare({
+      plan,
+      subject: peer(refused("invalid_pattern", "subject"), refused("not_found", "subject")),
+      reference: peer(refused("invalid_pattern", "reference"), refused("not_found", "reference"))
+    }))
+    expect(differences).toEqual([])
+    expect(SearchConformance.report(differences)).toBe("")
   })
 })
