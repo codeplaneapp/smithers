@@ -241,19 +241,27 @@ describe("the installation token exchange", () => {
 
   test("never keeps a token past the expiry GitHub states", async () => {
     let now = NOW
+    const paths: Array<string> = []
     const auth = createGithubAppAuth({
-      fetch: async (request) =>
-        new URL(request.url).pathname === "/app/installations"
+      fetch: async (request) => {
+        const path = new URL(request.url).pathname
+        paths.push(path)
+        return path === "/app/installations"
           ? Response.json(SMITHERSAI_INSTALLATION)
-          : Response.json({ token: INSTALLATION_TOKEN, expires_at: new Date(now + 120_000).toISOString() }, { status: 201 }),
+          : Response.json({ token: INSTALLATION_TOKEN, expires_at: new Date(now + 120_000).toISOString() }, { status: 201 })
+      },
       now: () => now,
       cache: () => undefined,
       log: () => {}
     })
     expect(await auth.token(APP_ENV)).toEqual({ value: INSTALLATION_TOKEN, renewable: true })
+    expect(paths).toHaveLength(2)
     now += 61_000
-    // 2 minutes of stated life minus a minute of slack: the held copy is already stale.
+    // 2 minutes of stated life minus a minute of slack: the held copy is already stale, so the
+    // second read exchanges again. Counting the exchanges is the only assertion that fails when
+    // the stated expiry is ignored: the served value is the same string either way.
     expect((await auth.token(APP_ENV))?.value).toBe(INSTALLATION_TOKEN)
+    expect(paths).toHaveLength(4)
   })
 
   test("joins concurrent callers onto one exchange", async () => {
