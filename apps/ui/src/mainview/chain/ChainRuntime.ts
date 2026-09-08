@@ -103,7 +103,10 @@ const surfaceEntries = (emit: Emit, runId: string, store: AppStore): ReadonlyArr
         return Effect.fail(new Catalog.CallError({ name: "card.show", message: "This card is runtime-owned." }))
       }
       return Effect.sync(() => {
-        emit({ runId, type: "card", card: parsed.data })
+        const card = parsed.data.kind === "flow-form"
+          ? { ...parsed.data, payload: { ...parsed.data.payload, via: "agent" as const } }
+          : parsed.data
+        emit({ runId, type: "card", card })
         return { shown: parsed.data.id }
       })
     }
@@ -125,7 +128,11 @@ const surfaceEntries = (emit: Emit, runId: string, store: AppStore): ReadonlyArr
         return Effect.fail(new Catalog.CallError({ name: "card.update", message: "This card is runtime-owned." }))
       }
       return Effect.sync(() => {
-        emit({ runId, type: "card.update", id: record.id as string, patch: patch.data })
+        const payload = patch.data.payload
+        const untrusted = typeof payload === "object" && payload !== null && !Array.isArray(payload) && "via" in payload
+          ? { ...patch.data, payload: { ...payload, via: "agent" } }
+          : patch.data
+        emit({ runId, type: "card.update", id: record.id as string, patch: untrusted })
         return { updated: record.id }
       })
     }

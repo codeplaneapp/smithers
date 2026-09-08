@@ -1,5 +1,6 @@
-import { Catalog } from "@smthrs/chain"
-import { Effect } from "effect"
+import * as Cell from "@smthrs/harness/Cell"
+import { Authorize, Catalog } from "@smthrs/chain"
+import { Effect, Option } from "effect"
 import type { CommandRegistry } from "../flows/Commands"
 import type { FlowEntry } from "../flows/registry"
 
@@ -40,15 +41,25 @@ const entryFor = (commands: CommandRegistry, entry: FlowEntry): Catalog.Entry =>
     name,
     description,
     capabilities,
-    handler: (payload) =>
-      argsOf(name, payload).pipe(
+    handler: (payload, slot) => Effect.gen(function*() {
+      const service = yield* Effect.serviceOption(Authorize.Authorize)
+      let refusal: Authorize.AuthorizeError | undefined
+      return yield* argsOf(name, payload).pipe(
         Effect.flatMap((args) =>
           Effect.tryPromise({
-            try: () => commands.runForAgent(name, args),
+            try: () => commands.runForAgent(name, args, Option.isNone(service) ? undefined : {
+              authorize: service.value,
+              slot: slot ?? { chain: "app", link: 0, ordinal: 0 },
+              authorized: Cell.declarationDigest(entry.binding.descriptor),
+              refused: (error) => { refusal = error }
+            }),
             catch: (cause) => new Catalog.CallError({ name, message: `flow threw: ${String(cause)}` })
           })
         ),
         Effect.flatMap((outcome) => {
+          if (refusal !== undefined) {
+            return Effect.fail(new Catalog.CallError({ name, message: refusal.message, cause: refusal.code }))
+          }
           switch (outcome.status) {
             case "executed":
               return Effect.succeed<unknown>(outcome.value ?? `executed /${name}`)
@@ -65,6 +76,7 @@ const entryFor = (commands: CommandRegistry, entry: FlowEntry): Catalog.Entry =>
           }
         })
       )
+    })
   }
 }
 

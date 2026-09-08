@@ -18,6 +18,8 @@ export const approvalFlows = (actions: CommandActions): ReadonlyArray<FlowEntry>
     hidden: true,
     args: "<cardId>",
     capabilities: ["approve:self"],
+    userOnly: true,
+    userOnlyReason: "approvals belong to the human",
     input: CardTarget,
     handler: ({ cardId }) => {
       actions.decideApproval(cardId, "approved")
@@ -29,6 +31,8 @@ export const approvalFlows = (actions: CommandActions): ReadonlyArray<FlowEntry>
     hidden: true,
     args: "<cardId>",
     capabilities: ["approve:self"],
+    userOnly: true,
+    userOnlyReason: "approvals belong to the human",
     input: CardTarget,
     handler: ({ cardId }) => {
       actions.decideApproval(cardId, "denied")

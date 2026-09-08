@@ -1,3 +1,6 @@
+import { Authorize } from "@smthrs/chain"
+import { Effect } from "effect"
+import { createChainPolicy } from "../../chain/Policy"
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
@@ -595,12 +598,19 @@ describe("feature.prototype", () => {
     expect(runCards(store)[0]?.payload).toMatchObject({ kind: "prototype", workflow: "prototype" })
   })
 
-  test("the model's signed-out invocation renders the sign-in step and fails honestly without launching", async () => {
+  test("the authorized model's signed-out invocation renders the sign-in step and fails honestly without launching", async () => {
     const relay = relayStubs()
     const { store, controller } = await fixture(relay.routes)
     identity(store, "signed-out")
     await settled()
-    const outcome = await controller.commands.runForAgent("feature.prototype", "a dark mode toggle")
+    // Reach the onboarding handler under an explicit outbound decision.
+    // The registry now refuses an unscoped protected agent invocation first.
+    const policy = createChainPolicy()
+    policy.resolve("onboarding", "approved", { name: "feature.prototype", claim: "outbound:launch" })
+    const authorize = await Effect.runPromise(Authorize.Authorize.pipe(Effect.provide(policy.layerFor("onboarding"))))
+    const outcome = await controller.commands.runForAgent("feature.prototype", "a dark mode toggle", {
+      authorize, slot: { chain: "", link: 1, ordinal: 0 }, refused: () => {}
+    })
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") expect(outcome.error).toContain("Sign in with GitHub first")
     expect(lastMessage(store)?.action?.flow).toBe("auth.sign-in")

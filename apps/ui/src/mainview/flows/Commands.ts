@@ -11,6 +11,10 @@
  * same bindings answer the calls. That is why `CommandCatalog.ts` no longer
  * exists: a parallel projection is exactly the drift the one-door law forbids.
  */
+import { Authorize } from "@smthrs/chain"
+import type { AgentInvocation } from "./AgentInvocation"
+import { createChainPolicy } from "../chain/Policy"
+import { formFlows } from "./entries/form"
 import * as Cell from "@smthrs/harness/Cell"
 import type * as Descriptor from "@smthrs/registry/Descriptor"
 import { Effect } from "effect"
@@ -138,7 +142,7 @@ export interface CommandRegistry {
    * value that happens to start with a failure prefix; this path never sniffs
    * strings.
    */
-  readonly runForAgent: (name: string, args?: string) => Promise<CommandOutcome>
+  readonly runForAgent: (name: string, args?: string, invocation?: AgentInvocation) => Promise<CommandOutcome>
   /** The flows the agent may call: the registry narrowed to model-invocable entries. */
   readonly callable: () => ReadonlyArray<FlowEntry>
   /** What the prompt's catalog block teaches: callable flows that are not hidden. */
@@ -193,6 +197,16 @@ const valueOf = (value: unknown): string | undefined => {
 }
 
 export const createCommandRegistry = (actions: CommandActions, agentActions: CommandActions = actions): CommandRegistry => {
+  const defaultPolicy = createChainPolicy().layerFor("app")
+  const unscopedInvocation: AgentInvocation = {
+    slot: { chain: "app", link: 0, ordinal: 0 },
+    authorize: Authorize.make({
+      authorize: (request) => Effect.flatMap(Authorize.Authorize, (service) => service.authorize(request)).pipe(
+        Effect.provide(defaultPolicy)
+      )
+    }),
+    refused: () => {}
+  }
   const base = baseFlows(actions)
   const admin = adminFlows(actions)
   /*
@@ -323,10 +337,11 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
     invoker: "user" | "agent",
     name: string,
     args?: string,
-    seen: ReadonlySet<string> = new Set()
+    seen: ReadonlySet<string> = new Set(),
+    invocation?: AgentInvocation
   ): Promise<CommandOutcome> => {
     const startedAt = Date.now()
-    const outcome = await settle(invoker, name, args, seen, startedAt)
+    const outcome = await settle(invoker, name, args, seen, startedAt, invocation)
     trace(
       invoker,
       name,
@@ -352,7 +367,8 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
     name: string,
     args: string | undefined,
     seen: ReadonlySet<string>,
-    startedAt: number
+    startedAt: number,
+    invocation?: AgentInvocation
   ): Promise<CommandOutcome> => {
     const entry = find(name)
     if (entry === undefined) {
@@ -371,7 +387,10 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
       if (prompt !== undefined) await invoke(prompt, { flow: name })
       return { status: "unavailable", door, reason, action: DOWNLOAD_PROMPT }
     }
-    const target = invoker === "agent" ? agentEntry(nameOf(entry)) ?? entry : entry
+    let target = invoker === "agent" ? agentEntry(nameOf(entry)) ?? entry : entry
+    if (invoker === "agent" && !modelInvocable(target)) {
+      return { status: "failed", error: userOnlyError(nameOf(target), target.metadata.userOnlyReason) }
+    }
     const acting = invoker === "agent" ? agentActions : actions
     const unmet = unmetRequirements(target.metadata, actions.snapshot(), flowRequirements)[0]
     if (unmet !== undefined) {
@@ -419,6 +438,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
         name: nameOf(target),
         args,
         via: invoker,
+        invocation: invocation === undefined ? undefined : { ...invocation, authorized: undefined },
         input: target.input,
         ...(target.metadata.form === undefined ? {} : { hints: target.metadata.form })
       })
@@ -440,6 +460,27 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
         status: "executed",
         value:
           `asked the user to confirm "/${nameOf(target)}${args === undefined ? "" : ` ${args}`}" — it runs only when they confirm, and nothing has happened yet`
+      }
+    }
+    if (invoker === "agent") {
+      if (invocation !== undefined && invocation.authorized !== Cell.declarationDigest(target.binding.descriptor)) {
+        const request = {
+          name: nameOf(target),
+          capabilities: target.binding.descriptor.capabilities,
+          slot: invocation.slot
+        }
+        const authorization = invocation.authorize.authorize(request)
+        const decision = await Effect.runPromise(Effect.result(authorization))
+        if (decision._tag === "Failure") {
+          invocation.refused(decision.failure)
+          return { status: "failed", error: decision.failure.message }
+        }
+      }
+      // Bind this continuation explicitly. No shared mutable actor or authority
+      // can leak into another concurrent command, and card metadata grants nothing.
+      if (nameOf(target) === "form.submit") {
+        const continuation = invocation === undefined ? unscopedInvocation : { ...invocation, authorized: undefined }
+        target = formFlows(acting, continuation).find((candidate) => nameOf(candidate) === "form.submit")!
       }
     }
     const settledOutcome = await invoke(target, parsed.payload)
@@ -478,16 +519,18 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
       return command
     },
     run,
+    // Preserve the native host's direct tool path. Form continuations
+    // still enter runForAgent below and must bring authority or fail closed.
     runAsAgent: (name, args) => runAs("agent", name, args),
     executeForAgent: (call) => actions.withAgentActor(() => executeAgentToolCall(registry, call)),
-    runForAgent: (name, args) =>
+    runForAgent: (name, args, invocation) =>
       actions.withAgentActor(async () => {
         const clean = name.trim().replace(/^\/+/, "")
         const target = find(clean)
         if (target !== undefined && !modelInvocable(target)) {
           return { status: "failed", error: userOnlyError(clean, target.metadata.userOnlyReason) }
         }
-        return runAs("agent", clean, args)
+        return runAs("agent", clean, args, new Set(), invocation ?? unscopedInvocation)
       }),
     callable,
     /*

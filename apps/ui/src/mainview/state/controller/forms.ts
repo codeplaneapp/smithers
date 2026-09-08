@@ -4,10 +4,12 @@ import { HARNESS_IDS } from "@smthrs/rpc/LocalApp"
 import type { Harness } from "@smthrs/rpc/LocalApp"
 import type { Schema } from "effect"
 import { roleMenuEntries } from "../../AgentRoleMenu"
+import type { AgentInvocation } from "../../flows/AgentInvocation"
 import type { CommandOutcome } from "../../flows/Commands"
 import { assembleArgs, draftFrom, formFieldsFor, missingFields, partialPayload } from "../../flows/FlowForms"
 import type { FieldOption, FieldValue, FormDraft, FormField, FormHints, OptionProvider } from "../../flows/FlowForms"
 import { payloadFor } from "../../flows/SlashPayload"
+import { actorSharedState } from "../ActorBindings"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 
@@ -31,6 +33,7 @@ export interface FormRenderRequest {
   readonly name: string
   readonly args: string | undefined
   readonly via: "user" | "agent"
+  readonly invocation?: AgentInvocation
   /** The flow's input schema and hints; looked up in the registry when the caller has only the name. */
   readonly input?: Schema.Top
   readonly hints?: FormHints
@@ -48,7 +51,7 @@ export interface FormsController {
   /** `form.set <cardId> <field> [value]`: one draft update; blank clears. */
   readonly setFormField: (cardId: string, field: string, value: string) => Promise<string | void>
   /** `form.submit <cardId>`: run the form's flow with the draft, as the actor that asked for it. */
-  readonly submitForm: (cardId: string) => Promise<string | void | { readonly value: string }>
+  readonly submitForm: (cardId: string, invocation?: AgentInvocation) => Promise<string | void | { readonly value: string }>
   /** `card.dismiss <cardId>`: drop a form card (the form's Cancel). */
   readonly dismissCard: (cardId: string) => string | void
 }
@@ -88,6 +91,17 @@ export const fetchHarnessModels = async (
 export const createFormsController = (ctx: ControllerContext, deps: FormsControllerDependencies): FormsController => {
   const { store } = ctx
   const { collections } = store
+  // Authority comes only from a registry invocation, never from persisted or model-authored payloads.
+  const continuations = actorSharedState(ctx, "form-continuations", () =>
+    new Map<string, { readonly invocation: AgentInvocation; readonly payload: string }>())
+  const continuationFor = (card: FlowFormCard): AgentInvocation | undefined => {
+    const saved = continuations.get(card.id)
+    if (saved?.payload === JSON.stringify(card.payload)) return saved.invocation
+    // card.show/card.update may replace a form under an existing id. Its new
+    // payload cannot borrow the replaced form's lineage or pending grant.
+    continuations.delete(card.id)
+    return undefined
+  }
 
   /** The harness rows in the table's own order (HARNESS_IDS), whatever order the collection iterates. */
   const harnesses = (): ReadonlyArray<Harness> =>
@@ -169,7 +183,9 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     })
 
   const patch = (card: FlowFormCard, payload: FlowFormCard["payload"], status: Card["status"]): void => {
+    const invocation = continuationFor(card)
     store.dispatch({ type: "card.updated", actor: ctx.commandActor, id: card.id, patch: { payload, status } })
+    if (invocation !== undefined) continuations.set(card.id, { invocation, payload: JSON.stringify(payload) })
   }
 
   /*
@@ -224,6 +240,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     if (existing?.kind === "flow-form" && existing.payload.submitting === true) {
       return { cardId, missing: missingFields(existing.payload.fields, existing.payload.draft) }
     }
+    continuations.delete(cardId)
     store.dispatch({
       type: "card.upsert",
       actor: ctx.commandActor,
@@ -237,6 +254,12 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
         payload: { flow: request.name, via: request.via, fields: resolved, draft, given }
       }
     })
+    if (request.invocation !== undefined) {
+      continuations.set(cardId, {
+        invocation: request.invocation,
+        payload: JSON.stringify({ flow: request.name, via: request.via, fields: resolved, draft, given })
+      })
+    }
     void refreshModelList(cardId)
     const missing = missingFields(resolved, draft)
     return { cardId, missing: missing.length > 0 ? missing : resolved.map((field) => field.name) }
@@ -306,7 +329,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     }
   }
 
-  const submitForm: FormsController["submitForm"] = async (cardId) => {
+  const submitForm: FormsController["submitForm"] = async (cardId, invocation) => {
     const card = formCard(cardId)
     if (card === undefined) return `There is no form card ${cardId}.`
     if (card.status === "acted") return `The form ${cardId} was already submitted.`
@@ -333,17 +356,19 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
      * never launder an act through a human's form: its own call is the agent's.
      */
     const asAgent = via === "agent" || actor === "smithers"
+    const continuation = invocation ?? continuationFor(card)
     patch(card, { ...card.payload, submitting: true }, "active")
     let outcome: CommandOutcome
     try {
       outcome = asAgent
-        ? await ctx.commands.runForAgent(flow, args === "" ? undefined : args)
+        ? await ctx.commands.runForAgent(flow, args === "" ? undefined : args, continuation)
         : await ctx.commands.run(flow, args === "" ? undefined : args)
     } catch (cause) {
       outcome = { status: "failed", error: cause instanceof Error ? cause.message : String(cause) }
     }
     const current = formCard(cardId) ?? card
     if (outcome.status === "executed") {
+      continuations.delete(cardId)
       const { error: _dropped, ...payload } = current.payload
       patch(current, { ...payload, submitting: false }, "acted")
       return { value: outcome.value ?? `submitted /${flow}${args === "" ? "" : ` ${args}`}` }
@@ -359,6 +384,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     if (card === undefined) return `There is no card ${cardId}.`
     if (card.kind !== "flow-form") return `/card.dismiss dismisses form cards; ${cardId} is a ${card.kind} card.`
     if (card.payload.submitting === true) return `The form ${cardId} is being submitted.`
+    continuations.delete(cardId)
     store.dispatch({ type: "card.removed", actor: ctx.commandActor, id: cardId })
   }
 

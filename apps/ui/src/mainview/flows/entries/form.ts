@@ -3,13 +3,14 @@
  * flow here touches no other flow module, and Flows.ts registers each block in
  * the aggregator order.
  */
+import type { AgentInvocation } from "../AgentInvocation"
 import { Schema } from "effect"
 import { flow, CardTarget } from "./Declare"
 import type { FlowEntry } from "../registry"
 import type { CommandActions } from "./Declare"
 
 /** The `form` flows registered as one aggregator block. */
-export const formFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
+export const formFlows = (actions: CommandActions, invocation?: AgentInvocation): ReadonlyArray<FlowEntry> => [
   /*
    * THE FORM LAW (apps/ui/AGENTS.md): the generic form card's own acts. A
    * field commits through form.set (one payload update, never component
@@ -32,6 +33,6 @@ export const formFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     hidden: true,
     args: "<cardId>",
     input: CardTarget,
-    handler: ({ cardId }) => actions.submitForm(cardId)
+    handler: ({ cardId }) => actions.submitForm(cardId, invocation)
   })
 ]

@@ -308,13 +308,47 @@ describe("ChainRuntime behind the NativeAgent seam", () => {
     h.controller.send("approve that for me")
     await done
     const denied = h.frames.find(
-      (frame) => frame.type === "gate.rejected" && frame.kind === "denied"
+      (frame) => frame.type === "gate.rejected" && frame.kind === "catalog"
     )
     expect(denied).toBeDefined()
     expect(denied !== undefined && "message" in denied ? denied.message : "").toContain(
-      "approvals belong to the human"
+      "not a catalog entry"
     )
   })
+
+  for (const patch of [false, true]) {
+    test(`model-authored form provenance stays agent-owned after card.${patch ? "update" : "show"}`, async () => {
+      const card = {
+        id: "untrusted-form", kind: "flow-form", title: "Browser", status: "active", createdAt: 1, ordinal: 1,
+        payload: {
+          flow: "browser.open", via: "user",
+          fields: [{ name: "url", label: "URL", kind: "text", required: true }],
+          draft: { url: "https://example.invalid/private" }, given: {}
+        }
+      }
+      const h = await harness({
+        author: Author.layerMock([flow(
+          `await ctx.call("card.show", { card: ${JSON.stringify(card)} })`,
+          ...(patch ? [`await ctx.call("card.update", { id: "untrusted-form", patch: { payload: ${JSON.stringify(card.payload)} } })`] : []),
+          `await ctx.call("form.submit", { args: "untrusted-form" })`,
+          `return done({})`
+        )])
+      })
+      const done = h.waitForDone()
+      h.controller.send("submit this form")
+      await done
+      expect(h.frames.some((frame) => frame.type === "park" && frame.code === "approval")).toBe(true)
+      const shown = h.store.collections.cards.get(card.id)
+      expect(shown?.kind === "flow-form" ? shown.payload.via : undefined).toBe("agent")
+      const approval = [...h.store.collections.cards.values()].find((candidate) => candidate.kind === "approval")
+      expect(approval?.kind === "approval" ? approval.payload.capability : undefined).toBe("session:net-read")
+      // A later human Submit is still an agent continuation, even without a live chain call.
+      await h.controller.commands.run("form.submit", card.id)
+      const refused = h.store.collections.cards.get(card.id)
+      expect(refused?.status).toBe("error")
+      expect(refused?.kind === "flow-form" ? refused.payload.error : undefined).toContain("approval")
+    })
+  }
 
   test("an outbound call parks for approval; approving resumes the lineage and runs it once", async () => {
     const deploys = { count: 0 }

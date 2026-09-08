@@ -90,6 +90,8 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
   "debug.grants.reset": "revokes the chain's own session grants; the operator's act",
   "admin.grant.confirm": "a grant confirmation is the operator's own answer (approve:self)",
   "admin.grant.cancel": "a confirm-dialog answer is the human's",
+  "approval.approve": "approvals belong to the human",
+  "approval.deny": "approvals belong to the human",
   "admin.queue.approve": "approving an access request is the operator's own decision (approve:self)"
 }
 

@@ -102,3 +102,17 @@ a small `state/controller/forms.ts` for `form.set`, `state/AppController.ts`,
 ## Verification
 
 `cd apps/shared && bun test`; `cd apps/ui && bun x tsc --noEmit -p . && bun test src/mainview/flows src/mainview/cards src/mainview/state/InstructionsBudget.test.ts`, then `bun test src/mainview` once. Write `flow-forms.REPORT.md`.
+
+## Authorization on submission
+
+Every agent form continuation resolves its target in the command registry and
+checks that target's declared capabilities with the active chain authorization
+service. The call slot and lineage stay in host memory, outside the card payload.
+A nested approval requirement parks the outer call; resuming checks the target
+again before its handler runs. A continuation without host authority applies the
+default policy and cannot execute protected capabilities.
+
+Approval decisions are user-only at every agent entry point. Forms shown or
+patched by the model always retain agent provenance; their flow names, fields,
+and drafts are input, never authority. Submitting a user's form from an agent
+call also uses agent authorization.

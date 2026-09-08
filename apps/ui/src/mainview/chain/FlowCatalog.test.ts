@@ -81,7 +81,8 @@ describe("commandEntries — the callable projection", () => {
     const names = commandEntries(commands).map((entry) => entry.name)
     expect(names).toContain("browser.open")
     expect(names).toContain("world.new-note")
-    expect(names).toContain("approval.approve")
+    expect(names).not.toContain("approval.approve")
+    expect(names).not.toContain("approval.deny")
     // Re-pinned 2026-09-01. This asserted that `theme` was unreachable until
     // 1e18cb3339 narrowed the user-only set to USER_ONLY_VISIBLE, so that every
     // flow the slash menu lists is also a tool call. Appearance, surfaces and
