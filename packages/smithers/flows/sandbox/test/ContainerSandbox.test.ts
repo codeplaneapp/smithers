@@ -60,6 +60,7 @@ const survivor = `pgrep -f 'sleep ${sleepDuration.slice(0, -1)}[${sleepDuration.
 interface Call {
   readonly file: string
   readonly args: ReadonlyArray<string>
+  readonly input: string
 }
 
 interface Response {
@@ -74,7 +75,7 @@ const remap = (token: string): string => token.replaceAll("/tmp/.smthrs-sbx", `$
 
 const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = () => undefined) => {
   const calls: Array<Call> = []
-  const containers = new Map<string, { started: boolean }>()
+  const containers = new Map<string, { started: boolean; env: Record<string, string> }>()
   const canned = (response: Response) =>
     makeHandle({
       pid: ProcessId(1),
@@ -100,14 +101,21 @@ const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = (
           PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "no pipelines" })
         )
       }
-      calls.push({ file: command.command, args: command.args })
+      const input = Stream.isStream(command.options.stdin)
+        ? yield* Stream.runFold(command.options.stdin as Stream.Stream<Uint8Array>, () =>
+          "", (text, bytes) =>
+          text + new TextDecoder().decode(bytes))
+        : ""
+      calls.push({ file: command.command, input, args: command.args })
       const injected = fault(command.args)
       if (injected?.failSpawn === true) {
         return yield* Effect.fail(
           PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "engine gone" })
         )
       }
-      if (injected !== undefined) return canned(injected)
+      if (injected !== undefined) {
+        return canned(injected)
+      }
       const args = [...command.args]
       if (args[0] === "create") {
         const name = args[args.indexOf("--name") + 1]!
@@ -118,7 +126,19 @@ const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = (
               `docker: Error response from daemon: Conflict. The container name "/${name}" is already in use by container "0123456789ab".\n`
           })
         }
-        containers.set(name, { started: false })
+        const env: Record<string, string> = {}
+        if (args.includes("--env-file")) {
+          expect(args[args.indexOf("--env-file") + 1]).toBe("/dev/stdin")
+          for (
+            const line of input.split("\n").filter((line) =>
+              line.length > 0
+            )
+          ) {
+            const separator = line.indexOf("=")
+            env[line.slice(0, separator)] = line.slice(separator + 1)
+          }
+        }
+        containers.set(name, { started: false, env })
         return canned({ stdout: "0123456789ab\n" })
       }
       if (args[0] === "container" && args[1] === "inspect") {
@@ -178,7 +198,7 @@ const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = (
       const child = yield* local.spawn(
         ChildProcess.make("/bin/sh", ["-c", `"$0" "$@"; exit "$?"`, program, ...args.slice(index + 2).map(remap)], {
           cwd,
-          env,
+          env: { ...containers.get(name)!.env, ...env },
           extendEnv: true,
           ...interactive && Stream.isStream(command.options.stdin)
             ? { stdin: command.options.stdin as Stream.Stream<Uint8Array> }
@@ -220,6 +240,63 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("ContainerSandbox", () => {
+  it.effect("refuses creation env values that the CLI env-file cannot represent before spawning", () =>
+    Effect.gen(function*() {
+      for (const value of ["first\nsecond", "first\rsecond", "first\u0000second"]) {
+        const fake = engine()
+        const error = yield* Effect.flip(
+          acquired(
+            ContainerSandbox.make({ spawner: fake.spawner, image: "img", env: { TOKEN: value } }),
+            Effect.succeed
+          )
+        )
+        expect(error).toBeInstanceOf(ProviderError)
+        expect(error.code).toBe("spawn_error")
+        expect(fake.calls).toEqual([])
+      }
+    }))
+
+  it.effect("keeps creation and spawn environment values and stdin out of local argv", () =>
+    Effect.gen(function*() {
+      const fake = engine()
+      const secret = "ARGV_ENV_CANARY_'_é\nsecond line $(printf injected)\n"
+      const boot = "ARGV_BOOT_CANARY = ' spaces "
+      const bytes = encoder.encode("ARGV_STDIN_CANARY\n\u0000tail")
+      yield* acquired(
+        ContainerSandbox.make({
+          spawner: fake.spawner,
+          image: "img",
+          workdir,
+          env: { BOOT: boot, smthrs_env: "inherited" }
+        }),
+        (session) =>
+          Effect.gen(function*() {
+            expect((yield* output(session, `printf '%s' "$BOOT"`)).stdout).toBe(boot)
+            expect((yield* output(session, `printf '%s' "$TOKEN"`, { env: { TOKEN: secret } })).stdout).toBe(secret)
+            expect((yield* output(session, `printf '%s' "$smthrs_env"`, { env: { TOKEN: secret } })).stdout).toBe(
+              "inherited"
+            )
+            yield* output(session, "cat > canary.bin", { env: { TOKEN: secret }, stdin: bytes })
+            expect(Array.from(yield* session.readFile(`${workdir}/canary.bin`))).toEqual(Array.from(bytes))
+          })
+      )
+      const argv = fake.calls.flatMap((call) => call.args).join("\n")
+      for (
+        const value of [
+          boot,
+          "ARGV_ENV_CANARY",
+          "ARGV_STDIN_CANARY",
+          Buffer.from(secret).toString("base64"),
+          Buffer.from(bytes).toString("base64")
+        ]
+      ) {
+        expect(argv).not.toContain(value)
+      }
+      for (const call of fake.calls) {
+        if (call.input.length > 0) expect(argv).not.toContain(call.input.trimEnd())
+      }
+    }), 30_000)
+
   it.effect("disables container networking when the provider omits a network mode", () =>
     Effect.gen(function*() {
       const fake = engine()
@@ -262,8 +339,8 @@ describe("ContainerSandbox", () => {
         spaced,
         "--network",
         "none",
-        "--env",
-        "SEED=1",
+        "--env-file",
+        "/dev/stdin",
         "--memory",
         "1g",
         "img:tag",
@@ -418,28 +495,24 @@ describe("ContainerSandbox", () => {
       const spawns = calls.filter((call) => call.args[1] === "--workdir" || call.args[1] === "--interactive")
       expect(spawns[0]!.args).toEqual([
         "exec",
+        "--interactive",
         "--workdir",
         workdir,
-        spawns[0]!.args[3]!,
+        spawns[0]!.args[4]!,
         "/bin/sh",
         "-c",
         "echo $$ > /tmp/.smthrs-sbx/0.pid; if [ -e /tmp/.smthrs-sbx/0.pid.cancel ]; then exit 143; fi; "
-        // Every `-u` before every assignment: `env` stops reading options at
-        // the first operand, so `env KEEP=1 -u DROP prog` would run `-u`.
-        + `exec env -u DROP KEEP=1 WHO=guest /bin/sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
+        + `eval "$(IFS= read -r smthrs_env && smthrs_env=$(printf %s "$smthrs_env" | base64 -d) && printf 'set -- %s' "$smthrs_env" || printf 'exit 125')" || exit 125; `
+        + `exec env "$@" /bin/sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
       ])
-      // The caller's variables never reach the exec environment, so they can
-      // never break the wrapper the exec starts.
       expect(spawns[0]!.args).not.toContain("--env")
-      // This fake does not retain create-time environment, so the rendered
-      // argv is the proof that a real inherited value is deleted.
-      expect(spawns[0]!.args.at(-1)).toContain("env -u DROP KEEP=1")
+      expect(Buffer.from(spawns[0]!.input.trim(), "base64").toString()).toBe("-u DROP KEEP=1 WHO=guest")
       expect(spawns[1]!.args.slice(0, 3)).toEqual(["exec", "--workdir", workdir])
       expect(spawns[3]!.args.slice(1, 3)).toEqual(["--workdir", `${workdir}/sub/nested`])
       const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin"))!
       expect(fed.args.slice(0, 4)).toEqual(["exec", "--interactive", "--workdir", workdir])
-      // Only a command with input asks for the input channel.
-      expect(spawns.filter((call) => call.args.includes("--interactive"))).toHaveLength(1)
+      // Both environment operands and command stdin use the input channel.
+      expect(spawns.filter((call) => call.args.includes("--interactive"))).toHaveLength(2)
     }), 30_000)
 
   it.effect(

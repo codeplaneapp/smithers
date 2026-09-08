@@ -62,6 +62,7 @@ const survivor = `pgrep -f 'sleep ${sleepDuration.slice(0, -1)}[${sleepDuration.
 interface Call {
   readonly file: string
   readonly args: ReadonlyArray<string>
+  readonly input: string
 }
 
 interface Response {
@@ -107,33 +108,55 @@ const cluster = (fault: (args: ReadonlyArray<string>) => Response | undefined = 
           PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "no pipelines here" })
         )
       }
-      calls.push({ file: command.command, args: command.args })
+      const input = Stream.isStream(command.options.stdin)
+        ? yield* Stream.runFold(command.options.stdin as Stream.Stream<Uint8Array>, () =>
+          "", (text, bytes) =>
+          text + new TextDecoder().decode(bytes))
+        : ""
+      calls.push({ file: command.command, input, args: command.args })
       const injected = fault(command.args)
       if (injected?.failSpawn === true) {
         return yield* Effect.fail(
           PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "kubectl missing" })
         )
       }
-      if (injected !== undefined) return canned(injected)
+      if (injected !== undefined) {
+        return canned(injected)
+      }
       const args = [...command.args]
-      while (["--context", "--namespace", "--kubeconfig"].includes(args[0] ?? "")) args.splice(0, 2)
-      if (args[0] === "run") {
-        const name = args[1]!
+      while (["--context", "--namespace", "--kubeconfig"].includes(args[0] ?? "")) {
+        args.splice(0, 2)
+      }
+      if (args[0] === "run" && args.includes("--dry-run=client")) {
+        return canned({
+          stdout: JSON.stringify({
+            apiVersion: "v1",
+            kind: "Pod",
+            metadata: { name: args[1] },
+            spec: {
+              containers: [{ name: args[1], image: args[args.indexOf("--image") + 1] }]
+            }
+          })
+        })
+      }
+      if (args[0] === "run" || args[0] === "create") {
+        const manifest = args[0] === "create" ? JSON.parse(input) : undefined
+        const name = manifest?.metadata.name ?? args[1]!
         if (pods.has(name)) {
           return canned({ exitCode: 1, stderr: `Error from server (AlreadyExists): pods "${name}" already exists\n` })
         }
-        const env: Record<string, string> = {}
-        for (let index = 0; index < args.length; index++) {
-          if (args[index] !== "--env") continue
-          const assignment = args[index + 1]!
-          const separator = assignment.indexOf("=")
-          env[assignment.slice(0, separator)] = assignment.slice(separator + 1)
-        }
+        const env = Object.fromEntries(
+          (manifest?.spec.containers[0].env ?? []).map((
+            entry: { name: string; value: string }
+          ) => [entry.name, entry.value])
+        )
         pods.set(name, { phase: "Running", env })
         return canned({ stdout: `pod/${name} created\n` })
       }
       if (args[0] === "wait") {
-        const name = args.find((arg) => arg.startsWith("pod/"))?.slice(4) ?? ""
+        const name = args.find((arg) =>
+          arg.startsWith("pod/")
+        )?.slice(4) ?? ""
         const pod = pods.get(name)
         if (pod === undefined) {
           return canned({ exitCode: 1, stderr: `Error from server (NotFound): pods "${name}" not found\n` })
@@ -221,6 +244,94 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("KubernetesSandbox", () => {
+  it.effect(
+    "merges creation environment into the stdin manifest and refuses failed rendering",
+    () =>
+      Effect.gen(function*() {
+        const fake = cluster((args) =>
+          args.includes("--dry-run=client") ?
+            {
+              stdout: JSON.stringify({
+                metadata: { name: args[1] },
+                spec: {
+                  containers: [
+                    { name: "sidecar" },
+                    { name: args[1], env: [{ name: "KEPT", value: "base" }, { name: "TOKEN", value: "old" }] }
+                  ]
+                }
+              })
+            } :
+            undefined
+        )
+        // Inspect the manifest without requiring the fake to choose among sidecars.
+        yield* acquired(
+          KubernetesSandbox.make({ spawner: fake.spawner, image: "img", workdir, env: { TOKEN: "secret" } }),
+          () => Effect.void
+        )
+        const manifest = JSON.parse(fake.calls.find((call) => call.args[0] === "create")!.input)
+        expect(manifest.spec.containers).toEqual([
+          { name: "sidecar" },
+          { name: expect.any(String), env: [{ name: "KEPT", value: "base" }, { name: "TOKEN", value: "secret" }] }
+        ])
+        for (
+          const response of [{ stdout: "invalid json" }, { stdout: "{}" }, { exitCode: 1, stderr: "cannot render" }]
+        ) {
+          const broken = cluster((args) => args.includes("--dry-run=client") ? response : undefined)
+          const error = yield* Effect.flip(
+            acquired(
+              KubernetesSandbox.make({ spawner: broken.spawner, image: "img", workdir, env: { TOKEN: "secret" } }),
+              Effect.succeed
+            )
+          )
+          expect(error).toBeInstanceOf(ProviderError)
+          expect(error.code).toBe(response.exitCode === 1 ? "unavailable" : "spawn_error")
+          expect(broken.calls.some((call) => call.args[0] === "create")).toBe(false)
+        }
+      }),
+    30_000
+  )
+
+  it.effect("keeps creation and spawn environment values and stdin out of local argv", () =>
+    Effect.gen(function*() {
+      const fake = cluster()
+      const secret = "ARGV_ENV_CANARY_'_é\nsecond line $(printf injected)\n"
+      const boot = "ARGV_BOOT_CANARY\nsecond line"
+      const bytes = encoder.encode("ARGV_STDIN_CANARY\n\u0000tail")
+      yield* acquired(
+        KubernetesSandbox.make({
+          spawner: fake.spawner,
+          image: "img",
+          workdir,
+          env: { BOOT: boot, smthrs_env: "inherited" }
+        }),
+        (session) =>
+          Effect.gen(function*() {
+            expect((yield* output(session, `printf '%s' "$BOOT"`)).stdout).toBe(boot)
+            expect((yield* output(session, `printf '%s' "$TOKEN"`, { env: { TOKEN: secret } })).stdout).toBe(secret)
+            expect((yield* output(session, `printf '%s' "$smthrs_env"`, { env: { TOKEN: secret } })).stdout).toBe(
+              "inherited"
+            )
+            yield* output(session, "cat > canary.bin", { env: { TOKEN: secret }, stdin: bytes })
+            expect(Array.from(yield* session.readFile(`${workdir}/canary.bin`))).toEqual(Array.from(bytes))
+          })
+      )
+      const argv = fake.calls.flatMap((call) => call.args).join("\n")
+      for (
+        const value of [
+          boot,
+          "ARGV_ENV_CANARY",
+          "ARGV_STDIN_CANARY",
+          Buffer.from(secret).toString("base64"),
+          Buffer.from(bytes).toString("base64")
+        ]
+      ) {
+        expect(argv).not.toContain(value)
+      }
+      for (const call of fake.calls) {
+        if (call.input.length > 0) expect(argv).not.toContain(call.input.trimEnd())
+      }
+    }), 30_000)
+
   it.effect("threads shaping and global flags through the full Pod lifecycle", () =>
     Effect.gen(function*() {
       const spaced = join(root, "work dir")
@@ -281,21 +392,19 @@ describe("KubernetesSandbox", () => {
       }
       const localCalls = fake.calls.map((call) => call.args.slice(globals.length))
       const created = localCalls.find((args) => args[0] === "run")!
-      expect(created.slice(0, 12)).toEqual([
+      expect(created.slice(0, 10)).toEqual([
         "run",
         session.remoteId,
         "--image",
         "img:tag",
         "--restart",
         "Never",
-        "--env",
-        "SEED=1",
         "--labels",
         "app=sandbox,tier=test",
         "--override-type",
         "strategic"
       ])
-      const overrides = JSON.parse(created[13]!)
+      const overrides = JSON.parse(created[11]!)
       expect(overrides).toEqual({
         apiVersion: "v1",
         spec: {
@@ -310,9 +419,12 @@ describe("KubernetesSandbox", () => {
           }]
         }
       })
-      expect(created.slice(14)).toEqual([
+      expect(created.slice(12)).toEqual([
         "--image-pull-policy",
         "IfNotPresent",
+        "--dry-run=client",
+        "-o",
+        "json",
         "--command",
         "--",
         "sleep",
@@ -550,14 +662,17 @@ describe("KubernetesSandbox", () => {
         const withEnv = spawns.find((call) => call.args.at(-1)?.includes("env ") === true)!
         // Every `-u` before every assignment: `env` stops reading options at
         // the first operand, so `env KEEP=1 -u DROP prog` would run `-u`.
-        expect(withEnv.args.at(-1)).toContain(`exec env -u DROP 'KEEP=two words' PRESENT=delivered /bin/sh -c`)
+        expect(withEnv.args.at(-1)).toContain("exec env \"$@\" /bin/sh -c")
+        expect(Buffer.from(withEnv.input.trim(), "base64").toString()).toBe(
+          "-u DROP 'KEEP=two words' PRESENT=delivered"
+        )
         expect(withEnv.args.at(-1)).not.toContain("export")
         // The refused spawn never reached the cluster at all.
         expect(fake.calls.some((call) => call.args.at(-1)?.includes("WITH-DASH") === true)).toBe(false)
         const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin") === true)!
         expect(fed.args.slice(0, 2)).toEqual(["exec", "--stdin"])
         // Only a command with input asks for the input channel.
-        expect(spawns.filter((call) => call.args.includes("--stdin"))).toHaveLength(1)
+        expect(spawns.filter((call) => call.args.includes("--stdin"))).toHaveLength(2)
       }),
     30_000
   )

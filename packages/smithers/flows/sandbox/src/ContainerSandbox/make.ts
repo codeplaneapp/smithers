@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelGuard, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
@@ -37,7 +38,7 @@ export interface ContainerSandboxOptions {
   readonly program?: string | undefined
   /** The guest workspace path. Default `/workspace`. */
   readonly workdir?: string | undefined
-  /** Container-wide environment, applied at creation. */
+  /** Container-wide environment, sent through /dev/stdin as an env-file. CR, LF, and NUL values are refused. */
   readonly env?: Readonly<Record<string, string>> | undefined
   /** The engine's network mode for the container, passed verbatim. Default `none`; another value explicitly opts in. */
   readonly network?: string | undefined
@@ -75,7 +76,7 @@ const pidDirectory = "/tmp/.smthrs-sbx"
  * shells in the chain name `/bin/sh` absolutely, because the engine resolves a
  * bare `sh` through the exec environment's `PATH` and a caller's `env`
  * override would otherwise break the wrapper before the command ever ran. For
- * the same reason the caller's variables travel as an `env(1)` prefix on the
+ * the same reason the caller's variables travel through stdin to an `env(1)` prefix on the
  * inner shell rather than as `--env` on the exec: they belong to the command,
  * not to the plumbing that starts it. Closing a
  * spawn's scope is the process's lifetime ending: the local CLI client is torn
@@ -100,10 +101,12 @@ export const make = (options: ContainerSandboxOptions): Provider => {
   const workdir = options.workdir ?? "/workspace"
   const network = options.network ?? "none"
   const prefix = options.namePrefix ?? "smthrs-sbx-"
-  const run = (args: ReadonlyArray<string>): Effect.Effect<GatheredRun, ProviderError> =>
+  const run = (args: ReadonlyArray<string>, stdin?: Uint8Array): Effect.Effect<GatheredRun, ProviderError> =>
     Effect.scoped(
       Effect.gen(function*() {
-        const handle = yield* options.spawner.spawn(ChildProcess.make(program, [...args])).pipe(
+        const handle = yield* options.spawner.spawn(
+          ChildProcess.make(program, [...args], stdin === undefined ? {} : { stdin: Stream.make(stdin) })
+        ).pipe(
           Effect.mapError(providerFailure("spawn_error", `\`${program} ${args[0]}\` could not start`))
         )
         return yield* gather(handle, `${program} ${args[0]}`)
@@ -123,6 +126,20 @@ export const make = (options: ContainerSandboxOptions): Provider => {
   return {
     acquire: (sessionKey) =>
       Effect.gen(function*() {
+        yield* checkEnvironmentNames(options.env)
+        const creationEnv = Object.entries(options.env ?? {})
+        if (creationEnv.some(([, value]) => /[\r\n\0]/.test(value))) {
+          return yield* Effect.fail(
+            new ProviderError({
+              code: "spawn_error",
+              message:
+                "container creation environment values must not contain CR, LF, or NUL: the CLI env-file format cannot carry them"
+            })
+          )
+        }
+        const envFile = creationEnv.length === 0 ? undefined : new TextEncoder().encode(
+          creationEnv.map(([key, value]) => `${key}=${value}\n`).join("")
+        )
         const name = `${prefix}${sessionSlug(sessionKey)}`
         // CREATION IS ITS OWN RESOURCE, and starting and preparing come after
         // it rather than inside it. `acquireRelease` registers a finalizer only
@@ -141,12 +158,12 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               workdir,
               "--network",
               network,
-              ...Object.entries(options.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
+              ...envFile === undefined ? [] : ["--env-file", "/dev/stdin"],
               ...options.createArgs ?? [],
               options.image,
               "sleep",
               "infinity"
-            ])
+            ], envFile)
             if (created.code === 0) return
             // A refused create is either a name already taken, which is the
             // reattach this provider is built around, or anything else, which
@@ -233,11 +250,12 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               ...entries.flatMap(([key, value]) => value === undefined ? ["-u", CommandLine.quote(key)] : []),
               ...entries.flatMap(([key, value]) => value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)])
             ]
+            const input = environmentInput(environment, stdin)
             const args = [
               "exec",
               // The exec has a real input channel; it is asked for only when
               // there is input to carry, so an input-less command sees EOF.
-              ...stdin === undefined ? [] : ["--interactive"],
+              ...input.stdin === undefined ? [] : ["--interactive"],
               // `--workdir` requires an absolute guest path, so a relative
               // cwd is rooted at the session workdir before it gets here.
               "--workdir",
@@ -251,12 +269,12 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               // The pid survives the whole chain: `exec` replaces the recorded
               // shell with env, env replaces itself with `/bin/sh`, and
               // `sh -c` execs a lone simple command.
-              `echo $$ > ${pidfile}; ${cancelGuard(pidfile)}; exec ${
-                environment.length === 0 ? "" : `env ${environment.join(" ")} `
-              }/bin/sh -c ${CommandLine.quote(command)}`
+              `echo $$ > ${pidfile}; ${cancelGuard(pidfile)}; ${input.script}exec ${input.prefix}/bin/sh -c ${
+                CommandLine.quote(command)
+              }`
             ]
             const handle = yield* options.spawner.spawn(
-              ChildProcess.make(program, args, stdin === undefined ? {} : { stdin: Stream.make(stdin) })
+              ChildProcess.make(program, args, input.stdin === undefined ? {} : { stdin: input.stdin })
             ).pipe(
               Effect.mapError(providerFailure("spawn_error", `\`${command}\` could not start in ${name}`))
             )

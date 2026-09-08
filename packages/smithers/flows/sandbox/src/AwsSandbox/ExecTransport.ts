@@ -20,8 +20,8 @@ import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSp
  * Two consequences of that transport are visible to callers and stated here
  * rather than hidden. The session is a pseudo-terminal, so a command's
  * standard error arrives interleaved on standard output and line endings are
- * normalized; file transfer is byte-exact regardless, because it travels as
- * base64. And the plugin exits zero whatever the remote command did, so the
+ * normalized; file transfer is byte-exact when the streaming adapter is
+ * supplied, because it travels as base64. And the plugin exits zero whatever the remote command did, so the
  * provider wraps every command to print its own exit status and reads that
  * back; a session that ends without it is reported as `aborted`, never as
  * success.
@@ -30,10 +30,9 @@ import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSp
  * sentinel, the byte paths, and the signal walk are exercised against a fake
  * that reproduces the plugin's banner, footer, carriage returns, and zero exit
  * over a real shell. That the ECS agent hands `--command` to the container's
- * `sh` (which is why the provider sends `sh -c '...'`) and the exact command
- * length the SSM document accepts are taken from the service's documented
- * behavior, not from a live cluster run here; `chunkBytes` exists so the
- * latter can be tuned without a code change.
+ * `sh` (which is why the provider sends `sh -c '...'`) is taken from the
+ * service's documented behavior, not from a live cluster run here. Sensitive input requires the
+ * separate streaming adapter below; it never rides inside `--command`.
  *
  * @category models
  * @since 0.1.0
@@ -41,23 +40,26 @@ import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSp
 export interface ExecTransport {
   /** The spawner the AWS CLI runs through. */
   readonly spawner: ChildProcessSpawner["Service"]
+  /**
+   * Optional data-channel adapter for commands with input. Receives the same
+   * AWS CLI command descriptor as `spawner`, with `options.stdin` carrying
+   * sensitive bytes. It must deliver that stream byte-exactly to guest stdin,
+   * close guest stdin at EOF, and never echo it or put it in process argv.
+   * Output follows the same framing contract as the CLI spawner.
+   *
+   * A plain AWS CLI spawner is not sufficient: its PTY does not provide this
+   * contract. Without this adapter, file writes and spawns with stdin or a
+   * nonempty environment fail with ProviderError code `unavailable`.
+   */
+  readonly streamingSpawner?: ChildProcessSpawner["Service"] | undefined
   /** The CLI. Default `aws`. */
   readonly program?: string | undefined
   /** Global CLI arguments placed before the subcommand, such as `--profile`. */
   readonly globalArgs?: ReadonlyArray<string> | undefined
   /**
-   * The largest slice of a written file carried by one command, in bytes
-   * before base64 encoding. File contents ride inside the command line, whose
-   * length the SSM document bounds, so a write is split across as many
-   * commands as it needs. Default 3072.
-   *
-   * A whole number of at least 1. It is the increment of the loop that slices
-   * a file, so `0`, a negative value, or `NaN` would spin forever or silently
-   * truncate the write; acquiring a session validates it and fails with
-   * `spawn_error` instead. The upper end belongs to the service: a slice too
-   * large for the SSM document's command length fails the write with AWS's own
-   * message, and every write costs one remote round trip per slice, so a small
-   * value buys nothing but round trips.
+   * The largest slice sent through streaming stdin, before base64 encoding.
+   * Default 3072; acquisition requires a whole number from 1 through 65536.
+   * Each slice costs one remote session. This bounds buffering per transfer.
    */
   readonly chunkBytes?: number | undefined
 }

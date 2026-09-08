@@ -283,6 +283,7 @@ interface CliFaults {
 interface CliCall {
   readonly file: string
   readonly args: ReadonlyArray<string>
+  readonly input: string
   readonly remote: string
 }
 
@@ -308,14 +309,20 @@ const fakeCli = (faults: CliFaults = {}) => {
       // Guest pids live under a fixed guest path; on this host they live
       // under the test's own root instead.
       const remote = command.args[remoteIndex + 1]!.replaceAll("/tmp/.smthrs-sbx", `${root}/.pids`)
-      calls.push({ file: command.command, args: command.args, remote })
+      const input = Stream.isStream(command.options.stdin)
+        ? yield* Stream.runFold(command.options.stdin as Stream.Stream<Uint8Array>, () =>
+          "", (text, bytes) =>
+          text + new TextDecoder().decode(bytes))
+        : ""
+      calls.push({ file: command.command, input, args: command.args, remote })
       const sessionId = `ecs-execute-command-${calls.length}`
       if (faults.pluginFailure !== undefined) {
         return makeHandle({
           pid: 0 as never,
           exitCode: Effect.succeed(ExitCode(faults.pluginFailure.code)),
           isRunning: Effect.succeed(false),
-          kill: () => Effect.void,
+          kill: () =>
+            Effect.void,
           stdin: Sink.drain,
           stdout: Stream.empty,
           stderr: Stream.make(encoder.encode(faults.pluginFailure.stderr)),
@@ -335,7 +342,14 @@ const fakeCli = (faults: CliFaults = {}) => {
       // `to-stderr` AFTER the sentinel, where `unframe` correctly discards it
       // as session footer, and the conformance suite saw a command's standard
       // error vanish. One descriptor, one order, no race.
-      const child = yield* local.spawn(ChildProcess.make("sh", ["-c", `exec 2>&1\n${remote}`], { cwd: root }))
+      const child = yield* local.spawn(
+        ChildProcess.make("sh", ["-c", `exec 2>&1\n${remote}`], {
+          cwd: root,
+          ...Stream.isStream(command.options.stdin)
+            ? { stdin: command.options.stdin as Stream.Stream<Uint8Array> }
+            : {}
+        })
+      )
       const banner = faults.noBanner === true
         ? Stream.empty
         : Stream.make(encoder.encode(`\r\nStarting session with SessionId: ${sessionId}\r\n`))
@@ -395,7 +409,7 @@ const transportProvider = (
     workdir: root,
     pollIntervalMs: 0,
     maxPollAttempts: 3,
-    exec: { spawner: cli.spawner, ...transport },
+    exec: { spawner: cli.spawner, streamingSpawner: cli.spawner, ...transport },
     ...overrides
   })
 
@@ -416,6 +430,63 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("AwsSandbox", () => {
+  it.effect("fails closed before sending sensitive input through a CLI-only transport", () =>
+    Effect.gen(function*() {
+      const cli = fakeCli()
+      yield* acquired(transportProvider(fakeEcs(), cli, {}, { streamingSpawner: undefined }), (session) =>
+        Effect.gen(function*() {
+          expect((yield* output(session, "true")).code).toBe(0)
+          const before = cli.calls.length
+          for (
+            const operation of [
+              session.writeFile(`${root}/secret`, encoder.encode("FILE_CANARY")),
+              session.writeFile(`${root}/empty`, new Uint8Array()),
+              Effect.scoped(session.spawn("cat", { stdin: encoder.encode("STDIN_CANARY") })),
+              Effect.scoped(session.spawn("true", { env: { TOKEN: "ENV_CANARY" } })),
+              Effect.scoped(session.spawn("true", { env: { TOKEN: undefined } }))
+            ]
+          ) {
+            const error = yield* Effect.flip(operation)
+            expect(error).toBeInstanceOf(ProviderError)
+            expect(error.code).toBe("unavailable")
+            expect(error.message).toContain("ExecTransport.streamingSpawner")
+          }
+          expect(cli.calls).toHaveLength(before)
+        }))
+    }), 30_000)
+
+  it.effect("keeps environment, file, and stdin payloads out of local argv", () =>
+    Effect.gen(function*() {
+      const cli = fakeCli()
+      const secret = "ARGV_ENV_CANARY_'_é\nsecond line $(printf injected)\n"
+      const file = encoder.encode("ARGV_FILE_CANARY")
+      const stdin = encoder.encode("ARGV_STDIN_CANARY\n\u0000tail")
+      yield* acquired(transportProvider(fakeEcs(), cli), (session) =>
+        Effect.gen(function*() {
+          yield* session.writeFile(`${root}/canary.bin`, file)
+          expect(Array.from(yield* session.readFile(`${root}/canary.bin`))).toEqual(Array.from(file))
+          expect((yield* output(session, `printf '%s' "$TOKEN"`, { env: { TOKEN: secret } })).stdout).toBe(secret)
+          yield* output(session, "cat > stdin-canary.bin", { env: { TOKEN: secret }, stdin })
+          expect(Array.from(yield* session.readFile(`${root}/stdin-canary.bin`))).toEqual(Array.from(stdin))
+        }))
+      const argv = cli.calls.flatMap((call) => call.args).join("\n")
+      for (
+        const value of [
+          "ARGV_ENV_CANARY",
+          "ARGV_FILE_CANARY",
+          "ARGV_STDIN_CANARY",
+          Buffer.from(secret).toString("base64"),
+          Buffer.from(file).toString("base64"),
+          Buffer.from(stdin).toString("base64")
+        ]
+      ) {
+        expect(argv).not.toContain(value)
+      }
+      for (const call of cli.calls) {
+        if (call.input.length > 0) expect(argv).not.toContain(call.input.trimEnd())
+      }
+    }), 30_000)
+
   it.effect("provisions a Fargate task and refuses to reach into it without a transport", () =>
     Effect.gen(function*() {
       const fake = fakeEcs()
@@ -499,13 +570,12 @@ describe("AwsSandbox", () => {
             env: { KEEP: "1", DROP: undefined, WHO: "fargate" }
           })
           expect(greeting).toEqual({ stdout: "hello\nfrom fargate", code: 0 })
-          // The AWS fake records task environment but its local guest shell is
-          // not that task, so the shipped command line is the fidelity boundary
-          // that proves the inherited value is explicitly deleted.
+          // The recorded input proves the inherited value is explicitly deleted.
           const greetingCall = cli.calls.find((call) => call.remote.includes("hello"))!
           // Every `-u` before every assignment: `env` stops reading options at
           // the first operand, so `env KEEP=1 -u DROP prog` would run `-u`.
-          expect(greetingCall.remote).toContain("env -u DROP KEEP=1 WHO=fargate /bin/sh -c")
+          expect(Buffer.from(greetingCall.input.trim(), "base64").toString()).toBe("-u DROP KEEP=1 WHO=fargate")
+          expect(greetingCall.remote).toContain("env \"$@\" /bin/sh -c")
           expect(yield* output(session, "pwd")).toEqual({ stdout: `${root}\n`, code: 0 })
           expect((yield* output(session, "exit 23")).code).toBe(23)
           expect((yield* output(session, "true")).stdout).toBe("")

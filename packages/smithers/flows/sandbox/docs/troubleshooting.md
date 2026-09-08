@@ -196,7 +196,11 @@ still provisions and tears down tasks, but the ECS API alone carries no command
 output, so `spawn`, `readFile`, and `writeFile` refuse with `unavailable`.
 
 **What to change.** Pass `exec: { spawner }`, and install the `aws` CLI and
-`session-manager-plugin` on the machine running the provider.
+`session-manager-plugin` on the machine running the provider. File writes and
+spawns with stdin or environment overrides also require `exec.streamingSpawner`.
+That adapter must deliver stdin byte-exactly without echo or argv encoding;
+a normal CLI spawner is insufficient. Without it, these operations fail with
+`unavailable` before transfer. See [AwsSandbox](./api.md#awssandbox).
 
 ## "microsandbox: image and snapshot are exclusive; name one"
 

@@ -10,6 +10,7 @@ import type { Scope } from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
+import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelledStatus, cancelMarker, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure } from "../internal/localProcess.ts"
@@ -182,29 +183,10 @@ const leftoverTasks = (
 /** The write-slice size a transport uses when it names none. */
 const defaultChunkBytes = 3072
 
-/**
- * The largest write slice that stays safely below every known argv boundary.
- *
- * Each slice travels as base64 inside one `--command` argument of the
- * `aws ecs execute-command` process this provider spawns. Base64 expands by
- * four thirds, and Linux caps one argv entry at 128 KiB (`MAX_ARG_STRLEN`, 32
- * pages), so a 64 KiB payload plus its framing stays inside the smallest known
- * limit on the path. AWS does not publish a separate SSM document limit.
- */
+/** Maximum buffered payload per streaming write session. */
 const maxChunkBytes = 64 * 1024
 
-/**
- * The validated write-slice size.
- *
- * `chunkBytes` is the increment of the loop that splits a file into commands,
- * so an unchecked value is not a bad setting but a broken write: `0` or a
- * negative number never advances the offset and spins forever on empty slices,
- * and `NaN` makes the offset `NaN` after one iteration, ending the loop having
- * emitted a single empty slice — a silently truncated file rather than an
- * error. Values above {@link maxChunkBytes} can exceed Linux's single-argument
- * limit after base64 expansion and framing, so acquisition rejects them before
- * the remote service can fail later with a transport error.
- */
+/** Validate the loop increment before any file transfer can start. */
 const chunkBytesOf = (transport: ExecTransport): Effect.Effect<number, ProviderError> => {
   const chunkBytes = transport.chunkBytes ?? defaultChunkBytes
   return Number.isSafeInteger(chunkBytes) && chunkBytes >= 1 && chunkBytes <= maxChunkBytes
@@ -446,14 +428,13 @@ const unframe = (run: GatheredRun, nonce: number): Unframed => {
  * options at the first operand: `env A=1 -u B prog` hands `-u` to `env` as
  * the program to run and fails with `env: -u: No such file or directory`.
  */
-const envPrefix = (env: Readonly<Record<string, string | undefined>> | undefined): string => {
+const envOperands = (env: Readonly<Record<string, string | undefined>> | undefined): ReadonlyArray<string> => {
   const entries = Object.entries(env ?? {})
   const removals = entries.flatMap(([name, value]) => value === undefined ? ["-u", CommandLine.quote(name)] : [])
   const assignments = entries.flatMap(([name, value]) =>
     value === undefined ? [] : [CommandLine.quote(`${name}=${value}`)]
   )
-  const prefix = [...removals, ...assignments]
-  return prefix.length === 0 ? "" : `env ${prefix.join(" ")} `
+  return [...removals, ...assignments]
 }
 
 /**
@@ -478,7 +459,7 @@ const framedScript = (script: string, nonce: number): string =>
 const spawnScript = (
   command: string,
   cwd: string,
-  env: Readonly<Record<string, string | undefined>> | undefined,
+  environment: ReturnType<typeof environmentInput>,
   pidfile: string,
   nonce: number
 ): string =>
@@ -488,8 +469,10 @@ const spawnScript = (
       // kill can also plant the marker after this guard, then read an empty
       // pidfile between `cmd & p=$!` and `echo`. Rechecking immediately after
       // the pid write signals that now-recorded command and closes that window.
-      `if [ -e ${cancelMarker(pidfile)} ]; then c=${cancelledStatus}; ` +
-        `elif cd ${CommandLine.quote(cwd)}; then ${envPrefix(env)}/bin/sh -c ${CommandLine.quote(command)} & p=$!; ` +
+      environment.script + `if [ -e ${cancelMarker(pidfile)} ]; then c=${cancelledStatus}; ` +
+        `elif cd ${CommandLine.quote(cwd)}; then ${environment.prefix}/bin/sh -c ${
+          CommandLine.quote(command)
+        } & p=$!; ` +
         `echo "$p" > ${pidfile}; if [ -e ${cancelMarker(pidfile)} ]; then kill -s TERM "$p" 2>/dev/null; fi; ` +
         `wait "$p"; c=$?; else c=127; fi; printf '\\n${sentinel(nonce)}%s__\\n' "$c"`
     )
@@ -506,7 +489,7 @@ const spawnScript = (
  * Commands, reads, and writes travel through {@link ExecTransport}: the AWS
  * CLI and its Session Manager plugin over an injected spawner, because the ECS
  * API returns SSM session metadata and nothing more. Reads come back as
- * base64 and writes go in as base64 in bounded slices, so bytes survive the
+ * base64 and writes go in through streaming stdin as base64 in bounded slices, so bytes survive the
  * pseudo-terminal in both directions; `kill` records each command's guest pid
  * and signals it through a second session. Without a transport the session
  * refuses `spawn`, `readFile`, and `writeFile` explicitly rather than
@@ -585,7 +568,7 @@ export const make = (options: AwsSandboxOptions): Provider => ({
 
       const program = transport.program ?? "aws"
       const chunkBytes = yield* chunkBytesOf(transport)
-      const cli = (remote: string): ChildProcess.Command =>
+      const cli = (remote: string, stdin?: Stream.Stream<Uint8Array>): ChildProcess.Command =>
         ChildProcess.make(program, [
           ...transport.globalArgs ?? [],
           "--region",
@@ -600,19 +583,34 @@ export const make = (options: AwsSandboxOptions): Provider => ({
           "--interactive",
           "--command",
           remote
-        ])
+        ], stdin === undefined ? {} : { stdin })
+      const requireStreaming = Effect.suspend(() =>
+        transport.streamingSpawner === undefined
+          ? Effect.fail(
+            failure(
+              "unavailable",
+              "file writes, stdin, and environment input require ExecTransport.streamingSpawner; the AWS CLI cannot carry them safely"
+            )
+          )
+          : Effect.succeed(transport.streamingSpawner)
+      )
+      const spawnTransport = (remote: string, stdin?: Stream.Stream<Uint8Array>) =>
+        Effect.gen(function*() {
+          const spawner = stdin === undefined ? transport.spawner : yield* requireStreaming
+          return yield* spawner.spawn(cli(remote, stdin)).pipe(
+            Effect.mapError(providerFailure("spawn_error", `\`${program} ecs execute-command\` could not start`))
+          )
+        })
       const transportFailure = (run: GatheredRun): ProviderError =>
         failure("unavailable", `\`${program} ecs execute-command\` exited ${run.code}: ${run.stderr.trim()}`)
       // One-shot guest scripts: reads, writes, kills, and the workspace
       // preparation. Each opens its own session and reports its own status.
       let nextNonce = 0
-      const run = (script: string): Effect.Effect<Unframed, ProviderError> =>
+      const run = (script: string, stdin?: Stream.Stream<Uint8Array>): Effect.Effect<Unframed, ProviderError> =>
         Effect.scoped(
           Effect.gen(function*() {
             const nonce = nextNonce++
-            const handle = yield* transport.spawner.spawn(cli(framedScript(script, nonce))).pipe(
-              Effect.mapError(providerFailure("spawn_error", `\`${program} ecs execute-command\` could not start`))
-            )
+            const handle = yield* spawnTransport(framedScript(script, nonce), stdin)
             const gathered = yield* gather(handle, `${program} ecs execute-command`)
             if (gathered.code !== 0) return yield* Effect.fail(transportFailure(gathered))
             return unframe(gathered, nonce)
@@ -635,22 +633,14 @@ export const make = (options: AwsSandboxOptions): Provider => ({
 
       const writeFile: Session["writeFile"] = (path, content) =>
         Effect.gen(function*() {
+          yield* requireStreaming
           const target = CommandLine.quote(path)
           const parent = parentOf(path)
           const prepare = parent === undefined ? "" : `mkdir -p ${CommandLine.quote(parent)} && `
-          const slices: Array<string> = []
-          for (let offset = 0; offset < content.length; offset += chunkBytes) {
-            slices.push(encodeBase64(content.slice(offset, offset + chunkBytes)))
-          }
-          const scripts = slices.length === 0
-            ? [`${prepare}: > ${target}`]
-            : slices.map((slice, index) =>
-              `${index === 0 ? prepare : ""}printf %s ${CommandLine.quote(slice)} | base64 -d ${
-                index === 0 ? ">" : ">>"
-              } ${target}`
-            )
-          for (const script of scripts) {
-            const result = yield* Effect.flatMap(run(script), (result) => settled(`writing ${path}`, result))
+          for (let offset = 0; offset < Math.max(1, content.length); offset += chunkBytes) {
+            const script = `${offset === 0 ? prepare : ""}base64 -d ${offset === 0 ? ">" : ">>"} ${target}`
+            const input = Stream.make(encoder.encode(encodeBase64(content.slice(offset, offset + chunkBytes))))
+            const result = yield* Effect.flatMap(run(script, input), (result) => settled(`writing ${path}`, result))
             if (result.code !== 0) {
               return yield* Effect.fail(failure("unknown", `could not write ${path}: ${result.payload.trim()}`))
             }
@@ -689,13 +679,13 @@ export const make = (options: AwsSandboxOptions): Provider => ({
         workdir,
         spawn: Effect.fnUntraced(function*(command, spawnOptions) {
           yield* checkEnvironmentNames(spawnOptions.env)
+          const environment = environmentInput(envOperands(spawnOptions.env), undefined)
+          if (spawnOptions.stdin !== undefined || environment.stdin !== undefined) yield* requireStreaming
           const nonce = nextNonce++
           const pidfile = `${pidDirectory}/${nonce}.pid`
           const fed = yield* redirect(command, spawnOptions.stdin)
-          const remote = spawnScript(fed, resolveCwd(spawnOptions.cwd), spawnOptions.env, pidfile, nonce)
-          const handle = yield* transport.spawner.spawn(cli(remote)).pipe(
-            Effect.mapError(providerFailure("spawn_error", `\`${command}\` could not start in ${taskArn}`))
-          )
+          const remote = spawnScript(fed, resolveCwd(spawnOptions.cwd), environment, pidfile, nonce)
+          const handle = yield* spawnTransport(remote, environment.stdin)
           // The session's whole output is needed before any of it can be
           // read back (the banner leads and the sentinel trails), so the
           // three pieces of the process share one gathering of the local

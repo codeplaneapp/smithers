@@ -9,6 +9,7 @@ import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { decodeBase64Bytes, encodeBase64Bytes } from "../internal/base64.ts"
+import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelGuard, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
@@ -145,10 +146,12 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
     ...options.namespace === undefined ? [] : ["--namespace", options.namespace],
     ...options.kubeconfig === undefined ? [] : ["--kubeconfig", options.kubeconfig]
   ]
-  const run = (args: ReadonlyArray<string>): Effect.Effect<GatheredRun, ProviderError> =>
+  const run = (args: ReadonlyArray<string>, stdin?: Uint8Array): Effect.Effect<GatheredRun, ProviderError> =>
     Effect.scoped(
       Effect.gen(function*() {
-        const handle = yield* options.spawner.spawn(ChildProcess.make(program, [...globals, ...args])).pipe(
+        const handle = yield* options.spawner.spawn(
+          ChildProcess.make(program, [...globals, ...args], stdin === undefined ? {} : { stdin: Stream.make(stdin) })
+        ).pipe(
           Effect.mapError(providerFailure("spawn_error", `\`${program} ${args[0]}\` could not start`))
         )
         return yield* gather(handle, `${program} ${args[0]}`)
@@ -166,6 +169,7 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
   return {
     acquire: (sessionKey) =>
       Effect.gen(function*() {
+        const environment = options.env ?? {}
         const name = podNameOf(prefix, sessionKey)
         const createArgs = [
           "run",
@@ -174,7 +178,6 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
           options.image,
           "--restart",
           "Never",
-          ...Object.entries(options.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
           ...labels.length === 0
             ? []
             : ["--labels", labels.map(([key, value]) => `${key}=${value}`).join(",")],
@@ -185,9 +188,37 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
           "sleep",
           "infinity"
         ]
+        // Let kubectl render all run flags, then add environment values to
+        // the manifest sent over stdin rather than its local argv.
+        const create = Effect.gen(function*() {
+          if (Object.keys(environment).length === 0) return yield* run(createArgs)
+          yield* checkEnvironmentNames(environment)
+          const commandIndex = createArgs.indexOf("--command")
+          const rendered = yield* run([
+            ...createArgs.slice(0, commandIndex),
+            "--dry-run=client",
+            "-o",
+            "json",
+            ...createArgs.slice(commandIndex)
+          ])
+          if (rendered.code !== 0) return rendered
+          const manifest = yield* Effect.try({
+            try: () => {
+              const pod = JSON.parse(decoder.decode(rendered.stdout))
+              const container = pod.spec.containers.find((entry: { name: string }) => entry.name === name)
+              container.env = [
+                ...(container.env ?? []).filter((entry: { name: string }) => !Object.hasOwn(environment, entry.name)),
+                ...Object.entries(environment).map(([name, value]) => ({ name, value }))
+              ]
+              return new TextEncoder().encode(JSON.stringify(pod))
+            },
+            catch: providerFailure("spawn_error", "kubectl did not render a valid Pod manifest")
+          })
+          return yield* run(["create", "-f", "-"], manifest)
+        })
         yield* Effect.acquireRelease(
           Effect.gen(function*() {
-            const created = yield* run(createArgs)
+            const created = yield* create
             if (created.code === 0) return
             if (!/(?:AlreadyExists|already exists)/i.test(created.stderr)) {
               return yield* Effect.fail(
@@ -210,7 +241,7 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
               "--force",
               "--grace-period=0"
             ])
-            const recreated = yield* run(createArgs)
+            const recreated = yield* create
             if (recreated.code !== 0) {
               return yield* Effect.fail(
                 new ProviderError({
@@ -296,13 +327,12 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
             // pid survives the whole chain: `exec` replaces the recorded shell
             // with env, env replaces itself with `/bin/sh`, and `sh -c` execs
             // a lone simple command.
+            const input = environmentInput(environment, stdin)
             const script = [
               `cd ${CommandLine.quote(resolveCwd(spawnOptions.cwd))}`,
               `echo $$ > ${pidfile}`,
               cancelGuard(pidfile),
-              `exec ${environment.length === 0 ? "" : `env ${environment.join(" ")} `}/bin/sh -c ${
-                CommandLine.quote(command)
-              }`
+              `${input.script}exec ${input.prefix}/bin/sh -c ${CommandLine.quote(command)}`
             ].join(" && ")
             const handle = yield* options.spawner.spawn(
               ChildProcess.make(program, [
@@ -310,7 +340,7 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
                 "exec",
                 // The exec has a real input channel; it is asked for only
                 // when there is input to carry.
-                ...stdin === undefined ? [] : ["--stdin"],
+                ...input.stdin === undefined ? [] : ["--stdin"],
                 name,
                 "--",
                 // The absolute path prevents a Pod-wide PATH override from
@@ -318,7 +348,7 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
                 "/bin/sh",
                 "-c",
                 script
-              ], stdin === undefined ? {} : { stdin: Stream.make(stdin) })
+              ], input.stdin === undefined ? {} : { stdin: input.stdin })
             ).pipe(
               Effect.mapError(providerFailure("spawn_error", `\`${command}\` could not start in ${name}`))
             )
