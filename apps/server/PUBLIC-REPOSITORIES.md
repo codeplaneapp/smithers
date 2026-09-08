@@ -88,6 +88,18 @@ under the name the browser asked for. `cloudRepo` is server-side only and
 never appears in the `GET /api/public/repos` response. Signed-in requests
 keep the GitHub name and the user's own bearer.
 
+The mirror follows `main` through `.github/workflows/mirror-sync.yml`: every
+push to `main` on GitHub pushes the same history to
+`https://api.jjhub.tech/smithers-canary/smithers.git` `main`, so the factory
+projection under `.smithers/`, the wiki, the flow catalog and the docs a
+visitor reads signed out are the ones on `main`. The push authenticates with
+the `SMITHERS_CLOUD_MIRROR_TOKEN` repository secret, a Smithers Cloud personal
+access token for the `smithers-canary` user scoped to that repository, sent as
+the Basic password of the HTTPS push. A checkout without the secret skips the
+push with a notice that names it; a rejected push fails the run and is never
+forced. `apps/server/scripts/canary/mirror-sync-wiring.test.ts` pins the
+workflow to the `cloudRepo` in `src/publicRepoCatalog.ts`.
+
 Requests carrying a session use the existing authenticated path, preserving
 access to private repositories. An expired or non-allowlisted session falls
 back to an anonymous repository read. Authenticated answers never enter the public

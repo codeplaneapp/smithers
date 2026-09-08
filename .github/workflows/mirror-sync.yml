@@ -1,0 +1,61 @@
+# Push main to the Smithers Cloud mirror of this repository.
+#
+# smithers.sh serves this repository signed out from the Cloud mirror
+# smithers-canary/smithers (apps/server/PUBLIC-REPOSITORIES.md, "Existing
+# repository APIs"): the factory projection under .smithers/, the wiki, the flow
+# catalog and the docs all reach a visitor through that mirror's contents
+# reads. The mirror has no pull of its own and the Cloud mirror-sync endpoint
+# answers 500, so before this workflow the mirror moved only when someone
+# pushed main to it by hand and every projection on smithers.sh lagged main.
+#
+# AUTHENTICATION. The mirror takes a personal access token as the Basic
+# password of an HTTPS push. The token is the SMITHERS_CLOUD_MIRROR_TOKEN
+# repository secret: a token for the smithers-canary user scoped to that one
+# repository. It reaches git as an Authorization header, never as part of the
+# remote URL, so no progress line or error message carries it.
+#
+# HONESTY. A checkout without the secret (a fork, or this repository before
+# the secret is added) skips the push with a notice that names the secret; it
+# does not fail, because a missing credential is a configuration state and not
+# a defect in the commit. A rejected push (the mirror's main diverged from
+# ours) fails the run: the push is never forced.
+#
+# LINTING. ci.yml names this file in its actionlint step, and release.yml
+# copies that step, so a syntax error here reddens CI rather than surfacing
+# as a silent skip on the next push.
+name: Mirror main to Smithers Cloud
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Push main to smithers-canary/smithers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Push main to the mirror
+        env:
+          SMITHERS_CLOUD_MIRROR_TOKEN: ${{ secrets.SMITHERS_CLOUD_MIRROR_TOKEN }}
+          MIRROR_URL: https://api.jjhub.tech/smithers-canary/smithers.git
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          if [ -z "$SMITHERS_CLOUD_MIRROR_TOKEN" ]; then
+            echo "::notice title=Mirror sync skipped::The SMITHERS_CLOUD_MIRROR_TOKEN repository secret is not set, so main was not pushed to $MIRROR_URL. Add a smithers-canary personal access token scoped to that repository as SMITHERS_CLOUD_MIRROR_TOKEN and re-run this workflow."
+            exit 0
+          fi
+          authorization="Basic $(printf 'x-access-token:%s' "$SMITHERS_CLOUD_MIRROR_TOKEN" | base64 -w0)"
+          git -c "http.extraHeader=Authorization: $authorization" push "$MIRROR_URL" HEAD:refs/heads/main
+          echo "Pushed $(git rev-parse HEAD) to $MIRROR_URL main."
+        shell: bash
