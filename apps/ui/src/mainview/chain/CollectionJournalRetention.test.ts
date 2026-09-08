@@ -160,7 +160,7 @@ describe("authoritative chain journal retention", () => {
     ]
     for (const lineage of ["parked-a", "parked-b"]) {
       expect(await run(first, lineage, scripts, entries, false)).toMatchObject({
-        _tag: "Park",
+        _tag: "ApprovalWait",
         reason: { code: "approval" }
       })
     }

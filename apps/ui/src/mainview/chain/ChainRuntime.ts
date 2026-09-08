@@ -191,7 +191,7 @@ const teeJournal = (
 
 export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
-  const running = new Map<string, Fiber.Fiber<Outcome.Terminal, unknown>>()
+  const running = new Map<string, Fiber.Fiber<Outcome.RunResult, unknown>>()
   const steerable = new Map<string, Steering.Service>()
   const cancelled = new Set<string>()
   /* Session-scoped: grants and one-shot denials survive across turns, not reloads. */
@@ -281,10 +281,10 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
       prefix: subPrefix(),
       maxLinks: options.maxLinks,
       maxCallsPerLink: options.maxCallsPerLink
-    }).pipe(Effect.provide(Layer.mergeAll(base, catalog))) as Effect.Effect<Outcome.Terminal, unknown, never>
+    }).pipe(Effect.provide(Layer.mergeAll(base, catalog))) as Effect.Effect<Outcome.RunResult, unknown, never>
     void Effect.runPromise(
       Effect.exit(program) as Effect.Effect<
-        { readonly _tag: string; readonly value?: Outcome.Terminal; readonly cause?: unknown },
+        { readonly _tag: string; readonly value?: Outcome.RunResult; readonly cause?: unknown },
         never,
         never
       >
@@ -294,7 +294,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
         backgroundGoals.delete(lineage)
         return
       }
-      const outcome = exit.value as Outcome.Terminal
+      const outcome = exit.value as Outcome.RunResult
       if (outcome._tag === "Done") {
         const detail = compactResult(outcome.value)
         deliverNote(
@@ -303,7 +303,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
         backgroundGoals.delete(lineage)
         return
       }
-      if (outcome._tag === "Park" && outcome.reason.code === "approval") {
+      if (outcome._tag === "ApprovalWait") {
         const ask = policy.pendingAsk(lineage)
         options.store.dispatch({
           type: "card.upsert",
@@ -521,7 +521,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
       ],
       maxLinks: options.maxLinks,
       maxCallsPerLink: options.maxCallsPerLink
-    }).pipe(Effect.provide(layers)) as Effect.Effect<Outcome.Terminal, unknown, never>
+    }).pipe(Effect.provide(layers)) as Effect.Effect<Outcome.RunResult, unknown, never>
 
     const fiber = Effect.runFork(program)
     running.set(request.runId, fiber)
@@ -534,8 +534,8 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
         return
       }
       if (settled._tag === "Success") {
-        const outcome = settled.value as Outcome.Terminal
-        if (outcome._tag === "Park" && outcome.reason.code === "approval") {
+        const outcome = settled.value as Outcome.RunResult
+        if (outcome._tag === "ApprovalWait") {
           /*
            * An approval park ends the turn awaiting the human: the card
            * is registered directly by the runtime, the park frame names the
