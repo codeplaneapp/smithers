@@ -21,10 +21,10 @@ smthrs memory list --namespace flow:deploy-status
 smthrs memory get deploy-target --namespace flow:deploy-status
 ```
 
-- `list` prints one entry per fact with `key`, `value`, and `updatedAtMs`. To narrow the listing, pass `--prefix deploy-`: only facts whose key starts with the prefix print.
-- `get` prints the fact's value: a string prints as typed, and a JSON value prints as JSON. A key the namespace does not hold exits 2.
+- `list` returns up to 100 facts by default; use `--limit` to change the limit. Each entry includes `key`, `value`, and `updatedAtMs`. To narrow the listing, pass `--prefix deploy-`: only facts whose key starts with the prefix return.
+- `get` returns the full `Fact` record: `namespace`, `key`, `value`, `provenance`, `createdAtMs`, `updatedAtMs`, and optional `tags` and `ttlMs`. A key the namespace does not hold exits 1.
 - Without `--namespace`, every subcommand works in `user:cli`.
-- `--json` prints the same data in compact JSON; for `get` the value is JSON-encoded, so a string prints quoted.
+- `--json` selects machine-readable JSON output; `get` includes the full record with the stored value in its `value` field.
 
 ## 2. Set and delete facts by hand
 
@@ -34,14 +34,14 @@ smthrs memory rm deploy-target --namespace flow:deploy-status
 ```
 
 - A value that parses as JSON is stored as JSON; anything else is stored as the string as typed.
-- `set` prints `{ "key": "...", "written": true }`. Writing an existing key replaces its value.
-- `rm` prints `{ "key": "...", "removed": ... }`, where `removed` reports whether the fact existed.
+- `set` returns `{ "key": "deploy-target", "namespace": { "kind": "flow", "id": "deploy-status" }, "stored": true }` for the example above. Writing an existing key replaces its value.
+- `rm` returns `{ "key": "deploy-target", "deleted": true }` if the fact existed, or `deleted: false` if it did not.
 
 Reach for these to seed a fact before a run starts or to remove one afterwards. The command never reads or writes run history; `smthrs gc` handles that.
 
 ## 3. Choose the namespace
 
-`--namespace` spells a namespace as `<kind:id>`, where the kind is `flow`, `agent`, `user`, or `global`. Any other spelling, or an id containing control characters, exits 2.
+Select a namespace with `--namespace <kind:id>` or `--namespace <kind> --id <id>`, where the kind is `flow`, `agent`, `user`, or `global`. For example, `--namespace flow:deploy-status` and `--namespace flow --id deploy-status` select the same namespace. Do not combine `kind:id` with `--id`. An invalid kind, an empty id, an id containing control characters, or combining both spellings exits 1.
 
 The kind is a stable lifetime, so pick it by who the fact belongs to:
 
@@ -76,8 +76,8 @@ Facts live in `.flows/control.db`, so the project backup in [Back up, gc, and re
 
 ## Verify it worked
 
-- A `set` followed by `get` prints the value back, and `list` shows the fact with its `updatedAtMs`.
-- After `rm`, a `get` on the same key exits 2.
+- A `set` followed by `get` returns the full fact with the stored `value`, and `list` includes the fact with its `updatedAtMs` within the requested limit.
+- After `rm`, a `get` on the same key exits 1.
 - A maintenance pass returns its counts: `{ deletedFacts: 0, deletedMessages: 0 }` on a store with nothing expired and short threads.
 
 ## See also
