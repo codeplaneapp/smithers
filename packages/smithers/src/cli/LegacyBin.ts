@@ -7,6 +7,7 @@
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as Audience from "@smthrs/build-cli/Audience"
+import { ApprovalAuthority } from "@smthrs/control"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
 import * as Redaction from "@smthrs/journal/Redaction"
@@ -215,7 +216,9 @@ const main = Effect.gen(function*() {
         ...applicationConfig,
         ...History.prepare(Project.root(applicationConfig.root, process.cwd()), runId)
       }
-      return NodeControl.layer(config)
+      // The legacy gateway alias has the same local-only approval default as
+      // ControlBridge.host; configuring authentication does not delegate it.
+      return NodeControl.layer({ ...config, approvalAuthority: config.approvalAuthority ?? ApprovalAuthority.local })
     }),
     { version: packageVersion }
   ).pipe(

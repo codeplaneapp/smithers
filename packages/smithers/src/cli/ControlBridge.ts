@@ -6,7 +6,7 @@
 import { NodeServices } from "@effect/platform-node"
 import * as Audience from "@smthrs/build-cli/Audience"
 import type { RuntimeConfig } from "@smthrs/build-cli/Cli"
-import { type ApprovalAuthority, Control } from "@smthrs/control"
+import { ApprovalAuthority, Control } from "@smthrs/control"
 import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
 import { Cause, Console, Effect, Exit, Layer, Logger, References, Stream } from "effect"
 import { Command } from "effect/unstable/cli"
@@ -51,7 +51,7 @@ export type ConnectionOptions = z.output<typeof connectionOptions>
  * @since 1.0.0
  */
 export interface Runtime extends RuntimeConfig {
-  /** Host-owned local delegation, not an MCP argument or presentation preference. */
+  /** Host-owned delegation for local commands and the served gateway, never a request argument. */
   readonly approvalAuthority?: ApprovalAuthority.Service | undefined
   readonly executionRoot?: string | undefined
   readonly signal?: AbortSignal | undefined
@@ -293,7 +293,12 @@ export const host = async (bind: Serve.Bind, options: ConnectionOptions, runtime
   }
   const refusal = Serve.refuse(bind)
   if (refusal !== undefined) throw refusal
-  const control = NodeControl.layer(config)
+  // A gateway credential authenticates callers; only the host may delegate
+  // approval authority. Do not inherit NodeControl's credential-based default.
+  const control = NodeControl.layer({
+    ...config,
+    approvalAuthority: config.approvalAuthority ?? ApprovalAuthority.local
+  })
   const root = Project.root(config.root, process.cwd())
   const host = Layer.merge(control, layerTriggerScheduler(root).pipe(Layer.provide(control)))
   if (!options.quiet) process.stderr.write(`${Serve.banner(bind)}\n`)

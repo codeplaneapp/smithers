@@ -5,14 +5,17 @@
  * laptop's LAN address can launch agents with the operator's credentials, and
  * nothing about the running server says so.
  */
-import { ControlRpcs } from "@smthrs/control"
+import { ApprovalAuthority, Control, ControlRpcs } from "@smthrs/control"
+import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
+import { spawn } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import * as Bridge from "../src/cli/ControlBridge.ts"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
 import * as NodeControl from "../src/NodeControl.ts"
@@ -179,6 +182,121 @@ describe("the serve command", () => {
     await Effect.runPromise(Serve.host(bind({ credential: "" }), "/work").pipe(Effect.provide(gateway)))
     expect(options).not.toHaveProperty("credential")
   })
+
+  it.each([false, true])("requires explicit host delegation for bearer approval (delegated: %s)", async (delegated) => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-serve-authority-"))
+    staged.push(root)
+    const port = await freePort()
+    const credential = "serve-authority-test-credential"
+    const approvalAuthority = delegated
+      ? await Effect.runPromise(ApprovalAuthority.make([
+        { principal: NodeGateway.bearerPrincipal, scopes: ["once"], targets: ["Plan"] }
+      ]))
+      : undefined
+    const abort = new AbortController()
+    const running = Bridge.host(bind({ port, credential }), { root, credential, quiet: true }, {
+      environment: {},
+      approvalAuthority,
+      signal: abort.signal
+    }).catch((cause: unknown) => {
+      if (!abort.signal.aborted) throw cause
+    })
+    try {
+      await waitForHealth(port)
+      const card = await Effect.runPromise(
+        Effect.gen(function*() {
+          const control = yield* Control.Control
+          // Planning proves the bearer authenticated successfully before its
+          // independent approval authority is checked.
+          const card = yield* control.plan({ flowId: "system/test", input: {} })
+          for (const scope of ["run", "remembered"] as const) {
+            expect((yield* Effect.flip(control.approve({ ...card.approval, scope })))._tag)
+              .toBe("/control/Unauthorized")
+          }
+          // Node authority is checked before target lookup, including when
+          // the host has delegated Plan-only decisions.
+          const nodeApproval = {
+            ...card.approval,
+            target: {
+              _tag: "Node" as const,
+              runId: "policy-run",
+              requestId: "policy-request",
+              digest: card.digest,
+              envelope: card.envelope
+            }
+          }
+          for (const scope of ["once", "run", "remembered"] as const) {
+            expect((yield* Effect.flip(control.approve({ ...nodeApproval, scope })))._tag)
+              .toBe("/control/Unauthorized")
+          }
+          expect((yield* Effect.flip(control.deny(nodeApproval)))._tag).toBe("/control/Unauthorized")
+          if (delegated) {
+            yield* control.approve({ ...card.approval, scope: "once" })
+          } else {
+            expect((yield* Effect.flip(control.approve({ ...card.approval, scope: "once" })))._tag)
+              .toBe("/control/Unauthorized")
+            expect((yield* Effect.flip(control.deny(card.approval)))._tag).toBe("/control/Unauthorized")
+          }
+          return card
+        }).pipe(
+          Effect.provide(NodeControl.layerControl({ remote: `http://127.0.0.1:${port}`, credential })),
+          Effect.scoped
+        )
+      )
+      if (!delegated) {
+        // The local operator can still decide the unchanged pending approval.
+        await Effect.runPromise(
+          Effect.flatMap(Control.Control, (control) => control.approve(card.approval)).pipe(
+            Effect.provide(NodeControl.layerControl({ root })),
+            Effect.scoped
+          )
+        )
+      }
+    } finally {
+      abort.abort()
+      await running
+    }
+  }, 60_000)
+
+  it("keeps the legacy gateway alias behind the same approval boundary", async () => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-gateway-authority-"))
+    staged.push(root)
+    const port = await freePort()
+    const credential = "gateway-alias-test-credential"
+    const child = spawn(process.execPath, [
+      "--no-warnings",
+      new URL("../src/bin.ts", import.meta.url).pathname,
+      "--root",
+      root,
+      "gateway",
+      "--port",
+      String(port)
+    ], {
+      cwd: root,
+      env: { ...process.env, SMITHERS_API_KEY: credential, SMITHERS_REMOTE: "" },
+      stdio: "ignore",
+      timeout: 60_000,
+      killSignal: "SIGKILL"
+    })
+    const closed = new Promise<void>((resolve) => child.once("close", () => resolve()))
+    try {
+      await waitForHealth(port)
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const control = yield* Control.Control
+          const card = yield* control.plan({ flowId: "system/test", input: {} })
+          expect((yield* Effect.flip(control.approve(card.approval)))._tag).toBe("/control/Unauthorized")
+          expect((yield* Effect.flip(control.deny(card.approval)))._tag).toBe("/control/Unauthorized")
+        }).pipe(
+          Effect.provide(NodeControl.layerControl({ remote: `http://127.0.0.1:${port}`, credential })),
+          Effect.scoped
+        )
+      )
+    } finally {
+      child.kill("SIGTERM")
+      await closed
+    }
+  }, 90_000)
 
   it("hosts GET /health until the command fiber is interrupted", async () => {
     const root = mkdtempSync(join(tmpdir(), "smithers-serve-"))
