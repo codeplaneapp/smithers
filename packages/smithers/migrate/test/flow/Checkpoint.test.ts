@@ -166,6 +166,139 @@ describe("Checkpoint.take on git", () => {
       expect(execFileSync("git", ["stash", "list"], { cwd: root }).toString()).toBe("")
     }).pipe(Effect.provide(platform)))
 
+  for (
+    const component of [
+      ".smithers-migrate",
+      ".smithers-migrate/backup",
+      ".smithers-migrate/backup/workflow",
+      ".smithers-migrate/backup/workflow/demo/nested",
+      ".smithers-migrate/backup/workflow/demo/nested/private.env"
+    ]
+  ) {
+    it.effect(`refuses a symlink at backup component ${component}`, () =>
+      Effect.gen(function*() {
+        const root = gitProject("backup-symlink")
+        const outside = scratch("outside-backup")
+        write(root, "nested/private.env", "secret bytes\n")
+        write(outside, "sentinel", "outside bytes\n")
+        mkdirSync(join(root, component, ".."), { recursive: true })
+        symlinkSync(component.endsWith(".env") ? join(outside, "sentinel") : outside, join(root, component))
+
+        const result = yield* Effect.result(Checkpoint.take(payload(root, ["nested/private.env"])))
+
+        expect(readFileSync(join(outside, "sentinel"), "utf8")).toBe("outside bytes\n")
+        expect(listRecursive(outside)).toEqual(["sentinel"])
+        expect(result._tag).toBe("Failure")
+      }).pipe(Effect.provide(platform)))
+  }
+
+  for (const leaf of [false, true]) {
+    it.effect(`refuses a symlinked post-checkpoint ${leaf ? "file" : "directory"} before deleting an addition`, () =>
+      Effect.gen(function*() {
+        const root = gitProject("post-backup-symlink")
+        const ref = yield* Checkpoint.take({
+          ...payload(root, ["workflow.jsx"]),
+          treeExclude: [".smithers-migrate"]
+        })
+        const outside = scratch("outside-post-backup")
+        write(outside, "sentinel", "outside bytes\n")
+        write(root, "added.env", "new secret bytes\n")
+        const directory = `${ref.backup}.post-checkpoint`
+        if (leaf) mkdirSync(directory)
+        symlinkSync(leaf ? join(outside, "sentinel") : outside, leaf ? join(directory, "added.env") : directory)
+
+        const result = yield* Effect.result(Checkpoint.rollback(root, ref, { paths: ["workflow.jsx"] }))
+
+        expect(readFileSync(join(outside, "sentinel"), "utf8")).toBe("outside bytes\n")
+        expect(listRecursive(outside)).toEqual(["sentinel"])
+        expect(readFileSync(join(root, "added.env"), "utf8")).toBe("new secret bytes\n")
+        expect(result._tag).toBe("Failure")
+      }).pipe(Effect.provide(platform)))
+  }
+
+  it.effect("refuses dangling links and privately replaces regular backup files", () =>
+    Effect.gen(function*() {
+      for (const link of [false, true]) {
+        const root = gitProject("existing-backup")
+        const outside = scratch("dangling-backup")
+        const directory = join(root, ".smithers-migrate/backup/workflow/demo")
+        mkdirSync(directory, { recursive: true })
+        const destination = join(directory, "workflow.jsx")
+        if (link) symlinkSync(join(outside, "missing"), destination)
+        else writeFileSync(destination, "earlier recovery bytes\n")
+
+        const result = yield* Effect.result(Checkpoint.take(payload(root, ["workflow.jsx"])))
+
+        expect(result._tag).toBe(link ? "Failure" : "Success")
+        expect(readdirSync(outside)).toEqual([])
+        if (!link) {
+          expect(readFileSync(destination, "utf8")).toBe("old workflow\n")
+          expect(statSync(destination).mode & 0o777).toBe(0o600)
+        }
+      }
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("keeps checkpoint and post-checkpoint copies private under umask 022", () =>
+    Effect.gen(function*() {
+      const root = gitProject("private-backup")
+      write(root, "nested/private.env", "secret bytes\n")
+      chmodSync(join(root, "nested/private.env"), 0o600)
+      // Command may have already created the report directory with default permissions.
+      mkdirSync(join(root, ".smithers-migrate"), { mode: 0o755 })
+      const previous = process.umask(0o022)
+      try {
+        const ref = yield* Checkpoint.take({
+          ...payload(root, ["nested/private.env"]),
+          treeExclude: [".smithers-migrate"]
+        })
+        expect(statSync(join(ref.backup, "nested/private.env")).mode & 0o777).toBe(0o600)
+        for (
+          const directory of [
+            ".smithers-migrate",
+            ".smithers-migrate/backup",
+            ".smithers-migrate/backup/workflow",
+            ".smithers-migrate/backup/workflow/demo",
+            ".smithers-migrate/backup/workflow/demo/nested"
+          ]
+        ) {
+          expect(statSync(join(root, directory)).mode & 0o777).toBe(0o700)
+        }
+        expect(ref.entries[0]?.mode).toBe(0o600)
+        write(root, "new/private.env", "new secret bytes\n")
+        chmodSync(join(root, "new/private.env"), 0o600)
+        const rolled = yield* Checkpoint.rollback(root, ref, { paths: ["nested/private.env"] })
+        const preserved = rolled.deletedAdds.find((entry) => entry.path === "new/private.env")!
+        expect(readFileSync(preserved.backup, "utf8")).toBe("new secret bytes\n")
+        expect(statSync(preserved.backup).mode & 0o777).toBe(0o600)
+        expect(statSync(`${ref.backup}.post-checkpoint`).mode & 0o777).toBe(0o700)
+        expect(statSync(join(`${ref.backup}.post-checkpoint`, "new")).mode & 0o777).toBe(0o700)
+      } finally {
+        process.umask(previous)
+      }
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("recovers dirty tracked bytes with the advertised native Git command", () =>
+    Effect.gen(function*() {
+      const root = gitProject("git-recovery")
+      const git = (...args: Array<string>) => execFileSync("git", args, { cwd: root }).toString().trim()
+      write(root, "README.md", "staged readme\n")
+      git("add", "README.md")
+      write(root, "README.md", "unstaged readme\n")
+      expect(git("show", "HEAD:README.md")).toBe("committed readme")
+      expect(git("show", ":README.md")).toBe("staged readme")
+
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx"]))
+
+      expect(git("rev-parse", `${ref.ref}^{tree}`)).not.toBe(git("rev-parse", "HEAD^{tree}"))
+      expect(git("show", `${ref.ref}:README.md`)).toBe("unstaged readme")
+      expect(git("show", ":README.md")).toBe("staged readme")
+      write(root, "README.md", "migration overwrote this\n")
+      write(root, "workflow.jsx", "migration overwrote this too\n")
+      execFileSync("sh", ["-c", ref.restore], { cwd: root })
+      expect(readFileSync(join(root, "README.md"), "utf8")).toBe("unstaged readme\n")
+      expect(readFileSync(join(root, "workflow.jsx"), "utf8")).toBe("old workflow\n")
+    }).pipe(Effect.provide(platform)))
+
   it.effect("restores the mode a file carried, executable and read-only bits included", () =>
     Effect.gen(function*() {
       const root = gitProject("modes")

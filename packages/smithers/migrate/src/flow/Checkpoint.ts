@@ -31,6 +31,8 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { createHash } from "node:crypto"
+import { constants } from "node:fs"
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises"
 import * as Fs from "../internal/Fs.ts"
 import { io, make, MigrateError } from "../MigrateError.ts"
 import type * as Report from "../Report.ts"
@@ -243,6 +245,92 @@ const verifiedBytes = (
     )
   )
 
+/** Prepare each destination component without following links, including dangling links. */
+const privateDirectory = (
+  root: string,
+  directory: string
+): Effect.Effect<string, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const relative = path.relative(path.resolve(root), path.resolve(directory))
+    if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      return yield* Effect.fail(make("checkpoint-failed", `backup directory must be inside the project: ${directory}`))
+    }
+    // Resolve the trusted root once: /tmp itself is a symlink on macOS.
+    const realRoot = yield* fs.realPath(root).pipe(Effect.mapError(io(`could not resolve ${root}`)))
+    return yield* Effect.tryPromise({
+      try: async () => {
+        let current = realRoot
+        for (const component of relative.split(path.sep)) {
+          current = path.join(current, component)
+          const info = await lstat(current).catch((cause: NodeJS.ErrnoException) => {
+            if (cause.code === "ENOENT") return undefined
+            throw cause
+          })
+          if (info === undefined) await mkdir(current, { mode: 0o700 })
+          else if (!info.isDirectory() || info.isSymbolicLink()) {
+            throw new Error(`backup component is not a real directory: ${current}`)
+          }
+          // FileSystem.open has no numeric flags. Use a no-follow directory
+          // handle so tightening an existing report directory cannot chmod a link target.
+          const handle = await open(current, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+          try {
+            await handle.chmod(0o700)
+          } finally {
+            await handle.close()
+          }
+        }
+        return current
+      },
+      catch: io(`could not prepare private backup directory ${directory}`)
+    })
+  })
+
+let backupCounter = 0
+
+/** Write through an exclusive private file; replacing a completed checkpoint never follows its old inode. */
+const writeBackup = (
+  root: string,
+  directory: string,
+  file: string,
+  bytes: Uint8Array
+): Effect.Effect<void, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    if (path.isAbsolute(file) || file.split(/[\\/]/).some((part) => part === ".." || part === "" || part === ".")) {
+      return yield* Effect.fail(make("checkpoint-failed", `invalid backup path: ${file}`))
+    }
+    const target = path.join(directory, ...file.split("/"))
+    const parent = yield* privateDirectory(root, path.dirname(target))
+    yield* Effect.tryPromise({
+      try: async () => {
+        const destination = path.join(parent, path.basename(target))
+        const existing = await lstat(destination).catch((cause: NodeJS.ErrnoException) => {
+          if (cause.code === "ENOENT") return undefined
+          throw cause
+        })
+        if (existing !== undefined && (!existing.isFile() || existing.isSymbolicLink())) {
+          throw new Error(`backup destination is not a regular file: ${destination}`)
+        }
+        const temporary = path.join(parent, `.${path.basename(target)}.tmp-${process.pid}-${backupCounter++}`)
+        const handle = await open(
+          temporary,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+          0o600
+        )
+        try {
+          await handle.writeFile(bytes)
+          await rename(temporary, destination)
+        } finally {
+          await handle.close()
+          await rm(temporary, { force: true })
+        }
+      },
+      catch: io(`could not back up ${file}`)
+    })
+  })
+
 /** Copies every existing declared path into the backup directory, byte for byte. */
 const backup = (
   root: string,
@@ -253,7 +341,7 @@ const backup = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const entries: Array<Entry> = []
-    yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.mapError(io(`could not create ${directory}`)))
+    yield* privateDirectory(root, directory)
     for (const file of [...new Set(files)].sort()) {
       const source = absolute(path, root, file)
       const info = yield* optionalNotFound(fs.stat(source)).pipe(
@@ -273,10 +361,7 @@ const backup = (
       )
       const digest = sha256(bytes)
       const target = path.join(directory, ...file.split("/"))
-      yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
-        Effect.mapError(io(`could not create ${path.dirname(target)}`))
-      )
-      yield* fs.writeFile(target, bytes).pipe(Effect.mapError(io(`could not back up ${file}`)))
+      yield* writeBackup(root, directory, file, bytes)
       yield* verifiedBytes(fs, target, digest, `the backup of ${file}`)
       entries.push({ path: file, state: "file", digest, mode: info.value.mode & 0o777 })
     }
@@ -789,12 +874,7 @@ const preserveAdded = (
       )
       if (Option.isNone(bytes)) continue
       const target = path.join(directory, ...file.split("/"))
-      yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
-        Effect.mapError(io(`could not create ${path.dirname(target)}`))
-      )
-      yield* fs.writeFile(target, bytes.value).pipe(
-        Effect.mapError(io(`could not preserve the post-checkpoint file ${file}`))
-      )
+      yield* writeBackup(root, directory, file, bytes.value)
       const digest = sha256(bytes.value)
       yield* verifiedBytes(fs, target, digest, `the preserved post-checkpoint file ${file}`)
       preserved.push({ path: file, backup: target })
