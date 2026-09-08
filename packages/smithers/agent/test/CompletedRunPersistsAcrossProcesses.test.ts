@@ -24,6 +24,7 @@ import { Control, ControlLive, type ControlRuntime, type ControlSchema, SqlContr
 import * as CoreFlow from "@smthrs/core/Flow"
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
@@ -37,13 +38,13 @@ import { NotificationQueue } from "@smthrs/notifications"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { Migrations as RunStoreMigrations, type Ownership, RunStore } from "@smthrs/run-store"
-import { Effect, Layer, Option, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { mkdtempSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
@@ -171,7 +172,7 @@ const controlStores = (filename: string) =>
 const notes: Array<string> = []
 
 /** One process's worth of composition over one `.flows` directory, as `NodeControl` composes it. */
-const host = (root: string, owner: Ownership.OwnerId, engineHost: string) => {
+const host = (root: string, owner: Ownership.OwnerId, engineHost: string, onSweep?: () => void) => {
   const registration = AgentSession.layer({
     quotaPolicy: Safety.quotaPolicy,
     budget: Safety.budget,
@@ -206,7 +207,21 @@ const host = (root: string, owner: Ownership.OwnerId, engineHost: string) => {
     StepBoundary.layer,
     WorkspaceSandbox.layerFileSystem(),
     registration
-  ).pipe(Layer.provide([NodeFileSystem.layer, NodeCrypto.layer, jj]))
+  ).pipe(
+    Layer.provide([NodeFileSystem.layer, NodeCrypto.layer, jj]),
+    Layer.tap((context) =>
+      Effect.sync(() => {
+        if (onSweep === undefined) return
+        const state = Context.get(context, DurableEngineState.DurableEngineState)
+        const staleRunningRuns = state.staleRunningRuns
+        // This query runs after the released-row sweep has handled its candidates.
+        // Count completed queries, not just elapsed heartbeat intervals.
+        vi.spyOn(state, "staleRunningRuns").mockImplementation((...args) =>
+          staleRunningRuns(...args).pipe(Effect.tap(() => Effect.sync(onSweep)))
+        )
+      })
+    )
+  )
   return ControlLive.layer.pipe(
     Layer.provide(engine),
     Layer.provideMerge(
@@ -223,6 +238,7 @@ const host = (root: string, owner: Ownership.OwnerId, engineHost: string) => {
 const roots = new Set<string>()
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   calls.length = 0
   notes.length = 0
   await Promise.all([...roots].map((root) => rm(root, { recursive: true, force: true })))
@@ -339,11 +355,12 @@ const awaitCompletionEvent = (runId: string) =>
 /**
  * Holds a second composition open over the same files long enough for every
  * reclaim tick to have its chance at the run, and stops early if one takes it.
+ * The launching process's claim predates the baseline and is not a reclaim.
  */
-const watchForReclaim = (root: string, runId: string, ticks = 60) =>
+const watchForReclaim = (root: string, runId: string, decisionCountBeforeRestart: number, ticks = 60) =>
   Effect.gen(function*() {
     for (let tick = 0; tick < ticks; tick++) {
-      const decisions = readDecisions(root, runId)
+      const decisions = readDecisions(root, runId).slice(decisionCountBeforeRestart)
       if (decisions.includes("claimed-and-activated") || decisions.includes("stolen-and-activated")) return
       yield* Effect.sleep("100 millis")
     }
@@ -411,16 +428,18 @@ describe("a run the control plane reported completed", () => {
     expect(calls).toEqual(["completed-persist-first"])
     const turnsAfterFirst = countTurns(root, runId)
     const decisionsAfterFirst = readDecisions(root, runId)
+    let successorSweeps = 0
 
     await Effect.runPromise(
-      watchForReclaim(root, runId).pipe(
-        Effect.provide(host(root, secondOwner, "completed-persist-second")),
+      watchForReclaim(root, runId, decisionsAfterFirst.length).pipe(
+        Effect.provide(host(root, secondOwner, "completed-persist-second", () => successorSweeps++)),
         Effect.scoped,
         Effect.orDie
       )
     )
 
     // The launching process's own claim is the only one this run ever gets.
+    expect(successorSweeps).toBeGreaterThan(0)
     expect(decisionsAfterFirst).toEqual(["created", "claimed-and-activated", "transitioned"])
     expect(readDecisions(root, runId)).toEqual(decisionsAfterFirst)
     expect(countTurns(root, runId)).toBe(turnsAfterFirst)
