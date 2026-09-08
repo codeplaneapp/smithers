@@ -1179,13 +1179,14 @@ const layer: (live: Model.Model, sink: Sink) => Layer.Layer<Model.Model>
 The sink cannot fail and needs no services, so wrapping a model never widens
 its stream's error channel or its requirements.
 
-The recorder flushes on a settled stream and on a provider failure, and stays
-silent otherwise. Interruption and a defect both leave a truncated exchange:
-recording one would write a stream with no `settle` event, which replays as an
-aborted turn and poisons any cache built from the same fixture. A
-`PermissionRequired`, `PermissionDenied`, or `GrantStoreError` failure is not
-recorded either, because the kernel refused the call before the provider saw
-it; the failure still reaches the caller unchanged.
+The recorder flushes only on an exhausted stream and on a provider failure, and
+stays silent otherwise. Interruption, a defect, and a consumer that stops
+pulling early all leave a truncated exchange: recording one would write a stream
+with no `settle` event, which replays as an aborted turn and poisons any cache
+built from the same fixture. A `PermissionRequired`, `PermissionDenied`, or
+`GrantStoreError` failure is not recorded either, because the kernel refused the
+call before the provider saw it; the failure still reaches the caller
+unchanged.
 
 The request is projected at stream acquisition rather than after the exchange,
 and each event is snapshotted as it is emitted, so a caller that mutates its own

@@ -42,14 +42,15 @@ const recordedFailure = (error: Model.ModelFailure): ModelErrorLike | undefined 
 /**
  * Wraps a live model so each call is written to `sink` when its stream ends.
  *
- * The recorder flushes on a settled stream and on a provider failure, and stays
- * silent otherwise. Interruption and a defect both leave a truncated exchange:
- * recording one would write a stream with no `settle` event, which replays as
- * an aborted turn and poisons any cache built from the same fixture. A
- * `PermissionRequired`, `PermissionDenied`, or `GrantStoreError` failure is not
- * recorded either, because the kernel refused the call before the provider saw
- * it, so there is no provider exchange to record; the failure still reaches the
- * caller unchanged.
+ * The recorder flushes only on an exhausted stream and on a provider failure,
+ * and stays silent otherwise. Interruption, a defect, and a consumer that stops
+ * pulling early all leave a truncated exchange: recording one would write a
+ * stream with no `settle` event, which replays as an aborted turn and poisons
+ * any cache built from the same fixture. A `PermissionRequired`,
+ * `PermissionDenied`, or `GrantStoreError` failure is not recorded either,
+ * because the kernel refused the call before the provider saw it, so there is
+ * no provider exchange to record; the failure still reaches the caller
+ * unchanged.
  *
  * @category constructors
  * @since 0.0.0
@@ -65,6 +66,7 @@ export const make = (live: Model.Model, sink: Sink): Model.Model =>
         const recorded = recordedRequest(request)
         const events: Array<ModelEventLike> = []
         let failure: ModelErrorLike | undefined
+        let exhausted = false
         return live.stream(request).pipe(
           Stream.tap((event) =>
             Effect.sync(() => {
@@ -80,11 +82,15 @@ export const make = (live: Model.Model, sink: Sink): Model.Model =>
               failure = recordedFailure(error)
             })
           ),
-          // `onExit` rather than `ensuring`: the exit is what separates a
-          // settled call from an interrupted one, and only the settled call
-          // belongs in a fixture.
+          // A successful scope exit can also mean the consumer stopped early
+          // (`runHead`, `take`). Only the upstream done signal proves exhaustion.
+          Stream.onEnd(
+            Effect.sync(() => {
+              exhausted = true
+            })
+          ),
           Stream.onExit((exit) =>
-            Exit.isSuccess(exit) || failure !== undefined
+            (Exit.isSuccess(exit) && exhausted) || failure !== undefined
               ? sink({
                 request: recorded,
                 model: recorded.modelId,

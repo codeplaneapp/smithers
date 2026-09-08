@@ -4,7 +4,7 @@ import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import type * as ModelEvent from "@smthrs/model/ModelEvent"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
-import { Effect, Fiber, Ref, Stream } from "effect"
+import { Effect, Fiber, Option, Ref, Stream } from "effect"
 import type { RecordedCall } from "../src/Fixture.ts"
 import * as RecordingModel from "../src/RecordingModel.ts"
 
@@ -114,6 +114,24 @@ describe("RecordingModel", () => {
       )
       yield* Effect.yieldNow
       yield* Fiber.interrupt(fiber)
+      expect(yield* sink.calls()).toEqual([])
+    }))
+
+  it.effect("records nothing when the consumer stops before the stream ends", () =>
+    Effect.gen(function*() {
+      const sink = yield* collector
+      const recorder = RecordingModel.make(liveOf(Stream.fromIterable(events)), sink.sink)
+      const head = yield* Stream.runHead(recorder.stream(request("Summarize PR 4821.")))
+      expect(head).toEqual(Option.some(events[0]))
+      expect(yield* sink.calls()).toEqual([])
+    }))
+
+  it.effect("records nothing when the consumer takes only a prefix of the events", () =>
+    Effect.gen(function*() {
+      const sink = yield* collector
+      const recorder = RecordingModel.make(liveOf(Stream.fromIterable(events)), sink.sink)
+      const seen = yield* Stream.runCollect(Stream.take(recorder.stream(request("Summarize PR 4821.")), 2))
+      expect([...seen]).toEqual(events.slice(0, 2))
       expect(yield* sink.calls()).toEqual([])
     }))
 

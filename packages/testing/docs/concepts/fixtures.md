@@ -64,10 +64,13 @@ use.
 
 ## Two calls are never recorded
 
-**An interrupted call, or one that died.** A truncated stream has no `settle`
-event and would replay as an aborted turn, poisoning any cache built from the
-same fixture. The recorder flushes on a settled stream and on a provider
-failure, and stays silent otherwise.
+**An interrupted call, one that died, or one the consumer abandoned.** A
+truncated stream has no `settle` event and would replay as an aborted turn,
+poisoning any cache built from the same fixture. The recorder flushes only when
+the consumer pulled the stream to its end, or when the provider failed, and
+stays silent otherwise. A consumer that stops early, such as `Stream.runHead` or
+`Stream.take`, closes the stream's scope with a success but leaves the exchange
+unfinished, so nothing is recorded.
 
 **A call the kernel refused.** `PermissionRequired`, `PermissionDenied`, and
 `GrantStoreError` are decisions made before the provider saw the request, so
