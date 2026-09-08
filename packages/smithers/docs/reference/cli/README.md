@@ -78,6 +78,12 @@ trigger stops future dispatch without cancelling its active run.
 submit that unchanged to `approvals approve '<payload>' --scope run`. The
 scheduler retains the same plan across restarts and waits until it is approved
 or denied. `approvals list` lists in-run requests, not these pre-run plans.
+A launch attempt persists `launching` before calling Control. Cancellation
+before the run ID is recorded remains `cancelling` while the scheduler
+reconciles the durable launch key. Any accepted run is recorded and cancelled.
+Recovery retries interrupted cancellation. An unresolved cancellation reports
+an error so the scheduler retains the active handle for recovery. Cancelling
+a waiting plan prevents its launch.
 
 ## History and stored state
 

@@ -13,7 +13,15 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { databaseLayer } from "./Store.ts"
 
 const prefix = "trigger-plan:"
-const states = Schema.Literals(["waiting-approval", "running", "completed", "cancelled", "failed"])
+const states = Schema.Literals([
+  "waiting-approval",
+  "launching",
+  "running",
+  "cancelling",
+  "completed",
+  "cancelled",
+  "failed"
+])
 const stored = Schema.Struct({
   handle: Schema.String,
   idempotencyKey: Schema.String,
@@ -132,15 +140,25 @@ export const layer = (root: string) =>
       const mark = (handle: string, status: StoredPlan["status"], error: string | null = null) =>
         write(sql`
           UPDATE control_trigger_plans SET status = ${status}, error = ${error}
-          WHERE handle = ${handle} AND status != 'cancelled'
+          WHERE handle = ${handle} AND status NOT IN ('cancelled', 'cancelling')
         `).pipe(Effect.asVoid)
       const rememberFailure = (entry: StoredPlan, error: unknown) => {
         const tag = typeof error === "object" && error !== null && "_tag" in error
           ? String(error._tag).split("/").at(-1) ?? ""
           : ""
         const message = error instanceof Error ? error.message : "Control could not inspect this scheduled launch"
-        return mark(entry.handle, terminalErrors.has(tag) ? "failed" : entry.status, message).pipe(
-          Effect.as(!terminalErrors.has(tag))
+        return write(sql`
+          UPDATE control_trigger_plans
+          SET status = CASE
+                WHEN status = 'cancelled' THEN status
+                WHEN ${terminalErrors.has(tag) ? 1 : 0}
+                  THEN CASE WHEN status = 'cancelling' THEN 'cancelled' ELSE 'failed' END
+                ELSE status END,
+              error = ${message}
+          WHERE handle = ${entry.handle}
+        `).pipe(
+          Effect.andThen(read(entry.handle)),
+          Effect.map((current) => current?.status === "cancelling" || !terminalErrors.has(tag))
         )
       }
       const findRun = (runId: string) =>
@@ -179,8 +197,11 @@ export const layer = (root: string) =>
             }
             const entry = yield* read(handle)
             if (entry === null) return yield* Effect.fail(failure(`Unknown scheduled launch ${handle}`))
-            if (entry.status === "cancelled" && entry.runId !== null) {
+            if ((entry.status === "cancelled" || entry.status === "cancelling") && entry.runId !== null) {
               return yield* cancelRun(entry.runId).pipe(
+                Effect.andThen(write(sql`
+                  UPDATE control_trigger_plans SET status = 'cancelled', error = NULL WHERE handle = ${handle}
+                `)),
                 Effect.as(false),
                 Effect.catch(() => Effect.succeed(true))
               )
@@ -196,6 +217,16 @@ export const layer = (root: string) =>
                 Effect.catch((error) => rememberFailure(entry, error))
               )
             }
+            // The existing idempotency key is the durable launch identity.
+            // Claim the attempt before Control can accept it; cancellation of
+            // an untouched waiting plan wins this write and never calls run.
+            const launching = yield* write(sql`
+              UPDATE control_trigger_plans
+              SET status = CASE WHEN status = 'waiting-approval' THEN 'launching' ELSE status END
+              WHERE handle = ${handle} AND status IN ('waiting-approval', 'launching', 'cancelling') AND run_id IS NULL
+              RETURNING handle
+            `)
+            if (launching.length === 0) return true
             return yield* control.run({
               _tag: "Plan",
               planId: entry.plan.planId,
@@ -205,9 +236,21 @@ export const layer = (root: string) =>
             }).pipe(
               Effect.flatMap((receipt) =>
                 Effect.gen(function*() {
-                  if (receipt._tag === "Parked") return true
+                  if (receipt._tag === "Parked") {
+                    yield* write(sql`
+                      UPDATE control_trigger_plans
+                      SET status = CASE WHEN status = 'cancelling' THEN 'cancelled' ELSE 'waiting-approval' END
+                      WHERE handle = ${handle} AND status IN ('launching', 'cancelling') AND run_id IS NULL
+                    `)
+                    return (yield* read(handle))?.status !== "cancelled"
+                  }
                   if (receipt._tag === "Conflict") {
-                    yield* mark(handle, "failed", receipt.message)
+                    yield* write(sql`
+                      UPDATE control_trigger_plans
+                      SET status = CASE WHEN status = 'cancelling' THEN 'cancelled' ELSE 'failed' END,
+                          error = ${receipt.message}
+                      WHERE handle = ${handle} AND status != 'cancelled' AND run_id IS NULL
+                    `)
                     return false
                   }
                   const runId = receipt.runId
@@ -216,14 +259,18 @@ export const layer = (root: string) =>
                   }
                   yield* write(sql`
                     UPDATE control_trigger_plans
-                    SET run_id = ${runId}, status = CASE WHEN status = 'cancelled' THEN status ELSE 'running' END,
+                    SET run_id = ${runId}, status = CASE WHEN status IN ('cancelled', 'cancelling') THEN status ELSE 'running' END,
                         error = NULL
                     WHERE handle = ${handle}
                   `)
                   // A superseding scheduler may cancel between our read and
                   // Control's acceptance. Do not leave that accepted run live.
-                  if ((yield* read(handle))?.status === "cancelled") {
+                  const current = yield* read(handle)
+                  if (current?.status === "cancelled" || current?.status === "cancelling") {
                     yield* cancelRun(runId)
+                    yield* write(sql`
+                      UPDATE control_trigger_plans SET status = 'cancelled', error = NULL WHERE handle = ${handle}
+                    `)
                     return false
                   }
                   return true
@@ -237,8 +284,23 @@ export const layer = (root: string) =>
             if (!handle.startsWith(prefix)) return yield* cancelRun(handle)
             const entry = yield* read(handle)
             if (entry === null) return yield* Effect.fail(failure(`Unknown scheduled launch ${handle}`))
-            yield* mark(handle, "cancelled")
-            if (entry.runId !== null) yield* cancelRun(entry.runId)
+            // Decide from the current row, not the earlier read: a launch
+            // may have begun while this cancellation was being scheduled.
+            yield* write(sql`
+              UPDATE control_trigger_plans
+              SET status = CASE
+                    WHEN status IN ('launching', 'cancelling') AND run_id IS NULL THEN 'cancelling'
+                    ELSE 'cancelled' END,
+                  error = NULL
+              WHERE handle = ${handle}
+            `)
+            const current = yield* read(handle)
+            if (current?.runId != null) yield* cancelRun(current.runId)
+            if (current?.status === "cancelling" && current.runId === null) {
+              // Scheduler restores the active handle when cancel fails. Do
+              // not let supersession discard its only recovery monitor.
+              return yield* Effect.fail(failure(`Scheduled launch ${handle} is awaiting cancellation reconciliation`))
+            }
           })
       })
     })

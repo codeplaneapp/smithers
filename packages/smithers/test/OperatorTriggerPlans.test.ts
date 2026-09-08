@@ -126,10 +126,152 @@ describe("durable trigger approval plans", () => {
     expect(rows(root, "SELECT * FROM control_runs")).toHaveLength(1)
   })
 
-  it("does not launch cancelled or denied pending plans", async () => {
+  it("reconciles cancellation after a crash between Control acceptance and recording the run id", async () => {
     const root = fixture()
     const handle = await run(root, start)
     const pending = await TriggerPlans.inspect(root, handle)
+    await run(
+      root,
+      Effect.gen(function*() {
+        yield* (yield* Control.Control).approve(pending!.plan.approval)
+      })
+    )
+    const crashAfterAcceptance = Layer.effect(
+      Control.Control,
+      Effect.gen(function*() {
+        const control = yield* Control.Control
+        return Control.make({
+          ...control,
+          run: (request) => control.run(request).pipe(Effect.andThen(Effect.interrupt))
+        })
+      })
+    ).pipe(Layer.provide(controlLayer(root)))
+    const exit = await Effect.runPromiseExit(
+      active(handle).pipe(Effect.provide(TriggerPlans.layer(root).pipe(Layer.provide(crashAfterAcceptance))))
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(rows(root, "SELECT * FROM control_runs")).toHaveLength(1)
+    expect(await TriggerPlans.inspect(root, handle)).toMatchObject({ status: "launching", runId: null })
+    await run(
+      root,
+      Effect.gen(function*() {
+        const runner = yield* Scheduler.Runner
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const error = yield* Effect.flip(runner.cancel(handle))
+          expect(error.message).toContain("awaiting cancellation reconciliation")
+        }
+      })
+    )
+    expect(await TriggerPlans.inspect(root, handle)).toMatchObject({ status: "cancelling", runId: null })
+    const unavailable = (operation: "run" | "cancel") =>
+      Layer.effect(
+        Control.Control,
+        Effect.gen(function*() {
+          const control = yield* Control.Control
+          return Control.make({
+            ...control,
+            [operation]: () => Effect.fail(new Unavailable({ feature: operation, ticket: "fixture" }))
+          })
+        })
+      ).pipe(Layer.provide(controlLayer(root)))
+    for (const operation of ["run", "cancel"] as const) {
+      expect(
+        await Effect.runPromise(
+          active(handle).pipe(Effect.provide(TriggerPlans.layer(root).pipe(Layer.provide(unavailable(operation)))))
+        )
+      ).toBe(true)
+      expect(await TriggerPlans.inspect(root, handle)).toMatchObject({
+        status: "cancelling",
+        runId: operation === "run" ? null : expect.any(String)
+      })
+    }
+    expect(await run(root, active(handle))).toBe(false)
+    expect(await TriggerPlans.inspect(root, handle)).toMatchObject({
+      status: "cancelled",
+      runId: expect.any(String)
+    })
+    expect(
+      await run(
+        root,
+        Effect.gen(function*() {
+          return yield* (yield* Control.Control).list({ _tag: "runs" })
+        })
+      )
+    ).toMatchObject({ _tag: "runs", items: [{ status: "cancelled" }] })
+    expect(await run(root, active(handle))).toBe(false)
+    expect(rows(root, "SELECT * FROM control_runs")).toHaveLength(1)
+  })
+
+  it.each(["approved", "pending", "denied"] as const)(
+    "honors cancellation during a launch attempt for a %s plan",
+    async (approval) => {
+      const root = fixture()
+      const handle = await run(root, start)
+      const pending = await TriggerPlans.inspect(root, handle)
+      await run(
+        root,
+        Effect.gen(function*() {
+          const control = yield* Control.Control
+          if (approval === "approved") yield* control.approve(pending!.plan.approval)
+          if (approval === "denied") yield* control.deny(pending!.plan.approval)
+        })
+      )
+      const cancelDuringLaunch = Layer.effect(
+        Control.Control,
+        Effect.gen(function*() {
+          const control = yield* Control.Control
+          return Control.make({
+            ...control,
+            run: (request) =>
+              Effect.gen(function*() {
+                expect(yield* Effect.promise(() => TriggerPlans.inspect(root, handle))).toMatchObject({
+                  status: "launching",
+                  runId: null
+                })
+                yield* Effect.promise(() =>
+                  run(
+                    root,
+                    Effect.gen(function*() {
+                      const error = yield* Effect.flip((yield* Scheduler.Runner).cancel(handle))
+                      expect(error.message).toContain("awaiting cancellation reconciliation")
+                    })
+                  )
+                )
+                expect(yield* Effect.promise(() => TriggerPlans.inspect(root, handle))).toMatchObject({
+                  status: "cancelling",
+                  runId: null
+                })
+                return yield* control.run(request)
+              })
+          })
+        })
+      ).pipe(Layer.provide(controlLayer(root)))
+      expect(
+        await Effect.runPromise(
+          active(handle).pipe(Effect.provide(TriggerPlans.layer(root).pipe(Layer.provide(cancelDuringLaunch))))
+        )
+      ).toBe(false)
+      expect(await TriggerPlans.inspect(root, handle)).toMatchObject({
+        status: "cancelled",
+        runId: approval === "approved" ? expect.any(String) : null
+      })
+      expect(
+        await run(
+          root,
+          Effect.gen(function*() {
+            return yield* (yield* Control.Control).list({ _tag: "runs" })
+          })
+        )
+      ).toMatchObject({ _tag: "runs", items: approval === "approved" ? [{ status: "cancelled" }] : [] })
+      expect(await run(root, active(handle))).toBe(false)
+    }
+  )
+
+  it.each([false, true])("does not launch cancelled or denied pending plans (polled: %s)", async (polled) => {
+    const root = fixture()
+    const handle = await run(root, start)
+    const pending = await TriggerPlans.inspect(root, handle)
+    if (polled) expect(await run(root, active(handle))).toBe(true)
     await run(
       root,
       Effect.gen(function*() {
