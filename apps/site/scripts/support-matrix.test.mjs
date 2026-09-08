@@ -126,3 +126,27 @@ test("generation repairs output drift and check mode refuses it", () => {
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+for (const section of ["guides", "reference"]) {
+  test(`${section} trigger docs distinguish durable CLI approvals from the library retry limit`, () => {
+    const page = read(`apps/site/src/content/docs/docs/${section}/triggers.mdx`)
+    const libraryNote = page.match(/:::note\[Library embedders only\]\n([\s\S]*?)\n:::/)
+    assert.ok(libraryNote, "label the optional library runner policy")
+    assert.match(libraryNote[1], /Scheduler\.layerControlRunner/)
+    const cliPolicy = page.replace(libraryNote[0], "")
+    assert.match(cliPolicy, /no attempt counter or expiry/)
+    assert.match(cliPolicy, /across (?:scheduler )?restarts/)
+    assert.doesNotMatch(cliPolicy, /eight|two minutes|exhausted.*attempts/)
+    if (section === "guides") {
+      assert.match(page, /smthrs triggers list/)
+      assert.match(page, /smthrs triggers show nightly-lint/)
+      assert.match(page, /smthrs approvals deny '<activePlan\.plan\.approval>'/)
+      assert.match(page, /\/docs\/reference\/triggers\/#scheduler/)
+      assert.match(libraryNote[1], /eight attempts/)
+      assert.match(libraryNote[1], /two minutes/)
+    } else {
+      assert.match(page, /\/docs\/guides\/triggers\/#resolve-a-parked-approval/)
+      assert.doesNotMatch(libraryNote[1], /eight|two minutes/, "link to the guide's policy instead of duplicating it")
+    }
+  })
+}

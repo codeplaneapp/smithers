@@ -6236,16 +6236,31 @@ smthrs serve
 
 On each tick the scheduler computes which enabled triggers are due, claims each occurrence in the store, and starts the flow through Control with the idempotency key `<triggerId>:<occurrence ISO instant>`. Two hosts that notice the same boundary derive the same key, so a retry or a second scheduler cannot start the same occurrence twice.
 
-A flow that requires approval parks its plan. The scheduler re-offers the same plan eight times with a doubling delay, so the last attempt lands a little over two minutes after the first; if nobody has approved by then the occurrence is recorded as `failed` with error `runner`. Approve it from the CLI:
+Stopping the scheduler cancels nothing. Launched runs are durable and outlive the process; the next scheduler re-attaches to them from the store.
+
+## Resolve a parked approval
+
+A flow that requires approval parks its plan. The CLI scheduler in `smthrs serve` and `smthrs triggers serve` uses the durable `TriggerPlans` runner. Parked plans remain active across scheduler restarts with the same approval payload and no attempt counter or expiry. The scheduler never approves a plan.
+
+List the triggers, inspect the waiting plan, and approve it from the CLI:
 
 ```bash
+smthrs triggers list
 smthrs triggers show nightly-lint
 smthrs approvals approve '<activePlan.plan.approval>' --scope run
 ```
 
-`show` prints `activePlan.plan.approval` when a plan is waiting. Submit it unchanged. Waiting plans survive a scheduler restart without changing their payload.
+`show` prints `activePlan.plan.approval` when a plan is waiting. Submit that exact JSON payload unchanged. To cancel a parked launch, deny its approval instead:
 
-Stopping the scheduler cancels nothing. Launched runs are durable and outlive the process; the next scheduler re-attaches to them from the store.
+```bash
+smthrs approvals deny '<activePlan.plan.approval>'
+```
+
+The scheduler observes the denial on its next check and marks the stored plan `failed` without launching a run. Disabling the trigger or stopping the scheduler does not cancel its parked plan. See the [Trigger reference](/docs/reference/triggers/#scheduler) for scheduler claims and overlap behavior.
+
+:::note[Library embedders only]
+When a library embedder installs `Scheduler.layerControlRunner`, a parked plan has eight attempts with a delay that doubles from one second. The last attempt lands a little over two minutes after the first; if approval is still missing, the occurrence is recorded as `failed` with error `runner`. This limit applies only to that optional library runner.
+:::
 
 ## Fire an occurrence by hand
 
@@ -6270,7 +6285,7 @@ Every occurrence ends with one recorded outcome:
 | `skipped` | The occurrence was due while a run was active and the policy is `skip`. |
 | `buffered` | The occurrence is waiting behind an active run under `buffer-one`. |
 | `superseded` | The occurrence cancelled the active run under `supersede`. |
-| `failed` | Control refused the launch, or the parked plan exhausted its attempts. |
+| `failed` | The runner could not prepare or launch the flow. |
 
 `lastFiredAt` is the cursor catch-up resumes from. It advances on skipped and buffered occurrences too, so it does not tell you which occurrence an active run owns; `show` does.
 
@@ -45306,13 +45321,17 @@ All verbs run against the nearest Smithers project, or the one named by `--root`
 
 ## Scheduler
 
-The scheduler is `Scheduler.layer` from `@smthrs/triggers/Scheduler` over the SQL trigger store and a Control-backed runner.
+The scheduler is `Scheduler.layer` from `@smthrs/triggers/Scheduler` over the SQL trigger store. The CLI supplies the durable Control-backed `TriggerPlans` runner.
 
 On each tick it lists enabled triggers, computes the occurrences due since each trigger's `lastFiredAt` under its catch-up policy, and claims each one in the store. The claim reads the trigger row's current policy and revision inside the same transaction, so a scheduler holding a stale snapshot cannot fire a trigger that was disabled or repointed since it last looked. Claim results are `skip`, `buffer`, `fire`, or `supersede`; only `fire` and `supersede` hand out a reservation, and `supersede` also names the run it displaces.
 
 A fired occurrence starts the flow through Control with the idempotency key `<triggerId>:<occurrence ISO instant>`. Two schedulers that notice the same boundary derive the same key, and a retried `fire` with the same `--occurrence` reuses it, so one occurrence never becomes two runs.
 
-A plan that Control parks for approval is re-offered eight times with a delay that doubles from one second, so the last attempt lands a little over two minutes after the first. The scheduler never approves a plan. An unapproved plan is recorded as `failed` with error `runner`. Waiting plans survive a scheduler restart with the same approval payload; `smthrs triggers show <id>` exposes it and `smthrs approvals approve '<payload>' --scope run` submits it.
+CLI approval plans remain active across scheduler restarts with the same payload and no attempt counter or expiry. The scheduler never approves them. See [Resolve a parked approval](/docs/guides/triggers/#resolve-a-parked-approval) for listing triggers, inspecting a plan, approving it, or explicitly cancelling the parked launch with `smthrs approvals deny`.
+
+:::note[Library embedders only]
+`Scheduler.layerControlRunner` has a bounded approval retry policy. Its limit is documented in [Resolve a parked approval](/docs/guides/triggers/#resolve-a-parked-approval).
+:::
 
 Stopping the scheduler cancels nothing. Runs are durable; the next scheduler re-attaches to active runs from the store. Only a `supersede` claim cancels a run.
 
@@ -45329,7 +45348,7 @@ A catch-up that owes more occurrences than `maxCatchUp` logs a warning annotated
 | `skipped` | Due while a run was active under `skip`. |
 | `buffered` | Waiting behind an active run under `buffer-one`. A later due occurrence coalesces into the same buffer. |
 | `superseded` | Cancelled the active run under `supersede`. |
-| `failed` | Control refused the launch, or a parked plan exhausted its attempts. `error` carries the reason. |
+| `failed` | The runner could not prepare or launch the flow. `error` carries the reason. |
 
 `lastFiredAt` advances on skipped and buffered occurrences as well as fired ones, so it is the catch-up cursor and not the occurrence an active run owns. `activeOccurrence` answers that question; `smthrs triggers show` prints the active run id.
 
