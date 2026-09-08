@@ -50,7 +50,7 @@ const copyTreeOf = (copyId: string, treeRows: ReadonlyArray<RepoTreeRow>): CopyT
   for (const row of treeRows) if (row.copyId === copyId) rows.set(row.path, row)
   const nodes: string[] = []
   const directories: string[] = []
-  // Rows in path order so each level keeps the route's order (dirs first, then by name).
+  // Rows in path order; each level keeps the order the seam wrote (RepoTreeSeam: dirs first, then by name).
   for (const row of [...rows.values()].sort((left, right) => left.path.localeCompare(right.path))) {
     if (row.state !== "loaded") continue
     for (const entry of row.entries) {

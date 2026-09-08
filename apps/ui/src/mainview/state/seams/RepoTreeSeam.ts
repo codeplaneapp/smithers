@@ -12,13 +12,17 @@
  * mirror with no credentials: apps/server publicRepositoryReads.ts). The row
  * is what the sidebar renders: `loaded` with exactly the entries the route
  * returned (no filtering, nothing invented), or `failed` with the route's
- * error text verbatim, shown in place. Never throws.
+ * error text verbatim, shown in place. Every row holds its directory in the
+ * one order a listing reads in (`FilesSeam.sortEntries`: directories first,
+ * then by name), because the three routes do not agree on one — the mirror
+ * answers a git tree's byte order — and the sidebar reads the same for a
+ * checkout, a box, and the shared copy. Never throws.
  */
 import { isRecord } from "@smthrs/canonical/Record"
 import type { Repo } from "@smthrs/rpc/LocalApp"
 import type { RepoTreeEntry, WorkingCopy } from "../AppState"
 import { createCloudClient } from "./CloudClient"
-import { encodeRepoPath, parseEntry, requestLocalFiles } from "./FilesSeam"
+import { encodeRepoPath, parseEntry, requestLocalFiles, sortEntries } from "./FilesSeam"
 import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
@@ -86,10 +90,10 @@ const workspaceFilesPath = (repoId: string, workspaceId: string): string => {
 /** plue's entries as tree rows: a row without a name drops, a `dir` type is a directory, anything else a file. */
 const treeEntriesOf = (body: unknown): ReadonlyArray<RepoTreeEntry> => {
   const entries = isRecord(body) && Array.isArray(body.entries) ? body.entries : []
-  return entries.flatMap((entry): ReadonlyArray<RepoTreeEntry> => {
+  return sortEntries(entries.flatMap((entry): ReadonlyArray<RepoTreeEntry> => {
     if (!isRecord(entry) || typeof entry.name !== "string" || entry.name === "") return []
     return [{ name: entry.name, kind: entry.type === "dir" ? "dir" : "file" }]
-  })
+  }))
 }
 
 /**
@@ -140,10 +144,10 @@ export const createRepoTreeSeam = (ctx: SeamContext): RepoTreeSeam => {
       )
       return
     }
-    const entries = body.flatMap((entry): ReadonlyArray<RepoTreeEntry> => {
+    const entries = sortEntries(body.flatMap((entry): ReadonlyArray<RepoTreeEntry> => {
       const parsed = parseEntry(entry)
       return parsed === null ? [] : [parsed]
-    })
+    }))
     ctx.dispatch({ type: "repo-tree.loaded", actor: "system", copyId: copy.id, path, entries, truncated: false })
   }
   /*
@@ -201,7 +205,7 @@ export const createRepoTreeSeam = (ctx: SeamContext): RepoTreeSeam => {
       actor: "system",
       copyId,
       path,
-      entries: answer.body.entries,
+      entries: sortEntries(answer.body.entries),
       truncated: answer.body.truncated === true
     })
   }

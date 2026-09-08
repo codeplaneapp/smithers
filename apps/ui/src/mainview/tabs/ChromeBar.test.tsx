@@ -7,6 +7,7 @@ import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import App from "../App"
 import { ControllerTestProvider } from "../ControllerContext"
+import { openRequestedRepo } from "../RepoLink"
 import { DOWNLOAD_URL } from "@smthrs/rpc/AppLinks"
 
 /** A native release as the door tests see it; the product's constant is null until one carries an asset. */
@@ -797,6 +798,59 @@ describe("the sidebar's file tree", () => {
     expect(card?.kind).toBe("file")
     expect(card?.title).toBe("File · smithersai/smithers · README.md")
     // The shared copy has no VM: no box route is ever asked.
+    expect(requests.some((request) => request.includes("/workspaces"))).toBe(false)
+  })
+
+  /*
+   * The live outcome the shared copy exists for: a signed-out visitor opening
+   * https://smithers.sh/smithersai/smithers. The boot act (RepoLink's
+   * openRequestedRepo, which ControllerBoot runs for a `/owner/name` path)
+   * selects the catalog row, reads the mirror's default bookmark and opens
+   * the copy's root, so the sidebar paints `main · shared · read-only` over
+   * the mirror's root with no click. The mirror answers a git tree's byte
+   * order; the tree reads in the sidebar's own order.
+   */
+  test("a signed-out visit to /owner/name paints the shared copy expanded, over the mirror's root", async () => {
+    const requests: Array<string> = []
+    const contents = "/api/repos/smithersai/smithers/contents"
+    const fetchImpl: NonNullable<AppServices["fetchImpl"]> = async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+      const path = new URL(url, "http://cloud.test").pathname
+      if (!path.endsWith("/contents/.smithers/factory.json")) requests.push(path)
+      if (path === "/api/public/repos") {
+        return json(200, {
+          repos: [{ name: "smithersai/smithers", title: "Smithers", url: "https://github.com/smithersai/smithers", summary: "Smithers turns a repository into a factory.", stats: null }]
+        })
+      }
+      if (path === "/api/repos/smithersai/smithers") return json(200, { default_bookmark: "main" })
+      if (path === contents) {
+        return json(200, [
+          { name: "CHANGELOG.md", path: "CHANGELOG.md", type: "file", sha: "", size: 0 },
+          { name: "Cargo.lock", path: "Cargo.lock", type: "file", sha: "", size: 0 },
+          { name: "README.md", path: "README.md", type: "file", sha: "", size: 0 },
+          { name: "apps", path: "apps", type: "dir", sha: "", size: 0 }
+        ])
+      }
+      return json(404, { status: "error", message: `no stub for ${url}` })
+    }
+    const { store, controller } = await cloudHarness({ fetchImpl })
+    await persisted(store, { type: "cloud.session.loaded", actor: "system", state: "signed-out", username: null, expiresAt: null, scopes: null })
+    const { host, act } = mount(controller)
+    const copyId = "shared:smithersai/smithers"
+
+    await settle(act, () => void openRequestedRepo(controller, fetchImpl, "smithersai/smithers"))
+    for (let tick = 0; tick < 40 && store.collections.repoTree.get(`${copyId}#`)?.state !== "loaded"; tick += 1) await act(() => {})
+
+    const row = host.querySelector<HTMLElement>(`[data-testid="copy-${copyId}"]`)
+    expect(row?.querySelector(".repo-name")?.textContent).toBe("main · shared · read-only")
+    expect(host.querySelector<HTMLButtonElement>(`[data-testid="repo-tree-toggle-${copyId}"]`)?.getAttribute("aria-expanded")).toBe("true")
+    const tree = host.querySelector<HTMLElement>(`[data-testid="repo-tree-${copyId}"]`)
+    expect(names(tree, ".sui-file-tree-dir-name")).toEqual(["apps"])
+    expect(names(tree, "[data-slot=file-tree-file]")).toEqual(["Cargo.lock", "CHANGELOG.md", "README.md"])
+    // The catalog first, then the mirror: its repository document for the bookmark and its contents for the root. No box route: the shared copy has no VM.
+    expect(requests[0]).toBe("/api/public/repos")
+    expect(requests).toContain("/api/repos/smithersai/smithers")
+    expect(requests).toContain(contents)
     expect(requests.some((request) => request.includes("/workspaces"))).toBe(false)
   })
 

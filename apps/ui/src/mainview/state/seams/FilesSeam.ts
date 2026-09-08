@@ -190,8 +190,15 @@ export const parseEntry = (value: unknown): FileListEntry | null => {
   return { name, kind: value.type }
 }
 
-/** Directories first, then names in locale order — the multi sort (filesClient.ts :94). */
-const sortEntries = (entries: ReadonlyArray<FileListEntry>): FileListEntry[] =>
+/*
+ * Directories first, then names in locale order — the multi sort
+ * (filesClient.ts :94). The one order every listing of a directory reads in,
+ * card and sidebar alike (RepoTreeSeam.ts sorts its rows with it): the routes
+ * do not agree on one. The local route pages by name, and the public mirror
+ * answers a git tree's byte order, where `CHANGELOG.md` precedes
+ * `Cargo.lock`.
+ */
+export const sortEntries = (entries: ReadonlyArray<FileListEntry>): FileListEntry[] =>
   [...entries].sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1
     return a.name.localeCompare(b.name)

@@ -98,11 +98,19 @@ const boxAnswers: Record<string, () => Response> = {
  */
 const SHARED_CONTENTS = "/api/repos/smithersai/smithers/contents"
 const sharedAnswers: Record<string, () => Response> = {
+  /*
+   * The mirror answers a git tree's own byte order: uppercase before
+   * lowercase, so `CHANGELOG.md` precedes `Cargo.lock` and the directories
+   * sit wherever their names fall. The row the seam writes is in the
+   * sidebar's one order instead.
+   */
   "": () =>
     json(200, [
-      { name: "apps", path: "apps", type: "dir", sha: "", size: 0 },
+      { name: "CHANGELOG.md", path: "CHANGELOG.md", type: "file", sha: "", size: 0 },
+      { name: "Cargo.lock", path: "Cargo.lock", type: "file", sha: "", size: 0 },
       { name: "PACKAGE.ts", path: "PACKAGE.ts", type: "file", sha: "", size: 0 },
       { name: "README.md", path: "README.md", type: "file", sha: "", size: 0 },
+      { name: "apps", path: "apps", type: "dir", sha: "", size: 0 },
       { type: "file" }
     ]),
   "apps": () => json(200, [{ name: "ui", path: "apps/ui", type: "dir", sha: "", size: 0 }]),
@@ -337,7 +345,8 @@ describe("repo tree seam: a cloud workspace copy reads the box's files route", (
       expanded: true,
       state: "loaded",
       // `dir` is a directory, anything else plue names is a file; a row without a name drops.
-      entries: [{ name: "apps", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "link", kind: "file" }]
+      // The sidebar's order, not the route's: directories first, then by name.
+      entries: [{ name: "apps", kind: "dir" }, { name: "link", kind: "file" }, { name: "README.md", kind: "file" }]
     })
     expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))?.error).toBeUndefined()
     // A nested directory is one more request with its path; an empty one is a loaded row with no entries.
@@ -386,7 +395,7 @@ describe("repo tree seam: a cloud workspace copy reads the box's files route", (
     expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))?.expanded).toBe(false)
     expect((await controller.commands.run("repo.tree", "ws-1")).status).toBe("executed")
     expect(boxRequests).toEqual(["/repos/will/flows/workspaces/ws-1/files?path="])
-    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))).toMatchObject({ state: "loaded", entries: [{ name: "apps", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "link", kind: "file" }] })
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))).toMatchObject({ state: "loaded", entries: [{ name: "apps", kind: "dir" }, { name: "link", kind: "file" }, { name: "README.md", kind: "file" }] })
   })
 
   test("a refusal from the Worker or plue writes the failed row with the message verbatim", async () => {
@@ -433,8 +442,19 @@ describe("repo tree seam: the shared read-only copy reads the mirror's contents 
       path: "",
       expanded: true,
       state: "loaded",
-      // `dir` is a directory, `file` a file; a row without a name drops.
-      entries: [{ name: "apps", kind: "dir" }, { name: "PACKAGE.ts", kind: "file" }, { name: "README.md", kind: "file" }]
+      /*
+       * `dir` is a directory, `file` a file; a row without a name drops. The
+       * order is the sidebar's, not the mirror's: directories first, then by
+       * name, so `Cargo.lock` precedes `CHANGELOG.md` here and the byte order
+       * the route answered in does not reach the tree.
+       */
+      entries: [
+        { name: "apps", kind: "dir" },
+        { name: "Cargo.lock", kind: "file" },
+        { name: "CHANGELOG.md", kind: "file" },
+        { name: "PACKAGE.ts", kind: "file" },
+        { name: "README.md", kind: "file" }
+      ]
     })
     expect(store.collections.repoTree.get(repoTreeRowId(SHARED, ""))?.truncated).toBeFalsy()
     // A nested directory is one more read with its path (per-segment encoding); an empty one is a loaded row with no entries.

@@ -100,7 +100,11 @@ launch, relaunch, or quit the app: the orchestrator owns the running app.
   `apps/server/src/publicRepositoryReads.ts`); file rows bind
   `files.read <path> <org/repo>`. Its root opens on the first paint of the
   catalog repository. No write door renders on a read-only copy (no `+`, no
-  unpin); the chrome's Sign in line is the reader's door.
+  unpin); the chrome's Sign in line is the reader's door. Every row the seam
+  writes holds its directory in one order, `FilesSeam.sortEntries`
+  (directories first, then by name, the order the file-list card reads in):
+  the three routes do not agree on one, and the mirror answers a git tree's
+  byte order, where `CHANGELOG.md` precedes `Cargo.lock`.
 - Flows: `repo.tree <copyId> [path]` — user and button only (the agent has
   `files.list`); toggles expansion and loads the directory on first expand
   (or when the row is `failed`, retry). `files.read <path> <repo>` is the
