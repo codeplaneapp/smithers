@@ -16,6 +16,8 @@
  *   8. every anchor the 1.0 CLI links to exists on the migration page
  *   9. the API roster's workspace-private labels match the package manifests
  *  10. a page that imports a workspace-private package says so beside its name
+ *  11. no repository request or nomination instruction (the home page
+ *      registers a repository through GitHub sign-in and app installation)
  *
  * Usage: node apps/site/scripts/check-docs.mjs
  */
@@ -152,6 +154,14 @@ for (const p of pages) {
   // 7. coming soon
   const soon = p.noFences.match(/coming soon/i)
   if (soon) err(p.path, `banned phrase: ${soon[0]}`)
+  // 11. registration entry point. The home page registers a repository through
+  // GitHub sign-in plus installing the Smithers GitHub App, so no page may send
+  // readers to a repository request or nomination form on the site. An alpha
+  // access request is a different thing and stays allowed.
+  const nomination = p.noFences.match(/repository request|request(?:ing)? (?:a|another) repositor\w*|\bnominat(?:e|es|ed|ing|ion|ions)\b/i)
+  if (nomination) {
+    err(p.path, `repository registration is GitHub sign-in plus app installation, not: ${nomination[0]}`)
+  }
   // 4/5. links and anchors
   const links = [
     ...p.noFences.matchAll(/\]\(([^)\s]+)\)/g),
