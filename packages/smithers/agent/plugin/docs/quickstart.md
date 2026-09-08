@@ -10,7 +10,8 @@ extension point of its own, a `tools` waterfall, alongside the kernel's config
 lifecycle. By the end you will have run the kernel, read a frozen configuration,
 and dispatched a hook whose result is typed by the declaration you wrote.
 
-Everything here runs in one file with no services to provide and no I/O.
+The example uses two files: `host.ts` declares the hook catalog, and `main.ts`
+defines the plugins and runs the host. There are no services to provide.
 
 ## Prerequisites
 
@@ -57,12 +58,18 @@ catalog says what dispatches. `WaterfallHook` in the interface and
 
 ## Write two plugins
 
+Add all remaining TypeScript snippets to `main.ts` in order, starting with the
+complete import block and the first plugin.
+
 A plugin is a record. This one contributes a configuration namespace and two
-tools:
+tools.
+
+Create `main.ts` beside `host.ts`:
 
 ```ts
-import { type FlowsHooks, make } from "@smthrs/plugin"
+import { type FlowsHooks, Kernel, make } from "@smthrs/plugin"
 import * as Effect from "effect/Effect"
+import { hooks } from "./host.ts"
 
 const editor = make<FlowsHooks>({
   name: "flows-plugin-editor",
@@ -98,9 +105,6 @@ host's options. It resolves the list, runs the config waterfall, freezes the
 result, notifies the observers, and merges the plugin layers:
 
 ```ts
-import { Kernel } from "@smthrs/plugin"
-import { hooks } from "./host.ts"
-
 const kernel = await Effect.runPromise(
   Kernel.make([editor, audit], { host: { name: "quickstart" } }, { target: "harness", hooks })
 )
