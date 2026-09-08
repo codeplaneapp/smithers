@@ -7,7 +7,6 @@
  *
  * @since 0.1.0
  */
-import * as Digest from "@smthrs/core/Digest"
 import { Context, Effect, Layer, Option, Path, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import {
@@ -19,6 +18,7 @@ import {
   type Source
 } from "./Descriptor.ts"
 import { Discovery } from "./Discovery.ts"
+import { readVerifiedBody } from "./internal/Body.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
 import * as Pack from "./Pack.ts"
 import type { DiscoveryError, RegistryError } from "./RegistryError.ts"
@@ -349,36 +349,26 @@ const fromRef = (
           description: `flow "${name}" changed after planning; create and approve a new plan before running it`
         })
       }
+      const bodyPath = descriptor.body.path
+      const bytes = yield* readVerifiedBody(fs, path, descriptor).pipe(
+        Effect.mapError((failure) =>
+          registryError({
+            code: "body_unavailable",
+            method: "loadBody",
+            path: bodyPath,
+            description: failure._tag === "changed"
+              ? `body for flow "${name}" changed at "${bodyPath}" after discovery; refresh the registry before loading it`
+              : failure._tag === "unmeasured"
+              ? `body for flow "${name}" is unmeasured at "${bodyPath}"; refresh the registry before loading it`
+              : `body for flow "${name}" is unavailable at "${bodyPath}"`,
+            cause: failure._tag === "unreadable" ? failure.cause : undefined
+          })
+        )
+      )
       if (descriptor.body._tag === "Module") {
         return new FlowBodyModule({ path: descriptor.body.path })
       }
 
-      const bodyPath = path.normalize(descriptor.body.path)
-      const bytes = yield* fs.readFile(bodyPath).pipe(
-        Effect.mapError((cause) =>
-          registryError({
-            code: "body_unavailable",
-            method: "loadBody",
-            path: bodyPath,
-            description: `body for flow "${name}" is unavailable at "${bodyPath}"`,
-            cause
-          })
-        )
-      )
-      if (
-        descriptor.body.contentDigest !== undefined &&
-        Digest.digest(bytes) !== descriptor.body.contentDigest
-      ) {
-        return yield* Effect.fail(
-          registryError({
-            code: "body_unavailable",
-            method: "loadBody",
-            path: bodyPath,
-            description:
-              `body for flow "${name}" changed at "${bodyPath}" after discovery; refresh the registry before loading it`
-          })
-        )
-      }
       const text = new TextDecoder().decode(bytes)
       return MarkdownFlow.loadBody(text, descriptor.body.baseDirectory)
     }

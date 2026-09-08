@@ -173,6 +173,7 @@ export class BodyRefMarkdown
      *
      * Optional only so descriptors journaled before rc.0 still decode. Every
      * current discovery and executable-binding constructor supplies it.
+     * Registry.loadBody and Executable.fromDescriptor refuse it when absent.
      */
     contentDigest: Schema.optional(
       Schema.String.check(
@@ -192,7 +193,11 @@ export class BodyRefMarkdown
  */
 export class BodyRefModule extends Schema.TaggedClass<BodyRefModule>("flows/registry/BodyRef/Module")("Module", {
   path: Schema.String,
-  /** SHA-256 of the complete module source bytes measured during discovery. */
+  /**
+   * SHA-256 of the complete module source bytes measured during discovery.
+   * Optional for older journaled descriptors to decode; Registry.loadBody and
+   * Executable.fromDescriptor refuse an absent digest with body_unavailable.
+   */
   contentDigest: Schema.optional(
     Schema.String.check(
       Schema.isPattern(/^[0-9a-f]{64}$/, {

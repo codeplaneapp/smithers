@@ -12,6 +12,7 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
 import { Annotations, Flow as CoreFlow, Placement as CorePlacement } from "@smthrs/core"
+import * as Digest from "@smthrs/core/Digest"
 import { Action, Flow, FlowRuntime, Graph } from "@smthrs/flow"
 import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import { Node } from "@smthrs/plan"
@@ -172,6 +173,73 @@ describe("delegate resolution", () => {
 })
 
 describe("refusals", () => {
+  for (const name of ["changelog", "greet"]) {
+    it.effect(`refuses an unmeasured ${name} body before invoking a loader`, () =>
+      Effect.gen(function*() {
+        const measured = yield* descriptorNamed(name)
+        const descriptor = new Descriptor.FlowDescriptor({
+          ...measured,
+          body: { ...measured.body, contentDigest: undefined }
+        })
+        expect(Descriptor.executionDigest(descriptor)).toBeUndefined()
+        let loaded = false
+        const failure = yield* Effect.flip(Executable.fromDescriptor(
+          descriptor,
+          options({
+            load: () => {
+              loaded = true
+              return Effect.succeed({ default: greetModule })
+            }
+          })
+        ))
+        expect(loaded).toBe(false)
+        expect(failure).toMatchObject({ _tag: "flows/registry/ExecutableError", code: "body_unavailable" })
+        expect(failure.message).toContain("unmeasured")
+        expect(failure.message).toContain("refresh")
+      }).pipe(Effect.provide(platform)))
+  }
+
+  it.effect("verifies a percent-encoded file URL and preserves it for the module loader", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const directory = yield* fs.makeTempDirectoryScoped({ directory: modulesRoot, prefix: ".g2-" })
+      const sourcePath = `${directory}/flow #100%.ts`
+      const bytes = yield* fs.readFile(`${flowsRoot}/greet/flow.ts`)
+      yield* fs.writeFile(sourcePath, bytes)
+      const url = pathToFileURL(sourcePath).href
+      expect(url).toContain("flow%20%23100%25.ts")
+      const descriptor = new Descriptor.FlowDescriptor({
+        ...(yield* descriptorNamed("greet")),
+        body: new Descriptor.BodyRefModule({ path: url, contentDigest: Digest.digest(bytes) })
+      })
+      const loadedPaths: Array<string> = []
+      const executable = yield* Executable.fromDescriptor(
+        descriptor,
+        options({
+          load: (path) => {
+            loadedPaths.push(path)
+            return Effect.succeed({ default: greetModule })
+          }
+        })
+      )
+      expect(loadedPaths).toEqual([url])
+      expect(executable.delegate).toBe("test/echo")
+    }).pipe(Effect.scoped, Effect.provide(platform)))
+
+  for (const path of ["file://%", "file:///bad%2Fpath.mjs"]) {
+    it.effect(`refuses an invalid file URL as body_unavailable: ${path}`, () =>
+      Effect.gen(function*() {
+        const descriptor = new Descriptor.FlowDescriptor({
+          ...(yield* descriptorNamed("greet")),
+          body: new Descriptor.BodyRefModule({ path, contentDigest: "0".repeat(64) })
+        })
+        const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
+        expect(failure.code).toBe("body_unavailable")
+        expect(failure.path).toBe(path)
+        expect(failure.cause).toBeDefined()
+      }).pipe(Effect.provide(platform)))
+  }
+
   it.effect("names the missing flow rather than dying inside the engine", () =>
     Effect.gen(function*() {
       const descriptor = yield* descriptorNamed("orphan")
@@ -199,7 +267,8 @@ describe("refusals", () => {
         ...(yield* descriptorNamed("changelog")),
         body: new Descriptor.BodyRefMarkdown({
           path: `${flowsRoot}/changelog/absent.mdx`,
-          baseDirectory: `${flowsRoot}/changelog`
+          baseDirectory: `${flowsRoot}/changelog`,
+          contentDigest: "0".repeat(64)
         })
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
@@ -208,11 +277,11 @@ describe("refusals", () => {
       expect(failure.message).toContain("absent.mdx")
     }).pipe(Effect.provide(platform)))
 
-  it.effect("refuses a module body the loader cannot load", () =>
+  it.effect("refuses a module body it cannot read", () =>
     Effect.gen(function*() {
       const descriptor = new Descriptor.FlowDescriptor({
         ...(yield* descriptorNamed("greet")),
-        body: new Descriptor.BodyRefModule({ path: `${modulesRoot}/absent.mjs` })
+        body: new Descriptor.BodyRefModule({ path: `${modulesRoot}/absent.mjs`, contentDigest: "0".repeat(64) })
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("body_unavailable")
@@ -236,11 +305,26 @@ describe("refusals", () => {
       expect(failure.message).toContain("refresh")
     }).pipe(Effect.provide(platform)))
 
+  it.effect("loads a measured module from a file URL with the default loader", () =>
+    Effect.gen(function*() {
+      const measured = yield* descriptorNamed("greet")
+      const descriptor = new Descriptor.FlowDescriptor({
+        ...measured,
+        body: { ...measured.body, path: pathToFileURL(measured.body.path).href }
+      })
+      const executable = yield* Executable.fromDescriptor(descriptor, options())
+      expect(executable.delegate).toBe("test/echo")
+      expect(executable.lowered.placement).toEqual(CorePlacement.local())
+    }).pipe(Effect.provide(platform)))
+
   it.effect("accepts a body path already written as a file URL", () =>
     Effect.gen(function*() {
       const descriptor = new Descriptor.FlowDescriptor({
         ...(yield* descriptorNamed("greet")),
-        body: new Descriptor.BodyRefModule({ path: `file://${modulesRoot}/plain.mjs` })
+        body: new Descriptor.BodyRefModule({
+          path: `file://${modulesRoot}/plain.mjs`,
+          contentDigest: Digest.digest(yield* (yield* FileSystem.FileSystem).readFile(`${modulesRoot}/plain.mjs`))
+        })
       })
       // The loader reached the module — it refused what the module exports,
       // not the specifier it was given.
@@ -252,7 +336,10 @@ describe("refusals", () => {
     Effect.gen(function*() {
       const descriptor = new Descriptor.FlowDescriptor({
         ...(yield* descriptorNamed("greet")),
-        body: new Descriptor.BodyRefModule({ path: "fixtures/executable/modules/plain.mjs" })
+        body: new Descriptor.BodyRefModule({
+          path: "fixtures/executable/modules/plain.mjs",
+          contentDigest: "0".repeat(64)
+        })
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("body_unavailable")
@@ -262,13 +349,33 @@ describe("refusals", () => {
     Effect.gen(function*() {
       const descriptor = new Descriptor.FlowDescriptor({
         ...(yield* descriptorNamed("greet")),
-        body: new Descriptor.BodyRefModule({ path: `${modulesRoot}/plain.mjs` })
+        body: new Descriptor.BodyRefModule({
+          path: `${modulesRoot}/plain.mjs`,
+          contentDigest: Digest.digest(yield* (yield* FileSystem.FileSystem).readFile(`${modulesRoot}/plain.mjs`))
+        })
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("invalid_module")
       expect(failure.path).toBe(`${modulesRoot}/plain.mjs`)
       expect(failure.message).toContain("plain.mjs")
     }).pipe(Effect.provide(platform)))
+
+  it.effect("refuses a verified module whose import fails", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const directory = yield* fs.makeTempDirectoryScoped({ directory: modulesRoot, prefix: ".g2-" })
+      const path = `${directory}/broken.mjs`
+      const bytes = new TextEncoder().encode("throw new Error(\"module import failed\")")
+      yield* fs.writeFile(path, bytes)
+      const descriptor = new Descriptor.FlowDescriptor({
+        ...(yield* descriptorNamed("greet")),
+        body: new Descriptor.BodyRefModule({ path, contentDigest: Digest.digest(bytes) })
+      })
+      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
+      expect(failure.code).toBe("body_unavailable")
+      expect(failure.cause).toMatchObject({ message: "module import failed" })
+      expect(failure.message).toContain("could not be loaded")
+    }).pipe(Effect.scoped, Effect.provide(platform)))
 
   it.effect("refuses a module with no default export at all", () =>
     Effect.gen(function*() {

@@ -1,7 +1,7 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import { Effect, FileSystem, Layer, Option } from "effect"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 import {
   BodyRefMarkdown,
@@ -90,6 +90,43 @@ const attemptMutation = (mutation: () => void): void => {
 }
 
 describe("Registry", () => {
+  it.each(["changelog", "review/read-pr"])("refuses an unmeasured body for %s", async (name) => {
+    const measured = await Effect.runPromise(provideRegistry(Effect.gen(function*() {
+      return yield* (yield* Registry.Registry).get(name)
+    })))
+    const entry = new FlowDescriptor({ ...measured, body: { ...measured.body, contentDigest: undefined } })
+    expect(executionDigest(entry)).toBeUndefined()
+    const failure = await Effect.runPromise(
+      Effect.gen(function*() {
+        return yield* Effect.flip((yield* Registry.Registry).loadBody(name))
+      }).pipe(Effect.provide(fromDescriptors([entry])))
+    )
+    expect(failure).toMatchObject({
+      _tag: "flows/registry/RegistryError",
+      code: "body_unavailable",
+      method: "loadBody"
+    })
+    expect(failure.message).toContain("unmeasured")
+    expect(failure.message).toContain("refresh")
+  })
+
+  it("loads a measured markdown body through a file URL", async () => {
+    const measured = await Effect.runPromise(provideRegistry(Effect.gen(function*() {
+      return yield* (yield* Registry.Registry).get("changelog")
+    })))
+    const entry = new FlowDescriptor({
+      ...measured,
+      body: { ...measured.body, path: pathToFileURL(measured.body.path).href }
+    })
+    const body = await Effect.runPromise(
+      Effect.gen(function*() {
+        return yield* (yield* Registry.Registry).loadBody(entry.name)
+      }).pipe(Effect.provide(fromDescriptors([entry])))
+    )
+    expect(body._tag).toBe("Prompt")
+    if (body._tag === "Prompt") expect(body.text).toContain("changelog")
+  })
+
   it("loads only the executable identity the caller reviewed", async () => {
     await Effect.runPromise(provideRegistry(Effect.gen(function*() {
       const registry = yield* Registry.Registry
@@ -525,7 +562,8 @@ describe("Registry", () => {
       description: "Loads only when requested.",
       body: new BodyRefMarkdown({
         path: `${fixtures}/does-not-exist.md`,
-        baseDirectory: fixtures
+        baseDirectory: fixtures,
+        contentDigest: "0".repeat(64)
       }),
       input: new SchemaRefMarkdownArgs({}),
       output: new SchemaRefMarkdownOutput({}),

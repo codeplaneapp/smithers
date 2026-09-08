@@ -42,7 +42,6 @@
  * @since 1.0.0-rc.0
  */
 import * as Annotations from "@smthrs/core/Annotations"
-import * as Digest from "@smthrs/core/Digest"
 import * as CoreFlow from "@smthrs/core/Flow"
 import * as CoreMarkdown from "@smthrs/core/Markdown"
 import * as CorePlacement from "@smthrs/core/Placement"
@@ -63,6 +62,7 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type * as Descriptor from "./Descriptor.ts"
 import * as Discovery from "./Discovery.ts"
+import { readVerifiedBody } from "./internal/Body.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
 import * as Registry from "./Registry.ts"
 import { type DiscoveryError, discoveryError, type RegistryError } from "./RegistryError.ts"
@@ -561,32 +561,21 @@ const sourceBytes = (
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const bytes = yield* fs.readFile(path.normalize(sourcePath)).pipe(
-      Effect.mapError((cause) =>
+    return yield* readVerifiedBody(fs, path, descriptor).pipe(
+      Effect.mapError((failure) =>
         refuse({
           code: "body_unavailable",
           flow: descriptor.name,
           path: sourcePath,
-          message: `the body of flow "${descriptor.name}" is unavailable at "${sourcePath}"`,
-          cause
+          message: failure._tag === "changed"
+            ? `the body of flow "${descriptor.name}" changed at "${sourcePath}" after discovery; refresh the registry before running it`
+            : failure._tag === "unmeasured"
+            ? `the body of flow "${descriptor.name}" is unmeasured at "${sourcePath}"; refresh the registry before running it`
+            : `the body of flow "${descriptor.name}" is unavailable at "${sourcePath}"`,
+          cause: failure._tag === "unreadable" ? failure.cause : undefined
         })
       )
     )
-    if (
-      descriptor.body.contentDigest !== undefined &&
-      Digest.digest(bytes) !== descriptor.body.contentDigest
-    ) {
-      return yield* Effect.fail(
-        refuse({
-          code: "body_unavailable",
-          flow: descriptor.name,
-          path: sourcePath,
-          message:
-            `the body of flow "${descriptor.name}" changed at "${sourcePath}" after discovery; refresh the registry before running it`
-        })
-      )
-    }
-    return bytes
   })
 
 const loadMarkdown = (
@@ -613,9 +602,7 @@ const loadModule = (
 ): Effect.Effect<LoadedBody, ExecutableError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const platformPath = yield* Path.Path
-    if (descriptor.body.contentDigest !== undefined) {
-      yield* sourceBytes(descriptor, path)
-    }
+    yield* sourceBytes(descriptor, path)
     const loadPath = path.startsWith("file:") ? path : platformPath.resolve(path)
     const loaded = yield* (options.load ?? importModule)(loadPath).pipe(
       Effect.mapError((cause) =>

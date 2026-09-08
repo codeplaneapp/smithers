@@ -153,8 +153,9 @@ resolve against. `contentDigest` is the SHA-256 of the complete source bytes
 measured during discovery, as 64 lowercase hexadecimal characters. Every
 constructor supplies it. The field is optional only so a descriptor journaled
 by an older version, before the digest existed, still decodes. `Registry.loadBody`
-rehashes markdown source, and `Executable.fromDescriptor` verifies module source
-before importing it; a mismatch is `body_unavailable`.
+verifies source bytes before returning a prompt or module locator, and
+`Executable.fromDescriptor` verifies source before loading it. A missing digest
+or mismatch is `body_unavailable`; refresh the registry before loading it.
 
 ### Descriptor.FlowBody, FlowBodyPrompt, FlowBodyModule
 
@@ -508,7 +509,7 @@ const Registry: Context.Service<Registry, Registry>
 | `visible`   | The descriptors whose `modelInvocable` is true.                                                                                                         |
 | `get`       | One descriptor, or `RegistryError { code: "not_found" }`.                                                                                               |
 | `getOption` | One descriptor as an `Option`. It cannot fail.                                                                                                          |
-| `loadBody`  | Returns the body locator or prompt, optionally checking the approved execution identity first. Markdown bytes are checked against the discovery digest. |
+| `loadBody`  | Returns the body locator or prompt, optionally checking the approved execution identity first. Source bytes are checked against the discovery digest; unmeasured bodies are refused. |
 | `runPrompt` | A markdown body rendered as a prompt. A module flow is `not_prompt_flow`.                                                                               |
 | `refresh`   | Rescans every configured source and replaces the snapshot.                                                                                              |
 | `warnings`  | Every discovery and collision diagnostic.                                                                                                               |

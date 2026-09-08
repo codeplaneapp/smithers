@@ -43,8 +43,13 @@ A `BodyRef` also records `contentDigest`, the SHA-256 of the complete entry
 file measured during the scan. That digest is what makes a lazily loaded body
 honest. `Registry.loadBody` and `Executable.fromDescriptor` rehash the bytes
 they read and refuse with `body_unavailable` when the file changed after
-discovery, rather than running a body whose declaration the catalog no longer
-describes. Adopting the new bytes is what `refresh` is for.
+discovery or `contentDigest` is absent. Older journaled descriptors still decode
+and can be listed, but their unmeasured bodies cannot be loaded or run. Refresh
+the registry to measure the current bytes before loading them.
+
+Body paths may be filesystem paths or `file:` URLs. Verification decodes file
+URLs, including percent-encoded filenames, through the host `Path` service.
+Module loading retains the original URL for import.
 
 ## What a descriptor carries
 
