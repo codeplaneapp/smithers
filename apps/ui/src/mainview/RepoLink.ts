@@ -1,6 +1,7 @@
 import { AUTH_SIGNED_IN_PARAM } from "@smthrs/rpc/AgentApiRoutes"
 import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 import type { AppController } from "./state/AppController"
+import { repoTreeRowId, sharedCopyIdOf } from "./state/AppState"
 
 /*
  * A repository's app lives at `/owner/name` (https://smithers.sh/smithersai/smithers).
@@ -110,14 +111,38 @@ const welcomed = (controller: Pick<AppController, "store">, repo: string): boole
 }
 
 /**
+ * The repository document's default bookmark, read from the public mirror
+ * (`GET /api/repos/{o}/{r}`, a public repository read the Worker forwards
+ * with no credentials): the bookmark the shared read-only copy tracks. The
+ * catalog itself carries no head, so this is the one honest source signed
+ * out. Null when the document cannot be read or names no default bookmark:
+ * the copy then shows no bookmark, never an invented one.
+ */
+const defaultBookmarkOf = async (http: FetchLike, repo: string): Promise<string | null> => {
+  const [owner = "", name = ""] = repo.split("/")
+  try {
+    const response = await http(`/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, { headers: { accept: "application/json" } })
+    if (!response.ok) return null
+    const body: unknown = await response.json()
+    const bookmark: unknown = typeof body === "object" && body !== null ? (body as { readonly default_bookmark?: unknown }).default_bookmark : undefined
+    return typeof bookmark === "string" && bookmark !== "" ? bookmark : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Select the requested repository when the public catalog carries it. The
  * catalog row joins the repositories collection beside whatever the cloud
  * inventory already loaded, then `repo.select` makes it the active one, and
  * the welcome (`repo.welcome`) opens the transcript unless a reload finds it
- * already there. Returns the refusal when the request could not be honoured.
+ * already there. The repository's shared read-only copy (WorkspaceViews.ts)
+ * opens its root in the sidebar on this first paint, and the mirror's
+ * default bookmark lands on the row so the copy names it. Returns the
+ * refusal when the request could not be honoured.
  */
 export const openRequestedRepo = async (
-  controller: Pick<AppController, "store" | "selectRepo" | "runCommand">,
+  controller: Pick<AppController, "store" | "selectRepo" | "runCommand" | "runCommandArgs">,
   http: FetchLike,
   requested: string
 ): Promise<string | void> => {
@@ -153,4 +178,33 @@ export const openRequestedRepo = async (
   const refusal = await controller.selectRepo(repository.id)
   if (refusal !== undefined) return refusal
   if (!welcomed(controller, repository.id)) controller.runCommand("repo.welcome")
+  /*
+   * The shared copy's tree opens once, on the first paint of the catalog
+   * repository: `repo.tree <copyId>` through the registry, the same act the
+   * caret runs. The tree rows live for this launch only, so a row already
+   * there is this launch's own state, and the caret is the visitor's.
+   */
+  const sharedId = sharedCopyIdOf(repository.id)
+  if (
+    controller.store.collections.workingCopies.get(sharedId) !== undefined &&
+    controller.store.collections.repoTree.get(repoTreeRowId(sharedId, "")) === undefined
+  ) {
+    controller.runCommandArgs("repo.tree", sharedId)
+  }
+  const bookmark = await defaultBookmarkOf(http, repository.id)
+  const row = controller.store.collections.repositories.get(repository.id)
+  if (bookmark === null || row === undefined || row.head !== null) return
+  controller.store.dispatch({
+    type: "repositories.loaded",
+    actor: "system",
+    repositories: [...controller.store.collections.repositories.values()].map(({ id, org, ownerKind, name, head, catalog, summary }) => ({
+      id,
+      org,
+      ownerKind,
+      name,
+      head: id === repository.id ? { bookmark, changeId: null, commitId: null } : head,
+      ...(catalog === undefined ? {} : { catalog }),
+      ...(summary === undefined ? {} : { summary })
+    }))
+  })
 }

@@ -84,6 +84,23 @@ launch, relaunch, or quit the app: the orchestrator owns the running app.
   request. File rows on a box bind `workspace.file <path> <workspaceId>`;
   local rows keep `files.read`. `repo.tree` registers with
   `runtimeAny: ["local.repositories", "cloud"]` so the web host has it.
+- Box lane L2 (shared-box): a public catalog repository carries one SHARED
+  copy, `shared:<org/repo>` (`WorkspaceViews.sharedCopyOf`): the read-only
+  virtual box every signed-out reader shares over the mirror, no VM and no
+  terminal (factory design session ruling; spec 04 §2 gives a signed-in
+  person one box per branch). It is a materialized view, never a stored
+  row: present while the catalog row stands and the visitor has no box on
+  that repository. `kind: "shared"`, `access: "read"`, `bookmark` = the
+  row's head bookmark (`RepoLink.openRequestedRepo` reads it from
+  `GET /api/repos/{o}/{r}` `default_bookmark`, a public read); the row
+  reads `<bookmark> · shared · read-only` (`workingCopyLabel`, the one label
+  rule the sidebar and the connect menu share). `loadDirectory` branches on
+  `copy.kind === "shared"` and reads `GET /api/repos/{o}/{r}/contents[/path]`
+  (the files flows' public read, allowlisted signed out by
+  `apps/server/src/publicRepositoryReads.ts`); file rows bind
+  `files.read <path> <org/repo>`. Its root opens on the first paint of the
+  catalog repository. No write door renders on a read-only copy (no `+`, no
+  unpin); the chrome's Sign in line is the reader's door.
 - Flows: `repo.tree <copyId> [path]` — user and button only (the agent has
   `files.list`); toggles expansion and loads the directory on first expand
   (or when the row is `failed`, retry). `files.read <path> <repo>` is the

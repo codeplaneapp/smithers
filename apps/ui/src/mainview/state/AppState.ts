@@ -183,17 +183,32 @@ export type CloudRepository = z.infer<typeof CloudRepositorySchema>
 
 /*
  * A working copy of a repository (ADR 0001): a local checkout on this
- * machine, or a cloud workspace. A checkout computes `ahead` with jj; a
+ * machine, a cloud workspace (a box), or the SHARED copy of a public
+ * repository: the one read-only virtual box every reader of a catalog
+ * repository shares over the public mirror (factory design session ruling,
+ * lane plan B2: a virtual copy over the mirror's contents reads; factory
+ * spec 04 §2 gives a signed-in person one box per branch). It has no VM and
+ * no terminal; its files are the mirror's contents route. A checkout computes `ahead` with jj; a
  * cloud workspace has no API field yet, so it carries state only (never
  * faked). `readAt` is the checkout's own jj position, when the local server
- * probed it.
+ * probed it. A shared copy is a materialized view (WorkspaceViews.ts), never
+ * a persisted row.
  */
 export const WorkingCopySchema = z.object({
-  /** `local:<path>` (the pin key) for a checkout; `workspace:<workspaceId>` for a cloud workspace. */
+  /** `local:<path>` (the pin key) for a checkout; `workspace:<workspaceId>` for a cloud workspace; `shared:<org/repo>` for the shared copy. */
   id: z.string(),
   /** The repositories row this is a copy of, or the checkout's name when no cloud repo matches. */
   repoId: z.string(),
-  kind: z.enum(["local", "workspace"]),
+  kind: z.enum(["local", "workspace", "shared"]),
+  /**
+   * The derived access bit (no role field on the wire yet, lane plan B2): `read`
+   * for the shared copy, whose only route is the public mirror's contents
+   * read, so no write door renders on it. Absent for a checkout and a box:
+   * their own routes decide.
+   */
+  access: z.enum(["read", "write"]).optional(),
+  /** The bookmark the copy tracks, when a seam supplied it: the shared copy reads the repositories row's head bookmark. */
+  bookmark: z.string().optional(),
   label: z.string(),
   path: z.string().optional(),
   workspaceId: z.string().optional(),
@@ -409,6 +424,9 @@ export type GitHubAppStatusInput = Pick<
 
 /** The working-copy id of a local checkout: the pin key, stable across reopens. */
 export const localCopyIdOf = (path: string): string => repoKeyOf(path)
+
+/** The working-copy id of a public repository's shared read-only copy: one per repository, keyed on `org/repo`. */
+export const sharedCopyIdOf = (repoId: string): string => `shared:${repoId}`
 
 /**
  * The `org/repo` a remote URL names (`git@host:org/repo.git`,

@@ -6,6 +6,7 @@ import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
 import { DEFAULT_WORKSPACE_NAME, MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
 import type { Repo, RepoTreeRow, TabRow, WorkingCopy } from "../state/AppState"
+import { isReadOnlyCopy, workingCopyLabel } from "../state/WorkspaceViews"
 import { SELECT_REPO_LABEL } from "../Onboarding"
 
 /*
@@ -14,9 +15,12 @@ import { SELECT_REPO_LABEL } from "../Onboarding"
  * — then one row per repository, grouped `org/ → repo → working copies`. A
  * working copy's row is a file tree: its caret expands the copy's ROOT, one
  * directory per fetch (a local checkout through the local app, a cloud
- * workspace copy through its box's files route), and a file click renders the
- * existing file card in the chat (files.read, or workspace.file for a
- * workspace copy). The SESSIONS a copy holds: terminals,
+ * workspace copy through its box's files route, the shared read-only copy of
+ * a public repository through the mirror's contents route), and a file click
+ * renders the existing file card in the chat (files.read, or workspace.file
+ * for a workspace copy). A read-only copy carries no write door: no `+`, no
+ * unpin; the chrome's Sign in line is the door a signed-out reader has. The
+ * SESSIONS a copy holds: terminals,
  * agents, pinned cards — nest under it after its files. Then `+`, and at the
  * bottom the chrome that must stay visible everywhere: "Sign in", then the
  * six chrome buttons the factory design session fixed in this order (mocks
@@ -236,15 +240,21 @@ export function ChromeBar() {
    * else. Every directory row is `repo.tree <copyId>#<path>`; every file row
    * is the existing file card in the chat (THE EMBED LAW): `files.read <path>
    * <repo>` on a local checkout, `workspace.file <path> <workspaceId>` on a
-   * cloud workspace copy. A directory with nothing loaded shows its row's own
-   * state: `loading…`, `empty`, or the route's error text verbatim.
+   * cloud workspace copy, `files.read <path> <org/repo>` on the shared copy
+   * (the same public read the files flows make). A directory with nothing
+   * loaded shows its row's own state: `loading…`, `empty`, or the route's
+   * error text verbatim.
    */
   const copyTree = (copy: WorkingCopy, view: CopyTree) => {
     if (view.root?.expanded !== true) return null
     const repo = copy.path === undefined ? undefined : openByPath.get(copy.path)
     const fileFlow = copy.kind === "workspace" ? "workspace.file" : "files.read"
     const fileFlowArgs = (path: string): string =>
-      copy.kind === "workspace" ? fileArgs(path, copy.workspaceId ?? copy.id) : fileArgs(path, repo?.id)
+      copy.kind === "workspace"
+        ? fileArgs(path, copy.workspaceId ?? copy.id)
+        : copy.kind === "shared"
+        ? fileArgs(path, copy.repoId)
+        : fileArgs(path, repo?.id)
     const stateOf = (path: string): string => {
       const row = view.rows.get(path)
       if (row === undefined || row.state === "loading") return "loading…"
@@ -462,7 +472,7 @@ export function ChromeBar() {
                         <FolderGit2 size={14} aria-hidden="true" />
                         <span className="repo-name">{group.name}</span>
                       </button>
-                      {single !== undefined && canAddSession ?
+                      {single !== undefined && canAddSession && !isReadOnlyCopy(single) ?
                         (
                           <button
                             type="button"
@@ -504,9 +514,7 @@ export function ChromeBar() {
                         <div className="repo-copies" role="presentation">
                           {group.copies.map((copy) => {
                             const copyActive = activeCopyId === copy.id
-                            const copyLabel = copy.kind === "workspace"
-                              ? copy.state === undefined ? copy.label : `${copy.label} · ${copy.state}`
-                              : copy.ahead === undefined ? copy.label : `${copy.label} · ${copy.ahead} ahead`
+                            const copyLabel = workingCopyLabel(copy)
                             const view = copyTreeOf(copy.id, treeRows)
                             return (
                               <div key={copy.id} className="repo-copy" role="presentation" data-testid={`copy-${copy.id}`}>
@@ -525,7 +533,8 @@ export function ChromeBar() {
                                     <FolderGit2 size={12} aria-hidden="true" />
                                     <span className="repo-name">{copyLabel}</span>
                                   </button>
-                                  {copy.kind === "local" && canAddSession ?
+                                  {/* The `+` is a write door: never on a read-only copy (the shared copy of a public repository). */}
+                                  {copy.kind === "local" && canAddSession && !isReadOnlyCopy(copy) ?
                                     (
                                       <button
                                         type="button"

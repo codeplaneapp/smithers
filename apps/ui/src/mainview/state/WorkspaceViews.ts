@@ -1,5 +1,6 @@
-import { BTreeIndex, createLiveQueryCollection, eq, isUndefined } from "@tanstack/db"
-import type { Card, CloudWorkspaceInput, CloudWorkspaceRow, WorkingCopy } from "./AppState"
+import { and, BTreeIndex, createLiveQueryCollection, eq, isUndefined } from "@tanstack/db"
+import { sharedCopyIdOf } from "./AppState"
+import type { Card, CloudRepository, CloudWorkspaceInput, CloudWorkspaceRow, WorkingCopy } from "./AppState"
 import type { StoredCollections } from "./AppStore"
 
 /** The workspace row owns header facts; the card owns its loaded facets. */
@@ -50,9 +51,48 @@ const workspaceCopy = (workspace: CloudWorkspaceRow): WorkingCopy => ({
   revision: workspace.revision
 })
 
+/*
+ * The shared copy of a public repository (factory design session ruling,
+ * lane plan B2: read-only users share one virtual box over the public
+ * mirror; no VM, no terminal; factory spec 04 §2 keeps one box per branch
+ * per signed-in person).
+ * One per catalog row, derived and never stored: it exists exactly while
+ * the public catalog (GET /api/public/repos) lists the repository and no
+ * box of the visitor's own stands on it (a person with a box is not a
+ * read-only user of that repository). Its bookmark is the row's head
+ * bookmark when a seam supplied one; the catalog itself carries no head, so
+ * the label does not invent it.
+ */
+export const sharedCopyOf = (repository: Pick<CloudRepository, "id" | "head" | "updatedAt" | "revision">): WorkingCopy => ({
+  id: sharedCopyIdOf(repository.id),
+  repoId: repository.id,
+  kind: "shared",
+  access: "read",
+  ...(repository.head === null ? {} : { bookmark: repository.head.bookmark }),
+  label: "shared",
+  updatedAt: repository.updatedAt,
+  revision: repository.revision
+})
+
+/** A copy no door may write through: today the shared copy, whose only route is the mirror's contents read. */
+export const isReadOnlyCopy = (copy: Pick<WorkingCopy, "access">): boolean => copy.access === "read"
+
+/**
+ * The sidebar's line for a copy: what the seams hold and nothing more. A
+ * shared copy says its bookmark (when known), that it is shared, and that it
+ * is read-only; a box says its state; a checkout says how far ahead it is.
+ */
+export const workingCopyLabel = (copy: Pick<WorkingCopy, "kind" | "label" | "state" | "ahead" | "bookmark" | "access">): string => {
+  if (copy.kind === "shared") {
+    return [copy.bookmark, copy.label, ...(copy.access === "read" ? ["read-only"] : [])].filter((part) => part !== undefined).join(" · ")
+  }
+  if (copy.kind === "workspace") return copy.state === undefined ? copy.label : `${copy.label} · ${copy.state}`
+  return copy.ahead === undefined ? copy.label : `${copy.label} · ${copy.ahead} ahead`
+}
+
 /** Materialized views, never persisted or written by reducers. */
 export const createWorkspaceViews = (
-  stored: Pick<StoredCollections, "cards" | "workingCopies" | "cloudWorkspaces">
+  stored: Pick<StoredCollections, "cards" | "workingCopies" | "cloudWorkspaces" | "repositories">
 ) => {
   stored.cloudWorkspaces.createIndex((workspace) => workspace.id, { indexType: BTreeIndex })
   return {
@@ -91,7 +131,28 @@ export const createWorkspaceViews = (
             // workspace row always supersedes an older persisted copy.
             .where(({ workspace }) => isUndefined(workspace.id))
             .select(({ copy }) => copy),
-          q.from({ cloud: stored.cloudWorkspaces }).fn.select(({ cloud }) => workspaceCopy(cloud))
+          q.from({ cloud: stored.cloudWorkspaces }).fn.select(({ cloud }) => workspaceCopy(cloud)),
+          /*
+           * One shared read-only copy per public catalog repository, for as
+           * long as the catalog row stands and the visitor has no box on it.
+           * A box is a cloud workspace row, or an inventory copy of kind
+           * workspace (the two sources a box reaches the store through).
+           */
+          q.from({ repository: stored.repositories })
+            .leftJoin(
+              { box: stored.cloudWorkspaces },
+              ({ repository, box }) => eq(repository.id, box.repoId)
+            )
+            .leftJoin(
+              {
+                boxCopy: q.from({ copy: stored.workingCopies })
+                  .where(({ copy }) => eq(copy.kind, "workspace"))
+                  .select(({ copy }) => ({ id: copy.id, repoId: copy.repoId }))
+              },
+              ({ repository, boxCopy }) => eq(repository.id, boxCopy.repoId)
+            )
+            .where(({ repository, box, boxCopy }) => and(eq(repository.catalog, true), isUndefined(box.id), isUndefined(boxCopy.id)))
+            .fn.select(({ repository }) => sharedCopyOf(repository))
         )
     })
   }

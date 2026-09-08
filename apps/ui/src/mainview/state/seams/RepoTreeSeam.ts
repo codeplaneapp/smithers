@@ -5,16 +5,21 @@
  * use (`POST /api/repo/files { repoId, path }`, FilesSeam's
  * requestLocalFiles). A cloud WORKSPACE copy (a box) reads through the route
  * its Files facet uses (`GET /api/repos/{o}/{r}/workspaces/{id}/files?path=`,
- * WorkspaceSeam.loadFiles). The row is what the sidebar renders: `loaded`
- * with exactly the entries the route returned (no filtering, nothing
- * invented), or `failed` with the route's error text verbatim, shown in
- * place. Never throws.
+ * WorkspaceSeam.loadFiles). The SHARED copy of a public repository (the
+ * read-only virtual box every reader shares, lane plan B2) reads
+ * through the public contents route the files flows read
+ * (`GET /api/repos/{o}/{r}/contents[/path]`, forwarded to the Smithers Cloud
+ * mirror with no credentials: apps/server publicRepositoryReads.ts). The row
+ * is what the sidebar renders: `loaded` with exactly the entries the route
+ * returned (no filtering, nothing invented), or `failed` with the route's
+ * error text verbatim, shown in place. Never throws.
  */
 import { isRecord } from "@smthrs/canonical/Record"
 import type { Repo } from "@smthrs/rpc/LocalApp"
 import type { RepoTreeEntry, WorkingCopy } from "../AppState"
 import { createCloudClient } from "./CloudClient"
-import { requestLocalFiles } from "./FilesSeam"
+import { encodeRepoPath, parseEntry, requestLocalFiles } from "./FilesSeam"
+import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
 export interface RepoTreeSeam {
@@ -39,7 +44,13 @@ export const openRepoOfCopy = (
   const copy = store.collections.workingCopies.get(copyId)
   const path = copy?.path ?? (copyId.startsWith("local:") ? copyId.slice("local:".length) : undefined)
   const name = store.collections.pinnedRepos.get(copyId)?.name ?? copy?.label ?? copyId
-  if (path === undefined) return { error: `${name} is a cloud workspace; only a checkout on this machine lists its files here.` }
+  if (path === undefined) {
+    return {
+      error: copy?.kind === "shared"
+        ? `${name} is the shared read-only copy of ${copy.repoId}; its files are read from the public mirror, never from this machine.`
+        : `${name} is a cloud workspace; only a checkout on this machine lists its files here.`
+    }
+  }
   const repo = [...store.collections.repos.values()].find((candidate) => candidate.path === path)
   if (repo === undefined) return { error: `${name} is pinned but not open on this machine — open it with /repo.open, then retry.` }
   return { repo }
@@ -81,10 +92,59 @@ const treeEntriesOf = (body: unknown): ReadonlyArray<RepoTreeEntry> => {
   })
 }
 
+/**
+ * The public contents path of a directory in a repository's mirror: the URL
+ * FilesSeam lists with (`/api/repos/{o}/{r}/contents[/path]`, per-segment
+ * encoding), under the app's own origin so the Worker forwards it.
+ */
+export const sharedContentsPath = (repoId: string, path: string): string => {
+  const [owner = "", name = ""] = repoId.split("/")
+  const base = `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/contents`
+  return path === "" ? base : `${base}/${encodeRepoPath(path)}`
+}
+
 export const createRepoTreeSeam = (ctx: SeamContext): RepoTreeSeam => {
   const { get: getJson } = createCloudClient(ctx)
   const failed = (copyId: string, path: string, error: string): void => {
     ctx.dispatch({ type: "repo-tree.failed", actor: "system", copyId, path, error })
+  }
+  /*
+   * The shared copy's directory: the mirror's listing, a JSON array of
+   * `{ name, path, type }` rows (FilesSeam.parseEntry drops a malformed one).
+   * A record instead of an array is the route's answer for a file path. A
+   * refusal reaches the row in the route's words, so a repository the mirror
+   * does not hold says what the mirror said.
+   */
+  const loadSharedDirectory = async (copy: WorkingCopy, path: string): Promise<void> => {
+    const label = path === "" ? "/" : path
+    let response: Response
+    try {
+      response = await ctx.http(`${ctx.baseUrl}${sharedContentsPath(copy.repoId, path)}`)
+    } catch (error) {
+      failed(copy.id, path, `Could not reach the backend to list ${label} in ${copy.repoId}: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    if (!response.ok) {
+      const fallback = response.status === 404 ? `Path not found: ${label} in ${copy.repoId}` : `Listing ${label} in ${copy.repoId} failed (${response.status})`
+      failed(copy.id, path, await readErrorMessage(response, fallback))
+      return
+    }
+    const body: unknown = await response.json().catch(() => null)
+    if (!Array.isArray(body)) {
+      failed(
+        copy.id,
+        path,
+        isRecord(body) && ("content" in body || "encoding" in body)
+          ? `${path} in ${copy.repoId} is a file; run /files.read ${path} instead`
+          : `The backend answered ${label} in ${copy.repoId} with an unreadable payload`
+      )
+      return
+    }
+    const entries = body.flatMap((entry): ReadonlyArray<RepoTreeEntry> => {
+      const parsed = parseEntry(entry)
+      return parsed === null ? [] : [parsed]
+    })
+    ctx.dispatch({ type: "repo-tree.loaded", actor: "system", copyId: copy.id, path, entries, truncated: false })
   }
   /*
    * A box's directory: refused in place while the box is not running (its
@@ -114,6 +174,10 @@ export const createRepoTreeSeam = (ctx: SeamContext): RepoTreeSeam => {
     const copy = ctx.store.collections.workingCopies.get(copyId)
     if (copy?.kind === "workspace") {
       await loadWorkspaceDirectory(copy, path)
+      return
+    }
+    if (copy?.kind === "shared") {
+      await loadSharedDirectory(copy, path)
       return
     }
     const resolved = openRepoOfCopy(ctx.store, copyId)

@@ -726,6 +726,80 @@ describe("the sidebar's file tree", () => {
     expect(requests).toEqual([])
   })
 
+  /*
+   * The shared read-only copy of a public repository (WorkspaceViews.ts): the
+   * one virtual box every signed-out reader shares over the mirror. Its row
+   * reads `<bookmark> · shared · read-only`, its caret lists through the
+   * mirror's contents route (the same public read the files flows make), a
+   * file click is files.read <path> <org/repo>, and no write door renders on
+   * it: no `+`, no unpin. The chrome's Sign in line is the door a reader has.
+   */
+  const sharedHarness = async () => {
+    const requests: Array<string> = []
+    const contents = "/api/repos/smithersai/smithers/contents"
+    const services: AppServices = {
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const parsed = new URL(url, "http://cloud.test")
+        const path = parsed.pathname
+        if (!path.endsWith("/contents/.smithers/factory.json")) requests.push(`${path}${parsed.search}`)
+        if (path === contents) {
+          return json(200, [{ name: "apps", path: "apps", type: "dir", sha: "", size: 0 }, { name: "README.md", path: "README.md", type: "file", sha: "", size: 0 }])
+        }
+        if (path === `${contents}/apps`) return json(200, [{ name: "ui", path: "apps/ui", type: "dir", sha: "", size: 0 }])
+        if (path === `${contents}/README.md`) return json(200, { name: "README.md", path: "README.md", type: "file", encoding: "utf-8", content: "# Shared\n", size: 9 })
+        return json(404, { status: "error", message: `no stub for ${url}` })
+      }
+    }
+    const { store, controller } = await cloudHarness(services)
+    await persisted(store, { type: "cloud.session.loaded", actor: "system", state: "signed-out", username: null, expiresAt: null, scopes: null })
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "user", name: "smithers", head: { bookmark: "main", changeId: null, commitId: null }, catalog: true }]
+    })
+    return { store, controller, requests }
+  }
+
+  test("signed out, the shared read-only copy is the catalog repository's one tab: its caret lists the mirror's contents, a file click is files.read, and no write door renders", async () => {
+    const { store, controller, requests } = await sharedHarness()
+    const { host, act } = mount(controller)
+    const copyId = "shared:smithersai/smithers"
+    const row = host.querySelector<HTMLElement>(`[data-testid="copy-${copyId}"]`)
+    expect(row).not.toBeNull()
+    expect(row?.querySelector(".repo-name")?.textContent).toBe("main · shared · read-only")
+    expect(row?.querySelector('[data-flow="tab.menu"]')).toBeNull()
+    expect(row?.querySelector('[data-flow="repo.unpin"]')).toBeNull()
+    expect(host.querySelector("[data-testid=chrome-sign-in]")?.getAttribute("data-flow")).toBe("auth.sign-in")
+    const toggle = host.querySelector<HTMLButtonElement>(`[data-testid="repo-tree-toggle-${copyId}"]`)
+    expect(toggle?.getAttribute("data-flow")).toBe("repo.tree")
+    expect(toggle?.getAttribute("aria-label")).toBe("Expand shared")
+
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="copy-select-${copyId}"]`)?.click())
+    await settle(act, () => toggle?.click())
+    expect(requests).toEqual(["/api/repos/smithersai/smithers/contents"])
+    const tree = host.querySelector<HTMLElement>(`[data-testid="repo-tree-${copyId}"]`)
+    expect(names(tree, ".sui-file-tree-dir-name")).toEqual(["apps"])
+    expect(names(tree, "[data-slot=file-tree-file]")).toEqual(["README.md"])
+    for (const dir of tree?.querySelectorAll("[data-slot=file-tree-dir-toggle]") ?? []) expect(dir.getAttribute("data-flow")).toBe("repo.tree")
+    for (const file of tree?.querySelectorAll("[data-slot=file-tree-file]") ?? []) expect(file.getAttribute("data-flow")).toBe("files.read")
+    expect([...host.querySelectorAll(".chrome-bar button")].every((button) => button.getAttribute("data-flow") !== null)).toBe(true)
+
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${copyId}#apps"]`)?.click())
+    expect(requests[1]).toBe("/api/repos/smithersai/smithers/contents/apps")
+    expect(names(tree, ".sui-file-tree-dir-name")).toEqual(["apps", "ui"])
+
+    // The file click is the repository read the files flows make: the file card lands in the chat, addressed to the repository.
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-file-${copyId}#README.md"]`)?.click())
+    for (let tick = 0; tick < 20 && !store.collections.cards.has("file-smithersai/smithers-README.md"); tick += 1) await act(() => {})
+    expect(requests.at(-1)).toBe("/api/repos/smithersai/smithers/contents/README.md")
+    const card = store.collections.cards.get("file-smithersai/smithers-README.md")
+    expect(card?.kind).toBe("file")
+    expect(card?.title).toBe("File · smithersai/smithers · README.md")
+    // The shared copy has no VM: no box route is ever asked.
+    expect(requests.some((request) => request.includes("/workspaces"))).toBe(false)
+  })
+
   test("sessions nest under the copy after its files, labelled apart once the tree is open", async () => {
     const { store, controller } = await treeHarness()
     await persisted(store, {

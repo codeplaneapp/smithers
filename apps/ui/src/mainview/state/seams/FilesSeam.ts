@@ -169,7 +169,7 @@ const unsafePath = (path: string): boolean => {
 }
 
 /** Per-segment encoding, mirroring multi filesClient.ts encodeRepoPath (:53). */
-const encodeRepoPath = (path: string): string => path.split("/").filter(Boolean).map(encodeURIComponent).join("/")
+export const encodeRepoPath = (path: string): string => path.split("/").filter(Boolean).map(encodeURIComponent).join("/")
 
 /** The last path segment, for wire entries that answer a path but no name. */
 const fileName = (path: string): string => {
@@ -178,7 +178,7 @@ const fileName = (path: string): string => {
 }
 
 /** One directory row off the wire {name?, path?, type} shape; malformed rows drop. */
-const parseEntry = (value: unknown): FileListEntry | null => {
+export const parseEntry = (value: unknown): FileListEntry | null => {
   if (!isRecord(value)) return null
   if (value.type !== "file" && value.type !== "dir") return null
   const name = typeof value.name === "string" && value.name !== ""

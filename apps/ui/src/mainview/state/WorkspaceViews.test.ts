@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test"
-import { cardFrameId, rootFrameId } from "./AppState"
+import { describe, expect, test } from "bun:test"
+import { cardFrameId, rootFrameId, sharedCopyIdOf } from "./AppState"
 import type { Card, CloudWorkspaceInput } from "./AppState"
 import { createAppStore } from "./AppStore"
-import { workspaceCardFacts } from "./WorkspaceViews"
+import { isReadOnlyCopy, workingCopyLabel, workspaceCardFacts } from "./WorkspaceViews"
 
 const workspace: CloudWorkspaceInput = {
   id: "computer",
@@ -132,4 +132,119 @@ test("full rows supersede legacy inventory; leaving the scope captures the last 
   await store.dispatch({ type: "workspace.updated", actor: "system", workspace }).isPersisted.promise
   expect(store.collections.cards.get(card.id)).toMatchObject({ payload: { name: "Computer", status: "running" } })
   await store.dispose?.()
+})
+
+/*
+ * The shared copy (design session ruling, lane plan B2): the one read-only virtual box every
+ * reader of a public catalog repository shares over the mirror. It is a
+ * materialized view over the repositories collection, never a stored row:
+ * present while the catalog row stands and no box of the visitor's own
+ * stands on that repository, gone the moment either changes.
+ */
+describe("the shared read-only copy of a catalog repository", () => {
+  const memory = () => {
+    const data = new Map<string, string>()
+    return {
+      data,
+      backend: {
+        kind: "localStorage" as const,
+        storage: {
+          getItem: (key: string) => data.get(key) ?? null,
+          setItem: (key: string, value: string) => void data.set(key, value),
+          removeItem: (key: string) => void data.delete(key)
+        }
+      }
+    }
+  }
+  const catalogRow = (head: { bookmark: string; changeId: string | null; commitId: string | null } | null) => ({
+    id: "smithersai/smithers",
+    org: "smithersai",
+    ownerKind: "org" as const,
+    name: "smithers",
+    head,
+    catalog: true as const,
+    summary: "Smithers is a durable framework."
+  })
+
+  test("a catalog row derives one shared copy: kind shared, access read, the row's head bookmark, labelled `<bookmark> · shared · read-only`", async () => {
+    const { data, backend } = memory()
+    const store = await createAppStore(backend)
+    await store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        catalogRow({ bookmark: "main", changeId: null, commitId: null }),
+        // The signed-in inventory's row is not a catalog row: no shared copy.
+        { id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: { bookmark: "main", changeId: "q", commitId: "c" } }
+      ]
+    }).isPersisted.promise
+    const shared = store.collections.workingCopies.get(sharedCopyIdOf("smithersai/smithers"))
+    expect(shared).toMatchObject({
+      id: "shared:smithersai/smithers",
+      repoId: "smithersai/smithers",
+      kind: "shared",
+      access: "read",
+      bookmark: "main",
+      label: "shared"
+    })
+    expect(shared?.path).toBeUndefined()
+    expect(shared?.workspaceId).toBeUndefined()
+    expect(workingCopyLabel(shared!)).toBe("main · shared · read-only")
+    expect(isReadOnlyCopy(shared!)).toBe(true)
+    expect(store.collections.workingCopies.get(sharedCopyIdOf("will/flows"))).toBeUndefined()
+    expect(store.collections.workingCopies.size).toBe(1)
+    // Derived, never persisted: nothing under the shared id reaches the storage.
+    expect([...data.values()].some((value) => value.includes("shared:smithersai/smithers"))).toBe(false)
+    await store.dispose?.()
+  })
+
+  test("a catalog row without a head (the public catalog carries none) labels the copy without a bookmark: nothing invented", async () => {
+    const store = await createAppStore(memory().backend)
+    await store.dispatch({ type: "repositories.loaded", actor: "system", repositories: [catalogRow(null)] }).isPersisted.promise
+    const shared = store.collections.workingCopies.get("shared:smithersai/smithers")
+    expect(shared?.bookmark).toBeUndefined()
+    expect(workingCopyLabel(shared!)).toBe("shared · read-only")
+    // The head arriving later (a mirror read) puts the bookmark on the same copy.
+    await store.dispatch({ type: "repositories.loaded", actor: "system", repositories: [catalogRow({ bookmark: "main", changeId: null, commitId: null })] }).isPersisted.promise
+    expect(workingCopyLabel(store.collections.workingCopies.get("shared:smithersai/smithers")!)).toBe("main · shared · read-only")
+    await store.dispose?.()
+  })
+
+  test("a box of the visitor's own on that repository replaces the shared copy, from either box source, and its removal restores it", async () => {
+    const store = await createAppStore(memory().backend)
+    const catalog = catalogRow({ bookmark: "main", changeId: null, commitId: null })
+    await store.dispatch({ type: "repositories.loaded", actor: "system", repositories: [catalog] }).isPersisted.promise
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toBeDefined()
+    // The inventory's workspace copy (RepositoriesSeam, GET /api/user/workspaces).
+    await store.dispatch({
+      type: "workingcopies.workspaces.loaded",
+      actor: "system",
+      copies: [{ id: "workspace:box-1", workspaceId: "box-1", repoId: "smithersai/smithers", kind: "workspace", label: "main" }]
+    }).isPersisted.promise
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toBeUndefined()
+    expect([...store.collections.workingCopies.keys()]).toEqual(["workspace:box-1"])
+    await store.dispatch({ type: "workingcopies.workspaces.loaded", actor: "system", copies: [] }).isPersisted.promise
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toBeDefined()
+    // The full workspace row (workspace.updated / workspaces.loaded) is the other source of a box.
+    await store.dispatch({ type: "workspace.updated", actor: "system", workspace: { ...workspace, id: "box-2", repoId: "smithersai/smithers", name: "main" } }).isPersisted.promise
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toBeUndefined()
+    expect(store.collections.workingCopies.get("workspace:box-2")).toMatchObject({ kind: "workspace", label: "main" })
+    await store.dispatch({ type: "workspaces.loaded", actor: "system", workspaces: [], repoId: "smithersai/smithers" }).isPersisted.promise
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toMatchObject({ kind: "shared", access: "read" })
+    // A box on another repository leaves this repository's shared copy alone.
+    await store.dispatch({ type: "workspace.updated", actor: "system", workspace }).isPersisted.promise
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toBeDefined()
+    // The catalog row leaving the inventory takes its shared copy with it.
+    await store.dispatch({ type: "repositories.loaded", actor: "system", repositories: [] }).isPersisted.promise
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toBeUndefined()
+    await store.dispose?.()
+  })
+
+  test("the label of a box says its state and the label of a checkout says how far ahead it is: one rule for every copy row", () => {
+    expect(workingCopyLabel({ kind: "workspace", label: "fix-landings", state: "running" })).toBe("fix-landings · running")
+    expect(workingCopyLabel({ kind: "workspace", label: "fix-landings" })).toBe("fix-landings")
+    expect(workingCopyLabel({ kind: "local", label: "smithers", ahead: 3 })).toBe("smithers · 3 ahead")
+    expect(workingCopyLabel({ kind: "local", label: "smithers" })).toBe("smithers")
+    expect(isReadOnlyCopy({ kind: "workspace", label: "fix-landings" } as never)).toBe(false)
+  })
 })

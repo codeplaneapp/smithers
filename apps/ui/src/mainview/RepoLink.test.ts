@@ -56,6 +56,10 @@ const fixture = async () => {
       runCommand: (name: string) => {
         ran.push(name)
         return true
+      },
+      runCommandArgs: (name: string, args: string) => {
+        ran.push(`${name} ${args}`)
+        return true
       }
     }
   }
@@ -203,7 +207,8 @@ describe("openRequestedRepo", () => {
       return jsonResponse(catalog)
     }
     expect(await openRequestedRepo(controller, http, "SmithersAI/Smithers")).toBeUndefined()
-    expect(requests).toEqual(["/api/public/repos"])
+    // The catalog, then the mirror's repository document for the shared copy's bookmark.
+    expect(requests).toEqual(["/api/public/repos", "/api/repos/smithersai/smithers"])
     expect(store.session().activeRepoKey).toBe("smithersai/smithers")
     expect(store.collections.repositories.get("smithersai/smithers")).toMatchObject({
       org: "smithersai",
@@ -214,7 +219,41 @@ describe("openRequestedRepo", () => {
       // The curated sentence the welcome reads (controller/onboarding.ts).
       summary: SUMMARY
     })
-    expect(ran).toEqual(["repo.welcome"])
+    // The welcome, then the shared read-only copy's root opens (the caret's own act), once per launch.
+    expect(ran).toEqual(["repo.welcome", "repo.tree shared:smithersai/smithers"])
+  })
+
+  /*
+   * The shared read-only copy (WorkspaceViews.ts) is the signed-out visitor's
+   * one tab: its root opens on the first paint, and its bookmark is the
+   * mirror's default bookmark (`GET /api/repos/{o}/{r}`, a public read the
+   * Worker forwards signed out), never a name the catalog did not carry.
+   */
+  test("the shared copy opens its root once and names the mirror's default bookmark; a reload with the tree already open runs nothing twice", async () => {
+    const { store, controller, ran } = await fixture()
+    const requests: Array<string> = []
+    const http = async (input: RequestInfo | URL) => {
+      requests.push(String(input))
+      return String(input) === "/api/repos/smithersai/smithers" ? jsonResponse({ default_bookmark: "main" }) : jsonResponse(catalog)
+    }
+    expect(await openRequestedRepo(controller, http, "smithersai/smithers")).toBeUndefined()
+    expect(requests).toEqual(["/api/public/repos", "/api/repos/smithersai/smithers"])
+    expect(store.collections.repositories.get("smithersai/smithers")?.head).toEqual({ bookmark: "main", changeId: null, commitId: null })
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")).toMatchObject({ kind: "shared", access: "read", bookmark: "main" })
+    expect(ran).toEqual(["repo.welcome", "repo.tree shared:smithersai/smithers"])
+    // The tree row stands for this launch: the reload leaves the caret's state alone.
+    store.dispatch({ type: "repo-tree.loaded", actor: "system", copyId: "shared:smithersai/smithers", path: "", entries: [], truncated: false })
+    expect(await openRequestedRepo(controller, http, "smithersai/smithers")).toBeUndefined()
+    expect(ran.filter((name) => name.startsWith("repo.tree"))).toEqual(["repo.tree shared:smithersai/smithers"])
+  })
+
+  test("a mirror that answers no bookmark leaves the row's head alone: nothing invented", async () => {
+    const { store, controller } = await fixture()
+    const http = async (input: RequestInfo | URL) =>
+      String(input) === "/api/repos/smithersai/smithers" ? jsonResponse({ message: "unavailable" }, 502) : jsonResponse(catalog)
+    expect(await openRequestedRepo(controller, http, "smithersai/smithers")).toBeUndefined()
+    expect(store.collections.repositories.get("smithersai/smithers")?.head).toBeNull()
+    expect(store.collections.workingCopies.get("shared:smithersai/smithers")?.bookmark).toBeUndefined()
   })
 
   test("a reload that finds the welcome already in the transcript does not repeat it", async () => {
@@ -234,7 +273,8 @@ describe("openRequestedRepo", () => {
     })
     expect(await openRequestedRepo(controller, async () => jsonResponse(catalog), "smithersai/smithers")).toBeUndefined()
     expect(store.session().activeRepoKey).toBe("smithersai/smithers")
-    expect(ran).toEqual([])
+    // No second welcome; the shared copy's tree opens, because tree rows never survive a relaunch.
+    expect(ran).toEqual(["repo.tree shared:smithersai/smithers"])
   })
 
   test("a name outside the catalog is refused and selects nothing", async () => {

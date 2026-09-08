@@ -89,10 +89,34 @@ const boxAnswers: Record<string, () => Response> = {
   "locked": () => json(409, { status: "error", message: "workspace ws-1 is not running" })
 }
 
+/*
+ * The public contents route of the mirror
+ * (`GET /api/repos/{o}/{r}/contents[/path]`, the read the files flows make,
+ * allowlisted signed out by apps/server publicRepositoryReads.ts): a JSON
+ * array of `{ name, path, type }` rows for a directory, a record with
+ * `content`/`encoding` for a file, the mirror's message on a refusal.
+ */
+const SHARED_CONTENTS = "/api/repos/smithersai/smithers/contents"
+const sharedAnswers: Record<string, () => Response> = {
+  "": () =>
+    json(200, [
+      { name: "apps", path: "apps", type: "dir", sha: "", size: 0 },
+      { name: "PACKAGE.ts", path: "PACKAGE.ts", type: "file", sha: "", size: 0 },
+      { name: "README.md", path: "README.md", type: "file", sha: "", size: 0 },
+      { type: "file" }
+    ]),
+  "apps": () => json(200, [{ name: "ui", path: "apps/ui", type: "dir", sha: "", size: 0 }]),
+  "apps/ui": () => json(200, []),
+  "README.md": () => json(200, { name: "README.md", path: "README.md", type: "file", encoding: "base64", content: "IyBIaQo=", size: 5 }),
+  "boom": () => json(500, { message: "the mirror is resyncing smithersai/smithers" })
+}
+
 const treeBackend = () => {
   const requests: Array<{ readonly repoId?: string; readonly path?: string }> = []
   /** Every box listing asked for, as `<workspaces path>?<query>`. */
   const boxRequests: Array<string> = []
+  /** Every mirror contents read asked for, as its path. */
+  const sharedRequests: Array<string> = []
   const answers: Record<string, () => Response> = {
     "": () =>
       json(200, {
@@ -112,6 +136,13 @@ const treeBackend = () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
       const parsed = new URL(url, "http://local.test")
       const path = parsed.pathname
+      if (path === SHARED_CONTENTS || path.startsWith(`${SHARED_CONTENTS}/`)) {
+        // The repository-flows seam reads .smithers/factory.json in the background whenever the target repository changes; not this seam's read.
+        if (!path.endsWith("/contents/.smithers/factory.json")) sharedRequests.push(path)
+        const at = decodeURIComponent(path.slice(SHARED_CONTENTS.length).replace(/^\//, ""))
+        const answer = sharedAnswers[at]
+        return answer === undefined ? json(404, { message: `smithersai/smithers has no ${at}` }) : answer()
+      }
       if (path.startsWith("/api/cloud/api/repos/")) {
         boxRequests.push(`${path.slice("/api/cloud/api".length)}${parsed.search}`)
         if (path !== BOX_FILES) return json(401, { status: "error", message: "Sign in to run a Smithers turn." })
@@ -127,7 +158,7 @@ const treeBackend = () => {
         : answer()
     }
   }
-  return { services, requests, boxRequests }
+  return { services, requests, boxRequests, sharedRequests }
 }
 
 const treeController = async (repos: ReadonlyArray<Repo> = [SMITHERS]) => {
@@ -147,7 +178,7 @@ const treeController = async (repos: ReadonlyArray<Repo> = [SMITHERS]) => {
     }
   })
   await store.dispatch({ type: "repos.loaded", actor: "system", repos: [...repos] }).isPersisted.promise
-  return { store, controller, storage, requests: backend.requests, boxRequests: backend.boxRequests, settle }
+  return { store, controller, storage, requests: backend.requests, boxRequests: backend.boxRequests, sharedRequests: backend.sharedRequests, settle }
 }
 
 /** A cloud workspace copy (a box) as the inventory view writes it; `state` is plue's status verbatim. */
@@ -368,6 +399,72 @@ describe("repo tree seam: a cloud workspace copy reads the box's files route", (
     // The Worker's own refusal (a signed-out page) reaches the row in the Worker's words.
     expect((await controller.commands.run("repo.tree", "ws-9")).status).toBe("executed")
     expect(store.collections.repoTree.get(repoTreeRowId("ws-9", ""))).toMatchObject({ state: "failed", error: "Sign in to run a Smithers turn." })
+  })
+})
+
+/*
+ * The shared read-only copy of a public repository (WorkspaceViews.ts): the
+ * one virtual box every reader shares over the mirror. No VM and no
+ * terminal, so its listing is the mirror's contents route, the same public
+ * read the files flows make; the local route and the box route are never
+ * asked for it.
+ */
+describe("repo tree seam: the shared read-only copy reads the mirror's contents route", () => {
+  const SHARED = "shared:smithersai/smithers"
+  const loadShared = async () => {
+    const scope = await treeController([])
+    await scope.store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: { bookmark: "main", changeId: null, commitId: null }, catalog: true }]
+    }).isPersisted.promise
+    expect(scope.store.collections.workingCopies.get(SHARED)).toMatchObject({ kind: "shared", access: "read" })
+    return scope
+  }
+
+  test("/repo.tree <sharedCopy> lists the root through GET .../contents and maps the mirror's rows to the tree's rows, nothing filtered", async () => {
+    const { store, controller, requests, boxRequests, sharedRequests } = await loadShared()
+    expect((await controller.commands.run("repo.tree", SHARED)).status).toBe("executed")
+    expect(sharedRequests).toEqual([SHARED_CONTENTS])
+    expect(requests).toEqual([])
+    expect(boxRequests).toEqual([])
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, ""))).toMatchObject({
+      copyId: SHARED,
+      path: "",
+      expanded: true,
+      state: "loaded",
+      // `dir` is a directory, `file` a file; a row without a name drops.
+      entries: [{ name: "apps", kind: "dir" }, { name: "PACKAGE.ts", kind: "file" }, { name: "README.md", kind: "file" }]
+    })
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, ""))?.truncated).toBeFalsy()
+    // A nested directory is one more read with its path (per-segment encoding); an empty one is a loaded row with no entries.
+    expect((await controller.commands.run("repo.tree", `${SHARED}#apps`)).status).toBe("executed")
+    expect(sharedRequests[1]).toBe(`${SHARED_CONTENTS}/apps`)
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "apps"))?.entries).toEqual([{ name: "ui", kind: "dir" }])
+    expect((await controller.commands.run("repo.tree", `${SHARED}#apps/ui/`)).status).toBe("executed")
+    expect(sharedRequests[2]).toBe(`${SHARED_CONTENTS}/apps/ui`)
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "apps/ui"))).toMatchObject({ state: "loaded", entries: [] })
+    // Collapsing is collection state: no read.
+    expect((await controller.commands.run("repo.tree", `${SHARED}#apps`)).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "apps"))?.expanded).toBe(false)
+    expect(sharedRequests).toHaveLength(3)
+  })
+
+  test("a refusal writes the failed row with the mirror's message verbatim; a file path names the read that answers it", async () => {
+    const { store, controller } = await loadShared()
+    expect((await controller.commands.run("repo.tree", `${SHARED}#boom`)).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "boom"))).toMatchObject({ state: "failed", expanded: true, entries: [], error: "the mirror is resyncing smithersai/smithers" })
+    expect((await controller.commands.run("repo.tree", `${SHARED}#missing`)).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "missing"))?.error).toBe("smithersai/smithers has no missing")
+    expect((await controller.commands.run("repo.tree", `${SHARED}#README.md`)).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "README.md"))?.error).toBe("README.md in smithersai/smithers is a file; run /files.read README.md instead")
+  })
+
+  test("the shared copy is never a checkout on this machine: the local resolver says so in place", async () => {
+    const { store, controller } = await loadShared()
+    const { openRepoOfCopy } = await import("./RepoTreeSeam")
+    expect(openRepoOfCopy(store, SHARED)).toEqual({ error: "shared is the shared read-only copy of smithersai/smithers; its files are read from the public mirror, never from this machine." })
+    expect(controller.commands.find("repo.tree")).toBeDefined()
   })
 })
 

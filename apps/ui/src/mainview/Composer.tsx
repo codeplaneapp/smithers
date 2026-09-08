@@ -26,6 +26,7 @@ import { SELECT_REPO_LABEL } from "./Onboarding"
 import { paletteKey, PaletteOverlay, paletteRows } from "./SearchPalette"
 import type { PaletteDecision, PaletteRow } from "./SearchPalette"
 import { activeRepoOf, parseRepoSelection, repoKeyOf, WIKI_DISPLAY_NAME } from "./state/AppState"
+import { workingCopyLabel } from "./state/WorkspaceViews"
 
 /** Stable Playwright handle; spread past ChatComposer's excess-property check. */
 const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "composer-input" }
@@ -507,10 +508,8 @@ function ComposerConnect({
   const canAddConnector = controller.nativeRepositoriesAvailable &&
     controller.commands.find("connector.add") !== undefined
   const cloudSignedIn = cloudSessionRows[0]?.state === "signed-in"
-  const copyLabel = (copy: (typeof copyRows)[number]): string =>
-    copy.kind === "workspace"
-      ? copy.state === undefined ? copy.label : `${copy.label} · ${copy.state}`
-      : copy.ahead === undefined ? copy.label : `${copy.label} · ${copy.ahead} ahead`
+  // One label rule for every copy row (WorkspaceViews.ts): the sidebar and this menu say the same line.
+  const copyLabel = workingCopyLabel
 
   const cloudEntries: ReadonlyArray<MenuEntry> = [...repositoryRows]
     .sort((left, right) => left.org.localeCompare(right.org) || left.name.localeCompare(right.name))
@@ -795,7 +794,7 @@ function ComposerOrigin() {
           <span className="composer-origin" data-origin={copy.kind} data-testid="repo-chip" title={copy.path ?? copy.workspaceId ?? copy.id}>
             {copy.kind === "local" ? <Laptop size={14} aria-hidden="true" /> : <Cloud size={14} aria-hidden="true" />}
             <span className="composer-origin-name">
-              {copy.kind === "local" && copy.path !== undefined ? abbreviateHomePath(copy.path) : copy.label}
+              {copy.kind === "local" && copy.path !== undefined ? abbreviateHomePath(copy.path) : copy.kind === "shared" ? workingCopyLabel(copy) : copy.label}
             </span>
             {pin?.changeId != null ?
               (
