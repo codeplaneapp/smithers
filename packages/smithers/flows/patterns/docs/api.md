@@ -28,6 +28,26 @@ runtime branching; `MergeQueue` passes `members` as the first argument to
 `make`. `Trellis` is the remaining exception: `run` additionally accepts
 `continue` and `concurrency`.
 
+`Intervene` uses the same stage payloads in `make` and `run`:
+
+| Stage     | Payload                                                 |
+| --------- | ------------------------------------------------------- |
+| `read`    | `{ phase: "read", input }`                              |
+| `propose` | `{ phase: "propose", input, context }`                  |
+| `apply`   | `{ phase: "apply", input, proposal }`                   |
+| `report`  | `{ phase: "report", input, proposal, applied, dryRun }` |
+
+A dry run omits `apply` and reports `applied: undefined`. The optional approval
+callback retains its separate contract described in [Teams](./teams.md#intervene).
+
+`Kanban` columns receive `{ item, column, previous }`. Successful predecessors
+are the card values, unwrapped from the quarantine protocol. A declared later
+column still receives a `Quarantined` marker after a failure; `run` skips that
+card instead. Both completion callbacks receive `{ items, board }`, where
+`board` contains `board`, `completed`, `failed`, and `iterations`. The declared
+pass reports `iterations: 1`, retains each successful column value, and records
+each card's first failure. Runtime iterations report the final pass.
+
 Declaration-time misuse raises `PatternError` from `make`: an empty ladder, a
 fractional concurrency, a compensation that is not a flow. The same condition
 inside `run` becomes a typed failure rather than a throw.

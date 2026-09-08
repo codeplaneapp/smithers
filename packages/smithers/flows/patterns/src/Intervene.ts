@@ -42,20 +42,28 @@ export interface MakeOptions {
 /**
  * Operational callbacks for {@link run}.
  *
+ * Each stage receives the same `phase` envelope as its declared flow.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface RuntimeOptions<I, Context, Proposal, Applied, Report, E, R, E2, R2, E3, R3, E4, R4, E5, R5> {
-  readonly read: (input: I) => Effect.Effect<Context, E, R>
+  readonly read: (args: {
+    readonly phase: "read"
+    readonly input: I
+  }) => Effect.Effect<Context, E, R>
   readonly propose: (args: {
+    readonly phase: "propose"
     readonly input: I
     readonly context: Context
   }) => Effect.Effect<Proposal, E2, R2>
   readonly apply: (args: {
+    readonly phase: "apply"
     readonly input: I
     readonly proposal: Proposal
   }) => Effect.Effect<Applied, E3, R3>
   readonly report: (args: {
+    readonly phase: "report"
     readonly input: I
     readonly proposal: Proposal
     readonly applied: Applied | undefined
@@ -151,15 +159,15 @@ export const run = <I, Context, Proposal, Applied, Report, E, R, E2, R2, E3, R3,
   // edit to the option object in between must not reach it.
   const { apply, approval, dryRun, propose, read, report } = options
   return Effect.gen(function*() {
-    const context = yield* read(input)
-    const proposal = yield* propose({ input, context })
+    const context = yield* read({ phase: "read", input })
+    const proposal = yield* propose({ phase: "propose", input, context })
     if (dryRun) {
-      return yield* report({ input, proposal, applied: undefined, dryRun: true })
+      return yield* report({ phase: "report", input, proposal, applied: undefined, dryRun: true })
     }
     if (approval !== undefined) {
       yield* decide(yield* approval({ input, proposal }))
     }
-    const applied = yield* apply({ input, proposal })
-    return yield* report({ input, proposal, applied, dryRun: false })
+    const applied = yield* apply({ phase: "apply", input, proposal })
+    return yield* report({ phase: "report", input, proposal, applied, dryRun: false })
   })
 }

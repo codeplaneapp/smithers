@@ -1,8 +1,10 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as TestRuntime from "@smthrs/core/TestRuntime"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import * as Kanban from "../src/Kanban.ts"
@@ -18,6 +20,132 @@ const items = [{ id: "a" }, { id: "b" }, { id: "c" }]
 const columns = [{ name: "triage", flow: step }, { name: "build", flow: step }]
 
 describe("Kanban", () => {
+  it("unwraps a successful scalar predecessor in an executed declaration", () => {
+    const first = Flow.make({ input: Schema.Unknown, output: Schema.Number, body: () => Node.succeed(5) })
+    const second = Flow.make({
+      input: Schema.Struct({
+        item: Schema.Struct({ id: Schema.String }),
+        column: Schema.String,
+        previous: Schema.Number
+      }),
+      output: Schema.Number,
+      body: ({ previous }) => Node.map(Node.succeed(previous), (value) => value + 1)
+    })
+    const declaration = Kanban.make({
+      items: [{ id: "a" }],
+      columns: [{ name: "one", flow: first }, { name: "two", flow: second }],
+      concurrency: 1
+    })
+    const result = TestRuntime.evaluateInline(declaration.body!(null))
+    if (Result.isFailure(result)) throw result.failure
+
+    expect(result.success).toEqual({ a: { _tag: "Succeeded", member: "a", value: 6 } })
+    expect(Graph.diagnostics(Graph.build(declaration, null))).toEqual([])
+  })
+
+  it.effect("declares the payloads it executes", () =>
+    Effect.gen(function*() {
+      const executed: Array<unknown> = []
+      const declared: Array<unknown> = []
+      const result = yield* Kanban.run<Kanban.Item, number>(items, {
+        concurrency: 2,
+        columns: columns.map(({ name }) => ({
+          name,
+          run: (input) => Effect.sync(() => (executed.push(input), (input.previous ?? 4) + 1))
+        })),
+        onComplete: (input) => Effect.sync(() => executed.push(input))
+      })
+      const declaration = Kanban.make({ columns, items, concurrency: 2, onComplete: step })
+      const evaluated = TestRuntime.evaluate(declaration.body!(null), (request) => {
+        if (request._tag !== "FlowCall") throw new Error("unexpected dynamic node")
+        declared.push(request.input)
+        const input = request.input as { readonly column?: string; readonly previous?: number }
+        return Result.succeed(input.column === undefined ? request.input : (input.previous ?? 4) + 1)
+      })
+      if (Result.isFailure(evaluated)) throw evaluated.failure
+
+      expect(declared.slice(0, -1)).toEqual(executed.slice(0, -1))
+      expect(declared.at(-1)).toEqual({ items, board: result })
+      expect(declared).toEqual(executed)
+    }))
+
+  it.effect("forwards quarantine markers while reporting the same failed board as run", () =>
+    Effect.gen(function*() {
+      const previous: Array<unknown> = []
+      const declaredColumns = [
+        {
+          name: "triage",
+          flow: Flow.make({
+            input: Schema.Struct({ item: Schema.Struct({ id: Schema.String }) }),
+            output: Schema.Unknown,
+            body: ({ item }) => item.id === "a" ? Node.fail("triage failed") : Node.succeed(5)
+          })
+        },
+        {
+          name: "build",
+          flow: Flow.make({
+            input: Schema.Struct({ item: Schema.Struct({ id: Schema.String }), previous: Schema.Unknown }),
+            output: Schema.Unknown,
+            body: (input) => {
+              previous.push(input.previous)
+              return input.item.id === "b" ? Node.fail("build failed") : Node.succeed(6)
+            }
+          })
+        }
+      ]
+      const declaration = Kanban.make({ columns: declaredColumns, items, concurrency: 2, onComplete: step })
+      const evaluated = TestRuntime.evaluateInline(declaration.body!(null))
+      if (Result.isFailure(evaluated)) throw evaluated.failure
+      const result = yield* Kanban.run<Kanban.Item, number, string>(items, {
+        concurrency: 2,
+        columns: [
+          { name: "triage", run: ({ item }) => item.id === "a" ? Effect.fail("triage failed") : Effect.succeed(5) },
+          { name: "build", run: ({ item }) => item.id === "b" ? Effect.fail("build failed") : Effect.succeed(6) }
+        ]
+      })
+
+      expect(previous).toEqual([{ _tag: "Quarantined", member: "a", error: "triage failed" }, 5, 5])
+      expect(result).toEqual({
+        board: { b: { triage: 5 }, c: { triage: 5, build: 6 } },
+        completed: ["c"],
+        failed: [{ id: "a", column: "triage", error: "triage failed" }, {
+          id: "b",
+          column: "build",
+          error: "build failed"
+        }],
+        iterations: 1
+      })
+      expect(evaluated.success).toEqual({ items, board: result })
+    }))
+
+  it("preserves marker-shaped successful values and prototype-shaped board keys", () => {
+    const value = { _tag: "Quarantined", member: "data", error: "ordinary value" }
+    const first = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed(value) })
+    const second = Flow.make({
+      input: Schema.Struct({ previous: Schema.Unknown }),
+      output: Schema.Unknown,
+      body: ({ previous }) => Node.succeed(previous)
+    })
+    const declaration = Kanban.make({
+      items: [{ id: "__proto__" }],
+      columns: [{ name: "__proto__", flow: first }, { name: "constructor", flow: second }],
+      concurrency: 1,
+      onComplete: step
+    })
+    const result = TestRuntime.evaluateInline(declaration.body!(null))
+    if (Result.isFailure(result)) throw result.failure
+
+    expect(result.success).toEqual({
+      items: [{ id: "__proto__" }],
+      board: {
+        board: { ["__proto__"]: { ["__proto__"]: value, constructor: value } },
+        completed: ["__proto__"],
+        failed: [],
+        iterations: 1
+      }
+    })
+  })
+
   it("declares one call per item per column", () => {
     const board = Kanban.make({ columns, items, concurrency: 3 })
 
@@ -34,8 +162,9 @@ describe("Kanban", () => {
     expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall")).toHaveLength(7)
     expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(4)
     // Six maps wrap successful card values in unambiguous quarantine-protocol
-    // envelopes; the other two merge each column's batches.
-    expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(8)
+    // envelopes; two merge batches, one unwraps predecessors, and one builds
+    // the completion board from every column.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(10)
   })
 
   it("declares one recovery arm per card so a rejected card leaves its column alone", () => {

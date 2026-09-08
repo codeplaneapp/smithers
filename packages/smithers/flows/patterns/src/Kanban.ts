@@ -141,6 +141,37 @@ const merge = (left: unknown, right: unknown): Record<string, unknown> => ({
 
 const bound = (value: number): boolean => Number.isSafeInteger(value) && value >= 1
 
+const completionBoard = (
+  outcomes: ReadonlyArray<unknown>,
+  ids: ReadonlyArray<string>,
+  names: ReadonlyArray<string>
+): Board<unknown, unknown> => {
+  const board = new Map<string, Record<string, unknown>>()
+  const failed: Array<Failure<unknown>> = []
+  const rejected = new Set<string>()
+  for (const [index, values] of outcomes.entries()) {
+    const column = names[index]!
+    for (const id of ids) {
+      // Later calls remain in the declaration, but a failed card cannot
+      // become completed just because one of those calls accepted its marker.
+      if (rejected.has(id)) continue
+      const outcome = (values as Record<string, Quarantine.Settled<unknown, unknown>>)[id]!
+      if (outcome._tag === "Succeeded") {
+        board.set(id, { ...board.get(id), [column]: outcome.value })
+      } else {
+        rejected.add(id)
+        failed.push({ id, column, error: outcome.error })
+      }
+    }
+  }
+  return {
+    board: Object.fromEntries(board),
+    completed: ids.filter((id) => !rejected.has(id)),
+    failed,
+    iterations: 1
+  }
+}
+
 /**
  * Builds the board topology: for each column in order, one call per item,
  * batched into `Node.all` groups of `concurrency` members, with the batches
@@ -149,6 +180,8 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * Each call receives `{ column, item, previous }`. `previous` refers to the
  * same item's result in the preceding column, so a built graph shows the
  * per-item chain across columns rather than a column-wide barrier of values.
+ * `onComplete` receives `{ items, board }`, where `board` is a {@link Board}
+ * containing every column result and `iterations: 1` for the declared pass.
  * The columns themselves are sequenced: a column's first call depends on the
  * whole preceding column.
  *
@@ -243,21 +276,42 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       ? columns.map((declared) => declared.flow)
       : [...columns.map((declared) => declared.flow), onComplete],
     body: Node.capture(captures, () => {
-      const walk = (index: number, previous: unknown): Node.Node<unknown, unknown> => {
+      const walk = (
+        index: number,
+        previous: unknown,
+        history: ReadonlyArray<unknown>
+      ): Node.Node<unknown, unknown> => {
         const current = column(index, previous)
         if (index + 1 < columns.length) {
-          return Node.andThen(
+          // Unwrap inside a map, where outcomes are real values. A builder
+          // continuation sees symbolic references while the graph is planned.
+          const settled = Node.map(
             current,
-            Node.capture({ ...captures, column: names[index + 1] }, (values) => walk(index + 1, values))
+            Node.capture(captures, (values) => ({
+              outcomes: values,
+              previous: Object.fromEntries(
+                Object.entries(values as Record<string, Quarantine.Settled<unknown, unknown>>).map(([id, outcome]) => [
+                  id,
+                  outcome._tag === "Succeeded" ? outcome.value : outcome
+                ])
+              )
+            }))
+          )
+          return Node.andThen(
+            settled,
+            Node.capture(
+              { ...captures, column: names[index + 1] },
+              (state) => walk(index + 1, state.previous, [...history, state.outcomes])
+            )
           )
         }
         if (onComplete === undefined) return current
         return Node.andThen(
-          current,
-          Node.capture(captures, (values) => call(onComplete, { phase: "complete", items, board: values }))
+          Node.map(current, Node.capture(captures, (values) => completionBoard([...history, values], ids, names))),
+          Node.capture(captures, (board) => call(onComplete, { items, board }))
         )
       }
-      return walk(0, undefined)
+      return walk(0, undefined, [])
     })
   })
 }

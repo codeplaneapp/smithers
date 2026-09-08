@@ -1,6 +1,8 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as TestRuntime from "@smthrs/core/TestRuntime"
 import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import * as Intervene from "../src/Intervene.ts"
@@ -31,6 +33,31 @@ const calls = (graph: Graph.Graph): ReadonlyArray<Graph.GraphNode> =>
   Graph.nodes(graph).filter((node) => node.kind === "FlowCall")
 
 describe("Intervene", () => {
+  it.effect("declares the payloads it executes", () =>
+    Effect.gen(function*() {
+      for (const dryRun of [false, true]) {
+        const executed: Array<unknown> = []
+        const declared: Array<unknown> = []
+        yield* Intervene.run("refactor", {
+          dryRun,
+          read: (input) => Effect.sync(() => (executed.push(input), ["a.ts"])),
+          propose: (input) => Effect.sync(() => (executed.push(input), { edits: 1 })),
+          apply: (input) => Effect.sync(() => (executed.push(input), "written")),
+          report: (input) => Effect.sync(() => executed.push(input))
+        })
+        const declaration = Intervene.make({ read: step, propose: step, apply: step, report: step, dryRun })
+        const outputs = dryRun ? [["a.ts"], { edits: 1 }, "reported"] : [["a.ts"], { edits: 1 }, "written", "reported"]
+        const result = TestRuntime.evaluate(declaration.body!("refactor"), (request) => {
+          if (request._tag !== "FlowCall") throw new Error("unexpected dynamic node")
+          declared.push(request.input)
+          return Result.succeed(outputs[declared.length - 1])
+        })
+        if (Result.isFailure(result)) throw result.failure
+
+        expect(declared).toEqual(executed)
+      }
+    }))
+
   it("declares read, propose, apply, and report", () => {
     const graph = Graph.build(
       Intervene.make({ read: step, propose: step, apply: step, report: step, dryRun: false }),
@@ -129,6 +156,7 @@ describe("Intervene", () => {
 
       expect(applied).toBe(0)
       expect(report).toEqual({
+        phase: "report",
         input: "refactor",
         proposal: { edits: 2 },
         applied: undefined,
