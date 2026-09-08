@@ -483,10 +483,11 @@ as its identity and classification, never as the effect's `input` or `output`.
 ## Limits
 
 - The durable store is SQLite dialect only. Its DDL uses `typeof()` and
-  `json_valid` CHECK constraints, its reads use `json_extract` with `$` paths,
-  and its archive writes use `INSERT OR IGNORE`, so any SQLite-speaking
-  `SqlClient` runs it and nothing else does. PostgreSQL and PGlite are
-  unsupported.
+  `json_valid` CHECK constraints, and its reads use `json_extract` with `$`
+  paths, so any SQLite-speaking `SqlClient` runs it and nothing else does.
+  PostgreSQL and PGlite are unsupported. Archive writes use strict `INSERT`
+  keyed by `(run_id, generation, seq)`; a collision rolls back the archive
+  transaction.
 - Journal reads page at 100 entries by default. `pageSize` is a throughput knob
   and never changes a derived answer.
 - Every read is capped by `maxHistoryEntries`. The default is 100,000 entries;

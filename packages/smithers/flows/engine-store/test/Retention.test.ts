@@ -59,6 +59,7 @@ const createArchiveTable = Effect.gen(function*() {
   const sql = yield* Effect.service(SqlClient.SqlClient)
   yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
+    generation INTEGER NOT NULL CHECK (typeof(generation) = 'integer' AND generation >= 0),
     seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0),
     event_id TEXT NOT NULL CHECK (length(event_id) > 0),
     source_id TEXT NOT NULL CHECK (length(source_id) > 0),
@@ -68,7 +69,7 @@ const createArchiveTable = Effect.gen(function*() {
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     meta_json TEXT NOT NULL CHECK (json_valid(meta_json)),
     archived_at_ms INTEGER NOT NULL CHECK (typeof(archived_at_ms) = 'integer' AND archived_at_ms >= 0),
-    PRIMARY KEY (run_id, seq)
+    PRIMARY KEY (run_id, generation, seq)
   )`.pipe(Effect.orDie)
 })
 
@@ -76,8 +77,8 @@ const archive = (runId: string, seq: number) =>
   Effect.gen(function*() {
     const sql = yield* Effect.service(SqlClient.SqlClient)
     yield* sql`INSERT INTO flows_time_travel_archive
-      (run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json, archived_at_ms)
-      VALUES (${runId}, ${seq}, ${`${runId}-archive-${seq}`}, ${"retention-test"}, ${seq}, ${0}, ${"archived"}, ${"{}"}, ${"{}"}, ${0})`
+      (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json, archived_at_ms)
+      VALUES (${runId}, ${0}, ${seq}, ${`${runId}-archive-${seq}`}, ${"retention-test"}, ${seq}, ${0}, ${"archived"}, ${"{}"}, ${"{}"}, ${0})`
       .pipe(Effect.orDie)
   })
 

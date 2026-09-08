@@ -55,7 +55,12 @@ The result is the accounting:
 | `cancelledChildren` | The children the policy cancelled, in the order they landed.       |
 
 Records are archived, not deleted: they move aside so a forensic reader can
-still reach them. After the truncation the run is suspended carrying the state
+still reach them. Archive rows are keyed by `(run_id, generation, seq)`, using
+the journal generation before truncation advances it. Reused sequences retain
+each discarded history. Snapshot anchors above the frame and all anchors of
+archived attached children are removed in the same transaction.
+
+After the truncation the run is suspended carrying the state
 derived at the frame, not the state its truncated future had left on the row.
 Deferred completions and clock deadlines whose journal records moved into the
 archive are removed atomically with that truncation. If the resumed run reaches

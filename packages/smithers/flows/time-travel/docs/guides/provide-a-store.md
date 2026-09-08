@@ -49,11 +49,11 @@ It also indexes `meta_json.lineageId` on the journal's own
 `flows_journal_events`, so a lineage-filtered read is not a full run scan.
 
 **The store is SQLite dialect only.** Its DDL uses `typeof()` and `json_valid`
-CHECK constraints, its reads use `json_extract` with `$` paths, and its archive
-writes use `INSERT OR IGNORE`. Any SQLite-speaking `SqlClient` runs it, whether
-wa-sqlite, libsql, or the Node or Bun built-in. PostgreSQL and MySQL parse none
-of it, and a genuinely portable dialect would be a redesign rather than an
-edit.
+CHECK constraints, and its reads use `json_extract` with `$` paths. Any
+SQLite-speaking `SqlClient` runs it, whether wa-sqlite, libsql, or the Node or
+Bun built-in. PostgreSQL and MySQL are unsupported; a portable dialect would
+require a redesign. Archive writes use strict `INSERT` keyed by
+`(run_id, generation, seq)`; a collision rolls back the archive transaction.
 
 ## Run the migrations on the shared ladder
 
