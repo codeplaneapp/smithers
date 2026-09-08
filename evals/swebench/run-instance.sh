@@ -77,11 +77,22 @@ fi
 # The extraction lock is released by owner, never by whoever happens to be
 # exiting: this trap is installed before the lock is taken, and `rmdir` here
 # used to hand another lane's live extraction to a third one.
+LOCK="$S/.extract-lock"
+TMPC=""
 cleanup() {
+  if [ -n "$TMPC" ]; then docker rm -f "$TMPC" >/dev/null 2>&1 || true; fi
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  "$S/lib/lock.sh" release "$S/.extract-lock" --owner $$ --quiet || true
+  "$S/lib/lock.sh" release "$LOCK" --owner $$ --quiet || true
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  trap '' INT TERM
+  cleanup
+  trap - EXIT INT TERM
+  kill -s "$1" "$$"
+}
+trap cleanup EXIT
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
 
 echo "[$RUN_ID] image $IMAGE"
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
@@ -101,13 +112,15 @@ fi
 # takes it back the moment that pid is gone rather than spinning for ever on a
 # lock a `kill -9` left behind, and the wait is bounded so a wedged lane fails
 # this run instead of hanging it.
-LOCK="$S/.extract-lock"
 "$S/lib/lock.sh" acquire "$LOCK" --owner $$ --label "$RUN_ID extraction" || {
   echo "[$RUN_ID] EXTRACTION LOCK TIMED OUT"; exit 1; }
 rm -rf -- "$WORK"; mkdir -p "$WORK"
-TMPC="$(docker create --platform linux/amd64 "$IMAGE")"
+# Name it before acquisition so interruption during docker create is covered.
+TMPC="${CONTAINER}-extract-$$"
+docker create --platform linux/amd64 --name "$TMPC" "$IMAGE" >/dev/null
 docker cp "$TMPC:/testbed/." "$WORK/" >/dev/null 2>&1
 docker rm -f "$TMPC" >/dev/null 2>&1
+TMPC=""
 "$S/lib/lock.sh" release "$LOCK" --owner $$
 
 # Anchor the patch capture to the tree as extracted, before anything of ours

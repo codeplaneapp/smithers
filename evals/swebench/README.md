@@ -566,6 +566,21 @@ journal is still wanted, and it writes no timings stamp because no run happened.
 `regen-patch.sh <id>` re-captures from a surviving workspace. It refuses a
 workspace with no capture base instead of falling back to the base commit.
 
+The Codex runner returns the capture helper's failing status, retains
+`work-codex/<id>[-<index>]/`, and writes
+`logs-codex/<id>[-<index>].capture-failed` with the status, workspace and patch
+paths. A successful capture that publishes no patch file fails with status 1.
+Retry `lib/capture-patch.sh <workspace> <patch> ':(exclude)AGENTS.md'` against
+the retained checkout; restarting the runner replaces that checkout. Successful
+empty patches remain valid results and keep their workspaces for inspection.
+Only a successful non-empty capture permits workspace deletion.
+
+Both runners remove their extraction and testbed containers and release their
+owned extraction lock on exit, SIGINT or SIGTERM. Signal handlers terminate the
+runner after cleanup. The testbed checkout is bind-mounted from the workspace,
+so container removal preserves retained edits. `fixtures/check-codex-lanes.mjs`
+checks capture failures and interrupted acquisition with command doubles.
+
 **Deliberately not changed: what the agent is told.** `lib/write-flow.mjs` still
 tells the agent to review its own work with `git diff <base commit>`, so on an
 image with `pre_install` churn the agent sees a file it did not touch. Pointing
@@ -941,8 +956,8 @@ the selector, and any later forensics. A run *without* an index keeps its
 workspace, because `regen-patch.sh` re-derives a patch from it and the
 scorecard's default `--work work` reads its journal in place;
 `SWB_KEEP_WORKSPACE=1` keeps a matrix run's workspace for debugging and
-`SWB_DELETE_WORKSPACE=1` deletes an unindexed one. A codex run already deleted
-its workspace, so nothing changed there.
+`SWB_DELETE_WORKSPACE=1` deletes an unindexed one. A codex run deletes its
+workspace after a successful non-empty capture and retains it otherwise.
 
 Measured on the current five-instance sample, post-run, on this machine:
 
@@ -2434,17 +2449,18 @@ different sample and do not edit the pinned list to match a new draw.
   it cannot be reproduced by the next wave.
 
   One recorded exception exists, and it is the reason the rule is written down.
-  A **codex** run deletes its workspace when it finishes (`run-instance-codex.sh`
-  ends in `rm -rf "$WORK"`), so a codex patch cannot be re-derived at all once
-  the run is over. The 2026-08-20 sphinx correction therefore removed the whole
+  At the time, a **codex** run deleted its workspace unconditionally when it
+  finished, so its patch could not be re-derived once the run was over.
+  The 2026-08-20 sphinx correction therefore removed the whole
   contaminated `tox.ini` file section from the recorded capture rather than
   re-capturing, and the corrected patch still carries the pre-fix
   `old mode`/`new mode` lines that `lib/capture-patch.sh` no longer emits. That
   is admissible only under all three of these conditions, each of which that
   correction meets: whole file sections are dropped and no line is rewritten,
   the untouched capture is committed beside it, and the official evaluator
-  re-grades the result. A future codex baseline should be re-run instead —
-  keeping its workspace is the real fix, and it is not done here.
+  re-grades the result. A future codex baseline should be re-run instead.
+  Successful non-empty captures still delete their workspaces; failed and
+  empty captures now retain them as described under "Patch capture".
 
 ## The committed baseline
 

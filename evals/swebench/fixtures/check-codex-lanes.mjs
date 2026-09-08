@@ -37,9 +37,10 @@
  */
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { test } from "node:test"
 
 const root = resolve(import.meta.dirname, "..")
 const temporary = mkdtempSync(join(tmpdir(), "flows-swebench-lanes-"))
@@ -211,3 +212,149 @@ console.log(
     + " or a triple of conditions, every lane pins its effort and its testbed, and the script's table is the"
     + " README's."
 )
+
+// Exercise the actual runners with local command doubles: no Docker daemon,
+// evaluator environment or paid model calls. State files stand for containers.
+function runnerFixture(harness, scenario, check) {
+  const dir = mkdtempSync(join(tmpdir(), "swebench-runner-"))
+  const put = (path, content) => writeFileSync(join(dir, path), content, { mode: 0o755 })
+  try {
+    for (const path of ["lib", "bin", "active", ".venv-swb/bin"]) {
+      mkdirSync(join(dir, path), { recursive: true })
+    }
+    const script = harness === "codex" ? "run-instance-codex.sh" : "run-instance.sh"
+    for (const path of [script, "lib/run-paths.sh", "lib/lock.sh"]) {
+      copyFileSync(join(root, path), join(dir, path))
+    }
+    put("swb-verified.json", "[]")
+    put(".subject.json", '{"stamp":"fixture"}')
+    put("lib/validate-instance.mjs", 'console.log("base")')
+    put("lib/write-prompt-codex.mjs", 'console.log("fix the bug")')
+    put(".venv-swb/bin/python", '#!/bin/bash\necho "python -m pytest"\n')
+    put("lib/snapshot-base.sh", '#!/bin/bash\necho base\n')
+    put("lib/interpreter.sh", '#!/bin/bash\necho python\n')
+    put("lib/testbed-network.sh", `#!/bin/bash
+if [ "$1" = assert ] && [ "$FIXTURE_SCENARIO" = network-failure ]; then exit 7; fi
+echo none
+`)
+    put("lib/capture-patch.sh", `#!/bin/bash
+case "$FIXTURE_SCENARIO" in
+  capture-failure) exit 3 ;;
+  missing-patch) exit 0 ;;
+  empty-patch) : > "$2" ;;
+  *) printf 'paid attempt patch\\n' > "$2" ;;
+esac
+: > "$2.untracked"
+`)
+    put("bin/codex", `#!/bin/bash
+if [ "$1" = login ]; then exit 0; fi
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -C ]; then printf 'paid edits\\n' > "$2/edited.txt"; break; fi
+  shift
+done
+if [ "$FIXTURE_SCENARIO" = agent-timeout ]; then exit 124; fi
+`)
+    put("bin/docker", `#!${process.execPath}
+const fs = require("node:fs")
+const path = require("node:path")
+const args = process.argv.slice(2)
+const dir = process.env.FIXTURE_DIR
+const scenario = process.env.FIXTURE_SCENARIO
+const active = name => path.join(dir, "active", name)
+const signal = () => process.kill(Number(process.env.FIXTURE_RUNNER_PID), "SIGTERM")
+fs.appendFileSync(path.join(dir, "docker.log"), args.join(" ") + "\\n")
+switch (args[0]) {
+  case "image": break
+  case "create": {
+    const name = args.includes("--name") ? args[args.indexOf("--name") + 1] : "extraction"
+    fs.writeFileSync(active(name), "")
+    if (scenario === "term-create") signal()
+    console.log(name)
+    break
+  }
+  case "cp":
+    if (scenario === "term-extraction") signal()
+    if (scenario === "copy-failure") process.exit(9)
+    fs.writeFileSync(path.join(args[2], "checkout.txt"), "image checkout")
+    break
+  case "rm": fs.rmSync(active(args.at(-1)), { force: true }); break
+  case "run":
+    fs.writeFileSync(active(args[args.indexOf("--name") + 1]), "")
+    if (scenario === "term-testbed") signal()
+    break
+  default: throw new Error("unexpected docker command: " + args.join(" "))
+}
+`)
+    const result = spawnSync("bash", ["-c", 'export FIXTURE_RUNNER_PID=$$; exec bash "$@"',
+      "fixture", join(dir, script), "a__a-1", ...(harness === "codex"
+        ? ["10", "fixture-model", "r1"] : ["fixture-seat", "10", "r1"])], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+        SWB_DATASET: join(dir, "swb-verified.json"),
+        SWB_CODEX_NETWORK: "on",
+        SWB_CODEX_EFFORT: "high",
+        SWB_FLOWS_OPENAI_AUTH: "api-key",
+        FIXTURE_DIR: dir,
+        FIXTURE_SCENARIO: scenario
+      }
+    })
+    assert.ifError(result.error)
+    const work = join(dir, harness === "codex" ? "work-codex" : "work", "a__a-1-r1")
+    check({ dir, work, result })
+    assert.deepEqual(readdirSync(join(dir, "active")), [], "all acquired containers are removed")
+    assert.ok(!existsSync(join(dir, ".extract-lock")), "extraction lock is released")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+for (const scenario of ["capture-failure", "missing-patch"]) {
+  test(`codex ${scenario} preserves paid edits and reports failure`, () => {
+    runnerFixture("codex", scenario, ({ dir, work, result }) => {
+      assert.equal(result.status, scenario === "capture-failure" ? 3 : 1, result.stdout + result.stderr)
+      assert.equal(readFileSync(join(work, "edited.txt"), "utf8"), "paid edits\n")
+      const marker = readFileSync(join(dir, "logs-codex/a__a-1-r1.capture-failed"), "utf8")
+      assert.ok(marker.includes(work), "failure marker identifies the recovery workspace")
+      assert.match(result.stderr, /CAPTURE FAILED/u)
+    })
+  })
+}
+
+for (const scenario of ["success", "empty-patch", "agent-timeout"]) {
+  test(`codex ${scenario} captures before deleting its workspace`, () => {
+    runnerFixture("codex", scenario, ({ dir, work, result }) => {
+      assert.equal(result.status, 0, result.stdout + result.stderr)
+      assert.equal(existsSync(work), scenario === "empty-patch")
+      const patch = readFileSync(join(dir, "patches-codex/a__a-1-r1.patch"), "utf8")
+      assert.equal(patch, scenario === "empty-patch" ? "" : "paid attempt patch\n")
+      assert.ok(!existsSync(join(dir, "logs-codex/a__a-1-r1.capture-failed")))
+      if (scenario === "agent-timeout") {
+        assert.equal(JSON.parse(readFileSync(join(dir, "timings-codex/a__a-1-r1.json"))).exitCode, 124)
+      }
+    })
+  })
+}
+
+for (const harness of ["codex", "flows"]) {
+  for (const scenario of ["copy-failure", "network-failure", "term-create", "term-extraction", "term-testbed"]) {
+    test(`${harness} ${scenario} cleans up and terminates`, () => {
+      runnerFixture(harness, scenario, ({ dir, result }) => {
+        if (scenario.startsWith("term-")) {
+          assert.equal(result.signal, "SIGTERM", result.stdout + result.stderr)
+        } else {
+          assert.notEqual(result.status, 0, result.stdout + result.stderr)
+        }
+        const commands = readFileSync(join(dir, "docker.log"), "utf8")
+        assert.match(commands, /^create /mu, "the extraction container was acquired")
+        if (scenario === "term-testbed" || scenario === "network-failure") {
+          assert.match(commands, /sleep infinity/mu, "the live testbed was acquired")
+        }
+        assert.ok(!result.stdout.includes("codex start"), "failed setup never starts a paid attempt")
+      })
+    })
+  }
+}

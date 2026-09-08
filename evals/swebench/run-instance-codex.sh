@@ -14,11 +14,11 @@
 # With a run index — `run-instance-codex.sh <id> 1500 gpt-5.6-sol r3` — every one
 # of those names carries `-r3`, from the same `lib/run-paths.sh` the flows script
 # derives its names from, so a matrix run of five attempts per instance names its
-# artifacts identically on both sides. A codex run already deletes its workspace
-# when it finishes, so there is no disk policy to add here.
+# artifacts identically on both sides. A codex run deletes its workspace only
+# after successfully capturing a non-empty patch; failed or empty captures keep it.
 #
 # This spends real API tokens and needs docker. See README.md.
-set -u
+set -euo pipefail
 S="$(cd "$(dirname "$0")" && pwd)"
 INSTANCE="$1"
 BUDGET="${2:-1500}"
@@ -42,6 +42,25 @@ IMAGE="swebench/sweb.eval.x86_64.${IMAGE_ID}:latest"
 RUN_PATHS="$("$S/lib/run-paths.sh" codex "$INSTANCE" ${INDEX:+"$INDEX"})" || exit $?
 eval "$RUN_PATHS"
 mkdir -p "$WORK_ROOT" "$PATCH_ROOT" "$LOG_ROOT" "$TIMINGS_ROOT"
+
+# Keep cleanup armed through capture. The workspace is also the bind-mounted
+# container checkout, so removing containers must never remove the retry source.
+LOCK="$S/.extract-lock"
+TMPC=""
+cleanup() {
+  if [ -n "$TMPC" ]; then docker rm -f "$TMPC" >/dev/null 2>&1 || true; fi
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  "$S/lib/lock.sh" release "$LOCK" --owner $$ --quiet || true
+}
+on_signal() {
+  trap '' INT TERM
+  cleanup
+  trap - EXIT INT TERM
+  kill -s "$1" "$$"
+}
+trap cleanup EXIT
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
 
 # The isolated CODEX_HOME must exist and hold an API-key login before
 # `codex exec` runs. The CLI refuses to start when CODEX_HOME names a missing
@@ -71,16 +90,16 @@ fi
 # lock records this process's pid, so a lane that is killed while extracting
 # hands the lock straight to the next waiter instead of wedging every later
 # extraction in the rig.
-LOCK="$S/.extract-lock"
 "$S/lib/lock.sh" acquire "$LOCK" --owner $$ --label "$RUN_ID extraction" || {
   echo "[$RUN_ID] EXTRACTION LOCK TIMED OUT"; exit 1; }
-trap '"$S/lib/lock.sh" release "$LOCK" --owner $$ --quiet' EXIT
 rm -rf "$WORK"; mkdir -p "$WORK"
-TMPC="$(docker create --platform linux/amd64 "$IMAGE")"
+# Name it before acquisition so interruption during docker create is covered.
+TMPC="${CONTAINER}-extract-$$"
+docker create --platform linux/amd64 --name "$TMPC" "$IMAGE" >/dev/null
 docker cp "$TMPC:/testbed/." "$WORK/" >/dev/null 2>&1
 docker rm -f "$TMPC" >/dev/null 2>&1
+TMPC=""
 "$S/lib/lock.sh" release "$LOCK" --owner $$
-trap - EXIT
 
 # Same capture base as the flows side: the tree as the image ships it, so the
 # image's own pre_install churn cannot enter the patch. Both harnesses are
@@ -98,7 +117,7 @@ echo "[$RUN_ID] capture base $CAPTURE_BASE"
 # the rule and records the docker-measured facts behind it.
 TESTBED_NETWORK="$("$S/lib/testbed-network.sh" resolve)" || exit 2
 
-docker rm -f "$CONTAINER" >/dev/null 2>&1
+docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 docker run -d --platform linux/amd64 --name "$CONTAINER" --network "$TESTBED_NETWORK" \
   -v "$WORK:/testbed" -w /testbed "$IMAGE" sleep infinity >/dev/null 2>&1 || {
   echo "[$RUN_ID] CONTAINER START FAILED"; exit 1; }
@@ -232,6 +251,7 @@ esac
 echo "[$RUN_ID] codex start ($MODEL, effort $EFFORT, ${BUDGET}s)"
 START=$(date +%s)
 export CODEX_HOME="$S/.codex-home"
+CODE=0
 timeout "$BUDGET" codex exec \
   -C "$WORK" \
   -m "$MODEL" \
@@ -242,8 +262,7 @@ timeout "$BUDGET" codex exec \
   --color never \
   -o "$LOG_PREFIX.last-message.txt" \
   - < "$LOG_PREFIX.prompt.md" \
-  > "$LOG_PREFIX.run.log" 2>&1
-CODE=$?
+  > "$LOG_PREFIX.run.log" 2>&1 || CODE=$?
 END=$(date +%s)
 echo "[$RUN_ID] codex done in $((END-START))s (exit $CODE)"
 
@@ -257,10 +276,24 @@ printf '{\n  "instance_id": "%s",\n  "run_id": "%s",\n  "runIndex": "%s",\n  "mo
   "$TESTBED_NETWORK" "$TESTBED_OBSERVED" "$CODE" "$((START*1000))" "$((END*1000))" "$((END-START))" \
   > "$TIMINGS"
 
+CAPTURE_STATUS=0
 "$S/lib/capture-patch.sh" "$WORK" "$PATCH" \
-  ':(exclude)AGENTS.md' >/dev/null
+  ':(exclude)AGENTS.md' >/dev/null || CAPTURE_STATUS=$?
+if [ "$CAPTURE_STATUS" -eq 0 ] && [ ! -f "$PATCH" ]; then CAPTURE_STATUS=1; fi
+if [ "$CAPTURE_STATUS" -ne 0 ]; then
+  echo "[$RUN_ID] CAPTURE FAILED (exit $CAPTURE_STATUS); checkout retained at $WORK; patch $PATCH" >&2
+  printf 'captureExitStatus=%s\nworkspace=%s\npatch=%s\n' \
+    "$CAPTURE_STATUS" "$WORK" "$PATCH" > "$LOG_PREFIX.capture-failed" || true
+  exit "$CAPTURE_STATUS"
+fi
+rm -f "$LOG_PREFIX.capture-failed"
 
-docker rm -f "$CONTAINER" >/dev/null 2>&1
-rm -rf "$WORK"
+# An empty patch is a valid no-edit result, but keep its checkout for inspection.
+if [ -s "$PATCH" ]; then
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  rm -rf "$WORK"
+else
+  echo "[$RUN_ID] empty patch; checkout retained at $WORK"
+fi
 echo "[$RUN_ID] patch bytes: $(wc -c < "$PATCH" | tr -d ' ')"
 echo "[$RUN_ID] untracked files left out of the patch: $(wc -l < "$PATCH.untracked" | tr -d ' ')"
