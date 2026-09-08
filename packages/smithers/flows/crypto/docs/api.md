@@ -105,8 +105,7 @@ import { Sha256 } from "@smthrs/crypto"
 import * as Schema from "effect/Schema"
 
 const Manifest = Schema.Struct({ name: Schema.String, contents: Sha256 })
-const decodeManifest = (input: unknown) =>
-  Schema.decodeUnknownEffect(Manifest)(input, { reportInput: false })
+const decodeManifest = (input: unknown) => Schema.decodeUnknownEffect(Manifest)(input, { reportInput: false })
 // Provide a Crypto service when running the returned Effect.
 ```
 

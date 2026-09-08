@@ -133,9 +133,10 @@ Every export, with its signature and its failure modes, is on the
   UTF-16 surrogate fails with `invalid_text` instead of being encoded as a
   replacement character, so two different broken strings never collide on one
   digest.
-- **The input never reaches an error.** Every `Sha256Error` message is safe to
-  log, and the `Sha256` schema turns off input reporting even when a caller
-  asked for it.
+- **Messages omit hash input.** Every `Sha256Error` message omits the hashed
+  value. The `Sha256` schema disables input reporting for its own node only.
+  Composed schemas must pass `reportInput: false` at the outermost decode
+  boundary and must not re-enable it on descendant schemas.
 
 [The injected boundary](./concepts/injected-hashing.md) and
 [what a digest covers](./concepts/what-a-digest-covers.md) explain why each of

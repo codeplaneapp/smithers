@@ -96,10 +96,28 @@ schema-composition face of [`digest`](#digest).
 - Operational failures become `SchemaError` issues whose message is
   `[code] message` and whose annotations carry the stable `code` and the typed
   `Sha256Error` as `cause`.
-- The schema annotates `parseOptions: { reportInput: false }`, which overrides
-  a caller that asked for input reporting, so no enclosing schema issue
-  retains the hashed value.
+- The schema annotates `parseOptions: { reportInput: false }`, overriding
+  input reporting for its own node only. Enclosing Struct, Array, and Union
+  issues use their own options and can retain the original input, including
+  when a sibling field fails. Pass `reportInput: false` at the outermost
+  decode boundary and do not re-enable it on descendant schemas.
 - Identifier: `@smthrs/crypto/Sha256`.
+
+For composed schemas, disable input reporting on the complete decode:
+
+```ts
+import { Sha256 } from "@smthrs/crypto"
+import * as Schema from "effect/Schema"
+
+const Manifest = Schema.Struct({ name: Schema.String, contents: Sha256 })
+const decodeManifest = (input: unknown) => Schema.decodeUnknownEffect(Manifest)(input, { reportInput: false })
+// Provide a Crypto service when running the returned Effect.
+```
+
+This suppresses parser input capture throughout this schema. It does not
+sanitize preserved host or encoder causes, schema paths, custom messages, or
+annotations. Keep those free of secrets or sanitize them before serializing
+or inspecting a complete error.
 
 `Sha256.Digest`, `Sha256.digest`, and `Sha256.digestSync` are the same values
 as the named exports, attached for consumers that reached them through the
