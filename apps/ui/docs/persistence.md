@@ -288,7 +288,20 @@ and completed chain journals must retain their full prefixes: without them a
 resume can repeat model calls or external effects. Clearing/archiving a chat
 does not delete that execution evidence.
 
-Account sign-out, expiry and replacement still scrub private journal contents.
+Account sign-out, expiry and replacement scrub private journal contents,
+transcript cards and snapshots, composer drafts, deferred commands,
+recommendations, billing, repository inventory, working copies, cloud
+workspaces, integration status, and repository tree and flow projections.
+Card tabs and cloud terminal tabs close. Search history and repository selection
+reset. Local World notes and local host resources remain machine-owned.
+
+The identity row persists `accountOwnerLogin` independently of availability.
+An unavailable answer retains that owner and its data, including across reload.
+A definitive sign-out or different login scrubs in the same transaction that
+publishes the new identity. Missing ownership on a legacy unavailable row is
+unknown, so the next definitive answer scrubs conservatively. Fresh anonymous
+sessions retain deferred sign-in intent until their first login.
+
 The same transaction now inserts permanent SHA-256 lineage-ID tombstones in
 `app-retired-chain-lineages`. Those IDs cannot be resumed or reused, including
 after reload or another sign-out; a new account needs new lineage IDs. The

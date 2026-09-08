@@ -408,3 +408,60 @@ describe("runtime-owned pending approvals", () => {
   })
 
 })
+
+
+describe("persisted account ownership", () => {
+  const identity = (store: AppStore, state: "signed-in" | "signed-out" | "unavailable", login: string | null = null) =>
+    store.dispatch({ type: "identity.session.loaded", actor: "system", state, login,
+      allowlisted: state === "signed-in", admin: false, scopesPlain: null }).isPersisted.promise
+
+  test("same-account recovery keeps private state and owner across repeated outages and reload", async () => {
+    const storage = memoryStorage()
+    const first = await createAppStore({ kind: "localStorage", storage })
+    await identity(first, "signed-in", "alice")
+    await first.dispatch({ type: "composer.changed", actor: "user", draft: "Alice draft" }).isPersisted.promise
+    await identity(first, "unavailable")
+    await identity(first, "unavailable")
+    expect(first.collections.identitySessions.get("identity")?.accountOwnerLogin).toBe("alice")
+    await first.dispose?.()
+    const reopened = await createAppStore({ kind: "localStorage", storage })
+    expect(reopened.collections.identitySessions.get("identity")?.accountOwnerLogin).toBe("alice")
+    await identity(reopened, "signed-in", "alice")
+    expect(reopened.session().draft).toBe("Alice draft")
+    await identity(reopened, "signed-out")
+    expect(reopened.collections.identitySessions.get("identity")?.accountOwnerLogin).toBeNull()
+    await reopened.dispose?.()
+  })
+
+  test("anonymous intent survives an outage and the first sign-in", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    await identity(store, "signed-out")
+    await store.dispatch({ type: "command.deferred", actor: "user", name: "issues.create", args: "new issue",
+      requirement: "signed-in" }).isPersisted.promise
+    await identity(store, "unavailable")
+    await identity(store, "signed-in", "alice")
+    expect(store.session().pendingCommand?.args).toBe("new issue")
+    await store.dispose?.()
+  })
+
+  for (const legacyState of ["signed-in", "unavailable"] as const) {
+    for (const next of ["signed-out", "signed-in"] as const) {
+      test(`legacy ${legacyState} ownership scrubs on ${next} after reload`, async () => {
+        const storage = memoryStorage()
+        const first = await createAppStore({ kind: "localStorage", storage })
+        await identity(first, "signed-in", "alice")
+        await first.dispatch({ type: "composer.changed", actor: "user", draft: "Alice legacy draft" }).isPersisted.promise
+        if (legacyState === "unavailable") await identity(first, "unavailable")
+        await first.collections.identitySessions.update("identity", (draft) => { delete draft.accountOwnerLogin }).isPersisted.promise
+        await first.dispose?.()
+        const reopened = await createAppStore({ kind: "localStorage", storage })
+        await identity(reopened, "unavailable")
+        await identity(reopened, "unavailable")
+        await identity(reopened, next, next === "signed-in" ? "bob" : null)
+        expect(reopened.session().draft).toBe("")
+        expect(reopened.collections.identitySessions.get("identity")?.accountOwnerLogin).toBe(next === "signed-in" ? "bob" : null)
+        await reopened.dispose?.()
+      })
+    }
+  }
+})

@@ -1021,6 +1021,8 @@ export const IdentitySessionSchema = z.object({
   id: z.literal("identity"),
   state: z.enum(["unknown", "signed-out", "signed-in", "unavailable"]),
   login: z.string().nullable(),
+  /** Owner of retained account data, even while identity is unavailable. Missing only on legacy rows. */
+  accountOwnerLogin: z.string().nullable().optional(),
   allowlisted: z.boolean(),
   admin: z.boolean(),
   accessRequested: z.boolean(),
@@ -1624,6 +1626,7 @@ export const initialIdentitySession = (createdAt = Date.now()): IdentitySession 
   id: "identity",
   state: "unknown",
   login: null,
+  accountOwnerLogin: null,
   allowlisted: false,
   admin: false,
   accessRequested: false,

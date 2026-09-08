@@ -100,6 +100,7 @@ const seedAccountState = (store: AppStore): void => {
       }
     }
   })
+  store.dispatch({ type: "toast.shown", actor: "system", key: "alice-private", title: "Alice private work" })
   store.dispatch({
     type: "toolcall.recorded",
     actor: "smithers",
@@ -237,3 +238,144 @@ describe("signing out leaves nothing of the account behind", () => {
     expect(leftovers(store).messages).toBeGreaterThan(0)
   })
 })
+
+const loadIdentity = (store: AppStore, state: "signed-in" | "signed-out" | "unavailable", login: string | null = null) =>
+  store.dispatch({
+    type: "identity.session.loaded", actor: "system", state, login,
+    allowlisted: state === "signed-in", admin: false, scopesPlain: null
+  }).isPersisted.promise
+
+describe("retained account ownership", () => {
+  for (const next of ["signed-out", "signed-in"] as const) {
+    for (const reload of [false, true]) {
+      test(`Alice -> outage -> ${next}${reload ? " across reload" : ""} scrubs before publishing`, async () => {
+        const storage = memoryStorage()
+        let store = await createAppStore({ kind: "localStorage", storage })
+        await loadIdentity(store, "signed-in", "alice")
+        seedAccountState(store)
+        await loadIdentity(store, "unavailable")
+        expect(leftovers(store).messages).toBeGreaterThan(0)
+        if (reload) {
+          await store.dispose?.()
+          store = await createAppStore({ kind: "localStorage", storage })
+        }
+        await loadIdentity(store, next, next === "signed-in" ? "bob" : null)
+        expect(leftovers(store)).toEqual({
+          messages: 0, cards: 0, billing: null, billingState: "unknown", toolCalls: 0, chainEvents: 0
+        })
+        expect(store.collections.retiredChainLineages.size).toBe(1)
+        expect([...store.collections.transitions.values()].every((row) => !row.payload.includes("alice"))).toBe(true)
+        await store.dispose?.()
+        const reopened = await createAppStore({ kind: "localStorage", storage })
+        expect(leftovers(reopened).messages).toBe(0)
+        expect(reopened.collections.identitySessions.get("identity")?.state).toBe(next)
+        await reopened.dispose?.()
+      })
+    }
+  }
+})
+
+/** Every additional account projection omitted by the original scrub. */
+const seedPrivateRoster = async (store: AppStore): Promise<void> => {
+  seedAccountState(store)
+  await store.dispatch({ type: "composer.changed", actor: "user", draft: "ALICE_PRIVATE_DRAFT" }).isPersisted.promise
+  await store.dispatch({
+    type: "command.deferred", actor: "user", name: "issues.create", args: "ALICE_PRIVATE_ACTION", requirement: "signed-in"
+  }).isPersisted.promise
+  await store.dispatch({
+    type: "repositories.loaded", actor: "system",
+    repositories: [{ id: "alice/private", org: "alice", name: "private", ownerKind: "user", head: null }]
+  }).isPersisted.promise
+  await store.dispatch({
+    type: "workingcopies.workspaces.loaded", actor: "system",
+    copies: [{ id: "workspace:legacy", repoId: "alice/private", kind: "workspace", label: "Private legacy copy", workspaceId: "legacy" }]
+  }).isPersisted.promise
+  await store.dispatch({
+    type: "workspaces.loaded", actor: "system",
+    workspaces: [{ id: "private", repoId: "alice/private", name: "Private workspace", targetBookmark: null,
+      status: "running", provisioningStage: null, suspendedAt: null, createdAt: null }]
+  }).isPersisted.promise
+  await store.dispatch({
+    type: "cloud.session.loaded", actor: "system", state: "signed-in", username: "alice", expiresAt: null, scopes: null
+  }).isPersisted.promise
+  await store.dispatch({
+    type: "change.loaded", actor: "system", change: {
+      id: "alice/private#c", repoId: "alice/private", changeId: "c", commitId: null, description: "ALICE_PRIVATE_CHANGE",
+      authorName: "Alice", timestamp: null, hasConflict: false, parentChangeIds: [], currentSeq: null, revisionCount: null
+    }
+  }).isPersisted.promise
+  await store.collections.linearIntegrations.insert({
+    id: "private", teamId: "team", teamName: "Private", teamKey: "ALICE", repoOwner: "alice", repoName: "private",
+    active: true, remediation: null, lastSyncAt: null, createdAt: null, updatedAt: 1, revision: 1
+  }).isPersisted.promise
+  await store.collections.githubAppStatuses.insert({
+    repo: "alice/private", installed: true, configured: true, installationId: 1, installUrl: null, rateLimit: null,
+    updatedAt: 1, revision: 1
+  }).isPersisted.promise
+  await store.collections.recommendations.insert({
+    id: "current", suggestions: [{ id: "private", label: "Alice private", flow: "issues.create", args: "ALICE_PRIVATE", emphasis: "primary" }],
+    source: "agent", revision: 1, createdAt: 1
+  }).isPersisted.promise
+  await store.collections.tabs.insert({ id: "private-card-tab", kind: "card", title: "Alice private card", cardId: "balance", ordinal: 1 }).isPersisted.promise
+  await store.collections.tabs.insert({ id: "private-terminal", kind: "terminal", title: "Alice private workspace", sessionId: "private-session",
+    workspaceId: "private", repo: "alice/private", ordinal: 2 }).isPersisted.promise
+  await store.collections.sessions.update("main", (draft) => {
+    draft.paletteLastQuery = "ALICE_PRIVATE_QUERY"
+    draft.paletteRecents = [{ ref: "alice/private", kind: "repository", count: 1, lastSeen: 1 }]
+    draft.activeTabId = "private-terminal"
+  }).isPersisted.promise
+  store.collections.repoTree.insert({
+    id: "workspace:private#", copyId: "workspace:private", path: "", expanded: true, state: "failed", entries: [],
+    error: "ALICE_PRIVATE_PATH", loadedAt: 1
+  })
+  store.collections.repositoryFlows.insert({
+    id: "alice/private", flows: [{ id: "private", description: "ALICE_PRIVATE_FLOW", summary: null, featured: true, modelInvocable: true }], loadedAt: 1
+  })
+}
+
+const privateRosterSizes = (store: AppStore) => ({
+  recommendations: store.collections.recommendations.size,
+  repositories: store.collections.repositories.size,
+  workingCopies: store.collections.workingCopies.size,
+  cloudWorkspaces: store.collections.cloudWorkspaces.size,
+  changes: store.collections.changes.size,
+  linearIntegrations: store.collections.linearIntegrations.size,
+  githubAppStatuses: store.collections.githubAppStatuses.size,
+  repoTree: store.collections.repoTree.size,
+  repositoryFlows: store.collections.repositoryFlows.size
+})
+
+for (const next of ["logout", "replacement"] as const) {
+  test(`${next} clears the full private roster and deferred intent, durably`, async () => {
+    const storage = memoryStorage()
+    const store = await createAppStore({ kind: "localStorage", storage })
+    await loadIdentity(store, "signed-in", "alice")
+    await seedPrivateRoster(store)
+    const world = [...store.collections.worldDocuments.values()]
+    expect(Object.values(privateRosterSizes(store)).every((size) => size > 0)).toBe(true)
+    if (next === "logout") {
+      await store.dispatch({ type: "identity.session.cleared", actor: "user" }).isPersisted.promise
+    } else await loadIdentity(store, "signed-in", "bob")
+    const assertScrubbed = (current: AppStore) => {
+      expect(current.session().draft).toBe("")
+      expect(current.session().pendingCommand).toBeNull()
+      expect(current.session().paletteLastQuery).toBe("")
+      expect(current.session().paletteRecents).toEqual([])
+      expect(current.session().activeTabId).toBe("main")
+      expect([...current.collections.tabs.keys()]).toEqual(["main"])
+      expect(current.collections.toasts.size).toBe(0)
+      for (const [name, size] of Object.entries(privateRosterSizes(current))) expect({ name, size }).toEqual({ name, size: 0 })
+      expect(current.collections.cloudSessions.get("cloud")?.username).toBeNull()
+      expect([...current.collections.worldDocuments.values()]).toEqual(world)
+    }
+    assertScrubbed(store)
+    await store.dispose?.()
+    const reopened = await createAppStore({ kind: "localStorage", storage })
+    assertScrubbed(reopened)
+    await loadIdentity(reopened, "signed-in", "bob")
+    const controller = createAppController(reopened, unavailableRepositories, unavailableAgent, backend({}))
+    controller.resumeDeferredCommand()
+    expect([...reopened.collections.toasts.values()].some((toast) => toast.key === "command.resume.issues.create")).toBe(false)
+    await reopened.dispose?.()
+  })
+}

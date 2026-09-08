@@ -923,12 +923,27 @@ const forgetAccountState = (collections: StoredCollections): void => {
       collections.toasts,
       collections.toolCalls,
       collections.chainEvents,
-      collections.transitions
+      collections.transitions,
+      collections.recommendations,
+      collections.repositories,
+      collections.workingCopies,
+      collections.cloudWorkspaces,
+      collections.changes,
+      collections.linearIntegrations,
+      collections.githubAppStatuses,
+      collections.repoTree,
+      collections.repositoryFlows
     ]
   ) {
     const keys = [...(collection as { keys: () => Iterable<string> }).keys()]
     if (keys.length > 0) (collection as { delete: (keys: string[]) => void }).delete(keys)
   }
+  // Card tabs and cloud terminals also carry private repository names.
+  closeTabRows(collections, [
+    ...workspaceTabIds(collections),
+    ...[...collections.tabs.values()].filter((tab) => tab.kind === "card").map((tab) => tab.id)
+  ], collections.sessions.get(SESSION_ID)!.revision)
+  collections.cloudSessions.update("cloud", (draft) => Object.assign(draft, initialCloudSession()))
   const cardFrameKeys = [...collections.frames.values()]
     .filter((frame) => frame.kind === "card")
     .map((frame) => frame.id)
@@ -942,6 +957,17 @@ const forgetAccountState = (collections: StoredCollections): void => {
   }
   collections.sessions.update(SESSION_ID, (draft) => {
     const branchId = draft.activeBranchId ?? DEFAULT_BRANCH_ID
+    draft.draft = ""
+    draft.pendingCommand = null
+    draft.phase = "idle"
+    draft.composerOwner = "user"
+    draft.turnTabId = null
+    draft.devtoolsOpen = false
+    draft.resetConfirmOpen = false
+    draft.paletteActionsRef = null
+    draft.paletteLastQuery = ""
+    draft.paletteRecents = []
+    draft.activeRepoKey = null
     draft.maximizedCardId = null
     draft.activeFrameId = rootFrameId(branchId)
   })
@@ -2067,23 +2093,26 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
         case "identity.session.loaded": {
           const existing = collections.identitySessions.get("identity")
           if (existing === undefined) return
-          /*
-           * A session that was signed in and is not any more — an expired
-           * cookie, a revocation, a sign-out in another tab — leaves the
-           * previous account's transcript and balance persisted on screen.
-           * "unavailable" is not that: it means the seam could not answer,
-           * and the last known state stays honest-but-stale.
-           */
-          const accountChanged = transition.state === "signed-in" &&
-            existing.state === "signed-in" &&
-            existing.login !== transition.login
-          if (
-            (existing.state === "signed-in" && transition.state === "signed-out") ||
-            accountChanged
-          ) {
+          // Availability is transient; ownership lasts until a definitive answer.
+          // Legacy signed-in rows still name their owner. A legacy outage has
+          // lost that name, so undefined conservatively means unknown owner.
+          const owner = existing.accountOwnerLogin !== undefined
+            ? existing.accountOwnerLogin
+            : existing.state === "signed-in"
+            ? existing.login
+            : existing.state === "unavailable"
+            ? undefined
+            : null
+          if (owner !== null && (
+            transition.state === "signed-out" ||
+            (transition.state === "signed-in" && owner !== transition.login)
+          )) {
             forgetAccountState(collections)
           }
           collections.identitySessions.update("identity", (draft) => {
+            draft.accountOwnerLogin = transition.state === "signed-in"
+              ? transition.login
+              : transition.state === "signed-out" ? null : owner
             draft.state = transition.state
             draft.login = transition.login
             draft.allowlisted = transition.allowlisted
@@ -2134,6 +2163,7 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           collections.identitySessions.update("identity", (draft) => {
             draft.state = "signed-out"
             draft.login = null
+            draft.accountOwnerLogin = null
             draft.allowlisted = false
             draft.admin = false
             draft.accessRequested = false
