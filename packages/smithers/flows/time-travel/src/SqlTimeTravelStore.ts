@@ -13,9 +13,9 @@
  * The derived reads — state and attempts at a frame — are folds over journal
  * records rather than columns, because the run row holds only the *latest*
  * state. The store is SQLite-dialect only: the schema's CHECK constraints use
- * `typeof()` and `json_valid`, the reads use `json_extract` with `$` paths,
- * and the archive writes use `INSERT OR IGNORE`, none of which Postgres or
- * MySQL parse. Any SQLite-speaking `SqlClient` (wa-sqlite, libsql, node or
+ * `typeof()` and `json_valid`, and the reads use `json_extract` with `$` paths,
+ * none of which Postgres or MySQL parse. Any SQLite-speaking `SqlClient`
+ * (wa-sqlite, libsql, node or
  * bun SQLite) runs it; a genuinely generic dialect would have to abstract the
  * JSON functions and the constraint syntax, which is a redesign, not an edit.
  *
@@ -178,10 +178,13 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     sql`CREATE INDEX IF NOT EXISTS flows_time_travel_fork_intents_parent_idx
     ON flows_time_travel_fork_intents (parent_run_id, parent_seq)`
   )
-  yield* step(
-    "flows_time_travel_archive",
-    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
+  // Sequences are reused after truncation; the archive key includes the
+  // journal generation observed inside the archive transaction.
+  const createArchive = sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
+    generation INTEGER NOT NULL CHECK (
+      typeof(generation) = 'integer' AND generation >= 0 AND generation <= 9007199254740991
+    ),
     seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
     event_id TEXT NOT NULL CHECK (length(event_id) > 0),
     source_id TEXT NOT NULL CHECK (length(source_id) > 0),
@@ -197,8 +200,32 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     archived_at_ms INTEGER NOT NULL CHECK (
       typeof(archived_at_ms) = 'integer' AND archived_at_ms >= 0 AND archived_at_ms <= 9007199254740991
     ),
-    PRIMARY KEY (run_id, seq)
+    PRIMARY KEY (run_id, generation, seq)
   )`
+
+  yield* step("flows_time_travel_archive", createArchive)
+  yield* step(
+    "the flows_time_travel_archive generation rebuild",
+    sql.withTransaction(Effect.gen(function*() {
+      const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(flows_time_travel_archive)`
+      if (columns.some((column) => column.name === "generation")) return
+      // Legacy rows have no recoverable generation. Reserve zero for them.
+      // Older databases may also predate durable journal generations.
+      yield* sql`ALTER TABLE flows_time_travel_archive RENAME TO flows_time_travel_archive_legacy`
+      yield* createArchive
+      yield* sql`INSERT INTO flows_time_travel_archive
+        (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms,
+         event_type, payload_json, meta_json, archived_at_ms)
+        SELECT run_id, 0, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json, archived_at_ms
+        FROM flows_time_travel_archive_legacy`
+      yield* sql`INSERT INTO flows_journal_generations (run_id, generation, after_seq)
+        SELECT DISTINCT legacy.run_id, 1,
+          COALESCE((SELECT MAX(seq) FROM flows_journal_events WHERE run_id = legacy.run_id), -1)
+        FROM flows_time_travel_archive_legacy AS legacy WHERE true
+        ON CONFLICT (run_id) DO NOTHING`
+      yield* sql`DROP TABLE flows_time_travel_archive_legacy`
+    }))
   )
 })
 const Json = Schema.fromJsonString(Schema.Unknown)
@@ -484,6 +511,19 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
           })
         )
       )
+
+    /**
+     * The generation of a run's current history, which is the one
+     * `SqlJournal.generation` reports: zero until a truncation raises it.
+     *
+     * Read inside the truncation's transaction and BEFORE its own bump, so the
+     * archived records carry the generation being truncated rather than
+     * the one that replaced them.
+     */
+    const currentGeneration = (runId: string) =>
+      sql<{ readonly generation: number }>`
+        SELECT generation FROM flows_journal_generations WHERE run_id = ${runId}
+      `.pipe(Effect.map((rows) => rows[0] === undefined ? 0 : Number(rows[0].generation)))
 
     /**
      * Removes the mutable durable-wait projections explained by a journal
@@ -828,23 +868,24 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
                   }
                 }
                 const nowMs = yield* Clock.currentTimeMillis
-                const parentCount = yield* sql<{ readonly count: number }>`
-            SELECT COUNT(*) AS count FROM flows_journal_events
-            WHERE run_id = ${runId} AND seq > ${frame.seq}
-          `
-                let archived = Number(parentCount[0]!.count)
+                const parentGeneration = yield* currentGeneration(runId)
                 yield* sql`
-            INSERT OR IGNORE INTO flows_time_travel_archive
-            SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+            INSERT INTO flows_time_travel_archive
+              (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json, archived_at_ms)
+            SELECT run_id, ${parentGeneration}, seq, event_id, source_id, source_seq, emitted_at_ms,
                    event_type, payload_json, meta_json, ${nowMs}
             FROM flows_journal_events
             WHERE run_id = ${runId} AND seq > ${frame.seq}
           `
+                const parentChanges = yield* sql<{ readonly count: number }>`SELECT changes() AS count`
+                let archived = Number(parentChanges[0]!.count)
                 yield* sql`
                   INSERT INTO flows_journal_generations (run_id, generation, after_seq)
                   VALUES (${runId}, 1, ${frame.seq})
                   ON CONFLICT (run_id) DO UPDATE SET generation = generation + 1, after_seq = excluded.after_seq
                 `
+                yield* sql`DELETE FROM flows_time_travel_snapshots WHERE run_id = ${runId} AND seq > ${frame.seq}`
                 yield* deleteProjectedWaits(runId, frame.seq)
                 yield* sql`
             DELETE FROM flows_journal_events
@@ -880,25 +921,26 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
             `
                 }
                 for (const childRunId of descendants.attachedRunIds) {
-                  const count = yield* sql<{ readonly count: number }>`
-              SELECT COUNT(*) AS count FROM flows_journal_events
-              WHERE run_id = ${childRunId}
-            `
-                  archived += Number(count[0]!.count)
                   // An archived child's journal no longer explains any attempt,
                   // so none of its attempt rows may survive it.
                   yield* sql`DELETE FROM flows_attempts WHERE run_id = ${childRunId}`
+                  const childGeneration = yield* currentGeneration(childRunId)
                   yield* sql`
-              INSERT OR IGNORE INTO flows_time_travel_archive
-              SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+              INSERT INTO flows_time_travel_archive
+                (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms,
+                 event_type, payload_json, meta_json, archived_at_ms)
+              SELECT run_id, ${childGeneration}, seq, event_id, source_id, source_seq, emitted_at_ms,
                      event_type, payload_json, meta_json, ${nowMs}
               FROM flows_journal_events WHERE run_id = ${childRunId}
             `
+                  const childChanges = yield* sql<{ readonly count: number }>`SELECT changes() AS count`
+                  archived += Number(childChanges[0]!.count)
                   yield* sql`
                     INSERT INTO flows_journal_generations (run_id, generation, after_seq)
                     VALUES (${childRunId}, 1, -1)
                     ON CONFLICT (run_id) DO UPDATE SET generation = generation + 1, after_seq = -1
                   `
+                  yield* sql`DELETE FROM flows_time_travel_snapshots WHERE run_id = ${childRunId}`
                   yield* deleteProjectedWaits(childRunId, -1)
                   yield* sql`DELETE FROM flows_journal_events WHERE run_id = ${childRunId}`
                 }

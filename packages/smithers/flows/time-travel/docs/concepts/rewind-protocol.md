@@ -40,6 +40,9 @@ the process dies at this exact line, what does the next process see?
 10. **Archive and truncate the suffix atomically**, fenced on the parent's owner
     and on every non-terminal attached child's exact owner. Archiving is not
     deletion: the records move aside so a forensic reader can still reach them.
+    Archive rows use `(run_id, generation, seq)`, with each run's generation read
+    before truncation advances it. Snapshot anchors above the parent frame and
+    all anchors of archived attached children are removed atomically.
     Mutable deferred completions and clock deadlines named by those records are
     removed in the same transaction, so the rewound run cannot consume an
     answer or deadline from the discarded future.

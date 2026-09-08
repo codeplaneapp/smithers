@@ -190,6 +190,95 @@ describe("TimeTravelStore conformance", () => {
       })
     }))
 
+  it.effect("retains both generations after truncating, re-appending, and truncating", () =>
+    Effect.gen(function*() {
+      const zero = { ...frame, seq: 0 }
+      const exercise = (store: TimeTravelStore.Service, append: (parent: string) => Effect.Effect<unknown, unknown>) =>
+        Effect.gen(function*() {
+          yield* append("original")
+          const first = yield* store.archiveAndTruncate("run", zero, [], owner)
+          yield* append("replacement")
+          const second = yield* store.archiveAndTruncate("run", zero, [], owner)
+          return [first.archived, second.archived]
+        })
+      const memory = MemoryTimeTravelStore.make({
+        records: [{ runId: "run", seq: 0, eventId: "baseline", payload: {} }],
+        runOwners: new Map([["run", owner]])
+      })
+      // Fork markers are the memory store's journal append path. Empty donor
+      // runs copy no prefix and append one marker at the reused seq 1.
+      const memoryCounts = yield* exercise(memory, (parent) => memory.createFork(parent, zero, "run"))
+      const memoryArchive = memory.state().archived.map((record) => ({
+        generation: record.generation,
+        seq: record.seq,
+        parent: (record.payload as { parentRunId: string }).parentRunId
+      }))
+      const sqlite = yield* withSql((store, sql) =>
+        Effect.gen(function*() {
+          yield* seedSql(sql)
+          yield* sql`DELETE FROM flows_time_travel_edges`
+          yield* sql`DELETE FROM flows_journal_events WHERE run_id = 'run' AND seq > 0`
+          const counts = yield* exercise(store, (parent) =>
+            sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json)
+            VALUES ('run', 1, ${parent}, 'source', 1, 0, ${forkCreatedEventType},
+                    ${JSON.stringify({ parentRunId: parent })}, '{}')
+          `)
+          const archived = yield* sql<{ readonly generation: number; readonly seq: number; readonly parent: string }>`
+            SELECT generation, seq, json_extract(payload_json, '$.parentRunId') AS parent
+            FROM flows_time_travel_archive WHERE run_id = 'run' ORDER BY generation, seq
+          `
+          return { counts, archived }
+        })
+      )
+      expect(memoryCounts).toEqual([1, 1])
+      expect(memoryArchive).toEqual([
+        { generation: 0, seq: 1, parent: "original" },
+        { generation: 1, seq: 1, parent: "replacement" }
+      ])
+      expect(sqlite).toEqual({ counts: memoryCounts, archived: memoryArchive })
+    }))
+
+  for (const backend of ["memory", "sqlite"] as const) {
+    it.effect(`${backend} clears discarded snapshot anchors while retaining prefix and detached anchors`, () =>
+      Effect.gen(function*() {
+        const exercise = (store: TimeTravelStore.Service) =>
+          Effect.gen(function*() {
+            for (
+              const snapshot of [
+                { runId: "run", frame, changeId: "at-frame" },
+                { runId: "run", frame: { ...frame, seq: 2 }, changeId: "discarded-future" },
+                { runId: "run", frame: { lineageId: "other", seq: 2 }, changeId: "other-future" },
+                { runId: "attached", frame: { ...frame, seq: 0 }, changeId: "child-future" },
+                { runId: "detached", frame: { ...frame, seq: 0 }, changeId: "detached" }
+              ]
+            ) yield* store.recordSnapshot(snapshot)
+            yield* store.archiveAndTruncate("run", frame, [], owner)
+            // Replacement history anchors at 3, skipping the old anchor at 2.
+            yield* store.recordSnapshot({ runId: "run", frame: { ...frame, seq: 3 }, changeId: "replacement" })
+            return {
+              parent: yield* store.snapshotAt("run", { ...frame, seq: 2 }),
+              other: yield* store.snapshotAt("run", { lineageId: "other", seq: 2 }),
+              child: yield* store.snapshotAt("attached", { ...frame, seq: 2 }),
+              detached: yield* store.snapshotAt("detached", frame),
+              replacement: yield* store.snapshotAt("run", { ...frame, seq: 3 })
+            }
+          })
+        const expected = {
+          parent: { runId: "run", frame, changeId: "at-frame" },
+          other: undefined,
+          child: undefined,
+          detached: { runId: "detached", frame: { ...frame, seq: 0 }, changeId: "detached" },
+          replacement: { runId: "run", frame: { ...frame, seq: 3 }, changeId: "replacement" }
+        }
+        const actual = backend === "memory"
+          ? yield* exercise(memorySeed())
+          : yield* withSql((store, sql) => seedSql(sql).pipe(Effect.andThen(exercise(store))))
+        expect(actual).toEqual(expected)
+      }))
+  }
+
   it.effect("refuses a foreign-owned attached child without changing either journal", () =>
     Effect.gen(function*() {
       const childOwner = { ...owner, nonce: "rewind-child" }

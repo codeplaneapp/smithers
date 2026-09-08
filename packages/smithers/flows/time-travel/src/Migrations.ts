@@ -41,7 +41,8 @@ export const set: DatabaseMigrations.MigrationSet = {
   namespace: "time-travel",
   idOffset: DatabaseMigrations.idBlock * 5,
   migrations: {
-    "0001_initial": migrate
+    "0001_initial": migrate,
+    "0002_archive_generation": migrate
   }
 }
 

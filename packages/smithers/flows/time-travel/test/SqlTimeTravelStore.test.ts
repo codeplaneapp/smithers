@@ -249,3 +249,123 @@ it.effect("archiveAndTruncate forgets lossy source identities in the live journa
       )
     ))
   ))
+
+it.effect("archives both histories when a rewound run reuses journal sequences", () =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      const journal = yield* Journal.Journal
+      const store = yield* SqlTimeTravelStore.make
+      yield* sql`INSERT INTO flows_runs
+      (run_id, status, created_at_ms, state_json, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms)
+      VALUES ('rewind-twice', 'running', 0, '{}', ${owner.hostId}, ${owner.pid}, ${owner.nonce}, 0)`
+      const emit = (eventType: string) =>
+        journal.emitDurable(
+          new JournalEvent.Input({
+            runId: "rewind-twice" as JournalEvent.RunId,
+            sourceId: "producer" as JournalEvent.SourceId,
+            eventType,
+            payload: null
+          }),
+          owner
+        )
+      yield* emit("baseline")
+      yield* emit("original-future")
+      yield* journal.flush
+      const frame = { lineageId: "main", seq: 0 } as const
+      yield* store.recordSnapshot({ runId: "rewind-twice", frame, changeId: "baseline" })
+      yield* store.recordSnapshot({ runId: "rewind-twice", frame: { ...frame, seq: 1 }, changeId: "old-future" })
+      const first = yield* store.archiveAndTruncate("rewind-twice", frame, [], owner)
+      // The journal allocates from the truncated tail, so the resumed history
+      // re-uses seq 1: the coordinate the first rewind already archived.
+      const replacement = yield* emit("replacement-future")
+      yield* journal.flush
+      // The resumed history has no anchor at the reused coordinate.
+      expect(yield* store.snapshotAt("rewind-twice", { ...frame, seq: 1 })).toEqual({
+        runId: "rewind-twice",
+        frame,
+        changeId: "baseline"
+      })
+      const second = yield* store.archiveAndTruncate("rewind-twice", frame, [], owner)
+      const archived = yield* sql<
+        { readonly generation: number; readonly seq: number; readonly event_type: string }
+      >`
+        SELECT generation, seq, event_type FROM flows_time_travel_archive
+        WHERE run_id = 'rewind-twice' ORDER BY generation, seq
+      `
+
+      expect(replacement.seq).toBe(1)
+      expect(first.archived).toBe(1)
+      expect(second.archived).toBe(1)
+      expect(archived).toEqual([
+        { generation: 0, seq: 1, event_type: "original-future" },
+        { generation: 1, seq: 1, event_type: "replacement-future" }
+      ])
+      expect(yield* store.archivedAt("rewind-twice", 1)).toBe(true)
+    }).pipe(Effect.provide(
+      SqlJournal.layer({ capacity: 16, overflow: "reject" }).pipe(
+        Layer.provideMerge(Layer.provideMerge(Migrations.layer, TestDatabase.layer))
+      )
+    ))
+  ))
+
+it.effect("archives attached children with their own generations and rolls back archive collisions", () =>
+  Effect.gen(function*() {
+    yield* Migrations.run
+    const sql = yield* SqlClient.SqlClient
+    const store = yield* SqlTimeTravelStore.make
+    yield* sql`INSERT INTO flows_runs
+      (run_id, status, created_at_ms, state_json, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms)
+      VALUES ('parent', 'running', 0, '{}', ${owner.hostId}, ${owner.pid}, ${owner.nonce}, 0)`
+    yield* sql`INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+      VALUES ('child', 'completed', 0, '{}')`
+    yield* sql`INSERT INTO flows_journal_generations VALUES ('child', 3, -1)`
+    const frame = { lineageId: "main", seq: 0 } as const
+    const append = (iteration: number) =>
+      Effect.gen(function*() {
+        yield* sql`INSERT INTO flows_time_travel_edges VALUES ('parent', 1, 'child', 'child', 1)`
+        for (const runId of ["parent", "child"]) {
+          yield* sql`INSERT INTO flows_journal_events
+          (run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json)
+          VALUES (${runId}, 1, ${`${runId}-${iteration}`}, 'source', 1, 0, 'test', '{}', '{}')`
+          yield* store.recordSnapshot({ runId, frame: { ...frame, seq: 1 }, changeId: `${runId}-${iteration}` })
+        }
+      })
+    yield* append(0)
+    expect((yield* store.archiveAndTruncate("parent", frame, [], owner)).archived).toBe(2)
+    yield* append(1)
+    expect((yield* store.archiveAndTruncate("parent", frame, [], owner)).archived).toBe(2)
+    expect(yield* sql`SELECT run_id, generation, event_id FROM flows_time_travel_archive ORDER BY run_id, generation`)
+      .toEqual([
+        { run_id: "child", generation: 3, event_id: "child-0" },
+        { run_id: "child", generation: 4, event_id: "child-1" },
+        { run_id: "parent", generation: 0, event_id: "parent-0" },
+        { run_id: "parent", generation: 1, event_id: "parent-1" }
+      ])
+    yield* append(2)
+    // A collision in either insert must preserve the entire live transaction,
+    // including snapshots deleted before the attached-child insert is reached.
+    for (const runId of ["parent", "child"]) {
+      yield* sql`INSERT INTO flows_time_travel_archive
+        SELECT e.run_id, g.generation, e.seq, e.event_id, e.source_id, e.source_seq,
+          e.emitted_at_ms, e.event_type, e.payload_json, e.meta_json, 0
+        FROM flows_journal_events e JOIN flows_journal_generations g ON e.run_id = g.run_id
+        WHERE e.run_id = ${runId}`
+      const before = {
+        live: yield* sql`SELECT * FROM flows_journal_events`,
+        archive: yield* sql`SELECT * FROM flows_time_travel_archive`,
+        snapshots: yield* sql`SELECT * FROM flows_time_travel_snapshots`,
+        generations: yield* sql`SELECT * FROM flows_journal_generations`,
+        edges: yield* sql`SELECT * FROM flows_time_travel_edges`
+      }
+      expect((yield* Effect.flip(store.archiveAndTruncate("parent", frame, [], owner))).code).toBe("unknown")
+      expect({
+        live: yield* sql`SELECT * FROM flows_journal_events`,
+        archive: yield* sql`SELECT * FROM flows_time_travel_archive`,
+        snapshots: yield* sql`SELECT * FROM flows_time_travel_snapshots`,
+        generations: yield* sql`SELECT * FROM flows_journal_generations`,
+        edges: yield* sql`SELECT * FROM flows_time_travel_edges`
+      }).toEqual(before)
+      yield* sql`DELETE FROM flows_time_travel_archive WHERE run_id = ${runId} AND event_id = ${`${runId}-2`}`
+    }
+  }).pipe(Effect.provide(TestDatabase.layer)))

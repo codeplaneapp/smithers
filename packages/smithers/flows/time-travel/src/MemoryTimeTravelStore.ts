@@ -69,7 +69,7 @@ export interface JournalRecord {
  */
 export interface MemoryState {
   readonly records: ReadonlyArray<JournalRecord>
-  readonly archived: ReadonlyArray<JournalRecord>
+  readonly archived: ReadonlyArray<JournalRecord & { readonly generation: number }>
   readonly edges: ReadonlyArray<LineageEdge>
   readonly audits: ReadonlyArray<TimeTravelStore.Audit>
   readonly receipts: ReadonlyArray<TimeTravelStore.Receipt>
@@ -199,7 +199,8 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     }
   }
   let records = [...(options.records ?? [])]
-  let archived: Array<JournalRecord> = []
+  let archived: Array<JournalRecord & { readonly generation: number }> = []
+  let generations = new Map<string, number>()
   let edges = [...(options.edges ?? [])]
   let audits: Array<TimeTravelStore.Audit> = []
   let receipts: Array<TimeTravelStore.Receipt> = []
@@ -257,6 +258,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
       try: () => {
         const before = state()
         const beforeSequence = sequence
+        const beforeGenerations = new Map(generations)
         const beforeIntents = forkIntents.map((intent) => ({ ...intent }))
         try {
           return body()
@@ -272,6 +274,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
           runOwners.clear()
           for (const [runId, runOwner] of before.runOwners) runOwners.set(runId, runOwner)
           sequence = beforeSequence
+          generations = beforeGenerations
           forkIntents = beforeIntents
           throw cause
         }
@@ -413,7 +416,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
               descendants.attachedRunIds.has(record.runId)
             )
             fail("archiveAndTruncate:before-archive")
-            archived.push(...doomed)
+            archived.push(...doomed.map((record) => ({ ...record, generation: generations.get(record.runId) ?? 0 })))
             fail("archiveAndTruncate:before-truncate")
             records = records.filter((record) =>
               !(
@@ -421,6 +424,13 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
                 descendants.attachedRunIds.has(record.runId)
               )
             )
+            snapshots = snapshots.filter((snapshot) =>
+              !((snapshot.runId === runId && snapshot.frame.seq > frame.seq) ||
+                descendants.attachedRunIds.has(snapshot.runId))
+            )
+            for (const truncatedRunId of [runId, ...descendants.attachedRunIds]) {
+              generations.set(truncatedRunId, (generations.get(truncatedRunId) ?? 0) + 1)
+            }
             const attachedChildren = new Set(descendants.attached.map((edge) => edge.childRunId))
             edges = edges.filter((edge) => !attachedChildren.has(edge.childRunId))
             receipts.push(...clone([...newReceipts], "receipts"))

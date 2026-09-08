@@ -211,8 +211,9 @@ export type Receipt = typeof Receipt.Type
  * which lineage edges it left pointing at history that no longer exists.
  *
  * Archiving is not deletion — the records move aside so a forensic reader can
- * still reach them — and `orphaned` is the honest accounting of descendants
- * the operation detached rather than resolved.
+ * still reach them across sequence reuse, keyed by `(runId, generation, seq)`.
+ * The generation is read before truncation advances it. `orphaned` accounts
+ * for descendants the operation detached rather than resolved.
  *
  * @since 0.1.0
  * @category schemas
@@ -343,7 +344,8 @@ export interface Service {
   /**
    * Truncates a run back to a frame, moving the records above it into the
    * archive rather than deleting them, and persisting the compensation
-   * `receipts` that justified the truncation.
+   * `receipts` that justified the truncation. Clears snapshot anchors above
+   * the frame and every anchor belonging to archived attached children.
    *
    * The mutation is fenced on the caller's ownership of the run and every
    * non-terminal attached child. The commit re-checks `flows_runs` for

@@ -448,16 +448,17 @@ describe("SqlTimeTravelStore audits", () => {
           `INSERT INTO flows_time_travel_edges VALUES ('parent', 0, 'child-kind', 'unknown', 1)`,
           `INSERT INTO flows_time_travel_edges VALUES ('parent', 0, 'child-attached', 'child', 2)`,
           `INSERT INTO flows_time_travel_edges VALUES ('same', 0, 'same', 'child', 1)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('', 0, 'event', 'source', 0, 0, 'type', '{}', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', -1, 'event', 'source', 0, 0, 'type', '{}', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, '', 'source', 0, 0, 'type', '{}', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 'event-source', '', 0, 0, 'type', '{}', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 'event-seq', 'source', -1, 0, 'type', '{}', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 'event-emitted', 'source', 0, -1, 'type', '{}', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 'event-type', 'source', 0, 0, '', '{}', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 'event-payload', 'source', 0, 0, 'type', '{', '{}', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 'event-meta', 'source', 0, 0, 'type', '{}', '{', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 'event-archived', 'source', 0, 0, 'type', '{}', '{}', -1)`
+          `INSERT INTO flows_time_travel_archive VALUES ('', 0, 0, 'event', 'source', 0, 0, 'type', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', -1, 0, 'event-gen', 'source', 0, 0, 'type', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, -1, 'event', 'source', 0, 0, 'type', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, '', 'source', 0, 0, 'type', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-source', '', 0, 0, 'type', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-seq', 'source', -1, 0, 'type', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-emitted', 'source', 0, -1, 'type', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-type', 'source', 0, 0, '', '{}', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-payload', 'source', 0, 0, 'type', '{', '{}', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-meta', 'source', 0, 0, 'type', '{}', '{', 0)`,
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-archived', 'source', 0, 0, 'type', '{}', '{}', -1)`
         ] as const
         return Effect.forEach(invalidStatements, (statement) => Effect.exit(sql.unsafe(statement)))
       })

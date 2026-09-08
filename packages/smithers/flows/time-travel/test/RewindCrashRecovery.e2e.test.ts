@@ -192,9 +192,9 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
           `
               yield* sql`
             INSERT INTO flows_time_travel_archive
-              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+              (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms,
                event_type, payload_json, meta_json, archived_at_ms)
-            VALUES ('after-archive', 1, 'after-archive-1', 'crash', 1, 1, 'suffix', '{}',
+            VALUES ('after-archive', 0, 1, 'after-archive-1', 'crash', 1, 1, 'suffix', '{}',
                     ${JSON.stringify({ lineageId: "after-archive/root" })}, 2)
           `
               const detail = (phase: "audit_written" | "compensated", suffixCount: number) =>

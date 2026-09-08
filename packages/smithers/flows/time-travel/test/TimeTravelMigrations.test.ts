@@ -50,6 +50,58 @@ describe("time-travel migrations", () => {
       }
     }))
 
+  it.effect("rekeys a legacy archive that predates the journal generation", () =>
+    Effect.gen(function*() {
+      const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "flows-time-travel-archive-")))
+      const filename = join(directory, "archive.sqlite")
+      try {
+        const { columns, rows, generations } = yield* withDatabase(
+          filename,
+          Effect.gen(function*() {
+            yield* EngineMigrations.run
+            const sql = yield* Effect.service(SqlClient.SqlClient)
+            yield* sql`
+            CREATE TABLE flows_time_travel_archive (
+              run_id TEXT NOT NULL,
+              seq INTEGER NOT NULL,
+              event_id TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              source_seq INTEGER NOT NULL,
+              emitted_at_ms INTEGER NOT NULL,
+              event_type TEXT NOT NULL,
+              payload_json TEXT NOT NULL,
+              meta_json TEXT NOT NULL,
+              archived_at_ms INTEGER NOT NULL,
+              PRIMARY KEY (run_id, seq)
+            )
+          `
+            yield* sql`
+            INSERT INTO flows_time_travel_archive
+            VALUES ('legacy', 1, 'legacy-1', 'source', 1, 0, 'type', '{}', '{}', 0)
+          `
+            yield* sql`INSERT INTO flows_migrations (migration_id, created_at, name)
+              VALUES (5001, datetime('now'), 'time-travel_initial')`
+            yield* Migrations.run
+            // A rerun must find the rebuilt table and leave it alone.
+            yield* SqlTimeTravelStore.migrate
+            return {
+              generations: yield* sql`SELECT run_id, generation FROM flows_journal_generations`,
+              columns: yield* sql<{ readonly name: string }>`PRAGMA table_info(flows_time_travel_archive)`,
+              rows: yield* sql<{ readonly generation: number; readonly event_id: string }>`
+              SELECT generation, event_id FROM flows_time_travel_archive
+            `
+            }
+          })
+        )
+
+        expect(columns.map((column) => column.name)).toContain("generation")
+        expect(rows).toEqual([{ generation: 0, event_id: "legacy-1" }])
+        expect(generations).toEqual([{ run_id: "legacy", generation: 1 }])
+      } finally {
+        yield* Effect.promise(() => rm(directory, { recursive: true, force: true }))
+      }
+    }))
+
   it.effect("applies the full ladder repeatedly across persistent database lifetimes", () =>
     Effect.gen(function*() {
       const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "flows-time-travel-migrations-")))
