@@ -679,10 +679,10 @@ Checks whether a value is a node, by construction registration or by the shape a
 ### Node.succeed
 
 ```ts
-const succeed: <A>(value: A) => Node<A>
+const succeed: <A>(value: A) => Node<Succeed<A>>
 ```
 
-A node that succeeds with a constant.
+A node that succeeds with the constant’s inert JSON projection, typed as `Succeed<A>`. Dates produce `string | null` (an invalid date produces `null`); URLs produce strings. Callable `toJSON` results are projected recursively. Function and symbol members are omitted from objects and become `null` in arrays. Planned references resolve to their referenced result types. Use `Node.map` to reconstruct a domain value explicitly.
 
 ### Node.all
 
@@ -772,7 +772,7 @@ const branch: {
 }
 ```
 
-Decides between two arms, both of them static topology. Both arms contribute their requirements, because a run has to be able to take either. An arm that does not return a node throws `invalid_continuation`.
+Decides between two arms, both of them static topology. The predicate function is snapshotted at construction; replacing `options.if` later does not change the chosen arm. Both arms contribute their requirements, because a run has to be able to take either. An arm that does not return a node throws `invalid_continuation`.
 
 ### Node.CatchOptions
 
@@ -791,14 +791,14 @@ The statically planned recovery arm and the optional schema selecting which type
 const catch: {
   <Handled, B, E2, R2>(
     options: CatchOptions<unknown, B, E2, R2, Handled> & { readonly error: Schema.Schema<Handled> }
-  ): <A, E, R>(self: Node<A, E, R>) => Node<A | B, Exclude<E, Handled> | E2, R | R2>
+  ): <A, E, R>(self: Node<A, E, R>) => Node<A | B, E | E2, R | R2>
   <E, B, E2, R2>(
     options: CatchOptions<E, B, E2, R2> & { readonly error?: undefined }
   ): <A, R>(self: Node<A, E, R>) => Node<A | B, E2, R | R2>
   <A, E, R, Handled, B, E2, R2>(
     self: Node<A, E, R>,
     options: CatchOptions<E, B, E2, R2, Handled> & { readonly error: Schema.Schema<Handled> }
-  ): Node<A | B, Exclude<E, Handled> | E2, R | R2>
+  ): Node<A | B, E | E2, R | R2>
   <A, E, R, B, E2, R2>(
     self: Node<A, E, R>,
     options: CatchOptions<E, B, E2, R2> & { readonly error?: undefined }
@@ -806,7 +806,7 @@ const catch: {
 }
 ```
 
-Recovers from matching typed failures with static failure topology. With no schema the whole typed error channel is handled; a schema handles only the values it accepts and preserves the remainder in the resulting error type.
+Recovers from matching typed failures with static failure topology. With no schema the whole typed error channel is handled. A schema handles only values it accepts, so schema-filtered overloads retain `E | E2`: refinements can reject values without narrowing their TypeScript type. The filter’s JSON Schema and runtime function identities both enter the catch key. Uncaptured schema callbacks have process-local identity and cannot enter a stable graph. For stable custom checks, construct `SchemaAST.Filter` with a `Node.capture`-annotated `run` function and declare all semantic captures; `Schema.makeFilter` wraps its predicate in an opaque closure.
 
 ### Node.priority
 

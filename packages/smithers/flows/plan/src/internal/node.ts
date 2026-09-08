@@ -168,6 +168,7 @@ export interface Catch extends Scheduled {
   readonly protected: NodeAst
   readonly failure: NodeAst
   readonly filter?: unknown | undefined
+  readonly filterIdentity?: FunctionIdentity | undefined
 }
 
 /**
@@ -788,6 +789,7 @@ export const isNodeAst = (value: unknown): value is NodeAst => {
       }
       case "Catch": {
         if (typeof ast.subject !== "string") return false
+        if (ast.filterIdentity !== undefined && !isFunctionIdentity(ast.filterIdentity)) return false
         children.push(ast.protected, ast.failure)
         break
       }
@@ -937,6 +939,44 @@ export const branch = (
 }
 
 /**
+ * JSON Schema does not describe arbitrary checks, declaration parsers, or
+ * suspended schema factories. Include every function reachable from the
+ * schema AST, preserving declared captures and treating opaque wrappers as
+ * ephemeral. The iterative walk also covers nested checks and cyclic ASTs.
+ *
+ * @private
+ */
+const filterIdentity = (filter: Schema.Top): FunctionIdentity => {
+  const identities: Array<readonly [string, FunctionIdentity]> = []
+  const pending: Array<readonly [string, unknown]> = [["$", filter.ast]]
+  const seen = new WeakSet<object>()
+  while (pending.length > 0) {
+    const [path, current] = pending.pop()!
+    if (typeof current === "function") {
+      identities.push([path, functionIdentity(current)])
+    } else if (typeof current === "object" && current !== null && !seen.has(current)) {
+      seen.add(current)
+      const descriptors = Object.getOwnPropertyDescriptors(current)
+      for (const key of Object.keys(descriptors).sort()) {
+        const descriptor = descriptors[key]!
+        if ("value" in descriptor) pending.push([`${path}/${JSON.stringify(key)}`, descriptor.value])
+        else {
+          if (descriptor.get !== undefined) pending.push([`${path}/${JSON.stringify(key)}/get`, descriptor.get])
+          if (descriptor.set !== undefined) pending.push([`${path}/${JSON.stringify(key)}/set`, descriptor.set])
+        }
+      }
+    }
+  }
+  return {
+    _tag: "FunctionIdentity",
+    algorithm: identities.some(([, identity]) => identity.algorithm === "sha256-source-ephemeral/v4")
+      ? "sha256-source-ephemeral/v4"
+      : "sha256-source-captures/v4",
+    digest: digestSync(JSON.stringify(identities))
+  }
+}
+
+/**
  * Constructs a {@link Catch} whose failure topology is already evaluated.
  *
  * @since 0.1.0
@@ -949,7 +989,9 @@ export const catch_ = (subject: string, protectedAst: NodeAst, failure: NodeAst,
     subject,
     protected: protectedAst,
     failure,
-    ...(filter === undefined ? {} : { filter: Schema.toJsonSchemaDocument(filter) })
+    ...(filter === undefined
+      ? {}
+      : { filter: Schema.toJsonSchemaDocument(filter), filterIdentity: filterIdentity(filter) })
   }
   if (filter !== undefined) filters.set(ast, filter)
   return ast

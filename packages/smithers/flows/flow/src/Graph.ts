@@ -1385,6 +1385,7 @@ export const build = (
         return
       }
       case "Catch": {
+        if (ast.filter !== undefined) observeIdentity(id, "filter", ast.filterIdentity)
         const protectedId = `${id}.protected`
         const failureId = `${id}.failure`
         // DECIDED: each Catch AST carries its own
@@ -1412,7 +1413,7 @@ export const build = (
               placement: undefined,
               priority,
               tier: "sealed",
-              body: { _tag: ast._tag, filter: ast.filter },
+              body: { _tag: ast._tag, filter: ast.filter, filterIdentity: ast.filterIdentity },
               inputs,
               ast,
               payload: undefined

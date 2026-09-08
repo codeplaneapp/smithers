@@ -232,13 +232,44 @@ export interface CatchOptions<E, B, E2, R2 = never, Handled = E> {
 export const isNode = (value: unknown): value is Any => internal.isNode(value)
 
 /**
- * A node that succeeds with a constant.
+ * The inert value delivered by {@link succeed}. Planned references resolve to
+ * their result type; other values follow the payload's JSON projection.
+ * Invalid dates serialize to null. Members without a JSON representation are
+ * omitted from objects and replaced with null in arrays.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type Succeed<A> = A extends Planned.Planned<infer Value> ? Value
+  : A extends Date ? string | null
+  : A extends { toJSON: (...args: any) => infer Value } ? Succeed<Value>
+  : A extends (...args: any) => any ? undefined
+  : A extends symbol ? undefined
+  : A extends ReadonlyArray<unknown> ? { [K in keyof A]: SucceedArrayMember<A[K]> }
+  : A extends object ? {
+      [K in keyof A as K extends string | number ? [Succeed<A[K]>] extends [undefined] ? never : K : never]: Succeed<
+        A[K]
+      >
+    }
+  : A
+
+/** @private */
+type SucceedArrayMember<A> = A extends Planned.Planned<infer Value> ? Value
+  : A extends unknown ? Succeed<A> extends infer Value ? Value extends undefined ? null : Value
+    : never
+  : never
+
+/**
+ * A node that succeeds with the constant's inert JSON projection.
+ *
+ * Dates produce strings (or null for invalid dates), URLs produce strings,
+ * and callable object members are omitted. Use {@link map} to reconstruct a
+ * domain value explicitly after this serialization boundary.
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
-export const succeed = <A>(value: A): Node<A> => internal.makeNode<A>(internal.succeed(value))
+export const succeed = <A>(value: A): Node<Succeed<A>> => internal.makeNode<Succeed<A>>(internal.succeed(value))
 
 /**
  * Combines independent children into one node, keyed by name.
@@ -421,14 +452,15 @@ export const branch: {
     self: Node<A, E, R>,
     options: BranchOptions<A, B1, E1, R1, B2, E2, R2>
   ): Node<B1 | B2, E | E1 | E2, R | R1 | R2> => {
+    const predicate = options.if
     const subjectToken = `${branchSubject}/${branchOrdinal++}`
     const subject = Planned.make<A>(subjectToken)
     return internal.makeNode<B1 | B2, E | E1 | E2, R | R1 | R2>(
       internal.branch(
         subjectToken,
         self.ast,
-        (value) => options.if(value as A),
-        options.if,
+        (value) => predicate(value as A),
+        predicate,
         arm(options.then, subject, "then"),
         arm(options.else, subject, "else")
       )
@@ -441,8 +473,11 @@ export const branch: {
  *
  * The protected graph and failure arm are both stored in the AST. The arm is
  * built once at plan time against a strict planned error placeholder. With no
- * schema the whole typed error channel is handled; a schema handles only the
- * values it accepts and preserves the remainder in the resulting error type.
+ * schema the whole typed error channel is handled. A schema handles only the
+ * values it accepts, so its overloads retain E: a refinement can reject values
+ * without narrowing its TypeScript type. Runtime schema callbacks enter the
+ * filter identity along with its JSON Schema. Uncaptured callbacks are local
+ * to this process, just like uncaptured mappers.
  *
  * The failure arm contributes its requirements to the node's, for the same
  * reason a branch's arms do: it is topology the plan carries, and a run reaches
@@ -457,7 +492,7 @@ const catch_: {
     options: CatchOptions<unknown, B, E2, R2, Handled> & {
       readonly error: Schema.Schema<Handled>
     }
-  ): <A, E, R>(self: Node<A, E, R>) => Node<A | B, Exclude<E, Handled> | E2, R | R2>
+  ): <A, E, R>(self: Node<A, E, R>) => Node<A | B, E | E2, R | R2>
   <E, B, E2, R2>(
     options: CatchOptions<E, B, E2, R2> & {
       readonly error?: undefined
@@ -468,7 +503,7 @@ const catch_: {
     options: CatchOptions<E, B, E2, R2, Handled> & {
       readonly error: Schema.Schema<Handled>
     }
-  ): Node<A | B, Exclude<E, Handled> | E2, R | R2>
+  ): Node<A | B, E | E2, R | R2>
   <A, E, R, B, E2, R2>(
     self: Node<A, E, R>,
     options: CatchOptions<E, B, E2, R2> & {
@@ -480,7 +515,7 @@ const catch_: {
   <A, E, R, Handled, B, E2, R2>(
     self: Node<A, E, R>,
     options: CatchOptions<E, B, E2, R2, Handled>
-  ): Node<A | B, Exclude<E, Handled> | E2, R | R2> => {
+  ): Node<A | B, E | E2, R | R2> => {
     const subjectToken = `${catchSubject}/${catchOrdinal++}`
     const failure = options.onFailure(Planned.make<Handled>(subjectToken))
     if (!isNode(failure)) {

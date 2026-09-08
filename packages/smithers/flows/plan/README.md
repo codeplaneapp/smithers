@@ -198,7 +198,11 @@ NFC, and `FileSet.workspaceRelative` refuses absolute paths, drive letters,
 A node payload is stored as its inert JSON mirror, so a data-valued `toJSON` is
 honoured while an accessor or an unsupported prototype fails with
 `invalid_payload` rather than executing author code or collapsing distinct
-values onto `{}`. A compiled plan is deep-frozen: mutating the draft objects
+values onto `{}`. `Node.succeed(input)` returns `Node<Succeed<typeof input>>`:
+the success type describes that projection. Dates become `string | null`, URLs
+become strings, and callable object members disappear. Planned references
+resolve to their result types. Reconstruct domain objects explicitly in
+`Node.map` when needed. A compiled plan is deep-frozen: mutating the draft objects
 you passed in cannot change the plan, its keys, or its digest.
 
 `Plan.maximumPlanNodes` bounds compilation. The conflict and

@@ -189,6 +189,21 @@ describe("Interpreter payload resolution", () => {
     }))
 })
 
+describe("Interpreter projected constants", () => {
+  it.effect("delivers the documented projection through Flow.done", () =>
+    Effect.gen(function*() {
+      const node = Flow.done(new Date(0))
+      expectTypeOf<Node.Success<typeof node>>().toEqualTypeOf<{
+        readonly _tag: "Done"
+        readonly value: string | null
+      }>()
+      expect((yield* drive(Interpreter.interpret(node))).value).toMatchObject({
+        _tag: "Done",
+        value: "1970-01-01T00:00:00.000Z"
+      })
+    }))
+})
+
 describe("Interpreter branches", () => {
   const Increment = Action.make("interpreter/increment", {
     payload: { path: Schema.String },
@@ -213,6 +228,18 @@ describe("Interpreter branches", () => {
         })
       )
   })
+
+  it.effect("takes the snapshotted arm after caller options change", () =>
+    Effect.gen(function*() {
+      const options = {
+        if: Node.capture({}, (_value: number) => true),
+        then: () => Node.succeed("then"),
+        else: () => Node.succeed("else")
+      }
+      const node = Node.branch(Node.succeed(1), options)
+      options.if = Node.capture({}, (_value: number) => false)
+      expect((yield* drive(Interpreter.interpret(node))).value).toBe("then")
+    }))
 
   it.effect("takes the then arm on a real value and settles the untaken arm as skipped", () =>
     Effect.gen(function*() {
@@ -283,6 +310,18 @@ describe("Interpreter catches", () => {
 
       expect(interpretation.value).toBe(7)
       expect(interpretation.skipped).toEqual(["root.failure"])
+    }))
+
+  it.effect("preserves an empty string rejected by NonEmptyString", () =>
+    Effect.gen(function*() {
+      expect(
+        yield* refusal(Interpreter.interpret(
+          Fallible.call({ fail: true, error: "" }).pipe(Node.catch({
+            error: Schema.NonEmptyString,
+            onFailure: () => Node.succeed(0)
+          }))
+        ))
+      ).toMatchObject({ error: "" })
     }))
 
   it.effect("propagates an unmatched typed error", () =>

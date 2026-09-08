@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, Graph } from "@smthrs/flow"
 import { KeyMaterial, Node, Plan, Planned } from "@smthrs/plan"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, SchemaAST, SchemaIssue } from "effect"
 import { withCrypto } from "./Crypto.ts"
 
 const Read = Action.make("counter/read", {
@@ -995,6 +995,63 @@ describe("Graph.build into a plan", () => {
         })
       }
     }))
+
+  it.effect("keys catch refinement behavior even when JSON schemas are identical", () =>
+    Effect.gen(function*() {
+      const make = (accepted: string) =>
+        Node.catch(Node.succeed("protected"), {
+          error: Schema.String.check(Schema.makeFilter((value) => value === accepted)),
+          onFailure: () => Node.succeed("recovered")
+        })
+      const left = make("a")
+      const right = make("b")
+      expect(Schema.toJsonSchemaDocument(Node.catchFilter(left.ast)!))
+        .toEqual(Schema.toJsonSchemaDocument(Node.catchFilter(right.ast)!))
+      expect(Schema.is(Node.catchFilter(left.ast)!)("a")).toBe(true)
+      expect(Schema.is(Node.catchFilter(right.ast)!)("a")).toBe(false)
+      const a = yield* compile("catch-identity", "catch", Graph.build(left))
+      const b = yield* compile("catch-identity", "catch", Graph.build(right))
+      expect(a.digest).not.toBe(b.digest)
+      expect(a.nodes.map((node) => node.key)).not.toEqual(b.nodes.map((node) => node.key))
+    }))
+
+  it.effect("includes captured nested filter behavior in stable catch identities", () =>
+    Effect.gen(function*() {
+      const make = (accepted: string) =>
+        Node.catch(Node.succeed("protected"), {
+          error: Schema.Struct({
+            value: Schema.String.check(
+              new SchemaAST.Filter(Node.capture(
+                { accepted, implementationVersion: "catch-filter/v1" },
+                (value: string) => value === accepted ? undefined : new SchemaIssue.InvalidValue(undefined, value)
+              ))
+            )
+          }),
+          onFailure: () => Node.succeed("recovered")
+        })
+      const build = (accepted: string) => Graph.build(make(accepted), undefined, { callbackIdentity: "stable" })
+      const left = build("a")
+      expect(left.diagnostics).toEqual([])
+      const a = yield* compile("stable-catch", "catch", left)
+      const same = yield* compile("stable-catch", "catch", build("a"))
+      const different = yield* compile("stable-catch", "catch", build("b"))
+      expect(a.digest).toBe(same.digest)
+      expect(a.digest).not.toBe(different.digest)
+    }))
+
+  it("refuses opaque schema checks in stable graphs and admits structural schemas", () => {
+    const make = (error: Schema.Schema<string>) =>
+      Node.catch(Node.succeed(1), {
+        error,
+        onFailure: () => Node.succeed(0)
+      })
+    const stable = { callbackIdentity: "stable" } as const
+    expect(Graph.build(make(Schema.String), undefined, stable).diagnostics).toEqual([])
+    expect(
+      Graph.build(make(Schema.String.check(Schema.makeFilter((value) => value === "a"))), undefined, stable)
+        .diagnostics
+    ).toContainEqual(expect.objectContaining({ code: "unstable_callback", path: ["filter"] }))
+  })
 
   it.effect("shows protected and on-failure topology in the graph and compiled plan", () =>
     Effect.gen(function*() {

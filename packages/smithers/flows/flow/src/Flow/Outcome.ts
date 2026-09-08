@@ -14,7 +14,7 @@ import type { WaitingAnnotation } from "../FlowRuntime/WaitingAnnotation.ts"
 const OutcomeNodeTypeId = Symbol.for("@smthrs/flow/Flow/OutcomeNode")
 const OutcomeValueTypeId = Symbol.for("@smthrs/flow/Flow/OutcomeValue")
 
-const outcomeNode = <A extends Outcome>(value: A): Node.Node<A> => {
+const outcomeNode = <A extends Outcome>(value: A): Node.Node<Node.Succeed<A>> => {
   const node = Node.succeed(value)
   Object.defineProperty(node.ast, OutcomeNodeTypeId, {
     configurable: false,
@@ -124,12 +124,13 @@ export const Park = Schema.Struct({
 export const Outcome = Schema.Union([Done, To, Park])
 
 /**
- * Constructs a completed trampoline lineage value.
+ * Constructs a completed trampoline lineage value using Node.succeed's JSON
+ * projection. Pass a planned reference to retain an upstream domain value.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const done = <A>(value: A): Node.Node<Done<A>> => outcomeNode({ _tag: "Done", value })
+export const done = <A>(value: A): Node.Node<Node.Succeed<Done<A>>> => outcomeNode<Done<A>>({ _tag: "Done", value })
 
 /**
  * Constructs a durable parking request using the runtime waiting vocabulary.

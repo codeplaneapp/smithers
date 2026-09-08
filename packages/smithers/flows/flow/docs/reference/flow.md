@@ -591,10 +591,12 @@ A lineage asked for one more round than its flow's `maxRounds` allows. It is rec
 
 ### `Flow.done`
 
-- **Signature:** `done<A>(value: A): Node.Node<Done<A>>`
+- **Signature:** `done<A>(value: A): Node.Node<Node.Succeed<Done<A>>>`
 - **Since:** `0.1.0`
 
-Ends a trampoline lineage with a value. The engine encodes the value with the settling flow's success schema, so a caller passes the author-facing form.
+Ends a trampoline lineage with a value. The engine encodes the resulting value with the settling flow's success schema.
+
+Constant values use `Node.succeed`’s JSON projection; Dates become strings or `null`. Planned references retain their upstream result type.
 
 ### `Flow.park`
 

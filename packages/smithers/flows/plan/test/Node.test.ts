@@ -1,6 +1,7 @@
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import { GraphBuildError } from "../src/GraphBuildError.ts"
 import * as internal from "../src/internal/node.ts"
 import * as Node from "../src/Node.ts"
@@ -23,6 +24,65 @@ describe("Node", () => {
     expect(Node.succeed(1).ast).toEqual({ _tag: "Succeed", value: 1 })
     expect(Node.isNode(Node.succeed(1))).toBe(true)
     expect(Node.isNode({ ast: { _tag: "Succeed", value: 1 } })).toBe(false)
+  })
+
+  it("snapshots the branch predicate before building either arm", () => {
+    const options = {
+      if: Node.capture({}, (_value: number) => true),
+      then: () => Node.succeed("then"),
+      else: () => Node.succeed("else")
+    }
+    const ast = tagged(Node.branch(Node.succeed(1), options).ast, "Branch")
+    const identity = ast.predicate
+    options.if = Node.capture({}, (_value: number) => false)
+    expect(Node.predicate(ast)?.(1)).toBe(true)
+    expect(ast.predicate).toEqual(identity)
+  })
+
+  it("types the JSON value delivered to a Date mapper", () => {
+    const node = Node.map(Node.succeed(new Date(0)), (date) => {
+      expectTypeOf(date).toEqualTypeOf<string | null>()
+      return date?.slice(0, 4)
+    })
+    const ast = tagged(node.ast, "Map")
+    expect(Node.mapper(ast)?.(tagged(ast.first, "Succeed").value)).toBe("1970")
+  })
+
+  it("projects nested payload types and resolves planned result types", () => {
+    const node = Node.succeed({
+      url: new URL("https://example.test/"),
+      date: new Date(NaN),
+      ignored: () => 1,
+      symbol: Symbol("ignored"),
+      array: [() => 1, new URL("https://example.test/")] as const,
+      encoded: { toJSON: () => ({ value: 1 }) },
+      reference: Planned.make<Date>("upstream")
+    })
+    expectTypeOf<Node.Success<typeof node>>().toEqualTypeOf<{
+      url: string
+      date: string | null
+      array: readonly [null, string]
+      encoded: { value: number }
+      reference: Date
+    }>()
+    const ast = tagged(node.ast, "Succeed")
+    expect(ast.value).toMatchObject({
+      url: "https://example.test/",
+      date: null,
+      array: [null, "https://example.test/"],
+      encoded: { value: 1 }
+    })
+    expect(Object.hasOwn(ast.value as object, "ignored")).toBe(false)
+  })
+
+  it("preserves errors rejected by a schema refinement in both catch forms", () => {
+    const source: Node.Node<number, string> = Node.succeed(1)
+    const options = { error: Schema.NonEmptyString, onFailure: () => Node.succeed(0) }
+    const direct = Node.catch(source, options)
+    const piped = source.pipe(Node.catch(options))
+    expectTypeOf<Node.Error<typeof direct>>().toEqualTypeOf<string>()
+    expectTypeOf<Node.Error<typeof piped>>().toEqualTypeOf<string>()
+    expect(Schema.is(Node.catchFilter(direct.ast)!)("")).toBe(false)
   })
 
   it("combines independent children by name", () => {
@@ -166,6 +226,37 @@ describe("Node", () => {
 
     expect(ast.filter).toEqual(Schema.toJsonSchemaDocument(error))
     expect(Node.catchFilter(ast)).toBe(error)
+  })
+
+  it("keeps schema function captures and never invokes accessor metadata", () => {
+    let reads = 0
+    const metadata: Record<string, unknown> = { nullable: null }
+    metadata.self = metadata
+    Object.defineProperties(metadata, {
+      read: { get: () => ++reads },
+      write: {
+        set: (_value: unknown) => {
+          reads++
+        }
+      }
+    })
+    const error = Schema.String.check(new SchemaAST.Filter(Node.capture({}, () => undefined)))
+    Object.defineProperty(error.ast, "metadata", { value: metadata })
+    const ast = tagged(Node.catch(Node.succeed(1), { error, onFailure: () => Node.succeed(0) }).ast, "Catch")
+    expect(reads).toBe(0)
+    expect(ast.filterIdentity?.algorithm).toBe("sha256-source-ephemeral/v4")
+    expect(internal.isNodeAst(ast)).toBe(true)
+    expect(internal.isNodeAst({ ...ast, filterIdentity: { _tag: "FunctionIdentity" } })).toBe(false)
+
+    const captured = Schema.String.check(new SchemaAST.Filter(Node.capture({}, () => undefined)))
+    const stable = tagged(
+      Node.catch(Node.succeed(1), {
+        error: captured,
+        onFailure: () => Node.succeed(0)
+      }).ast,
+      "Catch"
+    )
+    expect(stable.filterIdentity?.algorithm).toBe("sha256-source-captures/v4")
   })
 
   it("refuses a catch failure arm that does not return a node", () => {
