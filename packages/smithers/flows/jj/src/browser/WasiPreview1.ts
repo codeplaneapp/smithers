@@ -39,8 +39,9 @@
  * **Honest divergences** from a kernel WASI host, in the `BrowserFileSystem`
  * tradition of documenting rather than hiding them:
  *
- * - `fd_sync`/`fd_datasync` are no-ops: a synchronous slice is durable the
- *   moment each call returns, so there is nothing left to flush.
+ * - `fd_sync`/`fd_datasync` only validate the descriptor and report success.
+ *   The slice has no flush operation and provides no durability barrier.
+ *   The host must await its mount's `sync` for changes that must survive reload.
  * - `poll_oneoff` reports every subscription complete immediately: clock waits
  *   (jj's lock backoff sleeps) become yields, and a synchronous filesystem is
  *   always ready. Nothing can be genuinely waited on in a single thread.

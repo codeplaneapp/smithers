@@ -193,8 +193,7 @@ const boomFs = (cause: unknown): SyncFsLike => {
     rmdirSync: boom,
     readlinkSync: boom,
     symlinkSync: boom,
-    utimesSync: boom,
-    truncateSync: boom
+    utimesSync: boom
   }
 }
 

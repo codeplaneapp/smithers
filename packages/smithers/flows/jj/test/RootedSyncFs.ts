@@ -31,7 +31,6 @@ export const rootedSyncFs = (hostRoot: string): SyncFsLike => {
     // The link target is content, not a location: stored verbatim so the wasm
     // side reads back exactly the namespace path it wrote.
     symlinkSync: (target, path) => fs.symlinkSync(target, at(path)),
-    utimesSync: (path, atime, mtime) => fs.utimesSync(at(path), atime, mtime),
-    truncateSync: (path, length) => fs.truncateSync(at(path), length)
+    utimesSync: (path, atime, mtime) => fs.utimesSync(at(path), atime, mtime)
   }
 }

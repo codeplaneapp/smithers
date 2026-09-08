@@ -392,8 +392,10 @@ budget returns `ELOOP`. No-follow rejects stable final symlinks with `ELOOP`.
 
 Honest divergences from a kernel WASI host, documented rather than hidden:
 
-- `fd_sync` and `fd_datasync` are no-ops, because a synchronous slice is durable
-  the moment each call returns.
+- `fd_sync` and `fd_datasync` only validate the descriptor and report success.
+  The slice has no flush operation and provides no durability barrier. After
+  operations that must survive a reload, await the host mount's `sync` as
+  described in [Durability is the mount's job](./guides/run-jj-in-a-browser.md#durability-is-the-mounts-job).
 - `poll_oneoff` reports every subscription complete immediately: clock waits
   become yields, and a synchronous filesystem is always ready.
 - `path_link` is `notsup`: the slice has no `linkSync`, and the jj code paths
@@ -419,7 +421,7 @@ so the browser bundle decides which backend is mounted.
 
 | Export           | Meaning                                                                                                                                                                                                                                                                           |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SyncFsLike`     | The filesystem surface: `openSync`, `closeSync`, `readSync`, `writeSync`, `fstatSync`, `ftruncateSync`, `futimesSync`, `statSync`, `lstatSync`, `mkdirSync`, `readdirSync`, `renameSync`, `unlinkSync`, `rmdirSync`, `readlinkSync`, `symlinkSync`, `utimesSync`, `truncateSync`. |
+| `SyncFsLike`     | The filesystem surface: `openSync`, `closeSync`, `readSync`, `writeSync`, `fstatSync`, `ftruncateSync`, `futimesSync`, `statSync`, `lstatSync`, `mkdirSync`, `readdirSync`, `renameSync`, `unlinkSync`, `rmdirSync`, `readlinkSync`, `symlinkSync`, `utimesSync`. |
 | `SyncStatsLike`  | The `Stats` subset the shim reads: `size`, `atimeMs`, `mtimeMs`, `ctimeMs`, optional `ino`, and the three `is*` predicates.                                                                                                                                                       |
 | `SyncDirentLike` | The `Dirent` subset `fd_readdir` needs: `name` and the three `is*` predicates.                                                                                                                                                                                                    |
 
@@ -430,8 +432,12 @@ and live on a module this slice refuses to import; and errors must be thrown
 with a Node-style string `code` property (`"ENOENT"`, `"EEXIST"`, `"ENOTDIR"`),
 which the shim maps onto WASI errno values.
 
-There is deliberately no `fsyncSync`: a synchronous backend is durable the
-moment a call returns. `ftruncateSync` and `futimesSync` are required, because
+The slice has no flush operation such as `fsyncSync`, so `fd_sync` and
+`fd_datasync` provide no durability barrier. Synchronous completion does not
+establish persistence. The host must await its mount's `sync` after operations
+that must survive a reload; see [Durability is the mount's job](./guides/run-jj-in-a-browser.md#durability-is-the-mounts-job).
+
+`ftruncateSync` is the sole truncation member. It and `futimesSync` are required because
 the descriptor-addressed WASI calls must follow the open file even after a
 rename, which is the shape of jj's tempfile-persist path.
 

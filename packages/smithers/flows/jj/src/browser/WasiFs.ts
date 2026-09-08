@@ -77,9 +77,14 @@ export interface SyncDirentLike {
  *   (`"ENOENT"`, `"EEXIST"`, `"ENOTDIR"`, …); the shim maps those codes onto
  *   WASI errno values. Both backends already throw exactly that shape.
  *
- * There is deliberately no `fsyncSync`: a synchronous backend is durable the
- * moment a call returns, so `fd_sync` is an honest no-op. `ftruncateSync` and
- * `futimesSync` ARE required: the fd-addressed `fd_filestat_set_size` and
+ * The slice has no flush operation such as `fsyncSync`. `fd_sync` and
+ * `fd_datasync` only validate the descriptor and provide no durability barrier;
+ * synchronous completion does not establish persistence. The host must await
+ * its mount's `sync` after operations that must survive a reload. See the
+ * [host mount contract](../../docs/guides/run-jj-in-a-browser.md#durability-is-the-mounts-job).
+ *
+ * `ftruncateSync` is the sole truncation member. It and `futimesSync` are
+ * required: the fd-addressed `fd_filestat_set_size` and
  * `fd_filestat_set_times` must follow the open file even after a
  * `path_rename` (jj's tempfile-persist shape is open → rename → mutate), so
  * serving them through a path captured at `path_open` time would mutate
@@ -122,5 +127,4 @@ export interface SyncFsLike {
   readonly readlinkSync: (path: string) => string
   readonly symlinkSync: (target: string, path: string) => void
   readonly utimesSync: (path: string, atime: number, mtime: number) => void
-  readonly truncateSync: (path: string, length: number) => void
 }
