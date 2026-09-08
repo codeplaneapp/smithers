@@ -55,6 +55,13 @@ the process dies at this exact line, what does the next process see?
 
 Everything before it is reversible, and everything irreversible waits for it.
 
+The archive call and its local commit flag are uninterruptible together. If
+the call fails after committing, rewind checks for an empty live suffix and
+the archived suffix tail before choosing rollback. A durable archive keeps
+the audit `in_progress` at phase `archive_committed`, with compensation and
+workspace restoration intact for recovery to finish. If the evidence cannot
+be read, the audit stays open and rollback is deferred.
+
 Cancelling a child is terminal and has no inverse, so it runs only after the
 commit. A rewind that fails earlier leaves every child exactly as it was:
 pre-commit child claims are released, an originally suspended child returns to
