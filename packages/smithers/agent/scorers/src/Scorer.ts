@@ -4,8 +4,8 @@
  * A scorer is a *declaration-only* flow: it carries the input and output
  * schemas so a caller can read its contract, and its execution entry point is
  * {@link Scorer.score}, never a flow body. {@link MakeOptions} therefore omits
- * `body` as well as `input` and `output`, so a scorer cannot declare two
- * implementations that disagree.
+ * `body`, `model`, and `flows` as well as `input` and `output`, so a scorer
+ * cannot declare two implementations that disagree.
  *
  * Package documentation: `packages/smithers/agent/scorers/docs/api.md`.
  *
@@ -80,8 +80,8 @@ export interface Scorer<E = never> extends Flow.Flow<typeof Input, typeof Result
 /**
  * Options accepted by {@link make}.
  *
- * `input`, `output`, and `body` are owned by this module: the schemas are the
- * scorer contract, and `score` is the single implementation.
+ * `input` and `output` are owned by this module. `body`, `model`, and `flows`
+ * are omitted and rejected at runtime so `score` is the single implementation.
  *
  * @category models
  * @since 0.1.0
@@ -89,7 +89,7 @@ export interface Scorer<E = never> extends Flow.Flow<typeof Input, typeof Result
 export type MakeOptions<E = never> =
   & Omit<
     Parameters<typeof Flow.make<typeof Input, typeof Result, E | ScorerError>>[0],
-    "input" | "output" | "body"
+    "input" | "output" | "body" | "model" | "flows"
   >
   & {
     /** Stable module-owned scorer identity. */
@@ -113,7 +113,8 @@ const declaration = (message: string, cause?: unknown): ScorerError =>
  *
  * This is a plan-time constructor and it *throws*, because a bad declaration is
  * a programming error with no run to fail. Every throw is a `ScorerError` with
- * code `invalid_declaration`: a non-string or blank `id` or `version`, a
+ * code `invalid_declaration`: a `body`, `model`, or `flows` option (even if
+ * `undefined`), a non-string or blank `id` or `version`, a
  * `config` carrying a member canonical JSON would drop, a `config` nested more
  * than 1,000 levels, a non-enumerable property, or a `toJSON` member, and a
  * `config` the canonical encoder refuses outright. These cases are rejected
@@ -126,6 +127,11 @@ const declaration = (message: string, cause?: unknown): ScorerError =>
  * @since 0.1.0
  */
 export const make = <E = never>(options: MakeOptions<E>): Scorer<E> => {
+  for (const key of ["body", "model", "flows"] as const) {
+    if (key in options) {
+      throw declaration(`A scorer must not declare ${key}; use score as its only implementation`)
+    }
+  }
   const { config, id, score, version, ...rest } = options
   if (typeof id !== "string") throw declaration("A scorer id must be a string")
   if (typeof version !== "string") throw declaration("A scorer version must be a string")

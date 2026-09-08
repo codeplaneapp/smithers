@@ -58,9 +58,11 @@ runner remains in testing.
 
 `Scorer.make` returns a flow value carrying `Input` and `Result` as its declared
 schemas, plus `score` and `scorerKey`. `score` is the only implementation:
-`MakeOptions` omits `input`, `output`, and `body`, so a scorer cannot declare
-two implementations that disagree, and calling the flow itself raises
-`FlowError{code: "missing_body"}` as any body-less flow does.
+`MakeOptions` omits `input`, `output`, `body`, `model`, and `flows`, so a scorer
+cannot declare two implementations that disagree, and calling the flow itself
+raises `FlowError{code: "missing_body"}` as any body-less flow does. `make`
+rejects `body` and the dynamic-body options `model` and `flows` at construction,
+including options whose value is `undefined`.
 
 `scorerKey` is `sha256(canonical({id, version, config}))`, 64 lowercase hex
 characters, and it is the durable identity written into every stored
@@ -72,6 +74,7 @@ covers, see [Scorer identity](./concepts/scorer-identity.md).
 with code `invalid_declaration`:
 
 - a non-string or blank `id` or `version`, named individually;
+- a `body`, `model`, or `flows` option, even if `undefined`;
 - a `config` carrying a member canonical JSON would drop (a function, a
   symbol, an `undefined` member, a symbol-keyed property, a cycle, or a
   non-finite number), or a non-enumerable own property, reported as a path and
@@ -245,7 +248,7 @@ Every public export, once.
 | `Scorer.Input`                       | schemas      | Input supplied to a scorer flow.                                                |
 | `Scorer.Result`                      | schemas      | Successful scorer output, carrying the inclusive `[0, 1]` score bound.          |
 | `Scorer.Scorer`                      | models       | A declaration-only flow with an independent durable identity.                   |
-| `Scorer.MakeOptions`                 | models       | Options for `Scorer.make`, minus `input`, `output`, and `body`.                 |
+| `Scorer.MakeOptions`                 | models       | Options for `Scorer.make`, minus `input`, `output`, `body`, `model`, and `flows`. |
 | `Scorer.make`                        | constructors | Declares a scorer and derives its `scorerKey`. Throws at plan time.             |
 | `Scorer.validate`                    | validation   | Decodes a scorer result against `Result`.                                       |
 | `Binding.Binding`                    | models       | A scorer, ground truth, context, and sampling policy attached to a target flow. |

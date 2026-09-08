@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import * as Scorer from "../src/Scorer.ts"
 import { ScorerError } from "../src/ScorerError.ts"
 
@@ -23,6 +23,33 @@ const declarationFailure = (build: () => unknown): ScorerError => {
 }
 
 describe("Scorer", () => {
+  it("keeps score as the only implementation", async () => {
+    expectTypeOf<Extract<keyof Scorer.MakeOptions, "body" | "model" | "flows">>().toEqualTypeOf<never>()
+    const scorer = quality()
+    expect(scorer.body).toBeUndefined()
+    expect(scorer.implementation).toBeUndefined()
+    expect(() => scorer({ input: "question", output: "answer" })).toThrowError(
+      expect.objectContaining({ code: "missing_body" })
+    )
+    await expect(Effect.runPromise(scorer.score({ input: "question", output: "answer" }))).resolves.toEqual({
+      score: 1
+    })
+  })
+
+  it.each([
+    ["model", "judge"],
+    ["flows", []],
+    ["body", () => Effect.succeed({ score: 0 })],
+    ["model", undefined],
+    ["flows", undefined],
+    ["body", undefined]
+  ])("refuses the flow implementation option %s (%s) at construction", (key, value) => {
+    // Computed keys exercise untyped callers that bypass MakeOptions.
+    const failure = declarationFailure(() => quality({ [key]: value }))
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toBe(`A scorer must not declare ${key}; use score as its only implementation`)
+  })
+
   it("has an independent declaration key and validates scores", async () => {
     const scorer = quality()
     expect(scorer.scorerKey).toMatch(/^[0-9a-f]{64}$/)
