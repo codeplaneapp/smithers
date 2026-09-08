@@ -121,7 +121,7 @@ recorded, appears in no ledger, and outlives the host that ran it.
 import { Jj } from "@smthrs/jj"
 import * as Effect from "effect/Effect"
 
-// The ledger records "jj status" while this runs, and retires it when the
+// The ledger records the jj executable while status runs, and retires it when the
 // invocation and its cleanup finish.
 const status = Effect.flatMap(Jj, (jj) => jj.status()).pipe(
   Effect.provide(host),
@@ -130,8 +130,10 @@ const status = Effect.flatMap(Jj, (jj) => jj.status()).pipe(
 ```
 
 That is the observable difference: the same call under `BunHost.layer` leaves
-the ledger empty. The initial `jj --version` probe runs outside the ledger in
-both compositions; repository operations use the selected runner.
+the ledger empty. The initial `jj --version` probe uses the selected runner
+too, so a contained host records and retires it before exposing `Jj`. Probe
+results are cached per resolved absolute executable path and runner, with a
+separate cache for each spawner instance.
 
 ## What the reaper refuses to kill
 

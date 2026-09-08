@@ -101,7 +101,10 @@ const temporaryDirectory = () => mkdtempSync(join(tmpdir(), "flows-bun-contained
 const installJjShim = (directory: string, script: string): void => {
   writeFileSync(
     join(directory, "jj"),
-    script.replace("#!/bin/sh", "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.39.0\"; exit 0; fi")
+    script.replace(
+      "#!/bin/sh",
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$0.invocations\"\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.39.0\"; exit 0; fi"
+    )
   )
   chmodSync(join(directory, "jj"), 0o755)
   // Prepended, not replaced: the shim wins while `sh` and `sleep` stay reachable.
@@ -247,7 +250,7 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
       }
     }), 30_000)
 
-  it.live("records the children `jj` starts, instead of letting them out the side", () =>
+  it.live("records and retires both the jj version probe and repository command", () =>
     Effect.gen(function*() {
       // `BunJj.layer` spawns through `node:child_process` directly, so a jj
       // child leads no group the host recorded and no reaper can ever find it.
@@ -274,10 +277,20 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
           )
         )
 
-        const status = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(Effect.provide(host), Effect.scoped)
+        const binary = join(directory, "jj")
+        const invocations = () => readFileSync(`${binary}.invocations`, "utf8").trim().split("\n")
+        const status = yield* Effect.gen(function*() {
+          const jj = yield* Jj
+          // Construction ran and retired only the startup version probe.
+          expect(invocations()).toEqual(["--version"])
+          expect(recorded).toEqual([binary])
+          expect(yield* ledger.live).toEqual([])
+          return yield* jj.status()
+        }).pipe(Effect.provide(host), Effect.scoped)
 
         expect(status.trim()).toBe(realpathSync(directory))
-        expect(recorded).toEqual(["jj"])
+        expect(invocations()).toEqual(["--version", "status --config snapshot.max-new-file-size=0"])
+        expect(recorded).toEqual([binary, binary])
         // The invocation finished, so the record was retired with it.
         expect(yield* ledger.live).toEqual([])
       } finally {

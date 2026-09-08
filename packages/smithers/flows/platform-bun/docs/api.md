@@ -28,10 +28,13 @@ a browser; a page composes
 [`@smthrs/platform-browser`](/api/platform-browser) instead.
 :::
 
-The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
-layer with one version probe; construction can fail with `JjError`, including
-`not_installed` or `unsupported_version`. The contained bundles route that probe
-through their process spawner and retire its ledger entry when it exits.
+The complete host bundles require jj 0.39.0 or newer. Each bundle checks its jj
+executable before exposing repository operations. Construction can fail with
+`JjError`, including `not_installed` or `unsupported_version`. The contained
+bundles route that probe
+through their process spawner and retire its ledger entry when it exits. Probe
+results are cached per resolved absolute executable path and runner; contained
+spawners share a result only within the same spawner instance.
 
 ## Entry points
 
@@ -50,8 +53,8 @@ Supported runtimes are Bun >=1.4.0 and Node.js >=22.19.0.
 
 ## BunHost
 
-The complete closed Host bundle. Four layers, one error, three types, one
-identity record, and four re-exports.
+The complete closed Host bundle: layers, construction errors, models,
+implementation identities, and platform module re-exports.
 
 ### Layers
 
@@ -174,15 +177,18 @@ changing one invalidates no cached step.
 
 ### Re-exports
 
-`BunHost` re-exports four modules so a program that should reach only part of
+`BunHost` re-exports these modules so a program that should reach only part of
 the host has one place to take it from:
 
 | Export                   | What it is                                                                      |
 | ------------------------ | ------------------------------------------------------------------------------- |
 | `AtomicFileSystem`       | `@smthrs/platform-node/AtomicFileSystem`, the filesystem implementation itself. |
 | `BunChildProcessSpawner` | `@effect/platform-bun/BunChildProcessSpawner`.                                  |
+| `BunCrypto`              | `@effect/platform-bun/BunCrypto`, the [Effect Crypto service](https://github.com/Effect-TS/effect/blob/main/packages/platform/bun/src/BunCrypto.ts) layer. |
 | `BunFileSystem`          | This package's `BunFileSystem` module.                                          |
 | `BunHttpClient`          | `@effect/platform-bun/BunHttpClient`.                                           |
+| `HostLiveness`           | `@smthrs/platform-node/HostLiveness`, the [host liveness probe](/api/platform-node#liveness-and-reaping). |
+| `ProcessReaper`          | `@smthrs/platform-node/ProcessReaper`, the [contained spawner](/api/platform-node#processreaperlayerspawner) and [orphan sweep](/api/platform-node#liveness-and-reaping). |
 
 `AtomicFileSystem` is in the set for the same reason `NodeHost` re-exports it:
 it owns the only configuration escape hatch the filesystem slot has, and a Bun

@@ -59,8 +59,10 @@ what fills it, so swapping `BunHost.layer` for `NodeHost.layer` from
 
 The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
 layer with one version probe; construction can fail with `JjError`, including
-`not_installed` or `unsupported_version`. The version probe runs outside the
-host process ledger; repository commands use the selected process runner.
+`not_installed` or `unsupported_version`. The version probe and repository commands use the
+selected process runner. Contained bundles record and retire the probe in the
+host process ledger. Probe results are cached per resolved absolute executable
+path and runner, with a separate cache for each spawner instance.
 
 ## Modules
 
