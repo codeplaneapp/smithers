@@ -1,11 +1,9 @@
 /**
  * Where the `jj` executable comes from on a Node host.
  *
- * `NodeJj` spawns the bare name `jj` and lets the operating system search
- * `PATH`. That is the right default and the wrong diagnosis: when it fails, an
- * operator needs to know which file was tried and why it was rejected. This
- * module answers exactly that question, and `smithers doctor` prints the
- * answer.
+ * `NodeJj` binds its version probe and operations to the absolute host path
+ * selected here. `smithers doctor` prints that selection and why an unusable
+ * candidate was rejected.
  *
  * Resolution order:
  *
@@ -13,7 +11,7 @@
  *    override that names an existing file stays authoritative even when it is
  *    not executable, so a bad explicit path is reported instead of silently
  *    running a different binary.
- * 2. `PATH`, as the bare command name `jj`.
+ * 2. `PATH`, searched for an absolute executable path.
  *
  * rc.0 ships no vendored `jj` platform packages, so the 0.x bundled-package
  * branch has no counterpart here.
@@ -21,13 +19,13 @@
  * @since 1.0.0
  */
 import { accessSync, constants, existsSync } from "node:fs"
-import { delimiter, join } from "node:path"
+import { delimiter, resolve } from "node:path"
 
 /**
  * Where a resolved `jj` command came from.
  *
- * `env` is an override named by {@link overrideVariables}, `path` is the bare
- * command name left for the operating system to search.
+ * `env` is an override named by {@link overrideVariables}, `path` is a
+ * candidate found on the host PATH, or the unresolved fallback name.
  *
  * @category models
  * @since 1.0.0
@@ -37,9 +35,9 @@ export type Source = "env" | "path"
 /**
  * The `jj` command a host should spawn, and what is known about it.
  *
- * `path` is always spawnable in the sense that it can be handed to a spawner:
- * when nothing better is known it is the bare name `jj`, which fails to spawn
- * with `not_installed` exactly as `NodeJj` already classifies it.
+ * `path` is absolute when a candidate was found. Relative overrides and PATH
+ * entries resolve against the host working directory. When nothing is found,
+ * it is the bare name `jj`; `NodeJj` reports `not_installed` without spawning it.
  *
  * `hint` is present only when the resolution is known to be unusable — an
  * override that is not executable, or nothing named `jj` on `PATH` — and
@@ -143,7 +141,7 @@ const searchPath = (
   const name = platform === "win32" ? "jj.exe" : "jj"
   for (const entry of raw.split(delimiter)) {
     if (entry === "") continue
-    const candidate = join(entry, name)
+    const candidate = resolve(entry, name)
     if (executable(candidate)) return candidate
   }
   return undefined
@@ -168,8 +166,8 @@ export interface Options {
  *
  * Always returns a command. When jj is genuinely absent the bare name `jj` is
  * returned with `executable: false` and a hint, which keeps every caller's
- * soft-failure behavior — `NodeJj` classifies the failed spawn as
- * `not_installed` — while giving `doctor` something specific to print.
+ * soft-failure behavior: `NodeJj` reports `not_installed`, while `doctor` has
+ * something specific to print.
  *
  * @category constructors
  * @since 1.0.0
@@ -190,17 +188,18 @@ export const resolveJjBinary = (options: Options = {}): Resolved => {
     //
     // One that names nothing falls through to PATH, and the fall-through is
     // reported rather than silent.
-    if (!exists(override)) {
+    const path = resolve(override)
+    if (!exists(path)) {
       ignored ??= { variable, path: override }
       continue
     }
-    const usable = executable(override)
+    const usable = executable(path)
     return {
-      path: override,
+      path,
       source: "env",
       executable: usable,
       variable,
-      ...(usable ? {} : { hint: permissionHint(override, platform) })
+      ...(usable ? {} : { hint: permissionHint(path, platform) })
     }
   }
 

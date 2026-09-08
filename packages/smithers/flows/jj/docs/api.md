@@ -211,14 +211,14 @@ values are not interpreted as CLI flags.
 
 Node and Bun require **jj 0.39.0 or newer**, pinned by the exported
 `NodeJj.minimumVersion` constant. Before exposing `Jj`, all CLI layers await a
-local `jj --version` probe through `node:child_process`, outside the host's
-process spawner and crash-reaping journal. The probe does not use or require the
-repository directory: bound layers can be built before runtime storage creates
-that directory. Repository operations still require a valid working directory.
-Concurrent and subsequent layer builds share the probe result per resolved
-executable path for the lifetime of the process. Restart the process after replacing a binary at the same path.
-Repository commands still use the layer's chosen process runner. An older or
-unrecognized version fails construction with `JjError.code = "unsupported_version"`
+`jj --version` probe through the same runner used for operations. The probe
+uses the absolute host executable selected at layer construction and does not
+require the repository directory. Bound layers can be built before runtime
+storage creates that directory; operations still require a valid working directory.
+Probe results are shared per absolute path and runner for the process lifetime.
+Each host spawner has its own probe cache. Restart the process after replacing a
+binary at the same path. Operations keep using the verified path even if the
+host or spawner PATH changes. An older or unrecognized version fails construction with `JjError.code = "unsupported_version"`
 and the required minimum; a missing binary fails construction with `not_installed`.
 All four CLI layers therefore have `JjError` in their layer error channel.
 
@@ -272,16 +272,18 @@ Decides which file `jj` is, and explains the answer.
 an existing file stays authoritative even when it cannot be executed, so a
 broken explicit path is reported instead of a different binary being quietly
 substituted. An override that names nothing falls through to `PATH`, and the
-fall-through is reported in `describe()` rather than passing silently. A
-resolution that came from `PATH` is spawned as the bare name `jj`, so a host
-spawner that hands the child a different `PATH` still decides for itself.
+fall-through is reported in `describe()`. Existing overrides and executable
+PATH candidates resolve to absolute host paths. Relative paths resolve against
+the host cwd at layer construction. Preflight and operations use the same path
+through the same runner, including when the host spawner changes PATH.
 `smthrs doctor` prints `describe()`.
 
 `resolveJjBinary` always returns a command: when jj is genuinely absent it
 answers the bare name `jj` with `executable: false` and a hint, which keeps
-every caller's soft-failure behavior while giving `doctor` something specific
-to print. The package vendors no `jj` binaries and downloads none, so there is
-no bundled-package branch to fall back to.
+the typed `not_installed` failure while giving `doctor` something specific
+to print. `NodeJj` never spawns this unresolved fallback. The package vendors no
+`jj` binaries and downloads none, so there is no bundled-package branch to fall
+back to.
 
 Every probe in `Options` is injectable, so a test pins the resolution order
 without staging a filesystem. `isExecutable` checks the execute bit on POSIX and

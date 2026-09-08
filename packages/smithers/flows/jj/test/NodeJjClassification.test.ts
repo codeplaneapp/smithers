@@ -405,6 +405,7 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
 
 describe.skipIf(process.platform === "win32")("NodeJj spawn errors", () => {
   let previousPath: string | undefined
+  let previousOverride: string | undefined
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "flows-unexecutable-jj-"))
@@ -412,10 +413,14 @@ describe.skipIf(process.platform === "win32")("NodeJj spawn errors", () => {
     await chmod(join(directory, "jj"), 0o644)
     previousPath = process.env.PATH
     process.env.PATH = directory
+    previousOverride = process.env.SMITHERS_JJ_PATH
+    process.env.SMITHERS_JJ_PATH = join(directory, "jj")
   })
 
   afterAll(async () => {
     process.env.PATH = previousPath
+    if (previousOverride === undefined) delete process.env.SMITHERS_JJ_PATH
+    else process.env.SMITHERS_JJ_PATH = previousOverride
     await rm(directory, { recursive: true, force: true })
   })
 

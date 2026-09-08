@@ -10,7 +10,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { delimiter, join } from "node:path"
+import { delimiter, join, relative } from "node:path"
 import * as Resolve from "../src/node/resolveJjBinary.ts"
 
 const staged = <A>(use: (directory: string) => A): A => {
@@ -39,6 +39,15 @@ describe("resolveJjBinary", () => {
       expect(Resolve.describe({ path: binary, source: "env", executable: true })).toBe(
         `jj: ${binary} (SMITHERS_JJ_PATH)`
       )
+    }))
+
+  it("returns absolute host paths for relative overrides and PATH entries", () =>
+    staged((directory) => {
+      const binary = write(join(directory, process.platform === "win32" ? "jj.exe" : "jj"), 0o755)
+      expect(Resolve.resolveJjBinary({ environment: { SMITHERS_JJ_PATH: relative(process.cwd(), binary) } }).path)
+        .toBe(binary)
+      expect(Resolve.resolveJjBinary({ environment: { PATH: relative(process.cwd(), directory) } }).path)
+        .toBe(binary)
     }))
 
   it("keeps a non-executable override authoritative and explains why it fails", () =>
@@ -165,11 +174,35 @@ describe("resolveJjBinary", () => {
     expect(Resolve.isExecutable("/tmp/jj", { platform: "linux", access })).toBe(false)
   })
 
-  it("resolves against the real process environment by default", () => {
-    const resolved = Resolve.resolveJjBinary()
-
-    expect(["env", "path"]).toContain(resolved.source)
-    expect(typeof resolved.path).toBe("string")
-    expect(Resolve.isExecutable(resolved.path)).toBe(resolved.executable || resolved.path === "jj")
-  })
+  it("resolves against the real process environment by default", () =>
+    staged((directory) => {
+      const previousPath = process.env.PATH
+      const previousOverride = process.env.SMITHERS_JJ_PATH
+      process.env.PATH = directory
+      delete process.env.SMITHERS_JJ_PATH
+      try {
+        expect(Resolve.resolveJjBinary()).toEqual({
+          path: "jj",
+          source: "path",
+          executable: false,
+          hint: "No jj on PATH. Install jj (https://jj-vcs.github.io) or set SMITHERS_JJ_PATH."
+        })
+        const binary = write(join(directory, process.platform === "win32" ? "jj.exe" : "jj"), 0o755)
+        const resolved = Resolve.resolveJjBinary()
+        expect(resolved).toEqual({ path: binary, source: "path", executable: true })
+        expect(Resolve.isExecutable(resolved.path)).toBe(true)
+        process.env.SMITHERS_JJ_PATH = binary
+        expect(Resolve.resolveJjBinary()).toEqual({
+          path: binary,
+          source: "env",
+          executable: true,
+          variable: "SMITHERS_JJ_PATH"
+        })
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH
+        else process.env.PATH = previousPath
+        if (previousOverride === undefined) delete process.env.SMITHERS_JJ_PATH
+        else process.env.SMITHERS_JJ_PATH = previousOverride
+      }
+    }))
 })

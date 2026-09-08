@@ -16,8 +16,9 @@
  *   `jj snapshot` that hangs is otherwise a process no host can account for.
  *   `@smthrs/platform-node`'s contained host bundle uses this one.
  *
- * Both await a local version probe outside the host spawner before exposing
- * `Jj`, sharing its result per executable path for the life of the process.
+ * Both await a version probe through their operation runner before exposing
+ * `Jj`, sharing its result per absolute executable path and runner. All later
+ * operations use that same path, independent of repository cwd or PATH changes.
  *
  * Errors are classified from `jj`'s own stderr vocabulary onto the stable
  * `JjError` codes, the same way `NodeFileSystem` classifies errno, and both
@@ -153,25 +154,10 @@ const requireRevision = (method: string, command: string, revision: string): Eff
     )
     : Effect.succeed(revision)
 
-/**
- * The `jj` to spawn.
- *
- * `SMITHERS_JJ_PATH` is an operator saying
- * "run THIS jj", and `smithers doctor` already prints the file it names, so the
- * override has to be the file that actually runs. A resolution that came from
- * `PATH` stays the bare name: the operating system searches the same `PATH` a
- * moment later, and a host spawner that hands the child a different `PATH` —
- * the contained bundles do — must keep deciding for itself.
- *
- * The `hint` travels with it so a failed spawn can say which file was tried
- * rather than only that none was found.
- */
-const resolveCommand = (): { readonly command: string; readonly hint?: string } => {
-  const resolved = resolveJjBinary()
-  return {
-    command: resolved.source === "env" ? resolved.path : "jj",
-    ...(resolved.hint === undefined ? {} : { hint: resolved.hint })
-  }
+/** The absolute executable selected once for a layer and its diagnostic hint. */
+interface Binary {
+  readonly command: string
+  readonly hint?: string | undefined
 }
 
 const notInstalledMessage = (hint: string | undefined): string =>
@@ -412,14 +398,9 @@ const settle = (method: string, args: ReadonlyArray<string>, output: Output): Ef
     : Effect.fail(classify(method, args, output))
 
 /** Runs `jj` with argv (never a shell string) in `cwd`. */
-const jj = (
-  method: string,
-  args: ReadonlyArray<string>,
-  cwd?: string,
-  binary?: { readonly command: string; readonly hint?: string | undefined }
-): Effect.Effect<string, JjError> =>
+const jj = (binary: Binary): Run => (method, args, cwd) =>
   Effect.callback<Output, JjError>((resume) => {
-    const { command, hint } = binary ?? resolveCommand()
+    const { command, hint } = binary
     let child: ChildProcess.ChildProcess
     try {
       // `node:child_process` delivers only EACCES, EAGAIN, EMFILE, ENFILE, and
@@ -489,9 +470,9 @@ const jj = (
  * answer: a spawner reports a missing binary as a `NotFound` `PlatformError`,
  * which is `ENOENT` with a different name on it.
  */
-const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, args, cwd) =>
+const viaSpawner = (spawner: ChildProcessSpawner["Service"]) => (binary: Binary): Run => (method, args, cwd) =>
   Effect.suspend(() => {
-    const { command, hint } = resolveCommand()
+    const { command, hint } = binary
     /**
      * One stream as text, refused rather than buffered past
      * {@link outputLimit}. `Stream.mkString` is as unbounded as string
@@ -683,27 +664,48 @@ const operations = (run: Run, repositoryRoot?: string) => {
   return { snapshot, restore, diff, workspaceAdd, workspaceForget, status, root, revert }
 }
 
-// Host introspection finishes before the layer exists, so it must not enter
-// the host ledger. Cache by executable path, including in-flight probes, so
-// separate repository layers and host incarnations share the same answer.
-// The repository may not exist until runtime storage creates its parent.
+// Cache only within the runner that performed the check. A direct probe cannot
+// establish what a contained spawner can execute at the same absolute path.
 const versionProbes = new Map<string, Effect.Effect<string, JjError>>()
+const spawnerVersionProbes = new WeakMap<ChildProcessSpawner["Service"], Map<string, Effect.Effect<string, JjError>>>()
 
-/** Check the local executable before exposing repository operations. */
-const checkedOperations = (run: Run, repositoryRoot?: string): Effect.Effect<Jj, JjError> =>
+/** Check and bind the executable before exposing repository operations. */
+const checkedOperations = (
+  makeRun: (binary: Binary) => Run,
+  repositoryRoot?: string,
+  spawner?: ChildProcessSpawner["Service"]
+): Effect.Effect<Jj, JjError> =>
   Effect.gen(function*() {
     const binary = resolveJjBinary()
-    const path = binary.executable || binary.source === "env" ? resolve(binary.path) : binary.path
-    let probe = versionProbes.get(path)
+    // The unresolved fallback is diagnostic data, never a command to resolve
+    // in a different runner environment or repository working directory.
+    if (!isAbsolute(binary.path)) {
+      return yield* Effect.fail(spawnFailure(
+        "version",
+        ["--version"],
+        undefined,
+        binary.hint,
+        { code: "ENOENT", message: "No executable jj found on host PATH" },
+        true
+      ))
+    }
+    const run = makeRun({ command: binary.path, hint: binary.hint })
+    let probes = versionProbes
+    if (spawner !== undefined) {
+      const cached = spawnerVersionProbes.get(spawner)
+      probes = cached ?? new Map()
+      if (cached === undefined) spawnerVersionProbes.set(spawner, probes)
+    }
+    let probe = probes.get(binary.path)
     if (probe === undefined) {
       probe = yield* Effect.cached(
-        jj("version", ["--version"], undefined, { command: path, hint: binary.hint }).pipe(
+        // The repository may not exist until runtime storage creates it.
+        run("version", ["--version"]).pipe(
           // Cancellation produced no version result; a later layer must retry.
-          Effect.onInterrupt(() => Effect.sync(() => versionProbes.delete(path)))
+          Effect.onInterrupt(() => Effect.sync(() => probes.delete(binary.path)))
         )
       )
-      // An unresolved command has no binary path to cache; PATH may change.
-      if (binary.executable || binary.source === "env") versionProbes.set(path, probe)
+      probes.set(binary.path, probe)
     }
     const output = yield* probe
     const actual = /^jj (\d+)\.(\d+)\.(\d+)(?:[-+\s]|$)/.exec(output.trim())
@@ -793,7 +795,7 @@ export const layerAt = (repositoryRoot: string): Layer.Layer<Jj, JjError> => {
  */
 export const layerSpawner: Layer.Layer<Jj, JjError, ChildProcessSpawner> = Layer.effect(
   Jj,
-  Effect.flatMap(ChildProcessSpawner, (spawner) => checkedOperations(viaSpawner(spawner)))
+  Effect.flatMap(ChildProcessSpawner, (spawner) => checkedOperations(viaSpawner(spawner), undefined, spawner))
 )
 
 /**
@@ -813,6 +815,6 @@ export const layerSpawnerAt = (
   }
   return Layer.effect(
     Jj,
-    Effect.flatMap(ChildProcessSpawner, (spawner) => checkedOperations(viaSpawner(spawner), repositoryRoot))
+    Effect.flatMap(ChildProcessSpawner, (spawner) => checkedOperations(viaSpawner(spawner), repositoryRoot, spawner))
   )
 }

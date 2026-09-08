@@ -41,6 +41,52 @@ fi
   )
 
 describe("NodeJj version requirement", () => {
+  it.live("keeps a relative override bound to the host executable in another repository", () =>
+    withVersion("jj 0.39.0", (trusted) =>
+      withVersion("jj 0.39.0", (repository) =>
+        Effect.gen(function*() {
+          const cwd = process.cwd()
+          yield* Effect.promise(() => mkdir(join(trusted, "bin")))
+          yield* Effect.promise(() => mkdir(join(repository, "bin")))
+          yield* Effect.promise(() =>
+            writeFile(
+              join(trusted, "bin", "jj"),
+              "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.39.0\"; else echo trusted; fi\n",
+              { mode: 0o755 }
+            )
+          )
+          yield* Effect.promise(() =>
+            writeFile(join(repository, "bin", "jj"), "#!/bin/sh\necho REPOSITORY_EXECUTABLE_RAN\n", { mode: 0o755 })
+          )
+          process.chdir(trusted)
+          process.env.SMITHERS_JJ_PATH = "./bin/jj"
+          try {
+            const jj = yield* Effect.provide(Jj, NodeJj.layerAt(repository))
+            expect(yield* jj.status()).toBe("trusted\n")
+          } finally {
+            process.chdir(cwd)
+          }
+        }))))
+
+  it.live("keeps an existing layer on the verified PATH executable after PATH changes", () =>
+    withVersion("jj 0.39.0", (trusted) =>
+      withVersion("jj 0.38.0", (old) =>
+        Effect.gen(function*() {
+          const previousPath = process.env.PATH
+          delete process.env.SMITHERS_JJ_PATH
+          try {
+            process.env.PATH = trusted
+            const jj = yield* Effect.provide(Jj, NodeJj.layerAt(trusted))
+            process.env.PATH = old
+            expect(yield* jj.status()).toBe("ok\n")
+            expect(yield* Effect.promise(() => readFile(join(trusted, "operations"), "utf8"))).toBe("operation\n")
+            yield* Effect.promise(() => expect(stat(join(old, "operations"))).rejects.toMatchObject({ code: "ENOENT" }))
+          } finally {
+            if (previousPath === undefined) delete process.env.PATH
+            else process.env.PATH = previousPath
+          }
+        }))))
+
   it.live("builds before the repository parent exists and runs after it is created", () =>
     withVersion("jj 0.39.0", (root) =>
       Effect.gen(function*() {
@@ -84,6 +130,8 @@ describe("NodeJj version requirement", () => {
           expect(missing.code).toBe("not_installed")
           yield* Effect.promise(() => chmod(join(root, "jj"), 0o644))
           process.env.PATH = root
+          // Explicit non-executable candidates still reach spawn for EACCES diagnostics.
+          process.env.SMITHERS_JJ_PATH = join(root, "jj")
           const refused = yield* Effect.flip(Effect.provide(Jj, NodeJj.layer))
           expect(refused.code).toBe("unknown")
         } finally {

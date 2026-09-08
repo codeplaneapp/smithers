@@ -24,7 +24,7 @@ import {
   ProcessId
 } from "effect/unstable/process/ChildProcessSpawner"
 import { spawn } from "node:child_process"
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Jj } from "../src/Jj.ts"
@@ -78,41 +78,45 @@ const encode = (text: string) => Stream.make(new TextEncoder().encode(text))
  * out here rather than imported. It is deliberately the smallest real one: it
  * starts the process, collects both streams, and reports the exit code.
  */
-const realSpawner = Layer.succeed(ChildProcessSpawner)(
-  makeSpawner((command: EffectChildProcess.Command) =>
-    Effect.sync(() => {
-      const standard = command as EffectChildProcess.StandardCommand
-      const child = spawn(standard.command, [...standard.args], {
-        cwd: standard.options.cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, PATH: directory }
+const spawnerWithPath = (path: string, calls: Array<EffectChildProcess.StandardCommand> = [], executable?: string) =>
+  Layer.succeed(ChildProcessSpawner)(
+    makeSpawner((command: EffectChildProcess.Command) =>
+      Effect.sync(() => {
+        const standard = command as EffectChildProcess.StandardCommand
+        calls.push(standard)
+        const child = spawn(executable ?? standard.command, [...standard.args], {
+          cwd: standard.options.cwd,
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, PATH: path }
+        })
+        let stdout = ""
+        let stderr = ""
+        child.stdout?.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf8")
+        })
+        child.stderr?.on("data", (chunk: Buffer) => {
+          stderr += chunk.toString("utf8")
+        })
+        const finished = new Promise<number>((resolve) => child.on("close", (code) => resolve(code ?? 1)))
+        const settled = Effect.promise(() => finished)
+        return makeHandle({
+          pid: ProcessId(child.pid ?? 0),
+          exitCode: Effect.map(settled, (code) => ExitCode(code)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          stdin: Sink.drain,
+          stdout: Stream.unwrap(Effect.map(settled, () => encode(stdout))),
+          stderr: Stream.unwrap(Effect.map(settled, () => encode(stderr))),
+          all: Stream.unwrap(Effect.map(settled, () => encode(stdout + stderr))),
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void)
+        })
       })
-      let stdout = ""
-      let stderr = ""
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8")
-      })
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8")
-      })
-      const finished = new Promise<number>((resolve) => child.on("close", (code) => resolve(code ?? 1)))
-      const settled = Effect.promise(() => finished)
-      return makeHandle({
-        pid: ProcessId(child.pid ?? 0),
-        exitCode: Effect.map(settled, (code) => ExitCode(code)),
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
-        stdin: Sink.drain,
-        stdout: Stream.unwrap(Effect.map(settled, () => encode(stdout))),
-        stderr: Stream.unwrap(Effect.map(settled, () => encode(stderr))),
-        all: Stream.unwrap(Effect.map(settled, () => encode(stdout + stderr))),
-        getInputFd: () => Sink.drain,
-        getOutputFd: () => Stream.empty,
-        unref: Effect.succeed(Effect.void)
-      })
-    })
+    )
   )
-)
+
+const realSpawner = spawnerWithPath(directory)
 
 /**
  * A spawner whose child never stops talking.
@@ -144,13 +148,18 @@ const flood = Layer.succeed(ChildProcessSpawner)(
 )
 
 /** A spawner that reports what a host reports for a binary that is not there. */
-const missingBinary = Layer.succeed(ChildProcessSpawner)(
-  makeSpawner(() =>
-    Effect.fail(
-      PlatformError.systemError({ _tag: "NotFound", module: "ChildProcess", method: "spawn", description: "jj" })
-    )
-  )
-)
+const missingBinary = (allowVersion = false) =>
+  Layer.effect(
+    ChildProcessSpawner,
+    Effect.map(ChildProcessSpawner, (real) =>
+      makeSpawner((command) =>
+        allowVersion && (command as EffectChildProcess.StandardCommand).args.includes("--version")
+          ? real.spawn(command)
+          : Effect.fail(
+            PlatformError.systemError({ _tag: "NotFound", module: "ChildProcess", method: "spawn", description: "jj" })
+          )
+      ))
+  ).pipe(Layer.provide(realSpawner))
 
 const run = <A, E>(effect: Effect.Effect<A, E, Jj>, spawner: Layer.Layer<ChildProcessSpawner>) =>
   Effect.provide(effect, Layer.provide(NodeJj.layerSpawnerAt(directory), spawner))
@@ -158,6 +167,82 @@ const run = <A, E>(effect: Effect.Effect<A, E, Jj>, spawner: Layer.Layer<ChildPr
 process.on("exit", () => rmSync(directory, { recursive: true, force: true }))
 
 describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
+  it.live("probes and runs the same absolute binary despite an older jj on the spawner PATH", () =>
+    Effect.gen(function*() {
+      const oldDirectory = mkdtempSync(join(tmpdir(), "flows-jj-old-path-"))
+      writeFileSync(
+        join(oldDirectory, "jj"),
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.38.0\"; else echo OLD_EXECUTABLE_RAN; fi\n",
+        { mode: 0o755 }
+      )
+      const previousPath = process.env.PATH
+      const calls: Array<EffectChildProcess.StandardCommand> = []
+      process.env.PATH = directory
+      delete process.env.SMITHERS_JJ_PATH
+      try {
+        // A direct probe must not satisfy the spawner's own preflight.
+        yield* Effect.provide(Jj, NodeJj.layerAt(directory))
+        const spawner = spawnerWithPath(oldDirectory, calls)
+        const jj = yield* run(Jj, spawner)
+        yield* run(Jj, spawner)
+        expect(yield* jj.status()).toBe("the working copy is clean\n")
+        expect(calls.map((command) => command.command)).toEqual([join(directory, "jj"), join(directory, "jj")])
+        expect(calls.map((command) => command.args[0])).toEqual(["--version", "status"])
+        expect(calls[0]!.options.cwd).toBeUndefined()
+        expect(calls[1]!.options.cwd).toBe(directory)
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH
+        else process.env.PATH = previousPath
+        rmSync(oldDirectory, { recursive: true, force: true })
+      }
+    }))
+
+  it.live("checks the version reported by each host runner even after a passing direct probe", () =>
+    Effect.gen(function*() {
+      yield* Effect.provide(Jj, NodeJj.layerAt(directory))
+      const calls: Array<EffectChildProcess.StandardCommand> = []
+      const error = yield* Effect.flip(run(Jj, spawnerWithPath(directory, calls, oldBinary)))
+      expect(error).toMatchObject({ code: "unsupported_version", method: "version" })
+      expect(error.message).toContain("0.38.0")
+      expect(calls.map((command) => command.args[0])).toEqual(["--version"])
+    }))
+
+  it.live("does not let a repository replace a relative override through the host spawner", () =>
+    Effect.gen(function*() {
+      const trusted = mkdtempSync(join(tmpdir(), "flows-jj-trusted-"))
+      const repository = join(trusted, "repository")
+      mkdirSync(join(trusted, "bin"))
+      mkdirSync(join(repository, "bin"), { recursive: true })
+      writeFileSync(join(trusted, "bin", "jj"), script, { mode: 0o755 })
+      writeFileSync(join(repository, "bin", "jj"), "#!/bin/sh\necho REPOSITORY_EXECUTABLE_RAN\n", { mode: 0o755 })
+      const previousCwd = process.cwd()
+      process.chdir(trusted)
+      process.env.SMITHERS_JJ_PATH = "./bin/jj"
+      try {
+        const jj = yield* Effect.provide(Jj, Layer.provide(NodeJj.layerSpawnerAt(repository), realSpawner))
+        expect(yield* jj.status()).toBe("the working copy is clean\n")
+      } finally {
+        process.chdir(previousCwd)
+        rmSync(trusted, { recursive: true, force: true })
+      }
+    }))
+
+  it.live("refuses an unresolved host binary without spawning the bare fallback", () =>
+    Effect.gen(function*() {
+      const previousPath = process.env.PATH
+      const calls: Array<EffectChildProcess.StandardCommand> = []
+      process.env.PATH = ""
+      delete process.env.SMITHERS_JJ_PATH
+      try {
+        const error = yield* Effect.flip(run(Jj, spawnerWithPath(directory, calls)))
+        expect(error).toMatchObject({ code: "not_installed", method: "version" })
+        expect(calls).toEqual([])
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH
+        else process.env.PATH = previousPath
+      }
+    }))
+
   it.live("rejects an old local version before exposing the spawner-backed Jj", () =>
     Effect.gen(function*() {
       process.env.SMITHERS_JJ_PATH = oldBinary
@@ -212,31 +297,25 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
 
   it.effect("reports a jj the host cannot find as `not_installed`", () =>
     Effect.gen(function*() {
-      const error = yield* Effect.flip(run(Effect.flatMap(Jj, (jj) => jj.status()), missingBinary))
+      const error = yield* Effect.flip(run(Effect.flatMap(Jj, (jj) => jj.status()), missingBinary()))
       expect(error.code).toBe("not_installed")
       expect(error.message).toBe("jj: command not found on PATH")
     }))
 
   it.effect("carries an unusable environment override's hint into a host spawn failure", () =>
-    run(
-      Effect.gen(function*() {
-        const jj = yield* Jj
-        // Change the override after the version probe so this exercises command
-        // resolution, not the layer's separate binary preflight.
-        process.env.SMITHERS_JJ_PATH = overrideBinary
-        chmodSync(overrideBinary, 0o644)
-        try {
-          const error = yield* Effect.flip(jj.status())
-          expect(error.code).toBe("not_installed")
-          expect(error.message).toContain(`jj: Cannot execute the jj binary at ${overrideBinary}.`)
-          expect(error.message).toContain(`chmod +x '${overrideBinary}'`)
-          expect(error.message).toContain("or point SMITHERS_JJ_PATH at a working jj.")
-        } finally {
-          chmodSync(overrideBinary, 0o755)
-        }
-      }),
-      missingBinary
-    ))
+    Effect.gen(function*() {
+      process.env.SMITHERS_JJ_PATH = overrideBinary
+      chmodSync(overrideBinary, 0o644)
+      try {
+        const error = yield* Effect.flip(run(Jj, missingBinary()))
+        expect(error.code).toBe("not_installed")
+        expect(error.message).toContain(`jj: Cannot execute the jj binary at ${overrideBinary}.`)
+        expect(error.message).toContain(`chmod +x '${overrideBinary}'`)
+        expect(error.message).toContain("or point SMITHERS_JJ_PATH at a working jj.")
+      } finally {
+        chmodSync(overrideBinary, 0o755)
+      }
+    }))
 
   it.live("spawns the binary SMITHERS_JJ_PATH names, through the spawner too", () =>
     Effect.gen(function*() {
@@ -260,7 +339,7 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       const missing = join(directory, "absent-root")
       const error = yield* Effect.flip(Effect.provide(
         Effect.flatMap(Jj, (jj) => jj.status()),
-        Layer.provide(NodeJj.layerSpawnerAt(missing), missingBinary)
+        Layer.provide(NodeJj.layerSpawnerAt(missing), missingBinary(true))
       ))
 
       expect(error.code).toBe("unknown")
@@ -286,19 +365,27 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
 
   it.effect("reports any other spawn failure as `unknown`", () =>
     Effect.gen(function*() {
-      const refused = Layer.succeed(ChildProcessSpawner)(
-        makeSpawner(() =>
-          Effect.fail(
-            PlatformError.systemError({
-              _tag: "PermissionDenied",
-              module: "ChildProcess",
-              method: "spawn",
-              description: "jj"
-            })
-          )
-        )
-      )
-      const error = yield* Effect.flip(run(Effect.flatMap(Jj, (jj) => jj.status()), refused))
+      const refused = Layer.effect(
+        ChildProcessSpawner,
+        Effect.map(ChildProcessSpawner, (real) =>
+          makeSpawner((command) =>
+            (command as EffectChildProcess.StandardCommand).args.includes("--version")
+              ? real.spawn(command)
+              : Effect.fail(
+                PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "ChildProcess",
+                  method: "spawn",
+                  description: "jj"
+                })
+              )
+          ))
+      ).pipe(Layer.provide(realSpawner))
+      const error = yield* Effect.flip(run(
+        Effect.flatMap(Jj, (jj) =>
+          jj.status()),
+        refused
+      ))
       expect(error.code).toBe("unknown")
       expect(error.message).toContain("jj status:")
     }))
