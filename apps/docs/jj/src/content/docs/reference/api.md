@@ -372,13 +372,22 @@ literals. `WasiExitError` is what a `proc_exit` from a reactor module becomes: a
 thrown error that traps the calling export, which `BrowserJj` reports as a
 failed operation.
 
-The `root` option confines the guest to one slice of the backing filesystem.
-`..` of the namespace root is the root, and every symlink is resolved in
-namespace coordinates rather than handed to the backend: an absolute link target
-is re-rooted at the preopen, a relative one is clamped against the link's own
-directory, and intermediate components are resolved too, so a link naming a
-directory cannot smuggle the rest of a path out of the slice. A chain that does
-not terminate within the hop budget is `ELOOP`.
+The `root` option maps the guest namespace to one slice only when the host
+excludes concurrent namespace mutation during each WASI syscall or the backend
+independently confines every read and mutation. This includes replacement of
+`root` and its host ancestors by native processes, other workers, or reentrant
+backend callbacks. `SyncFsLike` uses separate string-path checks and operations;
+the shim is not a security sandbox for `node:fs` under concurrent mutation and
+does not detect or reject concurrent writers. Synchronous guest execution alone
+does not satisfy the namespace-ownership requirement.
+
+With that requirement satisfied, `..` of the namespace root is the root.
+Symlinks resolve in namespace coordinates: absolute targets are re-rooted at
+the preopen, and relative targets resolve against the link's directory.
+Traversed ancestors must exist and be directories after expansion, including
+components consumed by `..`. `/file/../victim` returns `ENOTDIR` when `file` is a
+regular file; `/missing/../victim` returns `ENOENT`. A chain that exceeds the hop
+budget returns `ELOOP`. No-follow rejects stable final symlinks with `ELOOP`.
 
 Honest divergences from a kernel WASI host, documented rather than hidden:
 

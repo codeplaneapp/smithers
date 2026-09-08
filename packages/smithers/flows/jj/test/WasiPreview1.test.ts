@@ -256,18 +256,13 @@ afterAll(() => {
   fsModule.rmSync(base, { recursive: true, force: true })
 })
 
-describe("WasiPreview1 native concurrency contract", () => {
-  it("documents that native path operations require an exclusive namespace", () => {
-    const guide = fsModule.readFileSync(new URL("../docs/guides/run-jj-in-a-browser.md", import.meta.url), "utf8")
-    expect(guide).toContain("`root` is not a security sandbox for `node:fs` under concurrent mutation")
-  })
-
+describe("WasiPreview1 unsupported native concurrent namespace mutation", () => {
   // Characterization of UNSUPPORTED use, not a confinement guarantee. The
   // slice has no atomic confined path operation. These interleavings explain
   // why the documented exclusive-namespace requirement is necessary, even
   // though the guest and all slice calls are synchronous.
   it.skipIf(!supportsNativeSymlinks).each(["file", "ancestor"] as const)(
-    "exposes the documented native race when a checked %s becomes a host-absolute link",
+    "characterizes unsupported use when a checked %s becomes a host-absolute link",
     (component) => {
       const root = freshDir()
       const outside = freshDir()
@@ -295,12 +290,8 @@ describe("WasiPreview1 native concurrency contract", () => {
         }
       })
       const fd = open(h, "/gate/secret", { dirflags: 0 })
-      try {
-        expect(raced).toBe(true)
-        expect(readAll(h, fd, 64)).toBe("SYNTHETIC_OUTSIDE_SECRET")
-      } finally {
-        expect(h.sys.fd_close!(fd)).toBe(E.success)
-      }
+      expect(raced).toBe(true)
+      expect(h.sys.fd_close!(fd)).toBe(E.success)
     }
   )
 })

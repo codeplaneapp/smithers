@@ -189,13 +189,33 @@ any wasm module: `make` returns plain functions over memory, a filesystem, and
 a file-descriptor table, so a test constructs a `WebAssembly.Memory`, calls the
 syscalls directly, and asserts errno values.
 
-Its `root` option confines the guest to one slice of the backing filesystem.
-`..` of the namespace root is the root, and every symlink is resolved in
-namespace coordinates rather than handed to the backend: an absolute target is
-re-rooted at the preopen, a relative one is clamped against the link's own
-directory, and intermediate components are resolved too, so a link naming a
-directory cannot smuggle the rest of a path out of the slice. A chain that does
-not terminate within the hop budget is `ELOOP`.
+### Namespace ownership is required
+
+`root` is not a security sandbox for `node:fs` under concurrent mutation.
+The shim checks paths with `lstatSync` and later opens or mutates them by string
+path. The slice provides no retained directory handles, atomic confined path
+resolution, or no-follow open flags. A native writer can replace a checked file
+or ancestor with a host-absolute symlink between those calls, causing a read or
+write outside `root`, even when the guest requested no-follow. Rechecking paths
+or adding a final-component no-follow flag cannot secure ancestor resolution.
+
+The host must prevent concurrent namespace mutation during each WASI syscall,
+including replacement of `root` or its host ancestors. This includes native
+processes, other workers, and reentrant backend callbacks. Synchronous guest
+execution alone does not enforce that requirement. If writers cannot be
+excluded, use a backend that independently confines **every** read and mutation
+to the allowed storage. This requirement applies to all path operations,
+including rename, unlink, timestamp changes, and operations through directory
+fds. The shim does not detect or reject concurrent writers.
+
+With that requirement satisfied, `root` maps the guest namespace to one slice.
+`..` of the namespace root is the root. Symlink expansion uses namespace
+coordinates: absolute targets are re-rooted at the preopen, and relative
+targets resolve against the link's directory. Traversed ancestors must exist
+and be directories after expansion, including components consumed by `..`.
+`/file/../victim` returns `ENOTDIR` when `file` is a regular file;
+`/missing/../victim` returns `ENOENT`. A chain that exceeds the hop budget
+returns `ELOOP`. No-follow rejects stable final symlinks with `ELOOP`.
 
 The filesystem it runs over is described structurally by
 `@smthrs/jj/browser/WasiFs`, and the shape has two deliberate consequences:
