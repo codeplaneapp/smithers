@@ -26,7 +26,7 @@
  *
  * @since 1.0.0-rc.0
  */
-import { Effect, Option } from "effect"
+import { Effect, Exit, Option } from "effect"
 import { readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import * as CliError from "./CliError.ts"
@@ -279,13 +279,24 @@ const carryOut = (
   brief: string
 ): Effect.Effect<SuggestFlow.Implemented, CliError.UnsupportedError> =>
   Effect.gen(function*() {
-    const spinner = ui.spinner()
-    spinner.start(title)
-    const implemented = yield* implement(brief).pipe(
-      Effect.tapError(() => Effect.sync(() => spinner.error(`${title}: failed`))),
-      Effect.mapError((error) => failed(`${title}: ${error.message}`))
-    )
-    spinner.stop(`${title}: ${settledFiles(implemented.files.length)}`)
+    const implemented = yield* Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const spinner = ui.spinner()
+        spinner.start(title)
+        return spinner
+      }),
+      () => Effect.suspend(() => implement(brief)),
+      (spinner, exit) =>
+        Effect.sync(() => {
+          if (Exit.isSuccess(exit)) {
+            spinner.stop(`${title}: ${settledFiles(exit.value.files.length)}`)
+          } else if (Exit.hasInterrupts(exit)) {
+            spinner.cancel(`${title}: cancelled`)
+          } else {
+            spinner.error(`${title}: failed`)
+          }
+        })
+    ).pipe(Effect.mapError((error) => failed(`${title}: ${error.message}`)))
     yield* ui.note(wroteNote(implemented), title)
     return implemented
   })

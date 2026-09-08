@@ -14,7 +14,7 @@
  * with the model scripted and the sandbox real, in
  * `test/suggest/SuggestFlow.scripted.test.ts`.
  */
-import { Effect, Option } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option } from "effect"
 import { Writable } from "node:stream"
 import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
@@ -349,6 +349,12 @@ describe("the interactive session", () => {
       { kind: "suggestion", suggestion: "test-target", ...implemented },
       { kind: "follow-up", suggestion: "test-target", followUp: "ci", ...implemented }
     ])
+    expect(ui.lines.filter((line) => line.startsWith("spinner "))).toEqual([
+      "spinner start: A test target that reruns only what changed",
+      "spinner stop: A test target that reruns only what changed: 1 file written",
+      "spinner start: Run this in CI?",
+      "spinner stop: Run this in CI?: 1 file written"
+    ])
     expect(ui.briefs).toHaveLength(2)
     expect(ui.briefs[0]).toContain("# Suggestion `test-target`: A test target that reruns only what changed")
     expect(ui.briefs[0]).toContain("Seat for the flow's `model:` line: `moonshot:kimi-k3`")
@@ -407,6 +413,60 @@ describe("the interactive session", () => {
     expect(Suggest.exitStatus(outcome)).toBe(0)
   })
 
+  it("releases the live spinner when interrupted after implementation starts", async () => {
+    const ui = scripted({ pick: "test-target" })
+    const terminal = sink()
+    const spinner = Ui.make({ output: terminal.stream, interactive: true }).spinner()
+    const signals = ["SIGINT", "SIGTERM", "exit", "unhandledRejection", "uncaughtExceptionMonitor"] as const
+    const listeners = () => signals.map((signal) => process.listenerCount(signal))
+    const before = listeners()
+
+    try {
+      const exit = await Effect.runPromise(Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const implement: Suggest.Implement = () =>
+          Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+        const fiber = yield* Suggest.run({ ...base, implement }).pipe(
+          Effect.provideService(Ui.Ui, { ...ui.service, spinner: () => spinner }),
+          Effect.forkChild
+        )
+        yield* Deferred.await(started)
+        expect(process.listenerCount("SIGTERM")).toBe(before[1]! + 1)
+        yield* Fiber.interrupt(fiber)
+        return yield* Fiber.await(fiber)
+      }))
+
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      expect(listeners()).toEqual(before)
+      expect(terminal.text()).toContain("A test target that reruns only what changed: cancelled")
+      expect(ui.asked).toEqual(["Which one should I implement?"])
+    } finally {
+      // Keep a failing regression from leaking the real spinner into other tests.
+      spinner.cancel()
+    }
+  })
+
+  it.each(["effect", "callback"] as const)("settles the spinner when the implementation %s defects", async (kind) => {
+    const ui = scripted({ pick: "test-target" })
+    const defect = new Error("implementation defect")
+    const implement: Suggest.Implement = () => {
+      if (kind === "callback") throw defect
+      return Effect.die(defect)
+    }
+
+    const exit = await Effect.runPromiseExit(
+      Suggest.run({ ...base, implement }).pipe(Effect.provideService(Ui.Ui, ui.service))
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBe(defect)
+    expect(ui.lines.filter((line) => line.startsWith("spinner "))).toEqual([
+      "spinner start: A test target that reruns only what changed",
+      "spinner error: A test target that reruns only what changed: failed"
+    ])
+    expect(ui.asked).toEqual(["Which one should I implement?"])
+  })
+
   it("exits 1 when the implementation fails, naming the step that failed", async () => {
     const ui = scripted({ pick: "lint-target" })
     const implement: Suggest.Implement = () => Effect.fail(new Error("the seat refused the request"))
@@ -418,6 +478,10 @@ describe("the interactive session", () => {
     expect(CliError.exitCode(error)).toBe(1)
     expect(error.message).toBe("A lint target over the files that changed: the seat refused the request")
     expect(ui.lines).toContain("spinner error: A lint target over the files that changed: failed")
+    expect(ui.lines.filter((line) => line.startsWith("spinner "))).toEqual([
+      "spinner start: A lint target over the files that changed",
+      "spinner error: A lint target over the files that changed: failed"
+    ])
   })
 })
 
