@@ -2203,3 +2203,16 @@
 .smithers-card[data-maximized="true"] .run-trace-code {
 	max-height: none;
 }
+
+/* Librarian L5: the Wiki's link rail and graph as cards. */
+.wiki-links-group {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+.wiki-graph-canvas {
+	min-height: 320px;
+	border: 1px solid var(--border, #e4ddd2);
+	border-radius: 0.5rem;
+	overflow: hidden;
+}

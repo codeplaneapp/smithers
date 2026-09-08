@@ -151,6 +151,12 @@ export interface AppController {
   readonly removeWorldDocument: (id: string) => string | void
   readonly confirmWorldDelete: () => string | void
   readonly cancelWorldDelete: () => void
+  /** `wiki.open <path>`: the human's act selects the note in the pane; the agent's embeds it as a card. */
+  readonly openWorldDocument: (path: string) => string | void
+  /** `wiki.backlinks <path>`: the note's link rail as an embedded card, for either actor. */
+  readonly showWorldLinks: (path: string) => string | void
+  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card for the agent. */
+  readonly showWorldGraph: (path?: string) => string | void
   readonly decideApproval: (id: string, decision: "approved" | "denied") => void
   readonly retryLastTurn: () => string | void
   readonly toggleTheme: () => void
@@ -945,8 +951,11 @@ export const createAppController = (
     createWorldDocument,
     removeWorldDocument,
     confirmWorldDelete,
-    cancelWorldDelete
-  } = actors.pair(ctx, (context) => createWorldController(context))
+    cancelWorldDelete,
+    openWorldDocument,
+    showWorldLinks,
+    showWorldGraph
+  } = actors.pair(ctx, (context) => createWorldController(context, { nextOrdinal: nextTranscriptOrdinal }))
 
   const changeDraft = (draft: string): void => {
     store.dispatch({ type: "composer.changed", actor: "user", draft })
@@ -1210,6 +1219,9 @@ export const createAppController = (
     removeWorldDocument,
     confirmWorldDelete,
     cancelWorldDelete,
+    openWorldDocument,
+    showWorldLinks,
+    showWorldGraph,
     decideApproval,
     retryLastTurn,
     clearConversation,
@@ -1555,6 +1567,9 @@ export const createAppController = (
     removeWorldDocument,
     confirmWorldDelete,
     cancelWorldDelete,
+    openWorldDocument,
+    showWorldLinks,
+    showWorldGraph,
     decideApproval,
     retryLastTurn,
     clearConversation,

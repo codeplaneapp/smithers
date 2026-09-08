@@ -1743,6 +1743,14 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           break
         }
 
+        case "wiki.pane.changed":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.wikiPane = transition.pane
+            draft.wikiGraphPath = transition.path
+            draft.revision = revision
+          })
+          break
+
         case "world.delete.asked": {
           if (transition.id !== null && collections.worldDocuments.get(transition.id) === undefined) return
           collections.sessions.update(SESSION_ID, (draft) => {

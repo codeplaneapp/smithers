@@ -45,6 +45,36 @@ export const wikiFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: Schema.Struct({ documentId: Schema.String }),
     handler: ({ documentId }) => actions.selectWorldDocument(documentId)
   }),
+  /*
+   * The vault kit's three flows (Librarian L5; 07-librarian.md §8 registers
+   * wiki.open as the citation door). Each takes a note by path, file stem
+   * or title, so a `[[wikilink]]` target and a citation ref both resolve.
+   * The human's wiki.open opens the note in the pane; the agent's embeds it
+   * as a card (THE EMBED LAW). wiki.backlinks is a read and embeds its card
+   * for either actor. wiki.graph switches the pane to graph mode for the
+   * human, and toggles back; for the agent it embeds the graph.
+   */
+  flow({
+    name: "wiki.open",
+    summary: `Open a ${WIKI_DISPLAY_NAME} note by path or title`,
+    args: "<path>",
+    input: Schema.Struct({ path: Schema.String }),
+    handler: ({ path }) => actions.openWorldDocument(path)
+  }),
+  flow({
+    name: "wiki.backlinks",
+    summary: "Notes that link to a note, and where it links out",
+    args: "<path>",
+    input: Schema.Struct({ path: Schema.String }),
+    handler: ({ path }) => actions.showWorldLinks(path)
+  }),
+  flow({
+    name: "wiki.graph",
+    summary: `The ${WIKI_DISPLAY_NAME} link graph, whole or around one note`,
+    args: "[path]",
+    input: Schema.Struct({ path: Schema.optional(Schema.String) }),
+    handler: ({ path }) => actions.showWorldGraph(path)
+  }),
   flow({
     name: "wiki.delete",
     summary: `Delete a ${WIKI_DISPLAY_NAME} note`,

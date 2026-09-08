@@ -68,7 +68,7 @@ const fixture = async (
       role: message.role === "smithers" ? "assistant" : "user",
       content: message.text
     }))
-  const world = createWorldController(ctx)
+  const world = createWorldController(ctx, { nextOrdinal: () => 0 })
   await store.dispatch({ type: "message.appended", actor: "system", text: "Keep this original conversation" })
     .isPersisted.promise
   return { storage, store, ctx, world }

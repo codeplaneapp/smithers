@@ -697,6 +697,15 @@ export const SessionSchema = z.object({
    * sessions persisted before the field parse without a schema reset.
    */
   pendingWorldDeleteId: z.string().nullable().optional(),
+  /*
+   * The Wiki pane's mode (Librarian L5): the note editor with its link rail,
+   * or the knowledge graph over the same notes. `wiki.graph [path]` switches
+   * it and `wikiGraphPath` names the note the graph is focused on (null =
+   * the whole Wiki). Both live here, not in a component, for the reason
+   * pendingWorldDeleteId does; optional so persisted sessions parse.
+   */
+  wikiPane: z.enum(["document", "graph"]).optional(),
+  wikiGraphPath: z.string().nullable().optional(),
   /** Repository whose disconnect confirmation is open. */
   pendingConnectorRemovalId: z.string().nullable().optional(),
   /*
@@ -1269,6 +1278,13 @@ export type AppTransition =
     id: string
   }
   | {
+    /* The Wiki pane's mode: the editor or the graph, focused on a note or on the whole Wiki. */
+    type: "wiki.pane.changed"
+    actor: Actor
+    pane: "document" | "graph"
+    path: string | null
+  }
+  | {
     /*
      * The delete question, asked and answered (§10.6). `id: null` is the
      * answer "no" — the dialog closes and the note stays.
@@ -1557,6 +1573,8 @@ export const initialSession = (theme: Session["theme"]): Session => ({
   resetConfirmOpen: false,
   verbose: false,
   pendingWorldDeleteId: null,
+  wikiPane: "document",
+  wikiGraphPath: null,
   pendingConnectorRemovalId: null,
   activeTabId: MAIN_TAB_ID,
   tabMenuOpen: false,

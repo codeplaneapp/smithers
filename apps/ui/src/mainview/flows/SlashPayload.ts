@@ -292,6 +292,10 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "connector.remove": (args) => required("connectorId", args, "connector.remove needs the connector id"),
   "wiki.select": (args) => required("documentId", args, "wiki.select needs the document id"),
   "wiki.delete": (args) => required("documentId", args, "wiki.delete needs the document id"),
+  // Librarian L5: a note by path, file stem or title; wiki.graph without one is the whole Wiki.
+  "wiki.open": (args) => required("path", args, "wiki.open needs a note path or title"),
+  "wiki.backlinks": (args) => required("path", args, "wiki.backlinks needs a note path or title"),
+  "wiki.graph": (args) => optional("path", args),
   /* Hidden aliases of the two above (entries/world.ts). */
   "world.select": (args) => required("documentId", args, "world.select needs the document id"),
   "world.delete": (args) => required("documentId", args, "world.delete needs the document id"),

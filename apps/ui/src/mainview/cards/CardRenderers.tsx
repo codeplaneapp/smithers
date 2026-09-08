@@ -43,6 +43,7 @@ import { targetCardFamily } from "./TargetCards"
 import { themePickerCardFamily } from "./ThemePickerCard"
 import { triggersCardFamily } from "./TriggersCard"
 import { turnCardFamily } from "./TurnCards"
+import { wikiCardFamily } from "./WikiCards"
 import { workflowCardFamily } from "./WorkflowCards"
 import { workspaceCardFamily } from "./WorkspaceCard"
 
@@ -83,7 +84,8 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   workspaceCardFamily,
   serviceLogCardFamily,
   anonymousCeilingCardFamily,
-  searchResultsCardFamily
+  searchResultsCardFamily,
+  wikiCardFamily
 ]
 
 /** One entry per card kind. Written as a literal so a missing kind fails to compile. */
@@ -123,7 +125,8 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...workspaceCardFamily,
   ...serviceLogCardFamily,
   ...anonymousCeilingCardFamily,
-  ...searchResultsCardFamily
+  ...searchResultsCardFamily,
+  ...wikiCardFamily
 }
 
 /** The entry for one kind, typed to that kind's card. */

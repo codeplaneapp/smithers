@@ -1,6 +1,7 @@
 import { Catalog } from "@smthrs/chain"
 import { Effect } from "effect"
 import type { AppStore } from "../state/AppStore"
+import { clampLimit, searchDocuments } from "../wiki/search"
 
 /*
  * The worldview door (DESIGN.md §14, decision D2): remember and recall bound
@@ -17,17 +18,6 @@ import type { AppStore } from "../state/AppStore"
  */
 
 const WIKILINK = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g
-
-const tokensOf = (text: string): ReadonlyArray<string> => {
-  const all = text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 0)
-  // Prefer discriminating tokens, but never go blind: a query of only
-  // short tokens ("jj", "ci") searches with what it has.
-  const long = all.filter((token) => token.length > 2)
-  return long.length > 0 ? long : all
-}
 
 const sanitizePath = (title: string): string =>
   `${title.replace(/[^\w\s.-]/g, "").trim().replace(/\s+/g, " ") || "Untitled"}.md`
@@ -47,43 +37,12 @@ export const worldviewEntries = (store: AppStore): ReadonlyArray<Catalog.Entry> 
           new Catalog.CallError({ name: "recall", message: `"recall" takes { query, limit? }` })
         )
       }
-      const limit = typeof record.limit === "number" && Number.isInteger(record.limit) && record.limit > 0
-        ? Math.min(record.limit, 10)
-        : 5
-      const needles = tokensOf(record.query)
-      return Effect.sync(() => {
-        const scored = [...store.collections.worldDocuments.values()]
-          .map((document) => {
-            const title = tokensOf(document.title)
-            const tags = tokensOf(document.tags.join(" "))
-            const body = tokensOf(document.body)
-            let score = 0
-            for (const needle of needles) {
-              score += title.filter((token) => token === needle).length * 3
-              score += tags.filter((token) => token === needle).length * 2
-              score += body.filter((token) => token === needle).length
-            }
-            return { document, score }
-          })
-          .filter((hit) => hit.score > 0)
-          .sort((left, right) => right.score - left.score)
-          .slice(0, limit)
-        return {
-          results: scored.map(({ document, score }) => {
-            const line = document.body
-              .split("\n")
-              .find((candidate) => needles.some((needle) => candidate.toLowerCase().includes(needle)))
-            return {
-              path: document.path,
-              title: document.title,
-              snippet: (line ?? document.body.split("\n")[0] ?? "").trim().slice(0, 200),
-              confidence: document.confidence,
-              updatedAt: document.updatedAt,
-              score
-            }
-          })
-        }
-      })
+      const query = record.query
+      const limit = clampLimit(record.limit)
+      // The same scorer the wiki flows rank with (wiki/search.ts): one ranking, two doors.
+      return Effect.sync(() => ({
+        results: searchDocuments(store.collections.worldDocuments.values(), query, limit)
+      }))
     }
   },
   {

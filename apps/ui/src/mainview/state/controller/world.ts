@@ -1,8 +1,9 @@
 import { MODEL_STREAM_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { parseWikilinks, restoreWikilinks } from "@smthrs/ui/vault"
 import { DEFAULT_BRANCH_ID, DEFAULT_WORKSPACE_ID, rootFrameId, WIKI_DISPLAY_NAME } from "../AppState"
-import type { WorldDocument } from "../AppState"
+import type { Card, WorldDocument } from "../AppState"
 import type { AppStore } from "../AppStore"
+import { linkGraphOf, linksOf, neighbourhoodOf, notesOf, resolveLink } from "../../wiki/VaultAdapter"
 import type { ControllerContext } from "./context"
 import { sweepConversation, SweepRequestTooLargeError } from "./ConversationSweep"
 import type { SweepNote } from "./ConversationSweep"
@@ -36,9 +37,18 @@ export interface WorldController {
   readonly removeWorldDocument: (id: string) => string | void
   readonly confirmWorldDelete: () => string | void
   readonly cancelWorldDelete: () => void
+  /** `wiki.open <path>`: the note in the pane for the human, the note as an embedded card for the agent. */
+  readonly openWorldDocument: (path: string) => string | void
+  /** `wiki.backlinks <path>`: the note's link rail as a card, for either actor. */
+  readonly showWorldLinks: (path: string) => string | void
+  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card for the agent. */
+  readonly showWorldGraph: (path?: string) => string | void
 }
 
-export const createWorldController = (ctx: ControllerContext): WorldController => {
+export const createWorldController = (
+  ctx: ControllerContext,
+  deps: { readonly nextOrdinal: () => number }
+): WorldController => {
   let pendingClear: AbortController | undefined
   let disposed = false
   ctx.onDispose(() => {
@@ -249,6 +259,104 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
     ctx.store.dispatch({ type: "world.delete.asked", actor: "user", id: null })
   }
 
+  /** The one refusal every path-taking wiki flow shares (A.34: an act names what it could not find). */
+  const noNote = (path: string): string => `There is no ${WIKI_DISPLAY_NAME} note at ${path}. Create one with wiki.new-note.`
+
+  const embed = (card: Omit<Card, "createdAt" | "ordinal" | "status">): void => {
+    const existing = ctx.store.collections.cards.get(card.id)
+    ctx.store.dispatch({
+      type: "card.upsert",
+      actor: ctx.commandActor,
+      card: { ...card, status: "active", createdAt: existing?.createdAt ?? Date.now(), ordinal: deps.nextOrdinal() } as Card
+    })
+  }
+
+  /*
+   * `wiki.open <path>` (07-librarian.md §8: the citation door). The human's
+   * act selects the note and opens the pane in its editor mode; the agent's
+   * act embeds the note as a world card (THE EMBED LAW), the same card its
+   * bare `wiki` invocation renders, cut to the one note.
+   */
+  const openWorldDocument = (path: string): string | void => {
+    const document = resolveLink(notesOf(ctx.store), path)
+    if (document === undefined) return noNote(path)
+    if (ctx.commandActor === "smithers") {
+      embed({
+        id: `wiki-open-${document.id}`,
+        kind: "world",
+        title: document.title,
+        payload: { documents: [{ path: document.path, title: document.title, confidence: document.confidence }] }
+      })
+      return
+    }
+    ctx.store.dispatch({ type: "world.document.selected", actor: "user", id: document.id })
+    const session = ctx.store.session()
+    if (session.wikiPane === "graph") ctx.store.dispatch({ type: "wiki.pane.changed", actor: "user", pane: "document", path: null })
+    if (session.surface !== "world") ctx.store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
+  }
+
+  const titled = (notes: ReadonlyArray<WorldDocument>, paths: ReadonlyArray<string>) =>
+    paths.map((row) => ({ path: row, title: notes.find((note) => note.path === row)?.title ?? row }))
+
+  /** `wiki.backlinks <path>`: a read, so both actors get the same embedded card. */
+  const showWorldLinks = (path: string): string | void => {
+    const notes = notesOf(ctx.store)
+    const document = resolveLink(notes, path)
+    if (document === undefined) return noNote(path)
+    const links = linksOf(notes, document.path)
+    if (links === undefined) return noNote(path)
+    embed({
+      id: `wiki-links-${document.id}`,
+      kind: "wiki-links",
+      title: `Links · ${document.title}`,
+      payload: {
+        path: document.path,
+        title: document.title,
+        backlinks: titled(notes, links.backlinks),
+        linksOut: titled(notes, links.linksOut),
+        unresolved: [...links.unresolved]
+      }
+    })
+  }
+
+  /*
+   * `wiki.graph [path]`: the human's act puts the pane in graph mode (toggles
+   * toggle, §2c: the same call in graph mode returns to the editor); the
+   * agent's act embeds the graph as a card. A path focuses either on the
+   * note and its neighbours one hop away.
+   */
+  const showWorldGraph = (path?: string): string | void => {
+    const notes = notesOf(ctx.store)
+    const wanted = path?.trim() === "" ? undefined : path?.trim()
+    const focus = wanted === undefined ? undefined : resolveLink(notes, wanted)
+    if (wanted !== undefined && focus === undefined) return noNote(wanted)
+    if (ctx.commandActor === "smithers") {
+      const whole = linkGraphOf(notes)
+      const graph = focus === undefined ? whole : neighbourhoodOf(whole, focus.path) ?? whole
+      embed({
+        id: focus === undefined ? "wiki-graph" : `wiki-graph-${focus.id}`,
+        kind: "wiki-graph",
+        title: focus === undefined ? `${WIKI_DISPLAY_NAME} graph` : `${WIKI_DISPLAY_NAME} graph · ${focus.title}`,
+        payload: {
+          path: focus?.path ?? null,
+          notes: graph.notes.map((note) => ({
+            path: note.path,
+            title: note.title,
+            linksOut: [...note.linksOut],
+            backlinks: [...(note.backlinks ?? [])],
+            missing: note.frontmatter?.missing === true
+          })),
+          links: graph.links.map((link) => ({ source: link.source, target: link.target }))
+        }
+      })
+      return
+    }
+    const session = ctx.store.session()
+    const already = session.wikiPane === "graph" && (session.wikiGraphPath ?? null) === (focus?.path ?? null)
+    ctx.store.dispatch({ type: "wiki.pane.changed", actor: "user", pane: already ? "document" : "graph", path: already ? null : focus?.path ?? null })
+    if (session.surface !== "world") ctx.store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
+  }
+
   return {
     clearConversation,
     selectWorldDocument,
@@ -256,6 +364,9 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
     createWorldDocument,
     removeWorldDocument,
     confirmWorldDelete,
-    cancelWorldDelete
+    cancelWorldDelete,
+    openWorldDocument,
+    showWorldLinks,
+    showWorldGraph
   }
 }

@@ -23,8 +23,10 @@ import {
   Sparkles,
   Timer,
   Trash2,
+  Waypoints,
   Workflow
 } from "lucide-react"
+import { BacklinksPanel, OutlineView } from "@smthrs/ui/vault"
 import { lazy, Suspense, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
 import { CardView, WorkflowListCardBody } from "./ChatCards"
@@ -49,11 +51,16 @@ import { TabBodies } from "./tabs/TabBodies"
 import { timeLabel } from "./Timestamps"
 import { ToastStack } from "./ToastStack"
 import { useCardRows } from "./state/useCardRows"
+import { linkGraphOf, linksOf, neighbourhoodOf } from "./wiki/VaultAdapter"
 import { StorageRecoveryButton } from "./StorageRecoveryButton"
 import { STORAGE_RECOVERY_EXPORT } from "./state/StorageRecoveryContract"
 
 const MarkdownEditorSurface = lazy(() =>
   import("./MarkdownEditorSurface").then((module) => ({ default: module.MarkdownEditorSurface }))
+)
+/* The Wiki pane's graph mode renders over d3-force; it loads on first use like the editor. */
+const KnowledgeGraphSurface = lazy(() =>
+  import("./KnowledgeGraphSurface").then((module) => ({ default: module.KnowledgeGraphSurface }))
 )
 
 const systemNoteLabel = (message: Message): string => {
@@ -137,6 +144,8 @@ function App() {
       surfacesMenuOpen: session.surfacesMenuOpen,
       connectMenuOpen: session.connectMenuOpen,
       pendingWorldDeleteId: session.pendingWorldDeleteId,
+      wikiPane: session.wikiPane,
+      wikiGraphPath: session.wikiGraphPath,
       activeTabId: session.activeTabId,
       tabMenuOpen: session.tabMenuOpen,
       addMenuOpen: session.addMenuOpen,
@@ -209,6 +218,20 @@ function App() {
   )
   const selectedWorldDocument = worldDocuments.find((document) => document.id === session.selectedWorldDocumentId) ??
     worldDocuments[0]
+  /*
+   * Librarian L5: the link rail and the graph are derived from the same
+   * notes the sidebar lists, during render (no effect, no second store).
+   * The rail shows the open note's backlinks and resolved links out; the
+   * graph mode shows the whole Wiki or one note's neighbourhood.
+   */
+  const selectedWorldLinks = selectedWorldDocument === undefined ? undefined : linksOf(worldDocuments, selectedWorldDocument.path)
+  const wikiGraphMode = session.surface === "world" && session.wikiPane === "graph"
+  const wikiWholeGraph = wikiGraphMode ? linkGraphOf(worldDocuments) : undefined
+  const wikiGraph = wikiWholeGraph === undefined ?
+    undefined :
+    session.wikiGraphPath === null || session.wikiGraphPath === undefined ?
+    wikiWholeGraph :
+    neighbourhoodOf(wikiWholeGraph, session.wikiGraphPath) ?? wikiWholeGraph
   const typing = session.phase === "responding"
   const activeTabId = session.activeTabId ?? MAIN_TAB_ID
   const streamingMessageId = typing ? messages[messages.length - 1]?.id : undefined
@@ -759,6 +782,18 @@ function App() {
                   <Plus size={14} aria-hidden="true" />
                   New note
                 </Button>
+                {/* The button door of wiki.graph: the same registry entry the slash and the agent run; it toggles. */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-flow="wiki.graph"
+                  data-testid="wiki-graph"
+                  aria-pressed={wikiGraphMode}
+                  onClick={() => controller.runCommand("wiki.graph")}
+                >
+                  <Waypoints size={14} aria-hidden="true" />
+                  Graph
+                </Button>
                 {/* The button door of factory.show: the same registry entry the slash and the agent run. */}
                 {canShowFactory ?
                   (
@@ -776,7 +811,7 @@ function App() {
                   null}
               </SurfaceHeader>
 
-              <div className="world-workspace">
+              <div className="world-workspace" data-pane={wikiGraphMode ? "graph" : "document"}>
                 <aside
                   className="world-sidebar"
                   aria-label={`${WIKI_DISPLAY_NAME} notes`}
@@ -795,6 +830,31 @@ function App() {
                   />
                 </aside>
 
+                {wikiGraph !== undefined ?
+                  (
+                    <main
+                      className="world-graph"
+                      aria-label={`${WIKI_DISPLAY_NAME} graph`}
+                      data-testid="wiki-graph-pane"
+                      ref={stampFlows([["button", "wiki.open"]])}
+                    >
+                      <div className="world-document-meta">
+                        <span>
+                          {session.wikiGraphPath === null || session.wikiGraphPath === undefined ?
+                            `The whole ${WIKI_DISPLAY_NAME}` :
+                            `Around ${session.wikiGraphPath}`}
+                        </span>
+                      </div>
+                      <Suspense fallback={<p className="smithers-card-note">Loading graph…</p>}>
+                        <KnowledgeGraphSurface
+                          notes={wikiGraph.notes}
+                          links={wikiGraph.links}
+                          height="100%"
+                          onOpenNote={(path) => controller.runCommandArgs("wiki.open", path)}
+                        />
+                      </Suspense>
+                    </main>
+                  ) :
                 <main className="world-document">
                   {selectedWorldDocument ?
                     (
@@ -856,7 +916,24 @@ function App() {
                         action={<Button onClick={() => controller.runCommand("wiki.new-note")}>Create a note</Button>}
                       />
                     )}
-                </main>
+                </main>}
+                {wikiGraph === undefined && selectedWorldDocument !== undefined && selectedWorldLinks !== undefined ?
+                  (
+                    <aside
+                      className="world-rail"
+                      aria-label={`${selectedWorldDocument.title} links and outline`}
+                      data-testid="wiki-rail"
+                      ref={stampFlows([["button", "wiki.open"]])}
+                    >
+                      <BacklinksPanel
+                        backlinks={[...selectedWorldLinks.backlinks]}
+                        linksOut={[...selectedWorldLinks.linksOut]}
+                        onOpenNote={(path) => controller.runCommandArgs("wiki.open", path)}
+                      />
+                      <OutlineView markdown={selectedWorldDocument.body} />
+                    </aside>
+                  ) :
+                  null}
               </div>
               <ConfirmDialog
                 open={pendingWorldDelete !== undefined}

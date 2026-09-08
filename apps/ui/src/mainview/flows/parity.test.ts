@@ -170,7 +170,8 @@ describe("launch-law parity: every affordance is a command", () => {
       // +1 (ask 5): the Flows pane's back-to-conversation close, like World's.
       // +1: the Flows pane's Triggers button, the button door of triggers.list.
       // +1: the Wiki pane's Factory button, the button door of factory.show.
-      "../App.tsx": 16,
+      // +1 (Librarian L5): the Wiki pane's Graph button, the button door of wiki.graph.
+      "../App.tsx": 17,
       "../StorageRecoveryButton.tsx": 1,
       /* 11 = 10 + the origin chip's "rev N exists · view" (lane change step 4; renders only when both seqs are known). */
       "../Composer.tsx": 9,
@@ -307,6 +308,8 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/FactoryCard.tsx": 1,
       /* The dispatcher card's Register door, the button door of triggers.register (factory mock 2; sign-in is the door). */
       "../cards/TriggersCard.tsx": 1,
+      /* Librarian L5: the rail card's Open and note rows (wiki.open) and the graph card's Refresh (wiki.graph). */
+      "../cards/WikiCards.tsx": 3,
       /*
        * The sidebar (docs/LOCAL-APP.md "Tabs"): the list's select and close
        * per tab, the Repos section's empty "Select a repo" row, each repo

@@ -2092,6 +2092,44 @@ export const CardSchema = z.discriminatedUnion("kind", [
       items: z.array(SearchItemSchema)
     })
   }),
+  /*
+   * The Wiki's link rail as a card (Librarian L5): who links to one note and
+   * where it links out, each row a `wiki.open` door, plus the `[[targets]]`
+   * no note answers. Embedded for the agent and the slash alike: a read.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("wiki-links"),
+    payload: z.object({
+      path: z.string(),
+      title: z.string(),
+      backlinks: z.array(z.object({ path: z.string(), title: z.string() })),
+      linksOut: z.array(z.object({ path: z.string(), title: z.string() })),
+      unresolved: z.array(z.string())
+    })
+  }),
+  /*
+   * The Wiki's knowledge graph as a card: every note a node, every wikilink
+   * an edge, a dangling target a `missing` node. `path` names the note the
+   * graph is focused on (one hop around it), or null for the whole Wiki.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("wiki-graph"),
+    payload: z.object({
+      path: z.string().nullable(),
+      notes: z.array(
+        z.object({
+          path: z.string(),
+          title: z.string(),
+          linksOut: z.array(z.string()),
+          backlinks: z.array(z.string()),
+          missing: z.boolean()
+        })
+      ),
+      links: z.array(z.object({ source: z.string(), target: z.string() }))
+    })
+  }),
   z.object({
     ...cardBaseShape,
     kind: z.literal("anonymous-ceiling"),

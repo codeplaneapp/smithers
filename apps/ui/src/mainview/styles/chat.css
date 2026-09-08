@@ -802,6 +802,35 @@
 	grid-template-columns: 220px minmax(0, 1fr);
 }
 
+/* Librarian L5: the link rail beside the open note, and the graph mode in the note's column. */
+.world-workspace:has(> .world-rail) {
+	grid-template-columns: 220px minmax(0, 1fr) 240px;
+}
+
+.world-rail {
+	display: flex;
+	min-width: 0;
+	min-height: 0;
+	flex-direction: column;
+	gap: 16px;
+	padding: 14px 12px;
+	overflow: auto;
+	border-left: 1px solid var(--border);
+	background: var(--surface-2);
+}
+
+.world-graph {
+	display: flex;
+	min-width: 0;
+	min-height: 0;
+	flex-direction: column;
+	background: var(--surface);
+}
+
+.world-graph > .world-document-meta {
+	flex: 0 0 auto;
+}
+
 .world-sidebar {
 	min-width: 0;
 	padding: 14px 8px;
