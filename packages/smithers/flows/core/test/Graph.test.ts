@@ -151,6 +151,100 @@ describe("Graph", () => {
     ])
   })
 
+  describe.each([
+    {
+      dimension: "reads",
+      restricted: effect({ reads: ["src/**"] }),
+      escaped: effect({ reads: ["secret.txt"] }),
+      code: "effect_outside_envelope",
+      paths: ["secret.txt"]
+    },
+    {
+      dimension: "writes",
+      restricted: effect({ writes: ["out/**"] }),
+      escaped: effect({ writes: ["secret.txt"] }),
+      code: "effect_outside_envelope",
+      paths: ["secret.txt"]
+    },
+    {
+      dimension: "mode",
+      restricted: effect({ mode: "hermetic" }),
+      escaped: effect({ mode: "expected" }),
+      code: "effect_mode_widening",
+      paths: []
+    },
+    {
+      dimension: "tier",
+      restricted: effect(),
+      escaped: effect({ tier: "irreversible" }),
+      code: "effect_tier_widening",
+      paths: []
+    }
+  ])("flow call $dimension envelopes", ({ restricted, escaped, code, paths }) => {
+    it.each([false, true])("rejects a callee escape with annotated=%s", (annotated) => {
+      const child = Flow.make({ effects: escaped, body: () => Node.dynamic({}) })
+      const graph = Graph.build(Flow.make({
+        effects: restricted,
+        body: () => annotated ? Node.withEffects(child(undefined), restricted) : child(undefined)
+      }))
+
+      expect(Graph.diagnostics(graph)).toMatchObject([{ code, paths, nodeId: "root" }])
+      expect(Graph.keyMaterial(graph)._tag).toBe("Failure")
+      expect(Graph.nodes(graph).find((node) => node.id === "root.flow")?.effectiveEffects).toEqual(restricted)
+    })
+
+    it("checks the callee against its call annotation without a parent envelope", () => {
+      const child = Flow.make({ effects: escaped, body: () => Node.dynamic({}) })
+      const graph = Graph.build(Node.withEffects(child(undefined), restricted))
+
+      expect(Graph.diagnostics(graph)).toMatchObject([{ code, paths, nodeId: "root" }])
+      expect(Graph.keyMaterial(graph)._tag).toBe("Failure")
+      expect(Graph.nodes(graph).find((node) => node.id === "root.flow")?.effectiveEffects).toEqual(restricted)
+    })
+
+    it("rejects a call annotation that escapes its parent even when the callee fits", () => {
+      const child = Flow.make({ effects: restricted, body: () => Node.dynamic({}) })
+      const graph = Graph.build(Flow.make({
+        effects: restricted,
+        body: () => Node.withEffects(child(undefined), escaped)
+      }))
+
+      expect(Graph.diagnostics(graph)).toMatchObject([{ code, paths, nodeId: "root" }])
+      expect(Graph.keyMaterial(graph)._tag).toBe("Failure")
+      expect(Graph.nodes(graph).find((node) => node.id === "root.flow")?.effectiveEffects).toEqual(restricted)
+    })
+  })
+
+  it("narrows the parent, call annotation and callee declaration in order", () => {
+    const parentEffects = effect({ reads: ["**"], writes: ["**"], tier: "irreversible" })
+    const callEffects = effect({ reads: ["src/**"], writes: ["out/**"], tier: "compensable" })
+    const childEffects = effect({ reads: ["src/index.ts"], writes: ["out/result"], mode: "hermetic" })
+    const child = Flow.make({ effects: childEffects, body: () => Node.dynamic({}) })
+    const graph = Graph.build(Flow.make({
+      effects: parentEffects,
+      body: () => Node.withEffects(child(undefined), callEffects)
+    }))
+
+    expect(Graph.diagnostics(graph)).toEqual([])
+    expect(Graph.keyMaterial(graph)._tag).toBe("Success")
+    expect(Graph.nodes(graph).find((node) => node.id === "root.flow")?.effectiveEffects).toEqual(childEffects)
+  })
+
+  it.each([false, true])("inherits the call envelope when the callee has no declaration, annotated=%s", (annotated) => {
+    const parentEffects = effect({ writes: ["out/**"] })
+    const callEffects = effect({ writes: ["out/result"], mode: "hermetic" })
+    const child = Flow.make({ body: () => Node.dynamic({}) })
+    const graph = Graph.build(Flow.make({
+      effects: parentEffects,
+      body: () => annotated ? Node.withEffects(child(undefined), callEffects) : child(undefined)
+    }))
+
+    expect(Graph.diagnostics(graph)).toEqual([])
+    expect(Graph.keyMaterial(graph)._tag).toBe("Success")
+    expect(Graph.nodes(graph).find((node) => node.id === "root.flow")?.effectiveEffects)
+      .toEqual(annotated ? callEffects : parentEffects)
+  })
+
   it("cannot widen a caller capability envelope through a nested flow", () => {
     const child = Flow.make({
       capabilities: ["fs:read:/workspace/**", "proc:spawn:**"],

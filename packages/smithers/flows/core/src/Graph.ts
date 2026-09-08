@@ -1498,8 +1498,8 @@ export const build = (
       : undefined
     // The declaration the AST itself carries: a dynamic node's own envelope or
     // the called flow's. It is admitted even when an annotation overrides it,
-    // because it still reaches key material and, for a flow call, the body's
-    // envelope.
+    // because it still reaches key material and, for a flow call, must narrow
+    // the body's envelope.
     const ownEffects = ast._tag === "Dynamic"
       ? admitEffects(ast.effects, id)
       : ast._tag === "FlowCall"
@@ -1654,6 +1654,23 @@ export const build = (
         break
       }
       case "FlowCall": {
+        // Each accepted declaration narrows the preceding envelope, so the
+        // body inherits their intersection. A rejected declaration must not
+        // replace the last validated envelope while diagnostics are collected.
+        let calleeEnvelope = envelope
+        for (const declaration of [projection.effects, ownEffects]) {
+          if (declaration === undefined) continue
+          if (calleeEnvelope !== undefined) {
+            const narrowed = narrowAgainst(calleeEnvelope, declaration)
+            if (!narrowed.ok) {
+              observedDiagnostics.push(
+                new GraphBuildError({ code: narrowed.code, paths: [...narrowed.paths], nodeId: id })
+              )
+              continue
+            }
+          }
+          calleeEnvelope = declaration
+        }
         const flowCapabilities = flow === undefined ? [] : [...new Set(flow.capabilities)].sort()
         const dropped = normalizedGrant === undefined
           ? []
@@ -1677,7 +1694,7 @@ export const build = (
             normalizedGrant === undefined
               ? flowCapabilities
               : normalizedGrant.filter((capability) => flowCapabilities.includes(capability)),
-            ownEffects ?? narrowedEnvelope,
+            calleeEnvelope,
             depth + 1,
             ast.input
           )
@@ -1687,7 +1704,7 @@ export const build = (
       }
     }
 
-    if (envelope !== undefined && declaredEffects !== undefined) {
+    if (ast._tag !== "FlowCall" && envelope !== undefined && declaredEffects !== undefined) {
       const narrowed = narrowAgainst(envelope, declaredEffects)
       if (!narrowed.ok) {
         observedDiagnostics.push(new GraphBuildError({ code: narrowed.code, paths: [...narrowed.paths], nodeId: id }))
