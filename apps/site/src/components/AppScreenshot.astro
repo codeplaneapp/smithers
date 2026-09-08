@@ -1,0 +1,28 @@
+---
+import captures from "../../public/images/app/captures.json"
+interface Props {
+  src: string
+  alt: string
+  caption: string
+  width?: number
+  height?: number
+}
+const { src, alt, caption } = Astro.props
+const capture = captures.find((entry) => src === `/images/app/${entry.file}`)
+const width = Astro.props.width ?? capture?.width ?? 1440
+const height = Astro.props.height ?? capture?.height ?? 1000
+---
+<figure class="app-screenshot">
+  <a href={src} target="_blank" rel="noopener" aria-label={`Open full-size screenshot: ${alt}`}>
+    <img src={src} alt={alt} width={width} height={height} loading="lazy" decoding="async" />
+  </a>
+  <figcaption>{caption} <a href={src} target="_blank" rel="noopener">View full size<span class="sr-only"> (opens in a new tab)</span></a></figcaption>
+</figure>
+<style>
+  .app-screenshot { margin: 1.75rem 0 2rem; }
+  .app-screenshot > a { display: block; border: 1px solid var(--sl-color-gray-5); border-radius: 10px; overflow: hidden; background: #fafafa; }
+  img { display: block; width: 100%; height: auto; margin: 0; }
+  figcaption { margin-top: .65rem; color: var(--sl-color-gray-3); font-size: .875rem; line-height: 1.55; }
+  figcaption a { white-space: nowrap; margin-inline-start: .35rem; }
+  a:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 4px; }
+</style>

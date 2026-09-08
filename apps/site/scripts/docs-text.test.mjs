@@ -16,6 +16,11 @@ test("exports navigation and diagram text", () => {
   assert.ok(!result.includes("<"))
 })
 
+test("exports app screenshots with their captions for text readers", () => {
+  const result = docsText('<AppScreenshot src="/images/app/home.png" alt="The repository home." caption="Choose a featured flow." />')
+  assert.equal(result, '![The repository home.](/images/app/home.png)\n\nChoose a featured flow.')
+})
+
 test("expands imported help and version fields", () => {
   const result = docsText('<Code lang="text" code={help} />\nNode {versions.node}', { raw: { help: "Usage: smthrs flow list   \n" }, versions: { node: "22.19.0" } })
   assert.match(result, /```text\nUsage: smthrs flow list\n```/)

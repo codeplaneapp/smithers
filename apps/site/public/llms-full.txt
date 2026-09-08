@@ -1,13 +1,239 @@
 # Smithers documentation (full)
 
-# Smithers docs
+# Welcome to Smithers
 https://smithers.sh/docs/
 
 Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code.
 
-Smithers is an evolution of monorepo tools like Turborepo, Nx, and Bazel: it helps make work across a codebase fast and efficient.
+Open a repository, describe what you want in chat, and inspect the work in the same conversation. Files, runs, approvals, and changes appear as interactive cards. You can keep talking to Smithers while a flow runs.
 
-Fast CI matters even more when agents are doing the work. But traditional monorepo tools largely stop at building and testing code. Smithers extends that model to agentic work, helping agents work on a codebase faster, cheaper, and more intelligently. When the process running a flow stops, Smithers [resumes from the last recorded step](/docs/concepts/durable-execution/) instead of starting the work again.
+[Open Smithers](https://smithers.sh/smithersai/smithers)
+[Follow the quickstart](/docs/quickstart/)
+
+![Smithers repository home with featured flows, welcome choices, chat, and the six sidebar buttons.](/images/app/home.png)
+
+The Smithers repository opens in the app. Start with a featured flow or choose how you want to explore.
+
+## Start with a repository
+
+The hosted app is in private alpha for selected public repositories. Start with **smithersai/smithers**. You can explore its home, public files, and declared automation without signing in. Contributing and running flows require GitHub sign-in and alpha access.
+
+Each repository has a **factory**: its flows, automation rules, knowledge, and environment for working on the code. The app brings those parts into one conversation.
+
+## Use the app
+
+  - [Quickstart](/docs/quickstart/): Explore the repository, find a flow, and prepare your first contribution.
+  - [Talk to Smithers](/docs/app/chat/): Give a task, use cards, and keep the conversation going.
+  - [Run a flow](/docs/app/flows/): Choose a repository flow and follow its progress.
+  - [Review a change](/docs/app/changes/): Read the diff, check the evidence, and decide what to land.
+  - [Explore the interface](/docs/app/): Find Wiki, Dispatcher, Flows, Secrets, History, and Account.
+  - [Pricing and access](/docs/pricing/): What the free hosted alpha includes and how access works.
+
+## Work from your own tools
+
+Smithers also has a CLI and TypeScript libraries for defining flows and build targets beside your code. The [developer overview](/docs/developers/) leads to installation, the CLI quickstart, and the API reference.
+
+Reading with an agent? [`/llms.txt`](/llms.txt) indexes the docs, including the app guides.
+
+---
+
+# Quickstart
+https://smithers.sh/docs/quickstart/
+
+Open the Smithers repository, read its contribution guide, and find the flows that help maintain it. Then sign in to start work in a box and review the result.
+
+The repository tour works in your browser without an account. Running flows requires GitHub sign-in and approved alpha access. You do not need to install the CLI.
+
+## 1. Open the repository
+
+Open [smithersai/smithers](https://smithers.sh/smithersai/smithers). This is the repository Smithers uses to build itself.
+
+The home card shows featured flows, and the welcome card offers three ways to begin. Check that **smithersai/smithers** appears beside the message box.
+
+![The Smithers home card shows featured flows and three choices for getting started.](/images/app/home.png)
+
+Your starting point: the repository home, its featured flows, and the conversation.
+
+## 2. Read the contribution guide
+
+Select **just exploring**. The Exploring card lists the repository's guide files. Select **CONTRIBUTING.md** to open the contribution guide in chat.
+
+Read the setup and check instructions. Use **Maximize card** if you want more room. If the preview is truncated, follow the source repository for the full file.
+
+![The Exploring card offers README.md and CONTRIBUTING.md as actions in the chat.](/images/app/explore.png)
+
+Read the project's own instructions before asking Smithers to change it.
+
+You have opened a repository and read its contribution guidance without leaving the app.
+
+## 3. Ask about the project
+
+Enter this prompt in the message box and select **Send message**:
+
+```text
+Explain this repository. Which files should I read before making a small
+documentation change? Do not modify files or start a flow.
+```
+
+Read the response and open any file cards Smithers returns. If the app requests sign-in or reports an unavailable service, complete the access step or use the guide files from step 2.
+
+Select **Wiki** to inspect the project's notes beside the conversation. Use **Back to the conversation** to close that pane.
+
+## 4. Find a flow
+
+Type `/review` in the message box. The menu shows the repository's review flow and the Review command group.
+
+Read the flow description, then press **Escape** and clear the draft. You will run a flow after connecting your account and box.
+
+![The command menu finds the review flow by its slash name.](/images/app/slash.png)
+
+You can discover a flow from the same message box you use to talk to Smithers.
+
+For broader search, press **Command+K** on macOS or **Ctrl+K** on Windows and Linux. The palette lets you search by type, including files, flows, and wiki pages.
+
+## 5. See what starts work automatically
+
+Select **Dispatcher**. Read one event and the flows associated with it.
+
+![Dispatcher lists the repository's declared rules, including reviews on new Changes.](/images/app/dispatcher.png)
+
+The public Dispatcher view explains declared automation. It does not establish that those rules are running.
+
+Select **History** to inspect the repository's mythical history. If the card says no mythical history exists, there is nothing to browse in that view. The source repository still has its Git history.
+
+## 6. Connect your account and box
+
+Select **Account**, then **Sign in with GitHub**. Review the permissions and complete sign-in.
+
+![The Account action presents the next GitHub sign-in step in the conversation.](/images/app/account.png)
+
+Sign in when you are ready to contribute. Browsing does not require an account.
+
+Open **Account** again and check the access label. If access is not allowed, use the access-request action offered by the app. Continue once the account has access.
+
+Type `/`, choose the **Boxes** group, and select `/workspace.open`. Select the repository and bookmark if requested. Review and approve the launch, then wait for the box to be ready.
+
+The box gives you a working copy and a place to run the repository's tools. Its files and sessions appear under the repository in the sidebar.
+
+## 7. Make and review a small change
+
+Ask for a bounded task, using an issue or an improvement you found while reading:
+
+```text
+Find one unclear instruction in the contribution guide. Explain your
+proposed wording and wait for me to choose it before making the edit.
+```
+
+After choosing the edit, ask Smithers to make it and run the relevant checks. Use **Flows** or the featured `/review` flow to inspect the working-copy change.
+
+Follow the run card. You can keep chatting while it runs, and use **Steer** on the run to send a correction. If an approval appears, inspect the requested action before deciding.
+
+![Example run card with a progress trace and controls for steering or stopping work.](/images/app/run-example.png)
+
+Example data in the local app shows where to inspect and steer a run. Your run has its own status and output.
+
+Open the resulting Change and read its **Diff**, **Checks**, and **Review** views. Land it only after you have reviewed the result and the repository's requirements are satisfied.
+
+## Continue with your next task
+
+  - [Run a flow](/docs/app/flows/): Choose a task and provide the inputs it needs.
+  - [Inspect a run](/docs/app/runs/): Read its trace, send a correction, or stop work.
+  - [Review a change](/docs/app/changes/): Check the diff and evidence before landing.
+  - [Troubleshoot the app](/docs/app/troubleshooting/): Resolve sign-in, box, and run problems.
+
+Prefer a terminal? Follow the separate [CLI quickstart](/docs/cli-quickstart/).
+
+---
+
+# Pricing
+https://smithers.sh/docs/pricing/
+
+Smithers is free to use in the hosted private alpha for selected public repositories. Start by exploring [the Smithers repository](https://smithers.sh/smithersai/smithers).
+
+## Hosted alpha
+
+**Free for selected public repositories.** Smithers builds these factories in public and covers their hosted inference during the alpha.
+
+You can explore an available repository without signing in. Contributing, running flows, and using a box require GitHub sign-in and approved access. The alpha is not unrestricted self-service hosting for every repository.
+
+Use the repository request option on [smithers.sh](https://smithers.sh) to express interest in another project. Requesting a repository does not guarantee access or an opening date.
+
+## Open-source tools
+
+**MIT-licensed software, with no Smithers license fee.** Run the CLI and libraries in your own environment. You are responsible for your model-provider usage and the infrastructure you use.
+
+For setup and the release candidate's supported platforms, see [CLI and libraries](/docs/developers/).
+
+## Compare the options
+
+Choose the option that fits where you want to work:
+
+| Feature | Hosted alpha | Run it yourself |
+| --- | --- | --- |
+| Main interface | The app at smithers.sh | Your terminal and code |
+| Smithers software fee | Free during the alpha | No license fee |
+| Model and infrastructure costs | Covered for selected hosted alpha factories | Paid by you to your providers |
+| Repository access | Selected public repositories | Repositories you can access in your environment |
+| Getting started | [Open the app](https://smithers.sh/smithersai/smithers) | [Install the CLI](/docs/installation/) |
+
+## Paid plans
+
+Paid contributor seats and multiplayer boxes are planned. Prices, included usage, and launch dates have not been announced. There is no paid plan to choose from on this page.
+
+The alpha's **Account** card shows identity and access. It does not offer subscription management or a usage meter.
+
+## Access and billing questions
+
+### Do I need my own model API key for the hosted alpha?
+
+No. Smithers provides inference for the selected hosted alpha factories. The app does not ask you to configure a personal model API key.
+
+### Does signing in give me alpha access?
+
+Signing in establishes your GitHub identity. Access is a separate approval. Open **Account** to check whether your account is allowed or waiting on an access request.
+
+### Can I use the CLI without hosted access?
+
+Yes. The CLI and libraries run in your environment and use the credentials you configure there. Follow the [CLI quickstart](/docs/cli-quickstart/) for that path.
+
+### Where do I manage a subscription?
+
+The hosted alpha has no subscription-management screen. For identity, access, and sign-out, use [Account](/docs/app/account/).
+
+---
+
+# CLI and libraries
+https://smithers.sh/docs/developers/
+
+Use the CLI to author and run flows in your own repository. Use the TypeScript libraries when you need to define actions, build targets, and execution rules in code.
+
+For the hosted application, start with the [app quickstart](/docs/quickstart/).
+
+## Get started from the terminal
+
+The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first flow. The npm command below applies after publication.
+
+[Install the CLI](/docs/installation/)
+[Read the CLI quickstart](/docs/cli-quickstart/)
+
+```bash
+npm install --global @smthrs/cli@next
+```
+
+From your project directory, scaffold a flow, edit its instructions, and configure the credential its `model:` field requires before running it:
+
+```bash
+smthrs init change
+smthrs up change
+```
+
+That creates `flows/change/flow.mdx`, a flow that lives with your code, and runs it. The [CLI quickstart](/docs/cli-quickstart/) walks through the same steps with what to expect at each one.
+
+## Explore the build graph
+
+A workspace contains packages and their build targets. Select a file to inspect the workspace configuration or a package's test and review targets.
+
+<HeroStage />
 
 ![Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it.](/images/how-smithers-works.gif)
 ![Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it.](/images/how-smithers-works-light.gif)
@@ -18,40 +244,12 @@ The release candidate's required package platform is Linux with Node 22.19.0. ma
 
 Offline Chromium tests cover the included web UI. Packaged desktop and hosted deployments require separate acceptance evidence.
 
-## Explore a workspace
+## Go deeper
 
-Start with a workspace and the targets that live in each package. Select a file below to explore the workspace configuration or a package's test and agent review targets.
-
-<HeroStage />
-
-## Get started
-
-The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first workflow. The npm command below applies after publication.
-
-[Install the CLI](/docs/installation/)
-[Read the quickstart](/docs/quickstart/)
-
-```bash
-npm install --global @smthrs/cli@next
-```
-
-From your project directory, scaffold a workflow, edit its instructions, and configure the credential its `model:` field requires before running it:
-
-```bash
-smthrs init change
-smthrs up change
-```
-
-That creates `flows/change/flow.mdx`, a workflow that lives with your code, and runs it. The [quickstart](/docs/quickstart/) walks through the same steps with what to expect at each one.
-
-## Where to go next
-
-  - [Tutorials](/docs/tutorials/first-flow/): Learn Smithers end to end, starting with your first durable flow.
-  - [Guides](/docs/guides/markdown-flows/): Task-by-task directions for authoring, running, and operating flows.
-  - [Drive Smithers from your agent](/docs/guides/mcp-setup/): Wire the Smithers MCP server into the agent you already use.
-  - [Upgrade from 0.x](/docs/migration/1.0/): Move a Smithers 0.x project to the 1.0 authoring model.
-
-Reading with an agent? [`/llms.txt`](/llms.txt) indexes every page with a one-line description.
+  - [Your first flow](/docs/tutorials/first-flow/): Build a typed flow from actions and run it durably.
+  - [Markdown flows](/docs/guides/markdown-flows/): Define a flow's instructions, capabilities, and budget.
+  - [CLI reference](/docs/reference/cli/): Look up commands, inputs, and outputs.
+  - [MCP setup](/docs/guides/mcp-setup/): Connect Smithers to an agent through MCP.
 
 ---
 
@@ -159,15 +357,15 @@ When the install is current, it says so:
 
 ## Next steps
 
-  - [Quickstart](/docs/quickstart/): Scaffold a flow and run it.
+  - [CLI quickstart](/docs/cli-quickstart/): Scaffold a flow and run it.
   - [CLI reference](/docs/reference/cli/): Every verb the smthrs command ships.
 
 ---
 
-# Quickstart
-https://smithers.sh/docs/quickstart/
+# CLI quickstart
+https://smithers.sh/docs/cli-quickstart/
 
-Create a workflow that lives with your code, give it a small task, and inspect the result. This follows the same `init` and `up` path as the README.
+Create a flow that lives with your code, give it a small task, and inspect the result. To use the hosted app instead, follow the [app quickstart](/docs/quickstart/).
 
 ## 1. Install the CLI
 
@@ -181,7 +379,7 @@ smthrs --version
 
 The version should start with `1.0.`. After publication, `npm install --global @smthrs/cli@next` will install the release candidate directly.
 
-## 2. Scaffold a workflow
+## 2. Scaffold a flow
 
 From the project directory where you want the agent to work, run:
 
@@ -246,9 +444,9 @@ A successful run appears as `completed`. Its transcript should contain the test 
 
 Smithers records completed action results in the project's journal. A resumed run can reuse those results; starting another `up` creates a new run. See [durable execution](/docs/concepts/durable-execution/) for what replay preserves.
 
-## Find useful workflows for your project
+## Find useful flows for your project
 
-For help choosing what to automate next, run `smthrs suggest`. It scans the project and lists candidate workflows and build targets. In an interactive terminal, you can choose a suggestion for an agent to implement, then select follow-ups. `--list`, `--json`, and noninteractive sessions list suggestions without implementing them.
+For help choosing what to automate next, run `smthrs suggest`. It scans the project and lists candidate flows and build targets. In an interactive terminal, you can choose a suggestion for an agent to implement, then select follow-ups. `--list`, `--json`, and noninteractive sessions list suggestions without implementing them.
 
 `suggest` chooses the first available seat in this order: a Codex subscription, Moonshot, OpenAI, Gemini, OpenRouter, then Cerebras. A Codex subscription requires an existing login; `SMITHERS_OPENAI_AUTH=chatgpt` selects that authentication mode but does not create credentials. Use `--seat provider:model` to select a seat explicitly. See the [suggest reference](/docs/reference/cli/suggest/) for setup and output details.
 
@@ -257,6 +455,634 @@ For help choosing what to automate next, run `smthrs suggest`. It scans the proj
   - [Your first flow](/docs/tutorials/first-flow/): Build a typed flow from actions and run it durably.
   - [Markdown flows](/docs/guides/markdown-flows/): Define the instructions, capabilities, and budget of a flow.mdx.
   - [MCP setup](/docs/guides/mcp-setup/): Give a run's agent access to MCP tools.
+
+---
+
+# The interface
+https://smithers.sh/docs/app/
+
+Smithers keeps your task and its results in one conversation. The repository selector sets the context. The message box is where you ask for work, and cards show files, runs, approvals, and changes.
+
+![The Smithers app with repository context, a home card, welcome choices, and the message box.](/images/app/home.png)
+
+The repository name beside the message box tells you where you are working.
+
+## The six main areas
+
+The sidebar keeps these areas available as you work:
+
+| Area | What you use it for |
+| --- | --- |
+| [Wiki](/docs/app/wiki/) | Read and edit notes about the project. |
+| [Dispatcher](/docs/app/dispatcher/) | See which events are declared to start which flows. |
+| [Flows](/docs/app/flows/) | Find flows and follow their runs. |
+| [Secrets](/docs/app/secrets/) | Inspect the names and scope of repository secrets. |
+| [History](/docs/app/history/) | Explore the repository's mythical history when it has been generated. |
+| [Account](/docs/app/account/) | Check your GitHub identity and alpha access. |
+
+Wiki and Flows open panes beside the conversation. Other results appear as cards in chat. Use **Back to the conversation** to close a pane. Use **Maximize card** when you need more room for a file or a run.
+
+## Ask, select, or type a command
+
+You can ask Smithers to do something, select an action on a card, or enter its slash command. For example, **Dispatcher** and `/triggers.list` open the same information.
+
+Type `/` to browse commands. A command such as `/review` runs a featured repository flow. A dotted command such as `/runs.list` names a specific action. A trailing dot, such as `/review.`, browses that command group. The menu shows the commands available in your session.
+
+For a command that needs more information, fill in the form Smithers presents in chat. You do not need to learn its argument syntax first.
+
+## Boxes and sessions
+
+A [box](/docs/app/boxes/) is the environment where the repository's code runs. Its files and sessions appear under the repository in the sidebar. Select a file to inspect it, or return to an existing terminal or agent session.
+
+## Public browsing and signed-in work
+
+The public repository home, guide files, and declared Dispatcher rules are available signed out. Flows, boxes, account details, and repository secrets need sign-in. A sign-in prompt is a step to complete before the requested action can run.
+
+For the access states and what they mean, see [Account and access](/docs/app/account/).
+
+---
+
+# Open a repository
+https://smithers.sh/docs/app/repositories/
+
+Open a repository to give your conversation a project context. In the hosted alpha, start with [smithersai/smithers](https://smithers.sh/smithersai/smithers).
+
+## Open an available repository
+
+1. Visit [smithers.sh](https://smithers.sh).
+2. Find the repository under **Available repos**.
+3. Select **Open Smithers**.
+
+The repository's home card shows its description and featured flows. The welcome card offers three ways to continue.
+
+## Choose how to start
+
+Select the option that matches your task:
+
+| Choice | What happens next |
+| --- | --- |
+| **just exploring** | Shows guide files you can read, including the README and contribution guide when present. |
+| **contributing to this repo** | After sign-in, offers actions to report an issue, prototype a feature request, or read the contribution guide. |
+| **maintaining this repo** | After sign-in, shows repository activity and actions for issues, pull requests, runs, and triggers. |
+
+These choices change the starting guidance. Selecting the maintainer option does not grant repository permissions.
+
+![The Exploring card links to the Smithers README and contribution guide.](/images/app/explore.png)
+
+Exploration uses the guide files the repository actually contains.
+
+## Read a guide file
+
+Select **README.md** or **CONTRIBUTING.md** on the Exploring card. The file opens in the conversation. Use **Maximize card** to read it with more room.
+
+A file card can contain a shortened preview. If it says the file is truncated, open the source repository to read the full file.
+
+![The contribution guide is maximized in a file card while the Smithers message box stays visible.](/images/app/file.png)
+
+Maximize a file card to read it with more room. Select Restore to return to its embedded view.
+
+## Change the repository context
+
+When your account has more than one repository, use the repository selector beside the message box. Check the selected repository and box before asking for a change.
+
+## Request another repository
+
+The alpha opens selected public repositories. Use the repository request option on [smithers.sh](https://smithers.sh) to express interest in another project. A request does not immediately open the repository or grant contributor access.
+
+For sign-in and access requests, see [Account and access](/docs/app/account/).
+
+---
+
+# Talk to Smithers
+https://smithers.sh/docs/app/chat/
+
+Give Smithers a concrete outcome and the context it needs to work on the selected repository.
+
+## Give it a task
+
+1. Check the repository name beside the message box.
+2. Write what you want to change and how you will judge the result.
+3. Select **Send message**.
+
+For a first read-only task, try this prompt:
+
+```text
+Explain this repository. Point me to the files I should read before
+contributing, and explain how to run its checks. Do not change files.
+```
+
+For a change, include the behavior you see, the behavior you want, and any files or constraints you already know:
+
+```text
+The help link in the footer is hard to find. Make its label clearer,
+keep the existing styling, and run the relevant checks. Show me the diff
+before landing the change.
+```
+
+Smithers can answer in prose, show a card, or start a flow. If the task needs sign-in or permission, complete that step in the conversation.
+
+## Work with cards
+
+Cards keep the result next to the request that produced it. A file card shows the file; a run card shows progress; an approval card asks for a decision.
+
+![An Exploring card offers README.md and CONTRIBUTING.md inside the Smithers conversation.](/images/app/explore.png)
+
+Select a file on a card to read it without leaving the conversation.
+
+Select **Maximize card** to inspect a larger result. Return to the conversation when you are ready to continue. A **Done** label on a listing card means the listing finished loading; inspect the run's own status to determine whether the work finished.
+
+## Keep working while a flow runs
+
+You can continue chatting after launching a flow. To change the instructions of a particular run, use its **Steer** control and name the correction. That directs the message to the run you are inspecting.
+
+For progress, stopping, and resuming, see [Inspect and steer a run](/docs/app/runs/).
+
+## Use the command menu
+
+Type `/` in the message box to see available commands. Search by name, or select a group to explore its actions.
+
+![The slash menu shows the repository review flow and the Review command group.](/images/app/slash.png)
+
+The menu distinguishes a repository flow from the actions in its command group.
+
+For finding files, notes, and commands together, see [Search the app](/docs/app/search/).
+
+---
+
+# Search the app
+https://smithers.sh/docs/app/search/
+
+Use the search palette when you know what you want but do not know which card or command opens it.
+
+## Open search
+
+1. Press **Command+K** on macOS or **Ctrl+K** on Windows and Linux.
+2. Enter a name or part of a name.
+3. Select a result or use the arrow keys and **Enter**.
+
+Press **Escape** to close the palette. Type `?` in the palette to list search types and their prefixes. Typing `/` in the message box opens the flow and command menu.
+
+![The Smithers search palette lists search types and their prefixes after entering a question mark.](/images/app/search.png)
+
+Type ? in the palette to inspect the search types and their prefixes.
+
+## Find a command
+
+Type `/review` to find the repository's review flow. Select the flow to invoke it. To browse the Review group's actions, type `/review.` instead.
+
+![Searching for /review shows a flow result and a separate Review command group.](/images/app/slash.png)
+
+A bare flow name runs a flow; a trailing dot explores its command group.
+
+## Search a specific area
+
+The palette offers search types for files, flows, targets, wiki pages, history, runs, changes, issues, boxes, and secret names. Choose the relevant type to narrow the query. Secret search concerns names and metadata, not secret values.
+
+Available results depend on your sign-in state, selected repository, and connected box. If an area says it is unavailable, follow the reason shown in the app. An unavailable search is different from a search that ran and found no matches.
+
+For a command that requires additional fields, Smithers opens a form in the conversation. Fill in the fields and review the action before submitting it.
+
+---
+
+# Read and edit the Wiki
+https://smithers.sh/docs/app/wiki/
+
+Use **Wiki** to read and edit the notes Smithers keeps about the project.
+
+## Open a note
+
+1. Select **Wiki** in the sidebar.
+2. Select a note from the list.
+3. Read the note and its source and confidence information.
+
+![The Wiki pane shows a World note, its source count, and its confidence label beside the chat.](/images/app/wiki.png)
+
+Wiki opens beside the conversation, so you can ask about a note while reading it.
+
+Use **Back to the conversation** to close the pane. A note's confidence label is recorded metadata; check the source when a statement matters to your task.
+
+## Add or edit a note
+
+Select **New note** to create a note, then write in the editor. To revise an existing note, select it and edit its content. Keep facts and their sources together so another reader can check the claim.
+
+Editing a note is distinct from landing a code change. Review code through the [Change card](/docs/app/changes/).
+
+## Read the repository's guide files
+
+For the repository's README and contribution guide, return to the welcome card and select **just exploring**. The app lists the guide files it finds.
+
+The hosted alpha can show a starter note named **World**. That note is not evidence that the repository has a generated wiki. When no generated wiki exists, the Exploring card says so and offers the repository's existing guide files.
+
+## Inspect the factory
+
+Select **Factory** in the Wiki pane to inspect the repository's wiki information and available environment configuration files. This is a way to read the factory's configuration. It does not create a box or regenerate the wiki.
+
+![The Factory card shows wiki information and the repository's environment configuration files.](/images/app/factory.png)
+
+Factory lists configuration files you can open and says when a file or generated wiki is absent.
+
+---
+
+# Inspect the Dispatcher
+https://smithers.sh/docs/app/dispatcher/
+
+Use **Dispatcher** to see which events are meant to start which flows for a repository.
+
+## Read the declared rules
+
+Select **Dispatcher** in the sidebar. Each rule names an event and the work it triggers in plain language.
+
+![The Dispatcher card lists declared events and the flows they trigger, with a Register a rule button.](/images/app/dispatcher.png)
+
+Signed out, Dispatcher shows the rules declared by the repository.
+
+For example, the Smithers factory declares a review when a Change opens and a review on weekday mornings. Other rules describe what to do after a landing or a box session.
+
+The label **declared in .smithers/FACTORY.ts** identifies configuration read from the repository. It does not confirm that an event listener is active or that a flow has run.
+
+## Inspect registered triggers
+
+To inspect live trigger state, sign in with an approved account and connect a box. Open **Dispatcher** again. Read the status and event information returned for that box.
+
+For a particular event, inspect the resulting [run](/docs/app/runs/) to determine whether its flow started and what happened. A declaration alone is not a run result.
+
+## Register a rule
+
+With access to the repository's box, select **Register a rule**. Fill in the trigger form and review its flow, schedule or webhook details, and any requested permission before submitting it.
+
+Signed out, **Register a rule** leads to sign-in. Registration also depends on the trigger service being available on your box. If the app reports that the service is unavailable, the rule has not been registered.
+
+For the configuration fields and supported trigger sources, see the [trigger reference](/docs/reference/triggers/). For operating triggers from a terminal, see [Triggers](/docs/guides/triggers/).
+
+---
+
+# Run a flow
+https://smithers.sh/docs/app/flows/
+
+A flow is a repeatable task defined by the repository. Use one to review a change, triage an issue, or perform another task the project provides.
+
+Running a hosted flow requires GitHub sign-in, alpha access, and an available box for the repository. See [Account and access](/docs/app/account/) if the app asks you to sign in or request access.
+
+## Choose a flow
+
+Open the repository home and read the flows under **Try first**. Select a featured flow, or type its slash command in the message box.
+
+![The slash menu finds the review flow declared by the Smithers repository.](/images/app/slash.png)
+
+Type a flow's name to find it without leaving the conversation.
+
+The Smithers repository features these tasks:
+
+| Flow | Task |
+| --- | --- |
+| `/review` | Review the working-copy change and explain the verdict. |
+| `/lint` | Check the files you name against repository conventions and fix findings. |
+| `/pr-triage` | Triage a GitHub pull request from its diff. |
+| `/issue-triage` | Reproduce and triage a GitHub issue. |
+| `/release-notes` | Draft release notes from commits since the last tag. |
+
+The repository supplies this list, so another repository can offer different flows. You can also select **Flows** to open the flow pane after signing in.
+
+## Supply the task
+
+If a form appears, fill in its fields. Include the issue, files, or change the flow should work on. Read the flow's description before launching: some flows edit files, and others inspect existing work.
+
+For a first run, use `/review` on a small change in your box. If there is no change to review, choose a task with an input you can provide.
+
+## Start and follow the run
+
+Submit the flow's inputs. If Smithers asks for permission, review the requested action and select **Approve** to proceed or **Deny** to decline it.
+
+A successful launch produces a run card. Read its status and output to follow the work. A sign-in prompt or launch error means you have another step to complete; it is not a running flow.
+
+Keep chatting while the flow runs. For its trace, steering, and controls, see [Inspect and steer a run](/docs/app/runs/). For the resulting diff, see [Review a change](/docs/app/changes/).
+
+## Create a flow for repeated work
+
+Ask Smithers to help define the repeated task, then review the proposed flow and its requested permissions. Flows live with the repository's code, so changes to them can go through the same review process.
+
+To author the files directly, follow the [CLI quickstart](/docs/cli-quickstart/) or [Markdown flows](/docs/guides/markdown-flows/).
+
+---
+
+# Inspect and steer a run
+https://smithers.sh/docs/app/runs/
+
+A run is one execution of a flow. Open its card to see what happened and decide what to do next.
+
+These controls require sign-in and a connected repository box.
+
+## Open a run
+
+After launching a flow, use the run card in the conversation. To find an earlier run, enter `/runs.list` and select the run from the list. You can also use the **view runs** action on the maintainer welcome card.
+
+Read the run's own status. A list card marked **Done** means the list loaded; it does not mean every run in the list completed.
+
+## Inspect the trace
+
+The run trace shows the work as an expandable tree and a timeline. Select a row to inspect the information recorded for that step, such as inputs, output, source, or a model call's token usage.
+
+![Example run card with status, trace filters, a call tree, and controls to stop or steer the run.](/images/app/run-example.png)
+
+Example data in the local app: the run card keeps its trace and controls together. This is not a production run.
+
+Use the filter controls to narrow the trace. Select **Maximize card** when the tree and details need more room. If the trace says **no journal yet**, it has no recorded steps to display.
+
+A prototype run uses the same trace with a prototype label. Treat a prototype as evidence for a later implementation; it does not go through the normal review and landing path.
+
+## Send a correction
+
+Enter a correction in the run's steering input and select **Steer**. For example:
+
+```text
+Keep the existing public API. Fix the internal parser and add a regression
+test for the failing input.
+```
+
+When steering is pending, the run has not consumed the correction yet. Check the following output for the requested change in direction.
+
+## Stop or resume work
+
+Use the run's stop action to request cancellation. Confirm the action if asked, then check the resulting run status.
+
+For a parked run, use `/runs.resume` and supply the run shown in the app. Resuming continues that run. Starting it again creates another execution, so choose the action that matches your intent.
+
+If the run is waiting for a decision, open its [approval](/docs/app/approvals/). If it failed, inspect its error before retrying. A disconnected box or missing credential needs a different fix from a failing test.
+
+## Verify the result
+
+Read the final output and any checks the flow reports. If it produced a Change, [review its diff and checks](/docs/app/changes/) before landing it. A completed run does not by itself establish that the result is ready to merge.
+
+---
+
+# Work in a box
+https://smithers.sh/docs/app/boxes/
+
+A box is the environment where Smithers works on a repository. It holds the working copy, terminals, agent sessions, and services for that work.
+
+Opening a hosted box requires GitHub sign-in and access to the repository.
+
+## Open a box
+
+1. Select the repository you want to work on.
+2. Type `/` and find the **Boxes** command group.
+3. Choose its open action, `/workspace.open`.
+4. Fill in the repository and bookmark if requested.
+5. Review and approve the launch request.
+
+The command keeps its `workspace.open` name; **box** is the name used in the interface. Opening a box can reuse an existing environment for that bookmark. Wait for the box's reported state before opening its terminal.
+
+## Inspect the files
+
+Expand the box under its repository in the sidebar. Expand a directory to load its contents, then select a file to open it as a card in the conversation.
+
+The file tree reflects that box's working copy. Before editing, check that you selected the intended box and repository.
+
+## Use the terminal and services
+
+Open the box card and select its terminal action when available. The terminal runs commands in the box. Return to the conversation to ask Smithers about the output.
+
+The box card also provides views for files, services, snapshots, and outbound network activity. The fields and controls depend on what the connected box supports. An absent or unavailable terminal is not an active session.
+
+## Save a point to return to
+
+Use the box's snapshot action before work you may want to revisit. Name the snapshot so its purpose is clear. After the action completes, check that the snapshot appears in the list.
+
+Forking from a snapshot creates another box from that saved state. Review the requested action before approving it.
+
+![Example box card with the Snapshots view selected and controls to fork, snapshot, suspend, or delete.](/images/app/box-example.png)
+
+Example data in the local app: a named snapshot and the box's available controls. This is not a production box.
+
+## Finish with the box
+
+Use **Suspend** when you want to stop a box while retaining it for later work. Use **Resume** to bring it back. Deleting a box is a separate action; check the box's identity and the confirmation before deleting it.
+
+For secrets available to box sessions, see [Repository secrets](/docs/app/secrets/). For flow execution within the box, see [Run a flow](/docs/app/flows/).
+
+---
+
+# Review an approval
+https://smithers.sh/docs/app/approvals/
+
+An approval card asks you to decide whether a specific action can proceed. Read what the card requests before deciding.
+
+## Decide on a request
+
+1. Read the requested action and the repository or run it concerns.
+2. Check that the action matches the work you asked for.
+3. Select **Approve** to allow it or **Deny** to decline it.
+
+While the card says **Sending your decision**, the app is submitting the response. Wait for the accepted or denied state. If submission fails, the card shows the error; the decision has not been confirmed.
+
+Approving a launch allows that launch. It does not mean that you have reviewed a resulting code change. Review that result separately through the [Change card](/docs/app/changes/).
+
+## Find pending approvals
+
+Use `/approvals.list` to open the approval inbox for your repository. Each request identifies the run it belongs to. Open the run when you need its context before deciding.
+
+If no requests are waiting, the inbox says that no approvals are pending.
+
+## Correct the task before approving
+
+If the requested action is too broad or targets the wrong repository, deny it and explain the correction to Smithers. For a running flow, use [Steer](/docs/app/runs/#send-a-correction) to direct the correction to that run.
+
+---
+
+# Review a change
+https://smithers.sh/docs/app/changes/
+
+A **Change** is the unit of code review in Smithers Cloud. Open its card to inspect the proposed code and the evidence for landing it.
+
+Review and landing actions require sign-in and repository permission.
+
+## Open the Change
+
+Open the Change from the task's result, or use `/change.view` and supply its identifier. Check the repository and revision named on the card.
+
+## Read the diff
+
+Start with the **Diff** view to inspect the changed files. Select **Full diff** to read the added and removed lines. If you need more room, select **Maximize card**.
+
+When several revisions exist, use the diff's revision selectors to compare the relevant versions. A review of an earlier revision does not cover changes made after that review.
+
+![Example Change card shows its revision, file changes, review views, and landing controls.](/images/app/change-example.png)
+
+Example data in the local app: a documentation Change ready for inspection. This is not a production change.
+
+## Check the evidence
+
+Open **Checks** to inspect reported check results and **Findings** for analyzer findings. Open **Review** for review verdicts, requests, and discussion. The card can also show ownership information and a walkthrough when those are available.
+
+![The Checks view on an example Change card shows a reported build result.](/images/app/checks-example.png)
+
+Example data in the local app: checks belong to the revision you are inspecting. This result is illustrative.
+
+Read the reason for a failed or missing check. Ask Smithers to address the specific finding, then inspect the updated diff and the new check result.
+
+## Resolve review feedback
+
+Use the actions on a review thread to respond or resolve it. If you ask for a correction, identify the file, the behavior that needs to change, and how to verify the fix.
+
+Check the revision associated with each approval. The review strip indicates when the code has changed since a review.
+
+## Land the result
+
+When the checks and required reviews permit landing, use the **Land** action. Its label can include the range of changes it will land, such as **Land 1 → 2**. Check that range and read the confirmation before submitting it, then verify the landed state.
+
+If landing is blocked, read the reason on the card and complete the missing requirement. A passing agent review does not replace a required human review.
+
+A Change lands through Smithers Cloud. A pull request is the GitHub object used for upstream review. The repository's policy determines how work reaches GitHub; the terms refer to different steps.
+
+For the runtime evidence behind a result, see [Inspect and steer a run](/docs/app/runs/).
+
+---
+
+# Repository secrets
+https://smithers.sh/docs/app/secrets/
+
+Use **Secrets** to inspect which repository secrets are available to sessions in the selected repository. Sign in with an account that has permission to read this information.
+
+## Inspect the secret list
+
+Select **Secrets** in the sidebar. The card identifies the repository and lists the metadata returned for each secret.
+
+The columns describe the following:
+
+| Column | Meaning |
+| --- | --- |
+| **Name** | The secret's identifier. |
+| **Bound to** | The hosts covered by its binding, or **setup only** when no host binding is listed. |
+| **Header** | The request headers associated with the binding. |
+| **Updated** | The recorded update date, when available. |
+
+The card does not display secret values. The scope statement says that every session in the repository may use these repository secrets.
+
+## Understand an empty or unavailable list
+
+**No secrets yet** means the returned list is empty. A sign-in prompt or permission error means the list was not available to your session.
+
+## Configure a required secret
+
+The hosted alpha's Secrets card is read-only. Ask the repository operator to configure a missing secret through the repository's supported secret-management path. Do not paste a secret value into chat to work around a missing control.
+
+Personal secret management and a secret editor are not available in this card. For model credentials used by your local CLI, see [Model seats](/docs/guides/model-seats/).
+
+---
+
+# Explore History
+https://smithers.sh/docs/app/history/
+
+**History** opens the repository's **mythical history**: a narrative of how the code fits together, organized into smaller changes. It is separate from the list of flow runs.
+
+## Open History
+
+Select **History** in the sidebar. Read the history returned for the repository, or the empty-state explanation when none exists.
+
+![The History card explains that the Smithers repository has no mythical history to show.](/images/app/history.png)
+
+An empty History card means there is no mythical history to display. It does not imply that the repository has no Git commits.
+
+The mythical history is an alpha feature. Opening this view does not create that history, rewrite the repository, or establish that the full history-generation process is running.
+
+## Find a different kind of history
+
+Use the view that matches what you need to inspect:
+
+| Question | Where to look |
+| --- | --- |
+| What did a flow do? | [Runs](/docs/app/runs/) and the run trace. |
+| What changed between revisions? | [The Change card](/docs/app/changes/) and its revision comparisons. |
+| What commits exist in the source repository? | The repository's GitHub history. |
+| How is the code explained through mythical history? | **History**, when the repository provides it. |
+
+---
+
+# Account and access
+https://smithers.sh/docs/app/account/
+
+You can explore an available public repository without signing in. Sign in with GitHub to contribute, run flows, and use a box.
+
+## Sign in
+
+1. Select **Sign in with GitHub** in the app.
+2. Read the requested GitHub permissions.
+3. Complete the GitHub sign-in and return to Smithers.
+
+You can also select **Account** while signed out to bring the sign-in step into the conversation.
+
+![The Account action adds a GitHub sign-in prompt to the Smithers conversation.](/images/app/account.png)
+
+Account shows the next sign-in step when no account is connected.
+
+## Check your access
+
+After signing in, select **Account**. The card identifies the connected GitHub account and its access state.
+
+The access labels mean the following:
+
+| Label | Meaning |
+| --- | --- |
+| **Allowed** | The account has alpha access. Repository permissions still apply. |
+| **Requested, waiting on an answer** | Your access request has been recorded and awaits a decision. |
+| **Not yet allowed** | The account is signed in but has not been granted alpha access. |
+
+If the app offers an access request, submit it and wait for approval. Signing in and receiving alpha access are separate steps.
+
+## Inspect account details
+
+When available, the card shows GitHub scopes with their descriptions and the boxes the app has loaded. A missing section means that information was not supplied; it is not a statement that the account has no permissions or boxes.
+
+The hosted alpha Account card is read-only apart from **Sign out**. It does not provide a billing, usage, or subscription-management screen. See [Pricing](/docs/pricing/) for the alpha's terms.
+
+## Sign out
+
+Select **Sign out** on the Account card. Check that the app returns to the signed-out state before using another account.
+
+---
+
+# Troubleshoot the app
+https://smithers.sh/docs/app/troubleshooting/
+
+Start with the message on the card or notification. It identifies the action that failed and the next step the app needs.
+
+## The app keeps asking me to sign in
+
+Open **Account** and complete **Sign in with GitHub**. Return to Smithers and check that Account identifies the connected user. If the session is signed in but work is still blocked, check the access label.
+
+**Requested, waiting on an answer** means the access request needs approval. Repeating the sign-in step does not grant access.
+
+## Flows or boxes are unavailable
+
+Confirm that the correct repository is selected and that your account is allowed. A hosted flow also needs an available box. Read the launch error before retrying: a missing box, an unavailable service, and a failed flow need different fixes.
+
+For the launch path, see [Work in a box](/docs/app/boxes/).
+
+## A notification covers a control
+
+Dismiss the notification with its **Dismiss** button, then retry the control. Read the error first so you can address the failed action.
+
+## Search shows no result
+
+Check the search type and the selected repository. A refusal or unavailable message means that search source could not answer. An empty result list means the search returned no matches.
+
+If a slash command is not recognized, type `/` to browse the commands available in your session. Use the names in that menu.
+
+## Wiki or History is empty
+
+The alpha does not guarantee a generated wiki or mythical history for every repository. Use **just exploring** to read the existing guide files. Use the repository's GitHub page for its source history.
+
+## A run stopped or is waiting
+
+Open the run card. Read the status, output, and any pending approval. If an approval is waiting, decide on that request. If the run failed, correct the reported cause before retrying.
+
+For sending a correction, stopping, or resuming, see [Inspect and steer a run](/docs/app/runs/).
+
+## Report a problem
+
+Check [Smithers status](https://status.smithers.sh) for service problems. For a reproducible app issue, include the action you selected, the visible error, the repository, and the run identifier when available. Include a screenshot with private information removed.
+
+Use the contributor welcome card's **report an issue** action when you have access, or open an issue in the [Smithers repository](https://github.com/smithersai/smithers/issues). Keep credentials and private source code out of the report.
 
 ---
 
@@ -378,7 +1204,7 @@ Time: about 20 minutes. You need Node.js and pnpm.
 
 - You have Node.js 22.19.0 or later. The durable engine runs on Node only.
 - You have pnpm for installing packages.
-- The [quickstart](/docs/quickstart/) is a useful warm-up, but this tutorial starts from an empty directory.
+- The [CLI quickstart](/docs/cli-quickstart/) is a useful warm-up, but this tutorial starts from an empty directory.
 
 ## 1. Set up the project
 
@@ -750,7 +1576,7 @@ Time: about 15 minutes. You need the project from the first tutorial.
 
 ## Before you begin
 
-- You have completed [Crash and resume a run](/docs/tutorials/crash-and-resume/) or the [quickstart](/docs/quickstart/).
+- You have completed [Crash and resume a run](/docs/tutorials/crash-and-resume/) or the [CLI quickstart](/docs/cli-quickstart/).
 - You have the project from [Build your first durable flow](/docs/tutorials/first-flow/), including `durable-layer.ts` and its installed packages.
 - You have Node.js 22.19.0 or later.
 
@@ -926,7 +1752,7 @@ Time: about 20 minutes. You need the project from the first tutorial.
 
 ## Before you begin
 
-- You have completed [Retry a flaky action](/docs/tutorials/retry-policy/) or the [quickstart](/docs/quickstart/).
+- You have completed [Retry a flaky action](/docs/tutorials/retry-policy/) or the [CLI quickstart](/docs/cli-quickstart/).
 - You have the project from [Build your first durable flow](/docs/tutorials/first-flow/), including `durable-layer.ts` and its installed packages.
 - You have Node.js 22.19.0 or later.
 
@@ -3636,7 +4462,7 @@ Declare the host authority a flow needs, grant that authority at approval time, 
 
 ## Before you start
 
-- A Smithers project with at least one markdown flow under `flows/`. The [quickstart](/docs/quickstart/) scaffolds one.
+- A Smithers project with at least one markdown flow under `flows/`. The [CLI quickstart](/docs/cli-quickstart/) scaffolds one.
 - You know what a capability, a grant, and the kernel's closed host surface are. [Capabilities and the host kernel](/docs/concepts/kernel/) defines them; this page only walks the mechanics.
 
 ## 1. Declare capabilities in the flow's frontmatter
@@ -43240,7 +44066,7 @@ Global Options:
 
 ## See also
 
-- [Quickstart](/docs/quickstart/) scaffolds and runs a flow, then introduces suggestions.
+- [CLI quickstart](/docs/cli-quickstart/) scaffolds and runs a flow, then introduces suggestions.
 - [smthrs init](/docs/reference/cli/init/) scaffolds a flow by hand instead.
 - [Model seats](/docs/guides/model-seats/) explains `provider:model` and the credentials each provider reads.
 

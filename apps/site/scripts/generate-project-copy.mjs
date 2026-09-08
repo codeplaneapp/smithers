@@ -49,7 +49,6 @@ const getStarted = project.install.getStarted.map((command, index) =>
   requiredString(command, `install.getStarted[${index}]`)
 )
 
-const siteAssetInReadme = (path) => `apps/site/public${path}`
 const logo = String.raw`<pre align="center">
 ███████╗███╗   ███╗██╗████████╗██╗  ██╗███████╗██████╗ ███████╗
 ██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║██╔════╝██╔══██╗██╔════╝
@@ -67,13 +66,16 @@ ${logo}
 
 ${description}
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="${siteAssetInReadme(animation.dark)}">
-    <source media="(prefers-color-scheme: light)" srcset="${siteAssetInReadme(animation.light)}">
-    <img src="${siteAssetInReadme(animation.light)}" alt="${animation.alt}">
-  </picture>
-</p>
+## Open Smithers
+
+Open [the Smithers repository](https://smithers.sh/smithersai/smithers) in your browser.
+Explore its files, ask for a task in chat, and inspect runs and changes in the conversation.
+The hosted private alpha is free for selected public repositories. Sign in with GitHub
+when you are ready to contribute. Follow the [app quickstart](https://smithers.sh/docs/quickstart/).
+
+![The Smithers app with its repository home, featured flows, and conversation.](apps/site/public/images/app/home.png)
+
+For local execution and authoring, use the CLI and libraries described below.
 
 ${supportSection}
 
@@ -91,7 +93,7 @@ ${cliInstall}
 
 Run these commands from your project directory. Before launching, edit the
 scaffolded flow and configure the credential its \`model:\` field requires.
-The [quickstart](https://smithers.sh/docs/quickstart/) covers each step.
+The [CLI quickstart](https://smithers.sh/docs/cli-quickstart/) covers each step.
 
 \`\`\`bash
 ${getStarted.join("\n")}
@@ -134,25 +136,27 @@ const docsPath = join(site, "src/content/docs/docs/index.mdx")
 let docs = readFileSync(docsPath, "utf8")
 docs = docs.replace(/^description:.*$/m, `description: ${JSON.stringify(description)}`)
 docs = replaceRegion(docs, "project-description", description, docsPath)
-docs = replaceRegion(docs, "project-support", supportSection, docsPath)
-docs = replaceRegion(
-  docs,
+const developersPath = join(site, "src/content/docs/docs/developers.mdx")
+let developers = readFileSync(developersPath, "utf8")
+developers = replaceRegion(developers, "project-support", supportSection, developersPath)
+developers = replaceRegion(
+  developers,
   "project-animation",
   `<img src="${animation.dark}" class="theme-only-dark hero-anim" alt="${animation.alt}" />\n` +
     `<img src="${animation.light}" class="theme-only-light hero-anim" alt="${animation.alt}" />`,
-  docsPath
+  developersPath
 )
-docs = replaceRegion(
-  docs,
+developers = replaceRegion(
+  developers,
   "project-quickstart",
-  `The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first workflow. The npm command below applies after publication.\n\n` +
+  `The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first flow. The npm command below applies after publication.\n\n` +
     `<LinkButton href="/docs/installation/" variant="primary">Install the CLI</LinkButton>\n` +
-    `<LinkButton href="/docs/quickstart/" variant="secondary">Read the quickstart</LinkButton>\n\n` +
+    `<LinkButton href="/docs/cli-quickstart/" variant="secondary">Read the CLI quickstart</LinkButton>\n\n` +
     `\`\`\`bash\n${cliInstall}\n\`\`\`\n\n` +
-    `From your project directory, scaffold a workflow, edit its instructions, and configure the credential its \`model:\` field requires before running it:\n\n` +
+    `From your project directory, scaffold a flow, edit its instructions, and configure the credential its \`model:\` field requires before running it:\n\n` +
     `\`\`\`bash\n${getStarted.join("\n")}\n\`\`\`\n\n` +
-    `That creates \`flows/change/flow.mdx\`, a workflow that lives with your code, and runs it. The [quickstart](/docs/quickstart/) walks through the same steps with what to expect at each one.`,
-  docsPath
+    `That creates \`flows/change/flow.mdx\`, a flow that lives with your code, and runs it. The [CLI quickstart](/docs/cli-quickstart/) walks through the same steps with what to expect at each one.`,
+  developersPath
 )
 
 const manifestPath = join(root, "package.json")
@@ -162,6 +166,7 @@ manifest.description = description
 const outputs = new Map([
   [join(root, "README.md"), readme],
   [docsPath, docs],
+  [developersPath, developers],
   [manifestPath, JSON.stringify(manifest, null, 2) + "\n"]
 ])
 

@@ -1,0 +1,29 @@
+---
+title: "Explore History"
+description: "Read the repository's mythical history and distinguish it from run history and Change revisions."
+sidebar:
+  order: 13
+---
+
+import AppScreenshot from "../../../../components/AppScreenshot.astro"
+
+**History** opens the repository's **mythical history**: a narrative of how the code fits together, organized into smaller changes. It is separate from the list of flow runs.
+
+## Open History
+
+Select **History** in the sidebar. Read the history returned for the repository, or the empty-state explanation when none exists.
+
+<AppScreenshot src="/images/app/history.png" alt="The History card explains that the Smithers repository has no mythical history to show." caption="An empty History card means there is no mythical history to display. It does not imply that the repository has no Git commits." />
+
+The mythical history is an alpha feature. Opening this view does not create that history, rewrite the repository, or establish that the full history-generation process is running.
+
+## Find a different kind of history
+
+Use the view that matches what you need to inspect:
+
+| Question | Where to look |
+| --- | --- |
+| What did a flow do? | [Runs](/docs/app/runs/) and the run trace. |
+| What changed between revisions? | [The Change card](/docs/app/changes/) and its revision comparisons. |
+| What commits exist in the source repository? | The repository's GitHub history. |
+| How is the code explained through mythical history? | **History**, when the repository provides it. |

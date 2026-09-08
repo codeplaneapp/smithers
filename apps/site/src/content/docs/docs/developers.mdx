@@ -1,0 +1,67 @@
+---
+title: "CLI and libraries"
+description: "Use Smithers from your terminal, define flows beside your code, and build on the TypeScript libraries."
+---
+
+import { CardGrid, LinkButton, LinkCard } from "@astrojs/starlight/components"
+import HeroStage from "../../../components/HeroStage.astro"
+
+Use the CLI to author and run flows in your own repository. Use the TypeScript libraries when you need to define actions, build targets, and execution rules in code.
+
+For the hosted application, start with the [app quickstart](/docs/quickstart/).
+
+## Get started from the terminal
+
+{/* generated:project-quickstart start. Edit apps/site/src/data/project.json; do not edit. */}
+
+The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first flow. The npm command below applies after publication.
+
+<LinkButton href="/docs/installation/" variant="primary">Install the CLI</LinkButton>
+<LinkButton href="/docs/cli-quickstart/" variant="secondary">Read the CLI quickstart</LinkButton>
+
+```bash
+npm install --global @smthrs/cli@next
+```
+
+From your project directory, scaffold a flow, edit its instructions, and configure the credential its `model:` field requires before running it:
+
+```bash
+smthrs init change
+smthrs up change
+```
+
+That creates `flows/change/flow.mdx`, a flow that lives with your code, and runs it. The [CLI quickstart](/docs/cli-quickstart/) walks through the same steps with what to expect at each one.
+
+{/* generated:project-quickstart end */}
+
+## Explore the build graph
+
+A workspace contains packages and their build targets. Select a file to inspect the workspace configuration or a package's test and review targets.
+
+<HeroStage />
+
+{/* generated:project-animation start. Edit apps/site/src/data/project.json; do not edit. */}
+
+<img src="/images/how-smithers-works.gif" class="theme-only-dark hero-anim" alt="Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it." />
+<img src="/images/how-smithers-works-light.gif" class="theme-only-light hero-anim" alt="Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it." />
+
+{/* generated:project-animation end */}
+
+{/* generated:project-support start. Edit apps/site/src/data/project.json; do not edit. */}
+
+## Supported platforms
+
+The release candidate's required package platform is Linux with Node 22.19.0. macOS and Windows package checks are advisory and do not establish a support guarantee.
+
+Offline Chromium tests cover the included web UI. Packaged desktop and hosted deployments require separate acceptance evidence.
+
+{/* generated:project-support end */}
+
+## Go deeper
+
+<CardGrid>
+  <LinkCard title="Your first flow" href="/docs/tutorials/first-flow/" description="Build a typed flow from actions and run it durably." />
+  <LinkCard title="Markdown flows" href="/docs/guides/markdown-flows/" description="Define a flow's instructions, capabilities, and budget." />
+  <LinkCard title="CLI reference" href="/docs/reference/cli/" description="Look up commands, inputs, and outputs." />
+  <LinkCard title="MCP setup" href="/docs/guides/mcp-setup/" description="Connect Smithers to an agent through MCP." />
+</CardGrid>

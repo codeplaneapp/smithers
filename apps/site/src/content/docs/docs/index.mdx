@@ -1,10 +1,10 @@
 ---
-title: "Smithers docs"
+title: "Welcome to Smithers"
 description: "Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code."
 ---
 
-import { LinkButton, CardGrid, LinkCard } from "@astrojs/starlight/components"
-import HeroStage from "../../../components/HeroStage.astro"
+import { CardGrid, LinkButton, LinkCard } from "@astrojs/starlight/components"
+import AppScreenshot from "../../../components/AppScreenshot.astro"
 
 {/* generated:project-description start. Edit apps/site/src/data/project.json; do not edit. */}
 
@@ -12,64 +12,32 @@ Smithers instruments and automates a code repository so changes get cheaper, fas
 
 {/* generated:project-description end */}
 
-Smithers is an evolution of monorepo tools like Turborepo, Nx, and Bazel: it helps make work across a codebase fast and efficient.
+Open a repository, describe what you want in chat, and inspect the work in the same conversation. Files, runs, approvals, and changes appear as interactive cards. You can keep talking to Smithers while a flow runs.
 
-Fast CI matters even more when agents are doing the work. But traditional monorepo tools largely stop at building and testing code. Smithers extends that model to agentic work, helping agents work on a codebase faster, cheaper, and more intelligently. When the process running a flow stops, Smithers [resumes from the last recorded step](/docs/concepts/durable-execution/) instead of starting the work again.
+<LinkButton href="https://smithers.sh/smithersai/smithers">Open Smithers</LinkButton>
+<LinkButton href="/docs/quickstart/" variant="secondary">Follow the quickstart</LinkButton>
 
-{/* generated:project-animation start. Edit apps/site/src/data/project.json; do not edit. */}
+<AppScreenshot src="/images/app/home.png" alt="Smithers repository home with featured flows, welcome choices, chat, and the six sidebar buttons." caption="The Smithers repository opens in the app. Start with a featured flow or choose how you want to explore." />
 
-<img src="/images/how-smithers-works.gif" class="theme-only-dark hero-anim" alt="Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it." />
-<img src="/images/how-smithers-works-light.gif" class="theme-only-light hero-anim" alt="Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it." />
+## Start with a repository
 
-{/* generated:project-animation end */}
+The hosted app is in private alpha for selected public repositories. Start with **smithersai/smithers**. You can explore its home, public files, and declared automation without signing in. Contributing and running flows require GitHub sign-in and alpha access.
 
-{/* generated:project-support start. Edit apps/site/src/data/project.json; do not edit. */}
+Each repository has a **factory**: its flows, automation rules, knowledge, and environment for working on the code. The app brings those parts into one conversation.
 
-## Supported platforms
-
-The release candidate's required package platform is Linux with Node 22.19.0. macOS and Windows package checks are advisory and do not establish a support guarantee.
-
-Offline Chromium tests cover the included web UI. Packaged desktop and hosted deployments require separate acceptance evidence.
-
-{/* generated:project-support end */}
-
-## Explore a workspace
-
-Start with a workspace and the targets that live in each package. Select a file below to explore the workspace configuration or a package's test and agent review targets.
-
-<HeroStage />
-
-## Get started
-
-{/* generated:project-quickstart start. Edit apps/site/src/data/project.json; do not edit. */}
-
-The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first workflow. The npm command below applies after publication.
-
-<LinkButton href="/docs/installation/" variant="primary">Install the CLI</LinkButton>
-<LinkButton href="/docs/quickstart/" variant="secondary">Read the quickstart</LinkButton>
-
-```bash
-npm install --global @smthrs/cli@next
-```
-
-From your project directory, scaffold a workflow, edit its instructions, and configure the credential its `model:` field requires before running it:
-
-```bash
-smthrs init change
-smthrs up change
-```
-
-That creates `flows/change/flow.mdx`, a workflow that lives with your code, and runs it. The [quickstart](/docs/quickstart/) walks through the same steps with what to expect at each one.
-
-{/* generated:project-quickstart end */}
-
-## Where to go next
+## Use the app
 
 <CardGrid>
-  <LinkCard title="Tutorials" href="/docs/tutorials/first-flow/" description="Learn Smithers end to end, starting with your first durable flow." />
-  <LinkCard title="Guides" href="/docs/guides/markdown-flows/" description="Task-by-task directions for authoring, running, and operating flows." />
-  <LinkCard title="Drive Smithers from your agent" href="/docs/guides/mcp-setup/" description="Wire the Smithers MCP server into the agent you already use." />
-  <LinkCard title="Upgrade from 0.x" href="/docs/migration/1.0/" description="Move a Smithers 0.x project to the 1.0 authoring model." />
+  <LinkCard title="Quickstart" href="/docs/quickstart/" description="Explore the repository, find a flow, and prepare your first contribution." />
+  <LinkCard title="Talk to Smithers" href="/docs/app/chat/" description="Give a task, use cards, and keep the conversation going." />
+  <LinkCard title="Run a flow" href="/docs/app/flows/" description="Choose a repository flow and follow its progress." />
+  <LinkCard title="Review a change" href="/docs/app/changes/" description="Read the diff, check the evidence, and decide what to land." />
+  <LinkCard title="Explore the interface" href="/docs/app/" description="Find Wiki, Dispatcher, Flows, Secrets, History, and Account." />
+  <LinkCard title="Pricing and access" href="/docs/pricing/" description="What the free hosted alpha includes and how access works." />
 </CardGrid>
 
-Reading with an agent? [`/llms.txt`](/llms.txt) indexes every page with a one-line description.
+## Work from your own tools
+
+Smithers also has a CLI and TypeScript libraries for defining flows and build targets beside your code. The [developer overview](/docs/developers/) leads to installation, the CLI quickstart, and the API reference.
+
+Reading with an agent? [`/llms.txt`](/llms.txt) indexes the docs, including the app guides.

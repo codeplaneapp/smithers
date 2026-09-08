@@ -127,8 +127,9 @@ test("public project copy keeps the support contract out of the short descriptio
   assert.equal(JSON.parse(docs.match(/^description: (.*)$/m)?.[1] ?? "null"), description)
   assert.equal(docs.match(/generated:project-description start[^\n]*\n\n([\s\S]*?)\n\n\{\/\* generated:project-description end/)?.[1], description)
   const readmeSupport = readme.match(/(?:^|\n)## Supported platforms\n\n([\s\S]*?)(?=\n## |$)/)?.[1]
-  const docsSupport = docs.match(/generated:project-support start[^\n]*\n\n## Supported platforms\n\n([\s\S]*?)\n\n\{\/\* generated:project-support end/)?.[1]
-  for (const [name, support] of [["README", readmeSupport], ["docs overview", docsSupport]]) {
+  const developers = readFileSync(join(root, "apps/site/src/content/docs/docs/developers.mdx"), "utf8")
+  const docsSupport = developers.match(/generated:project-support start[^\n]*\n\n## Supported platforms\n\n([\s\S]*?)\n\n\{\/\* generated:project-support end/)?.[1]
+  for (const [name, support] of [["README", readmeSupport], ["developer overview", docsSupport]]) {
     assert.equal(typeof support, "string", `${name} must have a dedicated support section`)
     assert.match(support, /required package platform is Linux with Node 22\.19\.0/)
     assert.match(support, /macOS and Windows.*advisory and do not establish a support guarantee/)

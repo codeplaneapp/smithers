@@ -9,6 +9,7 @@ export function docsText(source, { raw = {}, versions = {} } = {}) {
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
       .replace(/^import\s+[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm, "")
       .replace(/<DocsDiagram\b[\s\S]*?\/>/g, (tag) => `**${attr(tag, "title")}**\n\n${attr(tag, "caption")}`)
+      .replace(/<AppScreenshot\b[\s\S]*?\/>/g, (tag) => `![${attr(tag, "alt")}](${attr(tag, "src")})\n\n${attr(tag, "caption")}`)
       .replace(/<LinkCard\b[\s\S]*?\/>/g, (tag) => `- [${attr(tag, "title")}](${attr(tag, "href")}): ${attr(tag, "description")}`)
       .replace(/<LinkButton\b([^>]*)>([^<]*)<\/LinkButton>/g, (_, attrs, label) => `[${label}](${attr(attrs, "href")})`)
       .replace(/<Code\b[\s\S]*?\/>/g, (tag) => {

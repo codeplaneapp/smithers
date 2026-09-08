@@ -1,0 +1,114 @@
+[
+  {
+    "file": "account.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:19:19.862Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "box-example.png",
+    "source": "Local application with browser-test fixtures",
+    "capturedAt": "2026-09-08T04:38:50.966Z",
+    "width": 712,
+    "height": 174,
+    "data": "Illustrative example data; not a production account, run, or result"
+  },
+  {
+    "file": "change-example.png",
+    "source": "Local application with browser-test fixtures",
+    "capturedAt": "2026-09-08T04:38:49.277Z",
+    "width": 712,
+    "height": 310,
+    "data": "Illustrative example data; not a production account, run, or result"
+  },
+  {
+    "file": "checks-example.png",
+    "source": "Local application with browser-test fixtures",
+    "capturedAt": "2026-09-08T04:38:49.655Z",
+    "width": 712,
+    "height": 306,
+    "data": "Illustrative example data; not a production account, run, or result"
+  },
+  {
+    "file": "dispatcher.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:19:15.171Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "explore.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:18:46.588Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "factory.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:35:25.855Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "file.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:35:22.738Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "history.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:19:17.746Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "home.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:18:43.694Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "run-example.png",
+    "source": "Local application with browser-test fixtures",
+    "capturedAt": "2026-09-08T04:48:07.210Z",
+    "width": 712,
+    "height": 592,
+    "data": "Illustrative example data; not a production account, run, or result"
+  },
+  {
+    "file": "search.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:37:01.434Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "slash.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:19:24.636Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  },
+  {
+    "file": "wiki.png",
+    "source": "https://smithers.sh/smithersai/smithers",
+    "capturedAt": "2026-09-08T04:19:11.271Z",
+    "width": 1440,
+    "height": 1000,
+    "data": "Live public app, signed out"
+  }
+]

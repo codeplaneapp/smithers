@@ -13,13 +13,16 @@
 
 Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/site/public/images/how-smithers-works.gif">
-    <source media="(prefers-color-scheme: light)" srcset="apps/site/public/images/how-smithers-works-light.gif">
-    <img src="apps/site/public/images/how-smithers-works-light.gif" alt="Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it.">
-  </picture>
-</p>
+## Open Smithers
+
+Open [the Smithers repository](https://smithers.sh/smithersai/smithers) in your browser.
+Explore its files, ask for a task in chat, and inspect runs and changes in the conversation.
+The hosted private alpha is free for selected public repositories. Sign in with GitHub
+when you are ready to contribute. Follow the [app quickstart](https://smithers.sh/docs/quickstart/).
+
+![The Smithers app with its repository home, featured flows, and conversation.](apps/site/public/images/app/home.png)
+
+For local execution and authoring, use the CLI and libraries described below.
 
 ## Supported platforms
 
@@ -41,7 +44,7 @@ npm install --global @smthrs/cli@next
 
 Run these commands from your project directory. Before launching, edit the
 scaffolded flow and configure the credential its `model:` field requires.
-The [quickstart](https://smithers.sh/docs/quickstart/) covers each step.
+The [CLI quickstart](https://smithers.sh/docs/cli-quickstart/) covers each step.
 
 ```bash
 smthrs init change

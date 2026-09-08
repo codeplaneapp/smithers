@@ -59,7 +59,7 @@ code, pre, kbd { font-family: var(--font-mono); }
 .wrap { width: min(1120px, calc(100% - 2.5rem)); margin-inline: auto; }
 
 /* ── Header ── */
-.top { display: flex; align-items: center; justify-content: space-between; padding: 1.1rem 0; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1.1rem 0; }
 .mark { display: inline-flex; align-items: center; gap: 0.6rem; font-weight: 600; letter-spacing: -0.01em; }
 .mark img { width: 26px; height: 26px; border-radius: 7px; }
 .nav { display: flex; gap: 1.4rem; font-size: 0.92rem; color: var(--text-muted); }

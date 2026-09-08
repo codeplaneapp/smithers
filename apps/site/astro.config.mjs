@@ -56,7 +56,7 @@ export default defineConfig({
     buildStamp(),
     starlight({
       title: "Smithers",
-      routeMiddleware: "../docs/shared/release-notice.mjs",
+      routeMiddleware: "./scripts/docs-notice.mjs",
       disable404Route: true,
       description: project.description,
       logo: { src: "./src/docs-assets/logo.png", alt: "Smithers" },
@@ -95,12 +95,15 @@ export default defineConfig({
           label: "Get started",
           items: [
             { label: "Overview", slug: "docs" },
-            { slug: "docs/installation" },
-            { slug: "docs/quickstart" }
+            { slug: "docs/quickstart" },
+            { slug: "docs/pricing" },
+            { label: "Open Smithers ↗", link: "https://smithers.sh/smithersai/smithers" }
           ]
         },
-        { label: "Tutorials", items: [{ autogenerate: { directory: "docs/tutorials" } }] },
-        { label: "Guides", items: [{ autogenerate: { directory: "docs/guides" } }], collapsed: true },
+        { label: "Use the app", items: [{ autogenerate: { directory: "docs/app" } }] },
+        { label: "CLI and libraries", collapsed: true, items: [{ slug: "docs/developers" }, { slug: "docs/installation" }, { slug: "docs/cli-quickstart" }] },
+        { label: "Developer tutorials", items: [{ autogenerate: { directory: "docs/tutorials" } }], collapsed: true },
+        { label: "Developer guides", items: [{ autogenerate: { directory: "docs/guides" } }], collapsed: true },
         { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }], collapsed: true },
         { label: "Examples", items: [{ autogenerate: { directory: "docs/examples" } }], collapsed: true },
         {

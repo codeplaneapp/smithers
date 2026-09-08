@@ -59,8 +59,9 @@ function walk(dir) {
 }
 walk(docsRoot)
 
-const groups = ["tutorials", "guides", "concepts", "reference", "troubleshooting", "migration", "examples"]
+const groups = ["app", "tutorials", "guides", "concepts", "reference", "troubleshooting", "migration", "examples"]
 const groupLabel = {
+  app: "Use the app",
   tutorials: "Tutorials",
   guides: "How-to guides",
   concepts: "Concepts",
@@ -70,7 +71,7 @@ const groupLabel = {
   examples: "Examples"
 }
 const byGroup = (g) => pages.filter((p) => p.group === g).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
-const startOrder = ["index.mdx", "installation.mdx", "quickstart.mdx"]
+const startOrder = ["index.mdx", "quickstart.mdx", "pricing.mdx", "developers.mdx", "installation.mdx", "cli-quickstart.mdx"]
 const root = pages.filter((p) => p.group === "").sort((a, b) => startOrder.indexOf(a.rel) - startOrder.indexOf(b.rel))
 const link = (p) => `- [${p.title}](${origin}${p.route})${p.description ? `: ${p.description}` : ""}`
 

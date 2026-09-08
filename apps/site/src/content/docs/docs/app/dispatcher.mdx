@@ -1,0 +1,34 @@
+---
+title: "Inspect the Dispatcher"
+description: "Read automation rules and distinguish declared events from triggers registered on a running box."
+sidebar:
+  order: 6
+---
+
+import AppScreenshot from "../../../../components/AppScreenshot.astro"
+
+Use **Dispatcher** to see which events are meant to start which flows for a repository.
+
+## Read the declared rules
+
+Select **Dispatcher** in the sidebar. Each rule names an event and the work it triggers in plain language.
+
+<AppScreenshot src="/images/app/dispatcher.png" alt="The Dispatcher card lists declared events and the flows they trigger, with a Register a rule button." caption="Signed out, Dispatcher shows the rules declared by the repository." />
+
+For example, the Smithers factory declares a review when a Change opens and a review on weekday mornings. Other rules describe what to do after a landing or a box session.
+
+The label **declared in .smithers/FACTORY.ts** identifies configuration read from the repository. It does not confirm that an event listener is active or that a flow has run.
+
+## Inspect registered triggers
+
+To inspect live trigger state, sign in with an approved account and connect a box. Open **Dispatcher** again. Read the status and event information returned for that box.
+
+For a particular event, inspect the resulting [run](/docs/app/runs/) to determine whether its flow started and what happened. A declaration alone is not a run result.
+
+## Register a rule
+
+With access to the repository's box, select **Register a rule**. Fill in the trigger form and review its flow, schedule or webhook details, and any requested permission before submitting it.
+
+Signed out, **Register a rule** leads to sign-in. Registration also depends on the trigger service being available on your box. If the app reports that the service is unavailable, the rule has not been registered.
+
+For the configuration fields and supported trigger sources, see the [trigger reference](/docs/reference/triggers/). For operating triggers from a terminal, see [Triggers](/docs/guides/triggers/).
