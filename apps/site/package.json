@@ -14,7 +14,7 @@
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy",
     "lint": "eslint --no-config-lookup scripts/support-matrix.test.mjs scripts/sync-support-docs.mjs --rule \"no-unused-vars:error\" && node scripts/check-docs.mjs && node scripts/sync-support-docs.mjs --check",
-    "test": "node --test --test-concurrency=1 scripts/support-matrix.test.mjs scripts/docs-text.test.mjs scripts/built-site.test.mjs scripts/tutorials.test.mjs scripts/deployment.test.mjs"
+    "test": "node --test --test-concurrency=1 scripts/record-tape.test.mjs scripts/support-matrix.test.mjs scripts/docs-text.test.mjs scripts/built-site.test.mjs scripts/tutorials.test.mjs scripts/deployment.test.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",

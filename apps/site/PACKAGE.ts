@@ -284,6 +284,17 @@ const docsTextTest = Smithers.Shell.Test({
   ]
 })
 
+/** Preserve checkout state while recording against an owned detached worktree. */
+const recordTapeTest = Smithers.Shell.Test({
+  shell: "node --test apps/site/scripts/record-tape.test.mjs",
+  data: [
+    Smithers.file("scripts/record-tape.sh"),
+    Smithers.file("scripts/record-tape.test.mjs"),
+    Smithers.file("tapes/cli.tape"),
+    Smithers.file("tapes/bin/smithers")
+  ]
+})
+
 /** Verify the support claims against the release workflow and complete workspace inventory. */
 const supportMatrixTest = Smithers.Shell.Test({
   shell: "node --test --test-concurrency=1 apps/site/scripts/support-matrix.test.mjs",
@@ -394,6 +405,7 @@ export const Package = Smithers.Package({
     apiDocs,
     docsLint,
     docsTextTest,
+    recordTapeTest,
     supportMatrixTest,
     docsRuntimeTests,
     examplesPages,

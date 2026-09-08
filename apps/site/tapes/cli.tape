@@ -1,6 +1,6 @@
 # The hero tape: smithers running this repository's own flows.
 # Record with `sh scripts/record-tape.sh` from apps/site.
-# The helper sets SMITHERS_TAPE_ROOT to an owned scratch workspace.
+# The helper sets SMITHERS_TAPE_ROOT to an owned detached worktree.
 Output apps/site/public/media/cli.gif
 Output apps/site/public/media/cli.webm
 
@@ -19,21 +19,21 @@ Set BorderRadius 12
 Set CursorBlink true
 
 Hide
-Type `export PS1='\[\e[38;5;183m\]❯\[\e[0m\] '; clear`
+Type `cd "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}"; export PS1='\[\e[38;5;183m\]❯\[\e[0m\] '; clear`
 Enter
 Show
 
-Type `smithers ls --root "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}"`
+Type "smithers ls"
 Sleep 200ms
 Enter
 Sleep 22s
 
-Type `smithers up --root "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}" lint -d --data '{"args":"packages/smithers/src/Version.ts"}'`
+Type `smithers up lint -d --data '{"args":"packages/smithers/src/Version.ts"}'`
 Sleep 300ms
 Enter
 Sleep 50s
 
-Type `smithers logs --root "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}" run-1 --follow`
+Type "smithers logs run-1 --follow"
 Sleep 200ms
 Enter
 Sleep 85s
@@ -43,20 +43,20 @@ Sleep 1s
 Type "clear"
 Enter
 Sleep 500ms
-Type `smithers up --root "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}" review -d --data '{"args":"flows/"}'`
+Type `smithers up review -d --data '{"args":"flows/"}'`
 Sleep 300ms
 Enter
 Sleep 50s
 
-Type `smithers up --root "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}" release-notes -d --data '{"args":"last 8"}'`
+Type `smithers up release-notes -d --data '{"args":"last 8"}'`
 Sleep 300ms
 Enter
 Sleep 50s
 
-Type `smithers ps --root "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}"`
+Type "smithers ps"
 Enter
 Sleep 20s
 
-Type `smithers status --root "${SMITHERS_TAPE_ROOT:?Run scripts/record-tape.sh}" run-1`
+Type "smithers status run-1"
 Enter
 Sleep 6s
