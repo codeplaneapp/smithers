@@ -205,7 +205,7 @@ permission-aware spawner as everything else.
 | -------------- | ------------------------------------------------------ | --------------------------------------------------------- |
 | `Container`    | interface and `Context.Service` tag                    | `{ exec: (request: Request) => Effect<Plan, StdError> }`. |
 | `Request`      | interface                                              | `container`, `file`, `args`, `cwd?`, `env?`, `stdin`.     |
-| `Plan`         | interface                                              | `file`, `args`: the argv the host spawns.                 |
+| `Plan`         | interface                                              | `file`, `args`, `env?`: argv and environment overrides for the host spawn.                 |
 | `make`         | `(service: Container) => Container`                    |                                                           |
 | `unavailable`  | `(container: string) => StdError`                      | The refusal a host with no route answers with.            |
 | `makeNoop`     | `() => Container`                                      | Fails every request with `unavailable`.                   |
@@ -216,7 +216,9 @@ permission-aware spawner as everything else.
 `makeCommand` attaches `-i` only when the payload arrives on standard input,
 because a container CLI holding stdin open for a command that never reads it
 makes that command hang. A container name that is empty or starts with `-` is
-`invalid_input`.
+`invalid_input`. Environment values travel through `Plan.env`; argv carries
+only `-e KEY`. Custom transports return any host process environment overrides
+in `Plan.env`.
 
 ## TestRunner
 

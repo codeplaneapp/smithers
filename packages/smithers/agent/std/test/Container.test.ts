@@ -25,14 +25,32 @@ describe("Container.makeCommand", () => {
         "-w",
         "/work",
         "-e",
-        "MODE=test",
+        "MODE",
         "--",
         "worker-1",
         "bash",
         "-lc",
         "echo ready"
-      ]
+      ],
+      env: { MODE: "test" }
     })
+  })
+
+  it("forwards a requested variable by name, never by value", async () => {
+    // `docker exec -e KEY` and `podman exec -e KEY` read the value from their
+    // own environment, which is what `Plan.env` is for. A value written into
+    // the argv would sit in the process table for every local reader and in
+    // every rendering of that argv.
+    const plan = await Effect.runPromise(
+      Container.makeCommand().exec({
+        ...request("worker-1"),
+        env: { DATABASE_PASSWORD: "s3cret-value" }
+      })
+    )
+
+    expect(plan.args).toContain("DATABASE_PASSWORD")
+    expect(plan.args.join(" ")).not.toContain("s3cret-value")
+    expect(plan.env).toEqual({ DATABASE_PASSWORD: "s3cret-value" })
   })
 
   it.each(["--privileged", ""])("refuses container name %j before spawning", async (container) => {

@@ -307,6 +307,58 @@ describe("TestRun", () => {
     ])
   })
 
+  it("never reports a declared environment value in the command it answers with", async () => {
+    // A host that gives a containerised runner a credential through
+    // `Runner.env` must not have it read back: `command` is model-facing and
+    // is recorded by whatever consumes the result. The transport forwards the
+    // variable by name and the value travels on the spawned process.
+    const spawns: Array<ReadonlyArray<string>> = []
+    const environments: Array<Record<string, string> | undefined> = []
+    const capture = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(ChildProcessSpawner.makeNoop({
+      spawn: (command) =>
+        Effect.sync(() => {
+          const standard = command as ChildProcess.StandardCommand
+          spawns.push([standard.command, ...standard.args])
+          environments.push(standard.options.env as Record<string, string> | undefined)
+          return makeHandle({
+            pid: ProcessId(1),
+            exitCode: Effect.succeed(ExitCode(0)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          })
+        })
+    }))
+    const result = await execute(Effect.provide(
+      TestRun.run({}),
+      Layer.mergeAll(
+        capture,
+        TestRunner.layer({
+          command: "pytest",
+          cwd: "/repo",
+          container: "test-worker",
+          env: { DATABASE_PASSWORD: "s3cret-value" }
+        }),
+        Layer.succeed(Container.Container)(Container.makeCommand())
+      )
+    ))
+
+    expect(result.command).not.toContain("s3cret-value")
+    expect(result.command).toBe("bash -lc pytest \"$@\" pytest")
+    expect(result.tail).toBe("")
+    expect(spawns[0]).toContain("DATABASE_PASSWORD")
+    expect(spawns[0]?.join(" ")).not.toContain("s3cret-value")
+    // The value still has to reach the container, so it rides on the
+    // environment of the transport process the host spawns.
+    expect(environments[0]?.["DATABASE_PASSWORD"]).toBe("s3cret-value")
+  })
+
   it("says plainly when the host declares no runner", async () => {
     const spawns: Array<ReadonlyArray<string>> = []
     const exit = await execute(Effect.provide(

@@ -724,7 +724,7 @@ describe("Bash", () => {
         "-w",
         "/testbed",
         "-e",
-        "PYTHONHASHSEED=0",
+        "PYTHONHASHSEED",
         "--",
         "swebench-1",
         "bash",
@@ -744,6 +744,51 @@ describe("Bash", () => {
       args: ["exec", "-w", "/testbed", "--", "swebench-1", "bash", "-lc", "pytest -q tests/test_x.py"],
       stdin: undefined
     })
+  })
+
+  it("keeps a containerised environment value out of the argv and out of a timeout error", async () => {
+    // `env` on a containerised command is a host credential as often as it is
+    // a knob. It must not reach the process table through the argv, nor a
+    // model through the error a timeout renders.
+    const spawns: Array<ReadonlyArray<string>> = []
+    const environments: Array<Record<string, string> | undefined> = []
+    const stalled = ChildProcessSpawner.makeNoop({
+      spawn: (command) => {
+        const standard = command as ChildProcess.StandardCommand
+        spawns.push([...standard.args])
+        environments.push(standard.options.env as Record<string, string> | undefined)
+        return Effect.never
+      }
+    })
+    const exit = await execute(
+      Effect.exit(Bash.run({
+        mode: "unhermetic",
+        container: "swebench-1",
+        env: { DATABASE_PASSWORD: "s3cret-value" },
+        command: "pytest",
+        timeoutMs: 1
+      })).pipe(
+        Effect.provide(Layer.mergeAll(
+          Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(stalled),
+          Layer.succeed(Container.Container)(Container.makeCommand()),
+          Path.layer
+        ))
+      )
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const failure = Option.getOrUndefined(Cause.findErrorOption(exit.cause))
+      expect(failure?.code).toBe("timeout")
+      expect(failure?.message).not.toContain("s3cret-value")
+      expect(failure?.message).toBe("Command timed out: pytest")
+      expect(Cause.pretty(exit.cause)).not.toContain("s3cret-value")
+    }
+    expect(spawns[0]).toContain("DATABASE_PASSWORD")
+    expect(spawns[0]?.join(" ")).not.toContain("s3cret-value")
+    // The value still has to reach the container, so it rides on the
+    // environment of the transport process the host spawns.
+    expect(environments[0]?.["DATABASE_PASSWORD"]).toBe("s3cret-value")
   })
 
   it("asks a containerised shell script for no login flag of its own", async () => {

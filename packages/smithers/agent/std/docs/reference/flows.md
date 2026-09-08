@@ -244,7 +244,7 @@ separately, because the base run carries the same shape:
 
 | Outcome            | Type                           | Meaning                                              |
 | ------------------ | ------------------------------ | ---------------------------------------------------- |
-| `command`          | string                         | The invocation that ran.                             |
+| `command`          | string                         | The logical invocation, without container transport arguments.                             |
 | `exitCode`         | number                         | The runner's exit code.                              |
 | `passed`           | number                         | Tests reported passing. Zero when `parsed` is false. |
 | `failed`           | array of string                | Ids reported failing or erroring.                    |

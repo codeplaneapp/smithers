@@ -51,6 +51,8 @@ export interface Request {
 export interface Plan {
   readonly file: string
   readonly args: ReadonlyArray<string>
+  /** Environment overrides for the transport process, never rendered as argv. */
+  readonly env?: Record<string, string> | undefined
 }
 
 /**
@@ -115,6 +117,10 @@ export const layerNoop: Layer.Layer<Container> = Layer.succeed(Container, makeNo
  * container CLI that holds stdin open for a command that never reads it makes
  * that command hang.
  *
+ * Requested environment variables are forwarded by name (`-e KEY`). Their
+ * values travel in {@link Plan.env}, which the host applies to the transport
+ * process so Docker or Podman can forward them into the container.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -136,12 +142,13 @@ export const makeCommand = (options?: { readonly program?: string | undefined })
             "exec",
             ...(request.stdin ? ["-i"] : []),
             ...(request.cwd === undefined ? [] : ["-w", request.cwd]),
-            ...Object.entries(request.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
+            ...Object.keys(request.env ?? {}).flatMap((key) => ["-e", key]),
             "--",
             request.container,
             request.file,
             ...request.args
-          ]
+          ],
+          ...(request.env === undefined ? {} : { env: request.env })
         })
   })
 }

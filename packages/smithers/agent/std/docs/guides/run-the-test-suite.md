@@ -64,7 +64,7 @@ The result is a reading, not a log:
 
 | Field                               | Meaning                                                                    |
 | ----------------------------------- | -------------------------------------------------------------------------- |
-| `command`                           | The invocation that ran, quotable as the evidence it is.                   |
+| `command`                           | The logical invocation, without container transport arguments.                   |
 | `exitCode`                          | The runner's exit code.                                                    |
 | `passed`                            | Tests reported passing. Zero when `parsed` is false.                       |
 | `failed`                            | Ids of the tests reported failing or erroring.                             |

@@ -451,6 +451,7 @@ interface Plan {
   readonly file: string
   readonly args: ReadonlyArray<string> | undefined
   readonly stdin: string | undefined
+  readonly env: Record<string, string> | undefined
   readonly quoted: string
 }
 
@@ -485,13 +486,14 @@ const plan = (input: Input): Plan | StdError.StdError => {
     )
   }
   if (input.command !== undefined) {
-    return { file: input.command, args: undefined, stdin: input.stdin, quoted: input.command }
+    return { file: input.command, args: undefined, stdin: input.stdin, env: input.env, quoted: input.command }
   }
   const args = [...stdinArguments(interpreter), ...(input.args ?? [])]
   return {
     file: interpreter,
     args,
     stdin: input.script,
+    env: input.env,
     quoted: [interpreter, ...args].join(" ")
   }
 }
@@ -510,7 +512,9 @@ const routed = (
       file: routing.file,
       args: routing.args,
       stdin: plan.stdin,
-      quoted: [routing.file, ...routing.args].join(" ")
+      env: routing.env,
+      // Diagnostics describe the logical invocation, not transport arguments.
+      quoted: plan.quoted
     })
   )
 }
@@ -579,14 +583,14 @@ export const run = Effect.fn("Bash.run")(function*(
     const violation = outsideEnvelope(input, input.command ?? input.script ?? "", path)
     if (violation !== undefined) return yield* Effect.fail(violation)
   }
-  // A container owns the working directory and the environment of what runs in
-  // it, so those travel in the transport's argv rather than in the host spawn.
+  // The working directory belongs to the container. The transport supplies
+  // any environment overrides its host process needs to forward into it.
   const contained = input.container !== undefined
   const spawned = yield* routed(intent, input, yield* Effect.serviceOption(Container.Container))
 
   const result = yield* Exec.exec(spawned.file, {
     ...(input.cwd === undefined || contained ? {} : { cwd: input.cwd }),
-    ...(input.env === undefined || contained ? {} : { env: input.env }),
+    ...(spawned.env === undefined ? {} : { env: spawned.env }),
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxCaptureBytes: MAX_SHELL_OUTPUT_BYTES,
     ...(spawned.args === undefined ? {} : { args: spawned.args }),

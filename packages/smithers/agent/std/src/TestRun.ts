@@ -97,7 +97,9 @@ export const Input = Schema.Struct({
  * @since 0.1.0
  */
 export const Outcome = Schema.Struct({
-  command: Schema.String.annotate({ description: "The invocation that ran, quotable as the evidence it is" }),
+  command: Schema.String.annotate({
+    description: "The logical invocation that ran, without container transport arguments"
+  }),
   exitCode: Schema.Number,
   passed: Schema.Number.annotate({ description: "Tests reported passing; 0 when parsed is false" }),
   failed: Schema.Array(Schema.String).annotate({ description: "Ids of the tests reported failing or erroring" }),
@@ -207,7 +209,9 @@ const execute = (
 > =>
   Effect.gen(function*() {
     const plan = invocation(runner, options.selection)
-    const routed = runner.container === undefined ? plan : Option.isNone(transport)
+    const routed: Container.Plan = runner.container === undefined ?
+      { ...plan, env: runner.env } :
+      Option.isNone(transport)
       ? yield* Effect.fail(Container.unavailable(runner.container))
       : yield* transport.value.exec({
         container: runner.container,
@@ -217,11 +221,12 @@ const execute = (
         ...(runner.env === undefined ? {} : { env: runner.env }),
         stdin: false
       })
-    const quoted = [routed.file, ...routed.args].join(" ")
+    // Report the logical invocation, never the transport or its credentials.
+    const quoted = [plan.file, ...plan.args].join(" ")
     const result = yield* Exec.exec(routed.file, {
       args: [...routed.args],
       ...(options.cwd === undefined || runner.container !== undefined ? {} : { cwd: options.cwd }),
-      ...(runner.env === undefined || runner.container !== undefined ? {} : { env: runner.env }),
+      ...(routed.env === undefined ? {} : { env: routed.env }),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       maxCaptureBytes: MAX_CAPTURE_BYTES
     }).pipe(
