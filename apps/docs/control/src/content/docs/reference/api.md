@@ -1,6 +1,6 @@
 ---
 title: "API reference"
-description: "Every public export of @smthrs/control, module by module: the Control service and its ten operations, the wire schemas, the typed failures, the two ports, the RPC boundary, the projections, and the credential surface."
+description: "Every public export of @smthrs/control, module by module: the Control service and its ten operations, the wire schemas, the typed failures, the three ports, the RPC boundary, the projections, and the credential surface."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/control/docs/api.md"
 ---
 
@@ -44,7 +44,7 @@ and every client projects onto this one interface.
 | `signal`  | `(input: SignalInput) => Effect<Receipt, RunNotFound \| NoMatchingWait \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                 | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
 | `cancel`  | `(input: RunMutationInput) => Effect<Receipt, RunNotFound \| ClaimLost \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                 | `Accepted` or `Terminal`. Never replays its recorded receipt.                                        |
 | `resume`  | same as `cancel`                                                                                                                                                                                            | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
-| `list`    | `(input: ListRequest) => Effect<ListResponse, ControlError>`                                                                                                                                                | A bounded page of flows or runs.                                                                     |
+| `list`    | `(input: ListRequest) => Effect<ListResponse, ControlError>`                                                                                                                                                | A bounded page of flows, runs, triggers, or trigger fires.                                           |
 | `watch`   | `(filter: WatchFilter) => Stream<ControlEvent, ControlError>`                                                                                                                                               | Committed journal entries, plus the deltas the plane derives.                                        |
 
 There is no `pause`. An operator park is written through
@@ -140,18 +140,25 @@ the same run.
 
 ### Listing
 
-| Export            | Shape                                                                                                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `defaultPageSize` | `100`.                                                                                                                                                                 |
-| `maxPageSize`     | `500`.                                                                                                                                                                 |
-| `PageLimit`       | An integer between 1 and `maxPageSize`.                                                                                                                                |
-| `ListRequest`     | `{ _tag: "flows", filters?, cursor?, limit? }` or `{ _tag: "runs", filters?: { runId?, flowId?, status?, principalId?, parentRunId?, lineageId? }, cursor?, limit? }`. |
-| `ListResponse`    | `{ _tag: "flows", items, warnings?, nextCursor? }` or `{ _tag: "runs", items: RunSummary[], nextCursor? }`.                                                            |
+| Export            | Shape                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultPageSize` | `100`.                                                                                                                                                                                                                                                                                                                                                                    |
+| `maxPageSize`     | `500`.                                                                                                                                                                                                                                                                                                                                                                    |
+| `PageLimit`       | An integer between 1 and `maxPageSize`.                                                                                                                                                                                                                                                                                                                                   |
+| `ListRequest`     | `{ _tag: "flows", filters?, cursor?, limit? }`, `{ _tag: "runs", filters?: { runId?, flowId?, status?, principalId?, parentRunId?, lineageId? }, cursor?, limit? }`, `{ _tag: "triggers", filters?: { triggerId?, flowId?, enabled? }, cursor?, limit? }`, or `{ _tag: "fires", filters?: { triggerId?, runId?, outcome? }, cursor?, limit? }`.                           |
+| `ListResponse`    | `{ _tag: "flows", items, warnings?, nextCursor? }`, `{ _tag: "runs", items: RunSummary[], nextCursor? }`, `{ _tag: "triggers", items: TriggerSummary[], nextCursor? }`, or `{ _tag: "fires", items: FireSummary[], nextCursor? }`.                                                                                                                                        |
+| `TriggerSummary`  | `{ triggerId, flowId, input: Json, cron, timezone?, overlap: "skip" \| "buffer-one" \| "supersede", catchUp: "none" \| "one" \| "all", maxCatchUp?, enabled, revision, lastFiredAtMs?, pendingAtMs?, activeRunId?, nextOccurrencesMs: number[], schedulerLastTickMs? }`. One registered trigger. `schedulerLastTickMs` absent means no scheduler has ticked on this host. |
+| `FireOutcome`     | `"launched" \| "completed" \| "skipped" \| "buffered" \| "superseded" \| "failed"`. The same words the triggers package records in its fire ledger.                                                                                                                                                                                                                       |
+| `FireSummary`     | `{ triggerId, occurrenceAtMs, outcome: FireOutcome \| null, runId?, error?, waiting?: "approval" }`. One claimed occurrence; `outcome: null` is the window between the claim and its result.                                                                                                                                                                              |
 
 `principalId` stays on the wire and is refused by `Control.list`. Deleting the
 field would move the same overbroad answer one layer out, because struct
 decoding strips a property the schema does not declare and the server would
 never see it.
+
+The `triggers` and `fires` variants are answered through the `DispatchReader`
+port. A host without one refuses both with `InvalidInput` whose issue is
+`this host serves no trigger store`, never with an empty page.
 
 ### Receipts
 
@@ -221,7 +228,9 @@ request can have reached the server even when its response was lost.
 Writes delegate to `ControlRuntime`; journal events are observational records
 committed with the state they describe. `watch` only replays and follows
 committed entries. `ControlExecutor` is read optionally, so a composition
-without one records but starts nothing.
+without one records but starts nothing. `DispatchReader` is read optionally
+too: without one, `list` still answers `flows` and `runs`, and refuses
+`triggers` and `fires` with the typed issue `this host serves no trigger store`.
 
 ## ControlRuntime
 
@@ -378,6 +387,38 @@ The acceptance port from the control plane into a real run executor.
 `settleCancelledPark` is called after the cancel mutation commits, never inside
 it: driving a run re-enters the engine, whose writes would wait on the writer
 the transaction holds.
+
+## DispatchReader
+
+The read port from the control plane into a host's trigger store. `Control.list`
+answers `{ _tag: "triggers" }` and `{ _tag: "fires" }` through it. The port
+lives here rather than in `@smthrs/triggers` because that package depends on
+this one (its scheduler launches runs through `Control`), so the adapter over a
+real `TriggerStore` is composed by the host.
+
+| Export           | Kind     | Signature                                                                   |
+| ---------------- | -------- | --------------------------------------------------------------------------- |
+| `DispatchReader` | class    | `Context.Service<DispatchReader, Service>` at key `/control/DispatchReader` |
+| `make`           | function | `(implementation: Service) => Service`                                      |
+| `makeNone`       | function | `() => Service`. Both methods fail with `refuse()`.                         |
+| `refuse`         | function | `() => InvalidInput` with code `invalid_input` and issue `noStoreIssue`.    |
+| `noStoreIssue`   | constant | `"this host serves no trigger store"`.                                      |
+| `layer`          | layer    | `(implementation: Service) => Layer<DispatchReader>`                        |
+| `layerNone`      | layer    | `Layer<DispatchReader>` providing `makeNone()`.                             |
+
+### Service
+
+| Method  | Signature                                                                           |
+| ------- | ----------------------------------------------------------------------------------- |
+| `list`  | `(request: TriggersRequest) => Effect<ReadonlyArray<TriggerSummary>, ControlError>` |
+| `fires` | `(request: FiresRequest) => Effect<ReadonlyArray<FireSummary>, ControlError>`       |
+
+Each method receives the whole listing request and answers every row it has,
+newest fire first. A reader may narrow by `filters`; `Control.list` applies the
+same filters again and pages the rows with `cursor` and `limit`, so a reader
+that returns every row is still correct and both variants page exactly as
+`flows` and `runs` do. `TriggersRequest` and `FiresRequest` are the two
+`ListRequest` members by tag.
 
 ## ControlRpcs
 

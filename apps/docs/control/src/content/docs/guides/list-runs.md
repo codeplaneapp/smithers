@@ -6,8 +6,9 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/control/docs/guides/list-runs.md"
 ---
 
-`list` answers two questions under one verb, selected by the request's tag:
-what can this host plan, and what runs exist.
+`list` answers four questions under one verb, selected by the request's tag:
+what can this host plan, what runs exist, which triggers are registered, and
+what became of each trigger occurrence.
 
 ## List the flows a host can plan
 
@@ -47,6 +48,26 @@ so does every `smthrs status <run>`.
 Version 1.0.0-rc.0 records no launch principal on a run summary, so there is
 nothing to evaluate the filter against, and a caller using it as a tenant
 restriction would otherwise receive every run.
+
+## List triggers and their fires
+
+```ts
+const registered = yield * control.list({ _tag: "triggers", filters: { enabled: true } })
+const triggers = registered._tag === "triggers" ? registered.items : []
+// [{ triggerId: "nightly-lint", flowId: "lint", cron: "0 3 * * *", enabled: true, nextOccurrencesMs: [...], ... }]
+
+const ledger = yield * control.list({ _tag: "fires", filters: { runId } })
+const fires = ledger._tag === "fires" ? ledger.items : []
+// [{ triggerId: "nightly-lint", occurrenceAtMs, outcome: "launched", runId }]
+```
+
+`triggers` filters on `triggerId`, `flowId`, and `enabled`; `fires` filters on
+`triggerId`, `runId`, and `outcome`, and the ledger comes back newest first. Both
+are read through the `DispatchReader` port the host composes over its trigger
+store. A host that provides none refuses both variants with `InvalidInput` and
+the issue `this host serves no trigger store`. It never answers an empty page
+for them, because an empty page would claim the host has no triggers when it
+cannot read its store at all.
 
 ## Page through the result
 

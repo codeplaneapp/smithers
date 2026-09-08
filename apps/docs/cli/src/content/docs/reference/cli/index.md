@@ -64,9 +64,13 @@ Credential encryption requires `SMITHERS_CREDENTIAL_KEY`, a base64-encoded
 32-byte host key. Keep that key outside the database. Integrations read
 `.smithers/integrations.json` (version 1 with an `integrations` array), or
 discover configured provider environment variables; each entry names an `id`,
-`provider`, and optional `tokenEnv` or `credentialId`. GitHub hook declarations
-live in `.smithers/listeners.json`; deletion additionally requires
-`--allow-delete`.
+`provider`, and optional `tokenEnv` or `credentialId`. Workspace configuration
+selects among host-authorized pairings rather than creating them: an entry may
+name only its provider's own credential variables plus any listed in
+`SMITHERS_INTEGRATION_TOKEN_ENV`, and only its provider's public API origin plus
+the one named by `SMITHERS_GITHUB_API_BASE_URL`, `SMITHERS_LINEAR_API_BASE_URL`,
+or `SMITHERS_TELEGRAM_API_BASE_URL`. GitHub hook declarations live in
+`.smithers/listeners.json`; deletion additionally requires `--allow-delete`.
 
 `serve` hosts the trigger scheduler; `triggers serve` runs it separately.
 Scheduled and manual occurrences preserve approval requirements. Disabling a

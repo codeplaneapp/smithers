@@ -109,7 +109,7 @@ listing, and a watch, with no database and no engine.
 
 ## The three seams
 
-`Control` keeps its promises through three ports, and a host chooses an
+`Control` keeps its promises through four ports, and a host chooses an
 implementation of each:
 
 - `ControlRuntime` is the persistence port: plans, approval tokens, grants,
@@ -120,6 +120,10 @@ implementation of each:
   a signal, or a resume to a real engine and learns only what the engine did
   with it. A composition that provides none records and observes but starts
   nothing, which is the right shape for a monitor or a read-only dashboard.
+- `DispatchReader` is the trigger read port: `list` answers the `triggers` and
+  `fires` variants through it. A composition that provides none still lists
+  flows and runs, and refuses those two variants with a typed `InvalidInput`
+  rather than an empty page.
 - `ControlServer` and `ControlClient` are the transport: the same `Control`
   vtable served as RPC and projected back on the other side of a wire. A caller
   handed either one cannot tell which it has.
@@ -138,6 +142,7 @@ The root entry point exports these namespaces, and each is also importable from
 | `ControlRuntime`                        | The persistence port, plus `layerMemory`, its deterministic in-memory implementation.                                                     |
 | `SqlControlRuntime`                     | The durable persistence adapter over a SQL database and the fenced run store.                                                             |
 | `ControlExecutor`                       | The execution port: launch, cancel, signal, resume, and the park settlement a cancel needs.                                               |
+| `DispatchReader`                        | The trigger read port: the registered triggers and the fire ledger `list` pages, plus `layerNone` for a host without a store.             |
 | `ControlRpcs`                           | The ten remote procedures, the authentication middleware, and a bearer authenticator.                                                     |
 | `ControlServer`                         | The RPC handlers and the HTTP plus WebSocket mount.                                                                                       |
 | `ControlClient`                         | The RPC client projected back into the `Control` interface.                                                                               |

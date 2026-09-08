@@ -187,6 +187,16 @@ real failure, which is usually a missing `Action.toLayer`. Add the
 implementation, or widen the flow's declared error schema if the failure is
 genuinely part of its contract.
 
+**Served through a proxy, the caller sees a refusal instead.** The raw error is
+the best diagnostic there is inside the process, so the engine keeps dying with
+it, but it stays here. A defect crossing `FlowProxyServer` leaves the process:
+the proxy logs it, and an RPC server answers the caller with `Schema.Defect` of
+it, which encodes a plain object as full JSON. An implementation error is the
+kind that carries the credential the call was made with, so the proxy logs the
+same bounded, redacted rendering the engine writes and re-dies with
+`FlowHandlerDefect`, whose `diagnostic` field carries that rendering. Read the
+engine's own annotated log line for the unredacted context.
+
 ## Warnings a durable store can raise
 
 These are logged, not raised. Each one means the engine kept running on a
