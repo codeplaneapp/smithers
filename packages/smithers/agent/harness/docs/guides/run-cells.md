@@ -113,6 +113,11 @@ The failure split is the contract `EngineLike.call` declares:
   engine failure, travels in the effect's error channel and tears the cell
   down.
 
+QuickJS closes host-call admission before running teardown jobs. Calls and
+checkpoints attempted by cleanup code are rejected without queuing another
+host operation. Teardown runs at most 1,024 promise jobs before releasing the
+frame handles, so asynchronous cleanup is not guaranteed to finish.
+
 ## Read the outcome
 
 One evaluation settles with one of three `Cell.Outcome` members:

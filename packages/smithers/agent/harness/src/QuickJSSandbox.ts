@@ -930,6 +930,7 @@ const openRealm = (
     let steps = 0
     let exhausted: Cell.Rejected | undefined
     let pending: Array<Sandbox.PendingCall> = []
+    let closing = true
     let ordinal = 0
     let lines: Array<printChannel.Statement> = []
     let retained = 0
@@ -1010,12 +1011,18 @@ const openRealm = (
       }
     }
 
+    const abort = (message: string): void => {
+      closing = true
+      for (const call of pending.splice(0)) call.abort(message)
+    }
+
     const queue = (
       kind: "call" | "checkpoint",
       flow: string,
       input: Schema.Json,
       at: Schema.Json | undefined
     ): QuickJSHandle => {
+      if (closing) throw new Error("The cell is closing; no further host calls are accepted")
       const deferred = context.newPromise()
       const reply = (payload: Schema.Json): void => {
         const remaining = Math.max(0, memoryBytes - heapUsed())
@@ -1178,6 +1185,7 @@ const openRealm = (
         steps = 0
         exhausted = undefined
         pending = []
+        closing = false
         ordinal = 0
         lines = []
         retained = 0
@@ -1245,6 +1253,8 @@ const openRealm = (
 
         let settled: Cell.Outcome | undefined
         const poll = (): void => {
+          // Teardown alone runs jobs once admission closes, under its own budget.
+          if (closing) return
           runtime.executePendingJobs()
           if (exhausted !== undefined) {
             settled = exhausted
@@ -1295,9 +1305,7 @@ const openRealm = (
             })
           },
           wait: Effect.void,
-          abort: () => {
-            for (const call of pending.splice(0)) call.abort("The cell was interrupted")
-          },
+          abort,
           handler: (call) =>
             Effect.suspend(() => {
               const pausedAt = clock.now()
@@ -1311,17 +1319,23 @@ const openRealm = (
             }),
           limits
         }).pipe(
-          // A realm that outlives its frame accumulates whatever the frame left
-          // live, and disposing one while a bridge promise is still pending
-          // aborts inside QuickJS. So every frame closes its own leftovers:
-          // queued bridges are settled, the job queue is drained once, and the
-          // cell's promise handle is released here rather than at teardown.
+          // Closing is irreversible within this frame. Rejecting a bridge
+          // resumes user catch/finally blocks, so admission must close before
+          // any of those jobs can allocate another host-owned promise handle.
           Effect.ensuring(
             Effect.sync(() => {
-              /* v8 ignore next -- `driveCell` drains `pending` on every exit it controls, so this loop has work only when the frame is interrupted between two settled calls; no deterministic test can produce that interleaving, and without the guard such a frame would leave a live bridge handle in a realm that outlives it, which aborts inside QuickJS at disposal */
-              for (const call of pending.splice(0)) call.abort("The cell was interrupted")
-              runtime.executePendingJobs()
-              cellHandle.dispose()
+              closing = true
+              try {
+                // A cleanup may keep scheduling promise jobs even without host
+                // calls. Bound that work independently of the compute clock.
+                for (let jobs = 0;; jobs++) {
+                  abort("The cell was interrupted")
+                  if (jobs >= 1024 || !runtime.hasPendingJob()) break
+                  runtime.executePendingJobs(1).dispose()
+                }
+              } finally {
+                cellHandle.dispose()
+              }
             })
           )
         )

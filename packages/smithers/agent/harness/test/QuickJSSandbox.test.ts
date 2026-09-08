@@ -9,6 +9,7 @@
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Schema, Scope } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Cell from "../src/Cell.ts"
+import { HarnessError } from "../src/HarnessError.ts"
 import * as QuickJSSandbox from "../src/QuickJSSandbox.ts"
 import * as Sandbox from "../src/Sandbox.ts"
 
@@ -503,6 +504,65 @@ describe("QuickJSSandbox calls", () => {
 })
 
 describe("QuickJSSandbox interruption", () => {
+  it.each(["interruption", "permission failure"] as const)(
+    "closes cleanly after %s with nested async finally calls",
+    async (reason) => {
+      let calls = 0
+      const failure = new HarnessError({ code: "engine_failed", message: "permission park" })
+      const exit = await evaluate(
+        `try { await ctx.call("fs/list", {}) } finally {
+           try { await ctx.call("fs/list", {}) } finally {
+             try { await ctx.call("fs/list", {}) } finally {
+               await ctx.call("fs/list", {})
+             }
+           }
+         }`,
+        {
+          call: () => {
+            calls += 1
+            return reason === "interruption" ? Effect.interrupt : Effect.fail(failure)
+          }
+        }
+      )
+      // evaluate includes scope closure, so leaked handles appear as defects
+      // in this Exit rather than escaping a later, unobserved finalizer.
+      const after = await outcomeOf(`ctx.done("after")`)
+      expect(calls).toBe(1)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        if (reason === "interruption") expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        else expect(exit.cause.reasons).toEqual([expect.objectContaining({ _tag: "Fail", error: failure })])
+      }
+      expect(after).toMatchObject({ _tag: "settled", transition: { _tag: "complete", output: "after" } })
+    },
+    60_000
+  )
+
+  it("bounds teardown jobs even when cleanup keeps scheduling microtasks", async () => {
+    const exit = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.makeWithClock
+      const realm = yield* sandbox.openRealm!({ flows, limits: { steps: Number.MAX_SAFE_INTEGER } })
+      return yield* realm.evaluate({
+        cell: Cell.source(`try { await ctx.call("fs/list", {}) } finally {
+          while (true) { await null }
+        }`),
+        frame: 0,
+        call: () => Effect.interrupt
+      })
+    }).pipe(
+      // Neither wall-clock nor step exhaustion can rescue an unbounded drain.
+      Effect.provideService(QuickJSSandbox.ComputeClock, { now: () => 0 }),
+      Effect.scoped,
+      Effect.exit,
+      Effect.runPromise
+    )
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+    expect(await outcomeOf(`ctx.done("after")`)).toMatchObject({
+      _tag: "settled",
+      transition: { _tag: "complete", output: "after" }
+    })
+  }, 60_000)
+
   it("tears the realm down when a frame is interrupted mid-call, and a fresh realm still runs", async () => {
     const result = await Effect.gen(function*() {
       const sandbox = yield* QuickJSSandbox.make
