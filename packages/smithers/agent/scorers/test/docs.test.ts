@@ -1,5 +1,8 @@
+import * as Effect from "effect/Effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import * as Sampling from "../src/Sampling.ts"
+import * as Scorer from "../src/Scorer.ts"
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), "utf8")
 
@@ -48,6 +51,20 @@ const tabled = (): ReadonlyArray<string> =>
   [...read("../docs/api.md").matchAll(/^\| `([A-Za-z]+\.[A-Za-z0-9_$]+)` *\| /gmu)].map(([, name]) => name!)
 
 describe("documentation", () => {
+  it("requires a shared selection for paired scorer comparisons", async () => {
+    const sampling = { ratio: 0.5, seed: "same" }
+    const decisions = await Promise.all(["judge-a", "judge-b"].map((id) => {
+      const scorer = Scorer.make({ id, version: "1", score: () => Effect.succeed({ score: 1 }) })
+      return Effect.runPromise(Sampling.decide(sampling, "step-3", scorer.scorerKey))
+    }))
+    expect(decisions).toEqual([false, true])
+
+    const page = read("../docs/concepts/sampling.md").replace(/\s+/g, " ")
+    expect(page).toContain("target, ratio, seed, and `scorerKey` all match")
+    expect(page).toContain("one host-owned selection reused for both scorers")
+    expect(page).toContain("sample everything with `\"all\"`")
+  })
+
   it("tables every documented export exactly once", () => {
     const rows = tabled()
     expect(rows.length).toBeGreaterThan(0)
