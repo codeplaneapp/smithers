@@ -295,9 +295,9 @@ const Sha256Schema = Schema.Union([Schema.String, Schema.Uint8Array]).pipe(
   })
 ).annotate({
   identifier: "@smthrs/crypto/Sha256",
-  // Hash inputs can be credentials or multi-megabyte buffers. This security
-  // boundary overrides a caller's reportInput request so no enclosing schema
-  // issue retains the value by reference.
+  // Hash inputs can be credentials or multi-megabyte buffers. This overrides
+  // input reporting for this node only. Enclosing schemas use their own parse
+  // options: callers must set reportInput: false at the outermost decode.
   parseOptions: { reportInput: false }
 })
 
@@ -305,10 +305,13 @@ const Sha256Schema = Schema.Union([Schema.String, Schema.Uint8Array]).pipe(
  * One-way schema transformation from text or bytes to {@link Digest}.
  *
  * This is the schema-composition face of {@link digest}. Operational failures
- * become redacted `SchemaError` issues whose annotations retain the typed
- * `Sha256Error` as `cause`. Encoding is forbidden because a digest cannot
- * reconstruct its source. `Digest` and `digest` remain attached properties for
- * existing consumers; both are also ordinary named exports.
+ * become `SchemaError` issues without reported input at this node. Composed
+ * schemas must be decoded with `reportInput: false` at the outermost boundary
+ * to suppress input capture by enclosing issues, including sibling failures.
+ * Issue annotations retain the typed `Sha256Error` as `cause`; host causes and
+ * custom schema diagnostics are not sanitized. Encoding is forbidden because
+ * a digest cannot reconstruct its source. `Digest` and `digest` remain attached
+ * properties for existing consumers; both are also ordinary named exports.
  *
  * @category transformations
  * @since 0.1.0

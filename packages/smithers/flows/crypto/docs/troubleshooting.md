@@ -106,14 +106,18 @@ you want the typed failure in the error channel.
 
 ## The hashed value is missing from the error
 
-**Symptom.** You passed `reportInput: true` and the schema issue still has no
-`actual`.
+**Symptom.** You passed `reportInput: true` and the standalone `Sha256` issue
+still has no `input`.
 
-**Cause.** This is deliberate. The `Sha256` schema sets `reportInput: false`,
-which overrides the caller, because hash inputs can be credentials or
-multi-megabyte buffers.
+**Cause.** The `Sha256` schema sets `reportInput: false` for its own node,
+because hash inputs can be credentials or multi-megabyte buffers. This does
+not override an enclosing schema's input reporting.
 
-**Fix.** Log the digest, or log the input yourself at a place you control.
+**Fix.** To suppress input capture throughout a composed schema, pass
+`reportInput: false` at the outermost decode. See the
+[composition example](./guides/hash-a-structured-value.md#compose-the-sha256-schema).
+Preserved causes and custom diagnostics still need separate handling before
+logging a complete error.
 
 ## A digest cannot be converted back into its source bytes
 

@@ -1,5 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { Crypto, Effect, Schema } from "effect"
+import { Crypto, Effect, PlatformError, Schema, SchemaIssue } from "effect"
+import { inspect } from "node:util"
 import { describe, expect, it } from "vitest"
 import { Digest, digest, digestSync, Sha256, Sha256Error, syncCrypto } from "../src/index.ts"
 import { millionA, vectors } from "./fixtures.ts"
@@ -12,6 +13,30 @@ const decode = (input: string | Uint8Array): Digest =>
 
 const digestFailure = (input: string | Uint8Array) =>
   Effect.runSync(Effect.flip(Effect.provideService(digest(input), Crypto.Crypto, syncCrypto)))
+
+const expectRedacted = (error: Schema.SchemaError, secret: string): void => {
+  const visit = (issue: SchemaIssue.Issue): void => {
+    expect(issue).not.toHaveProperty("input")
+    expect(issue).not.toHaveProperty("actual")
+    if ("issue" in issue) visit(issue.issue)
+    if ("issues" in issue) issue.issues.forEach(visit)
+  }
+  visit(error.issue)
+  const bytes = new TextEncoder().encode(secret)
+  for (
+    const serialized of [
+      error.message,
+      JSON.stringify(error),
+      JSON.stringify(error.issue),
+      inspect(error, { depth: null, breakLength: Infinity, compact: true }),
+      inspect(error, { depth: null, breakLength: Infinity, compact: true, customInspect: false })
+    ]
+  ) {
+    expect(serialized).not.toContain(secret)
+    expect(serialized).not.toContain(JSON.stringify(bytes))
+    expect(serialized).not.toContain(inspect(bytes, { breakLength: Infinity, compact: true }))
+  }
+}
 
 describe("SHA-256 entry points", () => {
   it.each(vectors)("matches the published vector for %j", (input, expected) => {
@@ -109,6 +134,7 @@ describe("Digest validation and one-way schema behavior", () => {
     ))
     expect(error.message).not.toContain(secret)
     expect(error.issue).not.toHaveProperty("actual")
+    expectRedacted(error, secret)
   })
 
   it("uses the exact forbidden-encode message", () => {
@@ -149,6 +175,116 @@ describe("Digest validation and one-way schema behavior", () => {
     expect(digestFailure(bytes)).toMatchObject({
       code: "invalid_input",
       cause: expect.any(TypeError)
+    })
+  })
+})
+
+// Child parse options cannot change an enclosing issue's input reporting.
+// These controls pin that limitation alongside the documented decode boundary.
+describe("composed schema input reporting", () => {
+  const secret = "hash-input-secret"
+  const bytes = new TextEncoder().encode(secret)
+  const failedHost = Crypto.make({
+    randomBytes: (size) => new Uint8Array(size),
+    digest: () =>
+      Effect.fail(PlatformError.badArgument({
+        module: "test-host",
+        method: "digest",
+        description: "host unavailable"
+      }))
+  })
+  const defectiveHost = Crypto.make({
+    randomBytes: (size) => new Uint8Array(size),
+    digest: () => Effect.die(new Error("host unavailable"))
+  })
+  const failures = [
+    { label: "host failure, text", contents: secret, crypto: failedHost },
+    { label: "host failure, bytes", contents: bytes, crypto: failedHost },
+    { label: "host defect, text", contents: secret, crypto: defectiveHost },
+    { label: "host defect, bytes", contents: bytes, crypto: defectiveHost },
+    { label: "invalid UTF-16", contents: `${secret}\ud800`, crypto: syncCrypto }
+  ]
+
+  it.each(failures)("redacts standalone issues with reportInput:true ($label)", ({ contents, crypto }) => {
+    const error = Effect.runSync(Effect.flip(
+      Schema.decodeUnknownEffect(Sha256)(contents, { reportInput: true }).pipe(
+        Effect.provideService(Crypto.Crypto, crypto)
+      )
+    ))
+    expectRedacted(error, secret)
+  })
+
+  describe.each([
+    {
+      label: "Struct",
+      schema: Schema.Struct({ contents: Sha256 }),
+      wrap: (contents: string | Uint8Array) => ({ contents })
+    },
+    {
+      label: "Array",
+      schema: Schema.Array(Sha256),
+      wrap: (contents: string | Uint8Array) => [contents]
+    },
+    {
+      label: "Union",
+      schema: Schema.Union([Schema.Struct({ contents: Sha256 }), Schema.Number]),
+      wrap: (contents: string | Uint8Array) => ({ contents })
+    }
+  ])("$label", ({ schema, wrap }) => {
+    it.each(failures)("requires outer reportInput:false ($label)", ({ contents, crypto }) => {
+      const input = wrap(contents)
+      const decodeFailure = (reportInput: boolean) =>
+        Effect.runSync(Effect.flip(
+          Schema.decodeUnknownEffect(schema)(input, { reportInput }).pipe(
+            Effect.provideService(Crypto.Crypto, crypto)
+          )
+        ))
+
+      const unsafe = decodeFailure(true)
+      expect(unsafe.issue.input).toBe(input)
+      expect(JSON.stringify(unsafe.issue)).toContain(JSON.stringify(contents))
+      expect(inspect(unsafe, { depth: null, breakLength: Infinity, compact: true, customInspect: false })).toContain(
+        inspect(contents, { breakLength: Infinity, compact: true })
+      )
+
+      expectRedacted(decodeFailure(false), secret)
+    })
+  })
+
+  const Manifest = Schema.Struct({ contents: Sha256, name: Schema.String })
+  describe.each([
+    { label: "Struct", schema: Manifest, wrap: (contents: string | Uint8Array) => ({ contents, name: 42 }) },
+    {
+      label: "Array",
+      schema: Schema.Array(Manifest),
+      wrap: (contents: string | Uint8Array) => [{ contents, name: 42 }]
+    },
+    {
+      label: "Union",
+      schema: Schema.Union([Manifest, Schema.Number]),
+      wrap: (contents: string | Uint8Array) => ({ contents, name: 42 })
+    }
+  ])("$label with a sibling validation failure", ({ schema, wrap }) => {
+    it.each([secret, bytes])("requires outer reportInput:false for %j", (contents) => {
+      const input = wrap(contents)
+      const decodeFailure = (reportInput: boolean) =>
+        Effect.runSync(Effect.flip(
+          Schema.decodeUnknownEffect(schema)(input, { reportInput, errors: "all" }).pipe(
+            Effect.provideService(Crypto.Crypto, syncCrypto)
+          )
+        ))
+
+      const unsafe = decodeFailure(true)
+      expect(unsafe.issue.input).toBe(input)
+      expect(JSON.stringify(unsafe.issue)).toContain(JSON.stringify(contents))
+      expect(inspect(unsafe, { depth: null, breakLength: Infinity, compact: true, customInspect: false })).toContain(
+        inspect(contents, { breakLength: Infinity, compact: true })
+      )
+
+      const safe = decodeFailure(false)
+      expect(safe.message).toContain("Expected string")
+      expect(safe.message).not.toContain("[digest_failed]")
+      expectRedacted(safe, secret)
     })
   })
 })
