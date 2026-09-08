@@ -98,6 +98,7 @@ const cards = [
 <script>
   import { fillRepoStats } from "./repoStats"
 
+  /* The grid's cards are the section's descendants. */
   const root = document.querySelector<HTMLElement>("[data-available-repos]")
-  if (root) void fillRepoStats(root)
+  if (root) void fillRepoStats(root.dataset.endpoint!, [...root.querySelectorAll<HTMLElement>("[data-repo]")])
 </script>

@@ -67,6 +67,7 @@ const description = `${repo.name} opens on Smithers as its maintainers claim it.
 <script>
   import { fillRepoStats } from "./repoStats"
 
-  const root = document.querySelector<HTMLElement>("[data-coming-soon-repo]")
-  if (root) void fillRepoStats(root)
+  /* This page's only card is the article itself, not a descendant of it. */
+  const card = document.querySelector<HTMLElement>("[data-coming-soon-repo]")
+  if (card) void fillRepoStats(card.dataset.endpoint!, [card])
 </script>

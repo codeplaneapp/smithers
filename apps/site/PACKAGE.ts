@@ -287,6 +287,17 @@ const docsTextTest = Smithers.Shell.Test({
   ]
 })
 
+/** Fill repository cards from the public catalog: the parse, the count validation, the status fallback, and both call sites. */
+const repoStatsTest = Smithers.Shell.Test({
+  shell: "node --test --test-concurrency=1 apps/site/scripts/repo-stats.test.mjs",
+  data: [
+    Smithers.file("scripts/repo-stats.test.mjs"),
+    Smithers.file("src/components/repoStats.ts"),
+    Smithers.file("src/components/AvailableRepos.astro"),
+    Smithers.file("src/components/ComingSoonRepo.astro")
+  ]
+})
+
 /** Preserve checkout state while recording against an owned detached worktree. */
 const recordTapeTest = Smithers.Shell.Test({
   shell: "node --test apps/site/scripts/record-tape.test.mjs",
@@ -408,6 +419,7 @@ export const Package = Smithers.Package({
     apiDocs,
     docsLint,
     docsTextTest,
+    repoStatsTest,
     recordTapeTest,
     supportMatrixTest,
     docsRuntimeTests,
