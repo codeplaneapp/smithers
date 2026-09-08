@@ -1,7 +1,9 @@
 /*
  * The CI matrix card (docs/LOCAL-APP.md "Cards: target graph"): the GitHub
- * workflows the graph implies — jobs, their targets, and the shard fan-out —
- * with the generated YAML in a collapsible monospace block per workflow.
+ * Actions pipelines the graph implies (jobs, their targets, and the shard
+ * fan-out) with the generated YAML in a collapsible monospace block per
+ * pipeline. Product copy says "pipeline", never "workflow"; the GitHub file
+ * keeps its own name.
  */
 import { Badge, EmptyState } from "@smthrs/ui"
 import type { Card } from "../state/AppState"
@@ -17,15 +19,15 @@ export const CiMatrixCardBody = ({ card }: { readonly card: Extract<Card, { kind
       </p>
     )
   }
-  if (result.workflows.length === 0) return <EmptyState description="The graph implies no CI workflows." />
+  if (result.workflows.length === 0) return <EmptyState description="The graph implies no CI pipelines." />
   return (
     <div className="ci-matrix-card" data-testid={`ci-matrix-card-${repoId}`}>
       {result.workflows.map((workflow) => (
         <section key={workflow.path} className="ci-matrix-workflow" data-workflow={workflow.name}>
           <h3 className="ci-matrix-workflow-name">
-            {workflow.name} <code className="graph-drawer-mono">{workflow.path}</code>
+            pipeline {workflow.name} <code className="graph-drawer-mono">{workflow.path}</code>
           </h3>
-          <table className="ci-matrix-jobs" aria-label="Workflow jobs">
+          <table className="ci-matrix-jobs" aria-label="CI jobs">
             <thead>
               <tr>
                 <th scope="col">Job</th>

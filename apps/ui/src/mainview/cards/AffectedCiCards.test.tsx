@@ -135,7 +135,9 @@ describe("the CI matrix card", () => {
   test("workflows, jobs, targets and the matrix render; the YAML is collapsible monospace", () => {
     const host = renderCi(ciCard({}))
     const workflow = host.querySelector("[data-workflow=\"ci\"]")
+    expect(workflow?.querySelector(".ci-matrix-workflow-name")?.textContent).toContain("pipeline ci")
     expect(workflow?.textContent).toContain(".github/workflows/ci.yml")
+    expect(host.querySelector("table.ci-matrix-jobs")?.getAttribute("aria-label")).toBe("CI jobs")
     const job = host.querySelector("[data-job-row=\"main\"]")
     expect(job?.textContent).toContain("//.github:ci")
     expect(job?.textContent).toContain("//src:typeCheck")
@@ -145,12 +147,25 @@ describe("the CI matrix card", () => {
     expect(yaml?.querySelector("pre")?.textContent).toContain("name: ci")
   })
 
+  test("product copy never says workflow: empty state, headings, and the jobs table", () => {
+    const empty = renderCi(ciCard({ result: { repoId: "force", workflows: [], durationMs: 1 } }))
+    expect(empty.textContent).toContain("The graph implies no CI pipelines.")
+    const host = renderCi(ciCard({}))
+    for (const el of [empty, host]) {
+      expect(el.textContent?.toLowerCase()).not.toContain("workflow jobs")
+      expect(el.textContent).not.toContain("CI workflows")
+      for (const table of el.querySelectorAll("table")) {
+        expect(table.getAttribute("aria-label")?.toLowerCase()).not.toContain("workflow")
+      }
+    }
+  })
+
   test("pending and failed stay honest", () => {
     expect(renderCi(ciCard({ status: "pending", result: undefined })).textContent).toContain(
       "Generating the CI matrix…"
     )
-    expect(renderCi(ciCard({ status: "failed", result: undefined, error: "no workflows" })).textContent).toContain(
-      "no workflows"
+    expect(renderCi(ciCard({ status: "failed", result: undefined, error: "no pipelines" })).textContent).toContain(
+      "no pipelines"
     )
   })
 })
