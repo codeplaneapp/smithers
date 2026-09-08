@@ -9,8 +9,11 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/keys@next effect@4.0.0-rc.112
+pnpm add @smthrs/keys@next @effect/platform-node@4.0.0-rc.112 effect@4.0.0-rc.112
 ```
+
+`@effect/platform-node` provides `NodeCrypto` for the example below and is
+optional if you supply your own `Crypto` implementation.
 
 `npm install` and `bun add` take the same arguments. The current version is
 `1.0.0-rc.0`. Release candidates publish on the `next` dist-tag, which is what

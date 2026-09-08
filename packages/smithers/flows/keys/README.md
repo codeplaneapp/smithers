@@ -14,8 +14,11 @@ Use it as a cache key, a row id, or an idempotency token.
 ## Install
 
 ```bash
-pnpm add @smthrs/keys@next effect@4.0.0-rc.112
+pnpm add @smthrs/keys@next @effect/platform-node@4.0.0-rc.112 effect@4.0.0-rc.112
 ```
+
+`@effect/platform-node` provides `NodeCrypto` for the example below and is
+optional if you supply your own `Crypto` implementation.
 
 The current version is `1.0.0-rc.0`, and release candidates carry the `next`
 tag, which is what `@next` selects. `effect` is a peer dependency at that exact
