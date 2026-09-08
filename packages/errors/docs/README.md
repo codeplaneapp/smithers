@@ -20,11 +20,13 @@ from it:
 - A log needs a record that is safe to keep.
 
 `SmithersError` carries all three at once. `code` is a string literal from a
-closed union, so a `switch` over it is exhaustive and adding a code turns every
-unhandled branch into a type error. `summary` is the message without the
-documentation URL the constructor appends, which is what you put in a chat
-reply or a form field. `details` is the context the raise site attached, copied
-and frozen at construction so it cannot change under you. Only those fields
+closed union, which makes an
+[explicit exhaustiveness check](./quickstart.md#check-exhaustiveness-explicitly)
+possible. With that check, adding a code without a matching case is a type
+error. `summary` is the message without the documentation URL the constructor
+appends, which is what you put in a chat reply or a form field. `details` is the
+context the raise site attached, copied and frozen at construction so it cannot
+change under you. Only those fields
 serialize: `name` and `stack` stay out of `JSON.stringify`.
 
 The class never redacts. It stores `details` and `cause` exactly as it received
@@ -83,8 +85,9 @@ try {
 }
 ```
 
-`error.code` narrows to the five documented literals, so the `switch` you write
-next is exhaustive. [Quickstart](./quickstart.md) runs the same failure the
+`error.code` narrows to the five documented literals. A switch can keep a
+fallback or [check exhaustiveness explicitly](./quickstart.md#check-exhaustiveness-explicitly).
+[Quickstart](./quickstart.md) shows both forms and runs the same failure the
 whole way through, from the raise site to a log line.
 
 ## The five codes
