@@ -26,6 +26,15 @@ pseudo-terminal, which normalizes line endings and interleaves standard error.
 File transfer is byte-exact on all nine when the required transport is supplied, so a caller that needs bytes out of a
 command has it write a file and reads that back with `readFile`.
 
+Derived `Sandbox.fileSystem.writeFile` and `writeFileString` support only
+replacement: an omitted `flag` or `flag: "w"`, with no `mode`. All other flags
+(including `"a"` and `"wx"`) and all explicit modes fail with a typed
+`PlatformError` reason `BadArgument` before session access, leaving existing
+content unchanged and absent paths uncreated. `Session.writeFile` provides no
+atomic append, exclusive creation, or creation permission operation. Native
+write overrides in `Session.files` receive the options unchanged and may
+support these operations.
+
 ## Read next
 
 - [What a sandbox does and does not prevent](./concepts/isolation.md): the

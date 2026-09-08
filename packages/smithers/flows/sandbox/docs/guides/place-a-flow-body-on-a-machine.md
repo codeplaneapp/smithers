@@ -99,10 +99,17 @@ a location on the machine and not in the workspace.
 
 ## What the derived filesystem can and cannot tell you
 
-Operations the session declares in `files` are served natively. Everything else
-is a POSIX `sh` probe, and the probe dialect is deliberately honest about its
-limits:
+Operations the session declares in `files` are served natively. Reads and writes
+otherwise use the session's byte transfer operations; other supported operations
+use POSIX `sh` probes. The derived filesystem has these limits:
 
+- `writeFile` and `writeFileString` support replacement with an omitted `flag`
+  or `flag: "w"`, and no `mode`. Every other flag, including `"a"` and `"wx"`,
+  and every explicit mode fail with a typed `PlatformError` reason
+  `BadArgument` before session access. The byte transfer contract cannot
+  guarantee atomic append, exclusive creation, or creation permissions.
+  Native write overrides in `Session.files` receive the options unchanged
+  and define their own supported set.
 - `stat` reports exact file size. Mode is `0`, and times and ownership are
   absent, because the portable shell cannot name them.
 - Directory listings are line framed, so a filename containing a newline is

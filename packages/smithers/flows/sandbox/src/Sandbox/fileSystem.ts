@@ -214,6 +214,10 @@ const deniedExit = 12
  * Builds an Effect `FileSystem` over one sandbox session.
  *
  * `readFile` and `writeFile` ride the session's own byte-typed operations.
+ * Derived writes support only an omitted flag or `w`, with no mode. Other
+ * flags and explicit modes fail with `BadArgument` before session access:
+ * the transfer seam cannot guarantee atomic append, exclusive creation, or
+ * creation permissions. Native write overrides receive the options unchanged.
  * Everything else is derived through portable `sh` probes over
  * `Session.spawn`: POSIX `test`, `wc -c`, `ls -1A`, `find`, `mkdir`, `rm`,
  * `mv`, and `dirname`, plus `readlink`/`readlink -f` and `find -mindepth`,
@@ -295,9 +299,23 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
     const path = resolve(raw)
     return session.readFile(path).pipe(Effect.mapError(providerFailure("readFile", path)))
   }
-  const writeFile = (raw: string, data: Uint8Array): Effect.Effect<void, PlatformError.PlatformError> => {
+  const writeFile = (
+    method: "writeFile" | "writeFileString",
+    raw: string,
+    data: Uint8Array,
+    options: Parameters<FileSystem.FileSystem["writeFile"]>[2]
+  ): Effect.Effect<void, PlatformError.PlatformError> => {
     const path = resolve(raw)
-    return session.writeFile(path, data).pipe(Effect.mapError(providerFailure("writeFile", path)))
+    // A read/check followed by replacement races other writers. Refuse options
+    // the byte-transfer seam cannot honor before invoking any session method.
+    if ((options?.flag !== undefined && options.flag !== "w") || options?.mode !== undefined) {
+      return Effect.fail(PlatformError.badArgument({
+        module: "FileSystem",
+        method,
+        description: `\`${path}\`: unsupported write options; derived writes require flag 'w' or no flag, and no mode`
+      }))
+    }
+    return session.writeFile(path, data).pipe(Effect.mapError(providerFailure(method, path)))
   }
   return FileSystem.makeNoop({
     exists: Effect.fn("Sandbox.fileSystem.exists")(function*(raw) {
@@ -332,8 +350,8 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
     stat: (path) => statOf(path),
     readFile,
     readFileString: (path) => Effect.map(readFile(path), (bytes) => decoder.decode(bytes)),
-    writeFile: (path, data) => writeFile(path, data),
-    writeFileString: (path, data) => writeFile(path, encoder.encode(data)),
+    writeFile: (path, data, options) => writeFile("writeFile", path, data, options),
+    writeFileString: (path, data, options) => writeFile("writeFileString", path, encoder.encode(data), options),
     makeDirectory: Effect.fn("Sandbox.fileSystem.makeDirectory")(function*(raw, options) {
       const path = resolve(raw)
       const target = quote(path)

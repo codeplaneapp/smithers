@@ -78,6 +78,120 @@ const budget = 30_000
 
 const isRoot = globalThis.process.getuid?.() === 0
 
+describe("Sandbox.fileSystem write options", () => {
+  const unsupported: ReadonlyArray<NonNullable<Parameters<FileSystem.FileSystem["writeFile"]>[2]>> = [
+    { flag: "a" },
+    { flag: "wx" },
+    { flag: "r" },
+    { flag: "r+" },
+    { flag: "w+" },
+    { flag: "wx+" },
+    { flag: "ax" },
+    { flag: "a+" },
+    { flag: "ax+" },
+    { mode: 0o600 },
+    { mode: 0o666 },
+    { mode: 0 },
+    { flag: "w", mode: 0o600 },
+    { flag: "wx", mode: 0o600 }
+  ]
+
+  for (const method of ["writeFile", "writeFileString"] as const) {
+    for (const options of unsupported) {
+      it.effect(`${method} refuses ${JSON.stringify(options)} before touching the memory session`, () =>
+        Effect.scoped(Effect.gen(function*() {
+          const provider = Sandbox.TestSession.make({ files: { "/sandbox/held": "old" } })
+          const session = yield* provider.acquire("write-options")
+          const calls: Array<string> = []
+          const files = Sandbox.fileSystem({
+            ...session,
+            readFile: (path) => {
+              calls.push("readFile")
+              return session.readFile(path)
+            },
+            writeFile: (path, data) => {
+              calls.push("writeFile")
+              return session.writeFile(path, data)
+            }
+          })
+          for (const path of ["held", "missing"]) {
+            const result = yield* Effect.match(
+              method === "writeFile"
+                ? files.writeFile(path, new TextEncoder().encode("new"), options)
+                : files.writeFileString(path, "new", options),
+              {
+                onSuccess: () => "success",
+                onFailure: (error) => {
+                  expect(error).toBeInstanceOf(PlatformError.PlatformError)
+                  expect(error.reason.method).toBe(method)
+                  expect(error.reason.description).toContain("unsupported")
+                  return error.reason._tag
+                }
+              }
+            )
+            expect({ result, content: yield* files.readFileString("held") }).toEqual({
+              result: "BadArgument",
+              content: "old"
+            })
+          }
+          expect(provider.state.files.has("/sandbox/missing")).toBe(false)
+          // Only the two assertion reads above may reach the session.
+          expect(calls).toEqual(["readFile", "readFile"])
+          expect(provider.state.commands).toEqual([])
+        })))
+    }
+
+    it.effect(`${method} supports replacement with default options or flag w`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const provider = Sandbox.TestSession.make()
+        const session = yield* provider.acquire("write-defaults")
+        const files = Sandbox.fileSystem(session)
+        for (const options of [undefined, {}, { flag: "w" as const }, { flag: undefined, mode: undefined }]) {
+          yield* session.writeFile("/sandbox/held", new TextEncoder().encode("old"))
+          if (method === "writeFile") {
+            yield* files.writeFile("held", new Uint8Array([0, 255, 128]), options)
+            expect(yield* files.readFile("held")).toEqual(new Uint8Array([0, 255, 128]))
+          } else {
+            yield* files.writeFileString("held", "new", options)
+            expect(yield* files.readFileString("held")).toBe("new")
+          }
+        }
+        yield* files.writeFileString("missing", "created")
+        expect(yield* files.readFileString("missing")).toBe("created")
+      })))
+  }
+
+  it.effect("forwards write options and rooted paths to native overrides", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make()
+      const session = yield* provider.acquire("native-write-options")
+      const options = { flag: "wx", mode: 0o600 } as const
+      const bytes = new Uint8Array([0, 255])
+      const calls: Array<ReadonlyArray<unknown>> = []
+      const files = Sandbox.fileSystem({
+        ...session,
+        files: {
+          writeFile: (...args) =>
+            Effect.sync(() => {
+              calls.push(args)
+            }),
+          writeFileString: (...args) =>
+            Effect.sync(() => {
+              calls.push(args)
+            })
+        }
+      })
+      yield* files.writeFile("held", bytes, options)
+      yield* files.writeFileString("./held", "new", options)
+      expect(calls).toEqual([
+        ["/sandbox/held", bytes, options],
+        ["/sandbox/held", "new", options]
+      ])
+      expect(provider.state.files.size).toBe(0)
+      expect(provider.state.commands).toEqual([])
+    })))
+})
+
 describe("Sandbox.fileSystem probes against the reference filesystem", () => {
   it.effect(
     "refuses a rename onto an existing directory instead of moving into it",
