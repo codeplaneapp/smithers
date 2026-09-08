@@ -163,7 +163,9 @@ const applyPalette = (palette: Palette): void => {
 
 const transitionPayload = (transition: AppTransition): string => {
   const { actor: _actor, type: _type, ...payload } = transition
-  return JSON.stringify(payload)
+  // Native bearer capabilities are ephemeral, even if an untyped caller
+  // accidentally puts one in a transition. The journal and verbose share this.
+  return JSON.stringify(payload, (key, value) => key === "authorizationId" ? undefined : value)
 }
 
 /** The id prefix of every verbose trace line, so switching off can remove them all. */

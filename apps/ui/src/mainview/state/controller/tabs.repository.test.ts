@@ -18,7 +18,7 @@ for (const refusal of [undefined, "The repository authorization expired."]) {
       store, services: {}, commandActor: "user",
       repositories: {
         available: true,
-        pickLocalRepository: async () => ({ status: "selected", repository: {
+        pickLocalRepository: async () => ({ status: "connected", repository: {
           authorizationId: "one-use", root: "/tmp/repository", name: "org/repository",
           head: "head", branch: "main", remoteUrl: "https://github.com/org/repository.git"
         } })

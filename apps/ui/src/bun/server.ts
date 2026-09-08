@@ -1182,6 +1182,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     authority: repositoryAuthority,
     allowManualRepositoryPaths: options.allowManualRepositoryPaths,
     onRepoClosed: (repoId) => lsp.closeRepo(repoId),
+    onRepoAccessRevoked: (repoId) => ptyRoutes.revokeRepo(repoId),
     log,
     ...(options.buildCli === undefined ? {} : { cli: options.buildCli }),
     ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir })
@@ -1206,7 +1207,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     log
   }
   const pty = options.pty === undefined ? createPtyManager(ptyDeps) : options.pty(ptyDeps)
-  registerPtyRoutes(routeHost, pty, {
+  const ptyRoutes = registerPtyRoutes(routeHost, pty, {
     resolveRepo: (repoId) => repoTargets.resolveRepo(repoId, "read-write")
   })
   // A language server reads: read access suffices.

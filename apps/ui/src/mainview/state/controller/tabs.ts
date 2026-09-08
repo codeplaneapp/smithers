@@ -6,6 +6,7 @@ import {
 } from "@smthrs/rpc/LocalApp"
 import { agentRoleTitle, findAgentRole } from "@smthrs/rpc/AgentRoles"
 import type { AgentRoleId } from "@smthrs/rpc/AgentRoles"
+import { adoptLocalRepository } from "./adoptLocalRepository"
 import { currentAgentRoles, loadAgents } from "./agents"
 import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import { activeRepoOf, MAIN_TAB_ID, parseRepoSelection, repoKeyOf } from "../AppState"
@@ -478,22 +479,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
           store.dispatch({ type: "connector.local.failed", actor: "system", message: result.message })
           return result.message
         }
-        const { authorizationId, ...repository } = result.repository
-        // A picked handle is not yet an open local repository. Publish
-        // readiness only after the host has adopted the authorization;
-        // commands and the composer must see the same usable checkout.
-        const refusal = await ctx.openRepo({ authorizationId, displayName: repository.name })
-        if (refusal !== undefined) {
-          store.dispatch({ type: "connector.local.failed", actor: "system", message: refusal })
-          return refusal
-        }
-        store.dispatch({
-          type: "connector.local.connected",
-          actor: "system",
-          access: "read-write",
-          repository
-        })
-        return
+        return await adoptLocalRepository(ctx, result.repository, "read-write")
       } catch {
         const message = "The native repository picker stopped responding. Try again."
         store.dispatch({ type: "connector.local.failed", actor: "system", message })

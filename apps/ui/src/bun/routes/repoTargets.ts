@@ -6,7 +6,7 @@ import type { NodeSidecar } from "../Node"
 import type { Target } from "@smthrs/rpc/LocalApp"
 import { REPO_FILES_PATH, RepoFilesRequestSchema, TARGET_PATTERN, TargetRunVerbSchema } from "@smthrs/rpc/LocalApp"
 import type { RepositoryAccess } from "@smthrs/rpc/NativeRepository"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { z } from "zod"
 import { readRepoPath } from "../RepoFiles"
@@ -35,6 +35,8 @@ export interface RepoTargetRoutesOptions {
    */
   readonly stateDir?: string
   readonly cli?: string
+  /** Stop repository PTYs on downgrade or close, including pending creates. */
+  readonly onRepoAccessRevoked?: (repoId: string) => Promise<void>
   /** Runs when a repository closes, before the answer: the language-server host ends the repository's servers here. */
   readonly onRepoClosed?: (repoId: string) => Promise<void>
   readonly log?: (line: string) => void
@@ -99,14 +101,16 @@ export const registerRepoTargetRoutes = (
 ): RepoTargetRoutes => {
   const repos = createRepoStore()
   const rememberedPath = options.stateDir === undefined ? undefined : join(options.stateDir, REMEMBERED_FILE)
-  /** Write the open set; a failed write is logged, never fatal (the session still works). */
-  const remember = async (repoAccess: ReadonlyMap<string, RepositoryAccess>): Promise<void> => {
+  /** Revocations must reach disk before success; ordinary opens may remain session-only. */
+  const remember = async (repoAccess: ReadonlyMap<string, RepositoryAccess>, strict = false, closing?: string): Promise<void> => {
     if (rememberedPath === undefined) return
-    const repositories = repos.list().map((repo) => ({ path: repo.path, access: repoAccess.get(repo.id) ?? "read" }))
+    const repositories = repos.list().filter((repo) => repo.id !== closing).map((repo) => ({ path: repo.path, access: repoAccess.get(repo.id) ?? "read" }))
     try {
       await mkdir(dirname(rememberedPath), { recursive: true })
-      await writeFile(rememberedPath, JSON.stringify({ repositories }, null, 2))
+      await writeFile(`${rememberedPath}.tmp`, JSON.stringify({ repositories }, null, 2))
+      await rename(`${rememberedPath}.tmp`, rememberedPath)
     } catch (error) {
+      if (strict) throw error
       options.log?.(`could not remember open repositories at ${rememberedPath}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
@@ -124,6 +128,20 @@ export const registerRepoTargetRoutes = (
    */
   const targetGrants = new Map<string, Map<string, TargetGrant>>()
   const repoAccess = new Map<string, RepositoryAccess>()
+  const accessEpoch = new Map<string, number>()
+  // Serialize grant changes and their disk snapshots so a concurrent open
+  // cannot overwrite a completed revocation with an older remembered grant.
+  let changing: Promise<unknown> = Promise.resolve()
+  const change = (work: () => Promise<Response>): Promise<Response> => {
+    const result = changing.then(work)
+    changing = result.catch(() => {})
+    return result
+  }
+  const revoke = async (repoId: string): Promise<void> => {
+    accessEpoch.set(repoId, (accessEpoch.get(repoId) ?? 0) + 1)
+    targetGrants.delete(repoId)
+    await Promise.all([runner.revokeRepo(repoId), options.onRepoAccessRevoked?.(repoId)])
+  }
   const { router } = server
 
   const resolveRepo: RepoTargetRoutes["resolveRepo"] = (repoId, requiredAccess) => {
@@ -136,7 +154,7 @@ export const registerRepoTargetRoutes = (
     return { status: "ok", path: repo.path }
   }
 
-  router.add("POST", "/api/repo/open", async ({ request }) => {
+  router.add("POST", "/api/repo/open", ({ request }) => change(async () => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const body = RepoOpenRequestSchema.safeParse(parsed.body)
@@ -162,9 +180,10 @@ export const registerRepoTargetRoutes = (
     const result = await repos.open(path)
     if (result.status === "error") return jsonError(400, result.code, result.message)
     repoAccess.set(result.repo.id, access)
+    if (access === "read") await revoke(result.repo.id)
     await remember(repoAccess)
     return json({ repo: result.repo })
-  })
+  }))
 
   router.add("GET", "/api/repos", () => json({ repos: repos.list() }))
 
@@ -220,18 +239,41 @@ export const registerRepoTargetRoutes = (
     return answer.status === "ok" ? json(answer.body) : jsonError(answer.http, answer.code, answer.message)
   })
 
-  router.add("POST", "/api/repo/close", async ({ request }) => {
+  router.add("POST", "/api/repo/access", ({ request }) => change(async () => {
+    const parsed = await readJson(request)
+    if ("error" in parsed) return parsed.error
+    const body = z.object({ repoId: z.string().min(1), access: z.literal("read") }).strict().safeParse(parsed.body)
+    if (!body.success) return jsonError(400, "invalid_request", "Body must be { repoId, access: 'read' }.")
+    const { repoId } = body.data
+    if (repos.get(repoId) === undefined) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)
+    repoAccess.set(repoId, "read")
+    await revoke(repoId)
+    try {
+      await remember(repoAccess, true)
+    } catch {
+      return jsonError(500, "repository_access_not_saved", "Read-only access could not be saved. Retry before quitting.")
+    }
+    return json({ ok: true })
+  }))
+
+  router.add("POST", "/api/repo/close", ({ request }) => change(async () => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const repoId = stringField(parsed.body, "repoId")
     if (repoId === undefined) return jsonError(400, "invalid_request", "Body must be { repoId }.")
-    if (!repos.close(repoId)) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)
-    targetGrants.delete(repoId)
+    if (repos.get(repoId) === undefined) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)
     repoAccess.delete(repoId)
+    await revoke(repoId)
     await options.onRepoClosed?.(repoId)
-    await remember(repoAccess)
+    try {
+      // Keep a denied row on failure so the renderer can resolve and retry it.
+      await remember(repoAccess, true, repoId)
+    } catch {
+      return jsonError(500, "repository_access_not_saved", "The disconnection could not be saved. Retry before quitting.")
+    }
+    repos.close(repoId)
     return json({ ok: true })
-  })
+  }))
 
   router.add("POST", "/api/targets/query", async ({ request }) => {
     const parsed = await readJson(request)
@@ -261,6 +303,7 @@ export const registerRepoTargetRoutes = (
     if ("error" in parsed) return parsed.error
     const repoId = stringField(parsed.body, "repoId")
     const targetId = stringField(parsed.body, "targetId")
+    const epoch = repoId === undefined ? undefined : accessEpoch.get(repoId)
     if (repoId !== undefined && targetId === undefined && stringField(parsed.body, "verb") !== undefined) {
       const pattern = PatternRunRequestSchema.safeParse(parsed.body)
       if (!pattern.success) {
@@ -277,6 +320,9 @@ export const registerRepoTargetRoutes = (
       }
       const node = await options.node
       if (node === null) return jsonError(503, "node_missing", "No Node.js >= 22.19 was found for the smithers-build CLI.")
+      if (resolveRepo(repoId, "read-write").status !== "ok" || accessEpoch.get(repoId) !== epoch) {
+        return jsonError(403, "repository_read_only", "Repository access changed before execution.")
+      }
       let run
       try {
         run = runner.start({
@@ -347,6 +393,9 @@ export const registerRepoTargetRoutes = (
     if (!graph.nodes.some((candidate) => candidate.label === grant.label)) {
       targetGrants.get(repoId)?.delete(targetId)
       return jsonError(409, "target_stale", "That target is no longer declared by the repository.")
+    }
+    if (resolveRepo(repoId, "read-write").status !== "ok" || accessEpoch.get(repoId) !== epoch) {
+      return jsonError(403, "repository_read_only", "Repository access changed before execution.")
     }
     let run
     try {

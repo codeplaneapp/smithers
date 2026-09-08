@@ -141,10 +141,10 @@ export interface AppController {
   readonly runCommand: (name: string) => boolean
   readonly runCommandArgs: (name: string, args: string) => boolean
   readonly connectLocalRepository: (access: RepositoryAccess) => Promise<void>
-  readonly makeConnectorReadOnly: (id: string) => void
+  readonly makeConnectorReadOnly: (id: string) => Promise<string | void>
   readonly askConnectorRemoval: (id: string) => string | void
   readonly cancelConnectorRemoval: () => void
-  readonly removeConnector: (id: string) => string | void
+  readonly removeConnector: (id: string) => Promise<string | void>
   readonly selectWorldDocument: (id: string) => string | void
   readonly changeWorldDocument: (id: string, body: string) => void
   readonly createWorldDocument: () => void

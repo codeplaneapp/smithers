@@ -276,6 +276,8 @@ export interface TargetRunner {
   /** A subscriber is listening: spawn now if not yet started. */
   readonly attach: (runId: string) => boolean
   readonly cancel: (runId: string) => boolean
+  /** Cancel pending runs and kill running children before revocation succeeds. */
+  readonly revokeRepo: (repoId: string) => Promise<void>
   readonly get: (runId: string) => TargetRun | undefined
   readonly stop: () => void
 }
@@ -689,6 +691,22 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
         return true
       }
       return false
+    },
+    revokeRepo: async (repoId) => {
+      const exiting: Array<Promise<number>> = []
+      for (const live of runs.values()) {
+        if (live.run.repoId !== repoId) continue
+        if (live.run.status === "pending") {
+          if (live.timer !== undefined) clearTimeout(live.timer)
+          live.run.status = "failed"
+          emit(live.run, { type: "error", message: "Repository access was revoked." })
+          emit(live.run, { type: "exit", code: null })
+        } else if (live.run.status === "running" && live.child !== undefined) {
+          live.child.kill("SIGKILL")
+          exiting.push(live.child.exited)
+        }
+      }
+      await Promise.all(exiting)
     },
     get: (runId) => runs.get(runId)?.run,
     stop: () => {

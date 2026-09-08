@@ -1,12 +1,14 @@
 import type { RepositoryAccess } from "@smthrs/rpc/NativeRepository"
+import { ReposResponseSchema } from "@smthrs/rpc/LocalApp"
+import { adoptLocalRepository } from "./adoptLocalRepository"
 import type { ControllerContext } from "./context"
 
 export interface ConnectorController {
   readonly connectLocalRepository: (access: RepositoryAccess) => Promise<void>
-  readonly makeConnectorReadOnly: (id: string) => void
+  readonly makeConnectorReadOnly: (id: string) => Promise<string | void>
   readonly askConnectorRemoval: (id: string) => string | void
   readonly cancelConnectorRemoval: () => void
-  readonly removeConnector: (id: string) => string | void
+  readonly removeConnector: (id: string) => Promise<string | void>
 }
 
 export const createConnectorController = (
@@ -22,12 +24,7 @@ export const createConnectorController = (
       const result = await repositories.pickLocalRepository(access)
       switch (result.status) {
         case "connected":
-          store.dispatch({
-            type: "connector.local.connected",
-            actor: "system",
-            access,
-            repository: result.repository
-          })
+          await adoptLocalRepository(ctx, result.repository, access)
           break
         case "cancelled":
           store.dispatch({ type: "connector.local.cancelled", actor: "user" })
@@ -49,14 +46,41 @@ export const createConnectorController = (
     }
   }
 
-  const makeConnectorReadOnly = (id: string): void => {
-    store.dispatch({
-      type: "connector.access.changed",
-      actor: "user",
-      id,
-      access: "read"
-    })
+  // Resolve canonical picker roots against the host's current open set, including
+  // repositories restored on launch and connectors created by older clients.
+  const loadHostRepos = async () => {
+    const response = await ctx.boundedFetch(`${ctx.baseUrl}/api/repos`)
+    if (!response.ok) throw new Error(await ctx.errorMessageOf(response, "Could not load open repositories."))
+    return ReposResponseSchema.parse(await response.json()).repos
   }
+  const reducing = new Set<string>()
+  const reduceAccess = async (id: string, disconnect: boolean): Promise<string | void> => {
+    const connector = store.collections.connectors.get(id)
+    if (connector === undefined) return `There is no connector with id ${id}.`
+    if (reducing.has(id)) return "Repository access is already changing."
+    reducing.add(id)
+    try {
+      const repos = await loadHostRepos()
+      for (const repo of repos.filter((repo) => repo.path === connector.root)) {
+        const response = await ctx.boundedFetch(`${ctx.baseUrl}/api/repo/${disconnect ? "close" : "access"}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ repoId: repo.id, ...(disconnect ? {} : { access: "read" }) })
+        })
+        if (!response.ok) return await ctx.errorMessageOf(response, "Could not revoke repository access.")
+      }
+      const refreshed = await loadHostRepos()
+      store.dispatch({ type: "repos.loaded", actor: "system", repos: refreshed })
+      if (disconnect) store.dispatch({ type: "connector.removed", actor: "user", id })
+      else store.dispatch({ type: "connector.access.changed", actor: "user", id, access: "read" })
+    } catch (error) {
+      return `Could not revoke repository access: ${error instanceof Error ? error.message : String(error)}`
+    } finally {
+      reducing.delete(id)
+    }
+  }
+
+  const makeConnectorReadOnly = (id: string): Promise<string | void> => reduceAccess(id, false)
 
   const askConnectorRemoval = (id: string): string | void => {
     if (store.collections.connectors.get(id) === undefined) return `There is no connector with id ${id}.`
@@ -68,9 +92,9 @@ export const createConnectorController = (
     store.dispatch({ type: "connector.removal.asked", actor: "user", id: null })
   }
 
-  const removeConnector = (id: string): string | void => {
+  const removeConnector = async (id: string): Promise<string | void> => {
     if (store.session().pendingConnectorRemovalId !== id) return "Ask before disconnecting this repository."
-    store.dispatch({ type: "connector.removed", actor: "user", id })
+    return reduceAccess(id, true)
   }
 
   return {

@@ -47,9 +47,7 @@ export const connectorFlows = (actions: CommandActions): ReadonlyArray<FlowEntry
     hidden: true,
     args: "<connectorId>",
     input: Schema.Struct({ connectorId: Schema.String }),
-    handler: ({ connectorId }) => {
-      actions.makeConnectorReadOnly(connectorId)
-    }
+    handler: ({ connectorId }) => actions.makeConnectorReadOnly(connectorId)
   }),
   flow({
     name: "connector.remove.ask",
@@ -69,9 +67,7 @@ export const connectorFlows = (actions: CommandActions): ReadonlyArray<FlowEntry
     hidden: true,
     args: "<connectorId>",
     input: Schema.Struct({ connectorId: Schema.String }),
-    handler: ({ connectorId }) => {
-      actions.removeConnector(connectorId)
-    }
+    handler: ({ connectorId }) => actions.removeConnector(connectorId)
   }),
   flow({
     name: "connector.remove.cancel",

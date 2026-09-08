@@ -47,8 +47,11 @@ export const registerPtyRoutes = (
   host: PtyRouteHost,
   manager: PtyManager,
   repositories: PtyRepositoryResolver
-): void => {
+): { readonly revokeRepo: (repoId: string) => Promise<void> } => {
   const { router } = host
+  const sessionRepos = new Map<string, string>()
+  const epochs = new Map<string, number>()
+  const creating = new Map<string, Set<Promise<void>>>()
 
   router.add("GET", PTY_PATH, () => json({ sessions: manager.list() }))
 
@@ -70,7 +73,42 @@ export const registerPtyRoutes = (
         ? jsonError(404, "repo_not_found", `No open repository with id ${body.data.repoId}.`)
         : jsonError(403, "repository_read_only", "A terminal requires read-write repository access.")
     }
-    const result = await manager.create({ ...body.data, cwd: resolved.path })
+    const repoId = body.data.repoId
+    const epoch = repoId === undefined ? undefined : epochs.get(repoId)
+    const done = Promise.withResolvers<void>()
+    void done.promise.catch(() => {})
+    if (repoId !== undefined) {
+      const pending = creating.get(repoId) ?? new Set<Promise<void>>()
+      pending.add(done.promise)
+      creating.set(repoId, pending)
+    }
+    const result = await (async () => {
+      try {
+        const created = await manager.create({ ...body.data, cwd: resolved.path })
+        if (created.status === "ok" && repoId !== undefined) {
+          sessionRepos.set(created.session.sessionId, repoId)
+          if (epochs.get(repoId) !== epoch || repositories.resolveRepo(repoId).status !== "ok") {
+            try {
+              await manager.kill(created.session.sessionId)
+              sessionRepos.delete(created.session.sessionId)
+            } catch (error) {
+              done.reject(error)
+              throw error
+            }
+            return undefined
+          }
+        }
+        return created
+      } finally {
+        if (repoId !== undefined) {
+          const pending = creating.get(repoId)
+          pending?.delete(done.promise)
+          if (pending?.size === 0) creating.delete(repoId)
+        }
+        done.resolve()
+      }
+    })()
+    if (result === undefined) return jsonError(403, "repository_read_only", "Repository access changed while starting the terminal.")
     if (result.status === "error") {
       const status = result.code === "spawn_failed" ? 500
         : result.code === "manager_closed" ? 503
@@ -112,6 +150,7 @@ export const registerPtyRoutes = (
   router.add("DELETE", `${PTY_PATH}/:id`, async ({ params }) => {
     const id = params.id ?? ""
     const killed = await manager.kill(id)
+    sessionRepos.delete(id)
     return killed ? json({ ok: true }) : jsonError(404, "not_found", `No PTY session ${id}.`)
   })
 
@@ -125,8 +164,24 @@ export const registerPtyRoutes = (
       socket.send(JSON.stringify({ type: "error", message: `pty.input is capped at ${PTY_INPUT_MAX_BYTES} bytes.` }))
       return
     }
+    const repoId = sessionRepos.get(sessionId)
+    if (repoId !== undefined && repositories.resolveRepo(repoId).status !== "ok") {
+      socket.send(JSON.stringify({ type: "error", message: "Repository access was revoked." }))
+      return
+    }
     if (!manager.write(sessionId, data)) {
       socket.send(JSON.stringify({ type: "error", message: `No live PTY session ${sessionId}.` }))
     }
   })
+  return {
+    revokeRepo: async (repoId) => {
+      epochs.set(repoId, (epochs.get(repoId) ?? 0) + 1)
+      const kills = [...sessionRepos].filter(([, id]) => id === repoId).map(async ([sessionId]) => {
+        await manager.kill(sessionId)
+        sessionRepos.delete(sessionId)
+      })
+      await Promise.all([...kills, ...(creating.get(repoId) ?? [])])
+    }
+  }
+
 }

@@ -84,7 +84,9 @@ the proxy is enabled.
 
 Native repository opening is a two-step grant flow: the picker authorizes a
 canonical path for 60 seconds, then `/api/repo/open` consumes the authorization
-exactly once. Headless development explicitly advertises
+exactly once. Both repository and connector pickers wait for adoption before
+publishing inspection metadata; capabilities never enter the transition journal
+or verbose trace. Headless development explicitly advertises
 `local.repository-path-entry` and may instead send `{ path }`.
 
 Open repositories receive opaque `repoId` values and a read-only or read-write
@@ -92,6 +94,22 @@ access level. Process APIs accept `repoId`, never a renderer-controlled `cwd`.
 Terminals and target execution require read-write access. Target queries mint
 opaque target ids; a run resolves the command label server-side and rechecks
 the current graph before spawning it.
+
+Make read-only sends `POST /api/repo/access { repoId, access: "read" }`.
+Disconnect sends `POST /api/repo/close { repoId }`. The controller resolves the
+connector's canonical root against `/api/repos`, waits for host success, then
+refreshes open repositories and commits the connector transition. A failed
+request leaves the connector unchanged and reports the error.
+
+Both host actions deny new writes, cancel pending target runs, terminate running
+target children and repository PTYs, and wait for in-flight PTY creation to
+settle and terminate. Requests preparing a target recheck authorization before
+starting it. Home-directory PTYs are independent. Close also ends language
+servers and removes the repository from the open set. Reduced grants and
+removals are saved atomically to `repositories.json` before success; a failed
+save leaves host writes denied and the repository addressable for retry.
+The access endpoint cannot upgrade a grant. Upgrading requires a fresh picker
+authorization (or a new explicit path open on a development host).
 
 Language servers (`apps/ui/src/bun/lsp/`) read: `/api/lsp/*` requires read
 access. One `typescript-language-server --stdio` runs per (repository,
@@ -174,7 +192,8 @@ All mutations require `Content-Type: application/json`; failures use
 | DELETE | `/api/agents/:id` | Remove a custom agent; a built-in answers 409 |
 | POST | `/api/repo/open` | Consume `{ authorizationId }`, or dev-only `{ path }` |
 | GET | `/api/repos` | Open repository snapshot |
-| POST | `/api/repo/close` | Close `{ repoId }` |
+| POST | `/api/repo/access` | Downgrade `{ repoId, access: "read" }`, stop repository processes and save the reduced grant |
+| POST | `/api/repo/close` | Revoke and forget `{ repoId }`, stopping repository processes |
 | POST | `/api/repo/files` | `{ repoId, path? }`: a directory's entries or one file's text with its `digest` (read access; bounded; binary stated) |
 | POST | `/api/lsp/hover` | `{ repoId, path, line, character }` (1-based): the language server's hover at the position, `{ hover: { contents, truncated, range? } \| null, digest }`, text cut at 4 KiB and `truncated` when it was (read access) |
 | POST | `/api/lsp/definition` | Same body: `{ locations, total, omitted, digest }`, repository-relative, at most 20; targets outside the repository are counted in `omitted`, never listed |
