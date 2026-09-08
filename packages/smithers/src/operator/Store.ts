@@ -4,16 +4,13 @@
  * @since 1.0.0
  */
 import { NodeCrypto } from "@effect/platform-node"
-import * as DurableWriter from "@smthrs/database/DurableWriter"
-import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as Redaction from "@smthrs/journal/Redaction"
 import { Effect, Layer } from "effect"
 import { z } from "incur"
-import { mkdirSync } from "node:fs"
-import { join } from "node:path"
 import * as Presentation from "../cli/Presentation.ts"
 import * as Environment from "../Environment.ts"
-import * as ControlDatabaseMigrations from "../internal/ControlDatabaseMigrations.ts"
+import * as ControlDatabase from "../internal/ControlDatabase.ts"
+import * as NodeControl from "../NodeControl.ts"
 import * as Project from "../Project.ts"
 
 /**
@@ -57,15 +54,8 @@ export const localRoot = (options: LocalOptions): string => {
  * @category layers
  * @since 1.0.0
  */
-export const databaseLayer = (root: string) => {
-  const database = Layer.suspend(() => {
-    mkdirSync(join(root, ".flows"), { recursive: true })
-    return NodeDatabase.layer({ filename: join(root, ".flows", "control.db") })
-  })
-  return Layer.mergeAll(ControlDatabaseMigrations.layer, NodeCrypto.layer).pipe(
-    Layer.provideMerge(DurableWriter.layer().pipe(Layer.provideMerge(database)))
-  )
-}
+export const databaseLayer = (root: string) =>
+  Layer.mergeAll(ControlDatabase.layer(NodeControl.databasePath(root)), NodeCrypto.layer)
 
 /**
  * Minimal Incur error boundary used by operator commands.

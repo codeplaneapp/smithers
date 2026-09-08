@@ -27,7 +27,6 @@ import {
   SystemFlows
 } from "@smthrs/control"
 import * as DurableWriter from "@smthrs/database/DurableWriter"
-import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
 import * as NodeFlowsRuntime from "@smthrs/flows/NodeRuntime"
@@ -75,18 +74,20 @@ import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { randomUUID } from "node:crypto"
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs"
+import { chmodSync, existsSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
 import { hostname } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { join, resolve } from "node:path"
 import * as Application from "./Application.ts"
 import * as CliError from "./CliError.ts"
 import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
 import * as HistoryWorkspace from "./history/Workspace.ts"
 import * as CommandStatus from "./internal/CommandStatus.ts"
-import * as ControlDatabaseMigrations from "./internal/ControlDatabaseMigrations.ts"
+import * as ControlDatabase from "./internal/ControlDatabase.ts"
+import * as ControlDatabasePath from "./internal/ControlDatabasePath.ts"
+import * as ExecutionDatabasePath from "./internal/ExecutionDatabasePath.ts"
 import * as Output from "./Output.ts"
 import * as Project from "./Project.ts"
 import * as Providers from "./Providers.ts"
@@ -447,7 +448,7 @@ export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
  * @category constructors
  * @since 0.1.0
  */
-export const databasePath = (root: string): string => join(root, ".flows", "control.db")
+export const databasePath = ControlDatabasePath.databasePath
 
 /**
  * Where the durable flow engine keeps executions, attempts, cache entries,
@@ -460,7 +461,7 @@ export const databasePath = (root: string): string => join(root, ".flows", "cont
  * @category constructors
  * @since 0.1.0
  */
-export const executionDatabasePath = (root: string): string => join(root, ".flows", "engine.db")
+export const executionDatabasePath = ExecutionDatabasePath.executionDatabasePath
 
 /**
  * `Application.Engine` plus the shared database seam the Node composition
@@ -587,32 +588,7 @@ export const engineDurable = (
   // CLIs on one host appear to own the same fence and allowed the loser to
   // re-drive work claimed by the winner.
   const owner = Object.freeze({ hostId: hostname(), pid: process.pid, nonce: randomUUID() })
-  // Suspended so a `--remote` invocation, which never builds this layer, does
-  // not leave an empty `.flows/` behind. SQLite opens a file but will not
-  // create the directory holding it, and a missing one is the first-run case,
-  // not an error.
-  const database = Layer.provideMerge(
-    ControlDatabaseMigrations.layer,
-    Layer.provideMerge(
-      DurableWriter.layer(),
-      Layer.suspend(() => {
-        const stateDirectory = dirname(file)
-        mkdirSync(stateDirectory, { recursive: true, mode: 0o700 })
-        if (process.platform !== "win32") chmodSync(stateDirectory, 0o700)
-        return NodeDatabase.layer({ filename: file })
-      })
-    )
-  ).pipe(
-    Layer.tap(() =>
-      Effect.sync(() => {
-        if (process.platform === "win32") return
-        for (const sqliteFile of [file, `${file}-wal`, `${file}-shm`]) {
-          if (existsSync(sqliteFile)) chmodSync(sqliteFile, 0o600)
-        }
-      })
-    ),
-    Layer.orDie
-  )
+  const database = ControlDatabase.layer(file).pipe(Layer.orDie)
   // A control plane that cannot open its own database has nothing to serve, so
   // a failed open, migration, or journal start is a startup defect rather than
   // a typed control-plane error every command would have to carry.

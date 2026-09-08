@@ -3,8 +3,10 @@
  * @since 1.0.0
  */
 import { existsSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import { databasePath } from "../internal/ControlDatabasePath.ts"
+import { executionDatabasePath } from "../internal/ExecutionDatabasePath.ts"
 
 const table = (db: DatabaseSync, name: string): boolean =>
   db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name) !== undefined
@@ -15,7 +17,7 @@ interface ResolvedWorkspace {
 }
 
 const resolveWorkspace = (root: string, runId: string): ResolvedWorkspace | undefined => {
-  const file = join(root, ".flows", "engine.db")
+  const file = executionDatabasePath(root)
   if (!existsSync(file)) return { path: resolve(root) }
   const db = new DatabaseSync(file, { readOnly: true })
   try {
@@ -61,8 +63,8 @@ export const workspaceFor = (root: string, runId: string): string | undefined =>
 export const canExecute = (root: string, workspace: string, runId: string): boolean => {
   const expected = resolveWorkspace(root, runId)
   if (expected === undefined || expected.path !== resolve(workspace)) return false
-  const file = join(root, ".flows", "engine.db")
-  const controlFile = join(root, ".flows", "control.db")
+  const file = executionDatabasePath(root)
+  const controlFile = databasePath(root)
   if (!existsSync(file) || !existsSync(controlFile)) return expected.boundRunId === undefined
   const engine = new DatabaseSync(file, { readOnly: true })
   try {

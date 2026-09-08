@@ -12,9 +12,8 @@ import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as Retention from "@smthrs/engine-store/Retention"
 import { Cause, Effect, Layer } from "effect"
 import { existsSync } from "node:fs"
-import { join } from "node:path"
 import * as CliError from "./CliError.ts"
-import * as Project from "./Project.ts"
+import * as NodeControl from "./NodeControl.ts"
 
 /**
  * How long history is kept when `--older-than` is omitted.
@@ -62,8 +61,7 @@ export const duration = (value: string): number | undefined => {
  * @since 1.0.0
  */
 export const databases = (root: string): ReadonlyArray<string> =>
-  ["control.db", "engine.db"]
-    .map((name) => join(Project.stateDirectory(root), name))
+  [NodeControl.databasePath(root), NodeControl.executionDatabasePath(root)]
     .filter((file) => existsSync(file))
 
 /**

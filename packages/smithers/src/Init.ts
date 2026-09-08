@@ -24,6 +24,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join } from "node:path"
 import * as Environment from "./Environment.ts"
+import * as Project from "./Project.ts"
 import { starterSeats } from "./Providers.ts"
 
 /**
@@ -265,7 +266,7 @@ export const scaffold = (
   // marker, so a scaffold in a plain directory that is neither a package nor a
   // repository would otherwise resolve a different root from every
   // subdirectory, which is the one failure `init` exists to prevent.
-  const stateDirectory = join(root, ".flows")
+  const stateDirectory = Project.stateDirectory(root)
   mkdirSync(stateDirectory, { recursive: true })
   return { name, flowFile, created: !exists, gitignore: ensureIgnored(root), stateDirectory, seat: seat.seat }
 }

@@ -19,6 +19,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import * as Environment from "../Environment.ts"
+import * as NodeControl from "../NodeControl.ts"
 import * as Project from "../Project.ts"
 import * as Workspace from "./Workspace.ts"
 
@@ -50,9 +51,8 @@ export const localRoot = (
   return Project.root(options.root, process.cwd())
 }
 
-const databasePath = (root: string) => join(root, ".flows", "engine.db")
 const requireDatabase = (root: string): string => {
-  const file = databasePath(root)
+  const file = NodeControl.executionDatabasePath(root)
   if (!existsSync(file)) throw new Error(`No execution history at ${file}`)
   return file
 }
@@ -231,7 +231,7 @@ export const preview = async (root: string, runId: string, options: Options, sig
 const hasTable = (db: DatabaseSync, table: string): boolean =>
   db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table) !== undefined
 const openControl = (root: string) => {
-  const file = join(root, ".flows", "control.db")
+  const file = NodeControl.databasePath(root)
   if (!existsSync(file)) throw new Error("This operation requires a public CLI run with an approved control plan")
   const db = new DatabaseSync(file)
   db.exec("PRAGMA busy_timeout = 5000")
@@ -276,7 +276,7 @@ const parkControl = (db: DatabaseSync, runId: string, summary: Record<string, un
 
 const linkFork = (engine: DatabaseSync, control: DatabaseSync, root: string, childId: string, parentId: string) => {
   const summary = controlSummary(control, parentId, true)
-  const workspace = join(root, ".flows", "forks", forkWorkspaceName(childId))
+  const workspace = join(Project.stateDirectory(root), "forks", forkWorkspaceName(childId))
   if (!existsSync(join(workspace, ".jj"))) throw new Error(`Fork ${childId} has no retained workspace at ${workspace}`)
   const existing = control.prepare("SELECT 1 FROM flows_runs WHERE run_id=?").get(childId)
   if (existing === undefined) {
@@ -304,8 +304,8 @@ const linkFork = (engine: DatabaseSync, control: DatabaseSync, root: string, chi
  * @category constructors
  */
 export const reconcile = (root: string): void => {
-  if (!existsSync(databasePath(root)) || !existsSync(join(root, ".flows", "control.db"))) return
-  const engine = new DatabaseSync(databasePath(root))
+  if (!existsSync(NodeControl.executionDatabasePath(root)) || !existsSync(NodeControl.databasePath(root))) return
+  const engine = new DatabaseSync(NodeControl.executionDatabasePath(root))
   const control = openControl(root)
   try {
     control.exec("BEGIN IMMEDIATE")
@@ -370,7 +370,7 @@ export const mutate = async (
   try {
     control.exec("BEGIN IMMEDIATE")
     const summary = controlSummary(control, runId)
-    if (operation === "fork") mkdirSync(join(root, ".flows", "forks"), { recursive: true })
+    if (operation === "fork") mkdirSync(join(Project.stateDirectory(root), "forks"), { recursive: true })
     const result = await runEffect(
       Effect.gen(function*() {
         const service = yield* TimeTravel
@@ -378,7 +378,7 @@ export const mutate = async (
           ? {
             kind: "fork" as const,
             result: yield* service.fork(observed.position, {
-              workspaceRoot: join(root, ".flows", "forks"),
+              workspaceRoot: join(Project.stateDirectory(root), "forks"),
               retainWorkspace: true,
               maxHistoryEntries: options.limit ?? 10_000
             })
@@ -390,7 +390,7 @@ export const mutate = async (
       }).pipe(Effect.provide(writerLayer(root, workspace)), Effect.scoped),
       signal
     )
-    const engine = new DatabaseSync(databasePath(root))
+    const engine = new DatabaseSync(NodeControl.executionDatabasePath(root))
     try {
       if (result.kind === "fork") {
         const childWorkspace = linkFork(engine, control, root, result.result.runId, runId)

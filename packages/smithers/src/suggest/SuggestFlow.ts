@@ -48,6 +48,7 @@ import * as Stream from "effect/Stream"
 import { randomUUID } from "node:crypto"
 import { isAbsolute } from "node:path"
 import * as NodeControl from "../NodeControl.ts"
+import * as Project from "../Project.ts"
 import * as Brief from "./Brief.ts"
 
 /**
@@ -190,9 +191,9 @@ export const rules = (root: string): ReadonlyArray<Permission.Rule> => {
     allow("fs:*", `${trimmed}/**`),
     allow("net:*", "**"),
     allow("model:*", "**"),
-    ...[".git", ".flows"].flatMap((
+    ...[`${trimmed}/.git`, Project.stateDirectory(root)].flatMap((
       state
-    ) => [deny("fs:*", `${trimmed}/${state}`), deny("fs:*", `${trimmed}/${state}/**`)])
+    ) => [deny("fs:*", state), deny("fs:*", `${state}/**`)])
   ]
 }
 

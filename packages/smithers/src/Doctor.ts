@@ -19,6 +19,7 @@ import { existsSync, readdirSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import * as Environment from "./Environment.ts"
 import * as Legacy from "./Legacy.ts"
+import * as NodeControl from "./NodeControl.ts"
 import * as Project from "./Project.ts"
 import { starterSeats } from "./Providers.ts"
 
@@ -283,8 +284,8 @@ export const inspect = (options: Options): Report => {
       ? Project.stateDirectory(options.root)
       : `${Project.stateDirectory(options.root)} (not created yet)`
   })
-  checks.push(ladder(`${Project.stateDirectory(options.root)}/control.db`))
-  checks.push(ladder(`${Project.stateDirectory(options.root)}/engine.db`))
+  checks.push(ladder(NodeControl.databasePath(options.root)))
+  checks.push(ladder(NodeControl.executionDatabasePath(options.root)))
 
   checks.push({
     name: "node",

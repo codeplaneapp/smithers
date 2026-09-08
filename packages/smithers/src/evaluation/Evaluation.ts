@@ -214,7 +214,7 @@ export const runPath = (root: string, runId: string): string => {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(runId)) {
     throw new Error("Run IDs must contain only letters, digits, '.', '_' or '-'")
   }
-  return join(root, ".flows", "evals", "runs", `${runId}.json`)
+  return join(Project.stateDirectory(root), "evals", "runs", `${runId}.json`)
 }
 
 /**
