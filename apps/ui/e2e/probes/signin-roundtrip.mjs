@@ -1,10 +1,12 @@
 // Real signed-in probe against a deployed host using the persistent test profile.
 // Usage: node apps/ui/e2e/probes/signin-roundtrip.mjs [https://smithers.sh] [owner/repo]
 //
-// Proves the GitHub OAuth round trip: start the sign-in at the host, land back on it, open the
-// repository page, and read "Account · @<user>" from the Account card. Never prints credentials:
-// the password is read from a notes file outside the repository and only the redacted URL and the
-// verdict reach stdout. Re-logs the saved GitHub test account in when the persistent session expired.
+// Proves the app's own sign-in door round trip: open the repository page, click "Sign in with
+// GitHub", come back to that same repository page (return_to), and read "Account · @<user>" from
+// the Account card. Never prints credentials: the password is read from a notes file outside the
+// repository and only the redacted URL and the verdict reach stdout. Re-logs the saved GitHub test
+// account in when the persistent session expired. When the profile is already signed in it clears
+// only the host's cookies (never GitHub's) so the door appears and the round trip runs.
 //
 // The defaults below are overridable only through the environment (never through argv):
 //   SMITHERS_E2E_PROFILE  persistent Chromium profile directory (default ~/.multi-e2e-profile)
@@ -15,7 +17,7 @@ import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-const base = process.argv[2] ?? "https://smithers.sh";
+const base = (process.argv[2] ?? "https://smithers.sh").replace(/\/+$/, "");
 const repo = process.argv[3] ?? "smithersai/smithers";
 const home = homedir();
 const profile = process.env.SMITHERS_E2E_PROFILE ?? join(home, ".multi-e2e-profile");
@@ -27,10 +29,25 @@ const readPassword = () => {
 };
 const pass = readPassword();
 const redact = (url) => url.replace(/state=[^&]+/, "state=…").replace(/code=[^&]+/, "code=…");
+const host = new URL(base).hostname;
+const hostCookies = new RegExp(`(^|\\.)${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+const repoPath = `/${repo}`;
 const ctx = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 1280, height: 900 } });
 const page = await ctx.newPage();
 const fail = async (why) => { console.log("FAIL:", why, "at", redact(page.url())); await ctx.close(); process.exit(1); };
-await page.goto(`${base}/api/auth/github/start`, { waitUntil: "domcontentloaded", timeout: 60000 });
+const door = () => page.locator("[data-testid=chrome-sign-in], button:has-text('Sign in with GitHub')").first();
+const openRepo = async () => {
+  await page.goto(`${base}${repoPath}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForTimeout(7000);
+};
+await openRepo();
+if (!(await door().count())) {
+  // Already signed in: drop only this host's cookies so the door appears; GitHub's session stays.
+  await ctx.clearCookies({ domain: hostCookies });
+  await openRepo();
+  if (!(await door().count())) await fail("no Sign in with GitHub door on the repository page after clearing the host cookies");
+}
+await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {}), door().click()]);
 await page.waitForTimeout(2500);
 if (/github\.com\/(login|session)/.test(page.url())) {
   if (!pass) await fail("saved GitHub session expired and no password line in the notes file (SMITHERS_E2E_NOTES)");
@@ -47,17 +64,18 @@ for (let i = 0; i < 3; i++) {
   await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {}), auth.click()]);
   await page.waitForTimeout(3000);
 }
-await page.waitForTimeout(4000);
+await page.waitForTimeout(7000);
 const landed = page.url();
 if (!landed.startsWith(base)) await fail(`OAuth did not return to ${base}`);
-await page.goto(`${base}/${repo}`, { waitUntil: "domcontentloaded", timeout: 60000 });
-await page.waitForTimeout(7000);
+const final = new URL(landed);
+if (final.pathname !== repoPath) await fail(`the door returned to ${final.pathname}, not ${repoPath}`);
+if (final.searchParams.has("signed-in")) await fail("the app left the signed-in marker in the query");
 const text = await page.evaluate(() => document.body.innerText);
-if (/sign in with github/i.test(text)) await fail("app page still shows the sign-in door");
-const acct = page.getByRole("button", { name: /^account$/i }).first();
+if (/sign in with github/i.test(text)) await fail("repository page still shows the sign-in door");
+const acct = page.locator("[data-testid=chrome-account]").or(page.getByRole("button", { name: /^account$/i })).first();
 if (!(await acct.count())) await fail("no Account chrome button");
 await acct.click(); await page.waitForTimeout(3000);
 const t2 = await page.evaluate(() => document.body.innerText);
 if (!new RegExp(`Account · @${user}`, "i").test(t2)) await fail("Account card does not name the test user");
-console.log(`OK: OAuth returned to ${redact(landed)}; ${repo} signed in as @${user}`);
+console.log(`OK: the sign-in door returned to ${redact(landed)}; ${repo} signed in as @${user}`);
 await ctx.close();

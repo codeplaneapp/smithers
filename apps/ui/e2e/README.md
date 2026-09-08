@@ -40,11 +40,13 @@ network access to the public fixture remote.
 
 ## Sign-in probe (`probes/signin-roundtrip.mjs`)
 
-`probes/signin-roundtrip.mjs` proves the GitHub OAuth round trip against the
-deployed host, https://smithers.sh by default. It opens the repository page,
-signs in as the shared test account `codeplanesmithers` through
-`/api/auth/github/start`, expects OAuth to return to the host, and then expects
-the Account card to read `Account · @codeplanesmithers`. It is a plain Node
+`probes/signin-roundtrip.mjs` proves the app's own sign-in door round trip
+against the deployed host, https://smithers.sh by default. It opens the
+repository page, clicks the `Sign in with GitHub` door (clearing only the
+host's cookies first when the profile is already signed in, never GitHub's),
+signs in as the shared test account `codeplanesmithers`, expects the door to
+return to that same repository page with the `signed-in` marker stripped, and
+then expects the Account card to read `Account · @codeplanesmithers`. It is a plain Node
 script, not a Playwright spec: `playwright.config.ts` only collects
 `e2e/playwright`, and `PACKAGE.ts` only globs `e2e/**/*.ts`, so it never runs
 inside the T1 suite or the typecheck target.
