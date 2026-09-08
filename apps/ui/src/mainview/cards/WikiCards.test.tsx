@@ -91,4 +91,23 @@ describe("WikiGraphCardBody", () => {
     expect(calls).toEqual([["wiki.graph", "Plans.md"]])
     unmount()
   })
+
+  /*
+   * Spec 07 §2: a scope pill names a kind of wiki content, never a surface
+   * and never a store. The unfocused graph therefore reads "All", covering
+   * the pages the //:wiki target generates plus the person's own notes, and
+   * never "the whole Wiki", which named the store. The focused scope still
+   * names a note.
+   */
+  test("the unfocused scope reads All, not the store's name", () => {
+    const notes: GraphCard["payload"]["notes"] = [
+      { path: "Plans.md", title: "Plans", linksOut: ["World.md"], backlinks: [], missing: false },
+      { path: "World.md", title: "World", linksOut: [], backlinks: ["Plans.md"], missing: false }
+    ]
+    const { host, unmount } = mount(<WikiGraphCardBody card={graph(notes)} onRunCommand={() => {}} />)
+    const scope = host.querySelector('[data-testid="wiki-graph-scope"]')?.textContent
+    expect(scope).toBe("All · 2 notes · 1 link")
+    expect(scope).not.toContain("whole")
+    unmount()
+  })
 })

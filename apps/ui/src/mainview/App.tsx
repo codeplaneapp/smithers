@@ -41,7 +41,7 @@ import { INIT_GREETING, INIT_TITLE, initMessage, repoStep, repoSuggestion } from
 import type { InitMessage } from "./Onboarding"
 import { RichMarkdown } from "./RichMarkdown"
 import type { Card, Message, Suggestion as SuggestionBinding } from "./state/AppState"
-import { WIKI_DISPLAY_NAME } from "./state/AppState"
+import { WIKI_DISPLAY_NAME, WIKI_GRAPH_ALL_SCOPE } from "./state/AppState"
 import { scrubToolEcho } from "./state/MessageScrub"
 import { conversationTabIdOf, inConversation, MAIN_TAB_ID } from "./state/AppState"
 import { catalogRepositoryOf } from "./state/RepoContext"
@@ -222,7 +222,8 @@ function App() {
    * Librarian L5: the link rail and the graph are derived from the same
    * notes the sidebar lists, during render (no effect, no second store).
    * The rail shows the open note's backlinks and resolved links out; the
-   * graph mode shows the whole Wiki or one note's neighbourhood.
+   * graph mode shows every page (the All scope) or one note's
+   * neighbourhood.
    */
   const selectedWorldLinks = selectedWorldDocument === undefined ? undefined : linksOf(worldDocuments, selectedWorldDocument.path)
   const wikiGraphMode = session.surface === "world" && session.wikiPane === "graph"
@@ -843,9 +844,9 @@ function App() {
                       ref={stampFlows([["button", "wiki.open"]])}
                     >
                       <div className="world-document-meta">
-                        <span>
+                        <span data-testid="wiki-pane-graph-scope">
                           {session.wikiGraphPath === null || session.wikiGraphPath === undefined ?
-                            `The whole ${WIKI_DISPLAY_NAME}` :
+                            WIKI_GRAPH_ALL_SCOPE :
                             `Around ${session.wikiGraphPath}`}
                         </span>
                       </div>

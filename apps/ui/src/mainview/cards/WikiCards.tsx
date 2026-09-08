@@ -11,7 +11,7 @@
 import { Button } from "@smthrs/ui"
 import { lazy, Suspense } from "react"
 import type { Card } from "../state/AppState"
-import { WIKI_DISPLAY_NAME } from "../state/AppState"
+import { WIKI_DISPLAY_NAME, WIKI_GRAPH_ALL_SCOPE } from "../state/AppState"
 import type { CardFamily } from "./CardFamily"
 import { settledPill } from "./CardFamily"
 
@@ -106,7 +106,7 @@ export const WikiGraphCardBody = ({ card, onRunCommand }: { readonly card: WikiG
     <div className="world-card-list wiki-graph">
       <div className="world-card-row">
         <span className="world-card-path" data-testid="wiki-graph-scope">
-          {payload.path === null ? `The whole ${WIKI_DISPLAY_NAME}` : `Around ${payload.path}`} · {payload.notes.length - missing} note
+          {payload.path === null ? WIKI_GRAPH_ALL_SCOPE : `Around ${payload.path}`} · {payload.notes.length - missing} note
           {payload.notes.length - missing === 1 ? "" : "s"} · {payload.links.length} link{payload.links.length === 1 ? "" : "s"}
           {missing === 0 ? "" : ` · ${missing} unresolved`}
         </span>

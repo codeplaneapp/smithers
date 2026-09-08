@@ -565,6 +565,17 @@ export type Toast = z.infer<typeof ToastSchema>
 export const WIKI_DISPLAY_NAME = "Wiki"
 
 /*
+ * The graph's unfocused scope, named by the design session (spec 07 §2): a
+ * scope pill names a kind of wiki content, never a surface and never a store,
+ * so the graph over everything reads "All" and not "the whole Wiki". The two
+ * kinds it covers are the pages the //:wiki target generates and the person's
+ * own notes; only notes exist today, and a scope that has no pages shows none
+ * rather than an empty group. The focused scope stays `Around <path>`, which
+ * names a note, not a store.
+ */
+export const WIKI_GRAPH_ALL_SCOPE = "All"
+
+/*
  * Wave 10 (§2a/§2f) — pills are flow BINDINGS, never prompt strings: a
  * suggestion carries the flow it invokes directly, and the suggestion set
  * is DERIVED in App.tsx from live state (the genuinely-next step) — never
@@ -701,7 +712,7 @@ export const SessionSchema = z.object({
    * The Wiki pane's mode (Librarian L5): the note editor with its link rail,
    * or the knowledge graph over the same notes. `wiki.graph [path]` switches
    * it and `wikiGraphPath` names the note the graph is focused on (null =
-   * the whole Wiki). Both live here, not in a component, for the reason
+   * every page). Both live here, not in a component, for the reason
    * pendingWorldDeleteId does; optional so persisted sessions parse.
    */
   wikiPane: z.enum(["document", "graph"]).optional(),
@@ -1278,7 +1289,7 @@ export type AppTransition =
     id: string
   }
   | {
-    /* The Wiki pane's mode: the editor or the graph, focused on a note or on the whole Wiki. */
+    /* The Wiki pane's mode: the editor or the graph, focused on a note or over every page. */
     type: "wiki.pane.changed"
     actor: Actor
     pane: "document" | "graph"
