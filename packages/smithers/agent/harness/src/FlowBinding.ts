@@ -43,7 +43,7 @@ import type * as Effects from "@smthrs/core/Effects"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import type { Context, Schema as SchemaTypes } from "effect"
-import { Effect, Option, Result, Schema } from "effect"
+import { Effect, Option, Result, Schema, SchemaAST } from "effect"
 import { width as callLedgerWidth } from "./CallLedger.ts"
 import type * as Cell from "./Cell.ts"
 import { CallResult } from "./Cell.ts"
@@ -121,16 +121,21 @@ const declaredEffects = (effects: Effects.Declaration | undefined): Descriptor.E
   tier: effects?.tier ?? "irreversible"
 })
 
-/**
- * Drops the own properties whose value is exactly `null`.
- *
- * Only the top level, and only `null` — this is the JSON round trip of a
- * JavaScript object with `undefined`-valued keys, not a general coercion.
- */
-const withoutNulls = (input: unknown): unknown => {
+/** Only declared optional input properties that reject null can be omitted. */
+const omittableNullKeys = (schema: SchemaTypes.Top): ReadonlySet<PropertyKey> => {
+  const ast = SchemaAST.toEncoded(schema.ast)
+  if (ast._tag !== "Objects") return new Set()
+  return new Set(
+    ast.propertySignatures
+      .filter((field) => SchemaAST.isOptional(field.type) && !Schema.is(Schema.make(field.type))(null))
+      .map((field) => field.name)
+  )
+}
+
+/** The JSON omission retry is limited to known top-level optional properties. */
+const withoutRejectedNulls = (input: unknown, keys: ReadonlySet<PropertyKey>): unknown => {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return input
-  const entries = Object.entries(input as Record<string, unknown>).filter(([, value]) => value !== null)
-  return Object.fromEntries(entries)
+  return Object.fromEntries(Object.entries(input).filter(([key, value]) => value !== null || !keys.has(key)))
 }
 
 /**
@@ -212,45 +217,21 @@ export interface Binding<R = never> {
 const refused = (code: Cell.CallFailureCode, message: string): CallResult =>
   new CallResult({ outcome: "failure", value: null, code, message })
 
-/**
- * What a failure that cannot be read is described as.
- *
- * Named rather than written inline because it is the one description this
- * module can promise for every value: the failure happened, and the value
- * carrying it answered a read with a throw.
- */
-const undescribable = "the handler failed with a value that throws when it is read"
+/** Bounds a schema rejection before it enters the journal and later frames. */
+const describeFailure = (error: Schema.SchemaError): string =>
+  elide.head(error.message, callLedgerWidth * 4, "reissue the call to see the whole failure")
 
-/**
- * Renders an arbitrary failure value as stable text for the next frame.
- *
- * Every read here is a read of a value a handler chose: `message` can be a
- * throwing accessor, `toJSON` can throw under `JSON.stringify`, and `toString`
- * or `Symbol.toPrimitive` can throw under `String`. A throw escaping this
- * function would leave the boundary as a defect instead of the catchable
- * `CallResult` the cell contract promises, and a cell cannot catch a defect —
- * so the whole rendering runs under one guard and a value that refuses to
- * describe itself is described as exactly that.
- */
-const describe = (error: unknown): string => {
+/** Only explicitly public text may cross the host boundary. Renderer failures stay opaque too. */
+const publicMessage = <E>(error: E, render: ((error: E) => string | undefined) | undefined): string | undefined => {
   try {
-    if (typeof error === "string") return error
-    if (error instanceof Error) return error.message
-    const message = (error as { readonly message?: unknown } | null)?.message
-    if (typeof message === "string") return message
-    try {
-      return JSON.stringify(error) ?? String(error)
-    } catch {
-      return String(error)
-    }
+    const message = render?.(error)
+    return typeof message === "string"
+      ? elide.head(message, callLedgerWidth * 4, "ask the host for the full public failure")
+      : undefined
   } catch {
-    return undescribable
+    return undefined
   }
 }
-
-/** Bounds a failure before it enters the journal and every later frame. */
-const describeFailure = (error: unknown): string =>
-  elide.head(describe(error), callLedgerWidth * 4, "reissue the call to see the whole failure")
 
 /**
  * Decides whether a handler failure is the cell's business.
@@ -299,6 +280,14 @@ export interface Options<
    * same ordinal with the same declaration.
    */
   readonly handler: (input: I["Type"], call: Cell.Call) => Effect.Effect<O["Type"], E, R>
+  /**
+   * Opts safe handler-failure details into cell-visible, journaled text.
+   * Select only public fields; never forward raw messages or serialized causes.
+   * Undefined or a thrown renderer uses the opaque default. Permission errors
+   * and existing HarnessErrors bypass this renderer and stay in the error channel.
+   * Inspect raw causes in the host handler, redacting before any persistence.
+   */
+  readonly publicError?: ((error: E) => string | undefined) | undefined
 }
 
 /**
@@ -321,18 +310,15 @@ export const make = <
     ...(options.outputDocument === undefined ? { outputDocument: document(options.flow.output) } : {})
   })
   const decodeInput = Schema.decodeUnknownResult(options.flow.input)
-  // A cell is JavaScript, where `{ env: undefined }` and `{}` are the same
-  // object for an optional key — but the call crosses a JSON boundary, which
-  // has no `undefined`, so the omission arrives as an explicit `null` that an
-  // optional field rejects. That cost a whole frame per occurrence: the model
-  // reissued the identical call minus one key, learning the shape one rejection
-  // at a time. Retrying once without the nulls is exactly the JavaScript reading
-  // of the same value, and a schema that genuinely accepts `null` already
-  // decoded on the first attempt.
+  // Retry JSON nulls as omissions only where the encoded struct declares an
+  // optional field that rejects null. Other nullable fields must survive even
+  // when a sibling caused the original decode to fail. The full input schema
+  // still validates the retry, including refinements and transformations.
+  const nullKeys = omittableNullKeys(options.flow.input)
   const decodeCall = (input: unknown): ReturnType<typeof decodeInput> => {
     const first = decodeInput(input)
     if (first._tag !== "Failure") return first
-    const retried = decodeInput(withoutNulls(input))
+    const retried = decodeInput(withoutRejectedNulls(input, nullKeys))
     // When the retry fails too, the first attempt's failure is the one worth
     // reporting: it names the key the caller actually wrote.
     return retried._tag === "Failure" ? first : retried
@@ -356,7 +342,13 @@ export const make = <
         if (produced._tag === "Failure") {
           const escalate = escalated(produced.failure)
           if (escalate !== undefined) return yield* Effect.fail(escalate)
-          return refused("flow_failed", `Flow ${descriptor.name} failed: ${describeFailure(produced.failure)}`)
+          const message = publicMessage(produced.failure, options.publicError)
+          return refused(
+            "flow_failed",
+            message === undefined
+              ? `Flow ${descriptor.name} failed.`
+              : `Flow ${descriptor.name} failed: ${message}`
+          )
         }
         const encoded = encodeOutput(produced.success)
         if (encoded._tag === "Failure") {

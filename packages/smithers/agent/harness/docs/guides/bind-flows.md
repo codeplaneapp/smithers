@@ -57,16 +57,32 @@ them with `FlowBinding.provide(binding, context)` before composing.
 Inside `run`, every failure lands where the cell contract says it must:
 
 - Input the schema rejects settles as a catchable `invalid_input` failure
-  without running the handler. A first attempt that fails on an explicit
-  `null` retries once with the null keys dropped, the JavaScript reading of an
-  omitted optional key.
-- A handler failure settles as a catchable `flow_failed`, with the failure
-  rendered as bounded stable text.
+  without running the handler. For struct inputs, a failed decode retries once
+  with `null` omitted only from declared optional fields that reject it on the
+  encoded side. Schema-valid nulls remain present; the full schema validates
+  the retry. If it still fails, the original rejection is reported.
+- An ordinary handler failure settles as a catchable `flow_failed` with the
+  opaque message `Flow <name> failed.` No raw error message, object, or cause
+  enters the call result or its journal record.
 - Output the output schema rejects, or that is not serializable, settles as
   `flow_failed` naming which.
-- A permission requirement, a denial, or any harness-level failure stays in
-  the error channel as a `HarnessError` with code `suspended`, so a cell can
-  never catch its own permission park.
+- Existing `HarnessError` values pass through the error channel unchanged,
+  preserving their code and identity.
+- `PermissionRequired` and `PermissionDenied` become `HarnessError` values
+  with code `suspended`, so a cell cannot catch its own permission park.
+  Interruptions are never caught.
+
+A binding can opt safe details into the public failure using
+`publicError: (error: E) => string | undefined`. Select only fields approved
+for cells and journals, for example a public status code. The returned text
+is bounded before it enters the call result. Returning `undefined`, throwing,
+or returning a non-string at runtime uses the opaque default. Harness and
+permission errors bypass this renderer.
+
+Raw diagnostics remain in the host handler. Inspect them there, for example
+with `Effect.tapError`, and redact credentials before logging or persisting
+anything. `publicError` is an explicit disclosure decision, not a sanitizer;
+never forward raw `Error.message`, headers, URLs, or serialized causes.
 
 ## Compose a catalog
 

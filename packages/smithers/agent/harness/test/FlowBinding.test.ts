@@ -267,7 +267,7 @@ describe("FlowBinding.make", () => {
       ["just a string", ["one"], null, 7].map((input) => run(binding.run(call("echo", input))))
     )
 
-    // `withoutNulls` only strips top-level null values of a record; a string,
+    // The omission retry only handles top-level properties of a record; a string,
     // an array, and null itself are returned untouched, so the retry reports
     // the same rejection the first attempt did.
     expect(ran).toBe(false)
@@ -316,6 +316,99 @@ describe("FlowBinding.make", () => {
     expect(observed).toEqual({ env: null })
   })
 
+  it.each([
+    { status: 401, request: { headers: { Authorization: "Bearer SYNTHETIC_HOST_ONLY_TOKEN" } } },
+    { request: { url: "https://user:SYNTHETIC_PASSWORD@example.invalid/?api_key=SYNTHETIC_QUERY_SECRET" } },
+    new Error("Authorization: Bearer SYNTHETIC_ERROR_SECRET"),
+    "https://example.invalid/?api_key=SYNTHETIC_STRING_SECRET"
+  ])("keeps host credentials out of call results for failure %#", async (failure) => {
+    const binding = FlowBinding.make({
+      flow: Flow.make({ name: "lookup", input: Schema.Struct({}), output: Schema.Struct({}) }),
+      handler: () => Effect.fail(failure)
+    })
+
+    const result = await Effect.runPromise(binding.run(call("lookup", {})))
+
+    expect(JSON.stringify(result)).not.toContain("SYNTHETIC_")
+    expect(result).toStrictEqual(
+      new Cell.CallResult({
+        outcome: "failure",
+        value: null,
+        code: "flow_failed",
+        message: "Flow lookup failed."
+      })
+    )
+  })
+
+  it("preserves nullable fields when another optional field rejects null", async () => {
+    const Input = Schema.Struct({
+      content: Schema.optional(Schema.NullOr(Schema.String)),
+      limit: Schema.optional(Schema.Number)
+    })
+    let observed: unknown
+    const binding = FlowBinding.make({
+      flow: Flow.make({ name: "mixed", input: Input, output: Schema.Struct({}) }),
+      handler: (input) =>
+        Effect.sync(() => {
+          observed = input
+          return {}
+        })
+    })
+    const input = { content: null, limit: null }
+
+    const exit = await run(binding.run(call("mixed", input)))
+
+    expect(exit).toMatchObject({ _tag: "Success", value: { outcome: "success" } })
+    expect(observed).toEqual({ content: null })
+    expect(input).toEqual({ content: null, limit: null })
+  })
+
+  it("preserves required nullable and nested values during optional-key omission", async () => {
+    const Input = Schema.Struct({
+      content: Schema.NullOr(Schema.String),
+      limit: Schema.optionalKey(Schema.Number),
+      nested: Schema.Struct({ value: Schema.NullOr(Schema.String) }),
+      count: Schema.Number
+    })
+    let observed: unknown
+    const binding = FlowBinding.make({
+      flow: Flow.make({ name: "mixed", input: Input, output: Schema.Struct({}) }),
+      handler: (input) =>
+        Effect.sync(() => {
+          observed = input
+          return {}
+        })
+    })
+
+    const exit = await run(binding.run(call("mixed", {
+      content: null,
+      limit: null,
+      nested: { value: null },
+      count: 2
+    })))
+
+    expect(exit).toMatchObject({ _tag: "Success", value: { outcome: "success" } })
+    expect(observed).toEqual({ content: null, nested: { value: null }, count: 2 })
+  })
+
+  it("does not omit null-valued record entries", async () => {
+    const Input = Schema.Record(Schema.String, Schema.Number)
+    let ran = false
+    const binding = FlowBinding.make({
+      flow: Flow.make({ name: "record", input: Input, output: Schema.Struct({}) }),
+      handler: () =>
+        Effect.sync(() => {
+          ran = true
+          return {}
+        })
+    })
+
+    const exit = await run(binding.run(call("record", { limit: null })))
+
+    expect(exit).toMatchObject({ _tag: "Success", value: { outcome: "failure", code: "invalid_input" } })
+    expect(ran).toBe(false)
+  })
+
   it("turns an ordinary handler failure into a catchable call failure", async () => {
     const binding = FlowBinding.make({
       flow: echo,
@@ -326,21 +419,25 @@ describe("FlowBinding.make", () => {
 
     expect(Exit.isSuccess(exit) && exit.value.outcome).toBe("failure")
     expect(Exit.isSuccess(exit) && exit.value.code).toBe("flow_failed")
-    expect(Exit.isSuccess(exit) && exit.value.message).toBe("Flow echo failed: the file was busy")
+    expect(Exit.isSuccess(exit) && exit.value.message).toBe("Flow echo failed.")
   })
 
-  it("bounds a long handler failure before it enters later frames", async () => {
-    const binding = FlowBinding.make({ flow: echo, handler: () => Effect.fail("x".repeat(1_000)) })
+  it("bounds explicitly public handler failure text before it enters later frames", async () => {
+    const binding = FlowBinding.make({
+      flow: echo,
+      handler: () => Effect.fail({ publicDetail: "x".repeat(1_000) }),
+      publicError: (error) => error.publicDetail
+    })
 
     const exit = await run(binding.run(call("echo", { text: "hi" })))
     const message = Exit.isSuccess(exit) ? exit.value.message : undefined
 
     expect(Exit.isSuccess(exit) && exit.value.code).toBe("flow_failed")
-    expect(message).toContain("reissue the call to see the whole failure")
+    expect(message).toContain("ask the host for the full public failure")
     expect(message?.length).toBeLessThan(650)
   })
 
-  it("renders non-Error failure values as stable text", async () => {
+  it("keeps non-Error failure values opaque", async () => {
     const stringFailure = FlowBinding.make({ flow: echo, handler: () => Effect.fail("plain refusal") })
     const taggedFailure = FlowBinding.make({ flow: echo, handler: () => Effect.fail({ message: "tagged refusal" }) })
     const opaqueFailure = FlowBinding.make({ flow: echo, handler: () => Effect.fail({ code: 12 }) })
@@ -353,13 +450,13 @@ describe("FlowBinding.make", () => {
     )
 
     expect(rendered).toEqual([
-      "Flow echo failed: plain refusal",
-      "Flow echo failed: tagged refusal",
-      "Flow echo failed: {\"code\":12}"
+      "Flow echo failed.",
+      "Flow echo failed.",
+      "Flow echo failed."
     ])
   })
 
-  it("renders a failure value with no message and no JSON form", async () => {
+  it("keeps failure values with no message and no JSON form opaque", async () => {
     const undefinedFailure = FlowBinding.make({ flow: echo, handler: () => Effect.fail(undefined) })
     const symbolFailure = FlowBinding.make({ flow: echo, handler: () => Effect.fail(Symbol("refused")) })
 
@@ -370,11 +467,9 @@ describe("FlowBinding.make", () => {
       })
     )
 
-    // `JSON.stringify` answers `undefined` for both, so the text the next frame
-    // reads has to come from `String`.
     expect(rendered).toEqual([
-      "Flow echo failed: undefined",
-      "Flow echo failed: Symbol(refused)"
+      "Flow echo failed.",
+      "Flow echo failed."
     ])
   })
 
@@ -390,7 +485,7 @@ describe("FlowBinding.make", () => {
       value: {
         outcome: "failure",
         code: "flow_failed",
-        message: expect.stringContaining("Flow echo failed:")
+        message: "Flow echo failed."
       }
     })
   })
@@ -405,16 +500,14 @@ describe("FlowBinding.make", () => {
       value: {
         outcome: "failure",
         code: "flow_failed",
-        message: expect.stringContaining("Flow echo failed:")
+        message: "Flow echo failed."
       }
     })
   })
 
   it("settles a failure whose every read throws as catchable data", async () => {
-    // The three reads the renderer makes, each answered with a throw: the
-    // `message` accessor, `toJSON` under `JSON.stringify`, and `toString`
-    // under `String`. A defect here would reach the cell as an uncatchable
-    // crash of the whole frame rather than as the failure the flow had.
+    // Unknown failures must not be inspected or serialized, even when their
+    // accessors would throw.
     const hostile = new Error("unreadable")
     Object.defineProperty(hostile, "message", {
       get: () => {
@@ -440,9 +533,45 @@ describe("FlowBinding.make", () => {
       value: {
         outcome: "failure",
         code: "flow_failed",
-        message: "Flow echo failed: the handler failed with a value that throws when it is read"
+        message: "Flow echo failed."
       }
     })
+  })
+
+  it("publishes only details explicitly selected by the typed renderer", async () => {
+    const failure = { status: 404, request: { headers: { Authorization: "SYNTHETIC_SECRET" } } }
+    let observed: unknown
+    const binding = FlowBinding.make({
+      flow: echo,
+      handler: () => Effect.fail(failure),
+      publicError: (error) => {
+        observed = error
+        return `Lookup returned status ${error.status}.`
+      }
+    })
+
+    const result = await Effect.runPromise(binding.run(call("echo", { text: "hi" })))
+
+    expect(observed).toBe(failure)
+    expect(result.message).toBe("Flow echo failed: Lookup returned status 404.")
+    expect(JSON.stringify(result)).not.toContain("SYNTHETIC_SECRET")
+  })
+
+  it.each(["declined", "thrown", "invalid"])("uses the opaque default for a %s public renderer", async (mode) => {
+    const binding = FlowBinding.make({
+      flow: echo,
+      handler: () => Effect.fail(new Error("SYNTHETIC_SECRET")),
+      publicError: () => {
+        if (mode === "thrown") throw new Error("SYNTHETIC_RENDERER_SECRET")
+        if (mode === "invalid") return { secret: "SYNTHETIC_SECRET" } as unknown as string
+        return undefined
+      }
+    })
+
+    const result = await Effect.runPromise(binding.run(call("echo", { text: "hi" })))
+
+    expect(result.message).toBe("Flow echo failed.")
+    expect(JSON.stringify(result)).not.toContain("SYNTHETIC_")
   })
 
   it("keeps a permission requirement in the typed channel where a cell cannot swallow it", async () => {
@@ -465,17 +594,27 @@ describe("FlowBinding.make", () => {
     const denied = Permission.permissionDenied(Capability.make("fs:write", "**"), "policy")
     const harness = new HarnessError({ code: "aborted", message: "the run was cancelled" })
 
+    let rendered = false
+    const publicError = () => {
+      rendered = true
+      return "Should not reach the cell."
+    }
     const deniedExit = await run(
-      FlowBinding.make({ flow: echo, handler: () => Effect.fail(denied) }).run(call("echo", { text: "hi" }))
+      FlowBinding.make({ flow: echo, handler: () => Effect.fail(denied), publicError }).run(
+        call("echo", { text: "hi" })
+      )
     )
     const harnessExit = await run(
-      FlowBinding.make({ flow: echo, handler: () => Effect.fail(harness) }).run(call("echo", { text: "hi" }))
+      FlowBinding.make({ flow: echo, handler: () => Effect.fail(harness), publicError }).run(
+        call("echo", { text: "hi" })
+      )
     )
 
     expect(Exit.isFailure(deniedExit) ? Cause.squash(deniedExit.cause) : undefined).toMatchObject({
       code: "suspended"
     })
     expect(Exit.isFailure(harnessExit) ? Cause.squash(harnessExit.cause) : undefined).toBe(harness)
+    expect(rendered).toBe(false)
   })
 
   it("never converts an interruption into a call result", async () => {
