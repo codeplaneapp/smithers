@@ -527,7 +527,7 @@ const compile: (options: {
 
 Compiles drafts into a plan: topological order, dependency-digest substitution, overlap annotation, reader-after-writer ordering, and the plan digest. No I/O. The options are snapshotted before anything else happens, and the result is deep-frozen at generation 0 with `baseDigest` equal to `digest`.
 
-Traversal uses explicit stacks. Because the conflict and reader-after-writer passes consider a quadratic number of node pairs, plans are bounded by `maximumPlanNodes` and fail with `graph_too_large` above that limit.
+Traversal uses explicit stacks. Because the conflict and reader-after-writer passes consider a quadratic number of node pairs, plans are bounded by `maximumPlanNodes` and fail with `graph_too_large` above that limit or the effect-analysis work budget. Analysis yields periodically.
 
 ### Plan.append
 
@@ -595,9 +595,9 @@ A graph the compiler refuses. The code set is closed, so a caller may switch on 
 | `overlap_forbidden`  | a `fail` pair genuinely overlaps and no dependency path orders it                                                                                                                                                                                  |
 | `invalid_effects`    | one path is declared as both a write and a removal                                                                                                                                                                                                 |
 | `invalid_node`       | an empty plan id, flow, or node id, a priority that is not a safe integer, a `kind` or strategy outside its literal set, or key material or an effect declaration this release cannot decode, which includes a path that is not workspace-relative |
-| `graph_too_large`    | a plan contains more than `Plan.maximumPlanNodes` nodes                                                                                                                                                                                            |
+| `graph_too_large`    | a plan exceeds `Plan.maximumPlanNodes` or the effect-analysis work budget                                                                                                                                                                          |
 
-Compilation walks with explicit stacks and never recurses per edge. The conflict and reader-after-writer passes compare node pairs, so pair comparison is quadratic in node count, and each pair whose write sets actually overlap adds one on-demand reachability walk over the edge set. A plan whose write sets barely overlap costs about `n²` comparisons; one whose writers overlap densely costs more than quadratic. `Plan.maximumPlanNodes` bounds that work, because a plan above it is refused with `graph_too_large` before any pair is compared.
+Compilation walks with explicit stacks and never recurses per edge. Effect analysis caches transitive reachability in bitsets, updates it when inferring ordering edges, and yields periodically for interruption. It refuses more than 250,000 candidate pairs or 10,000,000 work units with `graph_too_large`. Work includes overlap comparisons, bitset merges and graph traversal. `verify` shares this budget and one effect expansion map and candidate index across all replayed generations. Plans above `Plan.maximumPlanNodes` are refused before effect analysis.
 
 ### Conflict annotations
 

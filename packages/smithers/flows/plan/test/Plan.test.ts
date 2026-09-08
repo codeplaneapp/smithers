@@ -10,6 +10,9 @@ import { StoredKey } from "@smthrs/keys"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { FastCheck } from "effect/testing"
+import { vi } from "vitest"
+import * as FileSet from "../src/FileSet.ts"
+import * as EffectCandidates from "../src/internal/EffectCandidates.ts"
 import * as KeyMaterial from "../src/KeyMaterial.ts"
 import * as Plan from "../src/Plan.ts"
 import * as PlanDiff from "../src/PlanDiff.ts"
@@ -39,6 +42,138 @@ const draftSpec = FastCheck.tuple(
 )
 
 describe("Plan.compile", () => {
+  it("yields during dense writer inference so interruption can stop the pass", async () => {
+    const controller = new AbortController()
+    const original = FileSet.overlaps
+    let comparisons = 0
+    const overlap = vi.spyOn(FileSet, "overlaps").mockImplementation((left, right) => {
+      if (++comparisons === 1) queueMicrotask(() => controller.abort())
+      return original(left, right)
+    })
+    try {
+      await expect(Effect.runPromise(
+        withCrypto(compile(
+          Array.from({ length: 400 }, (_, index) => draft(`dense-${index}`, { writes: ["shared"] }))
+        )),
+        { signal: controller.signal }
+      )).rejects.toBeDefined()
+      expect(comparisons).toBeGreaterThan(0)
+      expect(comparisons).toBeLessThan(5_000)
+    } finally {
+      overlap.mockRestore()
+    }
+  })
+
+  it.effect("completes 400 overlapping writers with the existing conflict and edge order", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(compile(
+        Array.from({ length: 400 }, (_, index) => draft(`dense-${index}`, { writes: ["shared"] }))
+      ))
+      // Approval digest captured from the original ascending conflict pass.
+      expect(plan.digest).toBe("key1_5b86940214d53ada9bcc937b4c346610b5e458f2d967534b8f2bb01b32ea50d0")
+      expect(plan.nodes.reduce((total, node) => total + node.dependsOn.length, 0)).toBe(79_800)
+      expect(plan.nodes[399]!.dependsOn).toEqual(plan.nodes.slice(0, 399).map((node) => node.id))
+      expect(plan.nodes.every((node) => node.conflicts.length === 399)).toBe(true)
+    }))
+
+  it.effect("refuses dense lane annotations at the candidate-pair budget", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(compile(
+        Array.from({ length: 710 }, (_, index) =>
+          draft(`lane-${index}`, { writes: ["shared"], conflictStrategy: "lane" }))
+      ))
+      expect(failure).toMatchObject({ code: "graph_too_large", message: expect.stringContaining("work budget") })
+    }))
+
+  it.effect("refuses excessive overlap work below the candidate-pair budget", () =>
+    Effect.gen(function*() {
+      const writes = Array.from({ length: 3_200 }, (_, index) => `out/${index}`)
+      const failure = yield* withCryptoFailure(compile([draft("a", { writes }), draft("b", { writes })]))
+      expect(failure).toMatchObject({ code: "graph_too_large", message: expect.stringContaining("work budget") })
+      const readerFailure = yield* withCryptoFailure(compile([
+        draft("reader", { reads: writes }),
+        draft("writer", { writes })
+      ]))
+      expect(readerFailure).toMatchObject({ code: "graph_too_large" })
+    }))
+
+  it.effect("preserves explicit version ordering through a long converging dependency graph", () =>
+    Effect.gen(function*() {
+      const chain = Array.from({ length: 2_100 }, (_, index) =>
+        draft(`version-${index}`, {
+          inputs: [{ _tag: "Pending", from: index === 0 ? "reader" : `version-${index - 1}` }]
+        }))
+      const plan = yield* withCrypto(compile([
+        draft("reader", { reads: ["source"] }),
+        ...chain,
+        draft("writer", {
+          writes: ["source"],
+          inputs: [{ _tag: "Pending", from: "version-2098" }, { _tag: "Pending", from: "version-2099" }]
+        })
+      ]))
+      expect(plan.nodes[0]!.dependsOn).toEqual([])
+      expect(plan.nodes.at(-1)!.dependsOn).toEqual(["version-2098", "version-2099"])
+    }))
+
+  it.effect("updates a wide set of cached descendants after reader inference", () =>
+    Effect.gen(function*() {
+      const children = Array.from({ length: 2_100 }, (_, index) =>
+        draft(`child-${index}`, {
+          inputs: [{ _tag: "Pending", from: "parent" }],
+          writes: [`out/${index}`]
+        }))
+      const plan = yield* withCrypto(compile([
+        {
+          ...draft("parent"),
+          effects: { reads: ["source"], writes: [{ _tag: "TreeArtifact", path: "out" }], boundaryMode: "hard" }
+        },
+        ...children,
+        draft("producer", { writes: ["source"] })
+      ]))
+      expect(plan.nodes[0]!.dependsOn).toEqual(["producer"])
+      expect(plan.nodes.slice(1, -1).every((node) => node.dependsOn.length === 1 && node.dependsOn[0] === "parent"))
+        .toBe(true)
+    }))
+
+  it.effect("refreshes cached descendants after inferring a reader dependency", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(compile([
+        draft("parent", { reads: ["source"], writes: ["shared"] }),
+        draft("child", {
+          inputs: [{ _tag: "Pending", from: "parent" }],
+          reads: ["source"],
+          writes: ["shared"]
+        }),
+        draft("producer", { writes: ["source"] })
+      ]))
+      expect(plan.nodes.map((node) => node.dependsOn)).toEqual([["producer"], ["parent"], []])
+      expect(yield* withCrypto(Plan.verify(JSON.parse(JSON.stringify(plan))))).toEqual(plan)
+    }))
+
+  it.effect("builds one candidate index when verifying hundreds of writer generations", () =>
+    Effect.gen(function*() {
+      // Generation is outside the approval projection. Distinct producers
+      // have the same edges/annotations whether compiled together or appended.
+      const flat = yield* withCrypto(compile(
+        Array.from({ length: 401 }, (_, index) => draft(`history-${index}`, { writes: [`out/${index}`] }))
+      ))
+      const base = yield* withCrypto(compile([draft("history-0", { writes: ["out/0"] })]))
+      const imported = JSON.parse(JSON.stringify(flat))
+      imported.baseDigest = base.digest
+      imported.generation = 400
+      imported.nodes.forEach((node: { generation: number }, index: number) => {
+        node.generation = index
+      })
+      const make = vi.spyOn(EffectCandidates, "make")
+      try {
+        const verified = yield* withCrypto(Plan.verify(imported))
+        expect(verified).toEqual(imported)
+        expect(make).toHaveBeenCalledTimes(1)
+      } finally {
+        make.mockRestore()
+      }
+    }))
+
   it.effect("orders topologically, keys every node, and defaults its annotations", () =>
     Effect.gen(function*() {
       const plan = yield* withCrypto(compile([

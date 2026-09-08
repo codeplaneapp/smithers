@@ -142,11 +142,15 @@ type in the middle, and it is the whole contract between the two packages.
 ## Bounds
 
 One compiled plan holds at most `Plan.maximumPlanNodes` nodes, which is 10,000.
-The ceiling exists because the conflict and reader-after-writer passes compare
-node pairs: a plan whose write sets barely overlap costs about `n²`
-comparisons, and one whose writers overlap densely costs more, because each
-overlapping pair adds an on-demand reachability walk. A plan above the ceiling
-is refused with `graph_too_large` before any pair is compared.
+A plan above the ceiling is refused with `graph_too_large` before effect
+analysis. Analysis also refuses more than 250,000 candidate pairs or 10,000,000
+work units, including overlap comparisons, bitset merges and graph traversal.
+This budget applies across all generations replayed by `verify`. Split plans
+that exceed either budget across flow boundaries.
+
+Reachability is cached in bitsets and updated when ordering edges are inferred.
+Analysis yields periodically so cancellation and other fibers can run. Imported
+plans reuse one effect expansion map and candidate index across generations.
 
 Compilation itself walks with explicit stacks and never recurses per edge, so
 depth is a data structure rather than native stack frames.

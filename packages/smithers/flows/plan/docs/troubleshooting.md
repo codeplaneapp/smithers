@@ -188,15 +188,16 @@ hole rather than a style rule.
 ### graph_too_large
 
 **What happened.** The plan would hold more than `Plan.maximumPlanNodes` nodes,
-which is 10,000.
+which is 10,000, or effect analysis exceeded 250,000 candidate pairs or
+10,000,000 work units.
 
 ```text
 A plan may contain at most 10000 nodes, received 12000
 ```
 
-**What to change.** Split the work across flow boundaries. The ceiling exists
-because conflict analysis compares node pairs, and it is checked before any pair
-is compared. A plan that large is also a plan no operator can review.
+**What to change.** Split the work across flow boundaries. The node ceiling is checked
+before effect analysis. A separate work budget bounds dense conflicts and
+reachability updates, and applies across generations during verification.
 
 ## KeyMaterialError
 

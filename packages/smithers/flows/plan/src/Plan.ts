@@ -8,8 +8,8 @@
  * node and everything downstream of it, and nothing else. That is the entire
  * invalidation mechanism. Invalidation is re-keying, which **rejects**
  * Skyframe's reverse-dependency index and invalidating node visitor outright
- * because content addressing subsumes them. There is no reverse-dep index in
- * this file, and there must never be one.
+ * because content addressing subsumes them. Key invalidation never retains a
+ * reverse-dependency index; annotation uses only a temporary reachability cache.
  *
  * Growth is append-only: {@link append} adds a pre-keyed subgraph to the same
  * plan and never rewrites a node already in it.
@@ -234,8 +234,8 @@ export class PlanError extends Schema.TaggedError<PlanError>()("@smthrs/plan/Pla
 /**
  * Maximum number of nodes retained by one compiled plan.
  *
- * Conflict analysis is quadratic in node count, so an explicit ceiling keeps
- * untrusted declarations from turning planning into an unbounded CPU task.
+ * Effect analysis also has a yielding work budget, since a node ceiling alone
+ * does not bound dense conflicts to practical work.
  *
  * @since 1.0.0
  * @category limits
@@ -401,7 +401,8 @@ const topological = (drafts: ReadonlyArray<NodeDraft>, known: ReadonlySet<string
  */
 const annotate = (
   nodes: ReadonlyArray<PlanNode>,
-  frozen: ReadonlySet<string>
+  frozen: ReadonlySet<string>,
+  replayGenerations = false
 ): Effect.Effect<ReadonlyArray<PlanNode>, PlanError> =>
   Effect.gen(function*() {
     const expanded = new Map(nodes.map((node) => [node.id, {
@@ -415,117 +416,236 @@ const annotate = (
     // Keep declaration sequencing separate from inferred ordering, including
     // for frozen generations whose `dependsOn` already contains inferred edges.
     const declaredEdges = new Map(nodes.map((node) => [node.id, KeyMaterial.dependencies(node.material)]))
-    // The dependency chain from `from` to `to`, or `undefined` when no path
-    // exists. The chain is what a cycle refusal shows the author, so the walk
-    // records how it arrived rather than only whether it did.
+    // One index and mutable graph serve every replayed generation. Future
+    // producers are filtered at the generation boundary, never re-indexed.
+    const ordinals = new Map(nodes.map((node, index) => [node.id, index]))
+    const dependents = new Map(nodes.map((node) => [node.id, new Set<string>()]))
+    for (const node of nodes) {
+      for (const dependency of node.dependsOn) dependents.get(dependency)!.add(node.id)
+    }
+    const words = Math.ceil(nodes.length / 32)
+    const ancestors = new Map<string, Uint32Array>()
+    // Charge a pair for bookkeeping as well as its path comparisons. The
+    // separate pair ceiling also bounds persisted annotations and edges.
+    let work = 0
+    let pairs = 0
+    let nextYield = 2_048
+    const checkpoint = Effect.gen(function*() {
+      if (work > 10_000_000 || pairs > 250_000) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "graph_too_large",
+            message: "Plan effect analysis exceeds its work budget (10000000 work units or 250000 candidate pairs)"
+          })
+        )
+      }
+      nextYield = Math.min(work + 2_048, 10_000_001)
+      yield* Effect.yieldNow
+    })
+    // Cache transitive ancestors as bitsets. Adding an edge updates its source
+    // immediately and invalidates only cached dependents. In particular, dense
+    // writers never walk the growing dependency DAG for each conflicting pair.
+    const closure = (id: string): Effect.Effect<Uint32Array, PlanError> =>
+      Effect.gen(function*() {
+        const cached = ancestors.get(id)
+        if (cached !== undefined) return cached
+        const frame = (id: string) => {
+          const bits = new Uint32Array(words)
+          const ordinal = ordinals.get(id)!
+          bits[ordinal >>> 5]! |= 1 << (ordinal & 31)
+          return { id, bits, dependencies: Array.from(edges.get(id)!), next: 0 }
+        }
+        const stack = [frame(id)]
+        while (stack.length > 0) {
+          const current = stack[stack.length - 1]!
+          const dependency = current.dependencies[current.next]
+          if (dependency === undefined) {
+            ancestors.set(current.id, current.bits)
+            stack.pop()
+            continue
+          }
+          const bits = ancestors.get(dependency)
+          if (bits === undefined) {
+            stack.push(frame(dependency))
+            continue
+          }
+          for (let word = 0; word < words; word++) {
+            current.bits[word]! |= bits[word]!
+            if (++work >= nextYield) yield* checkpoint
+          }
+          current.next++
+        }
+        return ancestors.get(id)!
+      })
+    const reaches = (from: string, to: string) =>
+      Effect.gen(function*() {
+        const bits = yield* closure(from)
+        const ordinal = ordinals.get(to)!
+        return (bits[ordinal >>> 5]! & (1 << (ordinal & 31))) !== 0
+      })
+    const addEdge = (from: string, to: string) =>
+      Effect.gen(function*() {
+        const source = yield* closure(from)
+        const target = yield* closure(to)
+        for (let word = 0; word < words; word++) {
+          source[word]! |= target[word]!
+          if (++work >= nextYield) yield* checkpoint
+        }
+        const stack = [from]
+        while (stack.length > 0) {
+          for (const dependent of dependents.get(stack.pop()!)!) {
+            if (++work >= nextYield) yield* checkpoint
+            if (!ancestors.delete(dependent)) continue
+            stack.push(dependent)
+          }
+        }
+        edges.get(from)!.add(to)
+        dependents.get(to)!.add(from)
+      })
+    // Routes are only needed for explicit version sequencing and a cycle's
+    // diagnostic. Bound and yield these walks too.
     const route = (
       from: string,
       to: string,
       graph: ReadonlyMap<string, Iterable<string>> = edges
-    ): ReadonlyArray<string> | undefined => {
-      const arrivedFrom = new Map<string, string>()
-      const seen = new Set<string>([from])
-      const stack = [from]
-      while (stack.length > 0) {
-        const current = stack.pop()!
-        if (current === to) {
-          const chain = [current]
-          for (let step = arrivedFrom.get(current); step !== undefined; step = arrivedFrom.get(step)) {
-            chain.unshift(step)
+    ): Effect.Effect<ReadonlyArray<string> | undefined, PlanError> =>
+      Effect.gen(function*() {
+        const arrivedFrom = new Map<string, string>()
+        const seen = new Set<string>([from])
+        const stack = [from]
+        while (stack.length > 0) {
+          const current = stack.pop()!
+          if (current === to) {
+            const chain = [current]
+            for (let step = arrivedFrom.get(current); step !== undefined; step = arrivedFrom.get(step)) {
+              chain.push(step)
+            }
+            return chain.reverse()
           }
-          return chain
+          for (const next of graph.get(current)!) {
+            if (++work >= nextYield) yield* checkpoint
+            if (seen.has(next)) continue
+            seen.add(next)
+            arrivedFrom.set(next, current)
+            stack.push(next)
+          }
         }
-        // Every edge is validated against this plan before conflict analysis.
-        for (const next of graph.get(current)!) {
-          if (seen.has(next)) continue
-          seen.add(next)
-          arrivedFrom.set(next, current)
-          stack.push(next)
-        }
-      }
-      return undefined
-    }
-    const reaches = (from: string, to: string): boolean => route(from, to) !== undefined
-    for (let index = 0; index < nodes.length; index++) {
-      const later = nodes[index]!
-      if (frozen.has(later.id)) continue
-      const laterProduced = expanded.get(later.id)!.produced
-      if (laterProduced.length === 0) continue
-      for (const before of candidates(laterProduced)) {
-        if (before >= index) break
-        const earlier = nodes[before]!
-        const earlierProduced = expanded.get(earlier.id)!.produced
-        const paths = overlap(earlierProduced, laterProduced)
-        if (paths.length === 0) continue
-        if (reaches(later.id, earlier.id)) continue
-        const strategy = pairStrategy(earlier.strategy, later.strategy)
-        const runtime = pairRuntime(earlier.runtime, later.runtime)
-        if (strategy === "fail") {
-          return yield* Effect.fail(
-            new PlanError({
-              code: "overlap_forbidden",
-              message: `Nodes ${earlier.id} and ${later.id} both write ${paths.join(", ")}`
-            })
-          )
-        }
-        const annotation = (other: string): ConflictAnnotation => ({ with: other, paths, strategy, runtime })
-        if (!frozen.has(earlier.id)) {
-          conflicts.set(earlier.id, [...conflicts.get(earlier.id) ?? [], annotation(later.id)])
-        }
-        conflicts.set(later.id, [...conflicts.get(later.id) ?? [], annotation(earlier.id)])
-        if (strategy === "serialize") {
-          ordering.set(later.id, [...ordering.get(later.id) ?? [], earlier.id])
-          edges.get(later.id)!.add(earlier.id)
-        }
+        return undefined
+      })
+    const ranges: Array<{ start: number; end: number }> = []
+    let start = frozen.size
+    for (let end = start + 1; end <= nodes.length; end++) {
+      if (end === nodes.length || (replayGenerations && nodes[end]!.generation !== nodes[start]!.generation)) {
+        ranges.push({ start, end })
+        start = end
       }
     }
-    // Reader-after-writer. A node that READS a path another node WRITES was
-    // ordered by nothing: the pass above compares write sets against write
-    // sets, so reader and writer could be admitted in the same wavefront
-    // round. The reader then measures pre-producer bytes and — because the
-    // dispatch key honestly folds the digest it measured — caches that wrong
-    // execution as a legitimate one. `PlanScheduler.measure` already assumes
-    // "their preceding producer has settled"; this pass is what makes that
-    // assumption true. Explicit read-before-write sequencing instead consumes
-    // an earlier version: a source input, or another preceding writer's output.
-    //
-    // Ordering only, exactly like a `serialize` edge: it enters `dependsOn`
-    // and never key material, because the reader computes the same result
-    // either way and its content dependence is already keyed by the hermetic
-    // boundary digests measured at dispatch.
-    for (const reader of nodes) {
-      // Append-only: a frozen node's row is never rewritten, so the edge lands
-      // on the new node only — the same rule the conflict pass follows.
-      if (frozen.has(reader.id)) continue
-      const reads = expanded.get(reader.id)!.reads
-      if (reads.length === 0) continue
-      for (const writerIndex of candidates(reads)) {
-        const writer = nodes[writerIndex]!
-        if (writer.id === reader.id) continue
-        const produced = expanded.get(writer.id)!.produced
-        const paths = readOverlap(reads, produced)
-        if (paths.length === 0) continue
-        // Already ordered, by a material edge, a serialize edge, or a path
-        // through either.
-        if (reaches(reader.id, writer.id)) continue
-        // Explicit sequencing selects the version being read. Do not reverse
-        // it just because a later node writes the same path. Only declared
-        // Ref/Pending paths establish this intent; a serialize edge or an
-        // earlier inferred producer edge cannot silently select old bytes.
-        if (route(writer.id, reader.id, declaredEdges) !== undefined) continue
-        const contradiction = route(writer.id, reader.id)
-        if (contradiction !== undefined) {
-          return yield* Effect.fail(
-            new PlanError({
-              code: "cycle",
-              message: `Plan cycle: node ${reader.id} reads ${paths.join(", ")}, which node ${writer.id} produces, ` +
-                `so ${reader.id} must follow ${writer.id}, but ${writer.id} already depends on ${reader.id} ` +
-                `through ${contradiction.join(" -> ")}`
-            })
-          )
+    for (const { start, end } of ranges) {
+      for (let index = start; index < end; index++) {
+        const later = nodes[index]!
+        const laterProduced = expanded.get(later.id)!.produced
+        if (laterProduced.length === 0) continue
+        const matches = candidates(laterProduced)
+        work += matches.length + laterProduced.length
+        if (work >= nextYield) yield* checkpoint
+        for (const before of matches) {
+          if (before >= index) break
+          pairs++
+          work += 32
+          if (work >= nextYield || pairs > 250_000) yield* checkpoint
+          const earlier = nodes[before]!
+          const earlierProduced = expanded.get(earlier.id)!.produced
+          work += earlierProduced.length * laterProduced.length
+          if (work >= nextYield) yield* checkpoint
+          const paths = overlap(earlierProduced, laterProduced)
+          if (paths.length === 0) continue
+          if (yield* reaches(later.id, earlier.id)) continue
+          const strategy = pairStrategy(earlier.strategy, later.strategy)
+          const runtime = pairRuntime(earlier.runtime, later.runtime)
+          if (strategy === "fail") {
+            return yield* Effect.fail(
+              new PlanError({
+                code: "overlap_forbidden",
+                message: `Nodes ${earlier.id} and ${later.id} both write ${paths.join(", ")}`
+              })
+            )
+          }
+          const annotation = (other: string): ConflictAnnotation => ({ with: other, paths, strategy, runtime })
+          if (before >= start) {
+            const previous = conflicts.get(earlier.id) ?? []
+            previous.push(annotation(later.id))
+            conflicts.set(earlier.id, previous)
+          }
+          const previous = conflicts.get(later.id) ?? []
+          previous.push(annotation(earlier.id))
+          conflicts.set(later.id, previous)
+          if (strategy === "serialize") {
+            const added = ordering.get(later.id) ?? []
+            added.push(earlier.id)
+            ordering.set(later.id, added)
+            yield* addEdge(later.id, earlier.id)
+          }
         }
-        ordering.set(reader.id, [...ordering.get(reader.id) ?? [], writer.id])
-        edges.get(reader.id)!.add(writer.id)
+      }
+      // Reader-after-writer. A node that READS a path another node WRITES was
+      // ordered by nothing: the pass above compares write sets against write
+      // sets, so reader and writer could be admitted in the same wavefront
+      // round. The reader then measures pre-producer bytes and — because the
+      // dispatch key honestly folds the digest it measured — caches that wrong
+      // execution as a legitimate one. `PlanScheduler.measure` already assumes
+      // "their preceding producer has settled"; this pass is what makes that
+      // assumption true. Explicit read-before-write sequencing instead consumes
+      // an earlier version: a source input, or another preceding writer's output.
+      //
+      // Ordering only, exactly like a `serialize` edge: it enters `dependsOn`
+      // and never key material, because the reader computes the same result
+      // either way and its content dependence is already keyed by the hermetic
+      // boundary digests measured at dispatch.
+      for (let index = start; index < end; index++) {
+        const reader = nodes[index]!
+        // Append-only: a frozen node's row is never rewritten, so the edge lands
+        // on the new node only — the same rule the conflict pass follows.
+        const reads = expanded.get(reader.id)!.reads
+        if (reads.length === 0) continue
+        const matches = candidates(reads)
+        work += matches.length + reads.length
+        if (work >= nextYield) yield* checkpoint
+        for (const writerIndex of matches) {
+          if (writerIndex >= end) break
+          pairs++
+          work += 32
+          if (work >= nextYield || pairs > 250_000) yield* checkpoint
+          const writer = nodes[writerIndex]!
+          if (writer.id === reader.id) continue
+          const produced = expanded.get(writer.id)!.produced
+          work += reads.length * produced.length
+          if (work >= nextYield) yield* checkpoint
+          const paths = readOverlap(reads, produced)
+          if (paths.length === 0) continue
+          // Already ordered, by a material edge, a serialize edge, or a path
+          // through either.
+          if (yield* reaches(reader.id, writer.id)) continue
+          // Explicit sequencing selects the version being read. Do not reverse
+          // it just because a later node writes the same path. Only declared
+          // Ref/Pending paths establish this intent; a serialize edge or an
+          // earlier inferred producer edge cannot silently select old bytes.
+          if (yield* reaches(writer.id, reader.id)) {
+            if ((yield* route(writer.id, reader.id, declaredEdges)) !== undefined) continue
+            const contradiction = (yield* route(writer.id, reader.id))!
+            return yield* Effect.fail(
+              new PlanError({
+                code: "cycle",
+                message: `Plan cycle: node ${reader.id} reads ${paths.join(", ")}, which node ${writer.id} produces, ` +
+                  `so ${reader.id} must follow ${writer.id}, but ${writer.id} already depends on ${reader.id} ` +
+                  `through ${contradiction.join(" -> ")}`
+              })
+            )
+          }
+          const added = ordering.get(reader.id) ?? []
+          added.push(writer.id)
+          ordering.set(reader.id, added)
+          yield* addEdge(reader.id, writer.id)
+        }
       }
     }
     return nodes.map((node) => {
@@ -868,7 +988,8 @@ const keyNodes = (
  *
  * Traversal uses explicit stacks. Because the conflict and reader/writer
  * passes consider a quadratic number of node pairs, plans are bounded by
- * {@link maximumPlanNodes} and fail with `graph_too_large` above that limit.
+ * {@link maximumPlanNodes} and fail with `graph_too_large` above that limit
+ * or the effect-analysis work budget. Analysis yields periodically.
  *
  * @since 0.1.0
  * @category constructors
@@ -1006,21 +1127,9 @@ export const verify = (
     const keyed = (yield* keyNodes(drafts, [], 0)).map((node) =>
       freezeNode({ ...node, generation: generations.get(node.id)! })
     )
-    let nodes: ReadonlyArray<PlanNode> = keyed
-    // Without producers there are no inferred ordering/conflict edges. Avoid
-    // rebuilding every prefix of a long, effect-free elaboration history.
-    if (keyed.some((node) => producedPaths(node.effects).length > 0)) {
-      const groups = new Map<number, Array<PlanNode>>()
-      for (const node of keyed) {
-        const group = groups.get(node.generation) ?? []
-        group.push(node)
-        groups.set(node.generation, group)
-      }
-      nodes = []
-      for (let generation = 0; generation <= decoded.generation; generation++) {
-        nodes = yield* annotate([...nodes, ...(groups.get(generation) ?? [])], new Set(nodes.map((node) => node.id)))
-      }
-    }
+    // Replay boundaries within one annotation pass, retaining its expansion
+    // map, candidate trie, inferred graph and reachability cache throughout.
+    const nodes = yield* annotate(keyed, new Set(), true)
     const baseDigest = yield* digestOf(decoded.planId, decoded.flow, nodes.filter((node) => node.generation === 0))
     const digest = decoded.generation === 0 ? baseDigest : yield* digestOf(decoded.planId, decoded.flow, nodes)
     if (decoded.baseDigest !== baseDigest || decoded.digest !== digest) {
