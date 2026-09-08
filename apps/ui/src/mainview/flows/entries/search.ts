@@ -3,10 +3,10 @@
  * flow per palette prefix, each with its three doors. The palette is the
  * button door and reads the same seam synchronously; the slash and agent
  * doors run these handlers, which answer the items as data and, for a human,
- * embed the `search-results` card. This landing registers the walking
- * skeleton: the bare search, files and flows; the other §6 ids follow with
- * their seams. Qualifiers (`path:`, `-path:`) ride inside the query, as §1
- * writes them.
+ * embed the `search-results` card. A mode whose index does not exist yet is
+ * registered and refuses with the exact reason (state/seams/SearchSeam.ts):
+ * no door ever answers with rows it did not read. Qualifiers (`section:`,
+ * `status:`, `is:`, `path:`) ride inside the query, as §1 writes them.
  */
 import { Schema } from "effect"
 import type { PaletteMode } from "../SearchQuery"
@@ -18,7 +18,7 @@ import type { CommandActions } from "./Declare"
 export const namespace: Namespace = {
   id: "search",
   label: "Search",
-  summary: "Find files and flows by name"
+  summary: "Find files, flows, targets, wiki pages, history, runs, changes, issues, boxes and secret names"
 }
 
 /** What every `search.*` flow takes: the query (qualifiers inside it), and the bounds a caller may set. */
@@ -34,11 +34,19 @@ const Query = Schema.Struct({ query: Schema.String })
 const OptionalQuery = Schema.Struct({ query: Schema.optional(Schema.String), kinds: Schema.optional(Schema.String) })
 
 /** One `search.*` flow over one palette mode. */
-const search = (actions: CommandActions, name: string, mode: PaletteMode, summary: string, args: string): FlowEntry =>
+const search = (
+  actions: CommandActions,
+  name: string,
+  mode: PaletteMode,
+  summary: string,
+  args: string,
+  extra: { readonly requires?: ReadonlyArray<string>; readonly runtime?: ReadonlyArray<"cloud"> } = {}
+): FlowEntry =>
   flow({
     name,
     summary,
     args,
+    ...extra,
     input: Query,
     handler: ({ query }) => actions.search(name, mode, { query })
   })
@@ -47,8 +55,8 @@ const search = (actions: CommandActions, name: string, mode: PaletteMode, summar
 export const searchFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   flow({
     name: "search.open",
-    summary: "Search everything by name: files and flows",
-    args: "[query] [--kinds file,flow]",
+    summary: "Search everything by name: files, flows, targets, wiki, history, runs, changes, issues, boxes, secret names",
+    args: "[query] [--kinds file,run,…]",
     input: OptionalQuery,
     handler: ({ query, kinds }) =>
       actions.search("search.open", "all", {
@@ -57,5 +65,16 @@ export const searchFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =
       })
   }),
   search(actions, "search.files", "path", "Find files by fuzzy path among the directories the app has listed", "<query> [path:… -path:…]"),
-  search(actions, "search.flows", "flows", "The slash tree as data: every flow this session may run", "<query>")
+  search(actions, "search.symbols", "symbols", "Find symbols in a file or the repository (no symbol index exists yet; refuses honestly)", "<query> [file:… kind:…]"),
+  search(actions, "search.text", "text", "Find text in files (no text index exists yet; refuses honestly)", "<query|/re/> [path:… -path:… lang:…]"),
+  search(actions, "search.flows", "flows", "The slash tree as data: every flow this session may run", "<query>"),
+  search(actions, "search.targets", "targets", "Find targets by label, and the flows the factory projection declares", "<query>"),
+  search(actions, "search.wiki", "wiki", "Find wiki pages and notes by title", "<query>"),
+  search(actions, "search.history", "history", "Find mythical commits, epics and note sections", "<query> [section:tried|evidence|folded|superseded]"),
+  search(actions, "search.runs", "runs", "Find runs by id, flow or status", "<query> [status:…]"),
+  search(actions, "search.changes", "changes", "Find changes by id or title", "<query>"),
+  search(actions, "search.issues", "issues", "Find issues by number or title", "<query> [is:open|closed]"),
+  search(actions, "search.boxes", "boxes", "Find boxes by name, repository or state", "<query>", { requires: ["signed-in"], runtime: ["cloud"] }),
+  search(actions, "search.secrets", "secrets", "Find secret names and the hosts they bind to; values never exist on the wire", "<query>", { requires: ["signed-in"], runtime: ["cloud"] }),
+  search(actions, "search.people", "people", "Find people and accounts (no people seam exists yet; refuses honestly)", "<query>", { requires: ["signed-in"] })
 ]

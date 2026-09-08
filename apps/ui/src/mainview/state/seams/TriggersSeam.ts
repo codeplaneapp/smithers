@@ -18,7 +18,7 @@
  */
 import { WORKFLOW_TRIGGERS_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { FACTORY_PROJECTION_PATH, FactoryProjectionSchema, ruleFlows } from "@smthrs/rpc/FactoryProjection"
-import type { FactoryRule } from "@smthrs/rpc/FactoryProjection"
+import type { FactoryProjection, FactoryRule } from "@smthrs/rpc/FactoryProjection"
 import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import type { SeamContext } from "./SeamContext"
@@ -82,9 +82,27 @@ export const readDeclaredRules = async (
   ctx: SeamContext,
   repo: string
 ): Promise<ReadonlyArray<FactoryRule> | { readonly error: string }> => {
+  const projection = await readFactoryProjection(ctx, repo)
+  if ("error" in projection) return { error: `The rules of ${repo} couldn't be read: ${projection.error}` }
+  return projection.absent ? [] : projection.projection.on
+}
+
+/**
+ * The whole projection off the contents route, shared by the rules table and
+ * the palette's target search: `absent` when the mirror 404s (nothing is
+ * committed), the decoded projection when it parses, else the reason.
+ */
+export const readFactoryProjection = async (
+  ctx: SeamContext,
+  repo: string
+): Promise<
+  | { readonly absent: true }
+  | { readonly absent: false; readonly projection: FactoryProjection }
+  | { readonly error: string }
+> => {
   const answer = await readJson(ctx, `${repoBase(ctx, repo)}/contents/${FACTORY_PROJECTION_PATH}`)
-  if (answer.status === 404) return []
-  if (answer.status !== 200) return { error: `The rules of ${repo} couldn't be read: the mirror did not answer for ${FACTORY_PROJECTION_PATH}.` }
+  if (answer.status === 404) return { absent: true }
+  if (answer.status !== 200) return { error: `the mirror did not answer for ${FACTORY_PROJECTION_PATH}.` }
   const text = decodeContent(answer.body)
   let parsed: unknown
   try {
@@ -93,8 +111,8 @@ export const readDeclaredRules = async (
     parsed = undefined
   }
   const projection = FactoryProjectionSchema.safeParse(parsed)
-  if (!projection.success) return { error: `The rules of ${repo} couldn't be read: ${FACTORY_PROJECTION_PATH} is not a factory projection.` }
-  return projection.data.on
+  if (!projection.success) return { error: `${FACTORY_PROJECTION_PATH} is not a factory projection.` }
+  return { absent: false, projection: projection.data }
 }
 
 const triggerRow = (value: unknown): TriggerRow | undefined => {

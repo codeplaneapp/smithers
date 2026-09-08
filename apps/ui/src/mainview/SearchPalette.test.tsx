@@ -177,8 +177,8 @@ describe("§3 the keyboard contract", () => {
     await press(view, "k", { meta: true })
     expect(view.store.session().paletteOpen).toBe(true)
     expect(palette(view.host)?.dataset["mode"]).toBe("all")
-    // Files (both prefix matches, in listing order), then the flow whose summary says "compose".
-    expect(rows(view.host)).toEqual(["src/Composer.tsx", "src/Compose.css", "chat.send"])
+    // Files (both prefix matches, in listing order), the run (contains), then the flow whose summary says "compose".
+    expect(rows(view.host)).toEqual(["src/Composer.tsx", "src/Compose.css", "run-compose", "chat.send"])
     await press(view, "Escape")
     expect(view.store.session().paletteOpen).toBe(false)
     expect(palette(view.host)).toBeNull()
@@ -200,32 +200,34 @@ describe("§3 the keyboard contract", () => {
     await press(view, "ArrowDown")
     expect(highlighted(view.host)?.dataset["ref"]).toBe("src/Compose.css")
     await press(view, "Tab")
+    expect(highlighted(view.host)?.dataset["ref"]).toBe("run-compose")
+    await press(view, "Tab")
     expect(highlighted(view.host)?.dataset["ref"]).toBe("chat.send")
     await press(view, "Tab", { shift: true })
-    expect(highlighted(view.host)?.dataset["ref"]).toBe("src/Composer.tsx")
+    expect(highlighted(view.host)?.dataset["ref"]).toBe("run-compose")
   })
 
   test("→ opens the item's actions (registered flows), ← walks back, Enter on an action runs it", async () => {
     const view = await mount()
-    await view.act(() => view.controller.changeDraft("Composer.tsx"))
+    await view.act(() => view.controller.changeDraft("run:compose"))
     await press(view, "k", { meta: true })
-    expect(palette(view.host)?.dataset["mode"]).toBe("path")
+    expect(palette(view.host)?.dataset["mode"]).toBe("runs")
     await press(view, "ArrowRight")
-    expect(view.store.session().paletteActionsRef).toBe("src/Composer.tsx")
+    expect(view.store.session().paletteActionsRef).toBe("run-compose")
     const actions = rows(view.host)
-    expect(actions[0]).toBe("files.read")
-    expect(actions).toContain("code.diagnostics")
+    expect(actions[0]).toBe("runs.open")
+    expect(actions).toContain("runs.resume")
+    expect(actions).toContain("runs.logs")
     expect(view.host.querySelector("[data-testid='palette-chip']")?.textContent).toBe("actions")
     await press(view, "ArrowLeft")
     expect(view.store.session().paletteActionsRef).toBeNull()
-    expect(rows(view.host)).toEqual(["src/Composer.tsx"])
+    expect(rows(view.host)).toEqual(["run-compose"])
     // A second Cmd+K on the highlighted item opens the actions too.
     await press(view, "k", { meta: true })
-    expect(view.store.session().paletteActionsRef).toBe("src/Composer.tsx")
+    expect(view.store.session().paletteActionsRef).toBe("run-compose")
     await press(view, "ArrowDown")
     await press(view, "Enter")
-    // The second row is files.list: the namespace flows follow the open flow in registry order.
-    expect(invoked(view.store)).toContainEqual({ name: "files.list", args: "src/Composer.tsx" })
+    expect(invoked(view.store).map((row) => row.name)).toContain("runs.resume")
     expect(view.store.session().paletteOpen).toBe(false)
     expect(view.store.session().draft).toBe("")
   })
@@ -248,9 +250,13 @@ describe("§3 the keyboard contract", () => {
     expect(palette(view.host)).not.toBeNull()
   })
 
-  test("Cmd+Enter runs nothing when the item has no primary flow, and never invents one", async () => {
+  test("Cmd+Enter runs the primary flow when the item has one, and nothing when it has none", async () => {
     const view = await mount()
-    // A file's primary flow is Implement (§2), which is not registered.
+    await view.act(() => view.controller.changeDraft("run:compose"))
+    await press(view, "k", { meta: true })
+    await press(view, "Enter", { meta: true })
+    expect(invoked(view.store)).toContainEqual({ name: "runs.resume", args: "run-compose" })
+    // A file's primary flow is Implement (§2), which is not registered: Cmd+Enter runs nothing and never invents a flow.
     await view.act(() => view.controller.changeDraft("Composer.tsx"))
     await press(view, "k", { meta: true })
     const before = invoked(view.store).length
@@ -284,18 +290,16 @@ describe("§3 the keyboard contract", () => {
     await press(view, "Enter")
     expect(view.store.session().draft).toBe("@")
     expect(palette(view.host)?.dataset["mode"]).toBe("symbols")
-    expect(view.host.querySelector("[data-testid='palette-refusal']")?.textContent).toContain("search.symbols is not registered yet")
+    expect(view.host.querySelector("[data-testid='palette-refusal']")?.textContent).toContain("No symbol index")
   })
 
-  test("a mode whose flow is not registered yet refuses in place and Enter runs nothing", async () => {
+  test("a mode with no rows runs its flow on Enter (the form law answers a bare prefix)", async () => {
     const view = await mount()
-    await view.act(() => view.controller.changeDraft("wiki:"))
+    await view.act(() => view.controller.changeDraft("box:"))
     await press(view, "k", { meta: true })
     expect(rows(view.host)).toEqual([])
-    expect(view.host.querySelector("[data-testid='palette-refusal']")?.textContent).toContain("search.wiki is not registered yet")
-    const before = invoked(view.store).length
     await press(view, "Enter")
-    expect(invoked(view.store).length).toBe(before)
+    expect(invoked(view.store).map((row) => row.name)).toContain("search.boxes")
   })
 
   test("the slash tree stays the / mode of the same overlay", async () => {

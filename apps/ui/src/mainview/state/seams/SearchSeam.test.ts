@@ -2,8 +2,8 @@
  * The search seam (Search and Command Palette Spec 2026-09-07 §4, §5, §6)
  * against fixture seams: the palette's rows come from what the store holds,
  * the flow doors answer items as data and embed the search-results card for
- * a human, the signed-out scope hides, and a mode whose flow is not
- * registered yet refuses by name.
+ * a human, the signed-out scope hides and defers, and a mode with no index
+ * refuses with its reason.
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
@@ -13,7 +13,7 @@ import { createAppController } from "../AppController"
 import type { AppServices } from "../AppController"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
-import { NO_FOCUSED_FILE, notRegisteredYet } from "./SearchSeam"
+import { ASK_PROPOSED, NO_FOCUSED_FILE, NO_PEOPLE_SEAM, NO_SYMBOL_INDEX, NO_TEXT_INDEX } from "./SearchSeam"
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -43,11 +43,12 @@ const unavailableRepositories: NativeRepositories = {
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
-const backend = (routes: Record<string, Response>): AppServices => ({
+const backend = (routes: Record<string, Response>, seen: Array<string> = []): AppServices => ({
   fetchImpl: async (input) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
     const absolute = new URL(url, "https://app.test")
     const path = absolute.pathname + absolute.search
+    seen.push(path)
     for (const [route, answer] of Object.entries(routes)) {
       if (path === route || path.startsWith(`${route}?`)) return answer.clone()
     }
@@ -91,7 +92,7 @@ const card = (store: AppStore, value: Omit<Card, "createdAt" | "ordinal" | "stat
   store.dispatch({ type: "card.upsert", actor: "system", card: { ...value, status: "active", createdAt: ordinal, ordinal } as Card })
 }
 
-/** The fixture seam: the listing the files seam had already written to the store. */
+/** The fixture seams: what each seam had already written to the store. */
 const seed = async (store: AppStore): Promise<void> => {
   card(store, {
     id: "files-x",
@@ -103,6 +104,79 @@ const seed = async (store: AppStore): Promise<void> => {
       path: "packages/journal",
       entries: [{ name: "Redaction.ts", kind: "file" }, { name: "Redaction.test.ts", kind: "file" }, { name: "src", kind: "dir" }]
     }
+  })
+  card(store, {
+    id: `history-${REPO}`,
+    kind: "history",
+    title: "history",
+    payload: {
+      repo: REPO,
+      defaultBookmark: "main",
+      mainCommits: null,
+      mythical: {
+        state: "present",
+        head: "h",
+        mainHead: null,
+        treeEqual: "unsupported",
+        commitCount: 2,
+        notes: "read",
+        epics: [{
+          sha: "abc1234",
+          title: "Redact secrets before they reach the journal",
+          merge: true,
+          note: { tried: "regex rescan per write, lost on latency", evidence: null, folded: null, superseded: null },
+          commits: [{ sha: "def5678", title: "Add the redaction seam", note: null }]
+        }]
+      }
+    }
+  })
+  card(store, {
+    id: "runs-x",
+    kind: "run-list",
+    title: "runs",
+    payload: {
+      repo: REPO,
+      runs: [
+        { runId: "run-9", flowId: "review", status: "running", createdAt: 1, turns: 1, calls: 1 },
+        { runId: "run-7", flowId: "implement", status: "completed", createdAt: 1, turns: 1, calls: 1 }
+      ]
+    }
+  })
+  card(store, {
+    id: "issues-x",
+    kind: "issue-list",
+    title: "issues",
+    payload: {
+      repo: REPO,
+      filter: "all",
+      issues: [
+        { number: 412, title: "Harden redaction on the journal path", state: "open", author: null, comments: 0, updatedAt: null },
+        { number: 7, title: "Old bug", state: "closed", author: null, comments: 0, updatedAt: null }
+      ]
+    }
+  })
+  card(store, {
+    id: "targets-r1",
+    kind: "targets",
+    title: "targets",
+    payload: {
+      repoId: "r1",
+      repoName: "flows",
+      status: "done",
+      warnings: [],
+      targets: [{ id: "t1", label: "//apps/ui:test", target: "Shell.Test", kinds: ["test"], package: "//apps/ui", name: "test", workspace: "." }]
+    }
+  })
+  card(store, {
+    id: `secrets-${REPO}`,
+    kind: "secrets",
+    title: "secrets",
+    payload: { repo: REPO, scope: "repository", secrets: [{ name: "NPM_TOKEN", hosts: ["registry.npmjs.org"], matchHeaders: [], updatedAt: null }] }
+  })
+  store.dispatch({
+    type: "change.loaded",
+    actor: "system",
+    change: { id: `${REPO}#c1`, repoId: REPO, changeId: "c1", commitId: "0123456789ab", description: "Redact the journal\n\nbody", authorName: null, timestamp: null, hasConflict: false, parentChangeIds: [], currentSeq: null, revisionCount: null }
   })
   await settled()
 }
@@ -117,17 +191,19 @@ const resultsCard = (store: AppStore, flow: string) => {
 }
 
 describe("the palette's rows (the button door) come from what the store holds", () => {
-  test("a bare query groups files and flows by kind, files first for a file name", async () => {
+  test("a bare query groups files, history, runs, issues and changes by kind, files first for a file name", async () => {
     const { store, controller } = await ready()
     await seed(store)
     const answer = controller.searchPalette("redact")
     expect(answer.parsed.mode).toBe("all")
     expect(answer.refusal).toBeUndefined()
-    expect(answer.groups.map((group) => group.label)).toEqual(["Files"])
+    expect(answer.groups.map((group) => group.label)).toEqual(["Files", "History", "Changes", "Issues"])
     expect(refs(answer.groups, "Files")).toEqual(["packages/journal/Redaction.ts", "packages/journal/Redaction.test.ts"])
+    // The epic (a prefix match), its commit (contains), then its tried note (its subtitle names the epic).
+    expect(refs(answer.groups, "History")).toEqual(["abc1234", "def5678", "abc1234#tried"])
+    expect(refs(answer.groups, "Issues")).toEqual(["412"])
     // A directory is never a file result, and every row names its open flow.
     expect(answer.groups.flatMap((group) => group.items).every((row) => row.item.actions.some((action) => action.role === "open"))).toBe(true)
-    expect(refs(controller.searchPalette("appearance").groups, "Flows")).toEqual(["appearance.theme", "appearance.dark-mode"])
   })
 
   test("a path query reads only the file index, fuzzy per segment", async () => {
@@ -139,8 +215,21 @@ describe("the palette's rows (the button door) come from what the store holds", 
     expect(refs(answer.groups, "Files")[0]).toBe("packages/journal/Redaction.test.ts")
   })
 
-  test("/ hands over to the slash tree; ? lists every prefix with the signed-in ones marked", async () => {
+  test("history: with section:tried lists the tried notes only; run: with status: filters", async () => {
+    const { store, controller } = await ready()
+    await seed(store)
+    const tried = controller.searchPalette("history: section:tried")
+    expect(tried.groups.flatMap((group) => group.items.map((row) => row.item.title))).toEqual(["tried: regex rescan per write, lost on latency"])
+    const running = controller.searchPalette("run: status:running")
+    expect(running.groups.flatMap((group) => group.items.map((row) => row.item.ref))).toEqual(["run-9"])
+    expect(controller.searchPalette("#412").groups.flatMap((group) => group.items.map((row) => row.item.title))).toEqual(["#412 Harden redaction on the journal path"])
+  })
+
+  test("wiki: lists the Wiki pane's notes; / hands over to the slash tree; ? lists every prefix", async () => {
     const { controller } = await ready()
+    const wiki = controller.searchPalette("wiki:")
+    expect(wiki.groups.map((group) => group.label)).toEqual(["Notes"])
+    expect(wiki.groups[0]?.items[0]?.item.actions[0]).toMatchObject({ flow: "wiki.select", role: "open" })
     expect(controller.searchPalette("/app")).toMatchObject({ groups: [], flow: "search.flows" })
     const help = controller.searchPalette("?")
     expect(help.help?.map((row) => row.label)).toContain("secret:")
@@ -166,26 +255,22 @@ describe("the palette's rows (the button door) come from what the store holds", 
     expect(answer.groups[0]?.items[0]?.item.actions[0]).toEqual({ flow: "files.read", args: "src/index.ts:120:8", label: "Read a file from a repository", role: "open" })
   })
 
-  test("a mode whose flow is not registered yet refuses in place by name, never with rows, and Enter has no flow to run", async () => {
-    const { store, controller } = await ready()
-    await seed(store)
-    for (const text of ["wiki:redact", "history: retry", "run:run-9", "#412", "@redact", "text:useEffect", "//apps"]) {
-      const answer = controller.searchPalette(text)
-      expect(answer.groups).toEqual([])
-      expect(answer.refusal).toBe(notRegisteredYet(answer.parsed.mode))
-      expect(answer.flow).toBeNull()
-    }
-    expect(notRegisteredYet("wiki")).toBe("search.wiki is not registered yet; this landing searches files and flows.")
+  test("a mode with no index refuses in place with its reason, never with rows", async () => {
+    const { controller } = await ready()
+    expect(controller.searchPalette("@redact")).toMatchObject({ groups: [], refusal: NO_SYMBOL_INDEX })
+    expect(controller.searchPalette("text:useEffect")).toMatchObject({ groups: [], refusal: NO_TEXT_INDEX })
+    expect(controller.searchPalette("ask:where")).toMatchObject({ groups: [], refusal: ASK_PROPOSED })
   })
 })
 
 describe("§4 signed-out scope", () => {
-  test("box:, secret: and user: are hidden signed out (no rows, no refusal, no badge)", async () => {
+  test("box:, secret: and user: are hidden signed out (no rows, no refusal, no badge), and a bare query never leaks them", async () => {
     const { store, controller } = await ready()
     await seed(store)
     expect(controller.searchPalette("box:main")).toMatchObject({ groups: [] })
     expect(controller.searchPalette("box:main").refusal).toBeUndefined()
-    expect(controller.searchPalette("secret:NPM").refusal).toBeUndefined()
+    expect(controller.searchPalette("secret:NPM")).toMatchObject({ groups: [] })
+    expect(refs(controller.searchPalette("NPM").groups, "Secrets")).toEqual([])
   })
 
   test("signed out, the flows a bare query lists are only the ones that work signed out", async () => {
@@ -196,6 +281,24 @@ describe("§4 signed-out scope", () => {
     expect(answer.groups[0]?.label).toBe("Recommended")
     expect(names).toContain("auth.sign-in")
     expect(names).not.toContain("auth.sign-out")
+  })
+
+  test("Enter on a signed-in-only search defers through sign-in: the flow parks on the requirement", async () => {
+    const { store, controller } = await ready()
+    // The outcome is the fulfilling flow's (auth.sign-in ran in its place); the search itself parks on the session row.
+    await controller.commands.run("search.boxes", "main")
+    expect(store.session().pendingCommand).toMatchObject({ name: "search.boxes", args: "main", requirement: "signed-in" })
+  })
+
+  test("signed in, secret: lists names and hosts and never a value", async () => {
+    const { store, controller } = await ready(backend({}), "signed-in")
+    await seed(store)
+    const answer = controller.searchPalette("secret:NPM")
+    expect(answer.groups[0]?.items.map((row) => row.item)).toEqual([
+      expect.objectContaining({ kind: "secret-name", ref: "NPM_TOKEN", title: "NPM_TOKEN", subtitle: `${REPO} · registry.npmjs.org` })
+    ])
+    // A secret row carries exactly the item fields; no value field exists on the wire or the row.
+    expect(Object.keys(answer.groups[0]?.items[0]?.item ?? {}).sort()).toEqual(["actions", "kind", "ref", "subtitle", "title"])
   })
 })
 
@@ -225,21 +328,81 @@ describe("§6 the flow doors", () => {
     expect(store.collections.cards.get("search-search.files")).toBeUndefined()
   })
 
-  test("search.flows answers the slash tree as data, and search.open --kinds narrows", async () => {
+  test("search.open without a query answers the pills and recents; --kinds narrows", async () => {
     const { store, controller } = await ready()
     await seed(store)
-    const flows = await controller.commands.run("search.flows", "appearance")
-    expect(flows.status).toBe("executed")
-    expect(resultsCard(store, "search.flows").payload.items.map((item) => item.ref)).toEqual(["appearance.theme", "appearance.dark-mode"])
-    const narrowed = await controller.commands.run("search.open", "redact --kinds flow")
+    const all = await controller.commands.run("search.open", "redact")
+    expect(all.status).toBe("executed")
+    const narrowed = await controller.commands.run("search.open", "redact --kinds issue")
     expect(narrowed.status).toBe("executed")
-    expect(resultsCard(store, "search.open").payload.items.every((item) => item.kind === "flow")).toBe(true)
+    if (narrowed.status !== "executed") return
+    const value = JSON.parse(narrowed.value ?? "{}") as { items: Array<{ kind: string }> }
+    expect(value.items.map((item) => item.kind)).toEqual(["issue"])
+    expect(resultsCard(store, "search.open").payload.items.map((item) => item.kind)).toEqual(["issue"])
+  })
+
+  test("search.history reads the section qualifier in its own grammar; search.runs, search.changes and search.issues read their seams' rows", async () => {
+    const { store, controller } = await ready()
+    await seed(store)
+    const history = await controller.commands.run("search.history", "regex section:tried")
+    expect(history.status).toBe("executed")
+    expect(resultsCard(store, "search.history").payload.items.map((item) => item.title)).toEqual(["tried: regex rescan per write, lost on latency"])
+    await controller.commands.run("search.runs", "run status:completed")
+    expect(resultsCard(store, "search.runs").payload.items.map((item) => item.ref)).toEqual(["run-7"])
+    await controller.commands.run("search.changes", "journal")
+    expect(resultsCard(store, "search.changes").payload.items[0]).toMatchObject({ kind: "change", ref: "c1", title: "Redact the journal" })
+    await controller.commands.run("search.issues", "bug is:closed")
+    expect(resultsCard(store, "search.issues").payload.items.map((item) => item.ref)).toEqual(["7"])
+    const labeled = await controller.commands.run("search.issues", "bug label:bug")
+    expect(labeled).toMatchObject({ status: "failed", error: expect.stringContaining("no labels") })
+  })
+
+  test("search.targets lists the target graph's labels and the factory projection's flows, each with its run door", async () => {
+    const seen: Array<string> = []
+    const projection = {
+      on: [],
+      flows: [{ id: "review", description: "Reviews the change.", summary: "Review the change.", featured: true, kind: "mdx", path: "flows/review/flow.mdx", capabilities: [], model: null, modelInvocable: true }]
+    }
+    const { store, controller } = await ready(backend({ [`/api/repos/will/flows/contents/.smithers/factory.json`]: json(200, { path: ".smithers/factory.json", content: JSON.stringify(projection) }) }, seen))
+    await seed(store)
+    const outcome = await controller.commands.run("search.targets", "e")
+    expect(outcome.status).toBe("executed")
+    const items = resultsCard(store, "search.targets").payload.items
+    expect(items.find((item) => item.kind === "target")).toMatchObject({ ref: "r1 //apps/ui:test", title: "//apps/ui:test" })
+    expect(items.find((item) => item.kind === "flow")).toMatchObject({ ref: "review", actions: [{ flow: "flow.run", args: "review", role: "open", label: "Run a flow on your workspace" }] })
+    expect(seen).toContain("/api/repos/will/flows/contents/.smithers/factory.json")
+  })
+
+  test("search.secrets signed in reads the environment document and lists names only", async () => {
+    const { store, controller } = await ready(
+      backend({
+        "/api/repos/will/flows/agent-environment": json(200, {
+          setup_script: "",
+          env: [],
+          secrets: [{ name: "NPM_TOKEN", hosts: ["registry.npmjs.org"], match_headers: ["authorization"], updated_at: null }]
+        })
+      }),
+      "signed-in"
+    )
+    const outcome = await controller.commands.run("search.secrets", "npm")
+    expect(outcome.status).toBe("executed")
+    const items = resultsCard(store, "search.secrets").payload.items
+    expect(items).toEqual([expect.objectContaining({ kind: "secret-name", ref: "NPM_TOKEN" })])
+    expect(JSON.stringify(items)).not.toContain("authorization")
+  })
+
+  test("the modes with no index refuse through every door with the exact reason", async () => {
+    const { controller } = await ready(backend({}), "signed-in")
+    expect(await controller.commands.run("search.symbols", "redact")).toEqual({ status: "failed", error: NO_SYMBOL_INDEX })
+    expect(await controller.commands.run("search.text", "useEffect")).toEqual({ status: "failed", error: NO_TEXT_INDEX })
+    expect(await controller.commands.run("search.people", "will")).toEqual({ status: "failed", error: NO_PEOPLE_SEAM })
+    expect(await controller.commands.runForAgent("search.text", "x")).toEqual({ status: "failed", error: NO_TEXT_INDEX })
   })
 
   test("a search flow without its query renders the form (THE FORM LAW), and palette.open refuses the agent by naming search.*", async () => {
     const { controller } = await ready()
-    const outcome = await controller.commands.run("search.files")
-    expect(outcome).toMatchObject({ status: "form", flow: "search.files", fields: ["query"] })
+    const outcome = await controller.commands.run("search.wiki")
+    expect(outcome).toMatchObject({ status: "form", flow: "search.wiki", fields: ["query"] })
     const refused = await controller.commands.runForAgent("palette.open")
     expect(refused).toMatchObject({ status: "failed", error: expect.stringContaining("search.*") })
   })

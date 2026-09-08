@@ -388,7 +388,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "secrets.list": (args) => repoOnly("secrets.list", args),
   /*
    * The palette flows (Search and Command Palette Spec 2026-09-07 §6): the
-   * whole line is the query, qualifiers included (`x path:apps/ui`);
+   * whole line is the query, qualifiers included (`retry section:tried`);
    * the seam reads them in the mode's own grammar. Only search.open takes
    * a flag, `--kinds a,b`, and only it may run with no query at all.
    */
@@ -400,7 +400,18 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok({ ...(query === "" ? {} : { query }), ...(kinds === undefined ? {} : { kinds }) })
   },
   "search.files": (args) => required("query", args, "search.files needs a query"),
+  "search.symbols": (args) => required("query", args, "search.symbols needs a query"),
+  "search.text": (args) => required("query", args, "search.text needs a query"),
   "search.flows": (args) => required("query", args, "search.flows needs a query"),
+  "search.targets": (args) => required("query", args, "search.targets needs a query"),
+  "search.wiki": (args) => required("query", args, "search.wiki needs a query"),
+  "search.history": (args) => required("query", args, "search.history needs a query"),
+  "search.runs": (args) => required("query", args, "search.runs needs a query"),
+  "search.changes": (args) => required("query", args, "search.changes needs a query"),
+  "search.issues": (args) => required("query", args, "search.issues needs a query"),
+  "search.boxes": (args) => required("query", args, "search.boxes needs a query"),
+  "search.secrets": (args) => required("query", args, "search.secrets needs a query"),
+  "search.people": (args) => required("query", args, "search.people needs a query"),
   "palette.open": (args) => optional("prefix", args),
   "palette.actions": (args) => required("ref", args, "palette.actions needs an item ref"),
   "history.show": (args) => repoOnly("history.show", args),
