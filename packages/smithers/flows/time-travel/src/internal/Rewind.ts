@@ -770,6 +770,7 @@ export const rewind = (
       let claimed: ClaimedRun | undefined
       let beat: Fiber.Fiber<never, never> | undefined
       let leaseReleased = false
+      let archiveAttempted = false
       let archiveCommitted = false
       let compensation: Compensation.Result = { handlerReceipts: [] }
       let detail: AuditDetail | undefined
@@ -954,17 +955,26 @@ export const rewind = (
                   }
 
                   yield* runHook(options, "archive-and-truncate")
-                  const archive = yield* store.archiveAndTruncate(
-                    options.runId,
-                    options.frame,
-                    Compensation.toStoreReceipts(auditId, compensation),
-                    // The rewind claimed and activated the run with this owner;
-                    // the store re-checks it at commit, so a superseded rewind
-                    // never truncates behind the live owner.
-                    options.owner,
-                    new Map(claimedChildren.map((child) => [child.plan.edge.childRunId, child.owner]))
+                  archiveAttempted = true
+                  // COMMIT can finish in an uninterruptible SQL finalizer. Keep
+                  // its result and this flag in the same mask so cancellation
+                  // cannot send a durably committed rewind through rollback.
+                  const archive = yield* Effect.uninterruptible(
+                    store.archiveAndTruncate(
+                      options.runId,
+                      options.frame,
+                      Compensation.toStoreReceipts(auditId, compensation),
+                      // The rewind claimed and activated the run with this owner;
+                      // the store re-checks it at commit, so a superseded rewind
+                      // never truncates behind the live owner.
+                      options.owner,
+                      new Map(claimedChildren.map((child) => [child.plan.edge.childRunId, child.owner]))
+                    ).pipe(Effect.tap(() =>
+                      Effect.sync(() => {
+                        archiveCommitted = true
+                      })
+                    ))
                   )
-                  archiveCommitted = true
                   // The cancellation plan was written with `compensated`, before
                   // the commit. This update records only that the archive landed.
                   detail = { ...detail, phase: "archive_committed", pendingChildren }
@@ -1031,6 +1041,39 @@ export const rewind = (
           const protocolExit = yield* Effect.exit(protocol)
           if (Exit.isSuccess(protocolExit)) return protocolExit.value
           const failure = toFailure(protocolExit.cause)
+
+          if (
+            !archiveCommitted &&
+            (archiveAttempted || Cause.hasInterruptsOnly(protocolExit.cause)) &&
+            detail?.suffixTailSeq !== undefined
+          ) {
+            // Publication after COMMIT can fail before the call returns. As in
+            // Recovery, require both an empty live suffix and its archived tail.
+            // An unreadable store leaves the audit open without risking rollback.
+            const tailSeq = detail.suffixTailSeq
+            const commitExit = yield* journal.entries({
+              runId: options.runId as JournalEvent.RunId,
+              after: options.frame.seq as JournalEvent.Seq,
+              limit: 1
+            }).pipe(
+              Effect.flatMap((page) =>
+                page.entries.length > 0
+                  ? Effect.succeed(false)
+                  : store.archivedAt(options.runId, tailSeq)
+              ),
+              Effect.exit
+            )
+            if (Exit.isFailure(commitExit)) {
+              return yield* Effect.failCause(protocolExit.cause)
+            }
+            archiveCommitted = commitExit.value
+          }
+          if (archiveCommitted && detail !== undefined) {
+            // An interrupt can precede the protocol's audit update even when
+            // the local flag is set. Keep this audit recoverable after commit.
+            detail = { ...detail, phase: "archive_committed", failure: failure.message }
+            yield* Effect.ignore(store.updateAudit(auditId, { detail }))
+          }
 
           if (!archiveCommitted) {
             const rollbackExit = yield* Effect.exit(Compensation.rollback(compensation))
