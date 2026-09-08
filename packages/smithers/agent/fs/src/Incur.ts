@@ -4,9 +4,11 @@
  * @since 0.1.0
  */
 import type * as Flow from "@smthrs/core/Flow"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
-import { Cli as IncurCli } from "incur"
+import { Cli as IncurCli, type MiddlewareHandler } from "incur"
 import * as CommandTree from "./CommandTree.ts"
 import * as FlowInvoker from "./FlowInvoker.ts"
 import { FsError } from "./FsError.ts"
@@ -152,9 +154,34 @@ const execute = (
     }))
     return yield* SchemaBridge.encodeOutput(selected.flow.output, output)
   }).pipe(
-    Effect.match({
-      onFailure: (error) => mapError(context, error),
-      onSuccess: (output) => context.ok(output)
+    Effect.matchCauseEffect({
+      onFailure: (cause) => {
+        const reason = cause.reasons[0]!
+        if (cause.reasons.length === 1 && reason._tag === "Fail" && reason.error instanceof FsError) {
+          return Effect.sync(() => mapError(context, reason.error))
+        }
+        // Host diagnostics stay in Effect's logger, never in Incur's response.
+        return Effect.logDebug("Incur invocation failed", cause).pipe(
+          Effect.provideService(Logger.LogToStderr, true),
+          Effect.andThen(() =>
+            Cause.hasInterrupts(cause)
+              ? Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)))
+              : Effect.sync(() =>
+                mapError(
+                  context,
+                  new FsError({
+                    code: "invocation_unavailable",
+                    method: "Incur.execute",
+                    description: "The flow invocation failed"
+                  })
+                )
+              )
+          )
+        )
+      },
+      // Incur's ok/error callbacks throw transport control signals. Keep them
+      // outside the effect whose failures are sanitized.
+      onSuccess: (output) => Effect.sync(() => context.ok(output))
     })
   )
 
@@ -360,11 +387,28 @@ export const createCli = (
     const runEffect = Effect.runPromiseWith(services)
     const cli = IncurCli.create(name)
 
+    // Dispatch CLIs are short-lived; the metadata CLI also receives guards
+    // registered after discovery, including an already running MCP server.
+    const middlewares: Array<MiddlewareHandler> = []
+    let metadataInstance: IncurCli.Cli | undefined
+    const register = cli.use.bind(cli)
+    cli.use = (handler) => {
+      middlewares.push(handler)
+      metadataInstance?.use(handler)
+      return register(handler)
+    }
+    const guarded = (surface: IncurCli.Cli): IncurCli.Cli => {
+      for (const handler of middlewares) surface.use(handler)
+      return surface
+    }
+
     // Built once, on the first request that needs it, so a caller that only
     // ever dispatches keeps loading exactly one module.
     let metadata: Promise<IncurCli.Cli> | undefined
     const metadataSurface = (): Promise<IncurCli.Cli> =>
-      metadata ??= runEffect(projectAll(tree)).then((projections) => metadataCli(name, tree, projections, runEffect))
+      metadata ??= runEffect(projectAll(tree)).then((projections) =>
+        metadataInstance = guarded(metadataCli(name, tree, projections, runEffect))
+      )
 
     const select = (
       tokens: ReadonlyArray<string>,
@@ -394,7 +438,7 @@ export const createCli = (
       if (outcome._tag === "Error") return reportServe(outcome.error, options)
       return Option.isNone(outcome.selection)
         ? (await metadataSurface()).serve([...normalized], options)
-        : dispatchCli(name, outcome.selection.value, runEffect).serve([...normalized], options)
+        : guarded(dispatchCli(name, outcome.selection.value, runEffect)).serve([...normalized], options)
     }
 
     cli.fetch = async (request) => {
@@ -406,7 +450,7 @@ export const createCli = (
       if (outcome._tag === "Error") return reportFetch(outcome.error)
       return Option.isNone(outcome.selection)
         ? (await metadataSurface()).fetch(request)
-        : dispatchCli(name, outcome.selection.value, runEffect).fetch(request)
+        : guarded(dispatchCli(name, outcome.selection.value, runEffect)).fetch(request)
     }
 
     return cli

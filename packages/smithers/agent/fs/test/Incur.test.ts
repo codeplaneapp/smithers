@@ -1,20 +1,21 @@
 import * as Descriptor from "@smthrs/registry/Descriptor"
-import { Cause, Effect, Layer, Option, Schema } from "effect"
+import { Cause, Effect, Layer, Logger, Option, References, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import * as FlowInvoker from "../src/FlowInvoker.ts"
+import { FsError } from "../src/FsError.ts"
 import * as Incur from "../src/Incur.ts"
 import visible from "./fixtures/command/visible.ts"
 import { makeRoute, recordedImports, recordedModule, refinedModule } from "./helpers.ts"
 
-const makeCli = async (routes = [makeRoute("review")]) => {
+const makeCli = async (routes = [makeRoute("review")], invoke?: FlowInvoker.Service["invoke"]) => {
   const seen: Array<FlowInvoker.Invocation> = []
   const invoker = FlowInvoker.make({
-    invoke: (invocation) =>
+    invoke: invoke ?? ((invocation) =>
       Effect.sync(() => {
         seen.push(invocation)
         const number = (invocation.input as { readonly number: number }).number
         return { accepted: true, number }
-      })
+      }))
   })
   const cli = await Effect.runPromise(
     Incur.createCli("flows", routes).pipe(Effect.provide(Layer.succeed(FlowInvoker.FlowInvoker, invoker)))
@@ -61,6 +62,22 @@ const tool = async (
       readonly content: ReadonlyArray<{ readonly text: string }>
     }
   }
+}
+
+const transports = ["HTTP", "CLI", "MCP"] as const
+
+const call = async (cli: Awaited<ReturnType<typeof makeCli>>["cli"], transport: typeof transports[number]) => {
+  if (transport === "HTTP") {
+    const response = await cli.fetch(new Request("http://localhost/review?number=42"))
+    return { failed: response.status >= 400, body: await response.text() }
+  }
+  if (transport === "CLI") {
+    const run = capture()
+    await cli.serve(["review", "--number", "42", "--format", "json"], run.options)
+    return { failed: run.exits.includes(1), body: run.writes.join("") }
+  }
+  const response = await tool(cli, "call_write_tool", { name: "review", arguments: { number: 42 } })
+  return { failed: response.result.isError === true, body: JSON.stringify(response) }
 }
 
 describe("Incur projection", () => {
@@ -396,5 +413,116 @@ describe("Incur projection", () => {
     expect(response.status).toBeGreaterThanOrEqual(400)
     expect(body.error).toMatchObject({ code: "decode_failed" })
     expect(seen).toEqual([])
+  })
+
+  describe.each(transports)("%s invocation boundary", (transport) => {
+    it.each([false, true])("enforces authorization after metadata initialized: %s", async (initialized) => {
+      const { cli, seen } = await makeCli()
+      if (initialized) await paths(cli)
+      const guards: Array<string> = []
+      expect(cli.use(async (_context, next) => {
+        guards.push("first")
+        return next()
+      })).toBe(cli)
+      cli.use((context) => {
+        guards.push("deny")
+        return context.error({ code: "UNAUTHORIZED", message: "Denied" })
+      })
+      const response = await call(cli, transport)
+      expect(response.failed).toBe(true)
+      expect(response.body).toContain(transport === "MCP" ? "Denied" : "UNAUTHORIZED")
+      expect(guards).toEqual(["first", "deny"])
+      expect(seen).toEqual([])
+    })
+
+    it.each(["die", "throw", "failure"])("sanitizes an invoker %s", async (kind) => {
+      const sentinel = "SECRET_SENTINEL_credential_from_backend"
+      const { cli } = await makeCli(undefined, () => {
+        if (kind === "throw") throw new Error(sentinel)
+        if (kind === "die") return Effect.die(new Error(sentinel))
+        // A JavaScript host can violate the service's typed failure contract.
+        return Effect.fail(new Error(sentinel)) as Effect.Effect<never, FsError>
+      })
+      const response = await call(cli, transport)
+      expect(response.failed).toBe(true)
+      expect(response.body).not.toContain(sentinel)
+      if (transport !== "MCP") expect(response.body).toContain("invocation_unavailable")
+      expect(response.body).toContain("The flow invocation failed")
+    })
+
+    it.each([false, true])("preserves interruption with a concurrent defect: %s", async (defect) => {
+      const sentinel = "SECRET_SENTINEL_interrupted_backend"
+      const { cli } = await makeCli(undefined, () =>
+        Effect.failCause(Cause.fromReasons<never>([
+          ...Cause.interrupt().reasons,
+          ...(defect ? Cause.die(new Error(sentinel)).reasons : [])
+        ])))
+      const response = await call(cli, transport)
+      expect(response.failed).toBe(true)
+      expect(response.body.toLowerCase()).toContain("interrupt")
+      expect(response.body).not.toContain("invocation_unavailable")
+      expect(response.body).not.toContain(sentinel)
+    })
+
+    it("preserves deliberately public typed failures", async () => {
+      const { cli } = await makeCli(undefined, () =>
+        Effect.fail(
+          new FsError({
+            code: "invocation_unavailable",
+            method: "test.invoke",
+            description: "Public refusal"
+          })
+        ))
+      const response = await call(cli, transport)
+      expect(response.failed).toBe(true)
+      if (transport !== "MCP") expect(response.body).toContain("invocation_unavailable")
+      expect(response.body).toContain("Public refusal")
+    })
+  })
+
+  it("retains unexpected causes only in the host's private debug logger", async () => {
+    const defect = new Error("SECRET_SENTINEL_private_diagnostics")
+    const logged: Array<{ readonly message: unknown; readonly cause: Cause.Cause<unknown> }> = []
+    const logger = Logger.make((entry) => {
+      logged.push(entry)
+    })
+    const cli = await Effect.runPromise(
+      Incur.createCli("flows", [makeRoute("review")]).pipe(
+        Effect.provideService(FlowInvoker.FlowInvoker, FlowInvoker.make({ invoke: () => Effect.die(defect) })),
+        Effect.provideService(References.MinimumLogLevel, "Debug"),
+        Effect.provide(Logger.layer([logger]))
+      )
+    )
+    const response = await call(cli, "HTTP")
+    expect(response.failed).toBe(true)
+    expect(response.body).not.toContain(defect.message)
+    expect(logged).toHaveLength(1)
+    expect(logged[0]!.message).toEqual(["Incur invocation failed"])
+    expect(Cause.squash(logged[0]!.cause)).toBe(defect)
+  })
+  it("keeps built-in debug diagnostics off CLI stdout", async () => {
+    const sentinel = "SECRET_SENTINEL_debug_console"
+    const cli = await Effect.runPromise(
+      Incur.createCli("flows", [makeRoute("review")]).pipe(
+        Effect.provideService(
+          FlowInvoker.FlowInvoker,
+          FlowInvoker.make({ invoke: () => Effect.die(new Error(sentinel)) })
+        ),
+        Effect.provideService(References.MinimumLogLevel, "Debug"),
+        Effect.provide(Logger.layer([Logger.defaultLogger]))
+      )
+    )
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => undefined)
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const response = await call(cli, "CLI")
+      expect(response.failed).toBe(true)
+      expect(response.body).not.toContain(sentinel)
+      expect(stdout).not.toHaveBeenCalled()
+      expect(JSON.stringify(stderr.mock.calls)).toContain(sentinel)
+    } finally {
+      stdout.mockRestore()
+      stderr.mockRestore()
+    }
   })
 })
