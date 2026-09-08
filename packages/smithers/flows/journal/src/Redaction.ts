@@ -534,7 +534,15 @@ export const redact = (value: unknown, options?: Options): unknown => {
       const toJSON = (node as { toJSON?: unknown }).toJSON
       if (typeof toJSON === "function") return walk(toJSON.call(node), ancestors, depth)
       if (Array.isArray(node)) {
-        return node.map((element) => walk(element, ancestors, depth + 1))
+        // `map` invokes the input's species constructor, which can restore
+        // credential fields and inspection hooks after the elements are walked.
+        // Rebuild a plain array, preserving the original length and holes.
+        const length = node.length
+        const result = new Array<unknown>(length)
+        for (let index = 0; index < length; index++) {
+          if (index in node) result[index] = walk(node[index], ancestors, depth + 1)
+        }
+        return result
       }
       // `result[key] = …` routes a literal `__proto__` key through the
       // inherited setter, so the field would silently become the result's

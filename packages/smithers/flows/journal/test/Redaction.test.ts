@@ -1,12 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Effect, Layer } from "effect"
+import { type Console, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { inspect } from "node:util"
 import { Journal } from "../src/Journal.ts"
 import { Input, type RunId, type SourceId } from "../src/JournalEvent.ts"
 import * as Migrations from "../src/Migrations.ts"
+import * as RedactedLogger from "../src/RedactedLogger.ts"
 import * as Redaction from "../src/Redaction.ts"
 import * as SqlJournal from "../src/SqlJournal.ts"
 
@@ -392,6 +394,75 @@ describe("Redaction", () => {
       text: "plain",
       self: "[Circular]"
     })
+  })
+
+  it.each([
+    ["subclass through redact", false, false],
+    ["species through redact", true, false],
+    ["subclass through redactingConsole", false, true],
+    ["species through redactingConsole", true, true]
+  ])("rebuilds a credential-bearing array %s as a plain array", (_name, customSpecies, throughConsole) => {
+    const secret = "opaqueGridCredential12345"
+    let constructions = 0
+    let speciesReads = 0
+    class Page extends Array<unknown> {
+      [inspect.custom]() {
+        return secret
+      }
+      token = (constructions++, secret)
+    }
+    class Species extends Page {}
+    if (customSpecies) {
+      Object.defineProperty(Page, Symbol.species, {
+        get: () => {
+          speciesReads++
+          return Species
+        }
+      })
+    }
+    const page = new Page("safe item", { token: secret })
+    expect(inspect(page)).toContain(secret)
+    constructions = 0
+
+    const captured: Array<unknown> = []
+    const target = new Proxy({}, {
+      get: () => (...args: Array<unknown>) => {
+        captured.push(...args)
+      }
+    }) as Console.Console
+    const console = RedactedLogger.redactingConsole(target, Redaction.make())
+    const redact = (value: unknown): unknown => {
+      if (!throughConsole) return Redaction.redact(value)
+      console.log(value)
+      expect(captured).toHaveLength(1)
+      return captured.pop()
+    }
+    const redacted = redact(page)
+    const repeated = redact(redacted)
+    for (const result of [redacted, repeated]) {
+      expect(inspect(result)).not.toContain(secret)
+      expect(Object.getPrototypeOf(result)).toBe(Array.prototype)
+      expect(result).toStrictEqual(["safe item", { token: Redaction.placeholder }])
+      expect(Object.getOwnPropertyDescriptor(result, "token")).toBeUndefined()
+      expect(Object.getOwnPropertySymbols(result)).toEqual([])
+    }
+    expect(constructions).toBe(0)
+    expect(speciesReads).toBe(0)
+  })
+
+  it("walks array indices without reading map and preserves holes and cycles", () => {
+    const array: Array<unknown> = new Array(3)
+    array[1] = { token: "opaqueGridCredential12345" }
+    array[2] = array
+    Object.defineProperty(array, "map", {
+      get: () => {
+        throw new Error("input map must not be read")
+      }
+    })
+    const expected: Array<unknown> = new Array(3)
+    expected[1] = { token: Redaction.placeholder }
+    expected[2] = "[Circular]"
+    expect(Redaction.redact(array)).toStrictEqual(expected)
   })
 
   it("mirrors JSON.stringify for Date and toJSON values, and names a callable", () => {
