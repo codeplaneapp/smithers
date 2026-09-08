@@ -115,6 +115,8 @@ export interface Host {
   readonly exists: (path: string) => boolean
   /** Whether a host path is a directory. */
   readonly isDirectory: (path: string) => boolean
+  /** Tests the entry itself, including dangling links; defaults to the real host. */
+  readonly isSymbolicLink?: ((path: string) => boolean) | undefined
   /**
    * The names of a directory's direct children, or undefined when the host
    * cannot list it. Optional: a host without it keeps every declared file as
@@ -123,9 +125,9 @@ export interface Host {
   readonly entries?: ((directory: string) => ReadonlyArray<string> | undefined) | undefined
   /**
    * Where a path's bytes actually live once every symbolic link on it is
-   * followed, or `undefined` when the host cannot say. A host that omits it
-   * binds declared paths where they sit, which is right everywhere a link's
-   * target stays visible.
+   * followed, or `undefined` when the host cannot say. Write validation uses
+   * the real host when this probe is omitted and refuses unresolved existing
+   * paths. Read aliases are only collected when this probe is supplied.
    */
   readonly realpath?: ((path: string) => string | undefined) | undefined
   readonly uid: number | undefined
@@ -271,6 +273,7 @@ export const host = (env: Readonly<Record<string, string | undefined>> = process
       return undefined
     },
     exists: (path) => NodeFs.existsSync(path),
+    isSymbolicLink,
     isDirectory: (path) => {
       try {
         return NodeFs.statSync(path).isDirectory()
@@ -419,6 +422,59 @@ const insideRoot = (root: string, candidate: string): boolean => {
     (relative !== ".." && !relative.startsWith(`..${NodePath.sep}`) && !NodePath.isAbsolute(relative))
 }
 
+/** Unlike exists/stat, lstat sees dangling links and does not follow them. */
+const isSymbolicLink = (path: string): boolean => {
+  try {
+    return NodeFs.lstatSync(path).isSymbolicLink()
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false
+    throw cause
+  }
+}
+
+/** Check each component, including existing ancestors of a missing output. */
+const safeWrite = (root: string, path: string, hostFacts: Host): boolean => {
+  if (!insideRoot(root, path)) return false
+  try {
+    const realpath = hostFacts.realpath ?? NodeFs.realpathSync
+    const link = hostFacts.isSymbolicLink ?? isSymbolicLink
+    if (realpath(root) !== root) return false
+    let current = root
+    for (const component of NodePath.relative(root, path).split(NodePath.sep).filter(Boolean)) {
+      current = NodePath.join(current, component)
+      if (link(current)) return false
+      if (hostFacts.exists(current) && realpath(current) !== current) return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+const unsafeWrite = (platform: NodeJS.Platform, mechanism: string, path: string): Unenforceable =>
+  unenforceable(
+    platform,
+    mechanism,
+    "canonical workspace write path",
+    `write path ${path} has a symbolic link, an unresolved ancestor, or leaves the canonical workspace`
+  )
+
+/**
+ * Rechecks write grants before directory creation and before rendering. Throws
+ * an {@link Unenforceable} refusal if a path changed since planning. Callers
+ * must keep the workspace stable until the operating system consumes mounts.
+ *
+ * @category resolution
+ * @since 0.1.0
+ */
+export const validateWrites = (confinement: Plan, hostFacts: Host = host()): void => {
+  for (const write of confinement.writes) {
+    if (!safeWrite(confinement.workspaceRoot, write, hostFacts)) {
+      throw unsafeWrite(hostFacts.platform, confinement.mechanism._tag, write)
+    }
+  }
+}
+
 /**
  * Folds a declared file set into directories plus the entries to re-close.
  *
@@ -492,7 +548,9 @@ const collapse = (paths: ReadonlyArray<string>): ReadonlyArray<string> => {
  * escapes the workspace is dropped, because the sandbox never grants anything
  * outside the tree the key covers. Reads that do not exist are dropped too:
  * bubblewrap cannot bind a missing path, and a declared input that vanished is
- * the executor's measurement failure, not this module's.
+ * the executor's measurement failure, not this module's. A write containing
+ * any symbolic link below the canonical root is refused, including a missing
+ * output below a linked ancestor.
  *
  * @category resolution
  * @since 0.1.0
@@ -505,7 +563,14 @@ export const plan = (
   const selected = select(request, hostFacts)
   if (isUnenforceable(selected)) return selected
   if (selected._tag === "none") return undefined
-  const root = location.workspaceRoot
+  let root: string
+  try {
+    const canonical = (hostFacts.realpath ?? NodeFs.realpathSync)(location.workspaceRoot)
+    if (canonical === undefined) return unsafeWrite(hostFacts.platform, selected._tag, location.workspaceRoot)
+    root = canonical
+  } catch {
+    return unsafeWrite(hostFacts.platform, selected._tag, location.workspaceRoot)
+  }
   const anchor = (relative: string): string | undefined => {
     const absolute = NodePath.resolve(root, ...relative.split("/"))
     return insideRoot(root, absolute) ? absolute : undefined
@@ -536,21 +601,30 @@ export const plan = (
   // A path that is already a file on the host is the one exception, since a
   // file cannot be bound as a writable directory.
   const writes: Array<string> = []
-  const add = (absolute: string | undefined): void => {
-    if (absolute === undefined || !insideRoot(root, absolute)) return
+  const add = (absolute: string): Unenforceable | undefined => {
+    if (!safeWrite(root, absolute, hostFacts)) return unsafeWrite(hostFacts.platform, selected._tag, absolute)
     writes.push(absolute)
+    return undefined
   }
   for (const relative of request.writes) {
     const absolute = anchor(relative)
     if (absolute === undefined) continue
-    add(hostFacts.exists(absolute) && !hostFacts.isDirectory(absolute) ? NodePath.dirname(absolute) : absolute)
+    if (!safeWrite(root, absolute, hostFacts)) return unsafeWrite(hostFacts.platform, selected._tag, absolute)
+    const refusal = add(
+      hostFacts.exists(absolute) && !hostFacts.isDirectory(absolute) ? NodePath.dirname(absolute) : absolute
+    )
+    if (refusal !== undefined) return refusal
   }
   // A declared output file opens its parent: a file cannot be bound before it
   // exists, and a tool that writes by rename needs the directory anyway.
   for (const relative of request.writeFiles ?? []) {
     const absolute = anchor(relative)
     if (absolute === undefined) continue
-    add(hostFacts.exists(absolute) && hostFacts.isDirectory(absolute) ? absolute : NodePath.dirname(absolute))
+    if (!safeWrite(root, absolute, hostFacts)) return unsafeWrite(hostFacts.platform, selected._tag, absolute)
+    const refusal = add(
+      hostFacts.exists(absolute) && hostFacts.isDirectory(absolute) ? absolute : NodePath.dirname(absolute)
+    )
+    if (refusal !== undefined) return refusal
   }
   const readOnly: Array<string> = []
   for (const relative of request.readOnly ?? []) {
@@ -640,9 +714,11 @@ export const environment = (
  */
 export const bubblewrap = (
   confinement: Plan,
-  argv: ReadonlyArray<string>
+  argv: ReadonlyArray<string>,
+  hostFacts: Host = host()
 ): ReadonlyArray<string> => {
   if (confinement.mechanism._tag !== "bubblewrap") throw new Error("bubblewrap argv needs a bubblewrap plan")
+  validateWrites(confinement, hostFacts)
   const home = "/tmp/home"
   const out: Array<string> = [
     confinement.mechanism.executable,
@@ -720,8 +796,9 @@ const ancestors = (root: string, paths: ReadonlyArray<string>): ReadonlyArray<st
  * @category rendering
  * @since 0.1.0
  */
-export const seatbelt = (confinement: Plan): string => {
+export const seatbelt = (confinement: Plan, hostFacts: Host = host()): string => {
   if (confinement.mechanism._tag !== "seatbelt") throw new Error("a seatbelt profile needs a seatbelt plan")
+  validateWrites(confinement, hostFacts)
   const lines: Array<string> = ["(version 1)", "(allow default)"]
   if (confinement.network !== "open") {
     lines.push("(deny network*)", "(allow network* (local unix-socket))")
@@ -770,9 +847,11 @@ export const seatbelt = (confinement: Plan): string => {
 export const docker = (
   confinement: Plan,
   argv: ReadonlyArray<string>,
-  env: Readonly<Record<string, string>>
+  env: Readonly<Record<string, string>>,
+  hostFacts: Host = host()
 ): ReadonlyArray<string> => {
   if (confinement.mechanism._tag !== "docker") throw new Error("docker argv needs a docker plan")
+  validateWrites(confinement, hostFacts)
   const out: Array<string> = [
     confinement.mechanism.executable,
     "run",
@@ -817,18 +896,19 @@ export const docker = (
 export const wrap = (
   confinement: Plan,
   argv: ReadonlyArray<string>,
-  env: Readonly<Record<string, string>>
+  env: Readonly<Record<string, string>>,
+  hostFacts: Host = host()
 ): { readonly argv: ReadonlyArray<string>; readonly env: Readonly<Record<string, string>> } => {
   const extra = environment(confinement)
   switch (confinement.mechanism._tag) {
     case "bubblewrap":
-      return { argv: bubblewrap(confinement, argv), env: extra }
+      return { argv: bubblewrap(confinement, argv, hostFacts), env: extra }
     case "seatbelt": {
-      const profile = seatbelt(confinement)
+      const profile = seatbelt(confinement, hostFacts)
       return { argv: [confinement.mechanism.executable, "-p", profile, ...argv], env: extra }
     }
     case "docker":
-      return { argv: docker(confinement, argv, { ...env, ...extra }), env: {} }
+      return { argv: docker(confinement, argv, { ...env, ...extra }, hostFacts), env: {} }
   }
 }
 

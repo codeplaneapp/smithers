@@ -57,6 +57,14 @@ closed `code` (`invalid_payload`, `spawn_failed`, `timed_out`, `signaled`,
 child, the `signal` itself, so a caller decides what to do without parsing
 stderr.
 
+`ExecSandbox` anchors write grants at the canonical workspace root. A write
+with a symbolic link in any component below that root is refused, including
+internal and dangling links and missing outputs below linked ancestors. File
+outputs are checked before granting their parent directory. `Exec` revalidates
+grants before creating output directories; each sandbox renderer revalidates
+before emitting its mounts or profile. The workspace must remain stable until
+the operating system consumes those paths.
+
 `SafeFs` is the confined filesystem seam: no-follow reads, bounded sizes, and
 one meaning for absent. `GeneratedFile` writes and drift-checks a generated
 file; its `DriftError` carries a `reason` of `missing`, `drifted`, or

@@ -15,6 +15,196 @@ import { Sandbox } from "../src/WorkspaceDeclaration.ts"
 
 const root = "/work/ws"
 
+const writeFixture = () => {
+  const base = NodeFs.realpathSync(NodeFs.mkdtempSync(NodePath.join(NodeOs.tmpdir(), "smthrs-write-grants-")))
+  const workspaceRoot = NodePath.join(base, "workspace")
+  const outside = NodePath.join(base, "outside")
+  NodeFs.mkdirSync(workspaceRoot)
+  NodeFs.mkdirSync(outside)
+  const facts: ExecSandbox.Host = {
+    ...ExecSandbox.host(),
+    platform: "linux",
+    executable: (name) => `/usr/bin/${name}`
+  }
+  const plan = (writes: ReadonlyArray<string>, writeFiles: ReadonlyArray<string> = []) =>
+    ExecSandbox.plan(
+      { policy: {}, reads: [], writes, writeFiles },
+      { workspaceRoot, cwd: workspaceRoot, tmp: NodePath.join(workspaceRoot, ".tmp") },
+      facts
+    )
+  return { base, workspaceRoot, outside, plan, facts }
+}
+
+describe("write grant symlink confinement", () => {
+  it.each(
+    [
+      ["external directory", "out", false],
+      ["missing directory below an external link", "out/missing/deep", false],
+      ["existing directory below a linked ancestor", "out/existing", false],
+      ["missing file below a linked ancestor", "out/missing/result.txt", true],
+      ["linked file", "out/result.txt", true]
+    ] as const
+  )("refuses a write through an %s", (_, output, file) => {
+    const { base, workspaceRoot, outside, plan } = writeFixture()
+    try {
+      NodeFs.mkdirSync(NodePath.join(outside, "existing"))
+      NodeFs.writeFileSync(NodePath.join(outside, "result.txt"), "private")
+      NodeFs.symlinkSync(outside, NodePath.join(workspaceRoot, "out"), "dir")
+      const result = file ? plan([], [output]) : plan([output])
+      // Port of security/1: refusing the plan prevents its grant becoming a
+      // writable Docker or bubblewrap bind source outside the workspace.
+      expect(ExecSandbox.isUnenforceable(result)).toBe(true)
+      expect(NodeFs.existsSync(NodePath.join(outside, "missing"))).toBe(false)
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it.each(["internal", "dangling", "loop"] as const)("refuses a %s symlink component", (kind) => {
+    const { base, workspaceRoot, outside, plan } = writeFixture()
+    try {
+      const out = NodePath.join(workspaceRoot, "out")
+      const target = kind === "internal" ? workspaceRoot : kind === "loop" ? out : NodePath.join(outside, "missing")
+      NodeFs.symlinkSync(target, out, "dir")
+      expect(ExecSandbox.isUnenforceable(plan(["out/deep"]))).toBe(true)
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it.each([false, true])("checks a linked file before widening to its parent (writeFiles=%s)", (file) => {
+    const { base, workspaceRoot, outside, plan } = writeFixture()
+    try {
+      const target = NodePath.join(outside, "result.txt")
+      NodeFs.writeFileSync(target, "private")
+      NodeFs.symlinkSync(target, NodePath.join(workspaceRoot, "result.txt"))
+      expect(ExecSandbox.isUnenforceable(file ? plan([], ["result.txt"]) : plan(["result.txt"]))).toBe(true)
+      expect(NodeFs.readFileSync(target, "utf8")).toBe("private")
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses unresolved existing write components and unavailable workspace roots", () => {
+    const { base, workspaceRoot, facts } = writeFixture()
+    try {
+      NodeFs.mkdirSync(NodePath.join(workspaceRoot, "out"))
+      for (
+        const realpath of [() => undefined, () => {
+          throw new Error("unreadable")
+        }, (path: string) => path === workspaceRoot ? workspaceRoot : undefined]
+      ) {
+        expect(ExecSandbox.isUnenforceable(ExecSandbox.plan(
+          { policy: {}, reads: [], writes: ["out"] },
+          { workspaceRoot, cwd: workspaceRoot, tmp: NodePath.join(workspaceRoot, ".tmp") },
+          { ...facts, realpath }
+        ))).toBe(true)
+      }
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it("canonicalizes a linked workspace root and uses real probes when optional probes are omitted", () => {
+    const { base, workspaceRoot, facts } = writeFixture()
+    try {
+      const alias = NodePath.join(base, "alias")
+      NodeFs.symlinkSync(workspaceRoot, alias, "dir")
+      const result = ExecSandbox.plan(
+        { policy: {}, reads: [], writes: ["out/new"] },
+        { workspaceRoot: alias, cwd: workspaceRoot, tmp: NodePath.join(workspaceRoot, ".tmp") },
+        { ...facts, realpath: undefined, isSymbolicLink: undefined }
+      )
+      if (result === undefined || ExecSandbox.isUnenforceable(result)) throw new Error("expected a plan")
+      expect(result.workspaceRoot).toBe(workspaceRoot)
+      expect(result.writes).toEqual([NodePath.join(workspaceRoot, "out/new")])
+      expect(() => ExecSandbox.validateWrites(result)).not.toThrow()
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it("revalidates missing outputs before the caller creates directories", () => {
+    const { base, workspaceRoot, outside, plan } = writeFixture()
+    try {
+      NodeFs.mkdirSync(NodePath.join(workspaceRoot, "out"))
+      const result = plan(["out/new/deep"])
+      if (result === undefined || ExecSandbox.isUnenforceable(result)) throw new Error("expected a plan")
+      NodeFs.rmdirSync(NodePath.join(workspaceRoot, "out"))
+      NodeFs.symlinkSync(outside, NodePath.join(workspaceRoot, "out"), "dir")
+      expect(() => {
+        ExecSandbox.validateWrites(result)
+        for (const write of result.writes) NodeFs.mkdirSync(write, { recursive: true })
+      }).toThrow()
+      expect(NodeFs.readdirSync(outside)).toEqual([])
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it.each(["directory", "ancestor", "workspace"] as const)("revalidates a replaced %s before rendering", (replaced) => {
+    const { base, workspaceRoot, outside, plan } = writeFixture()
+    try {
+      NodeFs.mkdirSync(NodePath.join(workspaceRoot, "out/deep"), { recursive: true })
+      const result = plan(["out/deep"])
+      if (result === undefined || ExecSandbox.isUnenforceable(result)) throw new Error("expected a plan")
+      const path = replaced === "workspace"
+        ? workspaceRoot
+        : NodePath.join(workspaceRoot, replaced === "ancestor" ? "out" : "out/deep")
+      NodeFs.rmSync(path, { recursive: true })
+      NodeFs.symlinkSync(outside, path, "dir")
+      expect(() => ExecSandbox.bubblewrap(result, ["true"])).toThrow()
+      expect(() =>
+        ExecSandbox.docker(
+          {
+            ...result,
+            mechanism: { _tag: "docker", executable: "/usr/bin/docker", image: "fixture" }
+          },
+          ["true"],
+          {}
+        )
+      ).toThrow()
+      expect(() =>
+        ExecSandbox.seatbelt({
+          ...result,
+          mechanism: { _tag: "seatbelt", executable: "/usr/bin/sandbox-exec" }
+        })
+      ).toThrow()
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it("admits regular existing and missing output directories within the canonical workspace", () => {
+    const { base, workspaceRoot, plan } = writeFixture()
+    try {
+      NodeFs.mkdirSync(NodePath.join(workspaceRoot, "out"))
+      const result = plan(["out", "dist.new/nested"])
+      if (result === undefined || ExecSandbox.isUnenforceable(result)) throw new Error("expected a plan")
+      expect(result.writes).toEqual([
+        NodePath.join(workspaceRoot, "out"),
+        NodePath.join(workspaceRoot, "dist.new/nested")
+      ])
+      for (const write of result.writes) NodeFs.mkdirSync(write, { recursive: true })
+      for (const write of result.writes) {
+        expect(NodeFs.realpathSync(write).startsWith(workspaceRoot + NodePath.sep)).toBe(true)
+      }
+      expect(ExecSandbox.bubblewrap(result, ["true"])).toContain("--bind")
+      const argv = ExecSandbox.docker(
+        {
+          ...result,
+          mechanism: { _tag: "docker", executable: "/usr/bin/docker", image: "fixture" }
+        },
+        ["true"],
+        {}
+      )
+      for (const write of result.writes) expect(argv).toContain(`type=bind,src=${write},dst=${write}`)
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+})
+
 const host = (
   platform: NodeJS.Platform,
   executables: Readonly<Record<string, string>> = {},
@@ -25,6 +215,8 @@ const host = (
   executable: (name) => executables[name],
   exists: (path) => existing.includes(path) || directories.includes(path),
   isDirectory: (path) => directories.includes(path),
+  isSymbolicLink: () => false,
+  realpath: (path) => path,
   uid: 501,
   gid: 20
 })
@@ -164,7 +356,7 @@ describe("plan", () => {
       const plan = planned(bare, { reads: [], writes: [write], writeFiles: [], readOnly: [] })
       expect(plan.writes).toEqual([`/work/ws/${write}`])
       expect(plan.writes).not.toContain("/work/ws")
-      expect(ExecSandbox.bubblewrap(plan, ["true"]).join(" ")).toContain("--remount-ro /work/ws")
+      expect(ExecSandbox.bubblewrap(plan, ["true"], linux).join(" ")).toContain("--remount-ro /work/ws")
     }
     const nested = planned(bare, { reads: [], writes: ["apps/site/.astro"], writeFiles: [], readOnly: [] })
     expect(nested.writes).toEqual(["/work/ws/apps/site/.astro"])
@@ -266,7 +458,7 @@ describe("plan", () => {
 
 describe("bubblewrap argv", () => {
   it("binds the root read-only, shadows the workspace, binds the declared set, and remounts read-only last", () => {
-    const argv = ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"])
+    const argv = ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"], linux)
     const text = argv.join(" ")
     expect(argv[0]).toBe("/usr/bin/bwrap")
     expect(text).toContain("--ro-bind / /")
@@ -286,7 +478,7 @@ describe("bubblewrap argv", () => {
       ...linux,
       realpath: (path) => path === "/work/ws/node_modules" ? "/tmp/real-ws/node_modules" : path
     }
-    const argv = ExecSandbox.bubblewrap(planned(linked), ["node", "build.js"])
+    const argv = ExecSandbox.bubblewrap(planned(linked), ["node", "build.js"], linux)
     const text = argv.join(" ")
     expect(text).toContain("--ro-bind /tmp/real-ws/node_modules /tmp/real-ws/node_modules")
     expect(text).toContain("--ro-bind /work/ws/node_modules /work/ws/node_modules")
@@ -300,7 +492,8 @@ describe("bubblewrap argv", () => {
         writes: [".flows"],
         readOnly: [".flows/cache"]
       }),
-      ["true"]
+      ["true"],
+      linux
     )
     const text = argv.join(" ")
     expect(text).toContain("--bind /work/ws/.flows /work/ws/.flows")
@@ -317,20 +510,20 @@ describe("bubblewrap argv", () => {
       readOnly: []
     })
     expect(rootWrite.writes).toEqual(["/work/ws"])
-    const argv = ExecSandbox.bubblewrap(rootWrite, ["true"])
+    const argv = ExecSandbox.bubblewrap(rootWrite, ["true"], linux)
     const text = argv.join(" ")
     expect(text).toContain("--bind /work/ws /work/ws")
     expect(text).not.toContain("--remount-ro")
     // A write below the root keeps the tmpfs at the root re-closed.
-    const nested = ExecSandbox.bubblewrap(planned(linux), ["true"]).join(" ")
+    const nested = ExecSandbox.bubblewrap(planned(linux), ["true"], linux).join(" ")
     expect(nested).toContain("--remount-ro /work/ws")
   })
 
   it("unshares the network by default and shares the host network only for an open policy", () => {
-    const open = ExecSandbox.bubblewrap(planned(linux, { policy: { network: true } }), ["true"]).join(" ")
+    const open = ExecSandbox.bubblewrap(planned(linux, { policy: { network: true } }), ["true"], linux).join(" ")
     expect(open).toContain("--share-net")
-    expect(ExecSandbox.bubblewrap(planned(linux), ["true"]).join(" ")).not.toContain("--share-net")
-    expect(() => ExecSandbox.bubblewrap({ ...planned(linux), network: "loopback" }, ["true"])).toThrow(
+    expect(ExecSandbox.bubblewrap(planned(linux), ["true"], linux).join(" ")).not.toContain("--share-net")
+    expect(() => ExecSandbox.bubblewrap({ ...planned(linux), network: "loopback" }, ["true"], linux)).toThrow(
       "bubblewrap cannot render loopback-only networking"
     )
   })
@@ -360,7 +553,7 @@ describe("folding declared files into directories", () => {
     const plan = planned(listingHost, { reads, writes: [] })
     expect(plan.reads).toEqual(["/work/ws/src"])
     expect(plan.readDenies).toEqual(["/work/ws/src/d.ts", "/work/ws/src/__generated__"])
-    const profile = ExecSandbox.seatbelt(plan)
+    const profile = ExecSandbox.seatbelt(plan, linux)
     const grant = profile.indexOf("(subpath \"/work/ws/src\")")
     const close = profile.indexOf(
       "(deny file-read* (subpath \"/work/ws/src/d.ts\") (subpath \"/work/ws/src/__generated__\"))"
@@ -481,7 +674,7 @@ describe("folding declared files into directories", () => {
 
 describe("seatbelt profile", () => {
   it("denies network and writes, closes reads under the workspace, and reopens the declared set", () => {
-    const profile = ExecSandbox.seatbelt(planned(darwin))
+    const profile = ExecSandbox.seatbelt(planned(darwin), linux)
     expect(profile.startsWith("(version 1)(allow default)")).toBe(true)
     expect(profile).toContain("(deny network*)")
     expect(profile).toContain("(deny file-write*)")
@@ -499,10 +692,10 @@ describe("seatbelt profile", () => {
   })
 
   it("opens loopback and the whole network in steps", () => {
-    const loopback = ExecSandbox.seatbelt(planned(darwin, { policy: { network: "loopback" } }))
+    const loopback = ExecSandbox.seatbelt(planned(darwin, { policy: { network: "loopback" } }), linux)
     expect(loopback).toContain("(deny network*)")
     expect(loopback).toContain("(allow network-bind (local ip \"localhost:*\"))")
-    const open = ExecSandbox.seatbelt(planned(darwin, { policy: { network: true } }))
+    const open = ExecSandbox.seatbelt(planned(darwin, { policy: { network: true } }), linux)
     expect(open).not.toContain("(deny network*)")
   })
 
@@ -514,7 +707,7 @@ describe("seatbelt profile", () => {
         writes: []
       }
     )
-    expect(ExecSandbox.seatbelt(plan)).toContain("(subpath \"/work/ws/we\\\"ird\")")
+    expect(ExecSandbox.seatbelt(plan, linux)).toContain("(subpath \"/work/ws/we\\\"ird\")")
   })
 })
 
@@ -524,7 +717,7 @@ describe("docker argv", () => {
       host("win32", { docker: "docker" }, ["/work/ws/src/a.ts", "/srv/git/one"], ["/work/ws/node_modules"]),
       { mechanism: Sandbox.Docker({ image: "node:22" }), externalReads: ["/srv/git/one"] }
     )
-    const text = ExecSandbox.docker(plan, ["node"], {}).join(" ")
+    const text = ExecSandbox.docker(plan, ["node"], {}, linux).join(" ")
     expect(text).toContain("--mount type=bind,src=/srv/git/one,dst=/srv/git/one,readonly")
   })
 
@@ -535,7 +728,7 @@ describe("docker argv", () => {
         mechanism: Sandbox.Docker({ image: "node:22" })
       }
     )
-    const argv = ExecSandbox.docker(plan, ["node", "build.js"], { PATH: "/ignored", HOME: "/ignored", CI: "1" })
+    const argv = ExecSandbox.docker(plan, ["node", "build.js"], { PATH: "/ignored", HOME: "/ignored", CI: "1" }, linux)
     const text = argv.join(" ")
     expect(argv.slice(0, 3)).toEqual(["docker", "run", "--rm"])
     expect(text).toContain("--read-only")
@@ -554,7 +747,7 @@ describe("docker argv", () => {
       mechanism: Sandbox.Docker({ image: "node:22" }),
       policy: { network: true }
     })
-    expect(ExecSandbox.docker(plan, ["true"], {}).join(" ")).toContain("--network bridge")
+    expect(ExecSandbox.docker(plan, ["true"], {}, linux).join(" ")).toContain("--network bridge")
   })
 
   it("omits the user mapping when the host reports no uid or no gid", () => {
@@ -567,9 +760,9 @@ describe("docker argv", () => {
     const uidOnly = planned({ ...facts, gid: undefined }, declared)
     expect(neither.uid).toBeUndefined()
     for (const plan of [neither, gidOnly, uidOnly]) {
-      expect(ExecSandbox.docker(plan, ["node"], {})).not.toContain("--user")
+      expect(ExecSandbox.docker(plan, ["node"], {}, linux)).not.toContain("--user")
     }
-    expect(ExecSandbox.docker(planned(facts, declared), ["node"], {})).toContain("--user")
+    expect(ExecSandbox.docker(planned(facts, declared), ["node"], {}, linux)).toContain("--user")
   })
 })
 
@@ -581,7 +774,7 @@ describe("docker argv", () => {
  */
 describe("every mechanism renders the same text on any host", () => {
   it("emits the seatbelt profile verbatim", () => {
-    expect(ExecSandbox.seatbelt(planned(darwin))).toBe(
+    expect(ExecSandbox.seatbelt(planned(darwin), linux)).toBe(
       "(version 1)(allow default)" +
         "(deny network*)(allow network* (local unix-socket))" +
         "(deny file-write*)" +
@@ -597,7 +790,7 @@ describe("every mechanism renders the same text on any host", () => {
   })
 
   it("emits the bubblewrap argv verbatim", () => {
-    expect(ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"])).toEqual([
+    expect(ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"], linux)).toEqual([
       "/usr/bin/bwrap",
       "--ro-bind",
       "/",
@@ -644,7 +837,7 @@ describe("every mechanism renders the same text on any host", () => {
       host("win32", { docker: "docker" }, ["/work/ws/src/a.ts"], ["/work/ws/node_modules", "/work/ws/dist"]),
       { mechanism: Sandbox.Docker({ image: "node:22" }) }
     )
-    expect(ExecSandbox.docker(plan, ["node"], { CI: "1" })).toEqual([
+    expect(ExecSandbox.docker(plan, ["node"], { CI: "1" }, linux)).toEqual([
       "docker",
       "run",
       "--rm",
@@ -678,19 +871,21 @@ describe("every mechanism renders the same text on any host", () => {
   it("refuses to render a mechanism the plan did not select", () => {
     const seatbeltPlan = planned(darwin)
     const bubblewrapPlan = planned(linux)
-    expect(() => ExecSandbox.bubblewrap(seatbeltPlan, ["true"])).toThrow(/bubblewrap argv needs a bubblewrap plan/)
-    expect(() => ExecSandbox.seatbelt(bubblewrapPlan)).toThrow(/a seatbelt profile needs a seatbelt plan/)
-    expect(() => ExecSandbox.docker(seatbeltPlan, ["true"], {})).toThrow(/docker argv needs a docker plan/)
+    expect(() => ExecSandbox.bubblewrap(seatbeltPlan, ["true"], linux)).toThrow(
+      /bubblewrap argv needs a bubblewrap plan/
+    )
+    expect(() => ExecSandbox.seatbelt(bubblewrapPlan, linux)).toThrow(/a seatbelt profile needs a seatbelt plan/)
+    expect(() => ExecSandbox.docker(seatbeltPlan, ["true"], {}, linux)).toThrow(/docker argv needs a docker plan/)
   })
 })
 
 describe("wrap and environment", () => {
   it("redirects the temporary and home directories into the confinement", () => {
-    const seatbelt = ExecSandbox.wrap(planned(darwin), ["true"], {})
+    const seatbelt = ExecSandbox.wrap(planned(darwin), ["true"], {}, linux)
     expect(seatbelt.argv.slice(0, 2)).toEqual(["/usr/bin/sandbox-exec", "-p"])
     expect(seatbelt.env["TMPDIR"]).toBe("/work/ws/.flows/sandbox/run1")
     expect(seatbelt.env["HOME"]).toBe("/work/ws/.flows/sandbox/run1/home")
-    const bubblewrap = ExecSandbox.wrap(planned(linux), ["true"], {})
+    const bubblewrap = ExecSandbox.wrap(planned(linux), ["true"], {}, linux)
     expect(bubblewrap.env["TMPDIR"]).toBe("/tmp")
     expect(bubblewrap.env["HOME"]).toBe("/tmp/home")
     expect(bubblewrap.env["XDG_CACHE_HOME"]).toBe("/tmp/cache")

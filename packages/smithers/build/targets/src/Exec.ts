@@ -1311,6 +1311,7 @@ const confined = (
   }
   const prepare = Effect.try({
     try: () => {
+      ExecSandbox.validateWrites(confinement)
       NodeFs.mkdirSync(NodePath.join(confinement.tmp, "home"), { recursive: true })
       NodeFs.mkdirSync(NodePath.join(confinement.tmp, "cache"), { recursive: true })
       for (const write of confinement.writes) NodeFs.mkdirSync(write, { recursive: true })
