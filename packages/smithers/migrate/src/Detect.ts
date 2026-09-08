@@ -1390,7 +1390,9 @@ export const scan = (
       evals: configFile((file) => /(^|\/)\.smithers\/evals\//.test(file))
     }
 
-    // 3.4 Integration environment names.
+    // 3.4 Integration environment names. A hit assigns this file to a unit;
+    // it does not make dotenv contents safe for a model. Transform.capture
+    // replaces `.env*` source text with a redacted assignment-name inventory.
     for (
       const file of files.filter((candidate) => /(^|\/)(\.env[^/]*|wrangler\.[a-z]+|vercel\.json)$/.test(candidate))
     ) {

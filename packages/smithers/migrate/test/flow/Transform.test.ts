@@ -24,7 +24,7 @@ import type * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
-import { readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { copyFixture } from "../fixtures/helpers.ts"
 
@@ -132,6 +132,65 @@ describe("Transform.approvedPackages", () => {
 })
 
 describe("Transform.capture", () => {
+  for (const file of [".env", ".env.local", "config/.env.production", ".envrc"]) {
+    it.effect(`keeps dotenv credentials out of every capture path for ${file}`, () =>
+      Effect.gen(function*() {
+        const root = copyFixture("jsx-single")
+        mkdirSync(join(root, "config"), { recursive: true })
+        const original = [
+          "SMITHERS_HOME=PRIVATE_HOME_VALUE",
+          "OTHER_SERVICE_TOKEN=FAKE_SECRET_FOR_REVIEW_ONLY",
+          "# PRIVATE_COMMENT",
+          "export SMITHERS_TOKEN_2 = 'PRIVATE_SMITHERS_TOKEN' # PRIVATE_INLINE_COMMENT",
+          "MULTILINE=\"PRIVATE_MULTILINE_START",
+          "PRIVATE_MULTILINE_END\"",
+          "SMITHERS_HOME=PRIVATE_DUPLICATE_VALUE",
+          ""
+        ].join("\n")
+        writeFileSync(join(root, file), original, { mode: 0o600 })
+        const scanned = yield* Scan.scan(root, { flowsDir: "flows" })
+        const outlined = MigrateFlow.outlines(scanned, { root, mode: "apply" })
+          .find((entry) => entry.kind === "integration" && entry.sources.includes(file))!
+        expect(outlined.sources).toContain(file)
+        const checkpoint = yield* Checkpoint.take({
+          root,
+          unit: outlined.id,
+          files: outlined.sources,
+          backupDir: join(root, ".smithers-migrate", "backup"),
+          allowNoVcs: true,
+          treeExclude: [".smithers-migrate"]
+        })
+        const assertRedacted = (brief: Contract.UnitBrief, expected: string) => {
+          expect(brief.sources.find((source) => source.path === file)?.text).toBe(expected)
+          // The capture action journals this return value, and the transform
+          // action renders that same brief into its model prompt.
+          for (const output of [JSON.stringify(brief), Contract.unitPrompt(brief)]) {
+            expect(output).not.toContain("FAKE_SECRET_FOR_REVIEW_ONLY")
+            expect(output).not.toContain("OTHER_SERVICE_TOKEN")
+            expect(output).not.toContain("PRIVATE_")
+          }
+          expect(Contract.unitPrompt(brief)).toContain("Do not read or rewrite dotenv files")
+          expect(Contract.unitPrompt(brief)).toContain("report any required environment migration as unresolved")
+        }
+        const expected = "SMITHERS_HOME=[REDACTED]\nSMITHERS_TOKEN_2=[REDACTED]"
+        assertRedacted(yield* Transform.capture(outlined, checkpoint), expected)
+        writeFileSync(join(root, file), "SMITHERS_REPAIR=PRIVATE_REPAIR_VALUE\nTOKEN=PRIVATE_REPAIR_TOKEN\n")
+        assertRedacted(yield* Transform.capture(outlined, checkpoint, true), "SMITHERS_REPAIR=[REDACTED]")
+        // Initial captures still use the checkpoint after the disk changes.
+        assertRedacted(yield* Transform.capture(outlined, checkpoint), expected)
+        // Missing repair sources fall back to the checkpoint.
+        unlinkSync(join(root, file))
+        assertRedacted(yield* Transform.capture(outlined, checkpoint, true), expected)
+        yield* Checkpoint.restore(root, checkpoint, [file])
+        expect(readFileSync(join(root, file), "utf8")).toBe(original)
+        // Sources absent from the checkpoint fall back to disk, even on the
+        // first round. No branch may return the raw dotenv bytes.
+        assertRedacted(yield* Transform.capture(outlined, { ...checkpoint, entries: [] }), expected)
+        writeFileSync(join(root, file), "TOKEN=PRIVATE_ONLY_UNRELATED\n")
+        assertRedacted(yield* Transform.capture(outlined, checkpoint, true), "")
+      }).pipe(Effect.provide(NodeServices.layer)))
+  }
+
   it.effect("shows the first round the checkpoint's copy and a repair round the disk", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")

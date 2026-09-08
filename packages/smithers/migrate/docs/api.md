@@ -1162,7 +1162,15 @@ What each of those exports puts in front of the model:
 | `unitPrompt`    | `(unit, failures?) => string` | The task, with sources numbered and every later section referring to them by line.                                                                                                                                                                                                             |
 | `failureReport` | `(failures) => string`        | The failing half of a verification round, with bounded output tails.                                                                                                                                                                                                                           |
 
-Every snippet in a prompt is captured source or a scanner-derived rewrite. The prompt never carries an invented identifier and never names a model.
+Every snippet in a prompt is captured source, a scanner-derived rewrite, or a redacted dotenv inventory. The prompt never carries an invented identifier and never names a model.
+
+Dotenv (`.env*`) `SourceFile.text` contains sorted, unique `SMITHERS_*`
+assignment names with `[REDACTED]` values. Other keys, all values, and comments
+are omitted before the brief becomes the capture action's output. Initial,
+repair, and fallback captures use the same view. Its numbered lines refer to
+the inventory. The agent leaves dotenv files unchanged and reports required
+environment migrations as unresolved; the host checkpoint retains original
+bytes for checks and restoration.
 
 ## Gate
 

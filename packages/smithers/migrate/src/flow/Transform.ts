@@ -317,8 +317,23 @@ const operatorDecisionLines = (
 }
 
 /**
+ * Dotenv files are integration inventories, not model-visible file contents.
+ * Match the scanner's entire `.env*` family, including nested files. Only
+ * assignment names survive; values, comments and unrelated keys stay local.
+ */
+const sourceView = (file: string, text: string): string => {
+  if (!/(^|\/)\.env[^/]*$/.test(file)) return text
+  const names = new Set<string>()
+  for (const match of text.matchAll(/^[ \t]*(?:export[ \t]+)?(SMITHERS_[A-Z0-9_]+)[ \t]*=/gm)) {
+    names.add(match[1]!)
+  }
+  return [...names].sort().map((name) => `${name}=[REDACTED]`).join("\n")
+}
+
+/**
  * Reads the unit's sources as they are right now and returns the brief the
- * agent is given.
+ * agent is given. Dotenv sources contain only sorted Smithers assignment
+ * names with redacted values; original bytes remain in the host checkpoint.
  *
  * @category execution
  * @since 1.0.0-rc.0
@@ -334,9 +349,10 @@ export const capture = (
     // Two answers, and which one is right depends on who is asking.
     //
     // The first round is shown the checkpoint's copy. That is what makes the
-    // captured-source rule exact: the text in the prompt, the text the
-    // deterministic checks compare against, and the text a restore puts back
-    // are one set of bytes, and a replay of that round decodes the same prompt.
+    // captured-source rule exact for ordinary sources: the prompt, checks and
+    // restore use one set of bytes. Dotenv is the exception: only its redacted
+    // inventory enters the brief, while checks and restore keep the originals.
+    // A replay of that round decodes the same sanitized prompt.
     //
     // A repair round is shown the disk. The round before it edited these files,
     // and a prompt that showed the original would ask for the same rewrite
@@ -364,7 +380,10 @@ export const capture = (
       const text = yield* fromDisk(file)
       if (text !== undefined) sources.push({ path: file, text })
     }
-    return { ...outlined, sources }
+    return {
+      ...outlined,
+      sources: sources.map(({ path, text }) => ({ path, text: sourceView(path, text) }))
+    }
   }).pipe(Effect.mapError(io(`could not capture the sources of unit "${outlined.id}"`)))
 
 /**
