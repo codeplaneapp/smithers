@@ -168,13 +168,30 @@ capability is dropped rather than smuggled through.
 Add the capability to the outer flow with `Flow.withCapabilities`, or remove it
 from the inner one.
 
-### duplicate_node_id and missing_key_material
+### duplicate_node_id
 
-Both mean a graph was assembled in a way `Graph.build` does not produce:
-`duplicate_node_id` when two nodes claim one structural id, and
-`missing_key_material` when a node reached `Graph.keyMaterial` without any.
-Neither arises from ordinary declarations. If you see one from a graph
-`Graph.build` produced, it is a defect in this package worth reporting.
+Two nodes claim the same structural id. Ordinary `Node.all` member names can
+collide with structural separators:
+
+```ts
+import { Graph, Node } from "@smthrs/core"
+
+const graph = Graph.build(Node.all({
+  a: Node.all({ b: Node.succeed(1) }),
+  "a.all.b": Node.succeed(2)
+}))
+```
+
+Both leaves have id `root.all.a.all.b`. `Graph.diagnostics(graph)` records
+`duplicate_node_id`, and `Graph.keyMaterial(graph)` refuses the graph.
+Rename the colliding member, for example from `"a.all.b"` to `"other"`.
+Dotted member names are allowed when their structural ids are unambiguous.
+
+### missing_key_material
+
+A node reached `Graph.keyMaterial` without key material. This does not arise
+from ordinary declarations. If you see it from a graph `Graph.build` produced,
+report a package defect.
 
 ## Behavior that is not an error
 
@@ -225,10 +242,16 @@ it.
 
 ### TestRuntime reports missing_operation or missing_flow
 
-The deferred callbacks and flow references live in weak maps beside the AST,
-not in it. A declaration that crossed a serialization boundary can still be
-planned, but its callbacks are gone, so it cannot be evaluated. Evaluate the
-declaration in the process that built it.
+Node ASTs and their side tables are process-local. Deferred callbacks and flow
+references live in weak maps beside the AST; losing them can produce these
+evaluation errors. `Graph.build` also needs live Effect `Context` annotations
+and in-memory continuation associations. A JSON round trip loses the `Context`
+identity, so even a constant declaration fails planning with `invalid_node`.
+
+There is no Node AST serialization contract. Evaluate the declaration in the
+process that built it, or rebuild it in the receiving process before planning
+or evaluating. For later inspection, persist the built graph or the
+projections you need from its getters.
 
 ## Where to go next
 

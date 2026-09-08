@@ -96,9 +96,16 @@ message, and the original thrown value in `cause` where one exists.
 | `invalid_schema`       | A `catch` AST carries something that is not a schema.                                |
 | `depth_exceeded`       | The declaration nests more than 1,024 levels.                                        |
 
-`missing_operation` and `missing_flow` are worth recognizing. The callbacks and
-flow references live in weak maps beside the AST, not in it, so a declaration
-that crossed a serialization boundary can be planned but not evaluated.
+Node ASTs and their side tables are process-local. Deferred callbacks and flow
+references live in weak maps beside the AST; losing them can produce
+`missing_operation` or `missing_flow` during evaluation. Planning also requires
+live Effect `Context` annotations and in-memory continuation associations.
+A JSON round trip loses the `Context` identity, so even a constant declaration
+fails `Graph.build` with `invalid_node`.
+
+There is no Node AST serialization contract. For later inspection, persist
+the built graph or the projections you need from its getters. To plan or
+evaluate in another process, rebuild the declaration there.
 
 ## Where this helper stops
 
