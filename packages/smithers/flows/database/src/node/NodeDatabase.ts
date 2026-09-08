@@ -10,8 +10,9 @@
  */
 import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient"
 
-import { Duration, Effect, Layer, Schedule, Schema, Scope } from "effect"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import { Cause, Context, Duration, Effect, Exit, Layer, Schedule, Schema, Scope } from "effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+import type * as SqlConnection from "effect/unstable/sql/SqlConnection"
 import { statSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 
@@ -333,6 +334,53 @@ const retryLockedOpen = <A>(self: Layer.Layer<A>): Layer.Layer<A> =>
     }))
   )
 
+// Effect rc.112 releases its transaction reservation when COMMIT fails,
+// without rolling back. Supply the same SQLite transaction commands with a
+// commit finalizer that recovers BEFORE releasing that reservation. Only this
+// driver layer owns the database lifetime, so it can discard the connection if
+// rollback itself fails. Keep upstream's nesting, serialization and tracing.
+const recoverFailedCommit = (
+  self: Layer.Layer<SqlClient.SqlClient | SqliteClient.SqliteClient>
+): Layer.Layer<SqlClient.SqlClient | SqliteClient.SqliteClient> =>
+  Layer.fromBuild((memoMap, scope) => {
+    const driverScope = Scope.forkUnsafe(scope)
+    return Effect.map(Layer.buildWithMemoMap(self, memoMap, driverScope), (context) => {
+      const sql = Context.get(context, SqliteClient.SqliteClient)
+      const rollback = (conn: SqlConnection.Connection) =>
+        conn.executeUnprepared("ROLLBACK", [], undefined).pipe(
+          Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(driverScope, exit) : Effect.void)
+        )
+      const withTransaction = SqlClient.makeWithTransaction({
+        transactionService: sql.transactionService,
+        spanAttributes: [...Object.entries(sql.config.spanAttributes ?? {}), ["db.system.name", "sqlite"]],
+        acquireConnection: Effect.flatMap(Scope.make(), (reservation) =>
+          Scope.provide(sql.reserve, reservation).pipe(
+            Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(reservation, exit) : Effect.void),
+            Effect.map((conn) => [reservation, conn] as const)
+          )),
+        begin: (conn) => conn.executeUnprepared("BEGIN IMMEDIATE", [], undefined),
+        savepoint: (conn, id) => conn.executeUnprepared(`SAVEPOINT effect_sql_${id}`, [], undefined),
+        commit: (conn) =>
+          conn.executeUnprepared("COMMIT", [], undefined).pipe(
+            Effect.catchCause((commitCause) =>
+              Effect.flatMap(Effect.exit(rollback(conn)), (rolledBack) =>
+                // makeWithTransaction's orDie retains only the first typed
+                // error. Convert every reason here so failed cleanup survives.
+                Effect.failCause(Cause.fromReasons((Exit.isFailure(rolledBack)
+                  ? Cause.combine(commitCause, rolledBack.cause)
+                  : commitCause).reasons.map((reason) =>
+                    Cause.isFailReason(reason) ? Cause.makeDieReason(reason.error) : reason
+                  ))))
+            )
+          ),
+        rollback,
+        rollbackSavepoint: (conn, id) => conn.executeUnprepared(`ROLLBACK TO SAVEPOINT effect_sql_${id}`, [], undefined)
+      })
+      Object.assign(sql, { withTransaction })
+      return context
+    })
+  })
+
 /**
  * Provides the node:sqlite SQL client. WAL is enabled by the underlying
  * client by default.
@@ -343,8 +391,8 @@ const retryLockedOpen = <A>(self: Layer.Layer<A>): Layer.Layer<A> =>
 export const layer = (options: NodeDatabaseOptions): Layer.Layer<SqlClient.SqlClient> =>
   Layer.unwrap(Effect.as(
     guardOpen(options.filename),
-    retryLockedOpen(SqliteClient.layer({
+    recoverFailedCommit(retryLockedOpen(SqliteClient.layer({
       ...options.sqlite,
       filename: options.filename
-    }))
+    })))
   ))

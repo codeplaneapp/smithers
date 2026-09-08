@@ -55,11 +55,16 @@ export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@smthrs/
 /**
  * Runtime shape of the durable writer.
  *
+ * `write` replaces typed SqlError failures with DatabaseError, removing
+ * SqlError from the error channel while preserving other application errors.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface Service {
-  readonly write: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | DatabaseError, R>
+  readonly write: <A, E, R>(
+    effect: Effect.Effect<A, E, R>
+  ) => Effect.Effect<A, Exclude<E, SqlError.SqlError> | DatabaseError, R>
 }
 
 /**
@@ -125,12 +130,12 @@ export const fromSqlError = (error: SqlError.SqlError): DatabaseError =>
   new DatabaseError({ code: WriteRetry.classifySqlError(error), cause: error })
 
 const normalizeSqlErrors = <E>(
-  cause: Cause.Cause<E | SqlError.SqlError>
-): Cause.Cause<E | DatabaseError> =>
+  cause: Cause.Cause<E>
+): Cause.Cause<Exclude<E, SqlError.SqlError> | DatabaseError> =>
   Cause.map(
     cause,
     (error) => SqlError.isSqlError(error) ? fromSqlError(error) : error
-  ) as Cause.Cause<E | DatabaseError>
+  ) as Cause.Cause<Exclude<E, SqlError.SqlError> | DatabaseError>
 
 // Only a driver's own data property counts: an inherited field or accessor is
 // not a result the statement returned. Safe bigint counts are exact and occur
@@ -194,6 +199,9 @@ export const affectedRows = (raw: unknown): Effect.Effect<number, DatabaseError>
 /**
  * Builds the durable writer around an existing SQL client.
  *
+ * Typed SqlError failures are replaced by DatabaseError in the error channel.
+ * SQL failures from COMMIT receive the same normalization.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -201,7 +209,7 @@ export const make = (sql: SqlClient.SqlClient, options?: WriteRetryOptions | und
   DurableWriter.of({
     write: Effect.fn("DurableWriter.write")(<A, E, R>(
       effect: Effect.Effect<A, E, R>
-    ): Effect.Effect<A, E | DatabaseError, R> =>
+    ): Effect.Effect<A, Exclude<E, SqlError.SqlError> | DatabaseError, R> =>
       Effect.gen(function*() {
         const enclosing = yield* Effect.serviceOption(sql.transactionService)
         const parent = yield* CommitScope.Current
@@ -213,14 +221,35 @@ export const make = (sql: SqlClient.SqlClient, options?: WriteRetryOptions | und
         const attempt = Effect.suspend(() => {
           const effects: Array<Effect.Effect<void>> = []
           let scope: CommitScope.CommitScope | undefined
+          let bodySucceeded = false
           return sql.withTransaction(
             Effect.flatMap(Effect.serviceOption(sql.transactionService), (transaction) => {
               scope = managed && Option.isSome(transaction)
                 ? { key: sql.transactionService, transaction: transaction.value, effects, open: true }
                 : undefined
-              return Effect.provideService(effect, CommitScope.Current, scope)
+              return Effect.provideService(effect, CommitScope.Current, scope).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    bodySucceeded = true
+                  })
+                )
+              )
             })
           ).pipe(
+            // Effect SQL puts COMMIT errors on the defect channel. Only a
+            // successful outer body can reach COMMIT; intentional body defects
+            // and nested savepoint failures keep their original channels.
+            Effect.catchCause((cause) =>
+              Effect.failCause(
+                !nested && bodySucceeded
+                  ? Cause.fromReasons(cause.reasons.map((reason) =>
+                    Cause.isDieReason(reason) && SqlError.isSqlError(reason.defect)
+                      ? Cause.makeFailReason(reason.defect)
+                      : reason
+                  ))
+                  : cause
+              )
+            ),
             Effect.ensuring(Effect.sync(() => {
               if (scope !== undefined) scope.open = false
             })),

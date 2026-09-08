@@ -36,7 +36,7 @@ The service tag. `yield* DurableWriter.DurableWriter` resolves the writer.
 
 ```ts
 interface Service {
-  readonly write: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | DatabaseError, R>
+  readonly write: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, Exclude<E, SqlError.SqlError> | DatabaseError, R>
 }
 ```
 
