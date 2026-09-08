@@ -684,3 +684,10 @@ than driving them directly.
 | `PackageError`                                                                                                             | The typed discovery and index refusals.                                 |
 | `MarkdownCodeBlocks`                                                                                                       | The `Markdown.CodeBlocks` rule implementation.                          |
 | `DockerExec`, `FetchExec`, `FoundryExec`, `GitSubmoduleExec`, `GoExec`, `NixExec`, `OverlayExec`, `StampExec`, `AnvilExec` | One rule family's execution each.                                       |
+
+`OverlayExec.apply` confines replacement sources and destinations to the canonical
+scratch root. It refuses destination directory symlinks, dangling destination
+links, and file links that resolve outside scratch, including absolute links back
+to the original workspace. An internal destination file link is replaced with a
+regular file without changing its target. Replacement files are staged beside the
+destination and renamed into place.

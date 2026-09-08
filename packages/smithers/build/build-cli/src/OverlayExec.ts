@@ -8,7 +8,9 @@
  * @since 0.1.0
  */
 import * as Input from "@smthrs/targets/Input"
+import * as SafeFs from "@smthrs/targets/SafeFs"
 import * as Target from "@smthrs/targets/Target"
+import { constants } from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 
@@ -137,15 +139,60 @@ export const resolve = async (options: {
 }
 
 /** Applies replacements to a scratch workspace without touching the source tree.
+ * Paths must stay inside scratch. Destination directory links are refused;
+ * an internal final file link is replaced, leaving its target untouched.
  *
  * @category execution
  * @since 0.1.0
  */
 export const apply = async (root: string, replacements: ReadonlyArray<Replacement>): Promise<void> => {
+  const canonical = await SafeFs.canonicalRoot(root)
   for (const replacement of replacements) {
-    const source = NodePath.join(root, ...replacement.source.split("/"))
-    const destination = NodePath.join(root, ...replacement.path.split("/"))
-    await Fs.mkdir(NodePath.dirname(destination), { recursive: true })
-    await Fs.copyFile(source, destination)
+    const source = NodePath.join(canonical, ...replacement.source.split("/"))
+    const destination = NodePath.join(canonical, ...replacement.path.split("/"))
+    for (const [what, path] of [["source", source], ["destination", destination]] as const) {
+      if (!SafeFs.inside(canonical, path)) {
+        throw new Error(`Overlay ${what} is outside the scratch workspace: ${path}`)
+      }
+    }
+    const admitted = await SafeFs.resolveFile(source, { root: canonical, what: "Overlay source" })
+    if (admitted === undefined) throw new Error(`Overlay source is missing: ${source}`)
+
+    // Admit every existing parent before recursive mkdir: a missing descendant
+    // must not hide a portal above it, including a dangling directory link.
+    const parent = NodePath.dirname(destination)
+    let ancestor = canonical
+    for (const part of NodePath.relative(canonical, parent).split(NodePath.sep).filter(Boolean)) {
+      ancestor = NodePath.join(ancestor, part)
+      if (await SafeFs.resolveDirectory(ancestor, { root: canonical, what: "Overlay destination directory" })) continue
+      const entry = await Fs.lstat(ancestor).catch((cause: unknown) => {
+        if (SafeFs.errorCode(cause) === "ENOENT") return undefined
+        throw cause
+      })
+      if (entry !== undefined) {
+        throw new Error(`Overlay destination directory is not a real directory in scratch: ${ancestor}`)
+      }
+      break
+    }
+    const existing = await SafeFs.resolveFile(destination, { root: canonical, what: "Overlay destination" })
+    if (existing === undefined) {
+      const entry = await Fs.lstat(destination).catch((cause: unknown) => {
+        if (SafeFs.errorCode(cause) === "ENOENT") return undefined
+        throw cause
+      })
+      if (entry?.isSymbolicLink()) throw new Error(`Overlay destination is a dangling symbolic link: ${destination}`)
+    }
+
+    await Fs.mkdir(parent, { recursive: true })
+    // Copy to a fresh entry and rename over the destination. copyFile directly
+    // to an admitted internal link would still overwrite its target's bytes.
+    const staging = await Fs.mkdtemp(NodePath.join(parent, ".smthrs-overlay-"))
+    try {
+      const staged = NodePath.join(staging, "replacement")
+      await Fs.copyFile(admitted.path, staged, constants.COPYFILE_EXCL)
+      await Fs.rename(staged, destination)
+    } finally {
+      await Fs.rm(staging, { recursive: true, force: true })
+    }
   }
 }
