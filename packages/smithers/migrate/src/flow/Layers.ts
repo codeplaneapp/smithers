@@ -49,6 +49,7 @@ import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
 import type * as Brand from "effect/Brand"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import type * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
@@ -185,12 +186,11 @@ export const seatResolver = (options: {
   })
 
 /**
- * Every command line a unit is allowed to spawn: this project's own install,
+ * Every command line the host runs to verify a unit: this project's own install,
  * format, typecheck, and test commands, in the order a verification runs them.
  *
- * The list is exactly what {@link module:Verify.run} executes, so the agent's
- * shell and the tool's own verification are permitted the same commands and
- * nothing else.
+ * The list is exactly what {@link module:Verify.run} executes. {@link rules}
+ * grants the agent only lines the capability grammar can represent literally.
  *
  * @category combinators
  * @since 1.0.0-rc.0
@@ -240,16 +240,13 @@ export const migrationRoot = (root: string): Effect.Effect<MigrationRoot, Migrat
  * commands that verify it, the model calls that rewrite it, and a denial of
  * every filesystem action on every 0.x run-state path.
  *
- * `proc:spawn` is granted per command line rather than as a wildcard. The
- * kernel checks the capability against the line
- * `@smthrs/kernel/CommandLine.render` produces, and this package spawns every
- * command through the platform shell, so a grant is the verification command
- * spelled exactly as the project spells it. The store is unattended, so a line
- * that matches no grant is refused rather than queued: an agent cannot reach
- * `sqlite3`, `rm`, or a package manager the project does not already run. A
- * verification command that itself contains a `*` grants the glob it spells,
- * which is the widest this can be, and it is still one project command rather
- * than every command.
+ * `proc:spawn` is granted only when the command line can be represented as an
+ * exact capability pattern. The kernel checks the line produced by
+ * `@smthrs/kernel/CommandLine.render`. Its glob grammar has no escape for `*`
+ * or `?`, so lines containing either receive no agent process grant. The
+ * deterministic verification still runs the configured commands; a package
+ * script without those characters lets the agent run them too. The store is
+ * unattended, so a line that matches no grant is refused rather than queued.
  *
  * That matters more than a filesystem rule does. A spawned process writes at
  * the OS level, where the kernel's `fs:write` denials cannot see it, so
@@ -285,7 +282,12 @@ export const rules = (options: {
     // project units exist to rewrite.
     allow("fs:*", root),
     allow("fs:*", `${root}/**`),
-    ...verificationCommands(options.commands).map((command) => allow("proc:spawn", command)),
+    ...verificationCommands(options.commands).flatMap((command) =>
+      Capability.patternFromCapability(Capability.make("proc:spawn", command)).pipe(
+        Option.map((pattern) => new Permission.Rule({ effect: "allow", pattern })),
+        Option.toArray
+      )
+    ),
     allow("net:*", "**"),
     allow("model:*", "**"),
     // The permanent SQLite lock inode and diagnostic state are host-owned,
@@ -640,34 +642,3 @@ export const layerScripted = (config: NodeConfig & { readonly script: Script }) 
  * @since 1.0.0-rc.0
  */
 export type Runtime = FlowRuntime.FlowRuntime
-
-/**
- * Refuses a composition root that still owes a service.
- *
- * An unannotated root infers its requirement channel instead of proving it
- * empty, so a service the composition forgot is not a type error: it is a
- * `Service not found` the first time something builds the layer, which is a
- * test on a good day and a user's run on a bad one. Making `QuotaPolicy` and
- * `Budget` required services reached this file exactly that way, breaking
- * `migrate --apply` at runtime while `tsc` stayed green. The two lines below
- * are the pin: a root that forgets a service fails the build instead.
- *
- * @private
- */
-type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
-  : false
-
-/** Fails to compile unless its argument is `true`. */
-type Expect<T extends true> = T
-
-/**
- * Each composition root above owes nothing at the layer level.
- *
- * @category models
- * @since 1.0.0-rc.0
- */
-export type CompositionRootsAreComplete = [
-  Expect<Complete<ReturnType<typeof layerNode>>>,
-  Expect<Complete<ReturnType<typeof layerNodeScanned>>>,
-  Expect<Complete<ReturnType<typeof layerScripted>>>
-]

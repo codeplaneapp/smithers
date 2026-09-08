@@ -1500,6 +1500,13 @@ scripted composition to test a migration against.
 | `scriptedModel`, `done`                                             | `(script: Script) => Model.Model`, `(output: unknown) => string` | The test model and the cell that answers with a value.                                                   |
 | `NodeConfig`, `ScannedConfig`, `Script`, `Runtime`, `MigrationRoot` | `interface` or `type`                                            | The composition's inputs and its runtime type.                                                           |
 
+`rules` grants process commands only when the capability pattern grammar can
+represent the complete line literally. Lines containing `*` or `?` receive no
+agent process grant; deterministic verification still runs them as configured.
+Use a package script such as `npm run test` to make those commands available to
+the agent. Composition completeness assertions are compile-time tests and are
+not exported by this subpath.
+
 ### Command
 
 `@smthrs/migrate/flow/Command`. The entry point the CLI verb, the bin, and a

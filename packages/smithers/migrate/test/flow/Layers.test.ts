@@ -9,12 +9,14 @@
  *
  * @since 0.1.0
  */
-import { describe, expect, it } from "@effect/vitest"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import { Capability, GrantStore, Workspace } from "@smthrs/kernel"
 import * as Command from "@smthrs/migrate/flow/Command"
 import type * as Contract from "@smthrs/migrate/flow/Contract"
 import * as Layers from "@smthrs/migrate/flow/Layers"
 import * as Transform from "@smthrs/migrate/flow/Transform"
+import * as Verify from "@smthrs/migrate/flow/Verify"
 import * as Scan from "@smthrs/migrate/Scan"
 import * as Units from "@smthrs/migrate/Units"
 import * as Effect from "effect/Effect"
@@ -53,6 +55,20 @@ const permitted = (action: Capability.Action, resource: string): Effect.Effect<b
       Effect.catch(() => Effect.succeed(false))
     )
   }).pipe(Effect.provide(store))
+
+describe("Layers composition contracts", () => {
+  it("keeps composition checks out of the public API", () => {
+    // @ts-expect-error the compilation assertion is an implementation detail
+    type InternalAssertion = Layers.CompositionRootsAreComplete
+    expectTypeOf<InternalAssertion>().toEqualTypeOf<InternalAssertion>()
+  })
+
+  it("provides every service required by each composition root", () => {
+    expectTypeOf<Layer.Services<ReturnType<typeof Layers.layerNode>>>().toEqualTypeOf<never>()
+    expectTypeOf<Layer.Services<ReturnType<typeof Layers.layerNodeScanned>>>().toEqualTypeOf<never>()
+    expectTypeOf<Layer.Services<ReturnType<typeof Layers.layerScripted>>>().toEqualTypeOf<never>()
+  })
+})
 
 describe("Layers.verificationCommands", () => {
   it("is every command a verification runs, once each", () => {
@@ -214,6 +230,63 @@ describe("Layers.rules over a real grant store", () => {
         expect([command, yield* permitted("proc:spawn", command)]).toEqual([command, true])
       }
     }))
+
+  for (const approved of ["npm test -- tests/*", "npm test -- tests/?", "npm test -- *"]) {
+    it.effect(`does not turn ${approved} into a wildcard shell grant`, () =>
+      Effect.gen(function*() {
+        const grants = yield* GrantStore.GrantStore
+        // These are permission probes only. No process is spawned.
+        for (
+          const unexpected of [
+            "npm test -- tests/x; rm -rf ~",
+            `${approved}; printf PROBE_ONLY`,
+            `${approved} && printf PROBE_ONLY`,
+            `${approved} | cat`,
+            `${approved}\nprintf PROBE_ONLY`,
+            `${approved}$(printf PROBE_ONLY)`,
+            `${approved}\`printf PROBE_ONLY\``,
+            "npm test -- tests/x",
+            "npm test --"
+          ]
+        ) {
+          const allowed = yield* grants.check(Capability.make("proc:spawn", unexpected)).pipe(
+            Effect.as(true),
+            Effect.catch(() => Effect.succeed(false))
+          )
+          expect([unexpected, allowed]).toEqual([unexpected, false])
+        }
+        // The glob grammar cannot express these exact resources. The
+        // host-owned verification flow still runs the configured command.
+        const refused = yield* Effect.flip(grants.check(Capability.make("proc:spawn", approved)))
+        expect(refused.code).toBe("permission_required")
+        yield* grants.check(Capability.make("proc:spawn", "npm run test"))
+      }).pipe(Effect.provide(
+        GrantStore.layer({
+          attended: false,
+          rules: Layers.rules({
+            root,
+            runStatePaths,
+            commands: { typecheck: ["npm run test"], test: approved, flowsDir: "flows" }
+          })
+        }).pipe(Layer.provide(Workspace.layer(root)), Layer.orDie)
+      )))
+  }
+
+  it.effect("keeps exact glob commands available to deterministic verification", () =>
+    Effect.gen(function*() {
+      const project = copyFixture("jsx-single")
+      mkdirSync(join(project, "grant-tests"))
+      writeFileSync(join(project, "grant-tests", "x"), "")
+      const approved = "printf '%s' grant-tests/*"
+      const result = yield* Verify.run({
+        root: project,
+        commands: { typecheck: [], test: approved, flowsDir: "flows" },
+        expectFlows: false
+      })
+      expect(result.tests?.command).toBe(approved)
+      expect(result.tests?.exitCode).toBe(0)
+      expect(result.tests?.stdoutTail).toBe("grant-tests/x")
+    }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("refuses every other command, including the ones that would reach run state anyway", () =>
     Effect.gen(function*() {
