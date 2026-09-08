@@ -522,6 +522,7 @@ function App() {
                     onRetryRun={(id) => controller.runCommandArgs("flow.run.retry", id)}
                     onChooseWorkflowRepo={(name) => controller.runCommandArgs("flow.repo.choose", name)}
                     debugVerbose={session.verbose === true}
+                    signedOut={identity?.state === "signed-out"}
                     worldDocuments={worldDocuments}
                     onChangeWorldDocument={(id, body) => controller.changeWorldDocument(id, body)}
                     onRunCommand={(name, commandArgs) =>

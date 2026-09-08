@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { Card } from "@smthrs/rpc/Cards"
-import { HistoryCardBody, notesStateLabel } from "./HistoryCard"
+import { HistoryCardBody, notesStateLabel, READ_ONLY_NOTE } from "./HistoryCard"
 
 /*
  * The history card renders exactly what its payload states: the empty state
@@ -22,8 +22,32 @@ const card = (payload: HistoryCard["payload"]): HistoryCard => ({
   payload
 })
 
-const render = (payload: HistoryCard["payload"], onRunCommand: (name: string, args?: string) => void = () => {}): string =>
-  renderToStaticMarkup(<HistoryCardBody card={card(payload)} onRunCommand={onRunCommand} />)
+const render = (
+  payload: HistoryCard["payload"],
+  onRunCommand: (name: string, args?: string) => void = () => {},
+  options: { readonly signedOut?: boolean } = {}
+): string => renderToStaticMarkup(<HistoryCardBody card={card(payload)} onRunCommand={onRunCommand} signedOut={options.signedOut} />)
+
+const PRESENT: HistoryCard["payload"] = {
+  repo: "will/flows",
+  defaultBookmark: "main",
+  mainCommits: null,
+  mythical: {
+    state: "present",
+    head: "e200000000000000000000000000000000000002",
+    mainHead: "3333333333333333333333333333333333333333",
+    treeEqual: "unsupported",
+    commitCount: 3,
+    notes: "absent",
+    epics: [{
+      sha: "e200000000000000000000000000000000000002",
+      title: "02 · Targets",
+      merge: true,
+      note: null,
+      commits: [{ sha: "b200000000000000000000000000000000000002", title: "feat(targets): declare targets", note: null }]
+    }]
+  }
+}
 
 describe("HistoryCard", () => {
   test("the empty state without a count is the short sentence and the bootstrap door carrying the repository", () => {
@@ -32,6 +56,42 @@ describe("HistoryCard", () => {
     expect(html).not.toContain("commit")
     expect(html).toContain('data-flow="history.bootstrap"')
     expect(html).not.toContain("history.fold")
+  })
+
+  /*
+   * Spec 03 §6 as amended 2026-09-07: the History view is readable signed out
+   * from the mirror's public refs. Its empty state is exactly the one
+   * sentence plus the bootstrap door, which signed out is the sign-in door;
+   * a present history renders its epics read-only with no write door.
+   */
+  test("signed out, the empty state is the exact sentence and the bootstrap door reads as the sign-in door", () => {
+    const html = render({ repo: "will/flows", defaultBookmark: "main", mainCommits: null, mythical: { state: "absent" } }, () => {}, { signedOut: true })
+    expect(html).toContain('data-testid="history-empty">No mythical history yet.</p>')
+    expect(html).toContain('data-flow="history.bootstrap"')
+    expect(html).toContain("Sign in to bootstrap the mythical history")
+    expect(html).not.toContain("history.fold")
+  })
+
+  test("signed out, a present history renders its epics read-only: no fold door, no bootstrap door, and the reason in words", () => {
+    const html = render(PRESENT, () => {}, { signedOut: true })
+    expect(html).toContain('data-testid="history-epic-e200000000000000000000000000000000000002"')
+    expect(html).toContain('data-testid="history-commit-b200000000000000000000000000000000000002"')
+    expect(html).not.toContain('data-flow="history.fold"')
+    expect(html).not.toContain('data-flow="history.bootstrap"')
+    expect(html).not.toContain('data-flow="history.amend"')
+    expect(html).toContain(`data-testid="history-read-only">${READ_ONLY_NOTE}</span>`)
+    expect(html).toContain('data-testid="history-notes-state"')
+  })
+
+  test("signed in (and while identity is unknown) the write doors render unchanged", () => {
+    for (const options of [{ signedOut: false }, {}]) {
+      const html = render(PRESENT, () => {}, options)
+      expect(html).toContain('data-flow="history.fold"')
+      expect(html).toContain("Fold main into mythical")
+      expect(html).not.toContain("history-read-only")
+      const empty = render({ repo: "will/flows", defaultBookmark: "main", mainCommits: null, mythical: { state: "absent" } }, () => {}, options)
+      expect(empty).toContain(">Bootstrap the mythical history<")
+    }
   })
 
   test("the empty state renders the count clause only when a seam exposed a count", () => {

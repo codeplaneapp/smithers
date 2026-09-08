@@ -644,6 +644,16 @@ export const createAppController = (
   const environmentSeam = actors.pair(seamCtx, (context) => createEnvironmentSeam(context))
   const secretsSeam = actors.pair(seamCtx, (context) => createSecretsSeam(context))
   const historySeam = actors.pair(seamCtx, (context) => createHistorySeam(context))
+  /*
+   * The mythical history read walks the mirror's change feed page by page
+   * (up to MAX_CHANGE_PAGES sequential requests) before it can state a
+   * thing: on a large repository that is many seconds with nothing on
+   * screen (probe 2026-09-07 on smithersai/smithers: the walk took ~15 s and
+   * read as a silent no-op). The 300ms toast law names the wait; the card
+   * lands when the walk settles, and a refusal resolves the same toast.
+   */
+  const showMythicalHistory: HistorySeam["showHistory"] = (repo) =>
+    withToast("history.show", "Reading the mythical history…", "Mythical history read", () => historySeam.showHistory(repo))
   const factorySeam = actors.pair(seamCtx, (context) => createFactorySeam(context))
   const triggersSeam = actors.pair(seamCtx, (context) => createTriggersSeam(context))
   const repoImportSeam = actors.pair(seamCtx, (context) => createRepoImportSeam(context))
@@ -1290,7 +1300,7 @@ export const createAppController = (
     viewEnvironment: environmentSeam.viewEnvironment,
     setEnvironmentVar: environmentSeam.setEnvironmentVar,
     listSecrets: secretsSeam.listSecrets,
-    showHistory: historySeam.showHistory,
+    showHistory: showMythicalHistory,
     retellHistory: historySeam.retellHistory,
     showFactory: factorySeam.showFactory,
     registerTrigger,
@@ -1624,7 +1634,7 @@ export const createAppController = (
     viewEnvironment: environmentSeam.viewEnvironment,
     setEnvironmentVar: environmentSeam.setEnvironmentVar,
     listSecrets: secretsSeam.listSecrets,
-    showHistory: historySeam.showHistory,
+    showHistory: showMythicalHistory,
     retellHistory: historySeam.retellHistory,
     showFactory: factorySeam.showFactory,
     registerTrigger,

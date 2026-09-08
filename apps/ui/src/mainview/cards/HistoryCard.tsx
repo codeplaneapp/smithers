@@ -7,6 +7,12 @@
  * one door (history.bootstrap); the sentence carries "main has N commits."
  * only when a seam exposes the count. Every button is the button door of a
  * registered flow, dispatched through onRunCommand with its repo carried.
+ *
+ * The history is a public mirror read, so the card renders signed out too
+ * (spec 03 §6 as amended 2026-09-07): read-only, with no write door. The
+ * bootstrap door stays, because signed out it IS the sign-in door (the
+ * requirement axis parks history.bootstrap behind auth.sign-in), and its
+ * label says so; the fold door is a write and does not render signed out.
  */
 import type { HistoryNote } from "@smthrs/rpc/Cards"
 import { Button } from "@smthrs/ui"
@@ -27,7 +33,13 @@ export const notesStateLabel = (notes: NotesState): string => {
 
 export interface HistoryCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
+  /** The identity seam's definitive signed-out answer; undefined (unknown, unavailable) hides nothing. */
+  readonly signedOut?: boolean
 }
+
+/** The one sentence beside a read-only history: why no write door renders. */
+export const READ_ONLY_NOTE = "Read-only signed out: sign in to fold or amend."
+
 
 const NoteSections = ({ note, sha }: { readonly note: HistoryNote; readonly sha: string }) => {
   const sections: ReadonlyArray<readonly [string, string | null]> = [
@@ -50,7 +62,7 @@ const NoteSections = ({ note, sha }: { readonly note: HistoryNote; readonly sha:
   )
 }
 
-export const HistoryCardBody = ({ card, onRunCommand }: { readonly card: HistoryCard } & HistoryCardActions) => {
+export const HistoryCardBody = ({ card, onRunCommand, signedOut = false }: { readonly card: HistoryCard } & HistoryCardActions) => {
   const { payload } = card
   const { mythical, repo } = payload
   if (mythical.state === "absent") {
@@ -66,7 +78,7 @@ export const HistoryCardBody = ({ card, onRunCommand }: { readonly card: History
           data-testid="history-bootstrap"
           onClick={() => onRunCommand("history.bootstrap", repo)}
         >
-          Bootstrap the mythical history
+          {signedOut ? "Sign in to bootstrap the mythical history" : "Bootstrap the mythical history"}
         </Button>
       </div>
     )
@@ -111,15 +123,19 @@ export const HistoryCardBody = ({ card, onRunCommand }: { readonly card: History
         ))}
       </ol>
       <div className="history-doors">
-        <Button
-          variant="ghost"
-          size="sm"
-          data-flow="history.fold"
-          data-testid="history-fold"
-          onClick={() => onRunCommand("history.fold", repo)}
-        >
-          Fold {payload.defaultBookmark ?? "the default bookmark"} into mythical
-        </Button>
+        {signedOut ?
+          <span className="world-card-path" data-testid="history-read-only">{READ_ONLY_NOTE}</span> :
+          (
+            <Button
+              variant="ghost"
+              size="sm"
+              data-flow="history.fold"
+              data-testid="history-fold"
+              onClick={() => onRunCommand("history.fold", repo)}
+            >
+              Fold {payload.defaultBookmark ?? "the default bookmark"} into mythical
+            </Button>
+          )}
         <span className="world-card-path" data-testid="history-notes-state">{notesStateLabel(mythical.notes)}</span>
       </div>
     </div>
@@ -127,5 +143,8 @@ export const HistoryCardBody = ({ card, onRunCommand }: { readonly card: History
 }
 
 export const historyCardFamily: CardFamily<"history"> = {
-  history: { render: (card, actions) => <HistoryCardBody card={card} onRunCommand={actions.onRunCommand} />, pill: settledPill }
+  history: {
+    render: (card, actions) => <HistoryCardBody card={card} onRunCommand={actions.onRunCommand} signedOut={actions.signedOut === true} />,
+    pill: settledPill
+  }
 }

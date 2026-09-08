@@ -52,7 +52,8 @@ export function CardView({
   worldDocuments,
   onChangeWorldDocument,
   onRunCommand,
-  debugVerbose
+  debugVerbose,
+  signedOut
 }: CardViewProps) {
   /*
    * Maximize and minimize replace each other in the header, so the button
@@ -202,7 +203,8 @@ export function CardView({
             worldDocuments,
             onChangeWorldDocument,
             onRunCommand,
-            debugVerbose
+            debugVerbose,
+            signedOut
           })}
         </div>
       </section>

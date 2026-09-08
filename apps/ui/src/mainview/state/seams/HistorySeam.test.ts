@@ -78,21 +78,45 @@ const signedIn = async (store: AppStore): Promise<void> => {
   await settled()
 }
 
-const reposChosen = async (store: AppStore): Promise<void> => {
+/** The identity seam's definitive signed-out answer: the visitor smithers.sh/owner/name gets before sign-in. */
+const signedOut = async (store: AppStore): Promise<void> => {
   store.dispatch({
-    type: "repositories.loaded",
+    type: "identity.session.loaded",
     actor: "system",
-    repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null }]
+    state: "signed-out",
+    login: null,
+    allowlisted: false,
+    admin: false,
+    scopesPlain: null
   })
   await settled()
 }
 
-/** A controller watching exactly will/flows over the given mirror, signed out unless asked. */
-const ready = async (services: AppServices, options: { signedIn?: boolean } = {}) => {
+/** will/flows loaded as a signed-in inventory row, or as the public catalog row a signed-out visitor explores. */
+const reposChosen = async (store: AppStore, catalog: boolean): Promise<void> => {
+  store.dispatch({
+    type: "repositories.loaded",
+    actor: "system",
+    repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null, ...(catalog ? { catalog: true } : {}) }]
+  })
+  await settled()
+}
+
+/**
+ * A controller watching exactly will/flows over the given mirror. Signed out
+ * unless asked, exactly as the live visitor is: the identity seam answered
+ * signed-out and the repository is the public catalog row. `toastDebounceMs`
+ * shortens the 300ms toast law for the in-flight test.
+ */
+const ready = async (services: AppServices, options: { signedIn?: boolean; toastDebounceMs?: number } = {}) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-  const controller = createAppController(store, unavailableRepositories, unavailableAgent, services)
+  const controller = createAppController(store, unavailableRepositories, unavailableAgent, {
+    ...services,
+    ...(options.toastDebounceMs === undefined ? {} : { toastDebounceMs: options.toastDebounceMs })
+  })
   if (options.signedIn === true) await signedIn(store)
-  await reposChosen(store)
+  else await signedOut(store)
+  await reposChosen(store, options.signedIn !== true)
   return { store, controller }
 }
 
@@ -182,10 +206,59 @@ describe("history seam: the empty state", () => {
       expect(outcome.status).toBe("failed")
       if (outcome.status === "failed") expect(outcome.error).toBe("No mythical history yet.")
     }
-    // Signed out, the doors defer behind sign-in instead of running.
-    const anonymous = await ready(backend({}))
-    const deferred = await anonymous.controller.commands.run("history.bootstrap")
-    expect(deferred.status).not.toBe("executed")
+  })
+
+  /*
+   * Spec 03 §6 as amended 2026-09-07: signed out, the empty state is exactly
+   * the one sentence and the bootstrap door, and that door is the sign-in
+   * door: history.bootstrap parks behind the signed-in requirement and
+   * auth.sign-in runs in its place. The write doors never run signed out.
+   */
+  test("signed out, the bootstrap door parks behind sign-in and runs auth.sign-in in its place; amend and fold the same", async () => {
+    const seen: Array<string> = []
+    const { store, controller } = await ready(
+      backend({
+        [REPO]: json(200, { default_bookmark: "main" }),
+        [`${REPO}/git/refs`]: json(200, [ref("refs/heads/main", "aaa3000000000000000000000000000000000003")])
+      }, seen)
+    )
+    expect(store.collections.identitySessions.get("identity")?.state).toBe("signed-out")
+    for (const door of ["history.bootstrap", "history.amend", "history.fold"]) {
+      // The outcome is the fulfilling flow's (auth.sign-in), never the door's own refusal: the door has not run.
+      await controller.commands.run(door)
+      const parked = store.session().pendingCommand
+      expect([parked?.name, parked?.args, parked?.requirement]).toEqual([door, null, "signed-in"])
+    }
+    // The doors never touched the mirror: a parked write reads nothing.
+    expect(seen.filter((path) => path.startsWith(REPO))).toEqual([])
+    // The sign-in step ran in each door's place, traced as the fulfilling flow.
+    const invoked = [...store.collections.transitions.values()]
+      .filter((row) => row.type === "flow.invoked")
+      .map((row) => (JSON.parse(row.payload) as { readonly name?: unknown }).name)
+    expect(invoked.filter((name) => name === "auth.sign-in").length).toBe(3)
+    expect(store.collections.cards.get("history-will/flows")).toBeUndefined()
+  })
+
+  test("the read states its wait: a slow mirror puts \"Reading the mythical history…\" on the toast stack, and the card resolves it", async () => {
+    const titlesWhileReading: Array<string | null> = []
+    const { store, controller } = await ready(
+      backend({
+        [REPO]: json(200, { default_bookmark: "main" }),
+        [`${REPO}/git/refs`]: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 40))
+          titlesWhileReading.push(store.collections.toasts.get("toast-history.show")?.title ?? null)
+          return json(200, [ref("refs/heads/main", "aaa3000000000000000000000000000000000003")])
+        }
+      }),
+      { toastDebounceMs: 5 }
+    )
+    expect((await controller.commands.run("history.show")).status).toBe("executed")
+    await settled()
+    expect(titlesWhileReading).toEqual(["Reading the mythical history…"])
+    const toast = store.collections.toasts.get("toast-history.show")
+    expect(toast?.status).toBe("ok")
+    expect(toast?.title).toBe("Mythical history read")
+    expect(historyCard(store).payload.mythical).toEqual({ state: "absent" })
   })
 })
 
@@ -259,6 +332,8 @@ const mythicalMirror = (options: { tree?: (sha: string) => Response; notes?: boo
 describe("history seam: the mythical history", () => {
   test("first-parent rows are epics, each merge's second-parent chain is its atomic commits, and the badge is unsupported while git/commits answers 501", async () => {
     const { store, controller } = await ready(mythicalMirror())
+    // The visitor is signed out and the repository is the catalog row: the read is the public mirror's, and the card lands the same.
+    expect(store.collections.identitySessions.get("identity")?.state).toBe("signed-out")
     expect((await controller.commands.run("history.show")).status).toBe("executed")
     await settled()
     const { payload } = historyCard(store)
@@ -415,6 +490,17 @@ describe("history seam: the mythical history", () => {
     if (outcome.status === "failed") {
       expect(outcome.error).toBe("The mythical history of will/flows cannot be rewritten from here yet: the retell flow does not exist.")
     }
+  })
+
+  test("signed in, the read is unchanged: the same card from the same mirror routes", async () => {
+    const seen: Array<string> = []
+    const { store, controller } = await ready(mythicalMirror({}, seen), { signedIn: true })
+    expect((await controller.commands.run("history.show")).status).toBe("executed")
+    await settled()
+    const { mythical } = historyCard(store).payload
+    if (mythical.state !== "present") throw new Error("expected the mythical history")
+    expect(mythical.epics.map((epic) => epic.title)).toEqual(["02 · Targets are declared in PACKAGE.ts", "01 · The workspace declares its toolchain", "root"])
+    expect(seen.slice(0, 2).sort()).toEqual([REPO, `${REPO}/git/refs`])
   })
 
   test("a mirror that lists no refs is an honest error, not an empty card", async () => {
