@@ -6,7 +6,7 @@ sidebar:
 ---
 
 `Alerts.layerWebhook` POSTs each alert to one endpoint. It is the shipped
-implementation of `Alerts.Sink`, and it needs an `HttpClient.HttpClient`.
+implementation of `Alerts.Sink`. It constructs its own Fetch HTTP client.
 
 ## Point it at an endpoint
 
@@ -14,14 +14,13 @@ implementation of `Alerts.Sink`, and it needs an `HttpClient.HttpClient`.
 import { Alerts, NotificationQueue } from "@smthrs/notifications"
 import * as Duration from "effect/Duration"
 import * as Layer from "effect/Layer"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 const sink = (token: string) =>
   Alerts.layerWebhook({
     url: "https://pager.example/alerts",
     headers: { authorization: `Bearer ${token}` },
     timeout: Duration.seconds(5)
-  }).pipe(Layer.provide(FetchHttpClient.layer))
+  })
 
 export const alerting = (policy: Alerts.Policy, token: string) =>
   Alerts.layer(policy).pipe(
@@ -33,6 +32,17 @@ export const alerting = (policy: Alerts.Policy, token: string) =>
 `Alerts.defaultWebhookTimeout`, ten seconds. An endpoint that never answers is a
 failure at that bound, because a hung page is indistinguishable from silence and
 waiting on one forever is not an option a pager may take.
+
+The sink uses the platform's `fetch` and forces `redirect: "manual"`. A 3xx
+response fails with `sink_rejected`; credentials and alert bodies are never
+forwarded to the redirect target. Injected `HttpClient` layers, including clients
+wrapped with `HttpClient.followRedirects`, are not used. Fetch defaults can be
+set with `FetchHttpClient.RequestInit`; the sink overrides its redirect mode.
+A custom `FetchHttpClient.Fetch` must honor the Fetch redirect and abort contracts.
+
+Each delivery has its own scope. Completion, refusal, timeout, and interruption
+abort the request and release any unread response body. Delivery depends on the
+response status, so a body that never ends does not delay completion.
 
 ## What the request looks like
 

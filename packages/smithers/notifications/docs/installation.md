@@ -85,22 +85,19 @@ export const alerting = (policy: Alerts.Policy) =>
   )
 ```
 
-`Alerts.layerWebhook` POSTs each alert instead, so it needs an
-`HttpClient.HttpClient`. `effect` ships one over the platform's `fetch`, so no
-further install is required:
+`Alerts.layerWebhook` POSTs each alert using its own Fetch HTTP client.
+The platform must provide `fetch`; no further install or `HttpClient` layer is
+required:
 
 ```ts
 import { Alerts } from "@smthrs/notifications"
-import * as Layer from "effect/Layer"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
-export const webhook = Alerts.layerWebhook({ url: "https://pager.example/alerts" }).pipe(
-  Layer.provide(FetchHttpClient.layer)
-)
+export const webhook = Alerts.layerWebhook({ url: "https://pager.example/alerts" })
 ```
 
-Any other `HttpClient` layer works the same way, including
-`NodeHttpClient.layerUndici` from `@effect/platform-node`.
+Injected `HttpClient` layers are not used. The sink controls redirect refusal
+and request cleanup. See [Send alerts to a webhook](guides/send-alerts-to-a-webhook.md)
+for Fetch configuration and delivery behavior.
 
 ## Import forms
 

@@ -537,7 +537,10 @@ const followingNoRedirects = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.E
  * layer is built, and the request is made with redirect following disabled:
  * the caller's headers can carry a credential, and a followed redirect would
  * re-send them to an origin the deployment never named. A 3xx answer is a
- * refusal like any other non-2xx, not a forwarding instruction.
+ * refusal like any other non-2xx, not a forwarding instruction. The sink owns
+ * its Fetch transport; an externally supplied `HttpClient` is not used.
+ * Each delivery has its own scope, which aborts the request and releases any
+ * unread response body on completion, failure, timeout, or interruption.
  *
  * A non-2xx response is a failure, not a delivery, and an endpoint that never
  * answers is a failure after `timeout`. Paging is exactly the case where a
@@ -555,12 +558,12 @@ export const layerWebhook = (
     readonly headers?: Readonly<Record<string, string>> | undefined
     readonly timeout?: Duration.Duration | undefined
   }
-): Layer.Layer<Sink, never, HttpClient.HttpClient> =>
+): Layer.Layer<Sink> =>
   Layer.effect(
     Sink,
     Effect.gen(function*() {
       const url = yield* Effect.orDie(webhookUrl(options.url))
-      const client = yield* HttpClient.HttpClient
+      const client = HttpClient.withScope(yield* HttpClient.HttpClient)
       const timeout = options.timeout ?? defaultWebhookTimeout
       return {
         deliver: (alert) =>
@@ -585,6 +588,7 @@ export const layerWebhook = (
                 )
             ),
             Effect.timeout(timeout),
+            Effect.scoped,
             Effect.catchTag("TimeoutError", () =>
               Effect.fail(
                 new AlertError({
@@ -605,7 +609,7 @@ export const layerWebhook = (
           )
       }
     })
-  )
+  ).pipe(Layer.provide(FetchHttpClient.layer))
 
 /**
  * What one tick decided.

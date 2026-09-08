@@ -10,14 +10,11 @@
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Cause, Duration, Effect, Exit, Layer, Option } from "effect"
+import { Cause, Duration, Effect, Exit, Fiber, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientError from "effect/unstable/http/HttpClientError"
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { describe, expect, it } from "vitest"
 import * as Alerts from "../src/Alerts.ts"
 import * as NotificationQueue from "../src/NotificationQueue.ts"
@@ -408,42 +405,29 @@ interface Sent {
   readonly body: unknown
 }
 
-const decodeBody = (body: HttpBody.HttpBody): unknown =>
-  body._tag === "Uint8Array"
-    ? JSON.parse(new TextDecoder().decode((body as HttpBody.Uint8Array).body)) as unknown
-    : undefined
-
-/**
- * A real `HttpClient` that answers with whatever the test scripts.
- *
- * The sink under test is the composition of `client.execute` with the status
- * rule, so a double for the client is the smallest thing that still exercises
- * the request the sink builds and the answer it interprets.
- */
+/** Records requests at the Fetch boundary of the sink's owned transport. */
 const recordingClient = (
-  answer: (attempt: number, request: HttpClientRequest.HttpClientRequest) => Response | HttpClientError.HttpClientError
+  answer: (attempt: number) => Response | Error
 ) => {
   const sent: Array<Sent> = []
-  const layer = Layer.succeed(HttpClient.HttpClient)(
-    HttpClient.make((request) => {
-      const answered = answer(sent.length, request)
-      sent.push({
-        url: request.url,
-        method: request.method,
-        authorization: request.headers["authorization"],
-        idempotencyKey: request.headers["idempotency-key"],
-        body: decodeBody(request.body)
-      })
-      return answered instanceof HttpClientError.HttpClientError
-        ? Effect.fail(answered)
-        : Effect.succeed(HttpClientResponse.fromWeb(request, answered))
+  const fetch: typeof globalThis.fetch = async (url, init) => {
+    const answered = answer(sent.length)
+    const headers = new Headers(init?.headers)
+    sent.push({
+      url: String(url),
+      method: init?.method ?? "GET",
+      authorization: headers.get("authorization") ?? undefined,
+      idempotencyKey: headers.get("idempotency-key") ?? undefined,
+      body: await new Response(init?.body).json()
     })
-  )
-  return { layer, sent }
+    if (answered instanceof Error) throw answered
+    return answered
+  }
+  return { layer: Layer.succeed(FetchHttpClient.Fetch)(fetch), sent }
 }
 
 const webhookStack = (
-  answer: (attempt: number, request: HttpClientRequest.HttpClientRequest) => Response | HttpClientError.HttpClientError
+  answer: (attempt: number) => Response | Error
 ) => {
   const client = recordingClient(answer)
   const sink = Alerts.layerWebhook({
@@ -454,6 +438,141 @@ const webhookStack = (
 }
 
 describe("Alerts.layerWebhook", () => {
+  it("refuses a 307 even when the supplied client follows redirects", async () => {
+    const seen: Array<{ url: string; apiKey: string | null; method: string | undefined }> = []
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      seen.push({ url: String(url), apiKey: new Headers(init?.headers).get("x-api-key"), method: init?.method })
+      return String(url) === "https://pager.test/alerts"
+        ? new Response(null, { status: 307, headers: { location: "https://collector.test/stolen" } })
+        : new Response(null, { status: 204 })
+    }
+    const followingClient = Layer.effect(HttpClient.HttpClient)(
+      Effect.map(HttpClient.HttpClient, HttpClient.followRedirects())
+    ).pipe(Layer.provide(FetchHttpClient.layer))
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sink = yield* Alerts.Sink
+        return yield* Effect.result(sink.deliver({
+          runId,
+          condition: "stalled",
+          since: 0,
+          firedAt: 0,
+          severity: "warning",
+          coalescingKey: Alerts.coalescingKey(runId, "stalled")
+        }))
+      }).pipe(
+        Effect.provide(
+          Alerts.layerWebhook({
+            url: "https://pager.test/alerts",
+            headers: { "x-api-key": "SYNTHETIC_REVIEW_SECRET" }
+          }).pipe(Layer.provide(followingClient))
+        ),
+        Effect.provideService(FetchHttpClient.Fetch, fetch)
+      )
+    )
+    expect(seen).toEqual([{
+      url: "https://pager.test/alerts",
+      apiKey: "SYNTHETIC_REVIEW_SECRET",
+      method: "POST"
+    }])
+    expect(result._tag === "Failure" ? result.failure : result).toMatchObject({
+      code: "sink_rejected",
+      status: 307
+    })
+  })
+
+  it.each([200, 307, 503])("aborts an unfinished response body on delivery completion (%s)", async (status) => {
+    let signal: AbortSignal | undefined
+    // Retain responses from the old injected-client path so this regression
+    // cannot pass on the unfixed sink because of GC cleanup.
+    const retained: Array<HttpClientResponse.HttpClientResponse> = []
+    const response = new Response(new ReadableStream(), { status })
+    const fetch: typeof globalThis.fetch = async (_url, init) => {
+      signal = init?.signal ?? undefined
+      return response
+    }
+    const client = Layer.effect(HttpClient.HttpClient)(
+      Effect.map(
+        HttpClient.HttpClient,
+        HttpClient.tap((response) =>
+          Effect.sync(() => {
+            retained.push(response)
+          })
+        )
+      )
+    ).pipe(Layer.provide(FetchHttpClient.layer))
+    try {
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const sink = yield* Alerts.Sink
+          const result = yield* Effect.result(sink.deliver({
+            runId,
+            condition: "stalled",
+            since: 0,
+            firedAt: 0,
+            severity: "warning",
+            coalescingKey: Alerts.coalescingKey(runId, "stalled")
+          }))
+          expect(result._tag).toBe(status === 200 ? "Success" : "Failure")
+          // Assert while the enclosing layer scope is still open.
+          expect(signal?.aborted).toBe(true)
+        }).pipe(
+          Effect.provide(Alerts.layerWebhook({ url: "https://pager.test/alerts" }).pipe(Layer.provide(client))),
+          Effect.provideService(FetchHttpClient.Fetch, fetch),
+          Effect.scoped
+        )
+      )
+    } finally {
+      await response.body?.cancel()
+      retained.length = 0
+    }
+  })
+
+  it.each(["timeout", "interruption"])("aborts a pending request on %s", async (completion) => {
+    let signal: AbortSignal | undefined
+    let started!: () => void
+    const requested = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const fetch: typeof globalThis.fetch = (_url, init) => {
+      signal = init?.signal ?? undefined
+      started()
+      return new Promise<Response>(() => {})
+    }
+    const fiber = Effect.runFork(
+      Effect.gen(function*() {
+        const sink = yield* Alerts.Sink
+        return yield* sink.deliver({
+          runId,
+          condition: "stalled",
+          since: 0,
+          firedAt: 0,
+          severity: "warning",
+          coalescingKey: Alerts.coalescingKey(runId, "stalled")
+        })
+      }).pipe(
+        Effect.provide(Alerts.layerWebhook({
+          url: "https://pager.test/alerts",
+          timeout: Duration.millis(20)
+        })),
+        Effect.provideService(FetchHttpClient.Fetch, fetch)
+      )
+    )
+    try {
+      await requested
+      if (completion === "interruption") await Effect.runPromise(Fiber.interrupt(fiber))
+      const exit = await Effect.runPromise(Fiber.await(fiber))
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        if (completion === "timeout") expect(Cause.squash(exit.cause)).toMatchObject({ code: "sink_timeout" })
+        else expect(Cause.hasInterrupts(exit.cause)).toBe(true)
+      }
+      expect(signal?.aborted).toBe(true)
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(fiber))
+    }
+  })
+
   it("posts the alert to the endpoint and calls a 2xx answer a delivery", async () => {
     const webhook = webhookStack(() => new Response("", { status: 202 }))
     const observed = await Effect.runPromise(
@@ -512,11 +631,7 @@ describe("Alerts.layerWebhook", () => {
   })
 
   it("calls an unreachable endpoint a refused page", async () => {
-    const webhook = webhookStack((_attempt, request) =>
-      new HttpClientError.HttpClientError({
-        reason: new HttpClientError.TransportError({ request, description: "connect ECONNREFUSED" })
-      })
-    )
+    const webhook = webhookStack(() => new Error("connect ECONNREFUSED: authorization: Bearer token"))
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
         const alerts = yield* Alerts.AlertRuntime
@@ -561,7 +676,7 @@ describe("Alerts.layerWebhook", () => {
   it("answers a hung endpoint within its bound instead of waiting forever", async () => {
     // The real clock, and a client that never answers. A paging path that can
     // hang is indistinguishable from a quiet system.
-    const client = Layer.succeed(HttpClient.HttpClient)(HttpClient.make(() => Effect.never))
+    const client = Layer.succeed(FetchHttpClient.Fetch)(() => new Promise<Response>(() => {}))
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
         const alerts = yield* Alerts.AlertRuntime
@@ -597,11 +712,7 @@ describe("Alerts.layerWebhook", () => {
   })
 
   it("refuses an endpoint that is not an http: or https: URL when the layer is built", async () => {
-    const client = Layer.succeed(HttpClient.HttpClient)(
-      HttpClient.make((request) =>
-        Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 })))
-      )
-    )
+    const client = recordingClient(() => new Response("", { status: 200 })).layer
     const build = (url: string) =>
       Effect.runPromise(
         Layer.build(Alerts.layerWebhook({ url })).pipe(Effect.provide(client), Effect.scoped, Effect.exit)
@@ -638,21 +749,10 @@ describe("Alerts.layerWebhook", () => {
 
   it("answers a redirect with a refusal and never re-sends the credential headers", async () => {
     const seen: Array<{ url: string; redirect: string | undefined; credentials: string | undefined }> = []
-    const client = Layer.succeed(HttpClient.HttpClient)(
-      HttpClient.make((request) =>
-        Effect.map(Effect.serviceOption(FetchHttpClient.RequestInit), (init) => {
-          seen.push({
-            url: request.url,
-            redirect: Option.isSome(init) ? init.value.redirect : undefined,
-            credentials: Option.isSome(init) ? init.value.credentials : undefined
-          })
-          return HttpClientResponse.fromWeb(
-            request,
-            new Response(null, { status: 302, headers: { location: "https://collector.test/credentials" } })
-          )
-        })
-      )
-    )
+    const client = Layer.succeed(FetchHttpClient.Fetch)(async (url, init) => {
+      seen.push({ url: String(url), redirect: init?.redirect, credentials: init?.credentials })
+      return new Response(null, { status: 302, headers: { location: "https://collector.test/credentials" } })
+    })
     const result = await Effect.runPromise(
       Effect.gen(function*() {
         const sink = yield* Alerts.Sink
@@ -673,7 +773,7 @@ describe("Alerts.layerWebhook", () => {
         ),
         // Fetch defaults the composition set survive; only the redirect mode
         // is forced.
-        Effect.provideService(FetchHttpClient.RequestInit, { credentials: "include" }),
+        Effect.provideService(FetchHttpClient.RequestInit, { credentials: "include", redirect: "follow" }),
         Effect.scoped
       )
     )
@@ -709,11 +809,7 @@ describe("Alerts.layerWebhook", () => {
         Effect.provide(
           Alerts.layerWebhook({ url: "https://pager.test/alerts" }).pipe(
             Layer.provide(
-              Layer.succeed(HttpClient.HttpClient)(
-                HttpClient.make((request) =>
-                  Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status })))
-                )
-              )
+              recordingClient(() => new Response("", { status })).layer
             )
           )
         ),
@@ -1059,11 +1155,7 @@ describe("Alerts over a policy that states only delays", () => {
                 NotificationQueue.layer,
                 Alerts.layerWebhook({ url: "https://pager.test/bare" }).pipe(
                   Layer.provide(
-                    Layer.succeed(HttpClient.HttpClient)(
-                      HttpClient.make((request) =>
-                        Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 })))
-                      )
-                    )
+                    recordingClient(() => new Response("", { status: 200 })).layer
                   )
                 )
               )
