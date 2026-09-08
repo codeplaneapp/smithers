@@ -58,6 +58,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Headers from "effect/unstable/http/Headers"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -142,18 +143,21 @@ export interface Options {
    * everywhere the journal goes.
    *
    * The protocol wins every collision. These headers are applied to a request
-   * first, and the ones the protocol computes for it — `content-type`,
-   * `content-length`, and the `content-range` of a chunked upload — are applied
-   * after, so no configuration can silently strip the header that tells the
-   * tier which slice of the blob it is being handed.
+   * first. Configured `content-type`, `content-length`, and `content-range`
+   * are removed, then computed only where the protocol needs them. Whole-blob
+   * uploads, including fallbacks, never carry `content-range`.
+   * All configured header names are redacted in HTTP spans, in addition to
+   * the host's existing redaction rules.
    */
   readonly headers?: Record<string, string> | undefined
   /**
    * The deadline on a single download, from the request leaving to the last
    * body byte arriving. A shared tier that stops answering must fail the read
-   * rather than park it forever — the combined composition treats a remote
-   * failure as a miss it can live with, but it can do nothing with a read
-   * that never returns. Defaults to 60 seconds, Bazel's `--remote_timeout`
+   * rather than park it forever. `CombinedArtifacts.get` propagates a remote
+   * `ArtifactStoreError`, including a download timeout. Only opportunistic
+   * uploads from `CombinedArtifacts.put` ignore remote failures;
+   * `ArtifactSync.hydrate` separately turns a failure into replay rejection.
+   * Defaults to 60 seconds, Bazel's `--remote_timeout`
    * default for the same REST protocol (its `RemoteOptions`: "For the REST
    * cache, this is both the connect and the read timeout").
    */
@@ -323,20 +327,17 @@ export const make = (
     const base = endpoint.toString().replace(/\/+$/, "")
     const headers = configured.headers
     const client = yield* HttpClient.HttpClient
+    const credentialNames = Object.keys(headers ?? {}).map((name) => name.toLowerCase())
     /**
-     * Starts a request from the configured credentials.
-     *
-     * `HttpClientRequest.setHeaders` is `Headers.setAll`, so whatever is applied
-     * LAST wins. Every request therefore begins here and takes its body and its
-     * `content-range` afterwards: applying the caller's record over a finished
-     * request would let a configured `content-range`, `content-type`, or
-     * `content-length` overwrite the protocol's own, and the failure would be
-     * silent — a tier that stops seeing per-chunk ranges answers `2xx`, the
-     * client reads that as a tier ignoring `Content-Range`, and every upload
-     * degrades to a whole-blob `PUT` with no diagnostic anywhere.
+     * Protocol-owned headers are computed from each request's body and range,
+     * never inherited from credentials, including on a whole-blob fallback.
      */
     const authorized = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
-      headers === undefined ? request : HttpClientRequest.setHeaders(request, headers)
+      (headers === undefined ? request : HttpClientRequest.setHeaders(request, headers)).pipe(
+        HttpClientRequest.removeHeader("content-type"),
+        HttpClientRequest.removeHeader("content-length"),
+        HttpClientRequest.removeHeader("content-range")
+      )
     // The address is a URL path segment, so it is refused before it is
     // interpolated and percent-encoded when it is: an address carrying a
     // separator or a `..` would otherwise point this client at a different
@@ -344,8 +345,22 @@ export const make = (
     // the same guard the filesystem tier applies to the same untrusted input —
     // a digest read back out of a durable row.
     const casUrl = (digest: ArtifactStore.Digest) => `${base}/cas/${digest}`
-    const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
-      client.execute(request).pipe(Effect.mapError(() => transportFailure(operation)))
+    const scopedClient = HttpClient.withScope(client)
+    /** Keep body processing inside the exchange; abort unused responses on every exit. */
+    const send = <A, E, R>(
+      operation: string,
+      request: HttpClientRequest.HttpClientRequest,
+      use: (response: HttpClientResponse.HttpClientResponse) => Effect.Effect<A, E, R>
+    ): Effect.Effect<A, E | ArtifactStore.ArtifactStoreError, R> =>
+      Effect.gen(function*() {
+        const redactedNames = yield* Headers.CurrentRedactedNames
+        return yield* scopedClient.execute(request).pipe(
+          Effect.mapError(() => transportFailure(operation)),
+          Effect.flatMap(use),
+          Effect.provideService(Headers.CurrentRedactedNames, [...redactedNames, ...credentialNames]),
+          Effect.scoped
+        )
+      })
     const parseDeadline = (name: string, input: Duration.Input | undefined, fallback: Duration.Duration) =>
       Effect.gen(function*() {
         const parsed = Duration.fromInput(input ?? fallback)
@@ -452,26 +467,24 @@ export const make = (
       })
     /** The network half of `get`: request, status split, bounded body read. */
     const download = (digest: ArtifactStore.Digest) =>
-      Effect.gen(function*() {
-        const response = yield* send("a download", authorized(HttpClientRequest.get(casUrl(digest))))
-        if (response.status === 404) {
-          return yield* Effect.fail(new ArtifactStore.ArtifactMissing({ code: "artifact_missing", digest }))
-        }
-        if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("a download", response.status))
-        return yield* readBounded(response, "a download", maxDownloadBytes)
-      })
+      send("a download", authorized(HttpClientRequest.get(casUrl(digest))), (response) =>
+        Effect.gen(function*() {
+          if (response.status === 404) {
+            return yield* Effect.fail(new ArtifactStore.ArtifactMissing({ code: "artifact_missing", digest }))
+          }
+          if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("a download", response.status))
+          return yield* readBounded(response, "a download", maxDownloadBytes)
+        }))
 
     /** One whole-blob `PUT`: the protocol every dumb-HTTP CAS already speaks. */
     const uploadWhole = (digest: ArtifactStore.Digest, bytes: Uint8Array) =>
-      Effect.gen(function*() {
-        const response = yield* send(
-          "an upload",
-          authorized(HttpClientRequest.put(casUrl(digest))).pipe(
-            HttpClientRequest.bodyUint8Array(bytes, "application/octet-stream")
-          )
-        )
-        if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("an upload", response.status))
-      })
+      send(
+        "an upload",
+        authorized(HttpClientRequest.put(casUrl(digest))).pipe(
+          HttpClientRequest.bodyUint8Array(bytes, "application/octet-stream")
+        ),
+        (response) => isOk(response) ? Effect.void : Effect.fail(unexpectedStatus("an upload", response.status))
+      )
 
     /**
      * The byte after the prefix a `Range: bytes=0-{last}` header reports, or
@@ -513,11 +526,12 @@ export const make = (
      * refused — it simply proves nothing, so the caller sends the blob whole.
      */
     const holdsWhole = (digest: ArtifactStore.Digest, total: number) =>
-      Effect.map(send("an existence probe", authorized(HttpClientRequest.head(casUrl(digest)))), (response) => {
-        if (!isOk(response)) return false
-        const declared = response.headers["content-length"]
-        return declared !== undefined && Number(declared) === total
-      })
+      send("an existence probe", authorized(HttpClientRequest.head(casUrl(digest))), (response) =>
+        Effect.sync(() => {
+          if (!isOk(response)) return false
+          const declared = response.headers["content-length"]
+          return declared !== undefined && Number(declared) === total
+        }))
 
     /**
      * Sends `bytes` as `Content-Range` chunks, resuming from whatever prefix
@@ -542,7 +556,9 @@ export const make = (
             authorized(HttpClientRequest.put(casUrl(digest))).pipe(
               HttpClientRequest.bodyUint8Array(body, "application/octet-stream"),
               HttpClientRequest.setHeader("content-range", range)
-            )
+            ),
+            // Only status and headers are used after the response is released.
+            Effect.succeed
           )
         // A blob the tier already holds whole costs one `HEAD` and no body.
         // Asking first is also what makes the probe's answer readable: a `2xx`
@@ -632,7 +648,7 @@ export const make = (
         const response = yield* within(
           "an existence probe",
           requestDeadline,
-          send("an existence probe", authorized(HttpClientRequest.head(casUrl(validated))))
+          send("an existence probe", authorized(HttpClientRequest.head(casUrl(validated))), Effect.succeed)
         )
         if (response.status === 404) return false
         if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("an existence probe", response.status))
@@ -663,29 +679,30 @@ export const make = (
             const decoded = yield* within(
               "a batched existence probe",
               requestDeadline,
-              Effect.gen(function*() {
-                const response = yield* send(
-                  "a batched existence probe",
-                  authorized(HttpClientRequest.post(`${base}/cas/findMissing`)).pipe(
-                    HttpClientRequest.bodyUint8Array(requestBody, "application/json")
-                  )
-                )
-                if (!isOk(response)) {
-                  return yield* Effect.fail(unexpectedStatus("a batched existence probe", response.status))
-                }
-                const bodyBytes = yield* readBounded(
-                  response,
-                  "a batched existence probe",
-                  maxFindMissingResponseBytes
-                )
-                const body = yield* Effect.try({
-                  try: () => JSON.parse(decoder.decode(bodyBytes)) as unknown,
-                  catch: () => transportFailure("a batched existence probe body")
-                })
-                return yield* Schema.decodeUnknownEffect(FindMissingResponse)(body).pipe(
-                  Effect.mapError(() => transportFailure("a batched existence probe body"))
-                )
-              })
+              send(
+                "a batched existence probe",
+                authorized(HttpClientRequest.post(`${base}/cas/findMissing`)).pipe(
+                  HttpClientRequest.bodyUint8Array(requestBody, "application/json")
+                ),
+                (response) =>
+                  Effect.gen(function*() {
+                    if (!isOk(response)) {
+                      return yield* Effect.fail(unexpectedStatus("a batched existence probe", response.status))
+                    }
+                    const bodyBytes = yield* readBounded(
+                      response,
+                      "a batched existence probe",
+                      maxFindMissingResponseBytes
+                    )
+                    const body = yield* Effect.try({
+                      try: () => JSON.parse(decoder.decode(bodyBytes)) as unknown,
+                      catch: () => transportFailure("a batched existence probe body")
+                    })
+                    return yield* Schema.decodeUnknownEffect(FindMissingResponse)(body).pipe(
+                      Effect.mapError(() => transportFailure("a batched existence probe body"))
+                    )
+                  })
+              )
             )
             const asked = new Set<string>(batch)
             for (const digest of decoded.missing) if (asked.has(digest)) missing.add(digest)

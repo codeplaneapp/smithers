@@ -145,8 +145,10 @@ services cap one body at 16 MiB, and no `chunkBytes` setting works around that,
 because they refuse ranged `PUT` with `400`.
 
 Raise a deadline only after checking that the tier is actually slow rather than
-unreachable. A combined composition already treats a remote failure as
-something it can live with.
+unreachable. `CombinedArtifacts.get` propagates a remote `ArtifactStoreError`,
+including download timeouts. `CombinedArtifacts.put` ignores failed opportunistic
+uploads. `ArtifactSync.hydrate` separately converts remote failure into replay
+rejection.
 
 ## An upload succeeded here but a second machine cannot read it
 

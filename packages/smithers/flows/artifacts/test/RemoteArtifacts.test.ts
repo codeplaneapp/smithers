@@ -12,8 +12,12 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import { TestClock } from "effect/testing"
+import * as Tracer from "effect/Tracer"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as Headers from "effect/unstable/http/Headers"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import * as RemoteArtifacts from "../src/RemoteArtifacts.ts"
@@ -169,6 +173,120 @@ describe("construction", () => {
   )
 })
 
+describe("HTTP exchange lifetime and tracing", () => {
+  it.effect.each(["success", "status", "transport"] as const)(
+    "redacts custom credentials in completed HTTP spans on %s",
+    (mode) =>
+      Effect.gen(function*() {
+        const spans: Array<Tracer.NativeSpan> = []
+        const tracer = Tracer.make({
+          span(options) {
+            const span = new Tracer.NativeSpan(options)
+            spans.push(span)
+            return span
+          }
+        })
+        const client = HttpClient.make((request) =>
+          mode === "transport"
+            ? Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request })
+              })
+            )
+            : Effect.succeed(HttpClientResponse.fromWeb(
+              request,
+              new Response(null, {
+                status: mode === "status" ? 503 : 200
+              })
+            ))
+        ).pipe(HttpClient.mapRequest(HttpClientRequest.setHeaders({
+          "x-host-secret": "host-secret-value",
+          "x-public": "public-value"
+        })))
+        const hostRules = [...(yield* Headers.CurrentRedactedNames), /^x-host-/]
+        const exit = yield* Effect.gen(function*() {
+          const store = yield* RemoteArtifacts.make({
+            endpoint: "https://cache.example.com",
+            headers: { "X-Auth-Token": "custom-secret-value", authorization: "Bearer secret-value" }
+          })
+          const result = yield* store.has(digest).pipe(Effect.exit)
+          expect(yield* Headers.CurrentRedactedNames).toEqual(hostRules)
+          return result
+        }).pipe(
+          Effect.provideService(HttpClient.HttpClient, client),
+          Effect.provideService(Headers.CurrentRedactedNames, hostRules),
+          Effect.provideService(Tracer.Tracer, tracer)
+        )
+        expect(exit._tag).toBe(mode === "success" ? "Success" : "Failure")
+        const httpSpans = spans.filter((span) => span.name === "http.client HEAD")
+        expect(httpSpans).toHaveLength(1)
+        for (const span of httpSpans) {
+          expect(span.status._tag).toBe("Ended")
+          expect(span.attributes.get("http.request.header.x-auth-token")).toBe("<redacted>")
+          expect(span.attributes.get("http.request.header.authorization")).toBe("<redacted>")
+          expect(span.attributes.get("http.request.header.x-host-secret")).toBe("<redacted>")
+          expect(span.attributes.get("http.request.header.x-public")).toBe("public-value")
+        }
+        expect(JSON.stringify(spans.map((span) => [...span.attributes]))).not.toContain("secret-value")
+      })
+  )
+
+  it.effect.each(["oversize", "status", "missing", "upload", "upload-status", "has", "batch"] as const)(
+    "aborts unused %s responses without draining their bodies",
+    (mode) =>
+      Effect.gen(function*() {
+        let cancelled = false
+        let pulls = 0
+        let signal: AbortSignal | undefined
+        const response = new Response(
+          new ReadableStream({
+            pull() {
+              pulls++
+            },
+            cancel() {
+              cancelled = true
+            }
+          }, { highWaterMark: 0 }),
+          {
+            status: mode === "status" || mode === "upload-status" || mode === "batch"
+              ? 503
+              : mode === "missing"
+              ? 404
+              : 200,
+            headers: mode === "oversize" ? { "content-length": "999999" } : {}
+          }
+        )
+        const fetch: typeof globalThis.fetch = async (_input, init) => {
+          signal = init?.signal ?? undefined
+          signal?.addEventListener("abort", () => {
+            void response.body?.cancel()
+          })
+          return response
+        }
+        const exit = yield* withCrypto(
+          Effect.gen(function*() {
+            const store = yield* RemoteArtifacts.make({ endpoint: "https://cache.example.com", maxDownloadBytes: 8 })
+            return yield* (mode === "upload" || mode === "upload-status"
+              ? store.put(bytes(artifact))
+              : mode === "has" ?
+              store.has(digest)
+              : mode === "batch" ?
+              store.findMissing([digest])
+              : store.get(digest))
+          }).pipe(
+            Effect.provide(FetchHttpClient.layer),
+            Effect.provideService(FetchHttpClient.Fetch, fetch),
+            Effect.exit
+          )
+        )
+        expect(exit._tag).toBe(mode === "upload" || mode === "has" ? "Success" : "Failure")
+        expect(pulls).toBe(0)
+        expect(signal?.aborted).toBe(true)
+        expect(cancelled).toBe(true)
+      })
+  )
+})
+
 describe("uploads", () => {
   it.effect.each([
     "http://cache.example.com",
@@ -248,6 +366,42 @@ describe("uploads", () => {
       const upload = tier.calls[0]!
       expect(upload.headers["authorization"]).toBe("Bearer secret")
       expect(upload.headers["content-type"]).toBe("application/octet-stream")
+      expect(upload.headers["content-range"]).toBeUndefined()
+    }))
+
+  it.effect("drops configured protocol headers from bodyless requests and whole fallback PUTs", () =>
+    Effect.gen(function*() {
+      const tier = remote((call) => {
+        if (call.method === "GET") return new Response(artifact)
+        if (call.method === "HEAD") return new Response(null, { status: 404 })
+        if (call.method === "POST") return new Response(JSON.stringify({ missing: [] }))
+        return new Response(null, { status: call.headers["content-range"] === undefined ? 201 : 400 })
+      }, {
+        chunkBytes: 4,
+        headers: {
+          "Content-Range": "bytes 0-0/1",
+          "Content-Length": "1",
+          "Content-Type": "text/plain"
+        }
+      })
+      const store = yield* tier.store
+      yield* withCrypto(store.put(bytes(artifact)))
+      yield* withCrypto(store.get(digest))
+      yield* store.has(digest)
+      yield* store.findMissing([digest])
+      const uploads = tier.calls.filter((call) => call.method === "PUT")
+      expect(uploads.map((call) => call.headers["content-range"])).toEqual([
+        `bytes */${bytes(artifact).byteLength}`,
+        undefined
+      ])
+      expect(uploads[1]!.headers["content-length"]).toBe(String(bytes(artifact).byteLength))
+      for (const call of tier.calls.filter((call) => call.method !== "PUT")) {
+        expect(call.headers["content-range"]).toBeUndefined()
+        if (call.method !== "POST") {
+          expect(call.headers["content-length"]).toBeUndefined()
+          expect(call.headers["content-type"]).toBeUndefined()
+        }
+      }
     }))
 
   it.effect("never lets a configured content-length describe a body it does not measure", () =>
