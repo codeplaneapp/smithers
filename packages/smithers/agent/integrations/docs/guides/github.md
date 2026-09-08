@@ -253,7 +253,10 @@ The safety rules, all enforced rather than documented:
 - **State file integrity.** A state file that exists but cannot be parsed is
   fatal, because reconciling without knowing what the workspace owns is how
   somebody else's hook gets deleted. An apply holds `.smithers/listeners.lock`
-  against a second concurrent apply.
+  against a second concurrent apply. State writes refuse symbolic links at
+  `.smithers` or `listeners.state.json`. Each write exclusively creates a
+  random temporary file with mode `0600`, syncs it, and atomically replaces
+  the state file.
 
 A repository with more hooks than one reconciliation can read (ten pages of
 100) fails `delivery-failed` rather than planning against a truncated list,

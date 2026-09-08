@@ -1,6 +1,17 @@
 import { Cause, Effect, Exit } from "effect"
 import { createHash } from "node:crypto"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -230,6 +241,95 @@ describe("readRegistry and readOwnershipState", () => {
     expect(() => readOwnershipState(root)).toThrow(/refusing unsafe reconciliation/)
     writeFileSync(join(root, DEFAULT_STATE_PATH), JSON.stringify({ version: 2, github: [] }))
     expect(() => readOwnershipState(root)).toThrow(/refusing unsafe reconciliation/)
+  })
+})
+
+describe("ownership state writes", () => {
+  const client = {
+    request: () => Effect.die("unexpected network request"),
+    paginate: () => Effect.die("unexpected network request")
+  }
+
+  it("ignores a symlink planted at the old predictable temporary path", async () => {
+    const base = mkdtempSync(join(tmpdir(), "smithers-listeners-"))
+    workspace = base
+    const root = join(base, "workspace")
+    mkdirSync(join(root, ".smithers"), { recursive: true })
+    const victim = join(base, "outside-workspace.txt")
+    writeFileSync(victim, "DO NOT OVERWRITE")
+    symlinkSync(victim, `${join(root, DEFAULT_STATE_PATH)}.${process.pid}.tmp`)
+
+    await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      registry: { version: 1, listeners: [] },
+      apply: true,
+      env: {},
+      client
+    }))
+
+    expect(readFileSync(victim, "utf8")).toBe("DO NOT OVERWRITE")
+    expect(readOwnershipState(root)).toEqual({ version: 1, github: [], pending: [] })
+    expect(statSync(join(root, DEFAULT_STATE_PATH)).mode & 0o777).toBe(0o600)
+    expect(readdirSync(join(root, ".smithers")).sort()).toEqual([
+      "listeners.state.json",
+      `listeners.state.json.${process.pid}.tmp`
+    ])
+  })
+
+  it.each([".smithers", DEFAULT_STATE_PATH, "dangling state"])(
+    "refuses a symbolic link at %s when writing ownership",
+    async (entry) => {
+      const base = mkdtempSync(join(tmpdir(), "smithers-listeners-"))
+      workspace = base
+      const root = join(base, "workspace")
+      mkdirSync(root)
+      const target = join(base, "outside-workspace")
+      if (entry === ".smithers") {
+        mkdirSync(target)
+        symlinkSync(target, join(root, entry))
+      } else {
+        mkdirSync(join(root, ".smithers"))
+        if (entry !== "dangling state") writeFileSync(target, "{\"version\":1,\"github\":[]}")
+        symlinkSync(target, join(root, DEFAULT_STATE_PATH))
+      }
+
+      const failure = await Effect.runPromise(Effect.flip(reconcile({
+        workspaceRoot: root,
+        registry: { version: 1, listeners: [] },
+        apply: true,
+        env: {},
+        client
+      })))
+
+      expect(failure.reason).toBe("invalid-config")
+      expect(failure.message).toContain("refuses symbolic link")
+      if (entry === ".smithers") expect(readdirSync(target)).toEqual([])
+      else if (entry === "dangling state") expect(existsSync(target)).toBe(false)
+      else expect(readFileSync(target, "utf8")).toBe("{\"version\":1,\"github\":[]}")
+    }
+  )
+
+  it("removes its temporary file when replacing the state fails", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    const failure = await Effect.runPromise(Effect.flip(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env: { TRIAGE_WEBHOOK_SECRET: "hook-secret" },
+      client: {
+        ...client,
+        paginate: () =>
+          Effect.sync(() => {
+            // The state was read before listing hooks. Make its destination
+            // unwritable before the pending-create write reaches rename.
+            mkdirSync(join(root, DEFAULT_STATE_PATH))
+            return { items: [], truncated: false }
+          })
+      }
+    })))
+
+    expect(failure.reason).toBe("invalid-config")
+    expect(failure.message).toContain("rename")
+    expect(readdirSync(join(root, ".smithers")).sort()).toEqual(["listeners.json", "listeners.state.json"])
   })
 })
 

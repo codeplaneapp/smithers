@@ -27,8 +27,19 @@
  */
 import { isRecord } from "@smthrs/canonical/Record"
 import { Effect } from "effect"
-import { createHash } from "node:crypto"
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { createHash, randomUUID } from "node:crypto"
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
 import { dirname, resolve as resolvePath } from "node:path"
 import { IntegrationError, isIntegrationError } from "../core/IntegrationError.ts"
 import * as Environment from "../Environment.ts"
@@ -507,10 +518,28 @@ export const readOwnershipState = (workspaceRoot: string): OwnershipState => {
 
 const writeOwnershipState = (workspaceRoot: string, state: OwnershipState): void => {
   const path = resolvePath(workspaceRoot, DEFAULT_STATE_PATH)
-  mkdirSync(dirname(path), { recursive: true })
-  const temporary = `${path}.${process.pid}.tmp`
-  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 })
-  renameSync(temporary, path)
+  const directory = dirname(path)
+  for (const entry of [directory, path]) {
+    if (lstatSync(entry, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      throw configError(`Listener ownership state refuses symbolic link ${entry}.`, { path: entry })
+    }
+  }
+  mkdirSync(directory, { recursive: true })
+  // Exclusive creation refuses an existing file or symlink; the random name
+  // also keeps stale files from earlier runs out of the write path.
+  const temporary = `${path}.${randomUUID()}.tmp`
+  const descriptor = openSync(temporary, "wx", 0o600)
+  try {
+    writeFileSync(descriptor, `${JSON.stringify(state, null, 2)}\n`)
+    fsyncSync(descriptor)
+    renameSync(temporary, path)
+  } finally {
+    try {
+      closeSync(descriptor)
+    } finally {
+      rmSync(temporary, { force: true })
+    }
+  }
 }
 
 const normalizedEvents = (events: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(events)].sort()
