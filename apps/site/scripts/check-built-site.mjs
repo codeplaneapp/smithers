@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Check built links, assets, redirects, and URLs emitted outside the site. */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { dirname, join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const siteRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -164,9 +164,23 @@ export function checkBuiltSite(root, requiredReferences = [], appPaths = []) {
   }
   if (!existsSync(root)) throw new Error("Build the site before checking its links")
   walk(root)
-  function check(reference, source) {
-    let url = new URL(reference, origin)
-    if (url.origin !== origin) {
+  // The URL a reference resolves to, or undefined when this origin does not
+  // serve it: an external link, a mailto:/data: reference, or an unparseable
+  // value. `base` is the page that emitted the reference, so a
+  // document-relative or fragment-only href resolves the way a browser
+  // reading that page resolves it.
+  function siteUrl(reference, base) {
+    let url
+    try {
+      url = new URL(reference, base)
+    } catch {
+      return undefined
+    }
+    return url.origin === origin ? url : undefined
+  }
+  function check(reference, source, base = origin) {
+    let url = siteUrl(reference, base)
+    if (url === undefined) {
       failures.add(`${source}: required URL leaves the site: ${reference}`)
       return
     }
@@ -194,10 +208,17 @@ export function checkBuiltSite(root, requiredReferences = [], appPaths = []) {
     }
   }
   for (const [page, { references }] of pages) {
+    // A page's own URL: the base a browser resolves its references against.
+    // Every internal form reaches the same check that way, whether the page
+    // writes a full site URL (the social card), a root-relative path, a
+    // document-relative path, or a bare fragment naming its own headings.
+    const base = new URL(
+      relative(root, page).split(sep).map((segment) => encodeURIComponent(segment)).join("/"),
+      origin + "/"
+    )
     for (const reference of references) {
-      // Pages link the site by path; the social card is emitted as a full URL.
-      if (!reference.startsWith(origin + "/") && (!reference.startsWith("/") || reference.startsWith("//"))) continue
-      check(reference, relative(root, page))
+      if (siteUrl(reference, base) === undefined) continue
+      check(reference, relative(root, page), base)
     }
   }
   for (const reference of requiredReferences) check(reference, "release URL")

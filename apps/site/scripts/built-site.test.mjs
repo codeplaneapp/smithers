@@ -78,6 +78,44 @@ test("page links and assets retain their existing checks", (t) => {
   assert.ok(failures.some((failure) => /missing \/missing\.png/.test(failure)))
 })
 
+/*
+ * A page reaches the same route by four spellings, and the browser resolves
+ * all four against the page it read them from. The checker must too: a
+ * document-relative href is as broken as the root-relative one it duplicates.
+ */
+test("every internal URL form resolves against the emitting page, so all four fail alike when the route is missing", (t) => {
+  const root = fixture(t, {
+    "index.html":
+      "<a href=\"/guide/\">Root-relative</a><a href=\"https://smithers.sh/guide/\">Absolute</a>" +
+      "<a href=\"./guide/\">Relative</a><a href=\"guide/index.html\">Bare</a>" +
+      "<a href=\"/absent/\">Root-relative</a><a href=\"https://smithers.sh/absent/\">Absolute</a>" +
+      "<a href=\"./absent/\">Relative</a><img src=\"absent.png\">",
+    "guide/index.html": "<h2 id=\"present\">Guide</h2>"
+  })
+  assert.deepEqual(checkBuiltSite(root).failures, [
+    "index.html: missing /absent/ (resolved to /absent/)",
+    "index.html: missing https://smithers.sh/absent/ (resolved to /absent/)",
+    "index.html: missing ./absent/ (resolved to /absent/)",
+    "index.html: missing absent.png (resolved to /absent.png)"
+  ])
+})
+
+test("a nested page resolves its own fragments and its sibling paths, and skips what this origin does not serve", (t) => {
+  const root = fixture(t, {
+    "docs/guide/index.html":
+      "<h2 id=\"present\">Guide</h2><a href=\"#present\">This page</a><a href=\"#absent\">This page</a>" +
+      "<a href=\"../reference/\">Sibling</a><a href=\"../missing/\">Sibling</a>" +
+      "<a href=\"../reference/#present\">Sibling anchor</a><a href=\"../reference/#absent\">Sibling anchor</a>" +
+      "<a href=\"mailto:hello@smithers.sh\">Mail</a><a href=\"\">This page</a>",
+    "docs/reference/index.html": "<h2 id=\"present\">Reference</h2>"
+  })
+  assert.deepEqual(checkBuiltSite(root).failures, [
+    "docs/guide/index.html: missing anchor #absent (resolved to /docs/guide/index.html#absent)",
+    "docs/guide/index.html: missing ../missing/ (resolved to /docs/missing/)",
+    "docs/guide/index.html: missing anchor ../reference/#absent (resolved to /docs/reference/#absent)"
+  ])
+})
+
 test("app-served paths are exempt only when named, and only at that exact path", (t) => {
   const root = fixture(t, {
     "index.html":
