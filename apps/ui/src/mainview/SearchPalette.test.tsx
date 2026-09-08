@@ -302,6 +302,21 @@ describe("§3 the keyboard contract", () => {
     expect(invoked(view.store).map((row) => row.name)).toContain("search.boxes")
   })
 
+  test("with the overlay open, Enter on a slash command with arguments is the composer's send, never search.flows", async () => {
+    const view = await mount()
+    await press(view, "k", { meta: true })
+    expect(view.store.session().paletteOpen).toBe(true)
+    // `/implement fix it` has no slash rows (the tree lists names, not arguments), so the overlay owns nothing here.
+    await view.act(() => view.controller.changeDraft("/implement fix it"))
+    expect(palette(view.host)?.dataset["mode"]).toBe("flows")
+    expect(rows(view.host)).toEqual([])
+    await press(view, "Enter")
+    const names = invoked(view.store).map((row) => row.name)
+    expect(invoked(view.store)).toContainEqual({ name: "chat.send", args: "/implement fix it" })
+    expect(names).not.toContain("search.flows")
+    expect(view.store.session().paletteOpen).toBe(false)
+  })
+
   test("the slash tree stays the / mode of the same overlay", async () => {
     const view = await mount()
     await view.act(() => view.controller.changeDraft("/app"))

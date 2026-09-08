@@ -285,16 +285,23 @@ export interface RankContext {
   readonly recommended: ReadonlyArray<string>
 }
 
-export interface RankedItem {
-  readonly item: SearchItem
+/**
+ * What ranking reads of an item: everything but its actions. The seams rank
+ * on facts and derive actions only for the rows that are shown, so the
+ * composer hot path never walks the registry for a row nobody sees.
+ */
+export type SearchFact = Omit<SearchItem, "actions">
+
+export interface RankedItem<T extends SearchFact = SearchItem> {
+  readonly item: T
   readonly score: number
   readonly recommended: boolean
   readonly recent: boolean
 }
 
-export interface ResultGroup {
+export interface ResultGroup<T extends SearchFact = SearchItem> {
   readonly label: string
-  readonly items: ReadonlyArray<RankedItem>
+  readonly items: ReadonlyArray<RankedItem<T>>
 }
 
 const RECOMMENDED_BOOST = 100
@@ -308,11 +315,11 @@ const recentKey = (kind: string, ref: string): string => `${kind}:${ref}`
  * §2 says they lead); the rest group by kind, each group ordered by score and
  * the groups by their best item.
  */
-export const rankItems = (items: ReadonlyArray<SearchItem>, query: string, ctx: RankContext): ReadonlyArray<ResultGroup> => {
+export const rankItems = <T extends SearchFact>(items: ReadonlyArray<T>, query: string, ctx: RankContext): ReadonlyArray<ResultGroup<T>> => {
   const recentsByKey = new Map(ctx.recents.map((recent) => [recentKey(recent.kind, recent.ref), recent]))
   const recommendedRank = new Map(ctx.recommended.map((ref, index) => [ref, index]))
   const empty = query.trim() === ""
-  const ranked: Array<RankedItem> = []
+  const ranked: Array<RankedItem<T>> = []
   for (const item of items) {
     const tier = matchTier(item.title, query, item.subtitle)
     if (tier === TIER.none) continue
@@ -326,7 +333,7 @@ export const rankItems = (items: ReadonlyArray<SearchItem>, query: string, ctx: 
       recent: recency > 0
     })
   }
-  const groups: Array<ResultGroup> = []
+  const groups: Array<ResultGroup<T>> = []
   const pills = ranked.filter((row) => row.recommended).sort((left, right) => right.score - left.score)
   if (pills.length > 0) groups.push({ label: "Recommended", items: pills })
   const taken = new Set(pills.map((row) => recentKey(row.item.kind, row.item.ref)))
@@ -337,7 +344,7 @@ export const rankItems = (items: ReadonlyArray<SearchItem>, query: string, ctx: 
     if (recents.length > 0) groups.push({ label: "Recent", items: recents })
     for (const row of recents) taken.add(recentKey(row.item.kind, row.item.ref))
   }
-  const byKind = new Map<SearchItemKind, Array<RankedItem>>()
+  const byKind = new Map<SearchItemKind, Array<RankedItem<T>>>()
   for (const row of ranked) {
     if (taken.has(recentKey(row.item.kind, row.item.ref))) continue
     const bucket = byKind.get(row.item.kind) ?? []

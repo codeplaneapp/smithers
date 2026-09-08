@@ -5,9 +5,16 @@
  * from what the store already holds (§5: "the browser holds caches and
  * recents"), so every row is a fact a seam has already established. `search`
  * is the slash and agent door of every `search.*` flow: it reads the same
- * indexes, refreshes the ones that have a live read (boxes, secrets, history,
- * the factory projection), embeds a `search-results` card for a human and
- * answers the items as data for the model.
+ * indexes, takes the ones that have a live read (boxes, secrets, history,
+ * the factory projection) from the reader's own answer, embeds ONE
+ * `search-results` card for a human and answers the items as data for the
+ * model. A search never dispatches another card: the secrets and history
+ * cards belong to their own seams' flows (§6).
+ *
+ * The indexes are FACTS (kind, ref, title, subtitle); ranking reads facts,
+ * and an item's actions are derived from the registry only for the rows the
+ * overlay shows or the flow answers, because `palette` runs on every
+ * keystroke while the overlay is open.
  *
  * NO INVENTION: a mode whose index does not exist yet (symbols, text, people,
  * the Librarian's ask) refuses with the exact reason, never with rows.
@@ -15,13 +22,15 @@
 import type { SearchAction, SearchItem } from "@smthrs/rpc/Cards"
 import type { SearchArgs } from "../../flows/entries/search"
 import { actionsFor, itemsValue, parseQuery, prefixRow, PREFIXES, rankItems } from "../../flows/SearchQuery"
-import type { PaletteMode, ParsedQuery, PrefixRow, ResultGroup } from "../../flows/SearchQuery"
+import type { PaletteMode, ParsedQuery, PrefixRow, ResultGroup, SearchFact } from "../../flows/SearchQuery"
 import type { CommandState, FlowEntry } from "../../flows/registry"
 import { recommendedNames, unmetRequirements } from "../../flows/registry"
 import type { Card, WorkingCopy } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import { readEnvironment } from "./EnvironmentSeam"
+import type { SecretMetadata } from "./EnvironmentSeam"
 import { readHistory } from "./HistorySeam"
+import type { HistoryPayload } from "./HistorySeam"
 import type { SeamContext } from "./SeamContext"
 import { readFactoryProjection } from "./TriggersSeam"
 
@@ -76,11 +85,36 @@ const HIDDEN_SIGNED_OUT: ReadonlySet<PaletteMode> = new Set(["boxes", "secrets",
 /** The flow behind a mode, when the registry has it. */
 const flowOf = (mode: PaletteMode): string | null => prefixRow(mode).flow
 
+/**
+ * One indexed row before its actions exist. `actions` is set only where the
+ * row's flow is known without the registry walk (a flow row, a projection
+ * flow, a line jump); `open` replaces the registry's open door (a box file
+ * opens in its box).
+ */
+type Fact = SearchFact & {
+  readonly actions?: ReadonlyArray<SearchAction>
+  readonly open?: SearchAction
+}
+
 /** The flows a search names must be registered on this host; the rest of an item's actions come from the registry too. */
-const withActions = (entries: ReadonlyArray<FlowEntry>, item: Omit<SearchItem, "actions">): SearchItem => ({
-  ...item,
-  actions: [...actionsFor(item, entries)]
-})
+const withActions = (entries: ReadonlyArray<FlowEntry>, fact: Fact): SearchItem => {
+  const item: SearchFact = { kind: fact.kind, ref: fact.ref, title: fact.title, ...(fact.subtitle === undefined ? {} : { subtitle: fact.subtitle }) }
+  if (fact.actions !== undefined) return { ...item, actions: [...fact.actions] }
+  const actions = [...actionsFor(item, entries)]
+  return { ...item, actions: fact.open === undefined ? actions : [fact.open, ...actions.filter((action) => action.role !== "open")] }
+}
+
+/** The secrets of one repository as the environment document names them: names and hosts, never a value. */
+interface SecretRows {
+  readonly repo: string
+  readonly secrets: ReadonlyArray<Pick<SecretMetadata, "name" | "hosts">>
+}
+
+/** The live reads a flow door takes from the readers' answers instead of the cards (§6: a search embeds one card). */
+interface LiveIndexes {
+  readonly history?: ReadonlyArray<HistoryPayload>
+  readonly secrets?: ReadonlyArray<SecretRows>
+}
 
 export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): SearchSeam => {
   const now = deps.now ?? (() => Date.now())
@@ -89,7 +123,7 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   /* ---- the indexes, each from a seam's own rows ---- */
 
   /** The slash tree as data: every listed flow this session may run (signed out, only what works signed out, as the slash menu offers). */
-  const flowItems = (): ReadonlyArray<SearchItem> => {
+  const flowItems = (): ReadonlyArray<Fact> => {
     const { entries, state } = deps.registry()
     const snapshot = state()
     return entries()
@@ -105,13 +139,11 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   }
 
   /** Files the app has listed: the sidebar's loaded directories and the file and listing cards. Box files open in the box. */
-  const fileItems = (): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    const seen = new Map<string, SearchItem>()
-    const add = (ref: string, subtitle: string, boxOpen?: SearchAction): void => {
+  const fileItems = (): ReadonlyArray<Fact> => {
+    const seen = new Map<string, Fact>()
+    const add = (ref: string, subtitle: string, open?: SearchAction): void => {
       if (seen.has(ref)) return
-      const item = withActions(entries, { kind: "file", ref, title: ref, subtitle })
-      seen.set(ref, boxOpen === undefined ? item : { ...item, actions: [boxOpen, ...item.actions.filter((action) => action.role !== "open")] })
+      seen.set(ref, { kind: "file", ref, title: ref, subtitle, ...(open === undefined ? {} : { open }) })
     }
     const copies = ctx.store.collections.workingCopies
     for (const row of ctx.store.collections.repoTree.values()) {
@@ -142,39 +174,42 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   }
 
   /** The Wiki pane's documents: the person's notes (generated pages exist on no catalog repository yet). */
-  const wikiItems = (): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    return [...ctx.store.collections.worldDocuments.values()].map((document) =>
-      withActions(entries, { kind: "note", ref: document.id, title: document.title, subtitle: document.path })
-    )
-  }
+  const wikiItems = (): ReadonlyArray<Fact> =>
+    [...ctx.store.collections.worldDocuments.values()].map((document) => ({ kind: "note" as const, ref: document.id, title: document.title, subtitle: document.path }))
 
-  /** The mythical history the history seam has read: epics, atomic commits, and the note sections. */
-  const historyItems = (section?: string): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    const out: Array<SearchItem> = []
+  /** The history cards the history seam has written, as their payloads. */
+  const heldHistory = (): ReadonlyArray<HistoryPayload> =>
+    cards().flatMap((card) => (card.kind === "history" ? [card.payload] : []))
+
+  /** The secrets cards the secrets seam has written, as name-and-host rows. */
+  const heldSecrets = (): ReadonlyArray<SecretRows> =>
+    cards().flatMap((card) => (card.kind === "secrets" ? [{ repo: card.payload.repo, secrets: card.payload.secrets }] : []))
+
+  /** The mythical history as read: epics, atomic commits, and the note sections. */
+  const historyItems = (payloads: ReadonlyArray<HistoryPayload>, section?: string): ReadonlyArray<Fact> => {
+    const out: Array<Fact> = []
     const note = (sha: string, owner: string, sections: Record<string, string | null> | null): void => {
       if (sections === null) return
       for (const [name, text] of Object.entries(sections)) {
         if (text === null || text.trim() === "" || (section !== undefined && section !== name)) continue
         // A note row's ref names its section beside the sha, so the epic and its notes stay distinct rows.
-        out.push(withActions(entries, { kind: "history", ref: `${sha}#${name}`, title: `${name}: ${firstLine(text)}`, subtitle: `note · ${owner}` }))
+        out.push({ kind: "history", ref: `${sha}#${name}`, title: `${name}: ${firstLine(text)}`, subtitle: `note · ${owner}` })
       }
     }
-    for (const card of cards()) {
-      if (card.kind !== "history" || card.payload.mythical.state !== "present") continue
-      for (const epic of card.payload.mythical.epics) {
+    for (const payload of payloads) {
+      if (payload.mythical.state !== "present") continue
+      for (const epic of payload.mythical.epics) {
         if (section === undefined) {
-          out.push(withActions(entries, {
+          out.push({
             kind: "history",
             ref: epic.sha,
             title: epic.title,
             subtitle: epic.merge ? `epic · ${epic.commits.length} commit${epic.commits.length === 1 ? "" : "s"}` : "commit"
-          }))
+          })
         }
         note(epic.sha, epic.title, epic.note)
         for (const commit of epic.commits) {
-          if (section === undefined) out.push(withActions(entries, { kind: "history", ref: commit.sha, title: commit.title, subtitle: `commit · ${epic.title}` }))
+          if (section === undefined) out.push({ kind: "history", ref: commit.sha, title: commit.title, subtitle: `commit · ${epic.title}` })
           note(commit.sha, commit.title, commit.note)
         }
       }
@@ -183,43 +218,37 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   }
 
   /** Runs the runs controller has listed or opened. */
-  const runItems = (status?: string): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    const seen = new Map<string, SearchItem>()
+  const runItems = (status?: string): ReadonlyArray<Fact> => {
+    const seen = new Map<string, Fact>()
     for (const card of cards()) {
       if (card.kind === "run-list") {
         for (const run of card.payload.runs) {
           if (status !== undefined && run.status !== status) continue
-          seen.set(run.runId, withActions(entries, { kind: "run", ref: run.runId, title: run.runId, subtitle: `${run.flowId} · ${run.status}` }))
+          seen.set(run.runId, { kind: "run", ref: run.runId, title: run.runId, subtitle: `${run.flowId} · ${run.status}` })
         }
       }
       if (card.kind === "run-trace" && (status === undefined || card.payload.phase === status)) {
-        seen.set(card.payload.runId, withActions(entries, { kind: "run", ref: card.payload.runId, title: card.payload.runId, subtitle: `${card.payload.workflow} · ${card.payload.phase}` }))
+        seen.set(card.payload.runId, { kind: "run", ref: card.payload.runId, title: card.payload.runId, subtitle: `${card.payload.workflow} · ${card.payload.phase}` })
       }
     }
     return [...seen.values()]
   }
 
   /** Changes the change seam has read (the changes collection). */
-  const changeItems = (): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    return [...ctx.store.collections.changes.values()].map((row) =>
-      withActions(entries, {
-        kind: "change",
-        ref: row.changeId,
-        title: firstLine(row.description) || row.changeId,
-        subtitle: `${row.repoId} · ${row.commitId === null ? "no commit" : row.commitId.slice(0, 8)}`
-      })
-    )
-  }
+  const changeItems = (): ReadonlyArray<Fact> =>
+    [...ctx.store.collections.changes.values()].map((row) => ({
+      kind: "change" as const,
+      ref: row.changeId,
+      title: firstLine(row.description) || row.changeId,
+      subtitle: `${row.repoId} · ${row.commitId === null ? "no commit" : row.commitId.slice(0, 8)}`
+    }))
 
   /** Issues the issues seam has listed or opened. */
-  const issueItems = (is?: string): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    const seen = new Map<string, SearchItem>()
+  const issueItems = (is?: string): ReadonlyArray<Fact> => {
+    const seen = new Map<string, Fact>()
     const add = (number: number, title: string, state: string, repo: string): void => {
       if (is !== undefined && state !== is) return
-      seen.set(`${repo}#${number}`, withActions(entries, { kind: "issue", ref: String(number), title: `#${number} ${title}`, subtitle: `${state} · ${repo}` }))
+      seen.set(`${repo}#${number}`, { kind: "issue", ref: String(number), title: `#${number} ${title}`, subtitle: `${state} · ${repo}` })
     }
     for (const card of cards()) {
       if (card.kind === "issue-list") for (const issue of card.payload.issues) add(issue.number, issue.title, issue.state, card.payload.repo)
@@ -229,55 +258,51 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   }
 
   /** Targets the target graph seam has listed (the targets cards). */
-  const targetItems = (): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    const seen = new Map<string, SearchItem>()
+  const targetItems = (): ReadonlyArray<Fact> => {
+    const seen = new Map<string, Fact>()
     for (const card of cards()) {
       if (card.kind !== "targets") continue
       for (const target of card.payload.targets) {
         const ref = `${card.payload.repoId} ${target.label}`
-        seen.set(ref, withActions(entries, { kind: "target", ref, title: target.label, subtitle: `${target.kinds.join(", ")} · ${card.payload.repoName}` }))
+        seen.set(ref, { kind: "target", ref, title: target.label, subtitle: `${target.kinds.join(", ")} · ${card.payload.repoName}` })
       }
     }
     return [...seen.values()]
   }
 
   /** Boxes the workspaces seam holds. */
-  const boxItems = (): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    const seen = new Map<string, SearchItem>()
+  const boxItems = (): ReadonlyArray<Fact> => {
+    const seen = new Map<string, Fact>()
     for (const row of ctx.store.collections.cloudWorkspaces.values()) {
-      seen.set(row.id, withActions(entries, { kind: "box", ref: row.id, title: row.name, subtitle: `${row.repoId} · ${row.status}` }))
+      seen.set(row.id, { kind: "box", ref: row.id, title: row.name, subtitle: `${row.repoId} · ${row.status}` })
     }
     for (const copy of ctx.store.collections.workingCopies.values()) {
       if (copy.kind !== "workspace") continue
       const id = copy.workspaceId ?? copy.id
       if (seen.has(id)) continue
-      seen.set(id, withActions(entries, { kind: "box", ref: id, title: copy.label, subtitle: `${copy.repoId}${copy.state === undefined ? "" : ` · ${copy.state}`}` }))
+      seen.set(id, { kind: "box", ref: id, title: copy.label, subtitle: `${copy.repoId}${copy.state === undefined ? "" : ` · ${copy.state}`}` })
     }
     return [...seen.values()]
   }
 
-  /** Secret NAMES the secrets seam has listed, with the hosts they bind to; no value exists on the wire. */
-  const secretItems = (): ReadonlyArray<SearchItem> => {
-    const entries = deps.registry().entries()
-    const seen = new Map<string, SearchItem>()
-    for (const card of cards()) {
-      if (card.kind !== "secrets") continue
-      for (const secret of card.payload.secrets) {
-        seen.set(`${card.payload.repo}:${secret.name}`, withActions(entries, {
+  /** Secret NAMES with the hosts they bind to; no value exists on the wire. */
+  const secretItems = (rows: ReadonlyArray<SecretRows>): ReadonlyArray<Fact> => {
+    const seen = new Map<string, Fact>()
+    for (const { repo, secrets } of rows) {
+      for (const secret of secrets) {
+        seen.set(`${repo}:${secret.name}`, {
           kind: "secret-name",
           ref: secret.name,
           title: secret.name,
-          subtitle: `${card.payload.repo}${secret.hosts.length === 0 ? "" : ` · ${secret.hosts.join(", ")}`}`
-        }))
+          subtitle: `${repo}${secret.hosts.length === 0 ? "" : ` · ${secret.hosts.join(", ")}`}`
+        })
       }
     }
     return [...seen.values()]
   }
 
   /** `:120`: the line in the newest file card, as one item whose open flow re-reads the file at that line. */
-  const lineItems = (parsed: ParsedQuery): ReadonlyArray<SearchItem> | string => {
+  const lineItems = (parsed: ParsedQuery): ReadonlyArray<Fact> | string => {
     const file = [...cards()].reverse().find((card): card is Extract<Card, { kind: "file" }> => card.kind === "file")
     if (file === undefined || parsed.line === undefined) return NO_FOCUSED_FILE
     const at = `${parsed.line.line}${parsed.line.column === undefined ? "" : `:${parsed.line.column}`}`
@@ -291,13 +316,15 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
     }]
   }
 
-  /** The items of one mode, or the refusal that stands in for an index that does not exist. */
-  const itemsOf = (mode: PaletteMode, parsed: Pick<ParsedQuery, "qualifiers">): ReadonlyArray<SearchItem> | string => {
+  /** The items of one mode, or the refusal that stands in for an index that does not exist; `live` is a flow door's fresh read, else the held cards. */
+  const itemsOf = (mode: PaletteMode, parsed: Pick<ParsedQuery, "qualifiers">, live: LiveIndexes = {}): ReadonlyArray<Fact> | string => {
     const qualifier = (key: string): string | undefined =>
       parsed.qualifiers.find((row) => row.key === key && !row.negated)?.value
+    const history = live.history ?? heldHistory()
+    const secrets = live.secrets ?? heldSecrets()
     switch (mode) {
       case "all":
-        return [...flowItems(), ...fileItems(), ...targetItems(), ...wikiItems(), ...historyItems(), ...runItems(), ...changeItems(), ...issueItems(), ...boxItems(), ...secretItems()]
+        return [...flowItems(), ...fileItems(), ...targetItems(), ...wikiItems(), ...historyItems(history), ...runItems(), ...changeItems(), ...issueItems(), ...boxItems(), ...secretItems(secrets)]
       case "path":
         return fileItems()
       case "flows":
@@ -307,7 +334,7 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
       case "wiki":
         return wikiItems()
       case "history":
-        return historyItems(qualifier("section"))
+        return historyItems(history, qualifier("section"))
       case "runs":
         return runItems(qualifier("status"))
       case "changes": {
@@ -321,7 +348,7 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
       case "boxes":
         return boxItems()
       case "secrets":
-        return secretItems()
+        return secretItems(secrets)
       case "symbols":
         return NO_SYMBOL_INDEX
       case "text":
@@ -337,10 +364,10 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   }
 
   /** The kinds §4 hides from a signed-out visitor, cut from a bare answer. */
-  const scoped = (items: ReadonlyArray<SearchItem>, signedOut: boolean): ReadonlyArray<SearchItem> =>
+  const scoped = (items: ReadonlyArray<Fact>, signedOut: boolean): ReadonlyArray<Fact> =>
     signedOut ? items.filter((item) => item.kind !== "box" && item.kind !== "secret-name" && item.kind !== "person") : items
 
-  const rank = (items: ReadonlyArray<SearchItem>, query: string): ReadonlyArray<ResultGroup> => {
+  const rank = (items: ReadonlyArray<Fact>, query: string): ReadonlyArray<ResultGroup<Fact>> => {
     const session = ctx.store.session()
     return rankItems(items, query, {
       recents: session.paletteRecents ?? [],
@@ -375,57 +402,51 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
     const kept = parsed.mode === "all" && parsed.query === ""
       ? groups.filter((group) => group.label === "Recommended" || group.label === "Recent")
       : groups
-    return { parsed, groups: kept.map((group) => ({ label: group.label, items: group.items.slice(0, PALETTE_GROUP_CAP) })), flow }
+    // Actions exist only for the rows the overlay shows: the registry walk is per shown row, never per indexed fact.
+    const entries = deps.registry().entries()
+    return {
+      parsed,
+      groups: kept.map((group) => ({
+        label: group.label,
+        items: group.items.slice(0, PALETTE_GROUP_CAP).map((ranked) => ({ ...ranked, item: withActions(entries, ranked.item) }))
+      })),
+      flow
+    }
   }
 
   /* ---- the slash and agent door: the flows ---- */
 
-  /** The live reads a flow refreshes before it answers, where the mode has one. */
-  const refresh = async (mode: PaletteMode, args: SearchArgs): Promise<string | undefined> => {
+  /**
+   * The live reads a flow door takes before it answers, where the mode has
+   * one. Each is the reader's own answer, indexed in place: a search embeds
+   * one card (§6), so the secrets and history cards stay their own flows'.
+   * A history card already held is the index (the read is the expensive
+   * mirror walk); the environment document is always re-read, as
+   * secrets.list re-reads it.
+   */
+  const liveIndexes = async (mode: PaletteMode, args: SearchArgs): Promise<LiveIndexes | string> => {
     if (mode === "boxes" && deps.refreshWorkspaces !== undefined) {
       const refused = await deps.refreshWorkspaces()
-      return typeof refused === "string" ? refused : undefined
+      return typeof refused === "string" ? refused : {}
     }
-    if (mode === "secrets" || mode === "history" || mode === "targets") {
-      const target = resolveTargetRepo(ctx.store, args.repo)
-      if ("error" in target) return mode === "targets" ? undefined : target.error
-      const { repo } = target
-      if (mode === "secrets") {
-        const config = await readEnvironment(ctx, repo)
-        if (typeof config === "string") return config
-        ctx.dispatch({
-          type: "card.upsert",
-          actor: ctx.actor(),
-          card: {
-            id: `secrets-${repo}`,
-            kind: "secrets",
-            title: `Secrets · ${repo}`,
-            status: "active",
-            createdAt: ctx.store.collections.cards.get(`secrets-${repo}`)?.createdAt ?? now(),
-            ordinal: ctx.store.collections.cards.get(`secrets-${repo}`)?.ordinal ?? ctx.nextOrdinal(),
-            payload: {
-              repo,
-              scope: "repository",
-              secrets: config.secrets.map((secret) => ({ name: secret.name, hosts: [...secret.hosts], matchHeaders: [...secret.matchHeaders], updatedAt: secret.updatedAt }))
-            }
-          }
-        })
-      }
-      if (mode === "history" && ctx.store.collections.cards.get(`history-${repo}`) === undefined) {
-        const payload = await readHistory(ctx, repo)
-        if ("error" in payload) return payload.error
-        ctx.dispatch({
-          type: "card.upsert",
-          actor: ctx.actor(),
-          card: { id: `history-${repo}`, kind: "history", title: `Mythical history · ${repo}`, status: "active", createdAt: now(), ordinal: ctx.nextOrdinal(), payload }
-        })
-      }
+    if (mode !== "secrets" && mode !== "history") return {}
+    const target = resolveTargetRepo(ctx.store, args.repo)
+    if ("error" in target) return target.error
+    const { repo } = target
+    if (mode === "secrets") {
+      const config = await readEnvironment(ctx, repo)
+      if (typeof config === "string") return config
+      return { secrets: [{ repo, secrets: config.secrets }] }
     }
-    return undefined
+    const held = ctx.store.collections.cards.get(`history-${repo}`)
+    if (held?.kind === "history") return { history: [held.payload] }
+    const payload = await readHistory(ctx, repo)
+    if ("error" in payload) return payload.error
+    return { history: [payload] }
   }
 
   /** The factory projection's declared flows, as flow items that `flow.run` starts (targets: `//` reads the repository's own catalog). */
-  const projectionFlows = async (args: SearchArgs): Promise<ReadonlyArray<SearchItem> | string> => {
+  const projectionFlows = async (args: SearchArgs): Promise<ReadonlyArray<Fact> | string> => {
     const target = resolveTargetRepo(ctx.store, args.repo)
     if ("error" in target) return []
     const read = await readFactoryProjection(ctx, target.repo)
@@ -443,20 +464,22 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   }
 
   const search: SearchSeam["search"] = async (flow, mode, args) => {
-    const refused = await refresh(mode, args)
-    if (refused !== undefined) return refused
+    const live = await liveIndexes(mode, args)
+    if (typeof live === "string") return live
     // The flow's query reads in its own mode's grammar, so `section:tried` is a qualifier for search.history too.
     const parsed = parseQuery(`${prefixRow(mode).prefix}${args.query}`)
     const query = parsed.query
-    const base = itemsOf(mode, parsed)
+    const base = itemsOf(mode, parsed, live)
     if (typeof base === "string") return base
     const extra = mode === "targets" ? await projectionFlows(args) : []
     if (typeof extra === "string") return extra
-    const snapshot = deps.registry().state()
+    const { entries, state } = deps.registry()
+    const snapshot = state()
     const kinds = args.kinds === undefined ? undefined : new Set(args.kinds)
     const pool = scoped([...base, ...extra], snapshot.signedOut).filter((item) => kinds === undefined || kinds.has(item.kind))
     const limit = args.limit ?? SEARCH_DEFAULT_LIMIT
-    const items = rank(pool, query).flatMap((group) => group.items.map((row) => row.item)).slice(0, limit)
+    const registered = entries()
+    const items = rank(pool, query).flatMap((group) => group.items.map((row) => row.item)).slice(0, limit).map((fact) => withActions(registered, fact))
     const value = itemsValue(flow, args.query, items)
     if (ctx.actor() === "smithers") return { value }
     const id = `search-${flow}`

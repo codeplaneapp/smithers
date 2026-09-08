@@ -387,8 +387,61 @@ describe("§6 the flow doors", () => {
     const outcome = await controller.commands.run("search.secrets", "npm")
     expect(outcome.status).toBe("executed")
     const items = resultsCard(store, "search.secrets").payload.items
-    expect(items).toEqual([expect.objectContaining({ kind: "secret-name", ref: "NPM_TOKEN" })])
+    expect(items).toEqual([expect.objectContaining({ kind: "secret-name", ref: "NPM_TOKEN", subtitle: `${REPO} · registry.npmjs.org` })])
     expect(JSON.stringify(items)).not.toContain("authorization")
+    // A search embeds ONE card (§6): the secrets card is secrets.list's, and the search never wrote it.
+    expect(store.collections.cards.get(`secrets-${REPO}`)).toBeUndefined()
+    expect([...store.collections.cards.values()].map((row) => row.kind)).toEqual(["search-results"])
+  })
+
+  test("search.history with no history card reads the mirror itself, indexes the read, and writes no history card", async () => {
+    const seen: Array<string> = []
+    const change = (changeId: string, commitId: string, description: string, parents: ReadonlyArray<string>) => ({
+      change_id: changeId,
+      commit_id: commitId,
+      description,
+      author_name: "will",
+      author_email: "will@example.test",
+      timestamp: "2026-09-07T00:00:00Z",
+      has_conflict: false,
+      is_empty: false,
+      parent_change_ids: parents
+    })
+    const ref = (name: string, sha: string) => ({ ref: name, object: { sha, type: "commit" } })
+    const E1 = "e100000000000000000000000000000000000001"
+    const A1 = "a100000000000000000000000000000000000001"
+    const R = "0000000000000000000000000000000000000000"
+    const { store, controller } = await ready(
+      backend({
+        "/api/repos/will/flows": json(200, { default_bookmark: "main" }),
+        "/api/repos/will/flows/git/refs": json(200, [ref("refs/heads/main", E1), ref("refs/heads/mythical", E1)]),
+        "/api/repos/will/flows/changes": json(200, {
+          items: [
+            change("c-e1", E1, "01 · The workspace declares its toolchain", ["c-r", "c-a1"]),
+            change("c-a1", A1, "feat(workspace): WORKSPACE.ts", ["c-r"]),
+            change("c-r", R, "root", [])
+          ],
+          next_cursor: ""
+        })
+      }, seen)
+    )
+    const outcome = await controller.commands.run("search.history", "workspace")
+    expect(outcome.status).toBe("executed")
+    expect(seen).toContain("/api/repos/will/flows/git/refs")
+    const items = resultsCard(store, "search.history").payload.items
+    expect(items.map((item) => [item.ref, item.title])).toEqual([
+      [E1, "01 · The workspace declares its toolchain"],
+      [A1, "feat(workspace): WORKSPACE.ts"]
+    ])
+    // The read is the index, never a second card: history.show owns `history-<repo>`.
+    expect(store.collections.cards.get(`history-${REPO}`)).toBeUndefined()
+    expect([...store.collections.cards.values()].map((row) => row.kind)).toEqual(["search-results"])
+    // A history card already held is the index and the mirror is not walked again.
+    await seed(store)
+    const reads = seen.length
+    await controller.commands.run("search.history", "redaction")
+    expect(seen.length).toBe(reads)
+    expect(resultsCard(store, "search.history").payload.items.map((item) => item.ref)).toEqual(["def5678"])
   })
 
   test("the modes with no index refuse through every door with the exact reason", async () => {

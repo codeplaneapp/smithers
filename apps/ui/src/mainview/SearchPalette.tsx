@@ -137,6 +137,8 @@ export const paletteKey = (input: PaletteKeyInput): PaletteDecision => {
       const action = actionForKey(chosen.item, meta ? "primary" : "open")
       return action === undefined ? { kind: "none" } : { kind: "run-action", action, item: chosen.item }
     }
+    // The `/` mode is the slash tree unchanged (§1, §3): with no slash row to choose, Enter is the composer's own send.
+    if (answer.parsed.mode === "flows") return { kind: "none" }
     // No row to choose: the mode's flow runs with the query (signed out, that is where "Sign in to run" lands).
     if (answer.flow !== null) {
       return { kind: "run-mode-flow", flow: answer.flow, rest: draft.trimStart().slice(answer.parsed.prefix.length).trim() }

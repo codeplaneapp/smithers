@@ -1072,8 +1072,23 @@ export function Composer({
         slashBranch
       })
     )
-    // Enter belongs to the overlay while it is open: a declined Enter must not fall through to the composer's send.
-    if (performed || event.key === "Enter") event.preventDefault()
+    if (performed) {
+      event.preventDefault()
+      return
+    }
+    if (event.key !== "Enter") return
+    /*
+     * A declined Enter in the `/` mode is a slash command with its arguments
+     * (`/implement fix it`): the slash tree never owned it, so it reaches
+     * onSubmit (chat.send) as it did before the overlay existed, and the
+     * overlay closes behind it. In every other mode Enter belongs to the
+     * overlay while it is open and never falls through to the send.
+     */
+    if (answer.parsed.mode === "flows") {
+      controller.closePalette(draft)
+      return
+    }
+    event.preventDefault()
   }
 
   return (
