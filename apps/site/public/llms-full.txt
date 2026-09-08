@@ -686,7 +686,7 @@ Factory lists configuration files you can open and says when a file or generated
 # Inspect the Dispatcher
 https://smithers.sh/docs/app/dispatcher/
 
-Use **Dispatcher** to see which events are meant to start which flows for a repository.
+Use **Dispatcher** to inspect a repository's declared rules and the live triggers returned by its box.
 
 ## Read the declared rules
 
@@ -708,11 +708,19 @@ For a particular event, inspect the resulting [run](/docs/app/runs/) to determin
 
 ## Register a rule
 
-With access to the repository's box, select **Register a rule**. Fill in the trigger form and review its flow, schedule or webhook details, and any requested permission before submitting it.
+**Register a rule** leads to sign-in when signed out. Once signed in, it always refuses registration, even when the box's trigger service is available. For `owner/repo`, it returns:
 
-Signed out, **Register a rule** leads to sign-in. Registration also depends on the trigger service being available on your box. If the app reports that the service is unavailable, the rule has not been registered.
+> A rule cannot be registered on owner/repo from here yet: declare it in .smithers/FACTORY.ts, or register it with the smthrs CLI on the box.
 
-For the configuration fields and supported trigger sources, see the [trigger reference](/docs/reference/triggers/). For operating triggers from a terminal, see [Triggers](/docs/guides/triggers/).
+To declare a rule, add an entry to the `on` table in `.smithers/FACTORY.ts`, such as `"schedule:0 9 * * 1-5": { flow: "lint", description: "Weekday lint" }`. Dispatcher reads declarations from the repository's `.smithers/factory.json` projection. A declaration does not register a live trigger.
+
+To register a live cron schedule, run the CLI in the project on the box. Use `smthrs flow list` to choose an existing flow id, then register it:
+
+```bash
+smthrs triggers register nightly-lint --flow lint --cron "0 9 * * 1-5" --timezone America/New_York
+```
+
+Keep `smthrs serve` or `smthrs triggers serve` running against that project for schedules to fire. See [Triggers](/docs/guides/triggers/) for registration fields, scheduler operation, and the limits of app access.
 
 ---
 

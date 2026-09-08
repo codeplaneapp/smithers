@@ -1,6 +1,16 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { docsText } from "./docs-text.mjs"
+
+test("Dispatcher documents the registration refusal and supported alternatives until registration crosses the relay", () => {
+  const source = readFileSync(new URL("../src/content/docs/docs/app/dispatcher.mdx", import.meta.url), "utf8")
+  assert.doesNotMatch(source, /\b(?:trigger|registration) form\b/i)
+  assert.ok(source.includes("A rule cannot be registered on owner/repo from here yet: declare it in .smithers/FACTORY.ts, or register it with the smthrs CLI on the box."))
+  assert.ok(source.includes('"schedule:0 9 * * 1-5"'))
+  assert.ok(source.includes('smthrs triggers register nightly-lint --flow lint --cron "0 9 * * 1-5"'))
+  assert.ok(source.includes("/docs/guides/triggers/"))
+})
 
 test("preserves example imports while removing MDX imports", () => {
   const source = 'import { Code } from "@astrojs/starlight/components"\n\n```ts title="main.ts"\nimport { Action } from "@smthrs/flow"\nconst value = 1\n```'
