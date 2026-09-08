@@ -27,7 +27,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
  * @category models
  * @since 0.1.0
  */
-export const ExecErrorCode = Schema.Literals(["timeout", "spawn_error"])
+export const ExecErrorCode = Schema.Literals(["timeout", "spawn_error", "capture_overflow"])
 
 /**
  * Failure codes a buffered execution can report.
@@ -42,7 +42,7 @@ export type ExecErrorCode = typeof ExecErrorCode.Type
  *
  * A non-zero exit is a successful {@link ExecResult}, not a failure; this
  * error is reserved for a command that could not start or was cut off by its
- * timeout.
+ * timeout, or whose captured output exceeded a refusing capture bound.
  *
  * @category errors
  * @since 0.1.0
@@ -76,7 +76,7 @@ export interface ExecResult {
  */
 export interface ExecOptions {
   readonly cwd?: string | undefined
-  readonly env?: Record<string, string> | undefined
+  readonly env?: Readonly<Record<string, string>> | undefined
   readonly timeoutMs?: number | undefined
   /**
    * The program's arguments. Present means an argv, absent means a command
@@ -101,6 +101,8 @@ export interface ExecOptions {
    * byte a tool produced (`rg --files`, `git worktree list`).
    */
   readonly maxCaptureBytes?: number | undefined
+  /** Defaults to `tail`; `refuse` fails if either stream exceeds the bound. */
+  readonly overflow?: "tail" | "refuse" | undefined
 }
 
 /** One captured stream: the text kept, and the bytes dropped to keep it bounded. */
@@ -141,7 +143,8 @@ const decodeTail = (state: Tail): Capture => {
 
 const boundedTail = <E>(
   stream: Stream.Stream<Uint8Array, E>,
-  maxBytes: number
+  maxBytes: number,
+  overflow: "tail" | "refuse" | undefined
 ): Effect.Effect<Capture, E> =>
   Stream.runFold(
     stream,
@@ -165,15 +168,20 @@ const boundedTail = <E>(
       }
       return state
     }
-  ).pipe(Effect.map(decodeTail))
+  ).pipe(Effect.map((state) =>
+    overflow === "refuse" && state.dropped > 0
+      ? { text: "", droppedBytes: state.dropped }
+      : decodeTail(state)
+  ))
 
 const capture = <E>(
   stream: Stream.Stream<Uint8Array, E>,
-  maxBytes: number | undefined
+  maxBytes: number | undefined,
+  overflow: "tail" | "refuse" | undefined
 ): Effect.Effect<Capture, E> =>
   maxBytes === undefined
     ? Effect.map(Stream.mkString(Stream.decodeText(stream)), (text) => ({ text, droppedBytes: 0 }))
-    : boundedTail(stream, maxBytes)
+    : boundedTail(stream, maxBytes, overflow)
 
 const unbounded = (
   command: string,
@@ -200,12 +208,29 @@ const unbounded = (
     // for exit first would deadlock on any output larger than the buffer.
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
-        capture(handle.stdout, options.maxCaptureBytes),
-        capture(handle.stderr, options.maxCaptureBytes),
+        capture(handle.stdout, options.maxCaptureBytes, options.overflow),
+        capture(handle.stderr, options.maxCaptureBytes, options.overflow),
         handle.exitCode
       ],
       { concurrency: "unbounded" }
     )
+    if (options.overflow === "refuse") {
+      const overflowed = [
+        stdout.droppedBytes > 0 ? "stdout" : undefined,
+        stderr.droppedBytes > 0 ? "stderr" : undefined
+      ]
+        .filter((stream): stream is string => stream !== undefined)
+      if (overflowed.length > 0) {
+        return yield* Effect.fail(
+          new ExecError({
+            code: "capture_overflow",
+            message: `${command} ${
+              overflowed.join(" and ")
+            } exceeded the ${options.maxCaptureBytes}-byte capture cap; refusing partial output`
+          })
+        )
+      }
+    }
     return {
       stdout: stdout.text,
       stderr: stderr.text,

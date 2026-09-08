@@ -54,5 +54,15 @@ export type Code = typeof Code.Type
 export class StdError extends Schema.TaggedError<StdError>()("flows/std/StdError", {
   code: Code,
   message: Schema.String,
-  path: Schema.optional(Schema.String)
+  path: Schema.optional(Schema.String),
+  /** Language-server request that failed. */
+  method: Schema.optional(Schema.String),
+  /** JSON-RPC diagnostics, bounded by the transport's maximum frame size. */
+  rpcError: Schema.optional(Schema.Struct({
+    code: Schema.Number,
+    message: Schema.String,
+    data: Schema.optional(Schema.Unknown)
+  })),
+  /** At most 64 KiB of the language server's most recent stderr. */
+  stderr: Schema.optional(Schema.String)
 }) {}

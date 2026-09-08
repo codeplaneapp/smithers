@@ -1,3 +1,4 @@
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Sink, Stream } from "effect"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -360,5 +361,116 @@ describe("NodeLanguageServer", () => {
       message: expect.stringContaining("512")
     })
     expect(result.completed).toHaveLength(512)
+  })
+})
+
+const sentinelServer = String.raw`
+let input = Buffer.alloc(0)
+process.stdin.on("data", chunk => {
+  input = Buffer.concat([input, chunk])
+  for (;;) {
+    const end = input.indexOf("\r\n\r\n")
+    if (end < 0) return
+    const length = Number(/Content-Length: (\d+)/i.exec(input.subarray(0, end).toString())[1])
+    if (input.length < end + 4 + length) return
+    const request = JSON.parse(input.subarray(end + 4, end + 4 + length).toString())
+    input = input.subarray(end + 4 + length)
+    if (request.id === undefined) continue
+    const result = request.method === "initialize" ? { capabilities: {} } : {
+      sentinel: process.env.SMITHERS_LSP_DUMMY_SECRET ?? null
+    }
+    const body = JSON.stringify({ jsonrpc: "2.0", id: request.id, result })
+    process.stdout.write("Content-Length: " + Buffer.byteLength(body) + "\r\n\r\n" + body)
+  }
+})
+`
+
+describe("NodeLanguageServer diagnostics and environment", () => {
+  for (const declared of [false, true]) {
+    it(`filters a real child's ambient sentinel with declared=${declared}`, async () => {
+      const previous = process.env["SMITHERS_LSP_DUMMY_SECRET"]
+      process.env["SMITHERS_LSP_DUMMY_SECRET"] = "ambient-dummy"
+      try {
+        const result = await Effect.runPromise(
+          Effect.scoped(Effect.gen(function*() {
+            const server = yield* NodeLanguageServer.make({
+              command: process.execPath,
+              args: ["-e", sentinelServer],
+              cwd: process.cwd(),
+              environment: declared ? { SMITHERS_LSP_DUMMY_SECRET: "declared-dummy" } : undefined
+            })
+            return yield* server.hover({ path: "/workspace/a.ts", line: 0, character: 0 })
+          })).pipe(Effect.provide(NodeServices.layer))
+        )
+        expect(result).toEqual({ sentinel: declared ? "declared-dummy" : null })
+      } finally {
+        if (previous === undefined) delete process.env["SMITHERS_LSP_DUMMY_SECRET"]
+        else process.env["SMITHERS_LSP_DUMMY_SECRET"] = previous
+      }
+    })
+  }
+
+  it("preserves the request method and JSON-RPC error code, message and data", async () => {
+    const rpcError = { code: -32602, message: "Invalid hover position", data: { parameter: "position" } }
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const spawner = scriptedSpawner((request, output) =>
+        respond(
+          output,
+          request.method === "initialize"
+            ? { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } }
+            : { jsonrpc: "2.0", id: request.id, error: rpcError }
+        )
+      )
+      const server = yield* NodeLanguageServer.make({ command: "language-server", cwd: "/workspace" })
+        .pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      return yield* Effect.flip(server.hover({ path: "/workspace/a.ts", line: 0, character: 0 }))
+    })))
+    expect(result).toMatchObject({ code: "request_failed", method: "textDocument/hover", rpcError })
+    expect(result.message).toContain("Invalid hover position")
+  })
+
+  it("retains a bounded stderr tail when a real server exits during initialization", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(NodeLanguageServer.make({
+        command: process.execPath,
+        args: ["-e", "process.stderr.write('é'.repeat(100000) + 'configuration missing', () => process.exit(17))"],
+        cwd: process.cwd()
+      })).pipe(Effect.provide(NodeServices.layer), Effect.flip)
+    )
+    expect(result).toMatchObject({
+      code: "request_failed",
+      method: "initialize",
+      stderr: expect.stringContaining("configuration missing")
+    })
+    const stderr = result.stderr ?? ""
+    expect(Buffer.byteLength(stderr)).toBeLessThanOrEqual(64 * 1024)
+    expect(stderr).not.toContain("�")
+  })
+
+  it("attaches stderr to an outstanding request when the initialized server exits", async () => {
+    const script = sentinelServer.replace(
+      "const result =",
+      `
+      if (request.method === "textDocument/hover") {
+        process.stderr.write("hover configuration failed", () => process.exit(23))
+        return
+      }
+      const result =`
+    )
+    const result = await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const server = yield* NodeLanguageServer.make({
+          command: process.execPath,
+          args: ["-e", script],
+          cwd: process.cwd()
+        })
+        return yield* Effect.flip(server.hover({ path: "/workspace/a.ts", line: 0, character: 0 }))
+      })).pipe(Effect.provide(NodeServices.layer))
+    )
+    expect(result).toMatchObject({
+      code: "request_failed",
+      method: "textDocument/hover",
+      stderr: "hover configuration failed"
+    })
   })
 })

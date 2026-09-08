@@ -82,7 +82,7 @@ The single typed failure every handler uses.
 | Export     | Type                                    | Meaning                                                  |
 | ---------- | --------------------------------------- | -------------------------------------------------------- |
 | `Code`     | `Schema.Literals` and the matching type | The closed list of failure codes.                        |
-| `StdError` | `Schema.TaggedError` class              | `{ code, message, path? }`, tagged `flows/std/StdError`. |
+| `StdError` | `Schema.TaggedError` class              | `{ code, message, path?, method?, rpcError?, stderr? }`, tagged `flows/std/StdError`. |
 
 ```ts
 import * as StdError from "@smthrs/std/StdError"
@@ -159,12 +159,14 @@ The peer that drives the `rg` executable through the permission-aware spawner.
 | Export              | Type                                                                              | Meaning                                                            |
 | ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `MAX_CAPTURE_BYTES` | `67_108_864`                                                                      | Bytes captured from either `rg` stream before the call is refused. |
-| `make`              | `(services: Context<FileSystem \| Path \| ChildProcessSpawner>) => Search.Search` |                                                                    |
+| `make`              | `(services: Context<FileSystem \| Path \| ChildProcessSpawner>, environment?: Readonly<Record<string, string>>) => Search.Search` |                                                                    |
 | `layer`             | `Layer<Search.Search, never, FileSystem \| Path \| ChildProcessSpawner>`          |                                                                    |
 
 An overflow is `command_failed` rather than a truncation, because a partial
 ripgrep stream could make this peer disagree with the portable one. A failure to
-start `rg` is `provider_unavailable`.
+start `rg` is `provider_unavailable`. The default layer uses the host environment
+allowlist. `make` accepts explicit environment declarations as its second
+argument; those names override the allowlist.
 
 ## SearchContract
 
@@ -291,6 +293,12 @@ JSON-RPC on ordinary stdio pipes.
 `make` sends `initialize` with `cwd` as the root URI and then `initialized`, so
 the service is ready when it resolves. `timeoutMs` defaults to 30,000 and bounds
 every request and every write. A frame body may be 8 MiB and its headers 8 KiB.
+The child receives the host environment allowlist plus `Config.environment`.
+Request failures include `method`. JSON-RPC refusals retain `rpcError` with the
+server's numeric `code`, `message`, and optional `data`, bounded by the 8 MiB
+frame limit. Failures attach the latest stderr tail when present, capturing at
+most 64 KiB. On stdout closure or process exit, draining stderr gets a bounded
+100 ms grace before pending requests fail.
 
 ## ExaWebSearch
 

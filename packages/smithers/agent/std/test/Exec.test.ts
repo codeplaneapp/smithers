@@ -110,3 +110,28 @@ describe.skipIf(process.platform === "win32")("Exec capture", () => {
       expect(result.stderrDroppedBytes).toBe(12)
     }).pipe(Effect.provide(host)), 30_000)
 })
+
+describe("Exec refuses partial capture", () => {
+  for (const stream of ["stdout", "stderr"] as const) {
+    it.live(`refuses overflowing ${stream}`, () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(Exec.exec(process.execPath, {
+          args: ["-e", `process.${stream}.write('abcde')`],
+          maxCaptureBytes: 4,
+          overflow: "refuse"
+        }))
+        expect(error.code).toBe("capture_overflow")
+        expect(error.message).toContain(stream)
+      }).pipe(Effect.provide(host)))
+  }
+
+  it.live("accepts exactly the bound in both streams", () =>
+    Effect.gen(function*() {
+      const result = yield* Exec.exec(process.execPath, {
+        args: ["-e", "process.stdout.write('éé'); process.stderr.write('abcd')"],
+        maxCaptureBytes: 4,
+        overflow: "refuse"
+      })
+      expect(result).toMatchObject({ stdout: "éé", stderr: "abcd", stdoutDroppedBytes: 0, stderrDroppedBytes: 0 })
+    }).pipe(Effect.provide(host)))
+})

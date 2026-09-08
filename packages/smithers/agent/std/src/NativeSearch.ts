@@ -3,11 +3,11 @@
  *
  * @since 0.1.0
  */
-import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
+import type * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import * as Path from "@smthrs/kernel/Path"
-import { type Context, Effect, Layer, Stream } from "effect"
+import { type Context, Effect, Layer } from "effect"
 import * as FileSystem from "effect/FileSystem"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as Exec from "./internal/Exec.ts"
 import * as Grouping from "./internal/Grouping.ts"
 import * as Contract from "./internal/SearchContract.ts"
 import { notice, truncateBytes } from "./internal/Text.ts"
@@ -34,80 +34,19 @@ interface RgResult {
   readonly exitCode: number
 }
 
-interface Capture {
-  readonly text: string
-  readonly overflowed: boolean
-}
-
-interface CaptureState {
-  chunks: Array<Uint8Array>
-  bytes: number
-  overflowed: boolean
-}
-
-const decodeCapture = (state: CaptureState): Capture => {
-  if (state.overflowed) return { text: "", overflowed: true }
-  const bytes = new Uint8Array(state.bytes)
-  let offset = 0
-  for (const chunk of state.chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return { text: new TextDecoder().decode(bytes), overflowed: false }
-}
-
-const capture = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<Capture, E> =>
-  Stream.runFold(
-    stream,
-    (): CaptureState => ({ chunks: [], bytes: 0, overflowed: false }),
-    (state, chunk) => {
-      if (state.overflowed || chunk.byteLength === 0) return state
-      if (state.bytes + chunk.byteLength > MAX_CAPTURE_BYTES) {
-        state.chunks = []
-        state.bytes = 0
-        state.overflowed = true
-        return state
-      }
-      state.chunks.push(chunk)
-      state.bytes += chunk.byteLength
-      return state
-    }
-  ).pipe(Effect.map(decodeCapture))
-
 const execute = (
   cwd: string,
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string>> | undefined
 ): Effect.Effect<RgResult, StdError.StdError, ChildProcessSpawner.ChildProcessSpawner> =>
-  Effect.gen(function*() {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const handle = yield* spawner.spawn(ChildProcess.make("rg", [...args], { cwd }))
-    const [stdout, stderr, exitCode] = yield* Effect.all([
-      capture(handle.stdout),
-      capture(handle.stderr),
-      handle.exitCode
-    ], { concurrency: "unbounded" })
-    const overflowed = [stdout.overflowed ? "stdout" : undefined, stderr.overflowed ? "stderr" : undefined]
-      .filter((stream): stream is string => stream !== undefined)
-    if (overflowed.length > 0) {
-      return yield* Effect.fail(
-        new StdError.StdError({
-          code: "command_failed",
-          message: `rg ${
-            overflowed.join(" and ")
-          } exceeded the ${MAX_CAPTURE_BYTES}-byte capture cap; the native search peer refuses partial output instead of returning an answer that could drift from the portable peer`
-        })
-      )
-    }
-    return { stdout: stdout.text, stderr: stderr.text, exitCode }
-  }).pipe(
-    Effect.scoped,
+  Exec.exec("rg", { args, cwd, env: environment, maxCaptureBytes: MAX_CAPTURE_BYTES, overflow: "refuse" }).pipe(
     Effect.mapError((error) =>
-      error instanceof StdError.StdError
-        ? error
-        : new StdError.StdError({
-          code: "provider_unavailable",
-          message: "The native ripgrep implementation could not start rg"
-        })
+      new StdError.StdError({
+        code: error.code === "capture_overflow" ? "command_failed" : "provider_unavailable",
+        message: error.code === "capture_overflow"
+          ? error.message
+          : "The native ripgrep implementation could not start rg"
+      })
     )
   )
 
@@ -208,7 +147,8 @@ const capMatches = (
 }
 
 const grep = (
-  input: Search.GrepInput
+  input: Search.GrepInput,
+  environment: Readonly<Record<string, string>> | undefined
 ): Effect.Effect<
   Search.GrepOutput,
   StdError.StdError,
@@ -269,7 +209,11 @@ const grep = (
     listingArgs.push("--", root.target)
 
     const [result, binaryResult, listingResult] = yield* Effect.all(
-      [execute(root.cwd, args), execute(root.cwd, binaryArgs), execute(root.cwd, listingArgs)],
+      [
+        execute(root.cwd, args, environment),
+        execute(root.cwd, binaryArgs, environment),
+        execute(root.cwd, listingArgs, environment)
+      ],
       { concurrency: "unbounded" }
     )
     for (const outcome of [result, binaryResult, listingResult]) {
@@ -368,7 +312,8 @@ const grep = (
   })
 
 const glob = (
-  input: Search.GlobInput
+  input: Search.GlobInput,
+  environment: Readonly<Record<string, string>> | undefined
 ): Effect.Effect<
   Search.GlobOutput,
   StdError.StdError,
@@ -383,7 +328,7 @@ const glob = (
     args.push("--glob", Contract.canonicalGlob(input.pattern))
     for (const glob of [...(input.hidden ? [] : hiddenGlobs), ...skipGlobs]) args.push("--glob", glob)
     args.push("--", root.target)
-    const result = yield* execute(root.cwd, args)
+    const result = yield* execute(root.cwd, args, environment)
     const rejected = rejection(result)
     if (rejected !== undefined) {
       return yield* Effect.fail(new StdError.StdError({ code: "invalid_pattern", message: rejected }))
@@ -408,16 +353,18 @@ const glob = (
 
 /**
  * Captures filesystem, path and process services in the native peer.
+ * Optional environment declarations overlay the host child-process allowlist.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const make = (
-  services: Context.Context<FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner>
+  services: Context.Context<FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner>,
+  environment?: Readonly<Record<string, string>>
 ): Search.Search =>
   Search.make({
-    grep: (input) => Effect.provide(grep(input), services),
-    glob: (input) => Effect.provide(glob(input), services)
+    grep: (input) => Effect.provide(grep(input, environment), services),
+    glob: (input) => Effect.provide(glob(input, environment), services)
   })
 
 /**

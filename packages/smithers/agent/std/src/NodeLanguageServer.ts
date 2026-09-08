@@ -11,8 +11,9 @@
  *
  * @since 0.1.0
  */
+import * as ChildProcessEnvironment from "@smthrs/kernel/ChildProcessEnvironment"
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import { Deferred, Effect, Layer, Queue, type Scope, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { pathToFileURL } from "node:url"
 import * as LanguageServer from "./LanguageServer.ts"
@@ -306,16 +307,43 @@ export const make = (
     const handle = yield* spawner.spawn(
       ChildProcess.make(config.command, config.args ?? [], {
         cwd: config.cwd,
-        ...(config.environment === undefined ? {} : { env: config.environment }),
+        env: ChildProcessEnvironment.make(process.env, config.environment),
+        extendEnv: false,
         stdin: { stream: Stream.fromQueue(input), endOnDone: false }
       })
     ).pipe(
-      Effect.mapError(() => failure("provider_unavailable", "Language server process could not be started"))
+      Effect.mapError((error) =>
+        failure("provider_unavailable", `Language server process could not be started: ${error.message}`)
+      )
     )
     const pending = new Map<number, Deferred.Deferred<unknown, StdError.StdError>>()
     const decoder = makeFrameDecoder()
     let nextId = 1
     let terminalError: StdError.StdError | undefined
+
+    // Keep draining stderr while requests run. Copy retained bytes so a small
+    // tail never holds a larger backing buffer alive.
+    const maximumStderrBytes = 64 * 1024
+    let stderrTail: Uint8Array = new Uint8Array(0)
+    const stderrFiber = yield* handle.stderr.pipe(
+      Stream.runForEach((chunk) =>
+        Effect.sync(() => {
+          stderrTail = chunk.byteLength >= maximumStderrBytes
+            ? chunk.slice(-maximumStderrBytes)
+            : concatenate(
+              stderrTail.slice(Math.max(0, stderrTail.byteLength + chunk.byteLength - maximumStderrBytes)),
+              chunk
+            )
+        })
+      ),
+      Effect.catch((cause) => Effect.logWarning("Language server stderr stream failed", cause)),
+      Effect.forkScoped({ startImmediately: true })
+    )
+    const stderr = (): string => {
+      let start = 0
+      while (start < stderrTail.byteLength && start < 3 && (stderrTail[start]! & 0b1100_0000) === 0b1000_0000) start++
+      return new TextDecoder().decode(stderrTail.subarray(start))
+    }
 
     const failPending = (error: StdError.StdError): Effect.Effect<void> =>
       Effect.flatMap(
@@ -335,13 +363,13 @@ export const make = (
     }
 
     const closeWith = (error: StdError.StdError): Effect.Effect<void> =>
-      Effect.flatMap(
-        Effect.sync(() => {
-          terminalError ??= error
-          return terminalError
-        }),
-        failPending
-      )
+      Effect.gen(function*() {
+        // stdout EOF and process exit can arrive before the last stderr chunk.
+        // A bounded grace also handles servers that close stdout but stay alive.
+        yield* Fiber.await(stderrFiber).pipe(Effect.timeoutOption(100))
+        terminalError ??= error
+        yield* failPending(terminalError)
+      })
 
     const receive = (value: unknown): Effect.Effect<void> => {
       const message = asMessage(value)
@@ -349,9 +377,28 @@ export const make = (
       const deferred = pending.get(message.id)
       if (deferred === undefined) return Effect.void
       pending.delete(message.id)
-      return message.error === undefined
-        ? Deferred.succeed(deferred, message.result)
-        : Deferred.fail(deferred, failure("request_failed", "Language server returned a JSON-RPC error"))
+      if (message.error === undefined) return Deferred.succeed(deferred, message.result)
+      const error = asMessage(message.error) as {
+        readonly code?: unknown
+        readonly message?: unknown
+        readonly data?: unknown
+      } | undefined
+      return Deferred.fail(
+        deferred,
+        new StdError.StdError({
+          code: "request_failed",
+          message: typeof error?.message === "string" ? error.message : "Language server returned a JSON-RPC error",
+          ...(typeof error?.code === "number" && typeof error.message === "string"
+            ? {
+              rpcError: {
+                code: error.code,
+                message: error.message,
+                ...(error.data === undefined ? {} : { data: error.data })
+              }
+            }
+            : {})
+        })
+      )
     }
 
     const receiveFrame = (event: FrameEvent): Effect.Effect<void> =>
@@ -377,15 +424,6 @@ export const make = (
         closeWith(failure("request_failed", `Language server process exited with code ${exitCode}`))
       ),
       Effect.catch(() => closeWith(failure("request_failed", "Language server process exited"))),
-      Effect.forkScoped({ startImmediately: true })
-    )
-
-    // Unconsumed stderr would eventually stall a chatty server on pipe
-    // backpressure; the diagnostics channel for failures is the JSON-RPC
-    // response, so stderr is drained and discarded.
-    yield* handle.stderr.pipe(
-      Stream.runDrain,
-      Effect.catch((cause) => Effect.logWarning("Language server stderr stream failed", cause)),
       Effect.forkScoped({ startImmediately: true })
     )
 
@@ -444,7 +482,14 @@ export const make = (
             })
           )
         )
-      })
+      }).pipe(Effect.mapError((error) =>
+        new StdError.StdError({
+          ...error,
+          method,
+          message: error.rpcError === undefined ? error.message : `${method}: ${error.message}`,
+          ...(stderrTail.byteLength === 0 ? {} : { stderr: stderr() })
+        })
+      ))
 
     const notify = (method: string, params: unknown): Effect.Effect<void, StdError.StdError> =>
       send({ jsonrpc: "2.0", method, params })
