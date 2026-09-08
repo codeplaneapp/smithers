@@ -136,11 +136,19 @@ receipt and a run that parked afterwards.
 carries no grant. An `Accepted` receipt with exit 3 means the run started and
 then parked on an in-run ask.
 
-**Fix.** For the first, approve the same payload you submitted. For the second,
-read the `control.approval.requested` event's `payload` member and approve
-that, then `smthrs run --resume <run-id>`. `smthrs status <run-id>` prints both
-commands, already quoted. See
-[Script the CLI](./guides/script-the-cli.md).
+**Fix.** A Plan approval records the grant without launching a run. Approve
+and then execute the same payload you submitted:
+
+```bash
+smthrs approvals approve "$approval" --scope run --json
+smthrs flow execute "$approval" --json
+```
+
+For an in-run Node approval, read the `control.approval.requested` event's
+`payload` member and approve that payload. This resumes the existing run;
+do not submit a new plan. If no executor took up the approved run, retry with
+`smthrs runs resume <run-id>`. `smthrs status <run-id>` prints the approval and
+resume commands, already quoted. See [Script the CLI](./guides/script-the-cli.md).
 
 ### A command against `--remote` prints the receipt and returns immediately
 

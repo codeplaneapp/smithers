@@ -130,6 +130,35 @@ export const createFlowCli = (runtime: Bridge.Runtime = {}) =>
     })
 
 /**
+ * Collects every page before cancelling, keeping one Control service for the
+ * whole operation and preserving the single-run cancellation keys and receipts.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const cancelAll = () =>
+  Effect.gen(function*() {
+    const control = yield* Control.Control
+    const ids: Array<string> = []
+    let cursor: string | undefined
+    do {
+      const page = yield* control.list({ _tag: "runs", ...(cursor === undefined ? {} : { cursor }) })
+      if (page._tag !== "runs") throw new Error("Expected durable runs")
+      ids.push(
+        ...page.items.filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).map((run) =>
+          run.runId
+        )
+      )
+      cursor = page.nextCursor
+    } while (cursor !== undefined)
+    const cancelled = yield* Effect.forEach(ids, (runId) =>
+      Effect.map(
+        control.cancel({ runId, idempotencyKey: `cli:cancel:${runId}` }),
+        (receipt) => ({ runId, receipt })
+      ))
+    return { cancelled }
+  })
+
+/**
  * Canonical commands for existing durable run records.
  * @category constructors
  * @since 1.0.0
@@ -249,33 +278,9 @@ export const createRunsCli = (runtime: Bridge.Runtime = {}) =>
       options,
       destructive: true,
       run: (c) =>
-        safe(c, async () => {
+        safe(c, () => {
           reconcileHistory(c.options, runtime)
-          const runs = await Bridge.query(
-            Effect.gen(function*() {
-              const control = yield* Control.Control
-              const ids: Array<string> = []
-              let cursor: string | undefined
-              do {
-                const page = yield* control.list({ _tag: "runs", ...(cursor === undefined ? {} : { cursor }) })
-                if (page._tag !== "runs") throw new Error("Expected durable runs")
-                ids.push(
-                  ...page.items.filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).map((run) =>
-                    run.runId
-                  )
-                )
-                cursor = page.nextCursor
-              } while (cursor !== undefined)
-              return ids
-            }),
-            c.options,
-            runtime
-          )
-          const cancelled = []
-          for (const runId of runs) {
-            cancelled.push({ runId, receipt: await Bridge.invoke(["cancel", runId], c.options, runtime) })
-          }
-          return { cancelled }
+          return Bridge.query(cancelAll(), c.options, runtime)
         })
     })
     .command("resume", {

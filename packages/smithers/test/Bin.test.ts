@@ -103,6 +103,62 @@ const inEmptyDirectory = <A>(use: (cwd: string) => A): A => {
   }
 }
 
+describe("bulk cancellation", processBudget, () => {
+  it.each([
+    { args: ["down"] },
+    { args: ["--json", "down"] },
+    { args: ["--json", "--quiet", "down"] },
+    { args: ["runs", "cancel-all", "--json"] }
+  ])("$args cancels an older live run after 101 newer terminal records", ({ args }) => {
+    inEmptyDirectory((cwd) => {
+      mkdirSync(join(cwd, ".flows"))
+      const environment = { SMITHERS_REMOTE: "", SMITHERS_AUDIENCE: "human" }
+      const initialized = runIn(cwd, ["--json", "ps"], environment)
+      expect(initialized.status, initialized.stderr).toBe(0)
+      const seeded = new DatabaseSync(join(cwd, ".flows", "control.db"))
+      try {
+        const insert = seeded.prepare(
+          "INSERT INTO flows_runs (run_id, status, created_at_ms, state_json) VALUES (?, ?, ?, ?)"
+        )
+        insert.run("older-live-run", "suspended", 1, JSON.stringify({
+          runId: "older-live-run", flowId: "demo/ship", status: "parked", createdAt: 1, updatedAt: 1
+        }))
+        // Control-launched runs sort before unindexed engine children,
+        // even when the child is older than all the terminal history.
+        const indexRun = seeded.prepare("INSERT INTO control_runs (run_id, created_seq) VALUES (?, ?)")
+        for (let index = 0; index < 101; index++) {
+          const runId = `terminal-${index}`
+          indexRun.run(runId, index + 1)
+          insert.run(runId, "completed", index + 2, JSON.stringify({
+            runId, flowId: "demo/ship", status: "completed", createdAt: index + 2, updatedAt: index + 2
+          }))
+        }
+      } finally {
+        seeded.close()
+      }
+      const firstPage = JSON.parse(runIn(cwd, ["--json", "ps"], environment).stdout)
+      expect(firstPage.items).toHaveLength(100)
+      expect(firstPage.items.every((run: { status: string }) => run.status === "completed")).toBe(true)
+      expect(firstPage.nextCursor).toBeDefined()
+      const result = runIn(cwd, args, environment)
+      expect(result.status, result.stderr).toBe(0)
+      expect(JSON.parse(result.stdout).cancelled).toEqual([{
+        runId: "older-live-run",
+        receipt: { _tag: "Terminal", status: "cancelled", runId: "older-live-run" }
+      }])
+      const database = new DatabaseSync(join(cwd, ".flows", "control.db"), { readOnly: true })
+      try {
+        expect(database.prepare("SELECT status FROM flows_runs WHERE run_id = ?").get("older-live-run"))
+          .toEqual({ status: "cancelled" })
+        expect(database.prepare("SELECT COUNT(*) AS count FROM flows_runs WHERE status = 'completed'").get())
+          .toEqual({ count: 101 })
+      } finally {
+        database.close()
+      }
+    })
+  })
+})
+
 describe("smithers executable", processBudget, () => {
   it("reports the package version", () => {
     const result = run(["--version"])

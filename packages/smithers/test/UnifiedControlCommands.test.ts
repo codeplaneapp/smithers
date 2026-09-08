@@ -15,6 +15,7 @@ const ports = vi.hoisted(() => ({
   query: vi.fn(),
   events: vi.fn(),
   list: vi.fn(),
+  cancel: vi.fn(),
   watch: vi.fn(),
   reconcile: vi.fn(),
   prepare: vi.fn(),
@@ -52,12 +53,16 @@ beforeEach(() => {
         return yield* effect.pipe(Effect.provideService(Control.Control, {
           ...base,
           list: ports.list,
+          cancel: ports.cancel,
           watch: ports.watch
         }))
       }).pipe(Effect.provide(Control.layerNoop))
     )
   )
   ports.list.mockReturnValue(Effect.succeed({ _tag: "runs", items: [] }))
+  ports.cancel.mockImplementation(({ runId }) =>
+    Effect.succeed({ _tag: "Accepted", receiptId: `cli:cancel:${runId}`, runId })
+  )
   ports.watch.mockReturnValue(Stream.empty)
   ports.events.mockImplementation(async function*() {})
   ports.prepare.mockReturnValue({ executionRoot: "/isolated-child" })
@@ -346,19 +351,30 @@ describe("unified control dispatch", () => {
       )
     const result = await invoke(["runs", "cancel-all", "--root", "/fixture", "--json"])
     expect(ports.list.mock.calls).toEqual([[{ _tag: "runs" }], [{ _tag: "runs", cursor: "more" }]])
-    expect(ports.invoke.mock.calls.map((call) => call[0])).toEqual(
-      ["accepted", "running", "parked", "approval"].map((id) => ["cancel", id])
+    expect(ports.cancel.mock.calls.map((call) => call[0])).toEqual(
+      ["accepted", "running", "parked", "approval"].map((runId) => ({ runId, idempotencyKey: `cli:cancel:${runId}` }))
     )
     expect(JSON.parse(result.stdout)).toEqual({
       cancelled: ["accepted", "running", "parked", "approval"].map((runId) => ({
         runId,
-        receipt: { receipt: `cancel ${runId}` }
+        receipt: { _tag: "Accepted", receiptId: `cli:cancel:${runId}`, runId }
       })),
       cta: {
         description: "Suggested command:",
         commands: [{ command: "smthrs runs list --root /fixture", description: "List the current durable run records" }]
       }
     })
+  })
+
+  it("acquires the runtime once for listing and all cancellations", async () => {
+    ports.list.mockReturnValue(Effect.succeed({ _tag: "runs", items: [row("first"), row("second")] }))
+    const result = await invoke(["runs", "cancel-all", "--root", "/fixture", "--json"])
+    expect(result.codes).toEqual([])
+    expect(ports.query).toHaveBeenCalledTimes(1)
+    expect(ports.invoke).not.toHaveBeenCalled()
+    expect(ports.cancel).toHaveBeenCalledTimes(2)
+    expect(ports.reconcile).toHaveBeenCalledExactlyOnceWith("/fixture")
+    expect(ports.prepare).not.toHaveBeenCalled()
   })
 
   it("refuses a malformed cancellation page before issuing any cancellation", async () => {
@@ -368,16 +384,20 @@ describe("unified control dispatch", () => {
     expect(result.codes).toEqual([1])
     expect(result.stdout).toContain("Expected durable runs")
     expect(ports.invoke).not.toHaveBeenCalled()
+    expect(ports.cancel).not.toHaveBeenCalled()
   })
 
   it("does not continue cancelling after a failed mutation", async () => {
     ports.list.mockReturnValue(Effect.succeed({ _tag: "runs", items: [row("first"), row("second"), row("third")] }))
-    ports.invoke.mockResolvedValueOnce({ receipt: "first" }).mockRejectedValueOnce(
-      new Error("cancellation unavailable")
-    )
+    ports.cancel.mockReturnValueOnce(Effect.succeed({ _tag: "Accepted", receiptId: "first", runId: "first" }))
+      .mockReturnValueOnce(Effect.fail(new Error("cancellation unavailable")))
     const result = await invoke(["runs", "cancel-all", "--json"])
     expect(result.codes).toEqual([1])
-    expect(ports.invoke.mock.calls.map((call) => call[0])).toEqual([["cancel", "first"], ["cancel", "second"]])
+    expect(ports.cancel.mock.calls.map((call) => call[0])).toEqual([
+      { runId: "first", idempotencyKey: "cli:cancel:first" },
+      { runId: "second", idempotencyKey: "cli:cancel:second" }
+    ])
+    expect(result.stdout).toContain("cancellation unavailable")
   })
 
   it("resumes locally inside the reconciled child execution root", async () => {

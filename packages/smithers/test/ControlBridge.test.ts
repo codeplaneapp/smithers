@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as Bridge from "../src/cli/ControlBridge.ts"
+import { createRunsCli } from "../src/cli/ControlCommands.ts"
 import * as Presentation from "../src/cli/Presentation.ts"
 import * as RunProgress from "../src/cli/RunProgress.ts"
 import * as CommandStatus from "../src/internal/CommandStatus.ts"
@@ -469,6 +470,33 @@ describe("control bridge bug report consent", () => {
 })
 
 describe("control bridge transport scope", () => {
+  it("keeps one acquired Control alive through bulk listing and cancellation", async () => {
+    service = {
+      ...service,
+      list: () => Effect.sync(() => {
+        lifecycle.push("list")
+        return {
+          _tag: "runs" as const,
+          items: ["first", "second"].map((runId) => ({
+            runId, flowId: "demo/ship", status: "parked" as const, createdAt: 1, updatedAt: 1
+          }))
+        }
+      }),
+      cancel: ({ runId, idempotencyKey }) => Effect.sync(() => {
+        lifecycle.push(`cancel:${runId}`)
+        return { _tag: "Accepted" as const, runId, receiptId: idempotencyKey }
+      })
+    }
+    const codes: Array<number> = []
+    await createRunsCli(runtime).serve(["cancel-all", "--remote", "https://control.invalid", "--json"], {
+      stdout: () => {},
+      exit: (code) => { codes.push(code) }
+    })
+    expect(codes).toEqual([])
+    expect(ports.control).toHaveBeenCalledTimes(1)
+    expect(lifecycle).toEqual(["control:open", "list", "cancel:first", "cancel:second", "control:close"])
+  })
+
   it.each([undefined, plain, silent])(
     "queries the selected service and closes it with policy %j",
     async (presentation) => {

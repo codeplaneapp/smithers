@@ -1176,19 +1176,10 @@ const output = Command.make("output", {
 const down = Command.make("down", {}, () =>
   Effect.gen(function*() {
     yield* guardGlobals
-    const control = yield* ControlService.Control
-    const listed = yield* control.list({ _tag: "runs" })
-    const runs = listed._tag === "runs"
-      ? listed.items.filter((item) =>
-        item.status !== "completed" && item.status !== "failed" && item.status !== "cancelled"
-      )
-      : []
-    const receipts = yield* Effect.forEach(runs, (item) =>
-      Effect.map(
-        control.cancel({ runId: item.runId, idempotencyKey: `cli:cancel:${item.runId}` }),
-        (receipt) => ({ runId: item.runId, receipt })
-      ))
-    yield* render({ cancelled: receipts })
+    // The unified bridge imports this command tree; load its helper only once
+    // the legacy handler runs so the two command surfaces can initialize.
+    const { cancelAll } = yield* Effect.promise(() => import("./cli/ControlCommands.ts"))
+    yield* render(yield* cancelAll())
   })).pipe(Command.withDescription(Verb.find("down")!.help))
 
 const init = Command.make("init", {
