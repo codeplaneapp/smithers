@@ -1,4 +1,5 @@
 import { Effect, Redacted } from "effect"
+import * as Headers from "effect/unstable/http/Headers"
 import { describe, expect, it } from "vitest"
 import * as Auth from "../src/Auth.ts"
 
@@ -14,6 +15,24 @@ describe("Auth", () => {
   it("signs OpenAI bearer headers", async () => {
     const auth = Auth.bearer(Redacted.make("openai-secret"))
     await expect(Effect.runPromise(auth.sign({}))).resolves.toEqual({ Authorization: "Bearer openai-secret" })
+  })
+
+  it("scopes custom credential names without losing the caller's policy", async () => {
+    const auth = Auth.apiKeyHeader("Ocp-Apim-Subscription-Key", Redacted.make("custom-secret"))
+    const names = await Effect.runPromise(
+      Effect.gen(function*() {
+        const inside = yield* Effect.gen(function*() {
+          const headers = yield* auth.sign({ "x-tenant": "tenant", "api-key": "another-secret" })
+          return Headers.redact(Headers.fromInput(headers), yield* Headers.CurrentRedactedNames)
+        }).pipe(Auth.withRedaction(auth))
+        const outside = yield* Headers.CurrentRedactedNames
+        return { inside, outside }
+      }).pipe(Effect.provideService(Headers.CurrentRedactedNames, ["x-tenant"]))
+    )
+    expect(String(names.inside["ocp-apim-subscription-key"])).toBe("<redacted>")
+    expect(String(names.inside["api-key"])).toBe("<redacted>")
+    expect(String(names.inside["x-tenant"])).toBe("<redacted>")
+    expect(names.outside).toEqual(["x-tenant"])
   })
 
   it("does not reveal credentials through the auth value", () => {

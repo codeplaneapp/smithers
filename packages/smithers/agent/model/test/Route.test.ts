@@ -1,5 +1,5 @@
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
-import { Effect, Layer, Redacted, Result, Schema, Stream } from "effect"
+import { Effect, Layer, Redacted, Result, Schema, Stream, Tracer } from "effect"
 import * as Sse from "effect/unstable/encoding/Sse"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -928,6 +928,225 @@ describe("Route.stream", () => {
   })
 })
 
+describe("Route.stream credential safety", () => {
+  // A successful call is enough to leak a key: the HTTP client writes every
+  // request header onto its client span, and its default redaction policy
+  // names `authorization` and `x-api-key` alone.
+  it.each([
+    ["api-key", "a name the shared matcher recognizes"],
+    ["chatgpt-account-id", "an account identity the ChatGPT route must not trace"],
+    ["Ocp-Apim-Subscription-Key", "a name only the auth itself knows is a credential"]
+  ])("keeps %s out of the request span (%s)", async (headerName) => {
+    const key = "traced-secret-value"
+    const spans: Array<Tracer.NativeSpan> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    const client = HttpClient.make((httpRequest) =>
+      Effect.succeed(HttpClientResponse.fromWeb(httpRequest, sseResponse(["[DONE]"])))
+    )
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const executor = yield* RequestExecutor.makeWith(RequestExecutor.fixed(client))
+          const model = yield* Route.toModel(
+            Route.make({
+              id: "traced",
+              protocol,
+              endpoint: endpoint({ url: "https://example.test" }),
+              auth: Auth.apiKeyHeader(headerName, Redacted.make(key)),
+              framing: Framing.sse,
+              headers: { "x-public": "yes" }
+            })
+          ).pipe(Effect.provideService(RequestExecutor.RequestExecutor, executor))
+          yield* model.stream(request).pipe(Stream.runDrain)
+        }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+      )
+    )
+
+    const attribute = (name: string): ReadonlyArray<unknown> =>
+      spans.map((span) => span.attributes.get(`http.request.header.${name}`)).filter((value) => value !== undefined)
+
+    expect(attribute(headerName.toLowerCase())).toEqual(["<redacted>"])
+    expect(attribute("x-public")).toEqual(["yes"])
+    expect(JSON.stringify(spans.map((span) => Array.from(span.attributes)))).not.toContain(key)
+  })
+  const credential = "sk-inline-stream-credential-0123456789"
+
+  // Every built-in family reports a mid-stream failure over HTTP 200, so the
+  // executor's status branch never sees it. A compatibility gateway that
+  // echoes the key it rejected is the whole exposure.
+  const encodedCredential = btoa(credential)
+
+  const rejection = (status = 200): Response => {
+    const body = JSON.stringify({
+      type: "error",
+      error: {
+        type: "authentication_error",
+        code: "invalid_api_key",
+        message: `Rejected key ${credential} ${encodedCredential}`
+      }
+    })
+    return new Response(status === 200 ? `data: ${body}\n\n` : body, {
+      status,
+      headers: { "content-type": status === 200 ? "text/event-stream" : "application/json" }
+    })
+  }
+
+  const drainOverHttp = <Body, Frame, Event, State>(
+    route: Route.Route<Body, Frame, Event, State>,
+    respond: () => Response
+  ): Promise<Model.ModelFailure> =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const model = yield* Model.Model
+          return yield* model.stream(request).pipe(Stream.runDrain, Effect.flip)
+        }).pipe(
+          Effect.provide(Route.layer(route)),
+          Effect.provide(RequestExecutor.layer),
+          Effect.provide(
+            kernelHttpClientLayer(
+              HttpClient.make((httpRequest) => Effect.succeed(HttpClientResponse.fromWeb(httpRequest, respond())))
+            )
+          ),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true)
+        )
+      )
+    )
+
+  it.each([200, 401])("redacts Anthropic credential echoes over HTTP %s", async (status) => {
+    const error = await drainOverHttp(
+      Result.getOrThrow(Route.anthropic({ apiKey: Redacted.make(credential) })),
+      () => rejection(status)
+    )
+
+    expect(error).toMatchObject({ code: "authentication" })
+    expect((error as ModelError).message).toContain("<redacted>")
+    expect(JSON.stringify(error)).not.toContain(credential)
+    expect(JSON.stringify(error)).not.toContain(encodedCredential)
+  })
+
+  it.each([200, 401])("redacts Responses credential echoes over HTTP %s", async (status) => {
+    const error = await drainOverHttp(
+      Result.getOrThrow(Route.openai({ apiKey: Redacted.make(credential) })),
+      () => rejection(status)
+    )
+
+    expect(error).toMatchObject({ code: "authentication" })
+    expect((error as ModelError).message).toContain("<redacted>")
+    expect(JSON.stringify(error)).not.toContain(credential)
+    expect(JSON.stringify(error)).not.toContain(encodedCredential)
+  })
+
+  it.each([200, 401])("redacts chat credential echoes over HTTP %s", async (status) => {
+    const error = await drainOverHttp(
+      Result.getOrThrow(
+        Route.openaiChatCompatible({
+          id: "compatible",
+          baseUrl: "https://provider.test/v1",
+          apiKey: Redacted.make(credential)
+        })
+      ),
+      () => rejection(status)
+    )
+
+    expect(error).toMatchObject({ code: "authentication" })
+    expect((error as ModelError).message).toContain("<redacted>")
+    expect(JSON.stringify(error)).not.toContain(credential)
+    expect(JSON.stringify(error)).not.toContain(encodedCredential)
+  })
+
+  it.each([200, 401])("redacts custom Auth header echoes over HTTP %s", async (status) => {
+    const route = Route.make({
+      ...Result.getOrThrow(Route.openai({ apiKey: Redacted.make(credential) })),
+      auth: Auth.apiKeyHeader("Ocp-Apim-Subscription-Key", Redacted.make(credential))
+    })
+    const error = await drainOverHttp(route, () => rejection(status))
+    expect(error).toMatchObject({ code: "authentication" })
+    expect((error as ModelError).message).toContain("<redacted>")
+    expect(JSON.stringify(error)).not.toContain(credential)
+    expect(JSON.stringify(error)).not.toContain(encodedCredential)
+  })
+
+  it("redacts every diagnostic field a protocol copies off the wire", async () => {
+    const leaked = new ModelError({
+      code: "provider_internal",
+      message: `rejected ${credential}`,
+      path: `choices[0].${credential} ${encodedCredential}`,
+      resetSource: `header ${credential} ${encodedCredential}`,
+      providerCode: `code-${credential} ${encodedCredential}`,
+      requestId: `req-${credential} ${encodedCredential}`
+    })
+    Object.defineProperties(leaked, {
+      body: { value: `{"error":"${credential}"}`, enumerable: false },
+      bodyTruncated: { value: false, enumerable: false }
+    })
+    const leaking = Protocol.make({
+      ...protocol,
+      stream: { ...protocol.stream, step: () => Effect.fail(leaked) }
+    })
+    const route = Route.make({
+      id: "leaking",
+      protocol: leaking,
+      endpoint: endpoint({ url: "https://example.test" }),
+      auth: Auth.bearer(Redacted.make(credential)),
+      framing: Framing.sse
+    })
+
+    const error = await drainError(route, executorOf(() => sseResponse(["{}"])))
+
+    expect(error).not.toBe(leaked)
+    expect(error).toMatchObject({
+      code: "provider_internal",
+      message: "rejected <redacted>",
+      path: "choices[0].<redacted> <redacted>",
+      resetSource: "header <redacted> <redacted>",
+      providerCode: "code-<redacted> <redacted>",
+      requestId: "req-<redacted> <redacted>"
+    })
+    expect((error as ModelError).body).toBe("{\"error\":\"<redacted>\"}")
+    expect((error as ModelError).bodyTruncated).toBe(false)
+    expect(JSON.stringify(error)).not.toContain(credential)
+    expect(JSON.stringify(error)).not.toContain(encodedCredential)
+    expect((error as ModelError).body).not.toContain(credential)
+  })
+
+  it("applies the HTTP diagnostic caps to an oversized protocol failure", async () => {
+    const oversized = new ModelError({
+      code: "provider_internal",
+      message: "m".repeat(20_000),
+      path: "p".repeat(20_000),
+      resetSource: "s".repeat(20_000),
+      providerCode: "c".repeat(20_000),
+      requestId: "r".repeat(20_000)
+    })
+    Object.defineProperty(oversized, "body", { value: "b".repeat(20_000), enumerable: false })
+    const verbose = Protocol.make({
+      ...protocol,
+      stream: { ...protocol.stream, step: () => Effect.fail(oversized) }
+    })
+
+    const error = await drainError(
+      routeOf({ protocol: verbose, framing: Framing.sse }),
+      executorOf(() => sseResponse(["{}"]))
+    ) as ModelError
+
+    expect(error.message).toHaveLength(16_384)
+    expect(error.path).toHaveLength(16_384)
+    expect(error.resetSource).toHaveLength(16_384)
+    expect(error.providerCode).toHaveLength(16_384)
+    expect(error.requestId).toHaveLength(16_384)
+    expect(error.body).toHaveLength(16_384)
+    expect(error.bodyTruncated).toBe(true)
+  })
+})
+
 describe("Route.stream refresh", () => {
   const refusal = () => new ModelError({ code: "authentication", message: "expired", httpStatus: 401 })
 
@@ -982,6 +1201,32 @@ describe("Route.stream refresh", () => {
       "Bearer stale-token",
       "Bearer fresh-token"
     ])
+  })
+
+  it("scrubs stream failures with the refreshed signed credential", async () => {
+    const { auth, count } = refreshingAuth()
+    const { executor } = countingExecutor((attempt) =>
+      attempt === 1 ? Effect.fail(refusal()) : Effect.succeed(sseResponse(["{}"]))
+    )
+    const route = Route.make({
+      ...withAuth(auth),
+      protocol: Protocol.make({
+        ...protocol,
+        stream: {
+          ...protocol.stream,
+          step: () =>
+            Effect.fail(
+              new ModelError({
+                code: "authentication",
+                message: `Rejected fresh-token ${btoa("fresh-token")}`
+              })
+            )
+        }
+      })
+    })
+    const error = await drainError(route, executor)
+    expect(error).toMatchObject({ code: "authentication", message: "Rejected <redacted> <redacted>" })
+    expect(count()).toBe(1)
   })
 
   it("surfaces the second authentication failure rather than retrying again", async () => {

@@ -17,6 +17,7 @@ import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
@@ -341,6 +342,8 @@ const quotaBody = (parsed: unknown): boolean => {
 const addSecret = (values: Set<string>, value: string): void => {
   if (value.length === 0) return
   values.add(value)
+  values.add(Encoding.encodeBase64(value))
+  values.add(Encoding.encodeBase64Url(value))
   values.add(encodeURIComponent(value))
   const json = encodeJsonString(value)
   // Encoding a string always emits its two JSON quotes, including for the
@@ -453,19 +456,19 @@ const redactFields = (body: string): string => {
   return parsed === undefined ? redactTextBody(body) : JSON.stringify(redactStructuredValue(parsed))
 }
 
-// Structural and literal passes ensure provider echoes are scrubbed before a
-// body is truncated or incorporated into a serializable ModelError.
+// Structural and literal passes run before diagnostic truncation.
+const redactSecrets = (body: string, secrets: ReadonlyArray<string>): string =>
+  secrets.reduce((text, secret) => text.split(secret).join(REDACTED), redactFields(body))
+
 const redactBody = (
   body: string,
   request: HttpClientRequest.HttpClientRequest,
   redactedNames: ReadonlyArray<string | RegExp>
 ): string =>
-  Array.from(secretValues(request, redactedNames))
-    .sort((left, right) => right.length - left.length)
-    .reduce(
-      (text, secret) => text.split(secret).join(REDACTED),
-      redactFields(body)
-    )
+  redactSecrets(
+    body,
+    Array.from(secretValues(request, redactedNames)).sort((left, right) => right.length - left.length)
+  )
 
 const responseBody = (
   body: string | undefined,
@@ -541,7 +544,61 @@ const sanitizedField = (
   value: string | undefined,
   request: HttpClientRequest.HttpClientRequest,
   redactedNames: ReadonlyArray<string | RegExp>
-): string | undefined => value === undefined ? undefined : redactBody(value, request, redactedNames)
+): string | undefined =>
+  value === undefined ? undefined : redactBody(value, request, redactedNames).slice(0, BODY_LIMIT)
+
+// HTTP 200 protocol failures need the same redaction and caps as status errors.
+const sanitizeModelError = (error: ModelError, redact: (value: string) => string): ModelError => {
+  const field = (value: string | undefined): string | undefined =>
+    value === undefined ? undefined : redact(value).slice(0, BODY_LIMIT)
+  const message = redact(error.message).slice(0, BODY_LIMIT)
+  const path = field(error.path)
+  const resetSource = field(error.resetSource)
+  const providerCode = field(error.providerCode)
+  const requestId = field(error.requestId)
+  const redactedBody = error.body === undefined ? undefined : redact(error.body)
+  const body = redactedBody?.slice(0, BODY_LIMIT)
+  const bodyTruncated = redactedBody !== undefined && redactedBody.length > BODY_LIMIT ? true : error.bodyTruncated
+  if (
+    message === error.message && path === error.path && resetSource === error.resetSource &&
+    providerCode === error.providerCode && requestId === error.requestId &&
+    body === error.body && bodyTruncated === error.bodyTruncated
+  ) {
+    return error
+  }
+  const sanitized = new ModelError({
+    code: error.code,
+    message,
+    path,
+    retryAfterMillis: error.retryAfterMillis,
+    resetAtEpochMillis: error.resetAtEpochMillis,
+    resetSource,
+    providerCode,
+    requestId,
+    httpStatus: error.httpStatus
+  })
+  Object.defineProperties(sanitized, {
+    body: { value: body, enumerable: false },
+    bodyTruncated: { value: bodyTruncated, enumerable: false }
+  })
+  return sanitized
+}
+
+/**
+ * Captures the signed request and current header policy for response-stream
+ * failures, including protocol errors delivered over HTTP 200.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const errorSanitizer = (
+  request: HttpClientRequest.HttpClientRequest
+): Effect.Effect<(error: ModelError) => ModelError> =>
+  Effect.gen(function*() {
+    const redactedNames = yield* Headers.CurrentRedactedNames
+    const secrets = Array.from(secretValues(request, redactedNames)).sort((left, right) => right.length - left.length)
+    return (error: ModelError) => sanitizeModelError(error, (value) => redactSecrets(value, secrets))
+  })
 
 const statusError = (
   request: HttpClientRequest.HttpClientRequest,
@@ -835,11 +892,12 @@ export const makeWith = (transport: Transport): Effect.Effect<RequestExecutor> =
           http = yield* transport.rebuild
           failures = 0
         }
-        const redactedNames = yield* Headers.CurrentRedactedNames
+        const redactedNames = [...yield* Headers.CurrentRedactedNames, SENSITIVE_NAME]
         const response = yield* http.execute(request).pipe(
           // `model:call` on this model, not a plain `net:*` effect: the same host
           // answers many models and a grant for one is not a grant for the rest.
           KernelHttpClient.withModelCall(options.modelId),
+          Effect.provideService(Headers.CurrentRedactedNames, redactedNames),
           Effect.mapError((error) => mapHttpError(error, redactedNames))
         )
         return yield* statusError(request, redactedNames, options.classifyError)(response)

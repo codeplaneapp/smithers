@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer"
 import * as Random from "effect/Random"
 import type * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
+import * as Tracer from "effect/Tracer"
 import * as Headers from "effect/unstable/http/Headers"
 import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as HttpClient from "effect/unstable/http/HttpClient"
@@ -1520,6 +1521,46 @@ describe("RequestExecutor", () => {
     const serialized = JSON.stringify(expectModelError(error))
     expect(serialized).not.toContain("tenant-secret")
     expect(serialized).toContain("public-value")
+  })
+
+  it("redacts credential headers in the request span, keeping the caller's policy and public names", async () => {
+    const spans: Array<Tracer.NativeSpan> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const layer = executorLayer([{ status: 200, body: "{}" }], requests)
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const executor = yield* RequestExecutor.RequestExecutor
+          return yield* execute(
+            executor,
+            request("https://provider.test/v1/models", "{}", {
+              "api-key": "traced-secret",
+              "x-tenant": "tenant-secret",
+              "x-public": "public-value"
+            })
+          )
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provideService(Headers.CurrentRedactedNames, [/^x-tenant/i]),
+          Effect.provideService(Tracer.Tracer, tracer)
+        )
+      )
+    )
+
+    const traced = (name: string): ReadonlyArray<unknown> =>
+      spans.map((span) => span.attributes.get(`http.request.header.${name}`)).filter((value) => value !== undefined)
+
+    expect(traced("api-key")).toEqual(["<redacted>"])
+    expect(traced("x-tenant")).toEqual(["<redacted>"])
+    expect(traced("x-public")).toEqual(["public-value"])
   })
 
   it("describes a transport failure without a description, a cause, or headers", async () => {

@@ -327,13 +327,27 @@ from reset fields in a JSON error body, preferring the exhausted resource's
 window so a parked run wakes exactly once.
 
 Diagnostics are scrubbed twice. Values the package knows to be credentials
-are removed literally, in raw, URL-encoded, and JSON-escaped form. A JSON
+are removed literally, in raw, URL-encoded, JSON-escaped, and Base64 forms
+(including URL-safe Base64). A JSON
 error body is additionally walked and every value under a credential-shaped
 key is replaced at any depth. A failed response body stops being read at
 64 KiB, so nothing beyond that is held, parsed, classified, or redacted; the
 recursive walks stop at depth 12, where a redacted subtree is replaced whole;
 and the text kept on the error is capped at 16 KiB, reachable as
 `ModelError.body` with `ModelError.bodyTruncated` set when either cap bites.
+
+`Auth.credentialHeaders` designates headers added by signing, including custom
+names. `apiKeyHeader` and `bearer` set it automatically. Custom Auth values
+should list any credential headers outside the shared matcher. `Auth.withRedaction`
+adds these names and the shared matcher to `Headers.CurrentRedactedNames` while
+preserving the caller's policy. Routes apply it around signing and HTTP execution,
+so request traces redact these headers, including `chatgpt-account-id`.
+
+`RequestExecutor.errorSanitizer(request)` captures the signed request's credential
+values and active header policy. Routes retain that sanitizer through response
+consumption, including after credential refresh. HTTP 200 protocol failures have
+every free-form `ModelError` string field scrubbed and capped at 16 KiB before
+reaching callers. Error codes and numeric retry metadata retain their meaning.
 
 ## `AnthropicMessages`
 

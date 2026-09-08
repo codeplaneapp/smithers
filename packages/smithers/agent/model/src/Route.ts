@@ -223,11 +223,13 @@ const stream = <Body, Frame, Event, State>(
           const httpRequest = HttpClientRequest.post(prepared.url, { headers: signedHeaders }).pipe(
             HttpClientRequest.bodyUint8Array(prepared.body, "application/json")
           )
-          return yield* executor.execute(httpRequest, {
+          const sanitize = yield* RequestExecutor.errorSanitizer(httpRequest)
+          const response = yield* executor.execute(httpRequest, {
             modelId: snapshot.modelId,
             classifyError: route.protocol.classifyError
           })
-        })
+          return { response, sanitize }
+        }).pipe(Auth.withRedaction(route.auth))
         // An `authentication` failure is terminal on both retry ladders — a bad
         // key never repairs itself by waiting. A refresh-capable Auth is the
         // one case where recovery is possible: run its refresh and re-sign
@@ -235,7 +237,7 @@ const stream = <Body, Frame, Event, State>(
         // recovery, while a credential the refresh cannot repair still fails
         // typed on the second attempt.
         const refresh = route.auth.refresh
-        const response = yield* (refresh === undefined
+        const { response, sanitize } = yield* (refresh === undefined
           ? attempt
           : attempt.pipe(
             Effect.catchIf(
@@ -283,7 +285,10 @@ const stream = <Body, Frame, Event, State>(
             route.protocol.stream.onHalt === undefined
               ? undefined
               : { onHalt: route.protocol.stream.onHalt }
-          )
+          ),
+          // Keep the signed attempt's policy after the HTTP effect completes,
+          // including when refresh replaced the original credential.
+          Stream.mapError(sanitize)
         )
       })()
     )
