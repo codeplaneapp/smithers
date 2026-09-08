@@ -24,6 +24,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import { TestClock } from "effect/testing"
+import { posix } from "node:path"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import { bytes, sha256, text, withCrypto } from "./Crypto.ts"
 
@@ -51,14 +52,31 @@ const memoryFs = (options: {
   const files = new Map<string, Uint8Array>(
     Object.entries(options.seed ?? {}).map(([path, content]) => [path, bytes(content)])
   )
-  const directories = new Set<string>()
+  const directories = new Set<string>([".", "/"])
+  const createDirectories = (path: string): void => {
+    if (directories.has(path)) return
+    createDirectories(posix.dirname(path))
+    directories.add(path)
+  }
+  for (const path of files.keys()) createDirectories(posix.dirname(path))
+  const events: Array<{ op: "write" | "sync" | "rename" | "directory-sync"; path: string; to?: string }> = []
+  // File data and directory entries persist independently. A synced child is
+  // unreachable after a crash until every entry linking it to the root persists.
+  const persistedEntries = new Set<string>([".", "/"])
+  const persistedData = new Set<Uint8Array>()
+  const reachable = (path: string): boolean =>
+    persistedEntries.has(path) && (path === "." || path === "/" || reachable(posix.dirname(path)))
+  const durable = (path: string): boolean =>
+    reachable(path) && (directories.has(path) || persistedData.has(files.get(path)!))
   const writes: Array<string> = []
   const reads: Array<string> = []
   const syncs: Array<string> = []
   let directoryReads = 0
   const fs = FileSystem.makeNoop({
     exists: ((path: string) =>
-      options.failExists === true ? Effect.fail(new Error("EIO: exists")) : Effect.succeed(files.has(path))) as never,
+      options.failExists === true
+        ? Effect.fail(new Error("EIO: exists"))
+        : Effect.succeed(files.has(path) || directories.has(path))) as never,
     readFile: ((path: string) =>
       Effect.suspend(() => {
         reads.push(path)
@@ -80,7 +98,7 @@ const memoryFs = (options: {
       })) as never,
     makeDirectory: ((path: string) =>
       Effect.sync(() => {
-        directories.add(path)
+        createDirectories(path)
       })) as never,
     readLink: () =>
       Effect.fail(PlatformError.systemError({
@@ -100,9 +118,7 @@ const memoryFs = (options: {
         const prefix = `${directory}/`
         return Effect.succeed([
           ...new Set(
-            [...files.keys(), ...directories].filter((path) =>
-              path.startsWith(prefix)
-            )
+            [...files.keys(), ...directories].filter((path) => path.startsWith(prefix))
               .map((path) => path.slice(prefix.length).split("/")[0]!)
           )
         ])
@@ -128,13 +144,34 @@ const memoryFs = (options: {
           if (files.has(path)) {
             return Effect.fail(PlatformError.systemError({ _tag: "AlreadyExists", module: "test", method: "open" }))
           }
+          if (!directories.has(posix.dirname(path))) {
+            return Effect.fail(PlatformError.systemError({ _tag: "NotFound", module: "test", method: "open" }))
+          }
           files.set(path, new Uint8Array())
+        } else if (!files.has(path) && !directories.has(path)) {
+          return Effect.fail(PlatformError.systemError({ _tag: "NotFound", module: "test", method: "open" }))
         }
         return Effect.succeed({
           stat: fs.stat(path),
           writeAll: (content: Uint8Array) => fs.writeFile(path, content),
           sync: Effect.suspend(() => {
-            if (options.failSyncOf?.(path) === true) return Effect.fail(new Error(`EIO: sync ${path}`))
+            if (options.failSyncOf?.(path) === true) {
+              return Effect.fail(PlatformError.systemError({
+                _tag: "Unknown",
+                module: "test",
+                method: "sync",
+                pathOrDescriptor: path,
+                cause: { code: "EIO" }
+              }))
+            }
+            events.push({ op: directories.has(path) ? "directory-sync" : "sync", path })
+            if (directories.has(path)) {
+              for (const entry of [...files.keys(), ...directories]) {
+                if (posix.dirname(entry) === path) persistedEntries.add(entry)
+              }
+            } else {
+              persistedData.add(files.get(path)!)
+            }
             syncs.push(path)
             return Effect.void
           })
@@ -143,13 +180,17 @@ const memoryFs = (options: {
     writeFile: ((path: string, content: Uint8Array) =>
       Effect.sync(() => {
         writes.push(path)
+        events.push({ op: "write", path })
         files.set(path, content)
       })) as never,
+    writeFileString: (path, content) => fs.writeFile(path, bytes(content)),
+    readFileString: (path) => Effect.map(fs.readFile(path), (content) => new TextDecoder().decode(content)),
     rename: ((from: string, to: string) =>
       Effect.suspend(() => {
         if (to === options.failRenameTo) return Effect.fail(new Error(`EIO: ${to}`))
         const content = files.get(from)
         if (content === undefined) return Effect.fail(new Error(`ENOENT: ${from}`))
+        events.push({ op: "rename", path: from, to })
         files.set(to, content)
         files.delete(from)
         return Effect.void
@@ -159,7 +200,7 @@ const memoryFs = (options: {
         files.delete(path)
       })) as never
   })
-  return { files, directories, writes, reads, syncs, directoryReads: () => directoryReads, fs }
+  return { files, directories, writes, reads, syncs, events, durable, directoryReads: () => directoryReads, fs }
 }
 
 const store = (host: ReturnType<typeof memoryFs>, options?: ArtifactStore.FileSystemOptions) =>
@@ -307,9 +348,15 @@ describe("atomic publication (issues #117, #131, #138)", () => {
       // writes and the rename)".
       const host = memoryFs({ supportsOpen: true })
       yield* withCrypto(store(host, { durability: "required" }).put(bytes(artifact)))
-      expect(host.syncs).toHaveLength(2)
-      expect(host.syncs[0]!.includes(".tmp-")).toBe(true)
-      expect(host.syncs[1]).toBe(`.flows/objects/${digest.slice(0, 2)}`)
+      const temp = host.writes[0]!
+      expect(temp).toContain(".tmp-")
+      expect(host.events).toEqual([
+        { op: "write", path: temp },
+        { op: "sync", path: temp },
+        { op: "rename", path: temp, to: blobPath },
+        ...[posix.dirname(blobPath), ".flows/objects", ".flows", "."].map((path) => ({ op: "directory-sync", path }))
+      ])
+      expect(host.durable(blobPath)).toBe(true)
     }))
 
   it.effect("refuses publication on a host with no exclusive writable file handles", () =>
@@ -322,17 +369,88 @@ describe("atomic publication (issues #117, #131, #138)", () => {
       expect(host.files.has(blobPath)).toBe(false)
     }))
 
-  it.effect("fails publication when a required durability barrier fails", () =>
+  it.effect("fake open rejects a missing path with a typed filesystem error", () =>
     Effect.gen(function*() {
-      const host = memoryFs({
-        supportsOpen: true,
-        failSyncOf: (path) => path === `.flows/objects/${digest.slice(0, 2)}`
-      })
-      const exit = yield* withCrypto(
-        store(host, { durability: "required" }).put(bytes(artifact)).pipe(Effect.exit)
-      )
-      expect(Exit.isFailure(exit)).toBe(true)
+      const host = memoryFs()
+      const exit = yield* Effect.scoped(host.fs.open("missing", { flag: "r+" })).pipe(Effect.exit)
+      expect(errorOf(exit)).toBeInstanceOf(PlatformError.PlatformError)
+      expect(errorOf(exit)).toMatchObject({ reason: { _tag: "NotFound" } })
     }))
+
+  it.effect("fake sync refusal is a typed PlatformError", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ seed: { [blobPath]: artifact }, failSyncOf: () => true })
+      const exit = yield* Effect.scoped(Effect.flatMap(host.fs.open(blobPath), (file) => file.sync)).pipe(Effect.exit)
+      expect(errorOf(exit)).toBeInstanceOf(PlatformError.PlatformError)
+      expect(errorOf(exit)).toMatchObject({ reason: { _tag: "Unknown", method: "sync" } })
+    }))
+
+  for (const barrier of ["temp", "fanout", "objects", "ancestor", "root"] as const) {
+    for (const durability of ["required", "best-effort"] as const) {
+      it.effect(`${durability} handles a typed ${barrier} sync refusal`, () =>
+        Effect.gen(function*() {
+          let refused = false
+          const host = memoryFs({
+            failSyncOf: (path) => {
+              const match = barrier === "temp" ?
+                path.includes(".tmp-") :
+                path === (barrier === "fanout" ?
+                  posix.dirname(blobPath) :
+                  barrier === "objects"
+                  ? ".flows/objects"
+                  : barrier === "ancestor"
+                  ? ".flows"
+                  : ".")
+              if (match) refused = true
+              return match
+            }
+          })
+          const exit = yield* withCrypto(store(host, { durability }).put(bytes(artifact))).pipe(Effect.exit)
+          expect(refused).toBe(true)
+          if (durability === "required") {
+            expect(errorOf(exit)).toMatchObject({ _tag: "@smthrs/artifacts/ArtifactStoreError", code: "unavailable" })
+            expect(tempsOf(host)).toEqual([])
+          } else {
+            expect(exit).toEqual(Exit.succeed(digest))
+            expect(text(host.files.get(blobPath))).toBe(artifact)
+          }
+        }))
+    }
+  }
+
+  for (const directory of [".flows/objects", "nested/cache/objects", "/nested/cache/objects"]) {
+    for (const coordination of ["process", "required"] as const) {
+      it.effect(`persists every directory entry in ${directory} with ${coordination} coordination`, () =>
+        Effect.gen(function*() {
+          const host = memoryFs()
+          yield* withCrypto(store(host, { directory, coordination, durability: "required" }).put(bytes(artifact)))
+          expect(host.durable(`${directory}/${digest.slice(0, 2)}/${digest}`)).toBe(true)
+          if (coordination === "required") expect(host.durable(`${directory}/.locks`)).toBe(true)
+        }))
+    }
+  }
+
+  for (const barrier of [posix.dirname(blobPath), ".flows/objects", ".flows", "."]) {
+    it.effect(`deduplicated retry repairs publication interrupted at ${barrier}`, () =>
+      Effect.gen(function*() {
+        let refuse = true
+        const host = memoryFs({ failSyncOf: (path) => refuse && path === barrier })
+        const failed = yield* withCrypto(store(host, { durability: "required" }).put(bytes(artifact))).pipe(Effect.exit)
+        expect(errorOf(failed)).toMatchObject({ _tag: "@smthrs/artifacts/ArtifactStoreError", code: "unavailable" })
+        expect(host.files.has(blobPath)).toBe(true)
+        expect(host.durable(blobPath)).toBe(false)
+        refuse = false
+        host.events.length = 0
+        // A fresh store cannot know which mkdir succeeded before the interruption.
+        yield* withCrypto(store(host, { durability: "required" }).put(bytes(artifact)))
+        expect(host.writes).toHaveLength(1)
+        expect(host.events).toEqual([
+          { op: "sync", path: blobPath },
+          ...[posix.dirname(blobPath), ".flows/objects", ".flows", "."].map((path) => ({ op: "directory-sync", path }))
+        ])
+        expect(host.durable(blobPath)).toBe(true)
+      }))
+  }
 })
 
 describe("verification and healing (issues #132, #144, #145)", () => {
@@ -495,7 +613,7 @@ describe("the orphan sweep (issue #138)", () => {
 
 const errorOf = (exit: Exit.Exit<unknown, unknown>): unknown => {
   const reason = Exit.isFailure(exit) ? exit.cause.reasons[0] : undefined
-  return (reason as { readonly error: unknown }).error
+  return (reason as { readonly error: unknown } | undefined)?.error
 }
 
 describe("reads, probes, and refusals", () => {

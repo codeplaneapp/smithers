@@ -19,6 +19,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
+import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
 import * as Random from "effect/Random"
 import * as Schema from "effect/Schema"
@@ -274,8 +275,8 @@ export interface FileSystemOptions {
   /** New objects and fanout directory mode, default `0700`. Existing directories are unchanged. */
   readonly directoryMode?: number | undefined
   /**
-   * `required` reports success only after syncing both the blob and the
-   * containing fanout directory. `best-effort` is the explicit weaker
+   * `required` reports success only after syncing the blob, its fanout,
+   * the objects directory, and every ancestor. `best-effort` is the explicit weaker
    * capability for hosts that cannot sync file or directory handles.
    * Both modes require exclusive writable handles and symlink inspection.
    */
@@ -447,6 +448,21 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
     )
     return durability === "best-effort" ? Effect.ignore(sync) : sync
   }
+  // A directory sync persists its children, not its own name in its parent.
+  // Repeat the whole ancestry even on dedupe: an existing directory may have
+  // been created by an interrupted publication in another store or process.
+  // Syncing objects also persists the lock directory created by withDigest.
+  const syncDirectoryAncestry = Effect.gen(function*() {
+    const path = yield* Path.Path
+    let current = directory
+    while (true) {
+      yield* syncPath(current, "r")
+      const parent = path.dirname(current)
+      if (parent === current) return
+      current = parent
+    }
+  }).pipe(Effect.provide(Path.layer))
+
   const put: Service["put"] = Effect.fn("ArtifactStore.put")((bytes: Uint8Array) =>
     Effect.flatMap(
       snapshotBytes(bytes),
@@ -574,6 +590,7 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
                     )
                   })).pipe(Effect.mapError(hostFailure))
                 }
+                yield* syncDirectoryAncestry
                 yield* Metric.update(ArtifactStoreMetrics.puts, 1)
                 return digest
               }),
