@@ -480,12 +480,14 @@ const makeLog = (options: Logger.Options<unknown>, runId: JournalEvent.RunId): J
  *
  * Configuration is decoded before a worker starts. The callback snapshots and
  * redacts a bounded DTO synchronously, then performs only non-blocking queue
- * admission. Overflow, journal delivery failures, and journal defects are
- * telemetry losses, not application failures: each one advances
- * `Metric.droppedLogRecords`, the two failure paths also log a warning through
- * the ambient loggers, and the worker keeps draining. Closing the scope
- * interrupts the worker and may drop records still queued behind an in-flight
- * write.
+ * admission. Queue overflow, journal `Dropped` receipts, delivery failures,
+ * and journal defects each advance `Metric.droppedLogRecords`. The two failure
+ * paths also warn through the ambient loggers with a fixed code and run id,
+ * and the worker keeps draining. `Accepted` and `Duplicate` do not advance the
+ * counter. Admission receipts cannot identify later drop-oldest evictions of
+ * these records or report asynchronous persistence failures or shutdown losses.
+ * Closing the scope interrupts the worker and may drop records still queued
+ * behind an in-flight write without advancing the counter.
  *
  * The layer replaces the ambient logger set unless `mergeWithExisting` is
  * `true`, and provides `MinimumLogLevel` only when `minimumLogLevel` is given,
@@ -509,15 +511,17 @@ export const layerJournalForwarding = (
             // This worker is forked before the logger it feeds is installed, so
             // its ambient logger set cannot contain that logger and a warning
             // here cannot enqueue itself. Delivery stays lossy; the loss is
-            // reported and counted instead of vanishing.
+            // reported and counted instead of vanishing. Warning annotations
+            // use fixed codes so ambient sinks never receive raw failures.
             const forward = Effect.fn("JournalLogger.forward")((input: JournalEvent.Input) =>
               journal.emitLossy(input).pipe(
-                Effect.catch((error) =>
+                Effect.tap((receipt) => receipt._tag === "Dropped" ? dropped : Effect.void),
+                Effect.catch(() =>
                   dropped.pipe(
                     Effect.andThen(
                       Effect.annotateLogs(Effect.logWarning("A telemetry log record could not be forwarded"), {
                         runId: configured.runId,
-                        error
+                        code: "journal_forwarding_failed"
                       })
                     )
                   )
@@ -537,7 +541,7 @@ export const layerJournalForwarding = (
                       Effect.andThen(
                         Effect.annotateLogs(
                           Effect.logWarning("The telemetry forwarding worker recovered from a defect"),
-                          { runId: configured.runId, cause }
+                          { runId: configured.runId, code: "journal_forwarding_defect" }
                         )
                       )
                     )

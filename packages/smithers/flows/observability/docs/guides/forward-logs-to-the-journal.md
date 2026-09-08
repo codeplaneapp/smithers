@@ -1,6 +1,6 @@
 ---
 title: "Forward logs to the run journal"
-description: "Install JournalLogger.layerJournalForwarding so a run's Effect log records become durable telemetry.log entries, and read them back: capacity, bounds, redaction, and the three ways a record is lost."
+description: "Install JournalLogger.layerJournalForwarding so a run's Effect log records become durable telemetry.log entries, and read them back: capacity, bounds, redaction, observed losses, and admission limits."
 sidebar:
   order: 3
 ---
@@ -149,23 +149,33 @@ permanent row.
 ## Watch for lost records
 
 Forwarding is lossy on purpose: a telemetry backlog must not become application
-backpressure. Three losses are possible, and each advances
-`Metric.droppedLogRecords` (`flows/observability/log/dropped`):
+backpressure. Each of these observed losses advances `Metric.droppedLogRecords`
+(`flows/observability/log/dropped`) once:
 
-1. **Queue overflow.** The queue was full when the record arrived. Counted only.
-2. **Journal delivery failure.** The write failed. Counted, and reported as a
-   warning annotated with the run id.
-3. **A defect from the journal implementation.** Counted and warned the same
-   way, and the worker keeps draining rather than dying silently for the rest
-   of the run.
+1. **Forwarder queue overflow.** The queue was full when the record arrived.
+   Counted only.
+2. **Journal `Dropped` receipt.** The journal refused admission under its
+   `drop-newest` policy. Counted only; `Accepted` and `Duplicate` receipts do
+   not advance the counter.
+3. **Journal delivery failure.** Admission failed. Counted, and reported as a
+   warning with the run id and code `journal_forwarding_failed`.
+4. **A defect from the journal implementation.** Counted and warned with the
+   run id and code `journal_forwarding_defect`. The worker keeps draining.
 
-Those warnings are safe to emit because the worker is forked before the logger
-it feeds is installed, so its ambient logger set cannot contain that logger and
-a warning cannot enqueue itself.
+Warnings carry fixed diagnostic codes instead of raw errors or causes, so
+failure credentials do not reach ambient warning sinks. The worker is forked
+before the forwarding logger is installed, so a warning cannot enqueue itself.
+
+`emitLossy` reports admission, not durable delivery. The counter cannot observe
+later `drop-oldest` evictions of admitted telemetry, asynchronous persistence
+failures, or journal shutdown losses. An `Accepted.evicted` summary does not
+identify the evicted record, so it cannot attribute that loss to telemetry.
 
 Interruption stays fatal: closing the layer's scope ends the worker and can
-drop records queued behind an in-flight write. Flush the journal before you
-assert on a short-lived run.
+drop records queued behind an in-flight write without advancing this counter.
+Flushing the journal waits for journal admissions to settle; it does not drain
+the forwarder's separate queue. Wait for the expected records before asserting
+on a short-lived run.
 
 A nonzero `droppedLogRecords` with a healthy journal usually means the capacity
 is too small for the run's log volume. See

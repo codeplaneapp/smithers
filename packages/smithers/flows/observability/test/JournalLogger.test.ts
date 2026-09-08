@@ -138,14 +138,16 @@ const hostileValue = (next: () => number, depth: number): unknown => {
 /** Collects only the warnings a forwarding worker reports to the ambient set. */
 const warningSink = () => {
   const warnings: Array<{ message: unknown; annotations: Readonly<Record<string, unknown>> }> = []
+  const output: Array<string> = []
   const logger = Logger.make<unknown, void>((options) => {
     if (options.logLevel !== "Warn") return
+    output.push(Logger.formatJson.log(options))
     warnings.push({
       message: options.message,
       annotations: options.fiber.getRef(References.CurrentLogAnnotations)
     })
   })
-  return { warnings, logger }
+  return { warnings, output, logger }
 }
 
 const entriesEventually = (
@@ -704,6 +706,48 @@ describe("JournalLogger", () => {
     expect(loneSurrogate.test(payloads[1]!.message as string)).toBe(false)
   })
 
+  it.each(
+    [
+      { name: "Accepted", receipt: { _tag: "Accepted" }, losses: 0 },
+      { name: "Duplicate pending", receipt: { _tag: "Duplicate", status: "pending" }, losses: 0 },
+      { name: "Duplicate committed", receipt: { _tag: "Duplicate", status: "committed" }, losses: 0 },
+      { name: "Dropped", receipt: { _tag: "Dropped", policy: "drop-newest" }, losses: 2 }
+    ] as const
+  )("counts $name admission losses exactly", async ({ receipt, losses }) => {
+    const sink = warningSink()
+    let attempts = 0
+    const dropped = await run(
+      Effect.gen(function*() {
+        const before = yield* Metric.value(droppedLogRecords)
+        yield* Effect.logInfo("first")
+        yield* Effect.logInfo("second")
+        yield* settled(() => attempts === 2)
+        return (yield* Metric.value(droppedLogRecords)).count - before.count
+      }).pipe(
+        Effect.provide(
+          Layer.provide(
+            layerJournalForwarding({ runId: runId("receipt-run") }),
+            Layer.merge(
+              Journal.layerNoop({
+                emitLossy: () =>
+                  Effect.sync(() => ({
+                    ...receipt,
+                    seq: attempts as JournalEvent.Seq,
+                    sourceSeq: attempts++ as JournalEvent.SourceSeq
+                  }))
+              }),
+              Logger.layer([sink.logger], { mergeWithExisting: false })
+            )
+          )
+        )
+      )
+    )
+
+    expect(attempts).toBe(2)
+    expect(dropped).toBe(losses)
+    expect(sink.warnings).toEqual([])
+  })
+
   it("reports and counts a journal delivery failure, then keeps forwarding", async () => {
     const sink = warningSink()
     const delivered: Array<unknown> = []
@@ -724,7 +768,13 @@ describe("JournalLogger", () => {
               acceptingJournal((input) => {
                 attempts += 1
                 return attempts === 1
-                  ? Effect.fail(new Journal.JournalError({ code: "journal_closed", message: "emitLossy is closed" }))
+                  ? Effect.fail(
+                    new Journal.JournalError({
+                      code: "journal_closed",
+                      message: "connection failed password=synthetic-review-secret-123456",
+                      cause: { password: "synthetic-review-secret-123456" }
+                    })
+                  )
                   : Effect.sync(() => {
                     delivered.push((input.payload as TelemetryLog).message)
                   })
@@ -736,8 +786,13 @@ describe("JournalLogger", () => {
       )
     )
 
+    expect(sink.warnings).toHaveLength(1)
+    expect(sink.output.join("\n")).not.toContain("synthetic-review-secret-123456")
     expect(sink.warnings[0]?.message).toEqual(["A telemetry log record could not be forwarded"])
-    expect(sink.warnings[0]?.annotations).toMatchObject({ runId: "delivery-failure-run" })
+    expect(sink.warnings[0]?.annotations).toEqual({
+      runId: "delivery-failure-run",
+      code: "journal_forwarding_failed"
+    })
     expect(delivered).toEqual([["accepted"]])
     expect(dropped).toBe(1)
   })
@@ -761,7 +816,12 @@ describe("JournalLogger", () => {
             Layer.merge(
               acceptingJournal((input) => {
                 attempts += 1
-                if (attempts === 1) return Effect.die(new Error("journal driver exploded"))
+                if (attempts === 1) {
+                  return Effect.die({
+                    message: "journal driver exploded password=synthetic-review-secret-123456",
+                    password: "synthetic-review-secret-123456"
+                  })
+                }
                 return Effect.sync(() => {
                   delivered.push((input.payload as TelemetryLog).message)
                 })
@@ -773,7 +833,13 @@ describe("JournalLogger", () => {
       )
     )
 
+    expect(sink.warnings).toHaveLength(1)
+    expect(sink.output.join("\n")).not.toContain("synthetic-review-secret-123456")
     expect(sink.warnings[0]?.message).toEqual(["The telemetry forwarding worker recovered from a defect"])
+    expect(sink.warnings[0]?.annotations).toEqual({
+      runId: "defect-run",
+      code: "journal_forwarding_defect"
+    })
     expect(delivered).toEqual([["recovered"]])
     expect(dropped).toBe(1)
   })
