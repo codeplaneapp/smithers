@@ -218,6 +218,19 @@ Attaches one typed annotation, returning a fresh flow. Annotations are metadata
 a host or a decorator reads; they do not change the flow's implementation
 digest.
 
+### Flow.annotateMerge
+
+```ts
+const annotateMerge: {
+  (annotations: Context.Context<never>): <I, O, E>(self: Flow<I, O, E>) => Flow<I, O, E>
+  <I, O, E>(self: Flow<I, O, E>, annotations: Context.Context<never>): Flow<I, O, E>
+}
+```
+
+Merges an annotation bag onto a fresh flow. Supplied values override existing
+values for matching keys. The original flow, its body, and its implementation
+identity are unchanged. Decorators use this to retain metadata read by hosts.
+
 ### Flow.withFlows
 
 ```ts

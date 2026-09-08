@@ -537,6 +537,34 @@ export const annotate: {
   }))
 
 /**
+ * Merges an annotation bag onto a flow, returning a fresh flow.
+ *
+ * Supplied values override existing values for matching keys. The body and
+ * implementation identity are unchanged, as with {@link annotate}.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const annotateMerge: {
+  (
+    annotations: Context.Context<never>
+  ): <Input extends Schema.Top, Output extends Schema.Top, E>(
+    self: Flow<Input, Output, E>
+  ) => Flow<Input, Output, E>
+  <Input extends Schema.Top, Output extends Schema.Top, E>(
+    self: Flow<Input, Output, E>,
+    annotations: Context.Context<never>
+  ): Flow<Input, Output, E>
+} = dual(2, <Input extends Schema.Top, Output extends Schema.Top, E>(
+  self: Flow<Input, Output, E>,
+  annotations: Context.Context<never>
+): Flow<Input, Output, E> =>
+  makeFlow({
+    ...optionsFromFlow(self),
+    annotations: Annotations.merge(self.annotations, annotations)
+  }))
+
+/**
  * Replaces the collaborators a flow declares, returning a fresh flow.
  *
  * Everything else the flow carries comes across unchanged: its name, schemas,

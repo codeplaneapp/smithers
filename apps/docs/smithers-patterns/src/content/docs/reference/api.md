@@ -207,24 +207,56 @@ is the decorator form.
 
 ## `WithCache`
 
-`WithCache.withCache(flow, { ttlMs?, scope?, version? })` declares how long a
-recorded result stays servable (`ttlMs`, counted from when it was recorded),
-how far it may travel (`scope`, one of `"run"`, `"flow"`, and `"shared"`), and
-which revision of the body produced it (`version`). Every field is optional and
-every default is the behavior the composition already had. All three are
-declaration identity, so a wrapper under one policy cannot serve a row recorded
-under another, and `version` is what you change when the inputs stayed the same
-but their meaning did not.
+`WithCache.withCache(flow, { ttlMs?, scope?, version? })` wraps a flow with a
+cache declaration. `WithCache.make(options)` is the decorator form, usable with
+`Pattern.decorate` and `Pattern.decorateAll`.
 
-`WithCache.CachePolicyAnnotation` is the annotation the wrapper writes, under
-the identifier `@smthrs/flow/Action/CachePolicy`, which is the key
-`@smthrs/engine-store` reads at dispatch. `WithCache.policyOf(annotations)`
-reads it back. The durable half is `ttlMs` and `scope`; `version` never reaches
-dispatch, because it has already done its work in the key. A policy declared
-here travels with the flow and enters its key material. To set the policy the
-durable engine acts on when it dispatches a step, declare it on the action
-itself with `CacheEnvironment.withCache` from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/), and
-see [`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/) for what the engine does with it.
+The input must explicitly declare effects with `mode: "hermetic"` and a
+`"sealed"` or omitted tier. A pure body without an effects declaration is
+rejected. Every option is optional:
+
+| Field | Contract |
+| --- | --- |
+| `ttlMs` | Positive safe integer in milliseconds, measured from when the result was recorded. Omit for no age bound. |
+| `scope` | `"run"`, `"flow"`, or `"shared"`. Omit to retain the composition's reach. |
+| `version` | Nonblank string naming the body revision. Omit for no extra revision in the key. |
+
+Invalid effects, TTL, or version throw `PatternError` with code
+`invalid_decorator` synchronously when the decorator is applied.
+`make` snapshots its options at construction and validates them on application.
+
+All declared fields enter the wrapper's name and captured key material.
+`version` changes declaration identity only. `ttlMs` and `scope` also travel
+in `WithCache.CachePolicyAnnotation`, under `@smthrs/flow/Action/CachePolicy`.
+`WithCache.policyOf(annotations)` reads that bag. Decorator composition
+preserves annotations, with an outer decorator's values overriding inner ones.
+
+The flow-level bag requires a host to lower it. The [`@smthrs/registry`](https://registry.smithers.sh/reference/api/)
+bridge lowers a module's default-exported core flow policy onto a dispatched
+action. An ordinary nested core flow call does not propagate that bag onto its
+call node. The durable engine reads the action-level policy set by
+`CacheEnvironment.withCache(action, policy)` from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/).
+See [`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/) for enforcement. `WithCache` itself
+allocates no cache and performs no expiry checks.
+
+```ts
+import { Effects, Flow, Node } from "@smthrs/core"
+import { WithCache } from "@smthrs/patterns"
+import * as Schema from "effect/Schema"
+
+const echo = Flow.make({
+  name: "echo",
+  input: Schema.String,
+  output: Schema.String,
+  effects: Effects.make({
+    reads: [], writes: [], mode: "hermetic", onConflict: "serialize"
+  }),
+  body: (input) => Node.succeed(input)
+})
+
+// The registry bridge lowers this default export's policy onto an action.
+export default WithCache.withCache(echo, { ttlMs: 60_000, version: "v1" })
+```
 
 ## `Bounded`
 

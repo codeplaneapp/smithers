@@ -6,7 +6,8 @@
  * @since 0.1.0
  */
 import { isRecord } from "@smthrs/canonical/Record"
-import { Effects, Flow, Node } from "@smthrs/core"
+import { Annotations, Effects, Flow, Node } from "@smthrs/core"
+import type * as Context from "effect/Context"
 import * as Schema from "effect/Schema"
 import { PatternError } from "../PatternError.ts"
 
@@ -15,6 +16,7 @@ import { PatternError } from "../PatternError.ts"
  * @private
  */
 export interface FlowDetails extends Flow.Any {
+  readonly annotations: Context.Context<never>
   readonly name?: string | undefined
   readonly description?: string | undefined
   readonly capabilities: ReadonlyArray<string>
@@ -180,7 +182,7 @@ export const redeclare = (
       message: `Decorator "${name}" widens the wrapped flow's declared effect envelope`
     })
   }
-  return Flow.make({
+  const wrapper = Flow.make({
     name,
     description: actual.description,
     input: expected.input,
@@ -194,6 +196,9 @@ export const redeclare = (
         Node.capture({ name }, () => call(supplied, input))
       ))
   })
+  // Fresh decorator declarations may carry only their own metadata. Retain
+  // the inner bag too, with the supplied outer declaration taking precedence.
+  return Flow.annotateMerge(wrapper, Annotations.merge(expected.annotations, actual.annotations))
 }
 
 /**

@@ -113,12 +113,19 @@ callbacks return stay the caller's references. The full contract is in
 
 ## Where a `WithCache` policy takes effect
 
-`WithCache` writes its policy under the annotation identifier
-`@smthrs/flow/Action/CachePolicy`, the key the durable engine reads when it
-dispatches a step. On a `@smthrs/core` flow the policy is a declaration: it
-renames the wrapper, enters the flow's key material, and travels with the flow.
-To set the policy the engine acts on when it dispatches, declare it on the
-action itself with `CacheEnvironment.withCache(action, policy)` from
-[`@smthrs/flow`](https://flow.smithers.sh), and see
-[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/) for what
-the engine does with it.
+`WithCache` requires explicitly declared hermetic effects with a sealed or
+omitted tier. `ttlMs` must be a positive safe integer; `version` must be a
+nonblank string. Invalid declarations throw `PatternError` with code
+`invalid_decorator` synchronously when applied.
+
+The options enter declaration identity. `ttlMs` and `scope` also travel in the
+flow's annotation bag, preserved through decorator composition. The
+[`@smthrs/registry`](https://registry.smithers.sh) bridge lowers a module's
+default-exported flow policy onto a dispatched action. Ordinary nested core
+calls do not propagate the flow's bag. The durable engine reads the action
+policy set by `CacheEnvironment.withCache(action, policy)` from
+[`@smthrs/flow`](https://flow.smithers.sh).
+
+See the [WithCache reference](https://smithers-patterns.smithers.sh/reference/api/#withcache)
+for the options, host boundary, and a minimal hermetic flow example, and
+[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/) for enforcement.

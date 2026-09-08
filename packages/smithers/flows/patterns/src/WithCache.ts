@@ -48,14 +48,16 @@ export type Scope = "run" | "flow" | "shared"
 export interface Options {
   /**
    * Milliseconds a recorded result stays servable, counted from when it was
-   * recorded. Past it the engine dispatches again and journals the expiry.
+   * recorded. Must be a positive safe integer. Once lowered onto an action,
+   * the engine dispatches again past it and journals the expiry.
    */
   readonly ttlMs?: number | undefined
   /** How far the recorded result may travel. */
   readonly scope?: Scope | undefined
   /**
    * The caller's revision of the wrapped body. Changing it is how a caller
-   * invalidates rows whose inputs did not change but whose meaning did.
+   * invalidates rows whose inputs did not change but whose meaning did. Must
+   * contain nonblank text.
    */
   readonly version?: string | undefined
 }
@@ -79,8 +81,9 @@ export interface Policy {
  *
  * The IDENTIFIER is the contract. `@smthrs/engine-store` reads the policy at
  * dispatch through `@smthrs/flow`'s `CacheEnvironment.CachePolicyAnnotation`,
- * which is the same key under the same identifier; a bag this module writes is
- * one that module reads. The key is declared twice rather than imported
+ * which is the same key under the same identifier. A host must lower the flow
+ * bag onto an action, as the registry bridge does for default-exported flows.
+ * The key is declared twice rather than imported
  * because `@smthrs/patterns` composes over `@smthrs/core` alone and
  * `@smthrs/flow` does not depend on either, so neither package can import the
  * other. `packages/smithers/flows/patterns/test/WithCache.test.ts` pins the two halves
@@ -199,27 +202,29 @@ const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
     body: Node.capture(captured(options), (input) => Compose.call(inner, input))
   })
   const policy = durable(options)
-  // The policy travels twice, because it does two different jobs. In the
-  // capture it is declaration identity, so a changed policy is a changed step
-  // key. In the annotation it is an instruction the engine executes at
-  // dispatch: `@smthrs/engine-store` bounds the age of the row it may serve by
-  // `ttlMs` and narrows the digest it is addressed by from `scope`. Without the
-  // annotation the wrapper renames itself and nothing else happens.
+  // Captured fields establish declaration identity. The flow annotation is
+  // metadata for a host to lower onto an action, as the registry bridge does.
   return policy === undefined ? wrapper : annotated(wrapper, policy)
 }
 
 /**
- * Builds a sealed step-key cache decorator carrying an optional policy.
+ * Builds a cache decorator for an explicitly hermetic flow with a sealed or
+ * omitted effects tier. A pure body without declared effects is insufficient.
+ * Use with `Pattern.decorate` or `Pattern.decorateAll`.
  *
- * The decorator both renames the wrapper (declaration identity) and attaches
- * the policy under {@link CachePolicyAnnotation}, which is the key
- * `@smthrs/engine-store` reads at dispatch. Compose it through
- * {@link withCache} rather than `Pattern.decorate` directly: the decoration
- * seam redeclares the wrapper and does not carry an annotation bag across, so
- * `withCache` reapplies the policy after it.
+ * All options are optional. `ttlMs` must be a positive safe integer and
+ * `version` a nonblank string; `scope` is `run`, `flow`, or `shared`. Invalid
+ * effects, TTL, or version throw {@link PatternError} with code
+ * `invalid_decorator` synchronously when the returned decorator is applied.
+ * `make` snapshots options at construction and validates them on application.
  *
- * `make` snapshots the options at the call, so a later edit to the caller's
- * object does not change the decorator it returned.
+ * Declared fields enter the wrapper's name and captured key material. The
+ * {@link CachePolicyAnnotation} bag carries `ttlMs` and `scope`; `version`
+ * affects identity only. Composition preserves the bag, with outer values
+ * overriding inner ones. The `@smthrs/registry` bridge lowers a module's
+ * default-exported flow bag onto an action. Ordinary nested core calls do not
+ * propagate it: the durable engine reads the action-level policy set by
+ * `CacheEnvironment.withCache` from `@smthrs/flow`.
  *
  * @category constructors
  * @since 0.1.0
@@ -232,31 +237,43 @@ export const make = (options: Options = {}): Pattern.Decorator => {
 }
 
 /**
- * Marks a sealable wrapper for engine step-key caching, optionally declaring
- * the time to live, the scope, and the version the engine dispatches under.
+ * Wraps an explicitly hermetic flow in a sealed cache declaration.
  *
- * Reuse remains an engine concern; this decorator allocates no map and keeps no
- * process-local state. The policy travels twice. As declaration identity it
- * renames the wrapper and enters its captured key material, so a changed policy
- * is a changed declaration. As a {@link CachePolicyAnnotation} it reaches the
- * dispatch, where `@smthrs/engine-store` bounds the age of the row it may serve
- * by `ttlMs` and narrows the digest the row is addressed by from `scope`. The
- * annotation key is `@smthrs/flow/CacheEnvironment`\'s `CachePolicyAnnotation`
- * under its own identifier; `version` stays identity only, because changing the
- * key is the whole of what it asks for.
+ * The input must declare hermetic effects with a sealed or omitted tier, even
+ * for a pure body. Every option is optional; `ttlMs` must be a positive safe
+ * integer, `version` a nonblank string, and `scope` `run`, `flow`, or `shared`.
+ * Invalid effects, TTL, or version throw {@link PatternError} with code
+ * `invalid_decorator` synchronously.
+ *
+ * Declared fields enter identity. The {@link CachePolicyAnnotation} bag also
+ * carries `ttlMs` and `scope` for a host to lower, as `@smthrs/registry` does
+ * for a module's default-exported flow. Ordinary nested core calls do not
+ * propagate the bag. The durable engine reads the action-level policy set by
+ * `CacheEnvironment.withCache` from `@smthrs/flow`. This wrapper allocates no
+ * cache and performs no expiry checks; `version` changes identity only.
+ *
+ * @example
+ * ```ts
+ * import { Effects, Flow, Node } from "@smthrs/core"
+ * import { WithCache } from "@smthrs/patterns"
+ * import * as Schema from "effect/Schema"
+ *
+ * const echo = Flow.make({
+ *   name: "echo",
+ *   input: Schema.String,
+ *   output: Schema.String,
+ *   effects: Effects.make({
+ *     reads: [], writes: [], mode: "hermetic", onConflict: "serialize"
+ *   }),
+ *   body: (input) => Node.succeed(input)
+ * })
+ *
+ * // The registry bridge lowers this default export's policy onto an action.
+ * export default WithCache.withCache(echo, { ttlMs: 60_000, version: "v1" })
+ * ```
  *
  * @category combinators
  * @since 0.1.0
  */
-export const withCache = (inner: Flow.Any, options?: Options | undefined): Flow.Any => {
-  const declared = options ?? {}
-  const sealed = Compose.seal(Pattern.decorate(inner, make(declared)))
-  const policy = durable(declared)
-  // Re-applied after the decoration seam, not only inside it. `Pattern.decorate`
-  // redeclares the wrapper as a fresh flow and carries its name, schemas,
-  // capabilities, and effects across, but not its annotation bag, so a policy
-  // attached by the decorator alone would reach the plan and never the
-  // dispatch. Applying it here is idempotent with the decorator's own
-  // annotation: both write the same value under the same key.
-  return policy === undefined ? sealed : annotated(sealed, policy)
-}
+export const withCache = (inner: Flow.Any, options?: Options | undefined): Flow.Any =>
+  Compose.seal(Pattern.decorate(inner, make(options)))

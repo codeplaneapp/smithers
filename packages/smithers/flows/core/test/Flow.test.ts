@@ -189,6 +189,39 @@ describe("Flow", () => {
     )
   })
 
+  it("merges annotation bags with supplied values winning without changing identity", () => {
+    const Metadata = Context.Service<string>("test/Flow/MergedMetadata")
+    const original = Flow.make({
+      name: "merged",
+      input: Schema.String,
+      output: Schema.String,
+      body: Node.succeed
+    }).pipe(
+      Flow.within(Placement.local()),
+      Flow.annotate(Metadata, "original")
+    )
+    const bag = Context.make(Metadata, "supplied").pipe(Context.add(Annotations.Priority, 2))
+    const direct = Flow.annotateMerge(original, bag)
+    const piped = original.pipe(Flow.annotateMerge(bag))
+
+    for (const merged of [direct, piped]) {
+      expect(merged).not.toBe(original)
+      expect(Option.getOrUndefined(Context.getOption(merged.annotations, Metadata))).toBe("supplied")
+      expect(Option.getOrUndefined(Context.getOption(merged.annotations, Annotations.Priority))).toBe(2)
+      expect(Option.getOrUndefined(Context.getOption(merged.annotations, Annotations.Placement))).toEqual(
+        Placement.local()
+      )
+      expect(merged.body).toBe(original.body)
+      expect(merged.implementation).toBe(original.implementation)
+      expect(Graph.nodes(Graph.build(merged, "x")).map((node) => node.id)).toEqual(
+        Graph.nodes(Graph.build(original, "x")).map((node) => node.id)
+      )
+    }
+    expect(Option.getOrUndefined(Context.getOption(original.annotations, Metadata))).toBe("original")
+    expect(Option.isNone(Context.getOption(original.annotations, Annotations.Priority))).toBe(true)
+    expect(Flow.annotateMerge(original, Context.empty()).annotations).toEqual(original.annotations)
+  })
+
   it("replaces a dynamic flow's collaborators and keeps everything else it carries", () => {
     const first = Flow.make({ name: "first", input: Schema.String, output: Schema.String, model: "smart" })
     const second = Flow.make({

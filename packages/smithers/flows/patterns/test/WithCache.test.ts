@@ -1,12 +1,15 @@
 import { describe, expectTypeOf, it } from "@effect/vitest"
-import { Digest, Effects, Flow, Graph, Node } from "@smthrs/core"
+import { Annotations, Digest, Effects, Flow, Graph, Node, Placement } from "@smthrs/core"
 import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
-import type * as Context from "effect/Context"
+import * as Context from "effect/Context"
+import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
+import * as Pattern from "../src/Pattern.ts"
 import { PatternError } from "../src/PatternError.ts"
 import * as WithCache from "../src/WithCache.ts"
+import * as WithRetry from "../src/WithRetry.ts"
 
 describe("WithCache", () => {
   it("rejects an unsealed inner flow", () => {
@@ -118,13 +121,35 @@ describe("WithCache policy", () => {
   })
 
   it("refuses a time to live no clock reading satisfies", () => {
-    for (const ttlMs of [0, -1, 1.5]) {
+    for (const ttlMs of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
       expect(() => WithCache.withCache(sealedRead(), { ttlMs })).toThrow(
         expect.objectContaining({
           code: "invalid_decorator",
           message: `withCache ttlMs must be a positive safe integer, received ${ttlMs}`
         })
       )
+    }
+  })
+
+  it("validates a factory's options synchronously on application", () => {
+    const decorator = WithCache.make({ ttlMs: 0 })
+    expect(() => Pattern.decorate(sealedRead(), decorator)).toThrow(
+      expect.objectContaining({ code: "invalid_decorator" })
+    )
+  })
+
+  it("accepts the TTL boundaries on an explicitly hermetic pure flow", () => {
+    const echo = Flow.make({
+      name: "echo",
+      input: Schema.String,
+      output: Schema.String,
+      effects: Effects.make({ reads: [], writes: [], mode: "hermetic", onConflict: "serialize" }),
+      body: (input) => Node.succeed(input)
+    })
+    for (const ttlMs of [1, Number.MAX_SAFE_INTEGER]) {
+      const cached = WithCache.withCache(echo, { ttlMs, version: "v1" })
+      expect(CacheEnvironment.cachePolicyOf(annotationsOf(cached))).toEqual({ ttlMs })
+      expect(Graph.build(cached, "hello").diagnostics).toEqual([])
     }
   })
 
@@ -162,6 +187,52 @@ const annotationsOf = (flow: Flow.Any): Context.Context<never> =>
   (flow as unknown as { readonly annotations: Context.Context<never> }).annotations
 
 describe("WithCache policy annotation", () => {
+  it("preserves the policy through Pattern.decorate", () => {
+    const cached = Pattern.decorate(sealedRead(), WithCache.make({ ttlMs: 1000, scope: "run" }))
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(cached))).toEqual({ ttlMs: 1000, scope: "run" })
+  })
+
+  it("preserves an inner policy through an outer retry", () => {
+    const cached = WithCache.withCache(sealedRead(), { ttlMs: 1000, scope: "run" })
+    const retried = WithRetry.withRetry(cached, { attempts: 3 })
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(retried))).toEqual({ ttlMs: 1000, scope: "run" })
+  })
+
+  it("preserves the policy through Pattern.decorateAll", () => {
+    const decorated = Pattern.decorateAll(sealedRead(), [
+      WithCache.make({ ttlMs: 1000, scope: "run" }),
+      WithRetry.make({ attempts: 3 })
+    ])
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(decorated))).toEqual({ ttlMs: 1000, scope: "run" })
+  })
+
+  it("lets the outer cache policy replace the inner policy", () => {
+    const decorated = Pattern.decorateAll(sealedRead(), [
+      WithCache.make({ ttlMs: 1000, scope: "run" }),
+      WithCache.make({ ttlMs: 2000 })
+    ])
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(decorated))).toEqual({ ttlMs: 2000 })
+  })
+
+  it("preserves placement and custom metadata from both sides of the seam", () => {
+    const Metadata = Context.Service<string>("test/WithCache/Metadata")
+    const inner = Flow.annotate(Flow.within(sealedRead(), Placement.local()), Metadata, "inner")
+    const cached = Pattern.decorate(inner, WithCache.make({ ttlMs: 1000 }))
+    expect(Option.getOrUndefined(Context.getOption(annotationsOf(cached), Annotations.Placement))).toEqual(
+      Placement.local()
+    )
+    expect(Option.getOrUndefined(Context.getOption(annotationsOf(cached), Metadata))).toBe("inner")
+    const outer = Pattern.decorate(
+      cached,
+      () => Flow.annotate(Flow.within(sealedRead(), Placement.remote()), Metadata, "outer")
+    )
+    expect(Option.getOrUndefined(Context.getOption(annotationsOf(outer), Annotations.Placement))).toEqual(
+      Placement.remote()
+    )
+    expect(Option.getOrUndefined(Context.getOption(annotationsOf(outer), Metadata))).toBe("outer")
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(outer))).toEqual({ ttlMs: 1000 })
+  })
+
   it("annotates the wrapper with the policy the engine reads at dispatch", () => {
     const cached = WithCache.withCache(sealedRead(), { ttlMs: 1000, scope: "run", version: "v2" })
     // Read back through @smthrs/flow's reader, not this module's: the two keys
