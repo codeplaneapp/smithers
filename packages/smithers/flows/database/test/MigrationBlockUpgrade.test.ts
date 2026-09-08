@@ -88,15 +88,19 @@ describe("installed package migration block upgrades", () => {
         ...lower,
         migrations: { "0001_rewritten": lower.migrations["0001_initial"]!, "0002_index": lowerAppend }
       }, "was recorded as lower_initial"],
-      ["foreign namespace without a matching installed migration", {
-        namespace: "foreign",
-        idOffset: 0,
-        migrations: { "0002_index": lowerAppend }
-      }, "would be skipped"],
+      [
+        "foreign namespace without a matching installed migration",
+        {
+          namespace: "foreign",
+          idOffset: 0,
+          migrations: { "0002_index": lowerAppend }
+        },
+        "Migration 2_foreign_index cannot append to installed block 0 without declaring a matching recorded migration"
+      ],
       ["partial history without a matching installed migration", {
         ...lower,
         migrations: { "0002_index": lowerAppend }
-      }, "would be skipped"]
+      }, "Migration 2_lower_index cannot append to installed block 0 without declaring a matching recorded migration"]
     ] as const
   ) {
     it.effect(`refuses ${label} before applying a lower-block append`, () =>
@@ -117,6 +121,48 @@ describe("installed package migration block upgrades", () => {
             indexes: []
           })
           expect(yield* opened(filename, Migrations.run([lower, higher]))).toEqual([])
+        })
+      ))
+  }
+
+  for (const namespace of ["foreign", "lower"]) {
+    it.effect(`refuses ${namespace} without matching history above the global cursor`, () =>
+      withFile((filename) =>
+        Effect.gen(function*() {
+          yield* opened(filename, Migrations.run([lower]))
+          let applications = 0
+          const declared: Migrations.MigrationSet = {
+            namespace,
+            idOffset: 0,
+            migrations: {
+              "0002_index": Effect.gen(function*() {
+                applications++
+                yield* lowerAppend
+              })
+            }
+          }
+          const exit = yield* opened(filename, Effect.exit(Migrations.run([declared])))
+          expect(exit._tag).toBe("Failure")
+          if (exit._tag !== "Failure") return
+          const failure = Result.getOrUndefined(Cause.findError(exit.cause))
+          expect(failure).toBeInstanceOf(Migrator.MigrationError)
+          expect(failure).toMatchObject({
+            kind: "BadState",
+            message:
+              `Migration 2_${namespace}_index cannot append to installed block 0 without declaring a matching recorded migration`
+          })
+          expect(applications).toBe(0)
+          expect(
+            yield* opened(
+              filename,
+              Effect.gen(function*() {
+                const sql = yield* SqlClient.SqlClient
+                return yield* sql`SELECT migration_id, name FROM flows_migrations ORDER BY migration_id`
+              })
+            )
+          ).toEqual([{ migration_id: 1, name: "lower_initial" }])
+          expect(yield* opened(filename, Migrations.run([nextLower()]))).toEqual([[2, "lower_index"]])
+          expect(yield* opened(filename, Migrations.run([nextLower()]))).toEqual([])
         })
       ))
   }

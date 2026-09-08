@@ -248,15 +248,24 @@ const finish = (
       const block = Math.floor(id / idBlock)
       installed.set(block, Math.max(installed.get(block) ?? -1, id))
     }
+    // Pending work must prove block ownership before either the loader or
+    // the upstream migrator applies it, including above the global cursor.
+    for (const [id, name] of resolved) {
+      const block = Math.floor(id / idBlock)
+      if (!applied.has(id) && installed.has(block) && !knownBlocks.has(block)) {
+        return yield* Effect.fail(fail(
+          `Migration ${id}_${name} cannot append to installed block ${block * idBlock} ` +
+            `without declaring a matching recorded migration`
+        ))
+      }
+    }
     // An existing package may append within its reserved block after another
     // package has advanced the database's global cursor. Run only such forward
     // additions here; retain rejectSkipped for holes and new lower blocks.
     for (const [id, name, load] of resolved) {
       const block = Math.floor(id / idBlock)
       const previous = installed.get(block)
-      if (
-        id > highWater || applied.has(id) || previous === undefined || id <= previous || !knownBlocks.has(block)
-      ) continue
+      if (id > highWater || applied.has(id) || previous === undefined || id <= previous) continue
       const sql = yield* SqlClient.SqlClient
       const migration = yield* load
       yield* Effect.gen(function*() {
