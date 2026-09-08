@@ -9,7 +9,7 @@ import type { Card } from "../AppState"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
 import { scopedControllers } from "../ControllerTestScope"
-import { parseActivity, summaryPredicate, welcomeSentence } from "./onboarding"
+import { parseActivity, PROTOTYPE_FLOW_ID, PROTOTYPE_RUN_KIND, summaryPredicate, welcomeSentence } from "./onboarding"
 
 /*
  * The repository welcome's decisions, through the one run path: the gate
@@ -541,6 +541,36 @@ describe("feature.prototype", () => {
     // No chat turn is spent on a sketch: the run is the answer.
     expect(turns).toHaveLength(0)
     expect([...store.collections.messages.values()].filter((message) => message.role === "user")).toHaveLength(0)
+  })
+
+  /*
+   * RULINGS 42 (Will, 2026-09-08): Implement runs on the smart seat, first try
+   * included, and cost control is never a cheaper implementer. The launch path
+   * `feature.prototype` shares with an implement launch names the flow and the
+   * kind and nothing about a model, so no caller can quietly downgrade a run's
+   * seat from here; the workspace flow's own declaration stays the only seat
+   * authority. A lane that adds `seat`, `tier`, `model`, or `role` to this
+   * payload fails here and has to answer for it.
+   */
+  test("the launch asks for no seat, tier, model, or role: the workspace flow's declaration is the only seat authority", async () => {
+    const relay = relayStubs({ flows: ["prototype"] })
+    const { store, controller } = await fixture(relay.routes)
+    identity(store, "signed-in")
+    await settled()
+
+    expect((await controller.commands.run("feature.prototype", "a dark mode toggle")).status).toBe("executed")
+
+    const launchKeys = relay.procedures
+      .filter((call) => call.procedure === "Plan" || call.procedure === "Run")
+      .flatMap((call) => Object.keys(call.payload))
+    expect(launchKeys).not.toContain("seat")
+    expect(launchKeys).not.toContain("tier")
+    expect(launchKeys).not.toContain("model")
+    expect(launchKeys).not.toContain("role")
+    // The Plan still names the flow and its goal, so the pin is on the seat, not on an empty payload.
+    expect(relay.procedures.find((call) => call.procedure === "Plan")?.payload)
+      .toMatchObject({ flowId: PROTOTYPE_FLOW_ID, input: { goal: "a dark mode toggle" } })
+    expect(runCards(store)[0]?.payload).toMatchObject({ kind: PROTOTYPE_RUN_KIND })
   })
 
   test("signed out, the human's request parks on the sign-in step and resumes as a launch once signed in", async () => {

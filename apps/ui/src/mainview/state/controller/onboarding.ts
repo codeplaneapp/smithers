@@ -69,6 +69,19 @@ export interface OnboardingController {
   readonly prototypeFeature: (request: string, repo?: string) => Answer
 }
 
+/*
+ * Run kinds and seats (factory-spec review RULINGS 42, Will, 2026-09-08).
+ * `prototype` is the throwaway kind: exploration nobody promotes. Choosing it
+ * over implement is the cost lever the ruling allows on this path, and the
+ * only one. Its sibling kind `implement` runs on the smart seat, first try
+ * included, so a lane adding an implement launch here must not send a
+ * `fast`/`cheap` seat, a `tier` hint, or a model id with it. Nothing on this
+ * path names a seat at all: the launch names the flow and
+ * the kind, and the workspace flow's own declaration is the seat authority
+ * (a markdown flow with no `model:` frontmatter asks for `smart`,
+ * packages/smithers/flows/core/src/Markdown.ts). Pinned by
+ * implementSeat.test.ts and by the launch-payload test in onboarding.test.ts.
+ */
 /** The flow a prototype run launches on the workspace (design session §6: `/prototype <goal>`). */
 export const PROTOTYPE_FLOW_ID = "prototype"
 /** The run kind the prototype's card carries. */

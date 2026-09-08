@@ -166,6 +166,18 @@ export const AGENT_ROLES: ReadonlyArray<AgentRole> = [
     harness: "opencode-kimi",
     delegates: false
   }),
+  /*
+   * Implement runs on the smart seat, first try included (factory-spec review
+   * RULINGS 42, Will, 2026-09-08). `implementation` is the smart seat of this
+   * table and is the only row an implement-shaped delegation may take. The
+   * fast rows below it (`trivial-implementation` and `fast-ui`) exist for a
+   * person who explicitly picks one for a mechanical edit; nothing may route
+   * an implement-shaped run to them, and no code here or downstream may
+   * "start cheap and escalate". Cost control is parallelism, caching and the
+   * prototype-first decision, never a cheaper model for the implementation
+   * itself. The pin is
+   * apps/ui/src/mainview/state/controller/implementSeat.test.ts.
+   */
   seeded({
     id: "implementation",
     label: "Implementation",
