@@ -97,6 +97,10 @@ to a sealed step. A lazy tool may never add prompt text for the same reason:
 changing the prompt prefix would change the step key of every request that
 declares it.
 
+Anthropic activation keeps tool references and the original output together
+inside `tool_result.content`. Activation never promotes tool output to user
+text. Results without new references retain their string content.
+
 For the mechanics of the stream these sealed calls produce, see
 [Streaming](./streaming.md). For the full interface list, see the
 [API reference](../api.md).

@@ -66,7 +66,7 @@ const ToolReferenceBlock = Schema.Struct({
 const ToolResultBlock = Schema.Struct({
   type: Schema.Literal("tool_result"),
   tool_use_id: Schema.String,
-  content: Schema.Union([Schema.String, Schema.Array(ToolReferenceBlock)])
+  content: Schema.Union([Schema.String, Schema.Array(Schema.Union([ToolReferenceBlock, TextBlock]))])
 })
 
 const UserBlock = Schema.Union([TextBlock, ToolResultBlock])
@@ -316,11 +316,9 @@ const lowerToolResults = (
   deferredNames: ReadonlyMap<string, string>,
   loadedNames: Set<string>
 ): WireMessage => {
-  // Measured against pi's deferred-tools regression fixture: references
-  // replace ordinary tool_result content, while that output moves to sibling
-  // text content.
+  // Activation metadata and untrusted tool output share the tool_result
+  // boundary; output must never become sibling user text.
   const results: Array<UserWireBlock> = []
-  const siblings: Array<UserWireBlock> = []
   for (const part of message.content) {
     const references: Array<typeof ToolReferenceBlock.Type> = []
     for (const name of part.addedToolNames) {
@@ -333,13 +331,10 @@ const lowerToolResults = (
     results.push({
       type: "tool_result",
       tool_use_id: part.toolCallId,
-      content: references.length === 0 ? part.content : references
+      content: references.length === 0 ? part.content : [...references, { type: "text", text: part.content }]
     })
-    if (references.length > 0) {
-      siblings.push({ type: "text", text: part.content })
-    }
   }
-  return { role: "user", content: [...results, ...siblings] }
+  return { role: "user", content: results }
 }
 
 const lowerMessages = (
