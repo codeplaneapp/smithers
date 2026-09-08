@@ -270,7 +270,9 @@ export const RunRecordSchema = z.object({
   startedAt: z.number(),
   endedAt: z.number().optional(),
   exitCode: z.number().nullable().optional(),
-  summary: RunSummarySchema.optional()
+  summary: RunSummarySchema.optional(),
+  /** Absent when no loss is known. A degraded replay contains only acknowledged frames. */
+  journal: z.object({ state: z.literal("degraded"), error: z.string() }).optional()
 })
 /**
  * The decoded value accepted by {@link RunRecordSchema}.

@@ -114,7 +114,7 @@ export const registerRepoTargetRoutes = (
       options.log?.(`could not remember open repositories at ${rememberedPath}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  const history = createTargetRunHistory()
+  const history = createTargetRunHistory({ log: options.log })
   const runner = createTargetRunner({
     publish: server.publish,
     onEvent: (run, event) => history.event(run, event),

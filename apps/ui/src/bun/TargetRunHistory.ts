@@ -11,11 +11,14 @@ interface StoredRun {
   events: Array<TargetRunEvent>
   readonly path: string
   queue: Promise<void>
+  appendError?: Error
   /** Retained stdout/stderr characters, kept under MAX_RETAINED_LOG_CHARS. */
   logChars: number
 }
 
 export interface TargetRunHistory {
+  /** Wait for queued writes; reject if any append in this store failed. */
+  readonly flush: () => Promise<void>
   readonly start: (run: TargetRun) => Promise<void>
   readonly event: (run: TargetRun, event: TargetRunEvent) => void
   readonly list: (repoId: string, repo: string) => Promise<ReadonlyArray<RunRecord>>
@@ -24,8 +27,9 @@ export interface TargetRunHistory {
 
 /*
  * The in-memory cap on one run's retained stdout/stderr. The .jsonl journal on
- * disk keeps every byte; this bounds the heap, because `runs` holds every run
- * of the process and a chatty node emits megabytes. The TAIL is what a human
+ * disk keeps every successfully appended frame; append failures mark the run
+ * degraded and stop further writes. This bounds the heap, because `runs`
+ * holds every run of the process and a chatty node emits megabytes. The TAIL is what a human
  * reads, so eviction drops the OLDEST log frames and never a structured frame
  * (started/node/summary/exit/error), which the timeline and overlay need whole.
  */
@@ -58,7 +62,16 @@ const capLogs = (events: Array<TargetRunEvent>): { events: Array<TargetRunEvent>
   return { events: kept, logChars: total }
 }
 
-export const createTargetRunHistory = (): TargetRunHistory => {
+const applyEvent = (record: RunRecord, event: TargetRunEvent, endedAt: number): RunRecord => {
+  if (event.type === "started") return { ...record, status: "running" }
+  if (event.type === "summary") return { ...record, summary: event.summary }
+  if (event.type === "exit") return {
+    ...record, status: event.code === 0 ? "done" : "failed", endedAt, exitCode: event.code
+  }
+  return record
+}
+
+export const createTargetRunHistory = (options: { readonly log?: (line: string) => void } = {}): TargetRunHistory => {
   const runs = new Map<string, StoredRun>()
   /*
    * One load per repository, INCLUDING the one still in flight: two requests
@@ -95,7 +108,12 @@ export const createTargetRunHistory = (): TargetRunHistory => {
             if (checked.success && checked.data.repoId === repoId) record = checked.data
           } else if (parsed.type === "event") {
             const checked = TargetRunEventSchema.safeParse(parsed.event)
-            if (checked.success) events.push(checked.data)
+            if (checked.success) {
+              events.push(checked.data)
+              // Terminal status/time comes from the final record. Rebuild the
+              // durable prefix's other facts even when that record is missing.
+              if (record !== undefined && checked.data.type !== "exit") record = applyEvent(record, checked.data, 0)
+            }
           }
         } catch { /* A partial final line after a crash is ignored. */ }
       }
@@ -103,7 +121,10 @@ export const createTargetRunHistory = (): TargetRunHistory => {
       // previous process; after a restart it can never finish, so report it
       // as failed instead of leaving it "running" forever.
       if (record !== undefined) {
-        if (record.status === "pending" || record.status === "running") record = { ...record, status: "failed" }
+        if (record.status === "pending" || record.status === "running") record = {
+          ...record, status: "failed",
+          journal: { state: "degraded", error: "Journal has no terminal record; the run was interrupted or an append failed." }
+        }
         /* A journal on disk can be arbitrarily large; the heap copy is capped. */
         const capped = capLogs(events)
         runs.set(record.runId, { record, events: capped.events, path, queue: Promise.resolve(), logChars: capped.logChars })
@@ -112,6 +133,12 @@ export const createTargetRunHistory = (): TargetRunHistory => {
   }
 
   return {
+    flush: async () => {
+      const storedRuns = [...runs.values()]
+      await Promise.all(storedRuns.map((stored) => stored.queue))
+      const errors = storedRuns.flatMap((stored) => stored.appendError === undefined ? [] : [stored.appendError])
+      if (errors.length > 0) throw new AggregateError(errors, "Target run journal append failed.")
+    },
     start: async (run) => {
       const dir = runsDir(run.repo)
       const record: RunRecord = {
@@ -136,23 +163,35 @@ export const createTargetRunHistory = (): TargetRunHistory => {
     event: (run, event) => {
       const stored = runs.get(run.runId)
       if (stored === undefined) return
-      stored.events.push(event)
-      stored.logChars += logChars(event)
-      if (stored.logChars > MAX_RETAINED_LOG_CHARS) {
-        const capped = capLogs(stored.events)
-        stored.events = capped.events
-        stored.logChars = capped.logChars
-      }
-      if (event.type === "started") stored.record = { ...stored.record, status: "running" }
-      else if (event.type === "summary") stored.record = { ...stored.record, summary: event.summary }
-      else if (event.type === "exit") stored.record = {
-        ...stored.record,
-        status: event.code === 0 ? "done" : "failed",
-        endedAt: Date.now(),
-        exitCode: event.code
-      }
-      const line = encode({ type: "event", event }) + (event.type === "exit" ? encode({ type: "record", record: stored.record }) : "")
-      stored.queue = stored.queue.then(() => appendFile(stored.path, line)).catch(() => {})
+      const endedAt = Date.now()
+      stored.queue = stored.queue.then(async () => {
+        // A missing frame must never be followed by an apparently complete
+        // journal. Keep the first error and the last acknowledged prefix.
+        if (stored.appendError !== undefined) return
+        const record = applyEvent(stored.record, event, endedAt)
+        const line = encode({ type: "event", event }) + (event.type === "exit" ? encode({ type: "record", record }) : "")
+        await appendFile(stored.path, line)
+        stored.record = record
+        stored.events.push(event)
+        stored.logChars += logChars(event)
+        if (stored.logChars > MAX_RETAINED_LOG_CHARS) {
+          const capped = capLogs(stored.events)
+          stored.events = capped.events
+          stored.logChars = capped.logChars
+        }
+      }).catch((error: unknown) => {
+        if (stored.appendError !== undefined) return
+        const message = `Target run ${run.runId} journal append failed: ${error instanceof Error ? error.message : String(error)}`
+        stored.appendError = new Error(message, { cause: error })
+        stored.record = {
+          ...stored.record,
+          status: stored.record.status === "pending" || stored.record.status === "running" ? "failed" : stored.record.status,
+          journal: { state: "degraded", error: message }
+        }
+        // Logging is diagnostic; even a throwing logger cannot erase the
+        // failure retained for list/replay and the rejecting flush boundary.
+        try { (options.log ?? console.error)(message) } catch { /* Error remains on the record. */ }
+      })
     },
     list: async (repoId, repo) => {
       await loadRepo(repoId, repo)

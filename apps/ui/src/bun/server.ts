@@ -1241,6 +1241,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         () => linearAuth?.stop(),
         () => ptyStopped,
         () => lsp.killAll(),
+        () => repoTargets.history.flush(),
         () => repositoryAuthority.clear()
       ].map(async (cleanup) => cleanup()))
       const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : [])

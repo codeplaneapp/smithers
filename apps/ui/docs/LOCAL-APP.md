@@ -157,6 +157,20 @@ awaiting termination; its admission/lifetime and parser buffering remain
 under review. Do not treat server shutdown as a verified descendant-process
 drain or a complete bound on every subprocess output path.
 
+Target history acknowledges frames only after their journal append succeeds.
+On the first append failure, list/replay return `run.journal` (or the listed
+record's `journal`) with `state: "degraded"` and `error`; later frames for that
+run are not appended or acknowledged. An unsettled history record becomes
+`failed` without an exit code. The host logs the first error once per run.
+`history.flush()` waits for queued appends and rejects on any append failure;
+server shutdown awaits it alongside the independent finalizers. It does not
+wait for target processes to terminate or provide an fsync guarantee.
+After restart, a journal missing its terminal record reports degraded history
+with a generic interruption error. The original filesystem error is available
+only in the failing process and its log, since a failed disk cannot reliably
+persist its own failure. Successfully appended stdout/stderr remains subject
+to the in-memory tail cap.
+
 ## Multi-workspace repositories and plugins
 
 Repository detection records the root and child Smithers workspaces (up to two
