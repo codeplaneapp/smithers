@@ -126,13 +126,14 @@ export const make = (bash: JustBashLike) =>
     const resolveWorkingDirectory = Effect.fnUntraced(
       function*(options: ChildProcess.CommandOptions) {
         if (options.cwd === undefined) return undefined
+        const cwd = path.isAbsolute(options.cwd) ? path.normalize(options.cwd) : path.resolve("/", options.cwd)
         // A regular file passes a bare existence check and is then handed to
         // the interpreter as a working directory, where Node fails ENOTDIR.
-        const info = yield* fs.stat(options.cwd)
+        const info = yield* fs.stat(cwd)
         if (info.type !== "Directory") {
           return yield* Effect.fail(rejected("spawn", `the working directory ${options.cwd} is not a directory`))
         }
-        return path.resolve(options.cwd)
+        return cwd
       }
     )
 

@@ -21,7 +21,6 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { mkdtemp, rm } from "node:fs/promises"
 import * as NodeFsPromises from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { relative } from "node:path"
 import * as BrowserChildProcessSpawner from "../src/BrowserChildProcessSpawner/index.ts"
 import * as BrowserFileSystem from "../src/BrowserFileSystem/index.ts"
 
@@ -276,23 +275,52 @@ describe("BrowserChildProcessSpawner", () => {
       expect(calls[0]?.env).toEqual({ KEEP: "yes" })
     }))
 
-  it.effect("resolves a relative cwd against the Node process cwd", () =>
+  it.effect.each([false, true])("resolves a relative cwd against the volume root (tab: %s)", (tab) =>
     Effect.gen(function*() {
       const { bash, calls } = stub(ok())
-      const relativeCwd = relative(process.cwd(), root)
+      const statted: Array<string> = []
+      const path = yield* Path.Path.pipe(Effect.provide(Path.layer))
+      const pathLayer = Layer.succeed(Path.Path, {
+        ...path,
+        resolve: (...paths) => {
+          if (!tab) return path.resolve(...paths)
+          // Only the synchronous resolver sees a tab's missing process global,
+          // so the test runner and asynchronous filesystem keep their runtime.
+          const descriptor = Object.getOwnPropertyDescriptor(globalThis, "process")!
+          Reflect.deleteProperty(globalThis, "process")
+          try {
+            return path.resolve(...paths)
+          } finally {
+            Object.defineProperty(globalThis, "process", descriptor)
+          }
+        }
+      })
+      const layer = BrowserChildProcessSpawner.layer(bash).pipe(
+        Layer.provide(Layer.mergeAll(
+          BrowserFileSystem.layer({
+            ...NodeFsPromises,
+            stat: (cwd) => {
+              statted.push(cwd)
+              // Model a volume whose backend roots relative paths at /.
+              return NodeFsPromises.stat(join(root, cwd))
+            }
+          }),
+          pathLayer
+        ))
+      )
+      yield* Effect.promise(() => NodeFsPromises.mkdir(join(root, "workspace"), { recursive: true }))
 
-      yield* run(
-        bash,
+      const exit = yield* Effect.exit(Effect.provide(
         Effect.flatMap(
           ChildProcessSpawner,
-          (spawner) => spawner.exitCode(ChildProcess.make("thing", [], { cwd: relativeCwd }))
-        )
-      )
+          (spawner) => spawner.exitCode(ChildProcess.make("thing", [], { cwd: "workspace" }))
+        ),
+        layer
+      ))
 
-      // Effect's POSIX Path layer consults globalThis.process.cwd() under Node.
-      // A real browser tab has no process, so callers should pass an absolute
-      // virtual cwd when they need the same resolution on a mounted filesystem.
-      expect(calls[0]?.cwd).toBe(root)
+      expect(exit).toEqual(Exit.succeed(0))
+      expect(calls[0]?.cwd).toBe("/workspace")
+      expect(statted).toEqual(["/workspace"])
     }))
 
   it.effect("omits cwd and env entirely when the command declares neither", () =>
