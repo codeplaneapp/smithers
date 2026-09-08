@@ -69,6 +69,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Headers from "effect/unstable/http/Headers"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -89,6 +90,8 @@ export interface Options {
   /**
    * Headers sent with every request. This is the credential seam, and it is
    * deliberately construction-time — see the module doc.
+   * All configured names are redacted case-insensitively in Effect HTTP
+   * tracing spans, preserving the caller's existing header redaction policy.
    */
   readonly headers?: Readonly<Record<string, string>> | undefined
   /**
@@ -283,6 +286,7 @@ export const make = (
     ) return yield* Effect.fail(invalidConfiguration("maxResponseBytes"))
     const client = yield* HttpClient.HttpClient
     const headers = configured.headers
+    const credentialNames = Object.keys(headers ?? {}).map((name) => name.toLowerCase())
     const authorize = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
       headers === undefined ? request : HttpClientRequest.setHeaders(request, headers)
     const acUrl = (keyDigest: string) => {
@@ -305,6 +309,7 @@ export const make = (
       )
     const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
       client.execute(authorize(request)).pipe(
+        Effect.updateService(Headers.CurrentRedactedNames, (names) => [...names, ...credentialNames]),
         Effect.mapError((cause) => transportFailure(operation, cause))
       )
     const readBounded = (response: HttpClientResponse.HttpClientResponse) =>

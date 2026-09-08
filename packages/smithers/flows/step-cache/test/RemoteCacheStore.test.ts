@@ -9,8 +9,11 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
+import * as Tracer from "effect/Tracer"
+import * as Headers from "effect/unstable/http/Headers"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as CacheStore from "../src/CacheStore.ts"
 import * as RemoteCacheStore from "../src/RemoteCacheStore.ts"
@@ -95,6 +98,64 @@ describe("lookups", () => {
       headers.authorization = "Bearer changed"
       yield* store.get(entry.keyDigest)
       expect(tier.calls[0]!.headers["authorization"]).toBe("Bearer original")
+    }))
+
+  it.effect("redacts configured credential headers only within cache HTTP spans", () =>
+    Effect.gen(function*() {
+      const spans: Array<Tracer.NativeSpan> = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        }
+      })
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests.push(request)
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(null, { status: request.method === "PUT" ? 201 : 404 })
+          )
+        })
+      ).pipe(HttpClient.mapRequest(HttpClientRequest.setHeaders({
+        authorization: "Bearer default-secret",
+        "x-tenant-secret": "caller-secret",
+        "x-public": "public-value"
+      })))
+      const store = yield* RemoteCacheStore.make({
+        endpoint: "https://cache.example.com",
+        headers: { "X-Cache-Token": "synthetic-cache-secret", "x-cache-key": "second-secret" }
+      }).pipe(Effect.provideService(HttpClient.HttpClient, client))
+      const names = yield* Headers.CurrentRedactedNames
+      yield* Effect.gen(function*() {
+        yield* store.get(entry.keyDigest)
+        yield* store.put(entry)
+        yield* store.evict(entry.keyDigest)
+        yield* client.get("https://cache.example.com/control", {
+          headers: { "x-cache-token": "public-control" }
+        })
+      }).pipe(
+        Effect.provideService(Headers.CurrentRedactedNames, [...names, /^x-tenant-/]),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
+      const clientSpans = spans.filter((span) => span.kind === "client")
+      expect(clientSpans).toHaveLength(4)
+      expect(requests.map((request) => request.method)).toEqual(["GET", "PUT", "DELETE", "GET"])
+      for (let index = 0; index < 3; index++) {
+        expect(requests[index]!.headers["x-cache-token"]).toBe("synthetic-cache-secret")
+        expect(requests[index]!.headers["x-cache-key"]).toBe("second-secret")
+        expect(clientSpans[index]!.attributes.get("http.request.header.x-cache-token")).toBe("<redacted>")
+        expect(clientSpans[index]!.attributes.get("http.request.header.x-cache-key")).toBe("<redacted>")
+      }
+      for (const span of clientSpans) {
+        expect(span.attributes.get("http.request.header.authorization")).toBe("<redacted>")
+        expect(span.attributes.get("http.request.header.x-tenant-secret")).toBe("<redacted>")
+        expect(span.attributes.get("http.request.header.x-public")).toBe("public-value")
+      }
+      expect(clientSpans[3]!.attributes.get("http.request.header.x-cache-token")).toBe("public-control")
+      expect(yield* Headers.CurrentRedactedNames).toEqual(names)
     }))
 
   it.effect("rejects accessor-backed headers without invoking them", () =>
