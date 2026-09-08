@@ -19,6 +19,25 @@ const read = (relativePath: string): string => readFileSync(join(packageRoot, re
 const apiDoc = read("docs/api.md");
 const barrelSource = read("src/index.ts");
 
+describe("consumer theming guides", () => {
+  test("palette sources distinguish host overrides from registry regeneration", () => {
+    const guide = read("docs/concepts/palette-sources.md").replace(/\s+/g, " ");
+    expect(guide).not.toContain("None of these can be fixed by overriding a token in your own sheet");
+    expect(guide).not.toContain("the `--check` mode restores");
+    expect(guide).toContain("../guides/override-a-token.md");
+    expect(guide).toContain("read-only");
+  });
+
+  test("embedding documents defaults before optional attribute overrides", () => {
+    const guide = read("docs/guides/embed-a-stylesheet.md").replace(/\s+/g, " ");
+    expect(guide).not.toContain("The sheet themes nothing until");
+    expect(guide).toContain("Night Owl light");
+    expect(guide).toContain("no attributes");
+    expect(guide).toContain("`prefers-color-scheme: dark`");
+    expect(guide).toContain("optional overrides");
+  });
+});
+
 /**
  * The type-only names the barrel re-exports.
  *

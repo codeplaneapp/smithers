@@ -102,10 +102,14 @@ them is a generated palette.
 A fifth cause has no list of its own: the generator's `contrast()` runs on
 rounded channels, so its ratchet stops one step early.
 
-None of these can be fixed by overriding a token in your own sheet, because the
-values live in generator output that the `--check` mode restores. Closing a gap
-means changing the generator, at which point the corresponding entry has to come
-out of the list, because the suite asserts that nothing inside a list may pass.
+Consumer token overrides can improve contrast in a host document; see
+[Override a token](../guides/override-a-token.md). The generator's `--check`
+mode is a read-only comparison of repository theme files: it never rewrites
+files or reads consumer CSS.
+
+Closing a gap in the shipped registry requires changing the generator and
+regenerating. Remove the corresponding entry from the list when it passes,
+because the suite asserts that nothing inside a list may pass.
 
 ## Related
 

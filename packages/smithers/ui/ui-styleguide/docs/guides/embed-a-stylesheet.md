@@ -88,7 +88,9 @@ once, near the root. A host whose page already inlines the theme leaves
 
 ## Stamp the selection
 
-The sheet themes nothing until the document says which palette and which mode:
+With no attributes, the sheet applies Night Owl light by default and switches
+to Night Owl dark when `prefers-color-scheme: dark` matches. Use `data-palette`
+and `data-theme` as optional overrides:
 
 ```ts
 document.documentElement.dataset.palette = "gruvbox"   // one of the eight keys
