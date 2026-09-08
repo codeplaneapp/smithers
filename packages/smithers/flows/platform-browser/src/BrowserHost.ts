@@ -85,12 +85,13 @@ export const layer = (options: {
   /**
    * What `BrowserJj.layer` needs: the compiled `flows_jj.wasm` module and the
    * synchronous slice of the same mount `fs` exposes as promises, plus the
-   * workspace root inside that namespace and optional stdio taps.
+   * repository root inside that namespace and optional stdio taps. The
+   * FileSystem isolation root remains the whole mount at `/`.
    */
   readonly jj: BrowserJj.BrowserJjOptions
 }): Layer.Layer<BrowserHost, PlatformError.PlatformError> => {
   const platform = Layer.mergeAll(
-    BrowserFileSystem.layer(options.fs, { workspaceRoot: options.jj.root ?? "/" }),
+    BrowserFileSystem.layer(options.fs, { workspaceRoot: "/" }),
     Path.layer
   )
   return Layer.mergeAll(

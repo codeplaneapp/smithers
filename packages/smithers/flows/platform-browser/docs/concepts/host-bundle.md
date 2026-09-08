@@ -73,4 +73,6 @@ never contacts the second origin on its own.
 
 Only `BrowserHost.layer` is exposed. The memory engine, adapters, and kernel
 run in a tab; durable execution needs the Node-only SqlClient and NodeRuntime.
-Use one workspace per mount and set `jj.root` to `/` (the default).
+Use one workspace per isolated mount. The FileSystem isolation root is always
+the mount root `/`. `jj.root` defaults to `/` and may instead select an existing
+repository directory such as `/repo` inside that mount.

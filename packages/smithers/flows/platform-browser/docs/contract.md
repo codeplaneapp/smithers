@@ -12,9 +12,13 @@ about the adapter, and the parts a backend owns are named as such.
 ```ts
 import * as BrowserHost from "@smthrs/platform-browser/BrowserHost"
 
-/** bash, fs, and wasm are the page's: see Compose the browser host bundle. */
+/** One isolated mount; /repo already exists. See Compose the browser host bundle. */
 const layer = BrowserHost.layer({ bash, fs: fs.promises, jj: { wasm, fs, root: "/repo" } })
 ```
+
+The FileSystem isolation root is always the mount root `/`. `jj.root` selects
+the repository directory inside that mount; it does not narrow FileSystem
+isolation. Use one workspace per isolated mount.
 
 ## What the bundle provides
 
