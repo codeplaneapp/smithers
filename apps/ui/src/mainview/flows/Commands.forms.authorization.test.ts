@@ -196,7 +196,7 @@ describe("form.submit authorization through the real chain catalog (security/1)"
       const h = fixture()
       const id = h.form(target)
       const first = await h.runChain(id)
-      expect(first.outcome._tag).toBe("Park")
+      expect(first.outcome._tag).toBe("ApprovalWait")
       expect(h.effects).toEqual([])
       expect(first.events.some((event) => event._tag === "CallSettled" && event.name === "form.submit")).toBe(false)
       expect(h.policy.resolve("chain", "approved")).toBe(true)
