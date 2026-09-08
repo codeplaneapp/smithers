@@ -63,46 +63,86 @@
     "exports": {
       "./package.json": "./package.json",
       ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "require": "./dist/cjs/index.js"
+        "import": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/esm/index.js"
+        },
+        "require": {
+          "types": "./dist/cjs/index.d.ts",
+          "default": "./dist/cjs/index.js"
+        }
       },
       "./internal/*": null,
       "./*/index": null,
       "./DatabaseMetrics": {
-        "types": "./dist/esm/DatabaseMetrics.d.ts",
-        "import": "./dist/esm/DatabaseMetrics.js",
-        "require": "./dist/cjs/DatabaseMetrics.js"
+        "import": {
+          "types": "./dist/esm/DatabaseMetrics.d.ts",
+          "default": "./dist/esm/DatabaseMetrics.js"
+        },
+        "require": {
+          "types": "./dist/cjs/DatabaseMetrics.d.ts",
+          "default": "./dist/cjs/DatabaseMetrics.js"
+        }
       },
       "./DurableWriter": {
-        "types": "./dist/esm/DurableWriter.d.ts",
-        "import": "./dist/esm/DurableWriter.js",
-        "require": "./dist/cjs/DurableWriter.js"
+        "import": {
+          "types": "./dist/esm/DurableWriter.d.ts",
+          "default": "./dist/esm/DurableWriter.js"
+        },
+        "require": {
+          "types": "./dist/cjs/DurableWriter.d.ts",
+          "default": "./dist/cjs/DurableWriter.js"
+        }
       },
       "./Migrations": {
-        "types": "./dist/esm/Migrations.d.ts",
-        "import": "./dist/esm/Migrations.js",
-        "require": "./dist/cjs/Migrations.js"
+        "import": {
+          "types": "./dist/esm/Migrations.d.ts",
+          "default": "./dist/esm/Migrations.js"
+        },
+        "require": {
+          "types": "./dist/cjs/Migrations.d.ts",
+          "default": "./dist/cjs/Migrations.js"
+        }
       },
       "./UnsupportedBackend": {
-        "types": "./dist/esm/UnsupportedBackend.d.ts",
-        "import": "./dist/esm/UnsupportedBackend.js",
-        "require": "./dist/cjs/UnsupportedBackend.js"
+        "import": {
+          "types": "./dist/esm/UnsupportedBackend.d.ts",
+          "default": "./dist/esm/UnsupportedBackend.js"
+        },
+        "require": {
+          "types": "./dist/cjs/UnsupportedBackend.d.ts",
+          "default": "./dist/cjs/UnsupportedBackend.js"
+        }
       },
       "./index": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "require": "./dist/cjs/index.js"
+        "import": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/esm/index.js"
+        },
+        "require": {
+          "types": "./dist/cjs/index.d.ts",
+          "default": "./dist/cjs/index.js"
+        }
       },
       "./node/NodeDatabase": {
-        "types": "./dist/esm/node/NodeDatabase.d.ts",
-        "import": "./dist/esm/node/NodeDatabase.js",
-        "require": "./dist/cjs/node/NodeDatabase.js"
+        "import": {
+          "types": "./dist/esm/node/NodeDatabase.d.ts",
+          "default": "./dist/esm/node/NodeDatabase.js"
+        },
+        "require": {
+          "types": "./dist/cjs/node/NodeDatabase.d.ts",
+          "default": "./dist/cjs/node/NodeDatabase.js"
+        }
       },
       "./test/TestDatabase": {
-        "types": "./dist/esm/test/TestDatabase.d.ts",
-        "import": "./dist/esm/test/TestDatabase.js",
-        "require": "./dist/cjs/test/TestDatabase.js"
+        "import": {
+          "types": "./dist/esm/test/TestDatabase.d.ts",
+          "default": "./dist/esm/test/TestDatabase.js"
+        },
+        "require": {
+          "types": "./dist/cjs/test/TestDatabase.d.ts",
+          "default": "./dist/cjs/test/TestDatabase.js"
+        }
       }
     }
   },

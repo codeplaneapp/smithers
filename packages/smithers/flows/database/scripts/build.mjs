@@ -20,6 +20,19 @@ const declarationResult = spawnSync(process.execPath, [tsc, "-p", "tsconfig.json
 })
 if (declarationResult.status !== 0) process.exit(declarationResult.status ?? 1)
 
+// The `require` condition serves the CommonJS tree below, so that tree needs
+// its own declarations: TypeScript reads a file's module format from the
+// nearest package.json, and `dist/cjs/package.json` marks these as CommonJS.
+// Emitting the same declarations there is what lets a Node16 consumer's value
+// import land on a CommonJS declaration file instead of the ESM one, which is
+// TS1479. Declaration-only, because esbuild writes the JavaScript.
+const cjsDeclarationResult = spawnSync(
+  process.execPath,
+  [tsc, "-p", "tsconfig.json", "--emitDeclarationOnly", "--declarationDir", "dist/cjs"],
+  { cwd: packageRoot, stdio: "inherit" }
+)
+if (cjsDeclarationResult.status !== 0) process.exit(cjsDeclarationResult.status ?? 1)
+
 await build({
   entryPoints: filesWithExtension(resolve(packageRoot, "src"), ".ts"),
   outbase: resolve(packageRoot, "src"),
