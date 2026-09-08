@@ -16,8 +16,11 @@ Install the packages and a crypto service:
 
 ```bash
 pnpm add @smthrs/engine@next @smthrs/flow@next
-pnpm add -D @effect/platform-node@4.0.0-rc.112
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
+
+`@effect/platform-node` supplies the runtime `Crypto` service used by every
+action dispatch, so install it in your application's `dependencies`.
 
 ## Declare the action and the flow
 

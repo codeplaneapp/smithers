@@ -42,8 +42,11 @@ browser program provides its own; a Node program provides
 `@effect/platform-node`:
 
 ```bash
-pnpm add -D @effect/platform-node@4.0.0-rc.112
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
+
+`@effect/platform-node` supplies the runtime `Crypto` service used by every
+action dispatch, so install it in your application's `dependencies`.
 
 ## Compensable actions
 
