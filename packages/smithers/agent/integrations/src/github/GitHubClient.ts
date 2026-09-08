@@ -83,14 +83,12 @@ export type RequestMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE"
 export const UNSAFE_METHODS: ReadonlyArray<RequestMethod> = ["POST", "PATCH", "PUT", "DELETE"]
 
 /**
- * Per-request options.
+ * Per-request options for a call whose response the client does not check.
  *
  * @category models
  * @since 1.0.0
  */
-export interface RequestOptions<A> {
-  /** Decodes the response body. Omit it to receive the parsed JSON. */
-  readonly schema?: Schema.Schema<A> | undefined
+export interface RequestOptions {
   readonly query?: Readonly<Record<string, string | number | boolean | undefined>> | undefined
   /**
    * Repeat a POST, PATCH, PUT, or DELETE whose outcome is unknown.
@@ -103,6 +101,20 @@ export interface RequestOptions<A> {
    * performed.
    */
   readonly retryUnsafeWrites?: boolean | undefined
+}
+
+/**
+ * Per-request options that decode the response.
+ *
+ * The schema is required, and the request's result type is the schema's type:
+ * a caller cannot name a response type the client never checked.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface DecodedRequestOptions<A> extends RequestOptions {
+  /** Decodes the response body, failing `decode-failed` when it does not fit. */
+  readonly schema: Schema.Schema<A>
 }
 
 /**
@@ -127,12 +139,28 @@ export interface Page {
  * @since 1.0.0
  */
 export interface GitHubClient {
-  readonly request: <A = unknown>(
-    method: RequestMethod,
-    path: string,
-    body?: unknown,
-    options?: RequestOptions<A>
-  ) => Effect.Effect<A, IntegrationError>
+  /**
+   * One REST call.
+   *
+   * Without a schema the result is the parsed JSON as `unknown`: nothing was
+   * validated, so nothing is promised. Passing a
+   * {@link DecodedRequestOptions.schema} is the only way to name the response
+   * type, and the decode failing is reported as `decode-failed`.
+   */
+  readonly request: {
+    <A>(
+      method: RequestMethod,
+      path: string,
+      body: unknown,
+      options: DecodedRequestOptions<A>
+    ): Effect.Effect<A, IntegrationError>
+    (
+      method: RequestMethod,
+      path: string,
+      body?: unknown,
+      options?: RequestOptions
+    ): Effect.Effect<unknown, IntegrationError>
+  }
   /**
    * Follows `Link: rel="next"` and concatenates the pages.
    *
@@ -299,7 +327,7 @@ export const make = (
   // `new URL` throws a bare TypeError for anything starting with "http" that
   // is not a URL (`httpx`, say). That throw runs before the request effect, so
   // it would escape the declared IntegrationError channel as a defect.
-  const buildUrl = (path: string, query?: RequestOptions<unknown>["query"]): string => {
+  const buildUrl = (path: string, query?: RequestOptions["query"]): string => {
     const absolute = path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`
     if (!URL.canParse(absolute)) {
       throw new IntegrationError("invalid-config", `GitHub request path is not a URL: ${path}`, {
@@ -316,7 +344,7 @@ export const make = (
 
   const urlFor = (
     path: string,
-    query?: RequestOptions<unknown>["query"]
+    query?: RequestOptions["query"]
   ): Effect.Effect<string, IntegrationError> =>
     Effect.try({ try: () => buildUrl(path, query), catch: (cause) => cause as IntegrationError })
 
@@ -427,18 +455,30 @@ export const make = (
     return attemptOnce(method, url, body, retryUnsafeWrites).pipe(Effect.retry(schedule))
   }
 
-  const request = <A>(
+  function request<A>(
+    method: RequestMethod,
+    path: string,
+    body: unknown,
+    options: DecodedRequestOptions<A>
+  ): Effect.Effect<A, IntegrationError>
+  function request(
     method: RequestMethod,
     path: string,
     body?: unknown,
-    options?: RequestOptions<A>
-  ): Effect.Effect<A, IntegrationError> =>
-    Effect.all([urlFor(path, options?.query), encodeBody(body)]).pipe(
+    options?: RequestOptions
+  ): Effect.Effect<unknown, IntegrationError>
+  function request(
+    method: RequestMethod,
+    path: string,
+    body?: unknown,
+    options?: RequestOptions & { readonly schema?: Schema.Schema<any> | undefined }
+  ): Effect.Effect<unknown, IntegrationError> {
+    return Effect.all([urlFor(path, options?.query), encodeBody(body)]).pipe(
       Effect.flatMap(([url, encoded]) => requestUrl(method, url, encoded, options?.retryUnsafeWrites)),
       Effect.flatMap(({ json }) => {
         const schema = options?.schema
-        if (schema === undefined) return Effect.succeed(json as A)
-        return (Schema.decodeUnknownEffect(schema)(json) as Effect.Effect<A, unknown>).pipe(
+        if (schema === undefined) return Effect.succeed(json)
+        return (Schema.decodeUnknownEffect(schema)(json) as Effect.Effect<unknown, unknown>).pipe(
           Effect.mapError((cause) =>
             new IntegrationError(
               "decode-failed",
@@ -450,6 +490,7 @@ export const make = (
         )
       })
     )
+  }
 
   const paginate: GitHubClient["paginate"] = (path, options) =>
     Effect.gen(function*() {

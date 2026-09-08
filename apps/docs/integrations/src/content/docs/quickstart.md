@@ -47,11 +47,13 @@ viewer. `make` is a plain constructor, so the first call needs no layers.
 
 ```ts
 import { GitHub } from "@smthrs/integrations"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 const client = GitHub.GitHubClient.make({})
 
-const viewer = await Effect.runPromise(client.request<{ login?: unknown }>("GET", "/user"))
+const Viewer = Schema.Struct({ login: Schema.String })
+
+const viewer = await Effect.runPromise(client.request("GET", "/user", undefined, { schema: Viewer }))
 console.log(viewer.login)
 ```
 

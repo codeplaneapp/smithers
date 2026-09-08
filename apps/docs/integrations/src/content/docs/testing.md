@@ -18,14 +18,16 @@ assert on the requests it received:
 
 ```ts
 import { GitHub } from "@smthrs/integrations"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 const client = GitHub.GitHubClient.make(
   { token: "test-token", apiBaseUrl: fixtureOrigin },
   {}
 )
 
-const viewer = await Effect.runPromise(client.request<{ login: string }>("GET", "/user"))
+const viewer = await Effect.runPromise(
+  client.request("GET", "/user", undefined, { schema: Schema.Struct({ login: Schema.String }) })
+)
 ```
 
 Replace `fixtureOrigin` with your server's origin, for example

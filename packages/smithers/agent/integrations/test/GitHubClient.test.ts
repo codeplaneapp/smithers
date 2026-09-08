@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
-import { isIntegrationError } from "../src/core/IntegrationError.ts"
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest"
+import { type IntegrationError, isIntegrationError } from "../src/core/IntegrationError.ts"
 import { DEFAULT_API_BASE_URL, resolve } from "../src/github/Config.ts"
 import { isRateLimitResponse, make, nextPageUrl, retryAfterMs } from "../src/github/GitHubClient.ts"
 import { type Fixture, json, startFixture } from "./Fixture.ts"
@@ -97,6 +97,27 @@ describe("rate-limit detection", () => {
     expect(retryAfterMs(new Headers({ "x-ratelimit-reset": "1010" }), 1_000_000)).toBe(10_000)
     expect(retryAfterMs(new Headers({ "x-ratelimit-reset": "900" }), 1_000_000)).toBeNull()
     expect(retryAfterMs(new Headers())).toBeNull()
+  })
+})
+
+describe("GitHubClient request typing", () => {
+  it("names a response type only through a schema", () => {
+    const offline = make({ token: TOKEN })
+
+    // Schemaless: the client validated nothing, so the result is `unknown`.
+    const raw = offline.request("GET", "/user")
+    expectTypeOf(raw).toEqualTypeOf<Effect.Effect<unknown, IntegrationError>>()
+
+    // With a schema the result is the schema's type, and the decode ran.
+    const decoded = offline.request("GET", "/user", undefined, {
+      schema: Schema.Struct({ login: Schema.String })
+    })
+    expectTypeOf(decoded).not.toEqualTypeOf<Effect.Effect<unknown, IntegrationError>>()
+    expectTypeOf(Effect.map(decoded, (viewer) => viewer.login))
+      .toEqualTypeOf<Effect.Effect<string, IntegrationError>>()
+
+    // @ts-expect-error a request without a schema cannot name its response type
+    offline.request<{ login: string }>("GET", "/user")
   })
 })
 

@@ -9,7 +9,7 @@
  *
  * A read-only token is enough. Nothing here writes.
  */
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { make } from "../src/github/GitHubClient.ts"
 
@@ -21,21 +21,25 @@ describe.skipIf(token === undefined)("GitHub live contract (GITHUB_TOKEN)", () =
   const client = make({ token })
 
   it("authenticates and returns the viewer", async () => {
-    const viewer = await Effect.runPromise(client.request<{ login?: unknown }>("GET", "/user"))
+    const viewer = await Effect.runPromise(
+      client.request("GET", "/user", undefined, { schema: Schema.Struct({ login: Schema.String }) })
+    )
     expect(typeof viewer.login).toBe("string")
   }, 30_000)
 
   it("reports the rate-limit headers the retry policy reads", async () => {
+    const RateLimit = Schema.Struct({
+      resources: Schema.Struct({
+        core: Schema.Struct({ limit: Schema.Number, remaining: Schema.Number, reset: Schema.Number })
+      })
+    })
     const limits = await Effect.runPromise(
-      client.request<{ resources?: { core?: { limit?: unknown; remaining?: unknown; reset?: unknown } } }>(
-        "GET",
-        "/rate_limit"
-      )
+      client.request("GET", "/rate_limit", undefined, { schema: RateLimit })
     )
-    const core = limits.resources?.core
-    expect(typeof core?.limit).toBe("number")
-    expect(typeof core?.remaining).toBe("number")
-    expect(typeof core?.reset).toBe("number")
+    const core = limits.resources.core
+    expect(typeof core.limit).toBe("number")
+    expect(typeof core.remaining).toBe("number")
+    expect(typeof core.reset).toBe("number")
   }, 30_000)
 
   it("paginates a real Link header", async () => {

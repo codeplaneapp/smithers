@@ -40,15 +40,21 @@ Build the client with `GitHub.GitHubClient.make` for direct use, or
 
 ```ts
 import { GitHub } from "@smthrs/integrations"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 const client = GitHub.GitHubClient.make({})
 
+const Viewer = Schema.Struct({ login: Schema.String })
+
 const program = Effect.gen(function*() {
-  const viewer = yield* client.request<{ login?: unknown }>("GET", "/user")
+  const viewer = yield* client.request("GET", "/user", undefined, { schema: Viewer })
   return viewer.login
 })
 ```
+
+The response type comes from the schema. Without one, `request` returns the
+parsed JSON as `unknown`, because the client checked nothing and so promises
+nothing.
 
 `request` retries a rate limit for every method, waiting the server's
 `Retry-After` or `x-ratelimit-reset` capped at one minute. A 5xx or a dropped
