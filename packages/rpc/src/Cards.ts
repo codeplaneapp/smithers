@@ -5,7 +5,6 @@
  */
 import { z } from "zod"
 import { AgentRoleIdSchema, AgentRoleModelSchema } from "./AgentRoles.ts"
-import { FactoryRuleSchema } from "./FactoryProjection.ts"
 import {
   ChangeAnalyzerRunSchema,
   ChangeCheckSchema,
@@ -24,6 +23,7 @@ import {
   LandingBlockSchema,
   RevisionPinSchema
 } from "./Changes.ts"
+import { FactoryRuleSchema } from "./FactoryProjection.ts"
 import { HomeBlockSchema } from "./HomePane.ts"
 import {
   HARNESS_IDS,

@@ -23,7 +23,10 @@ describe("the home blocks", () => {
     expect("title" in Home.Text({ text: "No title." })).toBe(false)
 
     const links = Home.Links({ links: [{ label: "Source", url: "https://github.com/smithersai/smithers" }] })
-    expect(links).toEqual({ type: "links", links: [{ label: "Source", url: "https://github.com/smithersai/smithers" }] })
+    expect(links).toEqual({
+      type: "links",
+      links: [{ label: "Source", url: "https://github.com/smithersai/smithers" }]
+    })
     expect(Object.isFrozen(links.links)).toBe(true)
     expect(Object.isFrozen(links.links[0])).toBe(true)
 
@@ -80,7 +83,9 @@ describe("Smithers.Factory.Home", () => {
   })
 
   it("refuses a raw string, markup, or an unknown block shape, naming the block", () => {
-    expect(() => Home.Home({ blocks: ["<h1>Hello</h1>"] as never })).toThrow(/block 0 must be a declared block.*not a string/)
+    expect(() => Home.Home({ blocks: ["<h1>Hello</h1>"] as never })).toThrow(
+      /block 0 must be a declared block.*not a string/
+    )
     expect(() => Home.Home({ blocks: [blocks[0]!, "# Hello"] as never })).toThrow(/block 1 must be a declared block/)
     expect(() => Home.Home({ blocks: [{ type: "html", html: "<div/>" }] as never })).toThrow(/Factory\.Home/)
     expect(() => Home.Home({ blocks: [{ type: "text", text: "<em>x</em>" }] })).toThrow(/must not contain HTML/)
@@ -95,7 +100,9 @@ describe("Smithers.Factory.Home", () => {
     expect(text).toBe(`${JSON.stringify({ blocks }, null, 2)}\n`)
     expect(Home.parse(text)).toEqual({ blocks })
     expect(Home.parse("{")).toMatch(/not JSON/)
-    expect(Home.parse(JSON.stringify({ blocks: [{ type: "text", text: "<b>x</b>" }] }))).toMatch(/must not contain HTML/)
+    expect(Home.parse(JSON.stringify({ blocks: [{ type: "text", text: "<b>x</b>" }] }))).toMatch(
+      /must not contain HTML/
+    )
     expect(Home.parse(JSON.stringify({ blocks: [{ type: "prose", markdown: "x" }] }))).toMatch(/shape/)
   })
 })

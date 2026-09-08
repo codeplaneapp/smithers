@@ -163,7 +163,8 @@ test("a _headers that only caches the chunks fails, naming each missing header",
   ])
   assert.deepEqual(checkAssetHeaders(fixture(t, {})), ["_headers: missing the /_astro/* rule"])
   const cors = fixture(t, {
-    "_headers": "/_astro/*\n  Cross-Origin-Embedder-Policy: require-corp\n  Cross-Origin-Resource-Policy: cross-origin\n"
+    "_headers":
+      "/_astro/*\n  Cross-Origin-Embedder-Policy: require-corp\n  Cross-Origin-Resource-Policy: cross-origin\n"
   })
   assert.deepEqual(checkAssetHeaders(cors), [
     "_headers: /_astro/* must set cross-origin-resource-policy: same-origin (got cross-origin)"

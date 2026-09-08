@@ -54,7 +54,9 @@ function readHeaders(root) {
       continue
     }
     const separator = trimmed.indexOf(":")
-    if (current === undefined || separator === -1) throw new Error(`_headers:${index + 1}: unsupported header line: ${trimmed}`)
+    if (current === undefined || separator === -1) {
+      throw new Error(`_headers:${index + 1}: unsupported header line: ${trimmed}`)
+    }
     current.set(trimmed.slice(0, separator).trim().toLowerCase(), trimmed.slice(separator + 1).trim())
   }
   return rules
