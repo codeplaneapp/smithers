@@ -7,7 +7,7 @@
  * the same rules on the real binary.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Console, Effect, Logger, Tracer } from "effect"
+import { Cause, Console, Context, Effect, Logger, References, Tracer } from "effect"
 import { inspect } from "node:util"
 import * as RedactedLogger from "../src/RedactedLogger.ts"
 import * as Redaction from "../src/Redaction.ts"
@@ -274,6 +274,140 @@ describe("RedactedLogger", () => {
       expect(rendered).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
       expect(rendered).toContain(`token=${Redaction.placeholder}`)
       expect(rendered).toContain("POST https://example.test failed")
+    }))
+
+  it.effect("redacts real span names in the cause exported by the tracer", () =>
+    Effect.gen(function*() {
+      const secret = "sk-live-gridProbeCredential12345"
+      const spans = yield* traced(
+        Effect.fail(new Error("request failed")).pipe(
+          Effect.withSpan(`fetch token=${secret}`),
+          Effect.withSpan(`parent token=${secret}`),
+          Effect.catchCause((cause) => Effect.logError("failed", cause))
+        )
+      )
+      const cause = String(onlyEvent(spans)[2]["effect.cause"])
+      expect(cause).toContain(`fetch token=${Redaction.placeholder}`)
+      expect(cause).toContain(`parent token=${Redaction.placeholder}`)
+      expect(cause).toContain("request failed")
+      expect(cause).not.toContain(secret)
+    }))
+
+  it.effect("redacts stack text and parent frames on failures, defects and interruptions", () =>
+    Effect.gen(function*() {
+      const secret = "sk-live-gridProbeCredential12345"
+      const frame = (name: string): References.StackFrame => ({
+        name: `${name} token=${secret}`,
+        stack: () => `at source (https://example.test/task?token=${secret})`,
+        parent: {
+          name: `${name} parent token=${secret}`,
+          stack: () => `at https://example.test/parent?token=${secret}`,
+          parent: undefined
+        }
+      })
+      for (
+        const reason of [
+          Cause.makeFailReason(new Error("request failed")),
+          Cause.makeDieReason(new Error("request died")),
+          Cause.makeInterruptReason(42)
+        ]
+      ) {
+        const annotations = new Map<string, unknown>([
+          [Cause.StackTrace.key, frame("operation")],
+          [Cause.InterruptorStackTrace.key, frame("interruptor")],
+          ["requestId", "request-42"]
+        ])
+        const original = Cause.fromReasons([reason.annotate(Context.makeUnsafe(annotations))])
+        const spans = yield* traced(Effect.logError(original))
+        const cause = String(onlyEvent(spans)[2]["effect.cause"])
+        expect(cause).not.toContain(secret)
+        expect(cause).toContain(`operation token=${Redaction.placeholder}`)
+        expect(cause).toContain(`operation parent token=${Redaction.placeholder}`)
+        expect(cause).toContain(`https://example.test/task?token=${Redaction.placeholder}`)
+        expect(cause).toContain(`https://example.test/parent?token=${Redaction.placeholder}`)
+        if (reason._tag === "Interrupt") {
+          expect(cause).toContain("at fiber (#42)")
+          expect(cause).toContain(`interruptor token=${Redaction.placeholder}`)
+          expect(cause).toContain(`interruptor parent token=${Redaction.placeholder}`)
+        }
+        yield* loggedWith(
+          Logger.make(({ cause: delegated }) => {
+            const copy = delegated.reasons[0]!
+            expect(copy._tag).toBe(reason._tag)
+            expect(copy.annotations.get("requestId")).toBe("request-42")
+            expect(copy.annotations).not.toBe(original.reasons[0]!.annotations)
+            for (const key of [Cause.StackTrace.key, Cause.InterruptorStackTrace.key]) {
+              const copiedFrame = copy.annotations.get(key) as References.StackFrame
+              expect(copiedFrame.name).not.toContain(secret)
+              expect(copiedFrame.stack()).not.toContain(secret)
+              expect(copiedFrame.parent!.name).not.toContain(secret)
+              expect(copiedFrame.parent!.stack()).not.toContain(secret)
+            }
+          }),
+          Effect.logError(original)
+        )
+        expect(Cause.pretty(original)).toContain(secret)
+      }
+    }))
+
+  it.effect("handles absent and unreadable frame text without leaking or losing the log", () =>
+    Effect.gen(function*() {
+      const frame: References.StackFrame = {
+        name: "operation token=sk-live-gridProbeCredential12345",
+        stack: () => undefined,
+        parent: {
+          get name(): string {
+            throw new Error("token=sk-live-gridProbeCredential12345")
+          },
+          stack: () => {
+            throw new Error("token=sk-live-gridProbeCredential12345")
+          },
+          parent: undefined
+        }
+      }
+      const cause = Cause.fromReasons([
+        Cause.makeFailReason(new Error("request failed")).annotate(Context.makeUnsafe(
+          new Map([
+            [Cause.StackTrace.key, frame],
+            [Cause.InterruptorStackTrace.key, undefined]
+          ])
+        ))
+      ])
+      const spans = yield* traced(Effect.logError(cause))
+      const output = String(onlyEvent(spans)[2]["effect.cause"])
+      expect(output).toContain(`operation token=${Redaction.placeholder}`)
+      expect(output).toContain("[Unrenderable]")
+      expect(output).not.toContain("sk-live-gridProbeCredential12345")
+    }))
+
+  it.effect("bounds cyclic frame parents before handing them to a logger", () =>
+    Effect.gen(function*() {
+      const frame: References.StackFrame = {
+        name: "operation token=sk-live-gridProbeCredential12345",
+        stack: () => undefined,
+        get parent() {
+          return frame
+        }
+      }
+      const cause = Cause.fromReasons([
+        Cause.makeInterruptReason().annotate(Context.make(Cause.InterruptorStackTrace, frame))
+      ])
+      yield* loggedWith(
+        Logger.make(({ cause: delegated }) => {
+          let current = delegated.reasons[0]!.annotations.get(Cause.InterruptorStackTrace.key) as References.StackFrame
+          const seen = new Set<References.StackFrame>()
+          while (current.parent !== undefined) {
+            expect(current.name).toBe(`operation token=${Redaction.placeholder}`)
+            expect(seen.has(current)).toBe(false)
+            seen.add(current)
+            expect(seen.size).toBeLessThanOrEqual(200)
+            current = current.parent
+          }
+          expect(current.name).toBe("[Deep]")
+          expect(current.stack()).toBeUndefined()
+        }),
+        Effect.logError(cause)
+      )
     }))
 
   it("keeps a redacted error's name and own fields, which a rendered cause reads", () => {

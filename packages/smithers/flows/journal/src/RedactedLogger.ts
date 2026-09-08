@@ -46,7 +46,7 @@
  */
 import * as Cause from "effect/Cause"
 import * as Console from "effect/Console"
-import type * as Context from "effect/Context"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import type * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
@@ -363,14 +363,33 @@ const redactedFiber = (
 }
 
 /**
- * The log event's cause with the rules applied to each failure and defect.
- *
- * A reason is copied as a view over itself rather than rebuilt through
- * `Cause.makeFailReason`: those constructors take no `annotations`, and
- * annotations are what `Cause.pretty` uses to annotate a stack, so rebuilding
- * would redact the credential and lose the trace. An `Interrupt` carries no
- * caller-supplied value and is passed through untouched, and an empty cause —
- * every ordinary `Effect.logInfo` — is returned as it came.
+ * Rebuilds the frame chain as redacted data. Evaluate the lazy stack here:
+ * carrying its original function would defer the credential past the boundary.
+ * The same depth cap as logged values also bounds cyclic parent chains.
+ */
+const redactedFrame = (
+  frame: References.StackFrame | undefined,
+  redactor: Redaction.Redactor,
+  depth = 0
+): References.StackFrame | undefined => {
+  if (frame === undefined) return undefined
+  if (depth >= renderDepthLimit) {
+    return { name: renderDepthMarker, stack: () => undefined, parent: undefined }
+  }
+  const stack = redactedText(() => frame.stack() ?? "", redactor, unrenderableMarker)
+  return {
+    name: redactedText(() => frame.name, redactor, unrenderableMarker),
+    stack: () => stack,
+    parent: redactedFrame(frame.parent, redactor, depth + 1)
+  }
+}
+
+/**
+ * The log event's cause with the rules applied to failures, defects and stack
+ * annotations. `Cause.pretty` renders these frames after rendering the error;
+ * the tracer exports that text without passing through the redacting console.
+ * Interruptions also carry both their own and the interruptor's frame chains.
+ * Rebuild reasons and annotation maps so the original cause stays untouched.
  */
 const redactedCause = (
   cause: Cause.Cause<unknown>,
@@ -378,14 +397,18 @@ const redactedCause = (
 ): Cause.Cause<unknown> => {
   if (cause.reasons.length === 0) return cause
   return Cause.fromReasons(cause.reasons.map((reason) => {
-    if (reason._tag === "Interrupt") return reason
-    const key = reason._tag === "Fail" ? "error" : "defect"
-    const view = Object.create(reason) as Cause.Reason<unknown>
-    Object.defineProperty(view, key, {
-      value: redactArgument((reason as unknown as Record<string, unknown>)[key], redactor),
-      enumerable: true
-    })
-    return view
+    const annotations = new Map(reason.annotations)
+    for (const key of [Cause.StackTrace.key, Cause.InterruptorStackTrace.key]) {
+      if (annotations.has(key)) {
+        annotations.set(key, redactedFrame(annotations.get(key) as References.StackFrame | undefined, redactor))
+      }
+    }
+    const copy = reason._tag === "Fail"
+      ? Cause.makeFailReason(redactArgument(reason.error, redactor))
+      : reason._tag === "Die"
+      ? Cause.makeDieReason(redactArgument(reason.defect, redactor))
+      : Cause.makeInterruptReason(reason.fiberId)
+    return copy.annotate(Context.makeUnsafe(annotations))
   }))
 }
 
