@@ -47,6 +47,8 @@ Graph.build(supervisor, { goal: "ship the feature", tasks: [{ id: "api", workerT
 
 Every round after the first passes the preceding review and its `retriable` ids to each worker call, so the graph shows which review a re-delegation depends on. A round-one worker call has no such reference.
 
+Task ids such as `"__proto__"`, `"constructor"`, and `"toString"` are supported. Each remains an own member of its declared batch and the results passed to review and finalize.
+
 `make` throws a `PatternError` when `workers` is empty, or when `maxRounds` or `concurrency` is not a positive safe integer. Building the flow throws when the input carries no `tasks` array, when it is empty, when a task is missing a string `id` or `workerType`, when two tasks share an id, or when a `workerType` names no declared worker.
 
 ### Execution

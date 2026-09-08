@@ -265,10 +265,12 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
               ? { phase: "work", task, round, plan, input }
               : { phase: "work", task, round, plan, input, review, retriable: retriableOf(review) }
           const batchAt = (offset: number, round: number, review: unknown): Node.Node<unknown, unknown> => {
-            const members: Record<string, Node.Any> = {}
-            for (const task of tasks.slice(offset, offset + concurrency)) {
-              members[task.id] = call(routes[task.workerType]!, work(task, round, review))
-            }
+            const members = Object.fromEntries(
+              tasks.slice(offset, offset + concurrency).map((task) => [
+                task.id,
+                call(routes[task.workerType]!, work(task, round, review))
+              ])
+            )
             return Node.all(members)
           }
           const delegate = (round: number, review: unknown): Node.Node<unknown, unknown> => {

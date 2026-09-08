@@ -1,8 +1,10 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as TestRuntime from "@smthrs/core/TestRuntime"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import { PatternError } from "../src/PatternError.ts"
@@ -63,20 +65,78 @@ describe("Supervisor", () => {
   it("routes each declared worker call to the task's workerType", () => {
     const coder = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: (input) => Node.succeed(input) })
     const tester = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed("tested") })
+    const workers = { coder, tester }
+    const tasks = [
+      { id: "a", workerType: "coder" },
+      { id: "b", workerType: "tester" },
+      { id: "c", workerType: "tester" },
+      { id: "d", workerType: "coder" }
+    ] as const
     const graph = Graph.build(
       Supervisor.make({
         plan: step,
-        workers: { coder, tester },
+        workers,
         review: step,
         finalize: step,
         maxRounds: 1,
         concurrency: 3
       }),
-      goal
+      { ...goal, tasks }
     )
     const routed = inPhase(graph, "work").map((node) => literal(node).task)
 
-    expect(routed).toEqual(plan.tasks)
+    expect(routed).toEqual(tasks)
+    for (const [index, node] of inPhase(graph, "work").entries()) {
+      const expected = calls(Graph.build(workers[tasks[index]!.workerType](literal(node))))[0]!
+      expect(node.keyMaterial.body).toEqual(expected.keyMaterial.body)
+    }
+  })
+
+  it.each([1, 2, 3])("declares every prototype-shaped task id at concurrency %i", (concurrency) => {
+    const tasks = ["__proto__", "constructor", "toString"].map((id) => ({ id, workerType: "coder" }))
+    const graph = Graph.build(
+      Supervisor.make({
+        plan: step,
+        workers: { coder: step },
+        review: step,
+        finalize: step,
+        maxRounds: 1,
+        concurrency
+      }),
+      { tasks }
+    )
+
+    expect(inPhase(graph, "work").map((node) => literal(node).task)).toEqual(tasks)
+    expect(calls(graph)).toHaveLength(tasks.length + 3)
+    expect(Graph.diagnostics(graph)).toEqual([])
+  })
+
+  it.each([1, 2, 3])("evaluates each task with its selected worker at concurrency %i", (concurrency) => {
+    const tasks = [
+      { id: "__proto__", workerType: "tester" },
+      { id: "constructor", workerType: "coder" },
+      { id: "toString", workerType: "tester" }
+    ]
+    const coder = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed("coded") })
+    const tester = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed("tested") })
+    const finalize = Flow.make({
+      input: Schema.Unknown,
+      output: Schema.Unknown,
+      body: (input) => Node.succeed((input as { readonly results: unknown }).results)
+    })
+    const supervisor = Supervisor.make({
+      plan: step,
+      workers: { coder, tester },
+      review: step,
+      finalize,
+      maxRounds: 1,
+      concurrency
+    })
+    const result = TestRuntime.evaluateInline(supervisor({ tasks }))
+    if (Result.isFailure(result)) throw result.failure
+
+    expect(Object.keys(result.success as object)).toEqual(tasks.map((task) => task.id))
+    expect(result.success).toEqual({ ["__proto__"]: "tested", constructor: "coded", toString: "tested" })
   })
 
   it("threads the previous round's review into the next round's worker calls", () => {
