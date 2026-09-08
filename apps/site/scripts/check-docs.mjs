@@ -14,6 +14,8 @@
  *   6. imports in ts fences resolve to published packages
  *   7. no "coming soon" or "TODO" in prose
  *   8. every anchor the 1.0 CLI links to exists on the migration page
+ *   9. the API roster's workspace-private labels match the package manifests
+ *  10. a page that imports a workspace-private package says so beside its name
  *
  * Usage: node apps/site/scripts/check-docs.mjs
  */
@@ -84,7 +86,7 @@ function scanPkgs(dir, depth) {
       const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
       if (typeof pkg.name === "string" && pkg.name.startsWith("@smthrs/")) {
         roster.add(pkg.name)
-        packagePaths.set(pkg.name, { directory: dir, exports: pkg.exports })
+        packagePaths.set(pkg.name, { directory: dir, exports: pkg.exports, private: pkg.private === true })
       }
     } catch { /* keep walking */ }
   }
@@ -117,6 +119,16 @@ function resolvesSubpath(spec, root) {
   }
   const target = sourceExport(value)
   return target !== undefined && existsSync(join(pkg.directory, wildcard === undefined ? target : target.replaceAll("*", wildcard)))
+}
+
+/**
+ * A page that names a package as workspace-private on the same line it names
+ * the package. `private: true` in the manifest is what keeps a package off
+ * npm; publishConfig.access alone does not.
+ */
+function labelsPrivate(page, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`\`${escaped}\`[^\n]*workspace-private|workspace-private[^\n]*\`${escaped}\``).test(page.noFences)
 }
 
 // --- rules -------------------------------------------------------------------
@@ -185,7 +197,31 @@ for (const p of pages) {
       const root = spec.split("/").slice(0, 2).join("/")
       if (!roster.has(root)) err(p.path, `import does not resolve to a package in this repo: ${spec}`)
       else if (!resolvesSubpath(spec, root)) err(p.path, `import subpath does not resolve: ${spec}`)
+      // 10. teaching an import of a workspace-private package without saying
+      // so reads as an install the reader can run; npm refuses it.
+      else if (packagePaths.get(root)?.private && !labelsPrivate(p, root)) {
+        err(p.path, `teaches importing workspace-private ${root} without labelling it beside the name`)
+      }
     }
+  }
+}
+
+// 9. API roster labels: a row that disagrees with its manifest either sends a
+// reader to install a package npm refuses, or hides one they can install.
+const apiIndex = byRoute.get("/docs/reference/api/")
+if (apiIndex) {
+  const source = "apps/site/docs/reference/api/index.mdx"
+  for (const line of apiIndex.noFences.split("\n")) {
+    const row = /^\|\s*\[`(@smthrs\/[a-z0-9-]+)`\]\([^)]*\)([^|]*)\|/.exec(line)
+    if (!row) continue
+    const pkg = packagePaths.get(row[1])
+    if (!pkg) {
+      err(apiIndex.path, `roster lists ${row[1]}, which is not a package in this repo (edit ${source})`)
+      continue
+    }
+    const labeled = row[2].includes("workspace-private")
+    if (pkg.private && !labeled) err(apiIndex.path, `${row[1]} is private in its manifest; the roster omits workspace-private (edit ${source})`)
+    if (!pkg.private && labeled) err(apiIndex.path, `${row[1]} publishes to npm; the roster marks it workspace-private (edit ${source})`)
   }
 }
 
