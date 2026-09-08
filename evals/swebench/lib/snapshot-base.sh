@@ -21,6 +21,7 @@
 # The ref keeps the commit alive against `git gc` and lets `capture-patch.sh`
 # and `regen-patch.sh` find it again in a surviving workspace.
 set -euo pipefail
+S="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${1:-}"
 REF="refs/flows/capture-base"
 
@@ -28,7 +29,17 @@ if [ -z "$WORK" ] || [ ! -d "$WORK/.git" ]; then
   echo "snapshot-base.sh: no git workspace at ${WORK:-<unset>}" >&2; exit 2
 fi
 
+source "$S/lib/capture-git.sh"
 cd "$WORK"
+
+# Preserve the image's tracked paths and modes in a private index, including
+# split-index data when present. Never let host Git use the task's config.
+if [ -f "$WORK/.git/index" ]; then
+  cp "$WORK/.git/index" "$CAPTURE_GIT/index"
+  for shared in "$WORK"/.git/sharedindex.*; do
+    [ ! -f "$shared" ] || cp "$shared" "$CAPTURE_GIT/"
+  done
+fi
 
 # Stage the working tree for every path the image already tracks. In a pristine
 # extraction this is a no-op — the images commit their own `pre_install` churn —
@@ -37,14 +48,12 @@ cd "$WORK"
 #
 # `core.fileMode=false`: `docker cp` to the host does not preserve permission
 # bits, so the modes recorded are the image's own, and the host's are ignored.
-git -c core.fileMode=false add -u
+capture_git add -u
 
-TREE="$(git write-tree)"
+TREE="$(capture_git write-tree)"
 COMMIT="$(
-  GIT_AUTHOR_NAME="swebench-rig" GIT_AUTHOR_EMAIL="rig@localhost" \
-  GIT_COMMITTER_NAME="swebench-rig" GIT_COMMITTER_EMAIL="rig@localhost" \
-  git commit-tree "$TREE" -p "$(git rev-parse HEAD)" \
+  capture_git commit-tree "$TREE" -p "$(capture_git rev-parse HEAD)" \
     -m "swebench: pristine post-install testbed, captured before the agent ran"
 )"
-git update-ref "$REF" "$COMMIT"
+capture_git update-ref "$REF" "$COMMIT"
 echo "$COMMIT"

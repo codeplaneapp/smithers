@@ -518,7 +518,7 @@ contaminants are excluded at the source rather than edited out afterwards:
 - **Files that did not exist when the agent started.** The flows durability
   snapshot writes the whole working tree into git's index, so agent scratch is
   tracked by capture time; wave 3 shipped `.tmp_init_collect_repro/` with an
-  `assert False` in it. Capture restores the index to the capture base, which
+  `assert False` in it. Capture restores a private index to the capture base, which
   drops them — and that is the same set the codex path never had in its index,
   so both harnesses are captured under one rule. Whatever is dropped is listed
   in `patches/<id>.patch.untracked`; read it when a run was supposed to add a
@@ -528,6 +528,24 @@ Normalising the modes falls out of the same restore: the patch is expressed in
 the image's own permission bits, so the executable-bit churn that `docker cp` to
 the host and the colocated jj snapshot introduce never appears.
 
+**The testbed's Git configuration is untrusted.** The image supplies `.git`,
+and the container can rewrite it. Both scripts use `lib/capture-git.sh` to run
+host Git with an empty environment apart from the host executable path and
+explicit capture settings. A temporary Git directory outside the bind mount
+shares only the task's objects and refs, copies `HEAD`, packed refs and ignore
+patterns, and uses a private index. Snapshot copies the image's index into it;
+capture rebuilds it from the capture base. The task's index is left unchanged.
+The capture-base commit and ref still live in the task repository for callers
+and later patch regeneration.
+
+No repository, global or system configuration is loaded, including config
+includes and custom filter definitions. Hooks, fsmonitor and global attributes
+are disabled. Diff also passes `--no-ext-diff --no-textconv` and ignores
+submodules to avoid entering their repositories. Repository attributes cannot
+enable configured helpers in this environment. This boundary prevents Git
+configuration from executing host commands; it does not authenticate the
+container-writable objects, refs or file contents.
+
 Two ways to check it, neither of which spends a token:
 
 ```sh
@@ -536,7 +554,11 @@ SWB_SKIP_AGENT=1 ./run-instance.sh sphinx-doc__sphinx-11445   # docker, no agent
 ```
 
 `verify.sh` replays both contaminants over throwaway git repositories shaped
-like the official images (`fixtures/check-capture.mjs`). `SWB_SKIP_AGENT=1`
+like the official images (`fixtures/check-capture.mjs`). The same fixture installs
+hostile diff, textconv, filter, fsmonitor and hook settings before snapshot and
+capture, checks config includes and environment overrides, and asserts that no
+host helper runs and the patch still contains exactly the agent's edit.
+`SWB_SKIP_AGENT=1`
 builds the real workspace, runs no agent, and captures: **the patch must be
 empty.** It rebuilds `work/<id>/`, so do not point it at a workspace whose
 journal is still wanted, and it writes no timings stamp because no run happened.

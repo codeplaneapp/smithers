@@ -33,21 +33,22 @@ if [ -z "$OUT" ]; then
   echo "capture-patch.sh: no output path given" >&2; exit 2
 fi
 
-CAPTURE="$(cd "$WORK" && git rev-parse --verify --quiet "$REF^{commit}")" || {
+source "$S/lib/capture-git.sh"
+CAPTURE="$(capture_git rev-parse --verify --quiet "$REF^{commit}")" || {
   echo "capture-patch.sh: $WORK has no $REF — it predates the capture fix." >&2
   echo "  Re-run run-instance.sh for this instance; a patch diffed against the" >&2
   echo "  base commit would carry the image's own pre_install churn." >&2
   exit 3
 }
 
-# Restore the index to the capture base: it is the pre-agent set of tracked
+# Restore a private index to the capture base: it is the pre-agent set of tracked
 # paths, with the image's own permission bits, so the diff reports content the
 # agent wrote and neither scratch files nor the mode churn the host extraction
 # introduces.
-( cd "$WORK" && git read-tree "$CAPTURE" )
-( cd "$WORK" && git ls-files --others --exclude-standard ) > "$OUT.untracked"
+( cd "$WORK" && capture_git read-tree "$CAPTURE" )
+( cd "$WORK" && capture_git ls-files --others --exclude-standard ) > "$OUT.untracked"
 
-( cd "$WORK" && git -c core.fileMode=false --no-pager diff "$CAPTURE" -- \
+( cd "$WORK" && capture_git diff --no-ext-diff --no-textconv --ignore-submodules=all "$CAPTURE" -- \
     ':(exclude)*.pyc' ':(exclude)**/__pycache__/**' ':(exclude).git' "$@" \
 ) > "$OUT" 2>/dev/null
 

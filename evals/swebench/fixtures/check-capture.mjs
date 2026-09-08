@@ -18,7 +18,7 @@
  * (what the sphinx image does) and one that leaves it in the worktree.
  */
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -56,9 +56,15 @@ try {
   for (const commitChurn of [true, false]) {
     const label = commitChurn ? "churn committed" : "churn unstaged"
     const { work, base } = makeTestbed(commitChurn ? "committed" : "unstaged", { commitChurn })
+    if (commitChurn) {
+      git(work, "pack-refs", "--all")
+      git(work, "update-index", "--split-index")
+    }
 
+    const imageIndex = readFileSync(join(work, ".git", "index"))
     const captureBase = run("lib/snapshot-base.sh", work)
     assert.match(captureBase, /^[0-9a-f]{40}$/, `${label}: capture base is a commit`)
+    assert.deepEqual(readFileSync(join(work, ".git", "index")), imageIndex, `${label}: snapshot leaves the task index unchanged`)
 
     // No agent runs. The captured patch must be empty: the image's own churn is
     // in the capture base, so it cancels.
@@ -73,8 +79,10 @@ try {
     writeFileSync(join(work, ".tmp_init_collect_repro/test_repro.py"), "assert False\n")
     git(work, "add", "-A")
 
+    const agentIndex = readFileSync(join(work, ".git", "index"))
     const patchPath = join(temporary, `${commitChurn}.patch`)
     run("lib/capture-patch.sh", work, patchPath)
+    assert.deepEqual(readFileSync(join(work, ".git", "index")), agentIndex, `${label}: capture leaves the task index unchanged`)
     const patch = readFileSync(patchPath, "utf8")
 
     assert.match(patch, /^diff --git a\/src\.py b\/src\.py$/m, `${label}: the agent's edit is captured`)
@@ -100,6 +108,80 @@ try {
     assert.equal(git(work, "show", `${base}:tox.ini`), "commands=\n    pytest --durations 25", `${label}: the base commit does not`)
   }
 
+  // Repository config is container-controlled. Exercise each execution surface
+  // separately so one helper cannot hide another. Install it both before the
+  // image snapshot and after the agent starts, with the marker outside /testbed.
+  const hostileCases = {
+    external: (work, helper) => git(work, "config", "diff.external", helper),
+    textconv: (work, helper) => {
+      writeFileSync(join(work, ".gitattributes"), "src.py diff=hostile\n")
+      git(work, "config", "diff.hostile.textconv", helper)
+    },
+    filter: (work, helper) => {
+      writeFileSync(join(work, ".gitattributes"), "src.py filter=hostile\n")
+      git(work, "config", "filter.hostile.clean", helper)
+    },
+    fsmonitor: (work, helper) => git(work, "config", "core.fsmonitor", helper),
+    hooks: (work, helper) => {
+      const hooks = join(work, ".git", "hostile-hooks")
+      mkdirSync(hooks)
+      writeFileSync(join(hooks, "reference-transaction"), readFileSync(helper), { mode: 0o755 })
+      git(work, "config", "core.hooksPath", hooks)
+    },
+    include: (work, helper) => {
+      const config = join(work, ".git", "hostile-config")
+      writeFileSync(config, `[diff]\n external = ${helper}\n`)
+      git(work, "config", "include.path", config)
+    },
+    global: (work, helper) => {
+      const config = join(temporary, "global-config")
+      writeFileSync(config, `[core]\n fsmonitor = ${helper}\n[diff]\n external = ${helper}\n`)
+      return { GIT_CONFIG_GLOBAL: config }
+    },
+    environment: (work, helper) => {
+      writeFileSync(join(work, ".gitattributes"), "src.py filter=hostile\n")
+      return {
+        GIT_EXTERNAL_DIFF: helper,
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "filter.hostile.clean",
+        GIT_CONFIG_VALUE_0: helper,
+        GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='" + helper + "'"
+      }
+    },
+    malformed: (work) => {
+      // Fails even rev-parse if the host reads this config at all.
+      writeFileSync(join(work, ".git", "config"), "[invalid\n")
+    }
+  }
+  const failures = []
+  for (const [name, install] of Object.entries(hostileCases)) {
+    for (const phase of ["snapshot", "capture"]) {
+      const label = `${phase}-${name}`
+      const { work } = makeTestbed(label, { commitChurn: false })
+      const marker = join(temporary, `${label}.executed`)
+      const helper = join(temporary, `${label}.sh`)
+      writeFileSync(helper, `#!/bin/sh\nprintf executed >> '${marker}'\nif [ "$#" -eq 0 ]; then cat; fi\n`, { mode: 0o755 })
+      if (phase === "capture") run("lib/snapshot-base.sh", work)
+      const env = { ...process.env, ...install(work, helper) }
+      if (phase === "snapshot") {
+        const result = spawnSync(join(root, "lib/snapshot-base.sh"), [work], { encoding: "utf8", env, timeout: 10_000 })
+        if (result.status !== 0) failures.push(`${label}: snapshot exited ${result.status}: ${result.stderr}`)
+        if (existsSync(marker)) failures.push(`${label}: helper executed on host during snapshot`)
+      }
+      writeFileSync(join(work, "src.py"), "value = 2\n")
+      const patchPath = join(temporary, `${label}.patch`)
+      const result = spawnSync(join(root, "lib/capture-patch.sh"), [work, patchPath], { encoding: "utf8", env, timeout: 10_000 })
+      if (result.status !== 0) failures.push(`${label}: capture exited ${result.status}: ${result.stderr}`)
+      if (existsSync(marker)) failures.push(`${label}: helper executed on host`)
+      const patch = existsSync(patchPath) ? readFileSync(patchPath, "utf8") : ""
+      if (!/^-value = 1$/m.test(patch) || !/^\+value = 2$/m.test(patch) ||
+          patch.split("diff --git ").length - 1 !== 1 || /tox\.ini/.test(patch)) {
+        failures.push(`${label}: patch does not contain exactly the agent's edit`)
+      }
+    }
+  }
+  assert.deepEqual(failures, [], "hostile Git configuration must never execute helpers or corrupt capture")
+
   // A workspace with no capture base is refused, not captured against the base
   // commit behind the operator's back.
   const stale = join(temporary, "stale")
@@ -122,4 +204,4 @@ try {
   rmSync(temporary, { recursive: true, force: true })
 }
 
-console.log("check-capture.mjs: capture reports the agent's edits and nothing else.")
+console.log("check-capture.mjs: 2 capture scenarios, 18 hostile-config scenarios and missing-ref refusal passed.")
