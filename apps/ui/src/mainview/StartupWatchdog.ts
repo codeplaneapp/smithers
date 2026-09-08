@@ -34,9 +34,12 @@ export const startStartupWatchdog = (options: StartupWatchdogOptions): StartupWa
   let firstBootError: unknown
   let settled = false
   let panel: ReturnType<typeof createStartupErrorElement> | undefined
+  let overlay: HTMLElement | undefined
   const releasePanel = (): Promise<void> => {
     const current = panel
     panel = undefined
+    overlay?.remove()
+    overlay = undefined
     return current?.dispose() ?? Promise.resolve()
   }
   const remember = (error: unknown): void => {
@@ -67,13 +70,20 @@ export const startStartupWatchdog = (options: StartupWatchdogOptions): StartupWa
     return releasePanel()
   }
   const reportFailure = (reason: unknown): void => {
-    if (settled) return
-    void stop().catch(() => console.warn("Smithers: local recovery cleanup could not finish."))
+    if (settled || panel !== undefined) return
+    windowTarget.clearTimeout(timer)
+    clientErrors.report("error", reason)
     console.error("Smithers failed to start", reason, firstBootError)
-    const root = documentTarget.getElementById("root") ?? documentTarget.body
-    root.textContent = ""
+    // React still owns #root while its boot promise is pending. Replacing its
+    // children strands a late successful boot on this error forever. Keep the
+    // tree intact underneath a separate panel; markMounted removes the panel
+    // when a slow network or storage operation finally completes.
     panel = createStartupErrorElement(documentTarget, startupErrorMessage(reason, firstBootError))
-    root.append(panel.element)
+    overlay = documentTarget.createElement("div")
+    overlay.dataset.startupFailure = "true"
+    overlay.setAttribute("style", "position: fixed; inset: 0; z-index: 2147483647; overflow: auto; background: white")
+    overlay.append(panel.element)
+    documentTarget.body.append(overlay)
   }
   const timer = windowTarget.setTimeout(() => {
     reportFailure(new Error(`Smithers did not finish starting within ${options.timeoutMs}ms.`))
@@ -91,8 +101,8 @@ export const startStartupWatchdog = (options: StartupWatchdogOptions): StartupWa
   }
 }
 
-/** How long a boot may take before the watchdog calls it a failure. */
-export const DEFAULT_BOOT_TIMEOUT_MS = 15_000
+/** Allow cold bundles, saved-state loading, and the identity seam's 30s deadline to settle. */
+export const DEFAULT_BOOT_TIMEOUT_MS = 60_000
 
 let browserInstance: StartupWatchdog | undefined
 

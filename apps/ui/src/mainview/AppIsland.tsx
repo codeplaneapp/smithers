@@ -1,6 +1,5 @@
 import { StrictMode, Suspense } from "react"
 import App from "./App"
-import { unavailableBootSession } from "./BootSession"
 import { controllerBootPromise, ControllerProvider } from "./ControllerProvider"
 import { SessionShell } from "./SessionShell"
 import { MountedSignal, StartupErrorBoundary } from "./StartupBoundary"
@@ -23,14 +22,13 @@ import "./index.css"
  * cannot report itself; importing this module arms it.
  */
 
-const session = unavailableBootSession()
 const watchdog = browserStartupWatchdog({ clientErrors: createClientErrorReporter({ fetchImpl: createAppFetch() }) })
 
 export default function AppIsland() {
   return (
     <StrictMode>
       <StartupErrorBoundary onError={watchdog.handleRenderFailure}>
-        <Suspense fallback={<SessionShell session={session} />}>
+        <Suspense fallback={<SessionShell />}>
           <ControllerProvider boot={controllerBootPromise()}>
             <MountedSignal onMounted={watchdog.markMounted} />
             <App />

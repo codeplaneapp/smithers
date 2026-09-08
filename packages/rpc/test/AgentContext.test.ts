@@ -109,8 +109,9 @@ describe("renderAgentRuntimeContext", () => {
     // A cut note says it was cut, so the model never reads silence as "empty".
     expect(rendered).toContain("note truncated here")
     expect(rendered).toContain("did not fit this turn's context budget")
-    // And the block says plainly that the notes are the answer.
-    expect(rendered).toContain("These notes ARE what Smithers understands")
+    // Note content is evidence; an empty starter title is not a repository identity.
+    expect(rendered).toContain("Answer from their substantive content when relevant")
+    expect(rendered).toContain("a blank note or a title alone supplies no repository facts")
   })
 
   test("a note-less document list still renders, so an older client is not broken by the new field", () => {

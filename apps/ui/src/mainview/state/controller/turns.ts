@@ -217,6 +217,7 @@ export const createTurnController = (
        * repo-scoped tool calls, never from a plain first message.
        */
       activeRepository: activeRepositoryId(store),
+      activeRepositorySummary: store.collections.repositories.get(activeRepositoryId(store) ?? "")?.summary,
       /*
        * Sign-in IS the GitHub connector (§2a′): connection truth derives
        * from the validated session, never from the legacy local-connector

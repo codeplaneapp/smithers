@@ -75,7 +75,7 @@ const bootProgram = (session: BootSession | undefined) =>
         yield* Effect.sync(() => void controller.loadAgents())
       }
       // Lane piper: the Smithers Cloud session mirrors into the store; a signed-in answer pulls the inventory.
-      if (runtime.bootstrap.capabilities.includes("cloud")) {
+      if (runtime.bootstrap.capabilities.includes("cloud.pat")) {
         yield* Effect.sync(() => void controller.loadCloudSession())
       }
       // Both URL rewrites keep the entry's state: on a repository path the

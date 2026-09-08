@@ -154,6 +154,8 @@ export const AgentRuntimeContextSchema = z.object({
    * still validates the payload.
    */
   activeRepository: z.string().nullable().optional(),
+  /** The public catalog's description of the selected repository, when loaded. */
+  activeRepositorySummary: z.string().optional(),
   /*
    * Sign-in IS the GitHub connector — one act, one truth (Wave 10, §2a′):
    * a valid GitHub session means the GitHub connector IS connected, so the
@@ -284,6 +286,9 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
         ? "- Active repository: none selected."
         : `- Active repository: ${context.activeRepository}. This is the selected repository: a bare repo-scoped command acts on it, and "this repo" in the user's message means it.`
     )
+    if (context.activeRepository !== null && context.activeRepositorySummary !== undefined) {
+      lines.push(`- Selected repository description (public catalog): ${context.activeRepositorySummary}`)
+    }
   }
   if (context.github.connected) {
     const loaded = typeof context.github.repositories === "number"
@@ -336,7 +341,7 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
     lines.push("- Wiki: no notes yet.")
   } else {
     lines.push(
-      `- Wiki: ${context.worldState.documentCount} note(s). These notes ARE what Smithers understands about this workspace — when the user asks about something a note records, answer from the note below, never from a repository read and never with "I can't retrieve that":`
+      `- Wiki: ${context.worldState.documentCount} note(s). These are workspace notes, not the selected repository's identity or description. Answer from their substantive content when relevant; a blank note or a title alone supplies no repository facts:`
     )
     for (const document of context.worldState.documents) {
       lines.push(`  - ${document.path} — "${document.title}" (confidence ${document.confidence})`)

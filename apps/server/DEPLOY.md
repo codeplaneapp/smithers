@@ -88,6 +88,13 @@ state, so a new entry here lands in the same commit as the test change.
 
 ## Scripted deploy (this repo's one repeatable path)
 
+The app's loading shell says that the session is starting until identity has
+actually answered. The browser startup watchdog allows 60 seconds for cold
+bundles, saved state and identity; its recovery panel leaves React's mount
+point intact so a late successful boot can dismiss the panel and continue.
+`apps/ui/e2e/playwright/startup.spec.ts` holds the boot bundle past that
+deadline and checks recovery without resetting saved data.
+
 `scripts/deploy.ts` prepares the Electrobun devkit projection the island's
 sources are typed against (`node scripts/ensure-devkit.mjs` in `apps/ui`),
 builds the site (`pnpm run build` in `apps/site`, stamped with the sha it

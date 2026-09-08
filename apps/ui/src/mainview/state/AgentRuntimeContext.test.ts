@@ -171,14 +171,17 @@ describe("per-turn runtime context", () => {
     store.dispatch({
       type: "repositories.loaded",
       actor: "system",
-      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "user", name: "smithers", head: null }]
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "user", name: "smithers", head: null,
+        summary: "A durable framework for agents to plan, run, and review code changes." }]
     })
     expect(await controller.selectRepo("smithersai/smithers")).toBeUndefined()
     controller.send("what does this repo do?")
     await settled()
 
     expect(requests[1]?.context?.activeRepository).toBe("smithersai/smithers")
+    expect(requests[1]?.context?.activeRepositorySummary).toBe("A durable framework for agents to plan, run, and review code changes.")
     expect(renderAgentRuntimeContext(requests[1]?.context as AgentRuntimeContext)).toContain("- Active repository: smithersai/smithers.")
+    expect(renderAgentRuntimeContext(requests[1]?.context as AgentRuntimeContext)).toContain("Selected repository description (public catalog): A durable framework")
   })
 
   test("Smithers is the first tab and sees every other one: the context lists the tabs and their status", async () => {
