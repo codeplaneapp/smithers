@@ -726,7 +726,13 @@ describe("command registry bindings", () => {
       "target.affected",
       "target.ci",
       "target.source.open",
-      "smithers.who"
+      "smithers.who",
+      "search.open",
+      "search.files",
+      "search.flows",
+      "palette.open",
+      "palette.actions",
+      "palette.recent"
     ])
 
     expect((await controller.commands.run("connect")).status).toBe("executed")

@@ -58,7 +58,8 @@ const USER_ONLY_ALTERNATIVES: Readonly<Record<string, string>> = {
   "app.download": "invoke app.download.prompt, which renders that button in the chat",
   "admin.reset": "suggest /chat.clear if they want a fresh chat",
   "chat.send": "answer with text instead",
-  "card.maximize": "your invocation of a surface flow renders the embedded card"
+  "card.maximize": "your invocation of a surface flow renders the embedded card",
+  "palette.open": "invoke a search.* flow (search.open, search.files, search.flows, …), which answers the same rows as data"
 }
 
 /**

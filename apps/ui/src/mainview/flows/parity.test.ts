@@ -73,6 +73,7 @@ const PRESENTATION_ONLY = [
   "setDeleteDraft", // workspace card delete: the typed-confirm row's open state and its draft — local presentation state; the act itself rides workspace.delete
   "setDisconnectArmed", // connector-setup card disconnect: the confirm row's open state — local presentation state; the act itself rides linear.disconnect
   "onRunCommand(", // delegated: App.tsx binds it to the registry's runCommand/runCommandArgs
+  "onChoose(", // delegated: Composer.tsx routes a palette row through runCommand/runCommandArgs, or edits the draft (a namespace, a prefix)
   // Card maximize/minimize: each calls the delegated onMaximize/onMinimize (bound to card.maximize /
   // card.minimize at the App.tsx and CardTabBody binding sites) and then hands focus to the button
   // that replaces the one pressed, so Escape keeps a shell to land on.
@@ -172,7 +173,7 @@ describe("launch-law parity: every affordance is a command", () => {
       "../App.tsx": 16,
       "../StorageRecoveryButton.tsx": 1,
       /* 11 = 10 + the origin chip's "rev N exists · view" (lane change step 4; renders only when both seqs are known). */
-      "../Composer.tsx": 11,
+      "../Composer.tsx": 9,
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
       // connected the pane stated a fact and offered no move.
       "../ConnectorsSurface.tsx": 6,
@@ -197,6 +198,7 @@ describe("launch-law parity: every affordance is a command", () => {
        */
       "../cards/WorkflowCards.tsx": 11,
       "../DevtoolsPanel.tsx": 1,
+      "../SearchPalette.tsx": 5,
       "../SurfaceChrome.tsx": 3,
       "../ToastStack.tsx": 1,
       /* The multi-parity domain cards: every handler routes through onRunCommand. */
@@ -257,6 +259,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * through the delegated onDecideApproval).
        */
       "../cards/RunsCards.tsx": 6,
+      "../cards/SearchResultsCard.tsx": 2,
       "../cards/RunHistoryCard.tsx": 1,
       "../cards/AffectedCard.tsx": 1,
       // Agents as data (custom-agents.md): Launch, Edit, Remove, New agent.

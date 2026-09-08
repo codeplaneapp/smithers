@@ -50,11 +50,13 @@ import * as history from "./entries/history"
 import * as issues from "./entries/issues"
 import * as linear from "./entries/linear"
 import * as notifications from "./entries/notifications"
+import * as palette from "./entries/palette"
 import * as prs from "./entries/prs"
 import * as repo from "./entries/repo"
 import * as repos from "./entries/repos"
 import * as review from "./entries/review"
 import * as runs from "./entries/runs"
+import * as search from "./entries/search"
 import * as smithers from "./entries/smithers"
 import * as secrets from "./entries/secrets"
 import * as sync from "./entries/sync"
@@ -392,6 +394,8 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   egress.namespace,
   agent.namespace,
   files.namespace,
+  search.namespace,
+  palette.namespace,
   branches.namespace,
   env.namespace,
   secrets.namespace,

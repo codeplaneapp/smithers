@@ -140,6 +140,8 @@ function App() {
       activeTabId: session.activeTabId,
       tabMenuOpen: session.tabMenuOpen,
       addMenuOpen: session.addMenuOpen,
+      paletteOpen: session.paletteOpen,
+      paletteLastQuery: session.paletteLastQuery,
       resetConfirmOpen: session.resetConfirmOpen,
       verbose: session.verbose,
       activeRepoKey: session.activeRepoKey
@@ -164,6 +166,8 @@ function App() {
    */
   /* The surfaces trigger, refocused by this shell's Escape and by the menu itself. */
   const surfacesTriggerRef = useRef<HTMLButtonElement>(null)
+  /* The composer wrap: Cmd+K focuses the textarea inside it (the palette opens on the composer). */
+  const composerWrapRef = useRef<HTMLDivElement>(null)
   /* The connect trigger has the same shell-level Escape exit as surfaces. */
   const connectTriggerRef = useRef<HTMLButtonElement>(null)
   /* The composer's `+` menu is the third session menu the shell closes the same way. */
@@ -425,6 +429,23 @@ function App() {
         if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "d") {
           event.preventDefault()
           controller.runCommand("admin.devtools")
+          return
+        }
+        /*
+         * The palette (Search and Command Palette Spec 2026-09-07 §3): Cmd+K
+         * focuses the composer and opens the overlay on the draft as it
+         * stands; Cmd+Shift+K reopens the last query. The composer handles a
+         * Cmd+K of its own while the overlay is open (the actions panel) and
+         * prevents the default first, so this is the closed-overlay path.
+         */
+        if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+          event.preventDefault()
+          const last = session.paletteLastQuery ?? ""
+          if (event.shiftKey && last !== "") controller.runCommandArgs("palette.open", last)
+          else controller.runCommand("palette.open")
+          requestAnimationFrame(() => {
+            composerWrapRef.current?.querySelector("textarea")?.focus()
+          })
         }
       }}
     >
@@ -681,7 +702,7 @@ function App() {
             )}
           </ChatTranscript>
 
-          <div className="composer-wrap">
+          <div className="composer-wrap" ref={composerWrapRef}>
             <Composer
               typing={typing}
               surface={session.surface}

@@ -35,6 +35,7 @@ import { repoImportCardFamily } from "./RepoImportCard"
 import { runHistoryCardFamily } from "./RunHistoryCard"
 import { runsCardFamily } from "./RunsCards"
 import { runTimelineCardFamily } from "./RunTimelineCard"
+import { searchResultsCardFamily } from "./SearchResultsCard"
 import { secretsCardFamily } from "./SecretsCard"
 import { serviceLogCardFamily } from "./ServiceLogCard"
 import { syncCardFamily } from "./SyncCards"
@@ -81,7 +82,8 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   flowFormCardFamily,
   workspaceCardFamily,
   serviceLogCardFamily,
-  anonymousCeilingCardFamily
+  anonymousCeilingCardFamily,
+  searchResultsCardFamily
 ]
 
 /** One entry per card kind. Written as a literal so a missing kind fails to compile. */
@@ -120,7 +122,8 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...flowFormCardFamily,
   ...workspaceCardFamily,
   ...serviceLogCardFamily,
-  ...anonymousCeilingCardFamily
+  ...anonymousCeilingCardFamily,
+  ...searchResultsCardFamily
 }
 
 /** The entry for one kind, typed to that kind's card. */

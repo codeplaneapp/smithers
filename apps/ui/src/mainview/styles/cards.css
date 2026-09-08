@@ -164,6 +164,101 @@
 	font-size: 11px;
 }
 
+/*
+ * The search palette (Search and Command Palette Spec 2026-09-07 §3, §9):
+ * the same overlay as the slash menu, anchored above the composer at its
+ * width, with the query and the key legend on its head line, group labels
+ * between the rows, and the mode chip beside the field.
+ */
+.palette-head {
+	display: flex;
+	padding: 4px 9px 6px;
+	align-items: baseline;
+	gap: 10px;
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+.palette-chip {
+	padding: 1px 6px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--r-sm);
+	color: var(--text);
+}
+
+.palette-query {
+	color: var(--text);
+	font-weight: 600;
+}
+
+.palette-legend {
+	margin-left: auto;
+}
+
+.palette-group {
+	padding: 6px 9px 2px;
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.slash-menu-item[data-gold="true"] .slash-menu-name {
+	color: var(--warning);
+}
+
+.slash-menu-item[data-role="primary"] .slash-menu-name {
+	color: var(--text);
+}
+
+.palette-refusal,
+.palette-help-row {
+	padding: 6px 9px;
+	color: var(--text-muted);
+	font-size: var(--fs-small);
+}
+
+.palette-help-row {
+	display: flex;
+	gap: 10px;
+}
+
+.palette-help-row .slash-menu-name {
+	min-width: 64px;
+}
+
+/* The search-results card: groups by kind, one row per item, its actions under it. */
+.search-results-group-label {
+	margin: 8px 0 2px;
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.search-results-items {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.search-results-item {
+	display: flex;
+	padding: 4px 0;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.search-results-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
 /* Message chrome: Smithers avatar + per-row hover actions. */
 
 .app-shell .smithers-chat-message .message-author {

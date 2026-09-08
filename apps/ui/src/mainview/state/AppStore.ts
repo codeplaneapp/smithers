@@ -106,6 +106,8 @@ import type {
 } from "./AppState"
 
 const SESSION_ID = "main"
+/** The recents ledger keeps this many items (§5): enough for seven days of opens, never a wall. */
+const PALETTE_RECENTS_CAP = 50
 
 /*
  * Retention bounds for derived diagnostic logs (apps/ui/docs/persistence.md §
@@ -1579,6 +1581,33 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
         case "add-menu.toggled":
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.addMenuOpen = transition.open
+            draft.revision = revision
+          })
+          break
+        case "palette.toggled":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.paletteOpen = transition.open
+            if (!transition.open) draft.paletteActionsRef = null
+            if (transition.lastQuery !== undefined) draft.paletteLastQuery = transition.lastQuery
+            draft.revision = revision
+          })
+          break
+
+        case "palette.actions.toggled":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.paletteActionsRef = transition.ref
+            draft.revision = revision
+          })
+          break
+
+        case "palette.item.opened":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            const rest = (draft.paletteRecents ?? []).filter((row) => row.ref !== transition.ref || row.kind !== transition.kind)
+            const seen = (draft.paletteRecents ?? []).find((row) => row.ref === transition.ref && row.kind === transition.kind)
+            draft.paletteRecents = [
+              { ref: transition.ref, kind: transition.kind, count: (seen?.count ?? 0) + 1, lastSeen: transition.at },
+              ...rest
+            ].slice(0, PALETTE_RECENTS_CAP)
             draft.revision = revision
           })
           break

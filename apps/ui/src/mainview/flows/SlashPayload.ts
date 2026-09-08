@@ -386,6 +386,23 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok(repo === undefined ? { assignment: rest } : { assignment: rest, repo })
   },
   "secrets.list": (args) => repoOnly("secrets.list", args),
+  /*
+   * The palette flows (Search and Command Palette Spec 2026-09-07 §6): the
+   * whole line is the query, qualifiers included (`x path:apps/ui`);
+   * the seam reads them in the mode's own grammar. Only search.open takes
+   * a flag, `--kinds a,b`, and only it may run with no query at all.
+   */
+  "search.open": (args) => {
+    const tokens = tokensOf(args)
+    const at = tokens.indexOf("--kinds")
+    const kinds = at === -1 ? undefined : tokens[at + 1]
+    const query = tokens.filter((_, index) => at === -1 || (index !== at && index !== at + 1)).join(" ")
+    return ok({ ...(query === "" ? {} : { query }), ...(kinds === undefined ? {} : { kinds }) })
+  },
+  "search.files": (args) => required("query", args, "search.files needs a query"),
+  "search.flows": (args) => required("query", args, "search.flows needs a query"),
+  "palette.open": (args) => optional("prefix", args),
+  "palette.actions": (args) => required("ref", args, "palette.actions needs an item ref"),
   "history.show": (args) => repoOnly("history.show", args),
   "history.bootstrap": (args) => repoOnly("history.bootstrap", args),
   "history.amend": (args) => repoOnly("history.amend", args),

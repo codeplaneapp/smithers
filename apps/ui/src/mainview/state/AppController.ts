@@ -16,6 +16,8 @@ import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
 import { activeCatalogRepositoryId, activeRepositoryId } from "./RepoContext"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
+import { createSearchSeam } from "./seams/SearchSeam"
+import type { PaletteAnswer, SearchSeam } from "./seams/SearchSeam"
 import type { PtyClient } from "./PtyClient"
 import { createLspClient } from "./LspClient"
 import { createCloudLspClient, pageCloudLspSocketUrl } from "./CloudLspClient"
@@ -261,6 +263,19 @@ export interface AppController {
   readonly describeAgentBackend: (backend: string) => string | { readonly value: string }
   /* The composer surfaces menu — the /surfaces command's open state. */
   readonly toggleSurfacesMenu: () => void
+  /*
+   * The search palette (Search and Command Palette Spec 2026-09-07): the
+   * overlay's rows read synchronously from the store (the button door), the
+   * `search.*` flow handler (the slash and agent doors), and the session
+   * acts the overlay dispatches (state/seams/SearchSeam.ts).
+   */
+  readonly searchPalette: (text: string) => PaletteAnswer
+  readonly search: SearchSeam["search"]
+  readonly openPalette: (prefix?: string) => void
+  readonly closePalette: (lastQuery?: string) => void
+  readonly togglePaletteActions: (ref: string) => void
+  readonly notePaletteItemOpened: (item: { readonly kind: string; readonly ref: string }) => void
+  readonly paletteRecent: () => { readonly value: string }
   /*
    * The composer connect menu's open state. Not a command — the chip is a
    * pointer affordance, not a registry entry — but the state is still the
@@ -683,6 +698,13 @@ export const createAppController = (
   const repositoriesSeam = actors.pair(seamCtx, (context) => createRepositoriesSeam(context))
   /* Lane citc: the cloud workspaces; its settle watches die with the controller. */
   const workspaceSeam = actors.pair(seamCtx, (context) => createWorkspaceSeam(context))
+  /*
+   * The palette's seam reads the registry it is registered in: the thunk
+   * resolves once `commands` exists below, and nothing calls it during
+   * construction.
+   */
+  const searchSeam = actors.pair(seamCtx, (context, select) =>
+    createSearchSeam(context, { registry: () => commands, refreshWorkspaces: select(workspaceSeam.refreshWorkspaces) }))
   const egressSeam = actors.pair(seamCtx, (context) => createEgressSeam(context))
   ctx.onDispose(workspaceSeam.dispose)
   /* Lane change: the change/diff cards and their acts. */
@@ -928,6 +950,25 @@ export const createAppController = (
   const noteCommandRun = (name: string): void => {
     store.dispatch({ type: "command.ran", actor: "user", name })
   }
+
+  /* The palette's session acts (palette spec §3): open, close, the actions panel, the recents ledger. */
+  const openPalette = (prefix?: string): void => {
+    if (prefix !== undefined && prefix !== "") store.dispatch({ type: "composer.changed", actor: "user", draft: prefix })
+    if (store.session().paletteOpen !== true) store.dispatch({ type: "palette.toggled", actor: "user", open: true })
+  }
+  const closePalette = (lastQuery?: string): void => {
+    if (store.session().paletteOpen !== true) return
+    store.dispatch({ type: "palette.toggled", actor: "user", open: false, ...(lastQuery === undefined ? {} : { lastQuery }) })
+  }
+  const togglePaletteActions = (ref: string): void => {
+    if (store.session().paletteOpen !== true) store.dispatch({ type: "palette.toggled", actor: "user", open: true })
+    const current = store.session().paletteActionsRef ?? null
+    store.dispatch({ type: "palette.actions.toggled", actor: "user", ref: current === ref ? null : ref })
+  }
+  const notePaletteItemOpened = (item: { readonly kind: string; readonly ref: string }): void => {
+    store.dispatch({ type: "palette.item.opened", actor: "user", ref: item.ref, kind: item.kind, at: Date.now() })
+  }
+  const paletteRecent = (): { readonly value: string } => ({ value: JSON.stringify({ items: store.session().paletteRecents ?? [] }) })
 
   const toggleVerbose = (): void => {
     store.dispatch({ type: "verbose.toggled", actor: "user", on: store.session().verbose !== true })
@@ -1240,6 +1281,13 @@ export const createAppController = (
     openTargetSource: targetGraph.openSource,
     toggleDevtools,
     toggleSurfacesMenu,
+    searchPalette: searchSeam.palette,
+    search: searchSeam.search,
+    openPalette,
+    closePalette,
+    togglePaletteActions,
+    notePaletteItemOpened,
+    paletteRecent,
     toggleConnectMenu,
     closeConnectMenu,
     toggleAddMenu,
@@ -1575,6 +1623,13 @@ export const createAppController = (
     openTargetSource: targetGraph.openSource,
     toggleDevtools,
     toggleSurfacesMenu,
+    searchPalette: searchSeam.palette,
+    search: searchSeam.search,
+    openPalette,
+    closePalette,
+    togglePaletteActions,
+    notePaletteItemOpened,
+    paletteRecent,
     toggleConnectMenu,
     closeConnectMenu,
     toggleAddMenu,

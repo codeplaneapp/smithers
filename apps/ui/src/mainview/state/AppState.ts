@@ -700,6 +700,19 @@ export const SessionSchema = z.object({
   /** The composer's `+` menu (the /composer.add command's open state); optional like the menus above. */
   addMenuOpen: z.boolean().optional(),
   /*
+   * The search palette (Search and Command Palette Spec 2026-09-07 §3, §5):
+   * the overlay's open state, the item whose actions panel is open, the last
+   * query (Cmd+Shift+K reopens it) and the recents ledger the ranking reads.
+   * Session state like the menus above, never a component's; all optional so
+   * sessions persisted before the fields parse without a schema reset.
+   */
+  paletteOpen: z.boolean().optional(),
+  paletteActionsRef: z.string().nullable().optional(),
+  paletteLastQuery: z.string().optional(),
+  paletteRecents: z
+    .array(z.object({ ref: z.string(), kind: z.string(), count: z.number().int().positive(), lastSeen: z.number() }))
+    .optional(),
+  /*
    * The active repository as a pin key (`repoKeyOf`): the row the sidebar
    * highlights, the name the composer's selector shows, and where a new
    * terminal or agent starts. Optional (missing = the first open repo).
@@ -1108,6 +1121,27 @@ export type AppTransition =
     type: "add-menu.toggled"
     actor: "user"
     open: boolean
+  }
+  | {
+    /* The search palette opens/closes (Cmd+K, Escape, Enter on an item); a close remembers the query. */
+    type: "palette.toggled"
+    actor: "user"
+    open: boolean
+    lastQuery?: string
+  }
+  | {
+    /* The palette's actions panel opens for one item (→, a second Cmd+K) or closes (←, Escape). */
+    type: "palette.actions.toggled"
+    actor: "user"
+    ref: string | null
+  }
+  | {
+    /* An item opened from the palette: the recents ledger (§5) the ranking reads. */
+    type: "palette.item.opened"
+    actor: "user"
+    ref: string
+    kind: string
+    at: number
   }
   | {
     /*

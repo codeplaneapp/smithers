@@ -22,6 +22,7 @@ import { createAppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
 import type { AppStore } from "../state/AppStore"
 import { modelInvocable, nameOf } from "./registry"
+import { PALETTE_ACTIONS_REASON, PALETTE_OPEN_REASON } from "./entries/palette"
 import { STORAGE_RECOVERY_USER_ONLY_REASON } from "./StorageRecoveryFlow"
 
 /**
@@ -62,6 +63,8 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
   "repo.select": "which pinned repository is active is the human's selection; an act names its working copy instead (tab.terminal [cwd])",
   "workspace.rename.edit": "opening the inline editor is the human's gesture; the agent names the workspace with workspace.rename",
   "composer.add": "opening the composer's menu is the human's gesture",
+  "palette.open": PALETTE_OPEN_REASON,
+  "palette.actions": PALETTE_ACTIONS_REASON,
   "target.filter": "the targets table's filter is the human's control; the agent lists targets with target.list",
   "target.select": "the targets table's row drawer is the human's control; the agent shows a target with target.open",
   "target.star": "starring is the human's own ranking of the table",

@@ -480,6 +480,86 @@ export const HistoryEpicSchema = z.object({
 export type HistoryEpic = z.infer<typeof HistoryEpicSchema>
 
 /**
+ * The kinds a search result can be: the Librarian Door union (RULINGS 6)
+ * plus `flow`, the kind `search.flows` answers with (the slash tree as data).
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const SEARCH_ITEM_KINDS = [
+  "wiki",
+  "note",
+  "history",
+  "target",
+  "file",
+  "run",
+  "change",
+  "issue",
+  "box",
+  "secret-name",
+  "person",
+  "flow"
+] as const
+/**
+ * Validates one search result kind.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const SearchItemKindSchema = z.enum(SEARCH_ITEM_KINDS)
+/**
+ * The decoded search result kind.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type SearchItemKind = z.infer<typeof SearchItemKindSchema>
+
+/**
+ * One act on a search result: a registered flow and the slash arguments that
+ * name the item. `open` runs on Enter, `primary` on Cmd+Enter, and the rest
+ * fill the actions panel (palette spec §2).
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const SearchActionSchema = z.object({
+  flow: z.string(),
+  args: z.string().optional(),
+  label: z.string(),
+  role: z.enum(["open", "primary", "other"])
+})
+/**
+ * The decoded search action.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type SearchAction = z.infer<typeof SearchActionSchema>
+
+/**
+ * One search result as data (palette spec §6): its kind, the ref its actions
+ * name, what a person reads, and every act a registered flow offers on it.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const SearchItemSchema = z.object({
+  kind: SearchItemKindSchema,
+  ref: z.string(),
+  title: z.string(),
+  subtitle: z.string().optional(),
+  actions: z.array(SearchActionSchema)
+})
+/**
+ * The decoded search result.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type SearchItem = z.infer<typeof SearchItemSchema>
+
+/**
  * Validates card values at the RPC boundary.
  *
  * @since 1.0.0
@@ -1996,6 +2076,22 @@ export const CardSchema = z.discriminatedUnion("kind", [
    * renders only these two fields plus the sign-in door; no count or reset is
    * invented client-side.
    */
+  /*
+   * The palette's results card (palette spec §3, §6): the rows one `search.*`
+   * flow answered, re-runnable from `flow` and `args`, each row carrying the
+   * registered flows that act on it. The agent embeds one when it surfaces
+   * what it found; a `text:` search embeds one grouped by file.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("search-results"),
+    payload: z.object({
+      query: z.string(),
+      flow: z.string(),
+      args: z.string().optional(),
+      items: z.array(SearchItemSchema)
+    })
+  }),
   z.object({
     ...cardBaseShape,
     kind: z.literal("anonymous-ceiling"),
