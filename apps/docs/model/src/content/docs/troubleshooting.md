@@ -97,9 +97,13 @@ quota-vocabulary provider code, or Anthropic's "credit balance is too low".
 Waiting does not add credit. Fund the account, then resume.
 
 **Repeated `transport` failures.** After three consecutive transport
-failures the executor replaces its HTTP client, because a destroyed
-connection pool is the failure waiting does not repair. Failures that
-survive a rebuilt client point at the network path: proxy, firewall, or the
+failures, the next attempt invokes the transport's `rebuild` effect.
+`RequestExecutor.make` and `RequestExecutor.layer` wrap `fixed(http)` and
+reuse the same client. A host that owns a connection pool can supply
+`RequestExecutor.makeWith(transport)` with a rebuilding effect that returns
+a client backed by a fresh pool; see
+[Supply a rebuilding transport](/guides/handle-failures/#supply-a-rebuilding-transport).
+If failures persist with a fresh pool, check the proxy, firewall, and
 provider's reachability.
 
 **`PermissionRequired` or `PermissionDenied`.** These are kernel classes,

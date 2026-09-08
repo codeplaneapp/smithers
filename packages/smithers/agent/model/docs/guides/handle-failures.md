@@ -17,10 +17,13 @@ failures arrive as their own classes (`PermissionRequired`,
 The `RequestExecutor` retried the request inside the call: at most two
 retries after the first attempt, starting at 500 ms, doubling, jittered,
 capped at 10 s per wait and 60 s in total, and only for a retryable code. A
-provider wait that exceeds the 60 s budget is not slept at all. Three
-consecutive `transport` failures replace the HTTP client itself. An
-`authentication` failure is never retried, except once when the route's
-`Auth` declares a `refresh`.
+provider wait that exceeds the 60 s budget is not slept at all. After three
+consecutive `transport` failures, the next attempt invokes the transport's
+`rebuild` effect. `RequestExecutor.make` and `RequestExecutor.layer` use
+`fixed(http)`, which returns the same client. Replacing a connection pool
+requires `RequestExecutor.makeWith(transport)` with a host-supplied rebuilding
+transport. An `authentication` failure is never retried, except once when
+the route's `Auth` declares a `refresh`.
 
 So the error in your hands has already had its transient chances. Your
 decision is what to do next.
@@ -28,7 +31,8 @@ decision is what to do next.
 ## Branch on the code
 
 ```ts
-import { Model, ModelError } from "@smthrs/model"
+import { Model } from "@smthrs/model"
+import { ModelError } from "@smthrs/model/ModelError"
 import { Effect, Stream } from "effect"
 
 const program = Effect.gen(function*() {
@@ -85,6 +89,36 @@ The twelve codes and their retryability are tabulated in the
   layer answering; provide a route.
 - `unknown`: unclassified. Inspect `httpStatus`, `providerCode`, and
   `requestId` when reporting it.
+
+## Supply a rebuilding transport
+
+The host supplies the initial client and a repeatable effect that creates a
+client backed by a fresh pool. The host owns pool allocation and cleanup,
+including the replaced pool and the final pool when its scope closes. Both
+clients must preserve the host's permission middleware.
+
+```ts
+import { HttpClient as KernelHttpClient } from "@smthrs/kernel"
+import { RequestExecutor } from "@smthrs/model"
+import { Effect } from "effect"
+
+// Supplied by the host, with resource ownership handled in its scope.
+declare const currentClient: KernelHttpClient.HttpClient
+declare const rebuildPool: Effect.Effect<KernelHttpClient.HttpClient>
+
+const transport: RequestExecutor.Transport = {
+  client: currentClient,
+  rebuild: rebuildPool
+}
+const executor = RequestExecutor.makeWith(transport)
+```
+
+The counter belongs to this executor and spans calls. Reaching three
+failures does not immediately rebuild or grant another retry. Before the
+next attempt, the executor runs `rebuildPool`, uses its returned client,
+and resets the counter. With the default two retries, that next attempt
+can be in a later call. Any HTTP response clears the transport-failure
+counter.
 
 ## Read the detail fields
 
