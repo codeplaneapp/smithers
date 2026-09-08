@@ -779,11 +779,11 @@ export const restore = Effect.fn("DisasterRecovery.restore")(function*(options: 
  * compare-and-swap. The suspended runs are claimable immediately, without
  * waiting out the heartbeat staleness cutoff and without liveness evidence.
  *
- * The manifest's recorded migrations must be a prefix of the restored
- * database's applied migrations: equal when the restoring binary matches the
- * backup, extended when a newer binary migrated the restored file forward on
- * open. Anything else means the file under fencing is not the one the
- * manifest describes.
+ * Every migration recorded in the manifest must remain applied with the same
+ * ID and namespaced name. Forward additions within any installed block are
+ * compatible, including engine-store `3006` below an existing plan `4003`;
+ * the current database layer applies them on open. A missing or renamed
+ * historical entry fails `schema_mismatch` before ownership is cleared.
  *
  * In-flight attempt rows are deliberately untouched: attempt writes are
  * fenced on the run row's ownership, and the resuming engine adopts or
@@ -798,10 +798,10 @@ export const fence = Effect.fn("DisasterRecovery.fence")(function*(manifest: Bac
   const applied = yield* appliedMigrations(sql, "fence")
   const expected = manifest.database.migrations
   const key = (migration: AppliedMigration): string => `${migration.migrationId}:${migration.name}`
-  if (
-    applied.length < expected.length ||
-    applied.slice(0, expected.length).map(key).join(",") !== expected.map(key).join(",")
-  ) {
+  // IDs identify migrations within their reserved blocks. Compare historical
+  // identities independently so additions in lower blocks cannot shift them.
+  const appliedById = new Map(applied.map((migration) => [migration.migrationId, migration.name]))
+  if (expected.some((migration) => appliedById.get(migration.migrationId) !== migration.name)) {
     return yield* Effect.fail(
       error(
         "fence",

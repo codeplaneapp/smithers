@@ -11,8 +11,10 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database"
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as RunStore from "@smthrs/run-store/RunStore"
 import * as Cause from "effect/Cause"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -24,6 +26,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as DisasterRecovery from "../src/DisasterRecovery.ts"
+import * as Migrations from "../src/Migrations.ts"
 import * as TestStores from "../src/test/TestStores.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
 
@@ -684,21 +687,122 @@ describe("fence", () => {
       })
     }))
 
-  it.effect("admits a database migrated forward past the manifest", () =>
-    Effect.gen(function*() {
-      const { manifest, restored } = yield* restoredStore()
-      const shorter = {
-        ...manifest,
-        database: {
-          ...manifest.database,
-          migrations: manifest.database.migrations.slice(0, manifest.database.migrations.length - 1)
-        }
-      }
-      const summary = yield* withCrypto(
-        DisasterRecovery.fence(shorter).pipe(Effect.provide(restoredDatabase(restored.databaseFile)))
-      )
-      expect(summary).toEqual({ clearedClaims: 0, suspendedRuns: 0 })
-    }))
+  const upgrades: ReadonlyArray<readonly [string, ReadonlyArray<number>]> = [
+    ["the same migration set", []],
+    ["a global suffix in the plan block", [4003]],
+    ["engine-store 3006 below the installed plan block", [3006]],
+    ["the previous engine and run-store migration sets", [1003, 3006]]
+  ]
+  for (const [name, omitted] of upgrades) {
+    it.effect(`restores, fences, and resumes with ${name}`, () =>
+      Effect.gen(function*() {
+        const base = root()
+        const backupDirectory = join(base, "backup")
+        const oldOwner = { hostId: "backup-host", pid: 7, nonce: "old-fence" }
+        const newOwner = { hostId: "restore-host", pid: 8, nonce: "new-fence" }
+        const previous = Migrations.sets.map((set) => ({
+          ...set,
+          migrations: Object.fromEntries(
+            Object.entries(set.migrations).filter(([key]) =>
+              !omitted.includes(set.idOffset + Number(key.split("_")[0]))
+            )
+          )
+        }))
+        const manifest = yield* withCrypto(
+          Effect.gen(function*() {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql`
+              INSERT INTO flows_runs (
+                run_id, status, created_at_ms, started_at_ms,
+                owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms, state_json,
+                claim_host_id, claim_pid, claim_nonce, claimed_at_ms
+              ) VALUES (
+                'upgrade-run', 'running', 0, 0,
+                ${oldOwner.hostId}, ${oldOwner.pid}, ${oldOwner.nonce}, 10, '{}',
+                'stale-claimant', 9, 'stale-claim', 10
+              )
+            `
+            return yield* backup({ directory: backupDirectory })
+          }).pipe(Effect.provide(Layer.mergeAll(
+            Layer.provideMerge(Layer.effectDiscard(DatabaseMigrations.run(previous)), TestDatabase.layer),
+            NodeFileSystem.layer
+          )))
+        )
+        const historicalIds = manifest.database.migrations.map((migration) => migration.migrationId)
+        expect(historicalIds).toContain(3005)
+        expect(historicalIds).toContain(4002)
+        for (const id of omitted) expect(historicalIds).not.toContain(id)
+        if (omitted.includes(3006)) expect(historicalIds).toContain(4003)
+
+        // Restore the actual old snapshot. Opening through the current layer
+        // applies the missing migrations before restoreAndFence checks it.
+        const restored = yield* withCrypto(
+          DisasterRecovery.restoreAndFence({
+            backupDirectory,
+            targetDirectory: join(base, "restored"),
+            databaseLayer: TestStores.databaseAt
+          }).pipe(Effect.provide(NodeFileSystem.layer))
+        )
+        expect(restored.manifest).toEqual(manifest)
+        expect(restored.fence).toEqual({ clearedClaims: 1, suspendedRuns: 1 })
+
+        yield* Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          const applied = yield* sql<{ readonly migration_id: number }>`
+            SELECT migration_id FROM flows_migrations ORDER BY migration_id
+          `
+          expect(applied.map((row) => row.migration_id)).toEqual([...historicalIds, ...omitted].sort((a, b) => a - b))
+          // This column is installed by 3006, proving the schema changed too.
+          const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(flows_runs)`
+          expect(columns.map((column) => column.name)).toContain("execution_parent_id")
+          const runs = yield* RunStore.make
+          const row = yield* runs.get("upgrade-run")
+          expect(row).toMatchObject({ status: "suspended", owner: null, heartbeatAtMs: null, claim: null })
+          expect(yield* runs.heartbeat("upgrade-run", oldOwner, 20)).toEqual({ _tag: "FenceLost" })
+          expect(
+            yield* runs.claimAndOwn(
+              "upgrade-run",
+              {
+                status: row.status,
+                owner: row.owner,
+                heartbeatAtMs: row.heartbeatAtMs
+              },
+              newOwner,
+              20
+            )
+          ).toEqual({ _tag: "Activated" })
+          expect(yield* runs.transitionOwned("upgrade-run", newOwner, "completed")).toEqual({ _tag: "Transitioned" })
+          expect((yield* runs.get("upgrade-run")).status).toBe("completed")
+        }).pipe(Effect.provide(restoredDatabase(restored.databaseFile)))
+      }))
+  }
+
+  for (const change of ["missing", "renamed"] as const) {
+    it.effect(`refuses a ${change} historical lower-block entry before clearing ownership`, () =>
+      Effect.gen(function*() {
+        const { manifest, restored } = yield* restoredStore()
+        yield* Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`
+            INSERT INTO flows_runs (
+              run_id, status, created_at_ms, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms, state_json,
+              claim_host_id, claim_pid, claim_nonce, claimed_at_ms
+            ) VALUES ('owned-run', 'running', 0, 'owner', 7, 'fence', 10, '{}', 'claimant', 8, 'claim', 10)
+          `
+          const before = yield* sql`SELECT * FROM flows_runs WHERE run_id = 'owned-run'`
+          // An additional migration cannot compensate for lost or renamed history.
+          yield* sql`INSERT INTO flows_migrations (migration_id, name) VALUES (3007, 'engine-store_future')`
+          if (change === "missing") {
+            yield* sql`DELETE FROM flows_migrations WHERE migration_id = 3005`
+          } else {
+            yield* sql`UPDATE flows_migrations SET name = 'engine-store_replaced' WHERE migration_id = 3005`
+          }
+          const exit = yield* DisasterRecovery.fence(manifest).pipe(Effect.exit)
+          expect(failure(exit)).toMatchObject({ code: "schema_mismatch", method: "fence" })
+          expect(yield* sql`SELECT * FROM flows_runs WHERE run_id = 'owned-run'`).toEqual(before)
+        }).pipe(Effect.provide(restoredDatabase(restored.databaseFile)))
+      }))
+  }
 
   it.effect("refuses a manifest recording migrations the database never applied", () =>
     Effect.gen(function*() {
