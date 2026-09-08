@@ -1,4 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as Migrations from "@smthrs/engine-store/Migrations"
 import * as Jj from "@smthrs/jj"
 import { Journal } from "@smthrs/journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
@@ -10,6 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type { EffectRecord } from "../src/EffectBoundary.ts"
 import type { Result as CompensationResult } from "../src/internal/Compensation.ts"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
@@ -141,9 +144,10 @@ const runRecovery = (
   runs: RunStore.Service,
   jj: Jj.Jj,
   registry: EffectHandlerRegistry.Service,
-  hasSuffix: boolean
+  hasSuffix: boolean,
+  options: Partial<Recovery.Options> = {}
 ) =>
-  Recovery.recover({ owner }).pipe(
+  Recovery.recover({ owner, ...options }).pipe(
     Effect.provide(Layer.succeed(TimeTravelStore, store)),
     Effect.provide(Layer.succeed(RunStore.RunStore, runs)),
     Effect.provide(Layer.succeed(Journal.Journal, journal(hasSuffix))),
@@ -152,6 +156,241 @@ const runRecovery = (
   )
 
 describe("Recovery", () => {
+  for (const committed of [true, false]) {
+    for (const claimedOnly of [false, true]) {
+      it.effect(`recovers a stale ${claimedOnly ? "claim" : "running child"} ${committed ? "after" : "before"} commit`, () =>
+        Effect.gen(function*() {
+          yield* Migrations.run
+          const sql = yield* SqlClient.SqlClient
+          const runs = yield* RunStore.make
+          const store = MemoryTimeTravelStore.make()
+          const phase = committed ? "archive_committed" : "compensated"
+          const value = audit(phase)
+          seed(store, { ...value, detail: { ...value.detail as AuditDetail, pendingChildren: ["child"] } })
+          yield* sql`
+            INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+            VALUES ('run', 'suspended', 0, '{}'), ('child', 'suspended', 0, '{"cursor":3}')
+          `
+          const dead = { hostId: "dead-host", pid: 99, nonce: "dead:rewind-child:child" }
+          const expected = { status: "suspended" as const, owner: null, heartbeatAtMs: null }
+          const claim = yield* runs.claim("child", expected, dead, 0)
+          expect(claim._tag).toBe("Claimed")
+          if (!claimedOnly) {
+            expect(yield* runs.activate("child", dead, 0, expected)).toEqual({ _tag: "Activated" })
+          }
+          yield* TestClock.adjust("1 minute")
+          const options: Partial<Recovery.Options> = {
+            livenessEvidence: (_audit, row, _claimant, nowMs) =>
+              Effect.succeed({
+                expectedOwner: row.owner!,
+                checkedAtMs: nowMs,
+                kind: "lease-expired"
+              })
+          }
+          const outcomes = yield* runRecovery(
+            store,
+            runs,
+            Jj.makeNoop({}),
+            EffectHandlerRegistry.makeNoop(),
+            !committed,
+            options
+          )
+          expect(outcomes).toEqual([{ _tag: committed ? "Completed" : "RolledBack", auditId: value.id }])
+          expect(yield* runs.get("child")).toMatchObject({
+            status: committed ? "cancelled" : "suspended",
+            owner: null,
+            claim: null,
+            stateJson: "{\"cursor\":3}"
+          })
+          expect(store.state().audits[0]).toMatchObject({
+            status: committed ? "completed" : "failed",
+            detail: { pendingChildren: [], cancelledChildren: committed ? ["child"] : [] }
+          })
+          expect(
+            yield* runRecovery(
+              store,
+              runs,
+              Jj.makeNoop({}),
+              EffectHandlerRegistry.makeNoop(),
+              !committed,
+              options
+            )
+          ).toEqual([])
+        }).pipe(Effect.provide(TestDatabase.layer)))
+    }
+  }
+
+  for (const refusal of ["no-probe", "live", "fresh", "wrong-owner", "old-evidence", "heartbeat-race"] as const) {
+    it.effect(`keeps the child and audit recoverable on ${refusal}`, () =>
+      Effect.gen(function*() {
+        yield* Migrations.run
+        const sql = yield* SqlClient.SqlClient
+        const runs = yield* RunStore.make
+        const store = MemoryTimeTravelStore.make()
+        const value = audit("archive_committed")
+        seed(store, { ...value, detail: { ...value.detail as AuditDetail, pendingChildren: ["child"] } })
+        yield* sql`
+          INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+          VALUES ('run', 'suspended', 0, '{}'), ('child', 'suspended', 0, '{}')
+        `
+        // Also recover an earlier recovery pass that died after activating a child.
+        const dead = { hostId: "dead-host", pid: 99, nonce: "dead:recovery-child:child" }
+        const expected = { status: "suspended" as const, owner: null, heartbeatAtMs: null }
+        yield* runs.claim("child", expected, dead, 0)
+        yield* runs.activate("child", dead, 0, expected)
+        yield* TestClock.adjust("1 minute")
+        if (refusal === "fresh") yield* runs.heartbeat("child", dead, 60_000)
+        const options: Partial<Recovery.Options> = refusal === "no-probe" ? {} : {
+          livenessEvidence: (_audit, row, _claimant, nowMs) =>
+            Effect.gen(function*() {
+              if (refusal === "live") return undefined
+              if (refusal === "heartbeat-race") yield* runs.heartbeat("child", dead, nowMs).pipe(Effect.orDie)
+              return {
+                expectedOwner: refusal === "wrong-owner" ? owner : row.owner!,
+                checkedAtMs: refusal === "old-evidence" ? nowMs - 1 : nowMs,
+                kind: "lease-expired" as const
+              }
+            })
+        }
+        expect(
+          yield* runRecovery(
+            store,
+            runs,
+            Jj.makeNoop({}),
+            EffectHandlerRegistry.makeNoop(),
+            false,
+            options
+          )
+        ).toMatchObject([{ _tag: "Busy", error: { code: "busy" } }])
+        expect(yield* runs.get("child")).toMatchObject({ status: "running", owner: dead, claim: null })
+        expect(store.state().audits[0]).toMatchObject({
+          status: "in_progress",
+          detail: { pendingChildren: ["child"] }
+        })
+        yield* TestClock.adjust("1 minute")
+        expect(
+          yield* runRecovery(
+            store,
+            runs,
+            Jj.makeNoop({}),
+            EffectHandlerRegistry.makeNoop(),
+            false,
+            {
+              livenessEvidence: (_audit, row, _claimant, nowMs) =>
+                Effect.succeed({
+                  expectedOwner: row.owner!,
+                  checkedAtMs: nowMs,
+                  kind: "lease-expired"
+                })
+            }
+          )
+        ).toEqual([{ _tag: "Completed", auditId: value.id }])
+      }).pipe(Effect.provide(TestDatabase.layer)))
+  }
+
+  it.effect("rolls back without releasing unrelated child owners or claims", () =>
+    Effect.gen(function*() {
+      yield* Migrations.run
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* RunStore.make
+      const store = MemoryTimeTravelStore.make()
+      const value = audit("compensated")
+      seed(store, { ...value, detail: { ...value.detail as AuditDetail, pendingChildren: ["owned", "claimed"] } })
+      yield* sql`
+        INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+        VALUES ('run', 'suspended', 0, '{}'), ('owned', 'suspended', 0, '{}'), ('claimed', 'pending', 0, '{}')
+      `
+      const stranger = { hostId: "engine", pid: 99, nonce: "engine-owner" }
+      const expected = { status: "suspended" as const, owner: null, heartbeatAtMs: null }
+      yield* runs.claim("owned", expected, stranger, 0)
+      yield* runs.activate("owned", stranger, 0, expected)
+      yield* runs.claim("claimed", { ...expected, status: "pending" }, stranger, 0)
+      yield* TestClock.adjust("1 minute")
+      expect(
+        yield* runRecovery(
+          store,
+          runs,
+          Jj.makeNoop({}),
+          EffectHandlerRegistry.makeNoop(),
+          true,
+          {
+            livenessEvidence: () => Effect.die("unrelated ownership must not be probed")
+          }
+        )
+      ).toEqual([{ _tag: "RolledBack", auditId: value.id }])
+      expect(yield* runs.get("owned")).toMatchObject({ status: "running", owner: stranger })
+      expect(yield* runs.get("claimed")).toMatchObject({ status: "pending", claim: stranger })
+    }).pipe(Effect.provide(TestDatabase.layer)))
+
+  for (
+    const refusal of [
+      "foreign-owner",
+      "foreign-claim",
+      "missing-claim-time",
+      "claim-fresh",
+      "claim-race",
+      "claim-error",
+      "steal-error"
+    ] as const
+  ) {
+    it.effect(`reports child recovery ${refusal} without closing a retryable audit`, () =>
+      Effect.gen(function*() {
+        const store = MemoryTimeTravelStore.make()
+        const value = audit("archive_committed")
+        seed(store, { ...value, detail: { ...value.detail as AuditDetail, pendingChildren: ["child"] } })
+        const parent = makeRuns()
+        const dead = { hostId: "dead-host", pid: 99, nonce: "dead:rewind-child:child" }
+        const stranger = { ...dead, nonce: "engine" }
+        const hasClaim = refusal !== "foreign-owner" && refusal !== "steal-error"
+        const child: RunStore.RunRow = {
+          ...parent.state(),
+          runId: "child",
+          status: hasClaim ? "suspended" : "running",
+          owner: hasClaim ? null : refusal === "foreign-owner" ? stranger : dead,
+          claim: hasClaim ? refusal === "foreign-claim" ? stranger : dead : null,
+          claimedAtMs: refusal === "missing-claim-time" ? null : 0
+        }
+        const persistenceFailure = new RunStore.RunStoreError({
+          code: "persistence_failed",
+          method: "recovery-test",
+          message: "store unavailable",
+          cause: undefined
+        })
+        const runs = RunStore.makeNoop({
+          ...parent,
+          get: (runId) => runId === "child" ? Effect.succeed(child) : parent.get(runId),
+          recoverClaim: () =>
+            refusal === "claim-error"
+              ? Effect.fail(persistenceFailure)
+              : Effect.succeed({ _tag: refusal === "claim-fresh" ? "ClaimFresh" as const : "ClaimChanged" as const }),
+          steal: () => Effect.fail(persistenceFailure)
+        })
+        const failed = refusal === "claim-error" || refusal === "steal-error"
+        expect(
+          yield* runRecovery(
+            store,
+            runs,
+            Jj.makeNoop({}),
+            EffectHandlerRegistry.makeNoop(),
+            false,
+            {
+              livenessEvidence: (_audit, row, _claimant, nowMs) =>
+                Effect.succeed({
+                  expectedOwner: row.owner!,
+                  checkedAtMs: nowMs,
+                  kind: "lease-expired"
+                })
+            }
+          )
+        ).toMatchObject([{ _tag: failed ? "Failed" : "Busy", error: { code: failed ? "unknown" : "busy" } }])
+        expect(store.state().audits[0]).toMatchObject({
+          status: failed ? "failed" : "in_progress",
+          detail: { pendingChildren: ["child"] }
+        })
+        expect(yield* runs.get("child")).toEqual(child)
+      }))
+  }
+
   it.effect("finishes the suspended transition when the archive transaction committed", () =>
     Effect.gen(function*() {
       const store = MemoryTimeTravelStore.make()

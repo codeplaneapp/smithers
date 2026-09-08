@@ -8,8 +8,13 @@ import { runReal } from "../RealTimeTravelHarness.ts"
 const filename = process.argv[2]
 const runId = process.argv[3]
 const stage = process.argv[4]
-if (filename === undefined || runId === undefined || (stage !== "after-audit" && stage !== "after-archive")) {
-  throw new Error("usage: rewind-crash-child.ts <database> <run-id> <after-audit|after-archive>")
+if (
+  filename === undefined || runId === undefined ||
+  !["after-audit", "after-archive", "before-child-cancel", "before-commit"].includes(stage ?? "")
+) {
+  throw new Error(
+    "usage: rewind-crash-child.ts <database> <run-id> <after-audit|after-archive|before-child-cancel|before-commit>"
+  )
 }
 
 const checkpoint = Effect.sync(() => {
@@ -21,11 +26,13 @@ await Effect.runPromise(runReal(
   filename,
   Effect.gen(function*() {
     const store = yield* TimeTravelStore
-    const wrapped = stage === "after-archive"
+    const wrapped = stage === "after-archive" || stage === "before-child-cancel"
       ? TimeTravelStore.of({
         ...store,
         updateAudit: (id, patch) =>
-          patch.status === "completed"
+          (stage === "after-archive" ?
+              patch.status === "completed" :
+              (patch.detail as Rewind.AuditDetail | undefined)?.phase === "archive_committed")
             ? checkpoint.pipe(Effect.andThen(Effect.never))
             : store.updateAudit(id, patch)
       })
@@ -35,11 +42,12 @@ await Effect.runPromise(runReal(
       frame: { lineageId: `${runId}/root`, seq: 0 },
       owner: { hostId: `crash-child:${process.pid}`, pid: process.pid, nonce: `crash-child:${process.pid}` },
       auditId: `${runId}-audit`,
-      ...(stage === "after-audit"
+      detachedChildPolicy: "cancel",
+      ...((stage === "after-audit" || stage === "before-commit")
         ? {
           hooks: {
             beforeStep: (step) =>
-              step === "write-audit"
+              step === (stage === "before-commit" ? "archive-and-truncate" : "write-audit")
                 ? checkpoint.pipe(Effect.andThen(Effect.never))
                 : Effect.void
           }

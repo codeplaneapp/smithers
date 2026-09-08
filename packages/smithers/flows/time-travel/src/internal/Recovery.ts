@@ -155,20 +155,48 @@ const archiveCommitted = (
   )
 }
 
+// The durable child nonce identifies claims made by rewind or an earlier
+// recovery pass, even after recovery has replaced/released the parent owner.
+const protocolChildOwner = (owner: OwnerId | null, childRunId: string): boolean =>
+  owner !== null && (
+    owner.nonce.endsWith(`:rewind-child:${childRunId}`) ||
+    owner.nonce.endsWith(`:recovery-child:${childRunId}`)
+  )
+
+const childEvidence = (
+  audit: Audit,
+  row: RunStore.RunRow,
+  owner: OwnerId,
+  nowMs: number,
+  options: Options
+): Effect.Effect<LivenessEvidence, TimeTravelFailure> =>
+  Effect.gen(function*() {
+    const evidence = options.livenessEvidence === undefined
+      ? undefined
+      : yield* options.livenessEvidence(audit, row, owner, nowMs)
+    if (evidence === undefined) {
+      return yield* Effect.fail(error("busy", `child ${row.runId} is still owned`))
+    }
+    return evidence
+  })
+
 /**
- * Finishes the child cancellations an interrupted rewind had already planned.
+ * Resolves children an interrupted rewind had already planned to cancel.
+ * Before commit, release only protocol claims and park activated children.
+ * After commit, reclaim expired protocol owners and finish cancellation.
  *
  * The plan is durable on the audit detail before the archive commit, so this is
  * a resumption rather than a new decision: a child already terminal is skipped,
  * and one that cannot be claimed leaves the audit open with the remainder still
  * pending, so a later pass retries it. Idempotent by construction, because
- * `pendingChildren` shrinks only as cancellations land.
+ * `pendingChildren` clears only once every child is resolved.
  */
-const cancelPending = (
+const resolvePending = (
   runs: RunStore.Service,
   audit: Audit,
   detail: AuditDetail,
-  owner: OwnerId
+  options: Options,
+  committed: boolean
 ): Effect.Effect<AuditDetail, TimeTravelFailure> =>
   Effect.gen(function*() {
     const pending = detail.pendingChildren ?? []
@@ -184,12 +212,57 @@ const cancelPending = (
         )
       )
       if (row === undefined || terminalStatus(row.status)) continue
+      if (!committed && !protocolChildOwner(row.owner, childRunId) && !protocolChildOwner(row.claim, childRunId)) {
+        continue
+      }
+      const childOwner: OwnerId = {
+        ...options.owner,
+        nonce: `${options.owner.nonce}:recovery-child:${childRunId}`
+      }
+      if (row.claim !== null) {
+        if (!protocolChildOwner(row.claim, childRunId) || row.claimedAtMs === null) {
+          return yield* Effect.fail(error("busy", `child ${childRunId} has an active claim`))
+        }
+        const nowMs = yield* Clock.currentTimeMillis
+        // An unactivated claim has its own identity and timestamp, independent
+        // of the run's original owner. Probe that lease and clear its exact CAS.
+        const evidence = yield* childEvidence(
+          audit,
+          { ...row, owner: row.claim, heartbeatAtMs: row.claimedAtMs },
+          childOwner,
+          nowMs,
+          options
+        )
+        const recovered = yield* runs.recoverClaim(
+          childRunId,
+          row.claim,
+          row.claimedAtMs,
+          childOwner,
+          nowMs,
+          evidence
+        ).pipe(Effect.mapError((cause) => runFailure(`recover pending child claim ${childRunId}`, cause)))
+        if (recovered._tag !== "Recovered") {
+          return yield* Effect.fail(error("busy", `child ${childRunId} could not release its stale claim`))
+        }
+      }
+      // Before commit only release ownership this protocol acquired. A child
+      // not yet activated keeps its original status and owner after claim CAS.
+      if (!committed && !protocolChildOwner(row.owner, childRunId)) continue
       const nowMs = yield* Clock.currentTimeMillis
-      const childOwner: OwnerId = { ...owner, nonce: `${owner.nonce}:recovery-child:${childRunId}` }
       const expected = snapshotOf(row)
-      const claimed = yield* runs.claim(childRunId, expected, childOwner, nowMs).pipe(
-        Effect.mapError((cause) => runFailure(`claim pending child ${childRunId}`, cause))
-      )
+      const claimed = row.status === "running"
+        ? yield* Effect.gen(function*() {
+          if (!protocolChildOwner(row.owner, childRunId)) {
+            return yield* Effect.fail(error("busy", `child ${childRunId} is owned outside rewind recovery`))
+          }
+          const evidence = yield* childEvidence(audit, row, childOwner, nowMs, options)
+          return yield* runs.steal(childRunId, expected, childOwner, nowMs, evidence).pipe(
+            Effect.mapError((cause) => runFailure(`steal pending child ${childRunId}`, cause))
+          )
+        })
+        : yield* runs.claim(childRunId, expected, childOwner, nowMs).pipe(
+          Effect.mapError((cause) => runFailure(`claim pending child ${childRunId}`, cause))
+        )
       if (claimed._tag !== "Claimed") {
         // The audit keeps the whole remaining plan: nothing is written on a
         // `busy` refusal, so the next pass sees the same list and retries it.
@@ -204,17 +277,17 @@ const cancelPending = (
         yield* Effect.ignore(runs.abandonClaim(childRunId, childOwner, claimed.claimedAtMs))
         return yield* Effect.fail(error("busy", `child ${childRunId} lost its cancellation claim`))
       }
-      const done = yield* runs.transitionOwned(childRunId, childOwner, "cancelled").pipe(
+      const done = yield* runs.transitionOwned(childRunId, childOwner, committed ? "cancelled" : "suspended").pipe(
         Effect.mapError((cause) => runFailure(`cancel pending child ${childRunId}`, cause))
       )
       if (done._tag !== "Transitioned") {
         return yield* Effect.fail(error("busy", `child ${childRunId} lost its cancellation fence`))
       }
-      cancelled.push(childRunId)
+      if (committed) cancelled.push(childRunId)
     }
     // Reaching here means every planned child is resolved: cancelled, already
-    // terminal, or gone. A child that could not be resolved failed above and
-    // left the audit open with its plan intact.
+    // terminal, gone, or released before commit. An unresolved child failed above
+    // and left the audit open with its plan intact.
     return { ...detail, cancelledChildren: cancelled, pendingChildren: [] }
   })
 
@@ -324,7 +397,7 @@ const recoverOne = (
                 // The cancellations the rewind planned before its commit are
                 // finished here. Closing the audit without draining them dropped
                 // exactly the work `detachedChildren: "cancel"` was asked for.
-                const drained = yield* cancelPending(runs, audit, detail, options.owner)
+                const drained = yield* resolvePending(runs, audit, detail, options, true)
                 // The live run row still carries the post-frame state the rewind
                 // truncated. Derive the state at the surviving frame just as the
                 // normal rewind path does; a history without a decision payload
@@ -360,6 +433,7 @@ const recoverOne = (
                 // pass never repeats those handler rollbacks.
                 yield* store.updateAudit(audit.id, { detail })
               }
+              detail = yield* resolvePending(runs, audit, detail, options, false)
               leaseReleased = true
               const restored = yield* runs.transitionOwned(
                 audit.runId,

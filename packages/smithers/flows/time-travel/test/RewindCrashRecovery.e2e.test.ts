@@ -43,13 +43,16 @@ const killHard = async (child: ChildProcessWithoutNullStreams): Promise<void> =>
 }
 
 describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
-  // The finite budget covers two real child processes, SIGKILL, and fresh recovery layers.
+  // The finite budget covers four real child processes, SIGKILL, and fresh recovery layers.
   it.effect("recovers real process deaths after audit write and archive commit", () =>
     Effect.gen(function*() {
-      for (const stage of ["after-audit", "after-archive"] as const) {
+      for (const stage of ["after-audit", "after-archive", "before-child-cancel", "before-commit"] as const) {
         yield* withRealFixture(`flows-rewind-${stage}-`, (fixture) =>
           Effect.gen(function*() {
             const runId = `run-${stage}`
+            const hasChild = stage === "before-child-cancel" || stage === "before-commit"
+            const committed = stage === "after-archive" || stage === "before-child-cancel"
+            const held = stage !== "after-archive"
             yield* runReal(
               fixture.databaseFile,
               Effect.gen(function*() {
@@ -66,6 +69,16 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
                      (${runId}, 1, ${`${runId}-1`}, 'killed-rewind', 1, 1, 'suffix', '{}',
                       ${JSON.stringify({ lineageId: `${runId}/root` })})
             `
+                if (hasChild) {
+                  yield* sql`
+                    INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+                    VALUES (${`${runId}-child`}, 'suspended', 0, ${runState("RewindChild")})
+                  `
+                  yield* sql`
+                    INSERT INTO flows_time_travel_edges (parent_run_id, parent_seq, child_run_id, kind, attached)
+                    VALUES (${runId}, 1, ${`${runId}-child`}, 'child', 0)
+                  `
+                }
               })
             )
             const child = spawn(process.execPath, [childFixture, fixture.databaseFile, runId, stage], {
@@ -90,7 +103,10 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
                   const archived = yield* sql<{ readonly seq: number }>`
                 SELECT seq FROM flows_time_travel_archive WHERE run_id = ${runId} ORDER BY seq
               `
-                  return { archived, audit: audit[0]!, live }
+                  const children = yield* sql<{ readonly status: string; readonly owner_nonce: string | null }>`
+                    SELECT status, owner_nonce FROM flows_runs WHERE run_id = ${`${runId}-child`}
+                  `
+                  return { archived, audit: audit[0]!, live, children }
                 })
               )
 
@@ -101,14 +117,19 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
               // rewind killed after its compensation would then never be
               // rolled back by anyone. `after-archive` dies after the run is
               // already suspended, so nothing blocks it.
-              expect(recovered.audit.status).toBe(stage === "after-audit" ? "in_progress" : "completed")
-              expect(JSON.parse(recovered.audit.detail_json).phase).toBe(
-                stage === "after-audit" ? "audit_written" : "completed"
+              expect(recovered.children).toEqual(
+                hasChild
+                  ? [{ status: "running", owner_nonce: `crash-child:${child.pid}:rewind-child:${runId}-child` }]
+                  : []
               )
-              expect(recovered.live).toEqual(stage === "after-audit" ? [{ seq: 0 }, { seq: 1 }] : [{ seq: 0 }])
-              expect(recovered.archived).toEqual(stage === "after-audit" ? [] : [{ seq: 1 }])
+              expect(recovered.audit.status).toBe(held ? "in_progress" : "completed")
+              expect(JSON.parse(recovered.audit.detail_json).phase).toBe(
+                stage === "after-audit" ? "audit_written" : held ? "compensated" : "completed"
+              )
+              expect(recovered.live).toEqual(committed ? [{ seq: 0 }] : [{ seq: 0 }, { seq: 1 }])
+              expect(recovered.archived).toEqual(committed ? [{ seq: 1 }] : [])
 
-              if (stage === "after-audit") {
+              if (held) {
                 // Expire the dead incarnation's lease: its last heartbeat
                 // moves to the epoch and the clock moves past the staleness
                 // window, which is exactly what wall-clock time does to a
@@ -128,7 +149,7 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
                   Effect.gen(function*() {
                     const sql = yield* Effect.service(SqlClient.SqlClient)
                     yield* sql`
-                  UPDATE flows_runs SET started_at_ms = 0, heartbeat_at_ms = 0 WHERE run_id = ${runId}
+                  UPDATE flows_runs SET started_at_ms = 0, heartbeat_at_ms = 0 WHERE run_id IN (${runId}, ${`${runId}-child`})
                 `
                   })
                 )
@@ -145,13 +166,22 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
                     const run = yield* sql<{ readonly status: string }>`
                   SELECT status FROM flows_runs WHERE run_id = ${runId}
                 `
-                    return { audit: audit[0]!, run: run[0]! }
+                    const children = yield* sql<{ readonly status: string; readonly owner_nonce: string | null }>`
+                      SELECT status, owner_nonce FROM flows_runs WHERE run_id = ${`${runId}-child`}
+                    `
+                    return { audit: audit[0]!, run: run[0]!, children }
                   })
                 )
 
-                expect(settled.audit.status).toBe("failed")
-                expect(JSON.parse(settled.audit.detail_json).phase).toBe("rolled_back")
+                expect(settled.audit.status).toBe(committed ? "completed" : "failed")
+                expect(JSON.parse(settled.audit.detail_json).phase).toBe(committed ? "completed" : "rolled_back")
                 expect(settled.run.status).toBe("suspended")
+                expect(settled.children).toEqual(
+                  hasChild
+                    ? [{ status: committed ? "cancelled" : "suspended", owner_nonce: null }]
+                    : []
+                )
+                if (hasChild) expect(JSON.parse(settled.audit.detail_json).pendingChildren).toEqual([])
               }
             } finally {
               yield* Effect.promise(() => killHard(child))

@@ -215,14 +215,20 @@ by the next recovery pass rather than silently dropped.
 
 ## Recovery
 
+Recovery recognizes child ownership from the persisted rewind or recovery child
+nonce. It reclaims expired child leases with fresh liveness evidence and the
+run store's snapshot CAS. Claims interrupted before activation are cleared with
+`recoverClaim`. Before the archive commits, activated children are released into
+`suspended`; after commit, the planned children are cancelled. Live leases or
+lost CAS races keep the audit open for retry.
+
 Recovery is not an operation. Building `TimeTravel.layer` finishes or rolls back
 every interrupted rewind audit before the service accepts work, so a crashed
 rewind never needs a call the caller has to remember.
 
-The one audit it cannot resolve is one whose run a live process still holds.
-That one is declined: the audit keeps its `in_progress` status, stays in
-`pendingAudits`, and nothing is written, so a later build finishes it. Recording
-it `failed` would close it terminally and drop it from `pendingAudits` forever.
+An audit whose parent or planned child a live process still holds is declined.
+It keeps its `in_progress` status and remains in `pendingAudits` for a later
+build to retry unresolved work.
 
 `Options.isAlive` is an [`Ownership.LivenessCheck`](/api/run-store) and decides
 what "still live" means. It defaults to `Ownership.leaseLiveness()`, the same
