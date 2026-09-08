@@ -6,7 +6,7 @@
  * journal: the child's events are scoped by that id, so a re-executed
  * spawning call resumes the child from its own settled events — child
  * chains are incrementally durable for free. A child's `done` and
- * non-approval parks settle as data the parent script inspects; a child
+ * terminal parks settle as data the parent script inspects; a child
  * waiting on approval bubbles as an in-place park so a later grant
  * resumes the child through the same slot. Children run unattended —
  * the chain core never drains steering under a child scope
@@ -16,8 +16,8 @@
  * journal/author/runner layers the chain runs on (the services are
  * captured at construction), root chain ids must not contain `/` or look
  * like `<digits>.<digits>`, and the reserved names (`agent`, `author`,
- * the system entries) may not appear in the host's entries — that is a
- * configuration defect and dies at construction.
+ * the system entries) may not appear in the host's entries. Invalid root
+ * ids fail Chain.run with ChainError; reserved entries die at construction.
  *
  * @since 0.1.0
  */
@@ -27,6 +27,8 @@ import * as Author from "./Author.ts"
 import * as AuthorDeclaration from "./AuthorDeclaration.ts"
 import * as Catalog from "./Catalog.ts"
 import * as Chain from "./Chain.ts"
+import { childRun } from "./internal/childRun.ts"
+import { ChildRunError } from "./internal/ChildRunError.ts"
 import * as Journal from "./Journal.ts"
 import * as ScriptRunner from "./ScriptRunner.ts"
 
@@ -185,6 +187,7 @@ export const make = (
             })
           }
           const outcome = yield* Chain.run({
+            [childRun]: true,
             chain: child,
             context: input.value.context ?? [],
             goal: input.value.goal,
@@ -196,14 +199,11 @@ export const make = (
             Effect.provideService(Journal.Journal, journal),
             Effect.provideService(Author.Author, author),
             Effect.provideService(ScriptRunner.ScriptRunner, runner),
-            // A failing child RUN — journal integrity, seat outage, seam
-            // outage — is never journaled as a rejection: a defect fails
-            // the parent run un-settled, so fixing the cause and resuming
-            // re-enters the child at its settled prefix. Only the child's
-            // TERMINAL is data.
-            Effect.orDie
+            // Only a terminal is data. Preserve run failures as typed,
+            // un-settled failures of the parent, with their original cause.
+            Effect.mapError((error) => new ChildRunError(error))
           )
-          if (outcome._tag === "Park" && outcome.reason.code === "approval") {
+          if (outcome._tag === "ApprovalWait") {
             // A child waiting on approval must not settle as data: bubble
             // it as the typed approval cause so the parent parks in place
             // and a later grant resumes the child through this same slot.

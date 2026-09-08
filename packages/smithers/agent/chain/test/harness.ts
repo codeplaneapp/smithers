@@ -14,6 +14,7 @@ export const flow = (...lines: ReadonlyArray<string>): string => ["```flow", ...
 
 export interface RunOptions {
   readonly author: Layer.Layer<Author.Author>
+  readonly chain?: string
   readonly goal?: string
   readonly entries?: ReadonlyArray<Catalog.Entry>
   /**
@@ -36,7 +37,7 @@ export interface RunOptions {
 }
 
 export interface RunResult {
-  readonly outcome: Outcome.Terminal
+  readonly outcome: Outcome.RunResult
   readonly events: ReadonlyArray<Event.Event>
 }
 
@@ -59,6 +60,7 @@ const layersOf = (options: RunOptions) => {
 }
 
 const chainOptions = (options: RunOptions): Chain.Options => ({
+  chain: options.chain,
   goal: options.goal ?? "fix TODOs",
   envelope: options.envelope as Chain.Options["envelope"],
   prefix: options.prefix,

@@ -78,7 +78,7 @@ optional `cause` for the subsystem's own stable code.
 | `Authorize.AuthorizeError`   | `denied`, `approval_required`, `authorize_unavailable`        | Gate 4's verdict. `denied` and `approval_required` are absorbed for catalog calls; `authorize_unavailable` always propagates.                                                                          |
 | `Steering.SteeringError`     | `steering_unavailable`                                        | The steering channel is mounted but broken.                                                                                                                                                            |
 | `ScriptRunner.ScriptFailure` | `compile`, `runtime`, `invalid_outcome`, `runner_unavailable` | Absorbed into a `script_failed` observation. It never reaches `Chain.run`'s error channel, but `QuickJsRunner.layer()` carries it: loading the WebAssembly module can fail while the layers are built. |
-| `Catalog.CallError`          | host-supplied `cause`                                         | Absorbed into a `call_failed` observation, unless `cause` is `approval_required`, which parks.                                                                                                         |
+| `Catalog.CallError`          | host-supplied `cause`                                         | Absorbed into a `call_failed` observation, unless `cause` is `approval_required`, which returns `ApprovalWait`. An internal child-run failure wrapper re-raises the original typed error.              |
 
 `Chain.run`'s error channel therefore carries a `ChainError`, a
 `JournalError`, an `AuthorError`, a `SteeringError`, or an `AuthorizeError`,

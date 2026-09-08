@@ -8,6 +8,7 @@ import type * as Event from "../src/Event.ts"
 import * as Journal from "../src/Journal.ts"
 import * as Observation from "../src/Observation.ts"
 import * as ScriptRunner from "../src/ScriptRunner.ts"
+import * as Steering from "../src/Steering.ts"
 import * as SubChains from "../src/SubChains.ts"
 import { countingEntry, failChain, failingEntry, flow, runChain } from "./harness.ts"
 
@@ -51,6 +52,46 @@ const goldenRun = async () => {
 }
 
 describe("Chain", () => {
+  it.each(["1.0", "12.34", "root/child", "root/", "/root"])(
+    "refuses reserved root scope %s before reading the journal",
+    async (chain) => {
+      const error = await Effect.runPromise(
+        Effect.flip(Chain.run({ chain, goal: "root" })).pipe(
+          Effect.provide(Layer.mergeAll(
+            Journal.layerNoop(),
+            Catalog.layer([]),
+            Author.layerMock([]),
+            ScriptRunner.layerInProcess
+          ))
+        )
+      )
+      expect(error).toMatchObject({ _tag: "/chain/ChainError", code: "invalid_journal" })
+    }
+  )
+
+  it.each(["", "root-a", "1", "1.0a"])("drains steering for root scope %s", async (chain) => {
+    const boundaries: Array<string> = []
+    const seen: Array<Author.Input> = []
+    const { events, outcome } = await runChain({
+      chain,
+      author: Author.layerFn((input) => {
+        seen.push(input)
+        return doneScript
+      }),
+      steering: Steering.layerNoop({
+        drain: (boundary) =>
+          Effect.sync(() => {
+            boundaries.push(boundary)
+            return ["stop now"]
+          })
+      })
+    })
+    expect(outcome).toEqual({ _tag: "Done", value: "recovered" })
+    expect(seen[0]?.context).toContain("[steering] stop now")
+    expect(boundaries).toEqual([chain === "" ? "0/0" : `${chain}/0/0`])
+    expect(events.find((event) => event._tag === "SteeringDrained")?.chain ?? "").toBe(chain)
+  })
+
   it("runs a two-link chain to done with the golden journal", async () => {
     const { edit, events, grep, outcome } = await goldenRun()
     expect(outcome).toEqual({ _tag: "Done", value: { patched: true } })

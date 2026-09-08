@@ -133,6 +133,27 @@ export type Outcome = typeof Outcome.Type
 export type Terminal = Done | Park
 
 /**
+ * An unsettled approval boundary. This run result is never a script
+ * outcome or a journal event; a grant and resume re-enter the same call.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ApprovalWait {
+  readonly _tag: "ApprovalWait"
+  readonly reason: { readonly code: "approval"; readonly message: string }
+}
+
+/**
+ * A run either reaches a terminal outcome or waits at an unsettled call.
+ * The persisted {@link Outcome} format contains only script outcomes.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type RunResult = Terminal | ApprovalWait
+
+/**
  * Completes the chain with a value; `undefined` becomes `null`, the one
  * JSON representation of "no value".
  *

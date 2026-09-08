@@ -5,12 +5,19 @@ import { describe, expect, it } from "vitest"
 import * as Author from "../src/Author.ts"
 import * as Authorize from "../src/Authorize.ts"
 import type * as Catalog from "../src/Catalog.ts"
+import * as Chain from "../src/Chain.ts"
 import type * as Event from "../src/Event.ts"
 import * as Journal from "../src/Journal.ts"
+import * as QuickJsRunner from "../src/QuickJsRunner.ts"
 import * as ScriptRunner from "../src/ScriptRunner.ts"
 import * as Steering from "../src/Steering.ts"
 import * as SubChains from "../src/SubChains.ts"
 import { countingEntry, flow, runChain } from "./harness.ts"
+
+const runners = [
+  ["in-process", ScriptRunner.layerInProcess],
+  ["QuickJS", QuickJsRunner.layer()]
+] as const
 
 const doneChild = flow(`const found = await ctx.call("grep", {})`, `return done(found)`)
 
@@ -21,10 +28,11 @@ const parentDelegates = flow(
 )
 
 describe("SubChains", () => {
-  it("runs a child chain to done and settles its terminal as data", async () => {
+  it.each(["", "root-a"])("runs a child chain to done under root scope %s", async (chain) => {
     const grep = countingEntry("grep", { files: ["a.ts"] })
     const catalog = SubChains.layer({ entries: [grep.entry] })
     const { events, outcome } = await runChain({
+      chain,
       author: Author.layerMock([parentDelegates, doneChild]),
       catalog
     })
@@ -34,9 +42,9 @@ describe("SubChains", () => {
     })
     expect(grep.count()).toBe(1)
 
-    const childEvents = events.filter((event) => (event.chain ?? "") !== "")
+    const childEvents = events.filter((event) => (event.chain ?? "") !== chain)
     expect(childEvents.length).toBeGreaterThan(0)
-    expect(new Set(childEvents.map((event) => event.chain))).toEqual(new Set(["1.0"]))
+    expect(new Set(childEvents.map((event) => event.chain))).toEqual(new Set([chain === "" ? "1.0" : `${chain}/1.0`]))
     const settle = events.find((event) => event._tag === "CallSettled" && event.name === "agent") as Event.CallSettled
     expect(settle.result).toEqual({ _tag: "Done", value: { files: ["a.ts"] } })
   })
@@ -73,7 +81,31 @@ describe("SubChains", () => {
     expect(settle.result).toEqual({ _tag: "Park", reason: { code: "timer", message: "waiting on the world" } })
   })
 
-  it("bubbles a child's approval park in place, and a grant resumes the child through the same slot", async () => {
+  it.each(runners)("settles a terminal child approval park as data (%s)", async (_, runner) => {
+    const terminal = { _tag: "Park", reason: { code: "approval", message: "script deliberately stopped" } }
+    const first = await runChain({
+      author: Author.layerMock([
+        flow(`return done(await ctx.call("agent", { goal: "stop" }))`),
+        flow(`return park("approval", "script deliberately stopped")`)
+      ]),
+      catalog: SubChains.layer({ entries: [] }),
+      runner
+    })
+    expect(first.outcome).toEqual({ _tag: "Done", value: terminal })
+    const settleIndex = first.events.findIndex((event) => event._tag === "CallSettled" && event.name === "agent")
+    expect(settleIndex).toBeGreaterThan(0)
+    // A crash after the child's LinkEnded but before the parent settles
+    // must also return the child's terminal as data.
+    const resumed = await runChain({
+      author: Author.layerMock([]),
+      catalog: SubChains.layer({ entries: [] }),
+      initial: first.events.slice(0, settleIndex),
+      runner
+    })
+    expect(resumed).toEqual(first)
+  })
+
+  it.each(runners)("bubbles a child's approval wait and a grant resumes the same slot (%s)", async (_, runner) => {
     const pattern = (action: CapabilityPattern["action"], resource: string): CapabilityPattern =>
       new CapabilityPattern({ action, resource })
     const allowAuthor = new Rule({ effect: "allow", pattern: pattern("model:call", "**") })
@@ -82,12 +114,13 @@ describe("SubChains", () => {
     const childWrites = flow(`const wrote = await ctx.call("repo/write", {})`, `return done(wrote)`)
 
     const first = await runChain({
+      runner,
       author: Author.layerMock([parentDelegates, childWrites]),
       authorize: Authorize.layerRules([allowAuthor, allowSpawn]),
       catalog: SubChains.layer({ entries: [gated] })
     })
     expect(first.outcome).toEqual({
-      _tag: "Park",
+      _tag: "ApprovalWait",
       reason: { code: "approval", message: `"repo/write" needs approval for fs:write:src/**` }
     })
     // Nothing settled for the agent call: the park is resumable in place.
@@ -95,6 +128,7 @@ describe("SubChains", () => {
 
     const regranted = { ...countingEntry("repo/write", "written").entry, capabilities: ["fs:write:src/**"] }
     const resumed = await runChain({
+      runner,
       author: Author.layerMock([]),
       authorize: Authorize.layerRules([
         allowAuthor,
@@ -178,26 +212,39 @@ describe("SubChains", () => {
     expect(outcome).toEqual({ _tag: "Done", value: "number" })
   })
 
-  it("fails the run un-journaled when the child run itself fails", async () => {
+  it.each(runners)("propagates a child's typed rate limit without settling the call (%s)", async (_, runner) => {
+    const failure = new Author.AuthorError({
+      code: "author_unavailable",
+      cause: "rate_limited",
+      message: "child seat offline"
+    })
     let calls = 0
     const author = Author.make({
       author: () => {
         calls = calls + 1
         if (calls === 1) return Effect.succeed(parentDelegates)
-        return Effect.fail(
-          new Author.AuthorError({ code: "author_unavailable", message: "child seat offline" })
-        )
+        if (calls === 2) return Effect.fail(failure)
+        return Effect.succeed(flow(`return done("recovered")`))
       }
     })
-    await expect(
-      runChain({
-        author: Layer.succeed(Author.Author)(author),
-        catalog: SubChains.layer({ entries: [] })
-      })
-    ).rejects.toThrow("child seat offline")
+    const base = Layer.mergeAll(Journal.layerMemory(), Layer.succeed(Author.Author)(author), runner)
+    const layers = Layer.mergeAll(base, SubChains.layer({ entries: [] }).pipe(Layer.provide(base)))
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(Chain.run({ goal: "parent" }))
+        expect(error).toBe(failure)
+        expect(error).toMatchObject({ _tag: "/chain/AuthorError", code: "author_unavailable", cause: "rate_limited" })
+        const journal = yield* Journal.Journal
+        const events = yield* journal.read
+        expect(events.some((event) => event._tag === "GateRejected")).toBe(false)
+        expect(events.some((event) => event._tag === "CallSettled" && event.name === "agent")).toBe(false)
+        const resumed = yield* Chain.run({ goal: "parent" })
+        expect(resumed).toEqual({ _tag: "Done", value: { from: "parent", child: "recovered" } })
+      }).pipe(Effect.provide(layers))
+    )
   })
 
-  it("keeps steering at the root even when admitted mid-child", async () => {
+  it.each(["", "root-a"])("keeps steering at root %s even when admitted mid-child", async (chain) => {
     const queue: Array<string> = []
     const steering = Steering.make({
       admit: (message) =>
@@ -237,6 +284,7 @@ describe("SubChains", () => {
       `return to(s)`
     )
     const { outcome } = await runChain({
+      chain,
       author: Layer.succeed(Author.Author)(
         Author.make({
           author: (input) =>

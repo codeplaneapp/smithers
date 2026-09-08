@@ -69,12 +69,14 @@ stale result when:
 
 ## Parks and resume
 
-Three park shapes resume three ways:
+`Chain.run` returns `Outcome.RunResult`: `Done`, terminal `Park`, or an
+unsettled `ApprovalWait`. The journal and script outcome schemas are unchanged.
+These shapes resume three ways:
 
 - A script's own `park(...)` settles as a `LinkEnded` and replays as the
-  terminal outcome. Waking a parked lineage is out of this package's scope.
+  terminal `Park`, even for `park("approval")`. Waking a parked lineage is out of this package's scope.
 - An approval wait (the seam's `approval_required`, or a sub-chain bubbling
-  one) journals nothing for the parked call. Resuming re-executes the link
+  one) returns `ApprovalWait` and journals nothing for the parked call. Resuming re-executes the link
   from its settled prefix and re-asks the seam under the current grants, so
   granting the claim and running again resumes through the same slot.
 - A `quota` park (link budget or per-link call budget) settles as a

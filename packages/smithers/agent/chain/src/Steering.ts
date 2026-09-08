@@ -38,8 +38,9 @@ export interface Service {
   readonly admit: (message: string) => Effect.Effect<void, SteeringError>
   /**
    * Takes every queued message. The boundary names the journal position
-   * the drain feeds (`link/ordinal`), so a durable binding can make the
-   * take exactly-once by deduping on it; the in-memory binding ignores it
+   * the drain feeds (`link/ordinal`, or `chain/link/ordinal` for a named
+   * root), so a durable binding can make the take exactly-once by deduping
+   * on it; the in-memory binding ignores it
    * and accepts the volatile loss window that implies.
    */
   readonly drain: (boundary: string) => Effect.Effect<ReadonlyArray<string>, SteeringError>

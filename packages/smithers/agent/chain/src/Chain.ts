@@ -17,6 +17,8 @@ import * as Authorize from "./Authorize.ts"
 import * as CallKey from "./CallKey.ts"
 import * as Catalog from "./Catalog.ts"
 import * as Event from "./Event.ts"
+import { childRun } from "./internal/childRun.ts"
+import { ChildRunError } from "./internal/ChildRunError.ts"
 import * as Journal from "./Journal.ts"
 import * as Observation from "./Observation.ts"
 import * as Outcome from "./Outcome.ts"
@@ -26,7 +28,8 @@ import * as Steering from "./Steering.ts"
 
 /**
  * A chain that cannot proceed: a replayed link diverged from its journal,
- * or the journal itself is not a valid chain history.
+ * the journal is not a valid chain history, or the root scope id uses
+ * the reserved child grammar.
  *
  * @category errors
  * @since 0.1.0
@@ -74,8 +77,13 @@ export interface Options {
   readonly maxCallsPerLink?: number | undefined
   /** Caller-supplied context lines appended after the goal in harness-driven author calls. */
   readonly context?: ReadonlyArray<string> | undefined
-  /** The journal scope this run owns; sub-chains derive theirs from the spawning call slot. */
+  /**
+   * The root journal scope. Must not contain `/` or match `<digits>.<digits>`;
+   * those shapes are reserved for children derived from a spawning call slot.
+   */
   readonly chain?: string | undefined
+  /** @internal Set only by SubChains for derived child scopes. */
+  readonly [childRun]?: true
 }
 
 /**
@@ -154,8 +162,9 @@ type RunError =
 type Services = Journal.Journal | Catalog.Catalog | Author.Author | ScriptRunner.ScriptRunner
 
 /**
- * Runs a chain to a terminal outcome, resuming from whatever the journal
- * already holds: a finished chain returns its terminal without executing
+ * Runs a chain to a terminal outcome or an in-place approval wait,
+ * resuming from whatever the journal already holds: a finished chain
+ * returns its terminal without executing
  * anything, and a half-finished link replays its settled calls by ordinal
  * before running live.
  *
@@ -163,19 +172,26 @@ type Services = Journal.Journal | Catalog.Catalog | Author.Author | ScriptRunner
  * @since 0.1.0
  * @slop
  */
-export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError, Services> =>
+export const run = (options: Options): Effect.Effect<Outcome.RunResult, RunError, Services> =>
   Effect.gen(function*() {
     const journal = yield* Journal.Journal
     const catalog = yield* Catalog.Catalog
     const author = yield* Author.Author
     const runner = yield* ScriptRunner.ScriptRunner
     const chainId = options.chain ?? ""
+    const isRoot = options[childRun] !== true
+    if (isRoot && (chainId.includes("/") || /^\d+\.\d+$/.test(chainId))) {
+      return yield* new ChainError({
+        code: "invalid_journal",
+        message: `root chain id ${JSON.stringify(chainId)} uses the reserved child scope grammar`
+      })
+    }
     // Steering is optional context: a chain without the service runs
     // unchanged and journals identically. It is also the ROOT's channel
     // only — a sub-chain never drains, so an instruction meant for the
     // root can never be consumed by an unattended child. The envelope
     // seam is optional the same way — end-state it is the kernel's job.
-    const steering = chainId === ""
+    const steering = isRoot
       ? yield* Effect.serviceOption(Steering.Steering)
       : Option.none<Steering.Service>()
     const authorize = yield* Effect.serviceOption(Authorize.Authorize)
@@ -260,7 +276,7 @@ export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError,
           Effect.gen(function*() {
             if (Option.isNone(steering) || steeredOrdinals.has(ordinal)) return steeringLines
             steeredOrdinals.add(ordinal)
-            const drained = yield* steering.value.drain(`${link}/${ordinal}`)
+            const drained = yield* steering.value.drain(`${chainId === "" ? "" : `${chainId}/`}${link}/${ordinal}`)
             if (drained.length > 0) {
               yield* append({ _tag: "SteeringDrained", link, messages: drained, ordinal })
               steeringLines.push(...drained)
@@ -435,6 +451,9 @@ export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError,
             const result = yield* entry.handler(payload, { chain: chainId, link, ordinal }).pipe(
               Effect.catchTag("/chain/CallError", (error) =>
                 Effect.gen(function*() {
+                  // Run failures stay typed and un-settled, through every
+                  // level of recursion. Ordinary handler failures reject.
+                  if (error instanceof ChildRunError) return yield* error.error
                   // A handler surfacing a required approval — a sub-chain
                   // waiting on a grant — parks in place like the seam's
                   // own ask: nothing settles, resume re-enters here.
@@ -529,7 +548,7 @@ export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError,
           )
         )
       if (outcome._tag === "ApprovalParked") {
-        return Outcome.park("approval", outcome.message)
+        return { _tag: "ApprovalWait", reason: { code: "approval", message: outcome.message } }
       }
       if (outcome._tag === "To") {
         // The successor's digest is re-derived here, whatever the runner

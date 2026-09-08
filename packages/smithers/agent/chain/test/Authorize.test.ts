@@ -132,7 +132,7 @@ describe("Authorize", () => {
       entries: [entry]
     })
     expect(first.outcome).toEqual({
-      _tag: "Park",
+      _tag: "ApprovalWait",
       reason: { code: "approval", message: `"repo/read" needs approval for fs:read:src/**` }
     })
     expect(entry.count()).toBe(0)
@@ -165,7 +165,7 @@ describe("Authorize", () => {
       authorize: authorizeWith()
     })
     expect(first.outcome).toEqual({
-      _tag: "Park",
+      _tag: "ApprovalWait",
       reason: {
         code: "approval",
         message: `"author" needs approval for ${AuthorDeclaration.authorCapability}`
@@ -187,7 +187,7 @@ describe("Authorize", () => {
       authorize: authorizeWith(allowAuthor, allowRead),
       entries: [undeclared.entry]
     })
-    expect(first.outcome._tag).toBe("Park")
+    expect(first.outcome._tag).toBe("ApprovalWait")
     expect(undeclared.count()).toBe(0)
 
     const weird = { ...countingEntry("weird", null).entry, capabilities: ["not a capability"] }
@@ -196,7 +196,7 @@ describe("Authorize", () => {
       authorize: authorizeWith(allowAll),
       entries: [weird]
     })
-    expect(second.outcome._tag).toBe("Park")
+    expect(second.outcome._tag).toBe("ApprovalWait")
   })
 
   it("never lets a rule's metacharacters cover a broader claim", async () => {
@@ -209,7 +209,7 @@ describe("Authorize", () => {
       authorize: authorizeWith(allowAuthor, narrow),
       entries: [broad]
     })
-    expect(outcome._tag).toBe("Park")
+    expect(outcome._tag).toBe("ApprovalWait")
   })
 
   it("lets deny win over ask across a request's claims", async () => {

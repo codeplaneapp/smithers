@@ -9,6 +9,11 @@ Everything below names the stable `code` to branch on; hosts branch on codes,
 never on prose. A script that fails, a handler that fails, and a value that
 will not serialize are journaled observations instead, listed at the end.
 
+A failing child run propagates its original typed error through the parent
+run. For example, a child's `author_unavailable` with cause `rate_limited`
+is catchable and retryable by the host. The spawning call stays unsettled;
+fix the cause and resume to re-enter the child's settled prefix.
+
 ## ChainError
 
 | Code                | Cause                                                                                                                                                                                                       | Fix                                                                                                            |
@@ -17,6 +22,7 @@ will not serialize are journaled observations instead, listed at the end.
 | `replay_divergence` | A replayed call differs from the journaled one in link, script digest, entry name, or payload.                                                                                                              | Restore the script text and payloads the journal settled; editing one character of a script re-keys its calls. |
 | `replay_divergence` | An entry's current declaration digest differs from the journaled one (a renamed, re-described, or re-capabilitied entry; a redeclared registry flow; a memory-contract upgrade; changed sub-chain budgets). | Restore the declaration the calls settled under, or start a new scope.                                         |
 | `invalid_journal`   | A link settled an author call whose result is not a script.                                                                                                                                                 | The journal is not a valid chain history; inspect the settled payload.                                         |
+| `invalid_journal`   | The root chain id contains `/` or matches `<digits>.<digits>`.                                                                                                                                              | Use the empty root id or a name such as `root-a`; derived child scopes are reserved.                           |
 
 ## JournalError
 
@@ -34,11 +40,11 @@ will not serialize are journaled observations instead, listed at the end.
 
 ## AuthorizeError
 
-| Code                    | Cause                                                                                            | Fix                                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `denied`                | Gate 4 denied the model seat itself (catalog-call denials are journaled observations instead).   | Cover `model:call:author` (`Chain.authorCapability`) in the ruleset.                 |
-| `approval_required`     | A claim matched no `allow` rule, so the seam asks. The run parks in place without a `LinkEnded`. | Grant the claim and run again; resume re-asks the seam under the new grant.          |
-| `authorize_unavailable` | The seam is mounted but unreachable. Always propagates.                                          | Mount a working seam, or `Authorize.layerAllowAll` when enforcement lives elsewhere. |
+| Code                    | Cause                                                                                                    | Fix                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `denied`                | Gate 4 denied the model seat itself (catalog-call denials are journaled observations instead).           | Cover `model:call:author` (`Chain.authorCapability`) in the ruleset.                 |
+| `approval_required`     | A claim matched no `allow` rule, so the seam asks. The run returns `ApprovalWait` without a `LinkEnded`. | Grant the claim and run again; resume re-asks the seam under the new grant.          |
+| `authorize_unavailable` | The seam is mounted but unreachable. Always propagates.                                                  | Mount a working seam, or `Authorize.layerAllowAll` when enforcement lives elsewhere. |
 
 ## SteeringError
 
@@ -81,9 +87,6 @@ the typed error channel:
   and journals written under one digest refuse to resume against the other.
   Bind them in exactly one place. See
   [Project the registry and bind memory](./guides/registry-and-memory.md).
-- A failing child RUN inside a sub-chain (journal integrity, seat outage,
-  seam outage) dies as a defect so the parent fails un-settled. Fix the
-  cause and resume: the child re-enters at its settled prefix.
 
 ## Observations, not failures
 
