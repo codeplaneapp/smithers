@@ -62,7 +62,11 @@ problem", and the second one arrives as `{ isError: true }` on a successful
 reply. The binding returns it in the success channel.
 
 `McpError` is the other channel entirely, reserved for failures of the session:
-the server would not start, the pipe closed, a reply could not be parsed. See
+the server would not start, the pipe closed, a reply could not be parsed.
+The binding explicitly publishes `McpError.message` as a catchable
+`flow_failed` result. The client authors this model-facing text with remote
+error bodies and process diagnostics withheld. Custom clients must preserve
+that public-message contract. See
 [Handle a failed tool call](../guides/handle-a-failed-tool-call.md).
 
 ## One declaration for every tool

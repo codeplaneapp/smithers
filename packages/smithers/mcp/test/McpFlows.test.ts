@@ -1873,6 +1873,44 @@ describe("McpFlows.mcp", () => {
     expect(result.value).toEqual({ content: [{ type: "text", text: "5" }], isError: false })
   })
 
+  it("publishes client-authored refusals while withholding remote error bodies", async () => {
+    const secret = "SYNTHETIC_MCP_REMOTE_SECRET"
+    const result = await withFakeServer(
+      respondToEcho,
+      Effect.flatMap(McpClient.connect({ server: "echo", command: "echo-mcp", args: [] }), (client) => {
+        const [binding] = Effect.runSync(McpFlows.mcp(client).bindings())
+        return binding!.run(
+          new Cell.Call({
+            flowName: binding!.descriptor.name,
+            input: { a: 2, b: 3 },
+            capabilities: McpFlows.capabilities,
+            effects: binding!.descriptor.effects,
+            placement: Option.none(),
+            identity: new Cell.CallIdentity({
+              session: "test",
+              frame: 0,
+              cell: "test",
+              ordinal: 0,
+              declaration: Cell.declarationDigest(binding!.descriptor),
+              layers: []
+            })
+          })
+        )
+      }),
+      {
+        envelope: (request, result) =>
+          request.method === "tools/call"
+            ? { jsonrpc: "2.0", id: request.id, error: { code: -32000, message: secret } }
+            : { jsonrpc: "2.0", id: request.id, result }
+      }
+    )
+    expect(result).toMatchObject({
+      outcome: "failure",
+      message: "Flow mcp/echo/add failed: MCP server \"echo\" failed tools/call (-32000); remote details withheld"
+    })
+    expect(JSON.stringify(result)).not.toContain(secret)
+  })
+
   it("uses conservative metadata defaults for an incomplete tool description", async () => {
     const source = McpFlows.mcp({
       server: "partial",

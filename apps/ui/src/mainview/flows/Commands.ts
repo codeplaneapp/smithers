@@ -179,7 +179,7 @@ const callFor = (entry: FlowEntry, payload: Record<string, unknown>): Cell.Call 
  * raw message beside the framed one.
  */
 const unframe = (name: string, message: string | undefined): string => {
-  if (message === undefined) return `/${name} failed`
+  if (message === undefined || message === `Flow ${name} failed.`) return `/${name} failed`
   const failed = `Flow ${name} failed: `
   if (message.startsWith(failed)) return message.slice(failed.length)
   return message

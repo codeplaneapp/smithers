@@ -206,6 +206,7 @@ export const source = (
     FlowBinding.provide(
       FlowBinding.make({
         flow: writeFlowFlow,
+        publicError: (error: FlowStore.FlowStoreError) => error.message,
         handler: (input) =>
           Effect.gen(function*() {
             yield* Effect.annotateCurrentSpan({ flow: input.id, description: input.description })

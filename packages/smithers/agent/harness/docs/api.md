@@ -657,7 +657,9 @@ replay another run's recorded result.
 serializable JSON. For struct inputs, a failed decode retries once by omitting
 only declared optional fields whose encoded schema rejects their `null`.
 Schema-valid nulls are preserved and the full schema validates the retry.
-If the retry fails, the original rejection is reported.
+If the retry fails, the original rejection is reported. The encoded input
+must be a struct-like object; unions of structs and records get no
+null-omission retry.
 
 Correctable failures (`invalid_input`, `flow_failed`) settle as `failure`
 results the cell catches. Ordinary handler failures use the opaque message
@@ -667,7 +669,9 @@ results and their journal records. `Options.publicError`, typed as
 text is bounded before journaling. An absent renderer, `undefined`, a throw,
 or a non-string result uses the opaque default. The renderer is not a
 sanitizer: hosts must select safe fields and redact raw diagnostics before
-logging or persisting them in the handler.
+logging or persisting them in the handler. Forward `message` only for error
+classes the host authored with model-facing text; never forward messages of
+transport, SDK, OS, or unknown errors, headers, URLs, or serialized causes.
 
 Existing `HarnessError` values pass through the error channel with their
 code and identity unchanged. Only `PermissionRequired` and `PermissionDenied`

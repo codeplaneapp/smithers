@@ -109,6 +109,7 @@ describe("the shared private recovery action and Flow", () => {
         const flow = storageRecoveryExportFlow(action.run)
         const result = await invokeStartupRecovery(flow)
         expect(result.outcome).toBe("failure")
+        expect(result.message).toContain("not reset")
         expect(JSON.stringify(result)).not.toContain(raw)
         expect(action.state.get("recovery")?.phase).toBe("failed")
         expect(action.state.get("recovery")?.message).toContain("not reset")

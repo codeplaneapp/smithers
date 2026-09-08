@@ -1048,6 +1048,14 @@ finds a flow in `ctx.flows` and calls it. Each helper pairs a declaration that
 already exists with the handler that already exists, and takes the `Context`
 the host built, because a handler's requirements are the host's to supply.
 
+Bindings explicitly publish host-authored refusal messages through
+`FlowBinding.Options.publicError`. Shell, test, and search errors with codes
+`command_failed`, `request_failed`, or `timeout` remain opaque because their
+messages can carry process diagnostics. Search `invalid_pattern` errors use
+fixed corrective text because native search can return raw stderr. Custom
+services must keep all other refusal messages suitable for cells and journals;
+diagnostic causes are never selected.
+
 ### StandardFlows.filesystem
 
 ```ts

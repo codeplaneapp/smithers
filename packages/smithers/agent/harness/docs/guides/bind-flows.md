@@ -61,6 +61,8 @@ Inside `run`, every failure lands where the cell contract says it must:
   with `null` omitted only from declared optional fields that reject it on the
   encoded side. Schema-valid nulls remain present; the full schema validates
   the retry. If it still fails, the original rejection is reported.
+  The encoded input must be a struct-like object; unions of structs and
+  records get no null-omission retry.
 - An ordinary handler failure settles as a catchable `flow_failed` with the
   opaque message `Flow <name> failed.` No raw error message, object, or cause
   enters the call result or its journal record.
@@ -82,7 +84,9 @@ permission errors bypass this renderer.
 Raw diagnostics remain in the host handler. Inspect them there, for example
 with `Effect.tapError`, and redact credentials before logging or persisting
 anything. `publicError` is an explicit disclosure decision, not a sanitizer;
-never forward raw `Error.message`, headers, URLs, or serialized causes.
+forward `message` only for error classes the host authored with model-facing
+text; never forward messages of transport, SDK, OS, or unknown errors,
+headers, URLs, or serialized causes.
 
 ## Compose a catalog
 

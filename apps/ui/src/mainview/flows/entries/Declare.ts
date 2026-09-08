@@ -70,16 +70,16 @@ const APP_ACT: ReadonlyArray<string> = ["app:act"]
  *
  * The controller's string return is its honest refusal, so it becomes the
  * typed error channel — which `FlowBinding` renders as a catchable `failure`
- * call result rather than a harness failure. A throw is the same kind of
- * refusal and is reported with its message instead of escaping as a defect.
+ * call result rather than a harness failure. Thrown host errors use the opaque
+ * default; only explicitly returned refusal strings are public.
  */
 const act = (
   run: () => CommandResult | Promise<CommandResult>
-): Effect.Effect<{ readonly value?: string }, string> =>
+): Effect.Effect<{ readonly value?: string }, string | undefined> =>
   Effect.flatMap(
     Effect.tryPromise({
       try: async () => run(),
-      catch: (cause) => (cause instanceof Error ? cause.message : String(cause))
+      catch: () => undefined
     }),
     (result) =>
       typeof result === "string"
@@ -135,6 +135,7 @@ export const flow = <I extends Payload>(declaration: Declaration<I>): FlowEntry 
         capabilities: capabilities ?? APP_ACT
       }),
       modelInvocable: userOnly !== true,
+      publicError: (message: string | undefined) => message,
       handler: (payload) => act(() => handler(payload))
     }),
     metadata,

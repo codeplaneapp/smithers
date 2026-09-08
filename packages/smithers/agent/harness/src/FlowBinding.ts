@@ -282,7 +282,9 @@ export interface Options<
   readonly handler: (input: I["Type"], call: Cell.Call) => Effect.Effect<O["Type"], E, R>
   /**
    * Opts safe handler-failure details into cell-visible, journaled text.
-   * Select only public fields; never forward raw messages or serialized causes.
+   * Forward message only for error classes the host authored with model-facing
+   * text; never forward messages of transport, SDK, OS, or unknown errors,
+   * headers, URLs, or serialized causes.
    * Undefined or a thrown renderer uses the opaque default. Permission errors
    * and existing HarnessErrors bypass this renderer and stay in the error channel.
    * Inspect raw causes in the host handler, redacting before any persistence.

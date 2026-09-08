@@ -116,6 +116,8 @@ const toolBinding = (
     // reading `ctx.flows` sees the real parameter shape rather than `Args`'s
     // permissive record type.
     inputDocument: tool.inputSchema as Schema.Json,
+    // McpClient authors these messages with remote/process diagnostics withheld.
+    publicError: (error: McpError) => error.message,
     handler: (input): Effect.Effect<typeof Result.Type, McpError> =>
       Effect.map(client.callTool(toolName, input), (result) =>
         result.structuredContent === undefined

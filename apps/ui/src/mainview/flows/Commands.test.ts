@@ -9,8 +9,10 @@
  * prerequisite (the requirement axis), never a mode refusal; a name that exists
  * nowhere stays `unknown-command`.
  */
+import { Effect } from "effect"
+import { CallResult } from "@smthrs/harness/Cell"
 import type { StorageApi } from "@tanstack/db"
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import { DOWNLOAD_URL } from "@smthrs/rpc/AppLinks"
 import { cloudCapabilities, localCapabilities } from "@smthrs/rpc/HostCapabilities"
@@ -21,6 +23,8 @@ import type { AppServices } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
 import type { AppStore } from "../state/AppStore"
 import { executeAgentToolCall } from "./agentTools"
+import { flow, NoPayload } from "./entries/Declare"
+import { invokeStartupRecovery } from "./StorageRecoveryFlow"
 import { modelInvocable, nativeOnly } from "./registry"
 
 const memoryStorage = (): StorageApi => {
@@ -133,6 +137,31 @@ const ORIGIN_REFUSAL = "/workspace.terminal is not available on this origin yet.
 /** The one download card the refusal renders, or a failure naming what rendered instead. */
 const downloadCards = (store: AppStore) =>
   messages(store).filter((message) => message.action?.flow === "app.download")
+
+test("app flows publish returned refusals but withhold thrown host errors", async () => {
+  const make = (handler: () => string) => flow({ name: "test", input: NoPayload, summary: "Test", handler })
+  const refusal = await invokeStartupRecovery(make(() => "Choose an available command."))
+  expect(refusal.message).toBe("Flow test failed: Choose an available command.")
+  for (const cause of [new Error("SYNTHETIC_HOST_SECRET"), { headers: { Authorization: "SYNTHETIC_HOST_SECRET" } }]) {
+    const failed = await invokeStartupRecovery(make(() => { throw cause }))
+    expect(failed.message).toBe("Flow test failed.")
+    expect(JSON.stringify(failed)).not.toContain("SYNTHETIC_HOST_SECRET")
+  }
+})
+
+test("opaque flow failures use the human command name", async () => {
+  const { store, controller } = await freshController(WEB)
+  try {
+    const entry = controller.commands.find("app.download")!
+    spyOn(entry.binding, "run").mockImplementation(() => Effect.succeed(new CallResult({
+      outcome: "failure", value: null, code: "flow_failed", message: "Flow app.download failed."
+    })))
+    expect(await controller.commands.run("app.download")).toEqual({ status: "failed", error: "/app.download failed" })
+  } finally {
+    await controller.dispose()
+    await store.dispose?.()
+  }
+})
 
 describe("nativeOnly — the flows the web host can never have", () => {
   test("a local.* or cloud.pat requirement is native-only; a cloud door alone is not", () => {

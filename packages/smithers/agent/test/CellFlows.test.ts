@@ -35,6 +35,8 @@ import { make as makePlugin } from "@smthrs/plugin"
 import type { ResolvedConfig } from "@smthrs/plugin/Config"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
+import * as Search from "@smthrs/std/Search"
+import { StdError } from "@smthrs/std/StdError"
 import * as TestRunner from "@smthrs/std/TestRunner"
 import {
   Cause,
@@ -469,6 +471,46 @@ ctx.done(caught)`
     const settled = settledCalls(eventsOf(outcome))
     expect(settled[0]?.result.outcome).toBe("failure")
     expect(settled[0]?.result.message).toContain("Flow read failed")
+    expect(settled[0]?.result.message).toContain("File not found: /missing.md")
+  })
+
+  it("keeps corrective search refusals public and host diagnostics opaque", async () => {
+    const secret = "SYNTHETIC_HOST_ONLY_TOKEN"
+    const filesystem = files({})
+    const search = Search.make({
+      grep: (input) =>
+        input.pattern === "d"
+          ? Effect.fail(
+            new StdError({ code: "provider_unavailable", message: "No search implementation is configured" })
+          )
+          : Effect.fail(
+            new StdError({
+              code: input.pattern === "a" ? "request_failed" : input.pattern === "b" ? "command_failed" : "timeout",
+              message: secret
+            })
+          ),
+      glob: () => Effect.fail(new StdError({ code: "invalid_pattern", message: secret }))
+    })
+    const outcome = await drive(collect({
+      flows: [StandardFlows.filesystem(filesystem.services, search)],
+      cells: [`for (const [name, input] of [
+        ["grep", { pattern: "(?=a)", path: "/repo" }],
+        ["grep", { pattern: "a", path: "/repo" }],
+        ["glob", { pattern: "*", path: "/repo" }],
+        ["grep", { pattern: "b", path: "/repo" }],
+        ["grep", { pattern: "c", path: "/repo" }],
+        ["grep", { pattern: "d", path: "/repo" }]
+      ]) { try { await ctx.call(name, input) } catch {} }
+      ctx.done("done")`]
+    }))
+    const settled = settledCalls(eventsOf(outcome))
+    expect(settled[0]?.result.message).toContain("Unsupported ripgrep pattern")
+    expect(settled[1]?.result.message).toBe("Flow grep failed.")
+    expect(settled[2]?.result.message).toContain("Unsupported ripgrep pattern")
+    expect(settled[3]?.result.message).toBe("Flow grep failed.")
+    expect(settled[4]?.result.message).toBe("Flow grep failed.")
+    expect(settled[5]?.result.message).toContain("No search implementation is configured")
+    expect(JSON.stringify(settled)).not.toContain(secret)
   })
 
   it("refuses an approval catchably when the host has nobody to ask", async () => {

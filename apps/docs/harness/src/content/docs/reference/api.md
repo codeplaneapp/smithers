@@ -654,13 +654,30 @@ options win over the projection. An undeclared effect envelope defaults to
 tier that is never content-shared, so a binding that forgot its tier can never
 replay another run's recorded result.
 
-`run` decodes the call's input (retrying once with explicit `null` keys
-dropped, the JavaScript reading of an omitted optional key), executes the
-handler, and encodes the output back into serializable JSON. Correctable
-failures (`invalid_input`, `flow_failed`) settle as `failure` results the cell
-catches; a permission requirement, a denial, or a harness-level failure is
-escalated into the error channel as a `HarnessError` of code `suspended`, and
-an interruption is never caught at all.
+`run` decodes input, executes the handler, and encodes output into
+serializable JSON. For struct inputs, a failed decode retries once by omitting
+only declared optional fields whose encoded schema rejects their `null`.
+Schema-valid nulls are preserved and the full schema validates the retry.
+If the retry fails, the original rejection is reported. The encoded input
+must be a struct-like object; unions of structs and records get no
+null-omission retry.
+
+Correctable failures (`invalid_input`, `flow_failed`) settle as `failure`
+results the cell catches. Ordinary handler failures use the opaque message
+`Flow <name> failed.` Raw messages, objects, and causes are excluded from call
+results and their journal records. `Options.publicError`, typed as
+`(error: E) => string | undefined`, explicitly selects safe public text; the
+text is bounded before journaling. An absent renderer, `undefined`, a throw,
+or a non-string result uses the opaque default. The renderer is not a
+sanitizer: hosts must select safe fields and redact raw diagnostics before
+logging or persisting them in the handler. Forward `message` only for error
+classes the host authored with model-facing text; never forward messages of
+transport, SDK, OS, or unknown errors, headers, URLs, or serialized causes.
+
+Existing `HarnessError` values pass through the error channel with their
+code and identity unchanged. Only `PermissionRequired` and `PermissionDenied`
+are converted to `HarnessError` with code `suspended`. These errors bypass
+`publicError`; interruptions are never caught.
 
 `FlowBinding.provide(binding, context)` closes a binding's remaining
 requirements. `FlowBinding.Source` is a named, possibly effectful producer of
@@ -762,7 +779,11 @@ export class HarnessError extends Schema.TaggedError<HarnessError>()("/harness/H
 `@smthrs/agent` actually raise; a foreign CLI adapter declares its own family
 beside the adapter rather than borrowing this one. `cause` is a
 `Schema.Defect` so a live `Error` attached as cause still encodes to JSON for
-the durable exit schema.
+the durable exit schema. `FlowBinding.make` passes existing `HarnessError`
+values through unchanged; only permission requirements and denials are
+converted to code `suspended`. Other handler errors become opaque
+`flow_failed` call results unless the binding supplies safe `publicError`
+text.
 
 ## StructuredOutput
 

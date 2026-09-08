@@ -215,7 +215,7 @@ export const makeNoop = (overrides: Partial<Children> = {}): Children =>
  */
 export const source = (children: Children): FlowBinding.Source =>
   FlowBinding.source("agent/children", [
-    FlowBinding.make({ flow: spawnFlow, handler: children.spawn }),
-    FlowBinding.make({ flow: sendFlow, handler: children.send }),
-    FlowBinding.make({ flow: awaitFlow, handler: children.await })
+    FlowBinding.make({ flow: spawnFlow, handler: children.spawn, publicError: (error) => error.message }),
+    FlowBinding.make({ flow: sendFlow, handler: children.send, publicError: (error) => error.message }),
+    FlowBinding.make({ flow: awaitFlow, handler: children.await, publicError: (error) => error.message })
   ])

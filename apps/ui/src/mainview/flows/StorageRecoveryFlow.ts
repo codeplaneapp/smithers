@@ -21,6 +21,7 @@ export const storageRecoveryExportFlow = (run: () => Promise<string | void>): Fl
   binding: FlowBinding.make({
     flow: declaration,
     modelInvocable: false,
+    publicError: (message: string) => message,
     handler: () =>
       Effect.tryPromise({
         try: run,

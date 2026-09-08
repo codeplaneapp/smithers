@@ -53,6 +53,7 @@ import * as Ls from "@smthrs/std/Ls"
 import * as PortableSearch from "@smthrs/std/PortableSearch"
 import * as Read from "@smthrs/std/Read"
 import * as Search from "@smthrs/std/Search"
+import type { StdError } from "@smthrs/std/StdError"
 import * as TestRun from "@smthrs/std/TestRun"
 import type * as TestRunner from "@smthrs/std/TestRunner"
 import * as Write from "@smthrs/std/Write"
@@ -62,6 +63,23 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Schema from "effect/Schema"
+
+/** These refusal classes carry host-authored text separately from diagnostic causes. */
+const publicRefusal = (error: { readonly message: string }): string => error.message
+
+/** Shell/test execution failures may contain OS diagnostics. */
+const publicExecutionError = (error: StdError): string | undefined =>
+  error.code === "command_failed" || error.code === "request_failed" || error.code === "timeout"
+    ? undefined
+    : error.message
+
+/** Native search may report raw stderr; publish only its corrective contract. */
+const publicSearchError = (error: StdError): string | undefined => {
+  if (error.code === "invalid_pattern") {
+    return "Unsupported ripgrep pattern. Use printable ASCII without special groups, lookaround, or backreferences."
+  }
+  return publicExecutionError(error)
+}
 
 /**
  * The default longest wait a cell may request, in seconds.
@@ -99,13 +117,25 @@ export const filesystem = (
 ): FlowBinding.Source => {
   const searchServices = Context.add(services, Search.Search, search)
   return FlowBinding.source("std/filesystem", [
-    FlowBinding.provide(FlowBinding.make({ flow: Read.flow, handler: Read.run }), services),
-    FlowBinding.provide(FlowBinding.make({ flow: Write.flow, handler: Write.run }), services),
-    FlowBinding.provide(FlowBinding.make({ flow: Edit.flow, handler: Edit.run }), services),
-    FlowBinding.provide(FlowBinding.make({ flow: ApplyPatch.flow, handler: ApplyPatch.run }), services),
-    FlowBinding.provide(FlowBinding.make({ flow: Ls.flow, handler: Ls.run }), services),
-    FlowBinding.provide(FlowBinding.make({ flow: Glob.flow, handler: Glob.run }), searchServices),
-    FlowBinding.provide(FlowBinding.make({ flow: Grep.flow, handler: Grep.run }), searchServices)
+    FlowBinding.provide(FlowBinding.make({ flow: Read.flow, handler: Read.run, publicError: publicRefusal }), services),
+    FlowBinding.provide(
+      FlowBinding.make({ flow: Write.flow, handler: Write.run, publicError: publicRefusal }),
+      services
+    ),
+    FlowBinding.provide(FlowBinding.make({ flow: Edit.flow, handler: Edit.run, publicError: publicRefusal }), services),
+    FlowBinding.provide(
+      FlowBinding.make({ flow: ApplyPatch.flow, handler: ApplyPatch.run, publicError: publicRefusal }),
+      services
+    ),
+    FlowBinding.provide(FlowBinding.make({ flow: Ls.flow, handler: Ls.run, publicError: publicRefusal }), services),
+    FlowBinding.provide(
+      FlowBinding.make({ flow: Glob.flow, handler: Glob.run, publicError: publicSearchError }),
+      searchServices
+    ),
+    FlowBinding.provide(
+      FlowBinding.make({ flow: Grep.flow, handler: Grep.run, publicError: publicSearchError }),
+      searchServices
+    )
   ])
 }
 
@@ -132,7 +162,7 @@ export const shell = (
 ): FlowBinding.Source =>
   FlowBinding.source("std/shell", [
     FlowBinding.provide(
-      FlowBinding.make({ flow: Bash.flow, handler: Bash.run }),
+      FlowBinding.make({ flow: Bash.flow, handler: Bash.run, publicError: publicExecutionError }),
       Context.add(services, Container.Container, container)
     )
   ])
@@ -153,7 +183,10 @@ export const tests = (
   services: Context.Context<ChildProcessSpawner.ChildProcessSpawner | TestRunner.TestRunner>
 ): FlowBinding.Source =>
   FlowBinding.source("std/tests", [
-    FlowBinding.provide(FlowBinding.make({ flow: TestRun.flow, handler: TestRun.run }), services)
+    FlowBinding.provide(
+      FlowBinding.make({ flow: TestRun.flow, handler: TestRun.run, publicError: publicExecutionError }),
+      services
+    )
   ])
 
 /**
@@ -167,11 +200,11 @@ export const memory = (
 ): FlowBinding.Source =>
   FlowBinding.source("memory", [
     FlowBinding.provide(
-      FlowBinding.make({ flow: MemoryFlows.remember, handler: MemoryFlows.runRemember }),
+      FlowBinding.make({ flow: MemoryFlows.remember, handler: MemoryFlows.runRemember, publicError: publicRefusal }),
       services
     ),
     FlowBinding.provide(
-      FlowBinding.make({ flow: MemoryFlows.recall, handler: MemoryFlows.runRecall }),
+      FlowBinding.make({ flow: MemoryFlows.recall, handler: MemoryFlows.runRecall, publicError: publicRefusal }),
       services
     )
   ])
@@ -263,6 +296,7 @@ export const clock = (
     FlowBinding.provide(
       FlowBinding.make({
         flow: waitFlow,
+        publicError: publicRefusal,
         handler: (input, call) => {
           if (!Number.isFinite(input.seconds)) {
             return Effect.fail(
@@ -369,7 +403,7 @@ export interface Asker {
  */
 export const approval = (asker: Asker): FlowBinding.Source =>
   FlowBinding.source("host/approval", [
-    FlowBinding.make({ flow: askFlow, handler: asker.ask })
+    FlowBinding.make({ flow: askFlow, handler: asker.ask, publicError: publicRefusal })
   ])
 
 /**
