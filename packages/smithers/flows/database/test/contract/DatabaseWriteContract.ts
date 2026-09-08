@@ -53,9 +53,9 @@ export interface Harness {
   readonly label: string
   /**
    * Enables assertions that require a real driver: savepoint nesting, rollback
-   * on a defect or an interrupt, and a multi-megabyte blob round trip. An
-   * implementation whose isolation only exists in-process cannot demonstrate
-   * any of them.
+   * on a defect or an interrupt, and a byte-exact blob round trip at four
+   * megabytes and at zero length. An implementation whose isolation only
+   * exists in-process cannot demonstrate any of them.
    */
   readonly realDriver: boolean
   /**
@@ -84,6 +84,40 @@ const reachedRead = (
   Deferred.succeed(self, undefined).pipe(
     Effect.andThen(Effect.raceFirst(Deferred.await(peer), Effect.sleep(Duration.millis(250))))
   )
+
+/**
+ * Deterministic payload bytes whose value at each offset depends on that
+ * offset.
+ *
+ * A uniform fill cannot tell two offsets apart, so it survives any
+ * rearrangement of the payload; an xorshift sequence does not. The seed is
+ * fixed, so a failure names the same byte on every run.
+ */
+const payloadBytes = (size: number): Uint8Array => {
+  const bytes = new Uint8Array(size)
+  let state = 0x9e3779b9
+  for (let index = 0; index < size; index += 1) {
+    state ^= state << 13
+    state ^= state >>> 17
+    state ^= state << 5
+    bytes[index] = (state >>> 24) & 0xff
+  }
+  return bytes
+}
+
+/**
+ * The offset of the first byte of `actual` that differs from `expected`, or
+ * `-1` when every one of them matches.
+ *
+ * Reported as a single number because a failed `toEqual` over four million
+ * bytes prints four million lines.
+ */
+const firstDifferingByte = (actual: Uint8Array, expected: Uint8Array): number => {
+  for (let index = 0; index < expected.length; index += 1) {
+    if (actual[index] !== expected[index]) return index
+  }
+  return -1
+}
 
 export const describeContract = (harness: Harness): void => {
   describe(`DurableWriter.write contract (${harness.label})`, () => {
@@ -342,23 +376,57 @@ export const describeContract = (harness: Harness): void => {
           expect(rows).toEqual([])
         }))
 
-      it.effect("writes and reads a four-megabyte blob on the real driver", () =>
+      // Every byte, not a prefix and a length: a four-byte prefix plus
+      // `length(payload)` accepts any same-length corruption after byte four,
+      // and a uniform payload accepts any reordering. The peer connection does
+      // the reading, so the bytes are decoded by a driver that never saw the
+      // writer's buffer.
+      it.effect("round-trips every byte of a four-megabyte blob through the peer connection", () =>
         Effect.gen(function*() {
           const size = 4 * 1024 * 1024
-          const blob = new Uint8Array(size).fill(0xa5)
-          const rows = yield* harness.run((context) =>
+          const blob = payloadBytes(size)
+          const result = yield* harness.run((context) =>
             Effect.gen(function*() {
               yield* context.a.sql`CREATE TABLE blob_rows (id INTEGER PRIMARY KEY, payload BLOB NOT NULL)`
               yield* context.a.write(
                 context.a.sql`INSERT INTO blob_rows (id, payload) VALUES (1, ${blob})`
               )
-              return yield* context.b.sql<
-                { readonly prefix: string; readonly size: number }
-              >`SELECT hex(substr(payload, 1, 4)) AS prefix, length(payload) AS size FROM blob_rows WHERE id = 1`
+              const rows = yield* context.b.sql<
+                { readonly payload: Uint8Array }
+              >`SELECT payload FROM blob_rows WHERE id = 1`
+              const payload = rows[0]!.payload
+              return {
+                rows: rows.length,
+                bytes: payload instanceof Uint8Array,
+                size: payload.length,
+                firstDifference: firstDifferingByte(payload, blob)
+              }
             })
           )
 
-          expect(rows).toEqual([{ prefix: "A5A5A5A5", size }])
+          expect(result).toEqual({ rows: 1, bytes: true, size, firstDifference: -1 })
+        }))
+
+      // The lower boundary of the same round trip: a zero-length blob is a
+      // value, not NULL, and must come back as an empty byte array rather than
+      // as null, undefined, or a one-byte artefact of an empty bind.
+      it.effect("round-trips an empty blob through the peer connection", () =>
+        Effect.gen(function*() {
+          const result = yield* harness.run((context) =>
+            Effect.gen(function*() {
+              yield* context.a.sql`CREATE TABLE empty_blob_rows (id INTEGER PRIMARY KEY, payload BLOB NOT NULL)`
+              yield* context.a.write(
+                context.a.sql`INSERT INTO empty_blob_rows (id, payload) VALUES (1, ${new Uint8Array(0)})`
+              )
+              const rows = yield* context.b.sql<
+                { readonly payload: Uint8Array }
+              >`SELECT payload FROM empty_blob_rows WHERE id = 1`
+              const payload = rows[0]!.payload
+              return { rows: rows.length, bytes: payload instanceof Uint8Array, size: payload.length }
+            })
+          )
+
+          expect(result).toEqual({ rows: 1, bytes: true, size: 0 })
         }))
     }
   })

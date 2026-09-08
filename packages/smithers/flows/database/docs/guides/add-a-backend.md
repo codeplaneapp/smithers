@@ -68,8 +68,10 @@ Two flags say what your backend can demonstrate, and each gates a group of
 assertions:
 
 - `realDriver` enables savepoint nesting, rollback on a defect or an interrupt,
-  and a multi-megabyte blob round trip. An implementation whose isolation only
-  exists in process cannot show any of them.
+  and a byte-exact blob round trip at four megabytes and at zero length: the
+  payload is written on one side and every returned byte is compared after a
+  read on the other. An implementation whose isolation only exists in process
+  cannot show any of them.
 - `crossConnection` enables the assertion that needs two genuine connections
   over one store: a backend that owns exactly one connection has no peer to
   contend with and cannot produce the lock error.
