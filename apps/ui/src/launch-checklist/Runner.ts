@@ -21,6 +21,10 @@ export interface RunOptions {
   readonly rows: ReadonlyArray<ChecklistRow>
   readonly mode: "dry-run" | "run"
   readonly context: ProbeContext
+  /** Shared by preparation and the probe, including streamed response bodies. */
+  readonly rowTimeoutMs?: number
+  /** Called after every completed row so reports survive later failures. */
+  readonly onProgress?: (results: ReadonlyArray<RowResult>) => void
 }
 
 const missingEnvFor = (row: ChecklistRow, env: Readonly<Record<string, string | undefined>>): ReadonlyArray<string> =>
@@ -48,12 +52,17 @@ const result = (
   ...(undecidedInProbe ? { undecidedInProbe: true } : {})
 })
 
-export const runChecklist = async ({ rows, mode, context }: RunOptions): Promise<ReadonlyArray<RowResult>> => {
+export const runChecklist = async ({ rows, mode, context, rowTimeoutMs = 120_000, onProgress }: RunOptions): Promise<ReadonlyArray<RowResult>> => {
+  if (!Number.isFinite(rowTimeoutMs) || rowTimeoutMs <= 0) throw new Error("rowTimeoutMs must be positive and finite")
   const results: Array<RowResult> = []
+  const record = (row: RowResult): void => {
+    results.push(row)
+    onProgress?.([...results])
+  }
   for (const row of rows) {
     const start = context.now()
     if (mode === "dry-run") {
-      results.push(
+      record(
         result(
           row,
           "skipped-dry-run",
@@ -70,49 +79,78 @@ export const runChecklist = async ({ rows, mode, context }: RunOptions): Promise
 
     const missing = missingEnvFor(row, context.env)
     if (missing.length > 0) {
-      results.push(result(row, "not-testable-yet", [`missing env: ${missing.join(", ")}`], [], context.now() - start))
+      record(result(row, "not-testable-yet", [`missing env: ${missing.join(", ")}`], [], context.now() - start))
       continue
     }
 
-    /*
-     * Preparation is best-effort and never decides a row: it undoes state a
-     * previous run left on the account, and a run without the rights to undo
-     * it must still grade honestly rather than fail. What happened either way
-     * goes in the evidence, so a reader can tell a prepared row from an
-     * unprepared one.
-     */
-    let prepared: ReadonlyArray<string> = []
-    if (row.prepare !== undefined) {
-      try {
-        prepared = [await row.prepare(context)]
-      } catch (error) {
-        prepared = [`prepare did not run: ${String(error instanceof Error ? error.message : error)}`]
+    const controller = new AbortController()
+    const signal = controller.signal
+    const combine = (other?: AbortSignal | null): AbortSignal =>
+      other == null ? signal : AbortSignal.any([signal, other])
+    const rowContext: ProbeContext = {
+      ...context,
+      signal,
+      fetch: (url, init) => {
+        signal.throwIfAborted()
+        return context.fetch(url, { ...init, signal: combine(init?.signal) })
+      },
+      sleep: (ms, other) => {
+        signal.throwIfAborted()
+        return context.sleep(ms, combine(other))
+      },
+      page: async (cookie, other) => {
+        signal.throwIfAborted()
+        const page = await context.page(cookie, combine(other))
+        signal.throwIfAborted()
+        return {
+          text: (other) => page.text(combine(other)),
+          evaluate: (expression, other) => page.evaluate(expression, combine(other)),
+          type: (text, other) => page.type(text, combine(other)),
+          press: (key, other) => page.press(key, combine(other)),
+          reload: (other) => page.reload(combine(other))
+        }
       }
     }
-
+    let prepared: ReadonlyArray<string> = []
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error(`row ${row.id} timed out after ${rowTimeoutMs}ms`)
+        reject(error)
+        controller.abort(error)
+      }, rowTimeoutMs)
+    })
+    let completed: RowResult
     try {
-      const probeResult = await row.probe(context)
-      results.push(
-        result(
-          row,
-          probeResult.status,
-          probeResult.status === "pass" ? [] : [probeResult.detail],
-          [...prepared, probeResult.detail],
-          context.now() - start,
-          probeResult.status === "not-testable-yet"
-        )
+      const probeResult = await Promise.race([deadline, (async () => {
+        // Ordinary preparation failures are evidence. A deadline stops the row.
+        if (row.prepare !== undefined) {
+          try {
+            prepared = [await row.prepare(rowContext)]
+          } catch (error) {
+            signal.throwIfAborted()
+            prepared = [`prepare did not run: ${String(error instanceof Error ? error.message : error)}`]
+          }
+        }
+        signal.throwIfAborted()
+        return row.probe(rowContext)
+      })()])
+      completed = result(
+        row,
+        probeResult.status,
+        probeResult.status === "pass" ? [] : [probeResult.detail],
+        [...prepared, probeResult.detail],
+        context.now() - start,
+        probeResult.status === "not-testable-yet"
       )
     } catch (error) {
-      /*
-       * A missing browser is a capability gap, not a product failure: the
-       * row honestly reports not-testable-yet and names what is missing.
-       * Anything else the probe threw is a real failure of the check.
-       */
       const status: Status = error instanceof BrowserUnavailableError ? "not-testable-yet" : "fail"
-      results.push(
-        result(row, status, [String(error instanceof Error ? error.message : error)], prepared, context.now() - start)
-      )
+      completed = result(row, status, [String(error instanceof Error ? error.message : error)], prepared, context.now() - start)
+    } finally {
+      clearTimeout(timer)
+      controller.abort(new Error(`row ${row.id} finished`))
     }
+    record(completed)
   }
   return results
 }

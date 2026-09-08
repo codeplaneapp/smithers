@@ -30,11 +30,12 @@
  * process shell (clock, filesystem, browser, exit code).
  */
 import { mkdirSync, writeFileSync } from "node:fs"
+import { setTimeout as delay } from "node:timers/promises"
 import { NO_BROWSER_REQUESTED_REASON } from "../src/launch-checklist/BrowserLaunch.ts"
 import { HELP, NO_TARGET_ERROR, parseArgs, reportDir } from "../src/launch-checklist/Cli.ts"
 import { ROWS } from "../src/launch-checklist/Rows.ts"
 import { buildReport, exitCodeFor, renderMarkdown, runChecklist } from "../src/launch-checklist/Runner.ts"
-import { BrowserUnavailableError, type ProbePage } from "../src/launch-checklist/Types.ts"
+import { BrowserUnavailableError, type ProbePage, type RowResult } from "../src/launch-checklist/Types.ts"
 import { createHeadlessBrowser } from "./headless-page.ts"
 
 const args = parseArgs(process.argv.slice(2))
@@ -55,32 +56,38 @@ const browser = mode === "dry-run" || args.noBrowser
   ? undefined
   : createHeadlessBrowser({ target: target as string, explicitBinary: args.browserPath, env: process.env })
 
-const page = (cookie: string | undefined): Promise<ProbePage> =>
+const page = (cookie: string | undefined, signal?: AbortSignal): Promise<ProbePage> =>
   browser === undefined
     ? Promise.reject(new BrowserUnavailableError(NO_BROWSER_REQUESTED_REASON))
-    : browser.page(cookie)
-
-const results = await runChecklist({
-  rows: ROWS,
-  mode,
-  context: {
-    target: target ?? "",
-    env: process.env,
-    page,
-    fetch: (url, init) => fetch(url, init),
-    now: () => Date.now(),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-  }
-})
-
-await browser?.close()
+    : browser.page(cookie, signal)
 
 const generatedAt = new Date().toISOString()
-const report = buildReport(mode, target, generatedAt, results)
 const outDir = reportDir(args, generatedAt)
-mkdirSync(outDir, { recursive: true })
-writeFileSync(`${outDir}/launch-checklist-report.json`, JSON.stringify(report, null, 2))
-writeFileSync(`${outDir}/launch-checklist-report.md`, renderMarkdown(report))
+let report = buildReport(mode, target, generatedAt, [])
+const persist = (rows: ReadonlyArray<RowResult>): void => {
+  report = buildReport(mode, target, generatedAt, rows)
+  writeFileSync(`${outDir}/launch-checklist-report.json`, JSON.stringify(report, null, 2))
+  writeFileSync(`${outDir}/launch-checklist-report.md`, renderMarkdown(report))
+}
+try {
+  mkdirSync(outDir, { recursive: true })
+  persist([])
+  await runChecklist({
+    rows: ROWS,
+    mode,
+    onProgress: persist,
+    context: {
+      target: target ?? "",
+      env: process.env,
+      page,
+      fetch: (url, init) => fetch(url, init),
+      now: () => Date.now(),
+      sleep: (ms, signal) => delay(ms, undefined, { signal })
+    }
+  })
+} finally {
+  await browser?.close()
+}
 
 for (const row of report.rows) {
   const marker = row.status === "pass" ? "ok" : row.status === "fail" ? "FAIL" : row.status.toUpperCase()

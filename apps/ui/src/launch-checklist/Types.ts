@@ -27,18 +27,24 @@ export class BrowserUnavailableError extends Error {
 /** A live headless page on the target origin, already carrying the session cookie it was opened with. */
 export interface ProbePage {
   /** `document.body.innerText` as the user would read it. */
-  text(): Promise<string>
-  /** Evaluate an expression in the page and return its JSON value. Rejects on a page exception. */
-  evaluate<T = unknown>(expression: string): Promise<T>
+  text(signal?: AbortSignal): Promise<string>
+  /**
+   * Evaluate an expression and return its JSON value (or legitimate undefined).
+   * Rejects on page exceptions, malformed responses, transport failure,
+   * cancellation or timeout.
+   */
+  evaluate<T = unknown>(expression: string, signal?: AbortSignal): Promise<T>
   /** Type literal characters into the focused element with real key events. */
-  type(text: string): Promise<void>
+  type(text: string, signal?: AbortSignal): Promise<void>
   /** Press one named key ("Enter", "Escape", "Tab", "/") with real key events. */
-  press(key: string): Promise<void>
+  press(key: string, signal?: AbortSignal): Promise<void>
   /** Reload the page, as closing and reopening the browser would. */
-  reload(): Promise<void>
+  reload(signal?: AbortSignal): Promise<void>
 }
 
 export interface ProbeContext {
+  /** The runner aborts this signal at the row deadline and when the row finishes. */
+  readonly signal?: AbortSignal
   readonly target: string
   readonly env: Readonly<Record<string, string | undefined>>
   /**
@@ -47,11 +53,11 @@ export interface ProbeContext {
    * cookie for the run. Rejects with `BrowserUnavailableError` when no
    * browser can be driven.
    */
-  page(cookie: string | undefined): Promise<ProbePage>
+  page(cookie: string | undefined, signal?: AbortSignal): Promise<ProbePage>
   fetch(url: string, init?: RequestInit): Promise<Response>
   /** Monotonic-enough clock, injected so probes' timing assertions are testable. */
   now(): number
-  sleep(ms: number): Promise<void>
+  sleep(ms: number, signal?: AbortSignal): Promise<void>
 }
 
 export interface ProbeResult {
@@ -74,8 +80,8 @@ export interface ChecklistRow {
    *
    * A prepare step is best-effort by construction: it may not have the rights
    * (the checklist session need not be an admin), and a row whose preparation
-   * did not happen still runs and still reports honestly. So it never fails a
-   * row — the reason lands in the evidence instead.
+   * did not happen still runs and still reports honestly. Ordinary preparation
+   * errors never fail a row; exhausting the shared row deadline does fail it.
    */
   readonly prepare?: (ctx: ProbeContext) => Promise<string>
   /** Every row has one. A row with no probe is a row this runner does not actually check. */

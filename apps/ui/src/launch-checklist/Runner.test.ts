@@ -243,3 +243,59 @@ describe("runChecklist preparation", () => {
     expect(prepared).toBe(false)
   })
 })
+
+describe("row deadlines", () => {
+  test.each(["prepare", "probe"])("a never-settling %s fails within the deadline and retains progress", async (stage) => {
+    const saved: string[][] = []
+    let signal: AbortSignal | undefined
+    let probeCalled = false
+    const hang = (ctx: ProbeContext) => { signal = ctx.signal; return new Promise<never>(() => {}) }
+    const running = runChecklist({
+      rows: [
+        row({ probe: async () => ({ status: "pass", detail: "first" }) }),
+        row({ id: "X-2", ...(stage === "prepare" ? { prepare: hang } : {}), probe: async (ctx) => {
+          probeCalled = true
+          return hang(ctx)
+        } }),
+        row({ id: "X-3", probe: async () => ({ status: "pass", detail: "last" }) })
+      ], mode: "run", context: context(), rowTimeoutMs: 20,
+      onProgress: (rows) => { saved.push(rows.map((row) => row.status)) }
+    })
+    const results = await Promise.race([running, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("runner hung")), 200))])
+    expect(results.map((row) => row.status)).toEqual(["pass", "fail", "pass"])
+    expect(results[1]?.reasons[0]).toContain("X-2 timed out after 20ms")
+    expect(signal?.aborted).toBe(true)
+    expect(probeCalled).toBe(stage === "probe")
+    expect(saved).toEqual([["pass"], ["pass", "fail"], ["pass", "fail", "pass"]])
+  })
+
+  test("the deadline reaches fetch bodies, page creation, page calls and sleeps", async () => {
+    const signals: AbortSignal[] = []
+    const results = await runChecklist({
+      rows: [row({ probe: async (ctx) => {
+        await ctx.sleep(1)
+        await (await ctx.page(undefined)).evaluate("1")
+        await (await ctx.fetch("https://example.test/stream")).text()
+        return { status: "pass", detail: "unreachable" }
+      } })], mode: "run", rowTimeoutMs: 20,
+      context: { ...context(),
+        sleep: async (_ms, signal) => { signals.push(signal!) },
+        page: async (_cookie, signal) => {
+          signals.push(signal!)
+          return { text: async () => "", press: async () => {}, type: async () => {}, reload: async () => {},
+            evaluate: async <T>(_expression: string, signal?: AbortSignal) => { signals.push(signal!); return 1 as T }
+          }
+        },
+        fetch: async (_url, init) => {
+          signals.push(init!.signal!)
+          return new Response(new ReadableStream({ start(controller) {
+            init!.signal!.addEventListener("abort", () => controller.error(init!.signal!.reason), { once: true })
+          } }))
+        }
+      }
+    })
+    expect(results[0]?.status).toBe("fail")
+    expect(signals).toHaveLength(4)
+    expect(signals.every((signal) => signal?.aborted)).toBe(true)
+  })
+})
