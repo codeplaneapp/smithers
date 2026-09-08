@@ -90,6 +90,17 @@
       "reason": "Read port from the control plane into a host's trigger store, so Control.list answers the triggers and fires variants; the port lives in control because @smthrs/triggers already depends on it, and layerNone is the typed refusal for a host without a store."
     },
     {
+      "name": "@smthrs/triggers",
+      "subpath": "./DispatchReader",
+      "development": "./src/DispatchReader.ts",
+      "published": {
+        "types": "./dist/esm/DispatchReader.d.ts",
+        "import": "./dist/esm/DispatchReader.js",
+        "require": "./dist/cjs/DispatchReader.js"
+      },
+      "reason": "Adapter that serves the @smthrs/control DispatchReader port from a TriggerStore, so a host composes Control.list triggers and fires over the same store the scheduler writes; the adapter lives here because only this package can read the store."
+    },
+    {
       "name": "@smthrs/engine-store",
       "subpath": "./PlanMergeStore",
       "development": "./src/PlanMergeStore.ts",
