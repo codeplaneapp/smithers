@@ -37,3 +37,24 @@ network access to the public fixture remote.
 
 `native/` holds the main-process subprocess probe driven by
 `src/bun/Main.test.ts`; see `native/README.md`.
+
+## Sign-in probe (`probes/signin-roundtrip.mjs`)
+
+`probes/signin-roundtrip.mjs` proves the GitHub OAuth round trip against the
+deployed host, https://smithers.sh by default. It opens the repository page,
+signs in as the shared test account `codeplanesmithers` through
+`/api/auth/github/start`, expects OAuth to return to the host, and then expects
+the Account card to read `Account · @codeplanesmithers`. It is a plain Node
+script, not a Playwright spec: `playwright.config.ts` only collects
+`e2e/playwright`, and `PACKAGE.ts` only globs `e2e/**/*.ts`, so it never runs
+inside the T1 suite or the typecheck target.
+
+Run it with `node apps/ui/e2e/probes/signin-roundtrip.mjs [host] [owner/repo]`.
+Its paths come only from the environment: `SMITHERS_E2E_PROFILE` names the
+persistent Chromium profile (default `~/.multi-e2e-profile`),
+`SMITHERS_E2E_NOTES` names a notes file outside the repository holding a
+`password: <value>` line (default the `multi-test-github-account` memory file),
+and `SMITHERS_E2E_USER` overrides the login. The probe never prints
+credentials; when the saved GitHub session has expired it logs the account in
+again from the notes file, and it fails with a reason when GitHub asks for a
+device code. Run it after every deploy that touches auth, chrome, or the shell.
