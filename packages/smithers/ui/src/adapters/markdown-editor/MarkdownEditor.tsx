@@ -56,6 +56,15 @@ export type MarkdownEditorHandle = {
    * or reset content without it looping back as a local edit.
    */
   setMarkdown: (markdown: string) => void;
+  /**
+   * Bring a 1-based source line into view (an outline's heading click). The
+   * WYSIWYG document keeps no source lines, so the target is the nearest ATX
+   * heading at or above `line`, matched by text in the rendered document; the
+   * textarea fallback places the caret at the line's start and scrolls to it.
+   * Returns false when nothing is mounted to scroll yet (the editor is still
+   * loading) or the line is past the document's end.
+   */
+  scrollToLine: (line: number) => boolean;
 };
 
 /** Stable failure codes reported through {@link MarkdownEditorProps.onError}. */
@@ -244,6 +253,43 @@ const releaseTab = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
   event.stopPropagation();
 };
 
+/** The ATX heading on one source line, or undefined. */
+const headingOf = (source: string): { readonly depth: number; readonly text: string } | undefined => {
+  const match = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(source);
+  return match ? { depth: match[1]!.length, text: match[2]!.trim() } : undefined;
+};
+
+const collapse = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+/**
+ * The rendered heading a 1-based source line lands on: the nearest heading at
+ * or above the line, found in the WYSIWYG host by its text (the nth among
+ * equal texts, so repeated headings resolve to the right one), falling back to
+ * the heading's ordinal when the rendered text differs (inline marks).
+ */
+const renderedHeadingFor = (host: HTMLElement, markdown: string, line: number): HTMLElement | null | undefined => {
+  const lines = markdown.split("\n");
+  if (line > lines.length) return undefined;
+  let inFence = false;
+  const headings: Array<{ text: string; line: number }> = [];
+  for (let i = 0; i < Math.min(line, lines.length); i++) {
+    const source = lines[i]!;
+    if (/^\s*(```|~~~)/.test(source)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const heading = headingOf(source);
+    if (heading) headings.push({ text: collapse(heading.text), line: i + 1 });
+  }
+  const target = headings[headings.length - 1];
+  if (target === undefined) return null;
+  const rendered = [...host.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")];
+  const sameText = headings.filter((heading) => heading.text === target.text).length - 1;
+  const byText = rendered.filter((element) => collapse(element.textContent ?? "") === target.text)[sameText];
+  return byText ?? rendered[headings.length - 1] ?? null;
+};
+
 /** The default module loader: the two `@milkdown/*` dynamic imports. */
 const loadMilkdown = async (): Promise<MarkdownEditorModule> => {
   const [{ Crepe }, { replaceAll }] = await Promise.all([import("@milkdown/crepe"), import("@milkdown/kit/utils")]);
@@ -268,6 +314,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   useInjectMarkdownEditorCss();
 
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const fallbackRef = useRef<HTMLTextAreaElement | null>(null);
   const crepeRef = useRef<CrepeInstance | null>(null);
   const readyRef = useRef(false);
   const replaceAllRef = useRef<MarkdownEditorModule["replaceAll"] | null>(null);
@@ -321,6 +368,31 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             suppressEchoRef.current = Math.max(0, suppressEchoRef.current - 1);
           }, 0);
         }
+      },
+      scrollToLine: (line: number) => {
+        const markdown = lastMarkdownRef.current;
+        const textarea = fallbackRef.current;
+        if (textarea) {
+          const lines = markdown.split("\n");
+          if (line < 1 || line > lines.length) return false;
+          const offset = lines.slice(0, line - 1).reduce((total, row) => total + row.length + 1, 0);
+          textarea.focus();
+          textarea.setSelectionRange(offset, offset);
+          const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight);
+          const rowHeight = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 21;
+          textarea.scrollTop = Math.max(0, (line - 1) * rowHeight);
+          return true;
+        }
+        const host = hostRef.current;
+        if (!host || !readyRef.current) return false;
+        const heading = renderedHeadingFor(host, markdown, line);
+        if (heading === undefined) return false;
+        if (heading === null) {
+          host.scrollTop = 0;
+          return true;
+        }
+        if (typeof heading.scrollIntoView === "function") heading.scrollIntoView({ block: "start" });
+        return true;
       },
     }),
     [],
@@ -422,6 +494,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   if (useFallback || editorState === "failed") {
     return (
       <textarea
+        ref={fallbackRef}
         className={className ? `sui-markdown-editor-fallback ${className}` : "sui-markdown-editor-fallback"}
         data-slot="markdown-editor"
         data-testid="markdown-editor"

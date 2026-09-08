@@ -4,6 +4,7 @@ import { DEFAULT_BRANCH_ID, DEFAULT_WORKSPACE_ID, rootFrameId, WIKI_DISPLAY_NAME
 import type { Card, WorldDocument } from "../AppState"
 import type { AppStore } from "../AppStore"
 import { linkGraphOf, linksOf, neighbourhoodOf, notesOf, resolveLink } from "../../wiki/VaultAdapter"
+import { actorSharedState } from "../ActorBindings"
 import type { ControllerContext } from "./context"
 import { sweepConversation, SweepRequestTooLargeError } from "./ConversationSweep"
 import type { SweepNote } from "./ConversationSweep"
@@ -37,12 +38,21 @@ export interface WorldController {
   readonly removeWorldDocument: (id: string) => string | void
   readonly confirmWorldDelete: () => string | void
   readonly cancelWorldDelete: () => void
-  /** `wiki.open <path>`: the note in the pane for the human, the note as an embedded card for the agent. */
-  readonly openWorldDocument: (path: string) => string | void
-  /** `wiki.backlinks <path>`: the note's link rail as a card, for either actor. */
-  readonly showWorldLinks: (path: string) => string | void
-  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card for the agent. */
-  readonly showWorldGraph: (path?: string) => string | void
+  /** `wiki.open <path>`: the note in the pane for the human, the note as an embedded card (with its links as the value) for the agent. */
+  readonly openWorldDocument: (path: string) => string | void | { readonly value: string }
+  /** `wiki.backlinks <path>`: the note's link rail as a card, for either actor; the agent also gets the names as the value. */
+  readonly showWorldLinks: (path: string) => string | void | { readonly value: string }
+  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card (with its counts as the value) for the agent. */
+  readonly showWorldGraph: (path?: string) => string | void | { readonly value: string }
+  /** The open note's editor, registered by its mount and released on unmount; the seam `wiki.heading` scrolls through. */
+  readonly attachWikiEditor: (editor: WikiEditorHandle | null) => void
+  /** `wiki.heading <line>`: bring the open note's heading at that source line into view. */
+  readonly jumpToHeading: (line: string) => string | void
+}
+
+/** What the Wiki pane's editor answers to (the markdown-editor adapter's handle, cut to the one act the pane needs). */
+export interface WikiEditorHandle {
+  readonly scrollToLine: (line: number) => boolean
 }
 
 export const createWorldController = (
@@ -262,6 +272,29 @@ export const createWorldController = (
   /** The one refusal every path-taking wiki flow shares (A.34: an act names what it could not find). */
   const noNote = (path: string): string => `There is no ${WIKI_DISPLAY_NAME} note at ${path}. Create one with wiki.new-note.`
 
+  /*
+   * The editor handle is presentation the pane registers; both actor
+   * projections of this controller share the one registration.
+   */
+  const editor = actorSharedState(ctx, "wikiEditor", (): { current: WikiEditorHandle | null } => ({ current: null }))
+
+  const attachWikiEditor = (handle: WikiEditorHandle | null): void => {
+    editor.current = handle
+  }
+
+  const jumpToHeading = (line: string): string | void => {
+    const wanted = Number.parseInt(line, 10)
+    if (!Number.isInteger(wanted) || wanted < 1 || String(wanted) !== line.trim()) return `${line} is not a line number.`
+    const session = ctx.store.session()
+    const selected = session.selectedWorldDocumentId ?? null
+    const document = selected === null ? undefined : ctx.store.collections.worldDocuments.get(selected)
+    if (document === undefined || session.surface !== "world" || session.wikiPane === "graph") {
+      return `No ${WIKI_DISPLAY_NAME} note is open in the editor.`
+    }
+    if (editor.current === null) return `The editor for ${document.title} is still loading; try again in a moment.`
+    if (!editor.current.scrollToLine(wanted)) return `${document.path} has no line ${wanted}.`
+  }
+
   const embed = (card: Omit<Card, "createdAt" | "ordinal" | "status">): void => {
     const existing = ctx.store.collections.cards.get(card.id)
     ctx.store.dispatch({
@@ -277,8 +310,9 @@ export const createWorldController = (
    * act embeds the note as a world card (THE EMBED LAW), the same card its
    * bare `wiki` invocation renders, cut to the one note.
    */
-  const openWorldDocument = (path: string): string | void => {
-    const document = resolveLink(notesOf(ctx.store), path)
+  const openWorldDocument = (path: string): string | void | { readonly value: string } => {
+    const notes = notesOf(ctx.store)
+    const document = resolveLink(notes, path)
     if (document === undefined) return noNote(path)
     if (ctx.commandActor === "smithers") {
       embed({
@@ -287,7 +321,8 @@ export const createWorldController = (
         title: document.title,
         payload: { documents: [{ path: document.path, title: document.title, confidence: document.confidence }] }
       })
-      return
+      // The model's tool result is what it can answer from beside the card: the note and its links, never a bare "executed".
+      return { value: `Embedded ${document.path}. ${linkSummary(notes, document.path)}` }
     }
     ctx.store.dispatch({ type: "world.document.selected", actor: "user", id: document.id })
     const session = ctx.store.session()
@@ -298,8 +333,19 @@ export const createWorldController = (
   const titled = (notes: ReadonlyArray<WorldDocument>, paths: ReadonlyArray<string>) =>
     paths.map((row) => ({ path: row, title: notes.find((note) => note.path === row)?.title ?? row }))
 
-  /** `wiki.backlinks <path>`: a read, so both actors get the same embedded card. */
-  const showWorldLinks = (path: string): string | void => {
+  const names = (rows: ReadonlyArray<{ readonly title: string }>): string =>
+    rows.length === 0 ? "none" : rows.map((row) => row.title).join(", ")
+
+  /** One line the agent can cite: who links here, where it links out, and the targets no note answers. */
+  const linkSummary = (notes: ReadonlyArray<WorldDocument>, path: string): string => {
+    const links = linksOf(notes, path)
+    if (links === undefined) return ""
+    const unresolved = links.unresolved.length === 0 ? "none" : links.unresolved.join(", ")
+    return `Backlinks: ${names(titled(notes, links.backlinks))}. Links out: ${names(titled(notes, links.linksOut))}. Unresolved: ${unresolved}.`
+  }
+
+  /** `wiki.backlinks <path>`: a read, so both actors get the same embedded card; the agent also gets the names. */
+  const showWorldLinks = (path: string): string | void | { readonly value: string } => {
     const notes = notesOf(ctx.store)
     const document = resolveLink(notes, path)
     if (document === undefined) return noNote(path)
@@ -317,6 +363,7 @@ export const createWorldController = (
         unresolved: [...links.unresolved]
       }
     })
+    if (ctx.commandActor === "smithers") return { value: `Embedded the links of ${document.path}. ${linkSummary(notes, document.path)}` }
   }
 
   /*
@@ -325,7 +372,7 @@ export const createWorldController = (
    * agent's act embeds the graph as a card. A path focuses either on the
    * note and its neighbours one hop away.
    */
-  const showWorldGraph = (path?: string): string | void => {
+  const showWorldGraph = (path?: string): string | void | { readonly value: string } => {
     const notes = notesOf(ctx.store)
     const wanted = path?.trim() === "" ? undefined : path?.trim()
     const focus = wanted === undefined ? undefined : resolveLink(notes, wanted)
@@ -349,10 +396,23 @@ export const createWorldController = (
           links: graph.links.map((link) => ({ source: link.source, target: link.target }))
         }
       })
-      return
+      const missing = graph.notes.filter((note) => note.frontmatter?.missing === true).map((note) => note.title)
+      const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`
+      return {
+        value: `Embedded the ${WIKI_DISPLAY_NAME} graph${focus === undefined ? "" : ` around ${focus.path}`}: ${
+          count(graph.notes.length - missing.length, "note")
+        }, ${count(graph.links.length, "link")}, ${count(missing.length, "unresolved target")}${
+          missing.length === 0 ? "" : ` (${missing.join(", ")})`
+        }.`
+      }
     }
     const session = ctx.store.session()
-    const already = session.wikiPane === "graph" && (session.wikiGraphPath ?? null) === (focus?.path ?? null)
+    /*
+     * Toggles toggle (§2c): in graph mode, the same focus again OR a bare
+     * call (the header's Graph button, /wiki.graph) returns to the editor.
+     * A different focus refocuses the graph instead of leaving it.
+     */
+    const already = session.wikiPane === "graph" && (focus === undefined || (session.wikiGraphPath ?? null) === focus.path)
     ctx.store.dispatch({ type: "wiki.pane.changed", actor: "user", pane: already ? "document" : "graph", path: already ? null : focus?.path ?? null })
     if (session.surface !== "world") ctx.store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
   }
@@ -367,6 +427,8 @@ export const createWorldController = (
     cancelWorldDelete,
     openWorldDocument,
     showWorldLinks,
-    showWorldGraph
+    showWorldGraph,
+    attachWikiEditor,
+    jumpToHeading
   }
 }

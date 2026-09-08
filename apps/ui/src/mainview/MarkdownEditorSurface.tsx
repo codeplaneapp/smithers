@@ -1,4 +1,5 @@
 import { MarkdownEditor, MarkdownEditorStyles } from "@smthrs/ui/adapters/markdown-editor"
+import type { MarkdownEditorHandle } from "@smthrs/ui/adapters/markdown-editor"
 
 /**
  * Heavy editor adapter boundary: loaded only when a markdown document is
@@ -11,13 +12,16 @@ export function MarkdownEditorSurface({
   resetKey,
   label,
   readOnly = false,
-  onChange
+  onChange,
+  onEditor
 }: {
   readonly value: string
   readonly resetKey: string
   readonly label: string
   readonly readOnly?: boolean
   readonly onChange?: (value: string) => void
+  /** The editor's imperative handle on mount, null on unmount (the Wiki pane registers it for `wiki.heading`). */
+  readonly onEditor?: (editor: MarkdownEditorHandle | null) => void
 }) {
   return (
     <>
@@ -28,6 +32,7 @@ export function MarkdownEditorSurface({
         aria-label={label}
         readOnly={readOnly}
         onChange={onChange ?? (() => {})}
+        ref={onEditor}
       />
     </>
   )

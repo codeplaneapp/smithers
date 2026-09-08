@@ -574,8 +574,8 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 
 - Source: plue · coverage: partial · effort: S
 - Exists: the `wiki` namespace is the notes pane renamed from World (2026-09-07): `wiki` opens the pane, `wiki.new-note` creates a note, `wiki.select <documentId>` opens one, `wiki.delete <documentId>` asks and `wiki.delete.confirm` / `wiki.delete.cancel` answer (flows/entries/wiki.ts; the world.* names are hidden aliases in flows/entries/world.ts). Notes are Smithers documents, not plue repository wiki pages; no page list, page view, revisions or page search.
-- UI: Reuse file-list and file cards with a `wiki:` target plus a revisions row under the `wiki.page.*` names so they never collide with the note flows; search via the search-results wiki scope, which the Librarian L5 plan serves with `wiki.search <query>`, `wiki.open <path>`, `wiki.backlinks <path>` and `wiki.graph [path]` over notes and generated pages.
-- Flows: `wiki.page.list [owner/repo]; wiki.page.view <page>; wiki.page.edit <page>; wiki.page.delete <page> (confirm); wiki.page.revisions <page>`; page search folds into the L5 `wiki.search <query>` scope
+- UI: Reuse file-list and file cards with a `wiki:` target plus a revisions row under the `wiki.page.*` names so they never collide with the note flows; search via the search-results wiki scope, which Librarian L5 serves with `search.wiki <query>` (`wiki.search` is its hidden alias, RULINGS 5), `wiki.open <path>`, `wiki.backlinks <path>` and `wiki.graph [path]` over notes and generated pages; the outline's heading click is the hidden user-only `wiki.heading <line>` (a viewport gesture).
+- Flows: `wiki.page.list [owner/repo]; wiki.page.view <page>; wiki.page.edit <page>; wiki.page.delete <page> (confirm); wiki.page.revisions <page>`; page search folds into the L5 `search.wiki <query>` scope
 
 ### workflows/automation · Declarative .smithers/ config files (workspace.ts, preview.ts, ci.ts, config.yml, protected-bookmarks.yml, labels.yml, webhooks.yml) and their reconcile state
 

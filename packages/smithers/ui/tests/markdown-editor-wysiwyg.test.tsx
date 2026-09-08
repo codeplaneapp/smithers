@@ -219,6 +219,93 @@ describe("MarkdownEditor (WYSIWYG path)", () => {
   });
 });
 
+describe("MarkdownEditor scrollToLine (WYSIWYG path)", () => {
+  /** A stub whose create() renders the seed's headings the way ProseMirror would. */
+  const headingStub = () => {
+    const stub = stubEditor();
+    const Base = stub.module.Crepe;
+    stub.module = {
+      ...stub.module,
+      Crepe: class extends Base {
+        override async create() {
+          for (const line of this.options.defaultValue.split("\n")) {
+            const match = /^(#{1,6})\s+(.*)$/.exec(line);
+            if (!match) continue;
+            const heading = document.createElement(`h${match[1]!.length}`);
+            heading.textContent = match[2]!;
+            this.options.root.append(heading);
+          }
+        }
+      } as unknown as MarkdownEditorModule["Crepe"],
+    };
+    return { ...stub, load: async () => stub.module };
+  };
+
+  test("brings the nearest heading at or above the line into view, the nth among equal texts", async () => {
+    const stub = headingStub();
+    const seen: string[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      seen.push(`${this.tagName.toLowerCase()}:${this.textContent}`);
+    };
+    try {
+      let handle: MarkdownEditorHandle | null = null;
+      await render(
+        <MarkdownEditor
+          ref={(h) => {
+            handle = h;
+          }}
+          value={"# Plans\n\ntext\n\n## Next\n\nmore\n\n## Next\n\nlast"}
+          fallback={false}
+          loadEditor={stub.load}
+        />,
+      );
+      expect(host().getAttribute("data-mode")).toBe("wysiwyg");
+      expect(handle!.scrollToLine(9)).toBe(true);
+      expect(handle!.scrollToLine(7)).toBe(true);
+      expect(handle!.scrollToLine(1)).toBe(true);
+      expect(seen).toEqual(["h2:Next", "h2:Next", "h1:Plans"]);
+      // The second "Next" is the second rendered h2, never the first again.
+      const rendered = [...host().querySelectorAll("h2")];
+      expect(rendered.length).toBe(2);
+      expect(handle!.scrollToLine(12)).toBe(false);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  test("a line above every heading scrolls the host to the top; nothing scrolls before the editor is ready", async () => {
+    const stub = headingStub();
+    let handle: MarkdownEditorHandle | null = null;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await render(
+      <MarkdownEditor
+        ref={(h) => {
+          handle = h;
+        }}
+        value={"intro\n\n# Plans"}
+        fallback={false}
+        loadEditor={async () => {
+          await gate;
+          return stub.module;
+        }}
+      />,
+    );
+    expect(handle!.scrollToLine(1)).toBe(false);
+    await act(async () => {
+      release?.();
+      await Promise.resolve();
+    });
+    expect(host().getAttribute("data-mode")).toBe("wysiwyg");
+    host().scrollTop = 40;
+    expect(handle!.scrollToLine(1)).toBe(true);
+    expect(host().scrollTop).toBe(0);
+  });
+});
+
 describe("MarkdownEditor failure reporting", () => {
   test("a rejecting loader falls back to the seeded textarea and reports the cause", async () => {
     const cause = new Error("chunk 404");

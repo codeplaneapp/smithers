@@ -789,7 +789,11 @@ function App() {
                   data-flow="wiki.graph"
                   data-testid="wiki-graph"
                   aria-pressed={wikiGraphMode}
-                  onClick={() => controller.runCommand("wiki.graph")}
+                  onClick={() =>
+                    // A button always carries its args: a focused graph toggles back from its own focus.
+                    session.wikiGraphPath ?
+                      controller.runCommandArgs("wiki.graph", session.wikiGraphPath) :
+                      controller.runCommand("wiki.graph")}
                 >
                   <Waypoints size={14} aria-hidden="true" />
                   Graph
@@ -903,6 +907,7 @@ function App() {
                               resetKey={selectedWorldDocument.id}
                               label={`Edit ${selectedWorldDocument.title}`}
                               onChange={(body) => controller.changeWorldDocument(selectedWorldDocument.id, body)}
+                              onEditor={controller.attachWikiEditor}
                             />
                           </Suspense>
                         </div>
@@ -923,14 +928,18 @@ function App() {
                       className="world-rail"
                       aria-label={`${selectedWorldDocument.title} links and outline`}
                       data-testid="wiki-rail"
-                      ref={stampFlows([["button", "wiki.open"]])}
+                      ref={stampFlows([['[data-slot="vault-outline"] button', "wiki.heading"], ["button", "wiki.open"]])}
                     >
                       <BacklinksPanel
                         backlinks={[...selectedWorldLinks.backlinks]}
                         linksOut={[...selectedWorldLinks.linksOut]}
                         onOpenNote={(path) => controller.runCommandArgs("wiki.open", path)}
                       />
-                      <OutlineView markdown={selectedWorldDocument.body} />
+                      {/* Each heading is the button door of wiki.heading: the editor scrolls to its source line. */}
+                      <OutlineView
+                        markdown={selectedWorldDocument.body}
+                        onHeadingClick={(line) => controller.runCommandArgs("wiki.heading", String(line))}
+                      />
                     </aside>
                   ) :
                   null}

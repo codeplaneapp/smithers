@@ -296,6 +296,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "wiki.open": (args) => required("path", args, "wiki.open needs a note path or title"),
   "wiki.backlinks": (args) => required("path", args, "wiki.backlinks needs a note path or title"),
   "wiki.graph": (args) => optional("path", args),
+  "wiki.heading": (args) => required("line", args, "wiki.heading needs the heading's source line"),
   /* Hidden aliases of the two above (entries/world.ts). */
   "world.select": (args) => required("documentId", args, "world.select needs the document id"),
   "world.delete": (args) => required("documentId", args, "world.delete needs the document id"),

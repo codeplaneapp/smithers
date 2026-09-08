@@ -19,6 +19,9 @@ export const recommendations: ReadonlyArray<Recommendation> = [
   { name: "wiki", when: () => true, rank: (state) => (state.hasConnectors ? 1 : 2) }
 ]
 
+/** Why `wiki.heading` is the human's alone: it scrolls their editor, which is focus. */
+export const WIKI_HEADING_USER_ONLY_REASON = "scrolling the open note's editor to a heading is the human's viewport gesture; the agent reads a note with wiki.open"
+
 /** The bare `wiki` surface switch, registered first with the other top-level surfaces. */
 export const wikiSurfaceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   flow({
@@ -74,6 +77,21 @@ export const wikiFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     args: "[path]",
     input: Schema.Struct({ path: Schema.optional(Schema.String) }),
     handler: ({ path }) => actions.showWorldGraph(path)
+  }),
+  flow({
+    /*
+     * The outline's heading click: the open note's editor scrolls to the
+     * heading's source line. Scrolling the human's own viewport is a focus
+     * gesture, so the agent has no door; it reads a note with wiki.open.
+     */
+    name: "wiki.heading",
+    summary: "Scroll the open note to a heading",
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: WIKI_HEADING_USER_ONLY_REASON,
+    args: "<line>",
+    input: Schema.Struct({ line: Schema.String }),
+    handler: ({ line }) => actions.jumpToHeading(line)
   }),
   flow({
     name: "wiki.delete",

@@ -56,6 +56,7 @@ import { createWorkflowPumpController } from "./controller/workflow-pump"
 import { createWorkflowController, type WorkflowController } from "./controller/workflows"
 import { createRunsController, type RunsController } from "./controller/runs"
 import { createWorldController } from "./controller/world"
+import type { WikiEditorHandle } from "./controller/world"
 import { createGitHubSeam } from "./seams/GitHubSeam"
 import type { GitHubSeam } from "./seams/GitHubSeam"
 import { createBillingSeam } from "./seams/BillingSeam"
@@ -151,12 +152,16 @@ export interface AppController {
   readonly removeWorldDocument: (id: string) => string | void
   readonly confirmWorldDelete: () => string | void
   readonly cancelWorldDelete: () => void
-  /** `wiki.open <path>`: the human's act selects the note in the pane; the agent's embeds it as a card. */
-  readonly openWorldDocument: (path: string) => string | void
-  /** `wiki.backlinks <path>`: the note's link rail as an embedded card, for either actor. */
-  readonly showWorldLinks: (path: string) => string | void
-  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card for the agent. */
-  readonly showWorldGraph: (path?: string) => string | void
+  /** `wiki.open <path>`: the human's act selects the note in the pane; the agent's embeds it as a card and reads its links back. */
+  readonly openWorldDocument: (path: string) => string | void | { readonly value: string }
+  /** `wiki.backlinks <path>`: the note's link rail as an embedded card, for either actor; the agent reads the names back. */
+  readonly showWorldLinks: (path: string) => string | void | { readonly value: string }
+  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card (its counts as the value) for the agent. */
+  readonly showWorldGraph: (path?: string) => string | void | { readonly value: string }
+  /** The Wiki pane's editor mount registers its handle here (null on unmount); `wiki.heading` scrolls through it. */
+  readonly attachWikiEditor: (editor: WikiEditorHandle | null) => void
+  /** `wiki.heading <line>`: bring the open note's heading at that source line into view. */
+  readonly jumpToHeading: (line: string) => string | void
   readonly decideApproval: (id: string, decision: "approved" | "denied") => void
   readonly retryLastTurn: () => string | void
   readonly toggleTheme: () => void
@@ -954,7 +959,9 @@ export const createAppController = (
     cancelWorldDelete,
     openWorldDocument,
     showWorldLinks,
-    showWorldGraph
+    showWorldGraph,
+    attachWikiEditor,
+    jumpToHeading
   } = actors.pair(ctx, (context) => createWorldController(context, { nextOrdinal: nextTranscriptOrdinal }))
 
   const changeDraft = (draft: string): void => {
@@ -1222,6 +1229,8 @@ export const createAppController = (
     openWorldDocument,
     showWorldLinks,
     showWorldGraph,
+    attachWikiEditor,
+    jumpToHeading,
     decideApproval,
     retryLastTurn,
     clearConversation,
@@ -1570,6 +1579,8 @@ export const createAppController = (
     openWorldDocument,
     showWorldLinks,
     showWorldGraph,
+    attachWikiEditor,
+    jumpToHeading,
     decideApproval,
     retryLastTurn,
     clearConversation,

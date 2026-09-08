@@ -70,9 +70,17 @@ describe("wiki.open", () => {
     controller.dispose()
   })
 
-  test("the agent's act embeds the one note as a world card and leaves the surface alone", async () => {
+  test("the agent's act embeds the one note as a world card, leaves the surface alone, and reads the note's links back", async () => {
     const { store, controller } = await setup()
-    expect((await controller.commands.runForAgent("wiki.open", "Plans.md")).status).toBe("executed")
+    // The model answers "what links to Plans?" from the tool result beside the card, never from a bare "executed".
+    expect(await controller.commands.runForAgent("wiki.open", "Plans.md")).toEqual({
+      status: "executed",
+      value: "Embedded Plans.md. Backlinks: none. Links out: World. Unresolved: Ghost."
+    })
+    expect(await controller.commands.runForAgent("wiki.open", "World")).toEqual({
+      status: "executed",
+      value: "Embedded World.md. Backlinks: Plans. Links out: none. Unresolved: none."
+    })
     expect(store.session().surface).toBe("chat")
     const card = store.collections.cards.get("wiki-open-plans")
     expect(card?.kind).toBe("world")
@@ -102,7 +110,10 @@ describe("wiki.backlinks", () => {
     if (home?.kind !== "wiki-links") throw new Error("no rail card")
     expect(home.payload.backlinks).toEqual([{ path: "Plans.md", title: "Plans" }])
     expect(home.payload.linksOut).toEqual([])
-    expect((await controller.commands.runForAgent("wiki.backlinks", "Plans")).status).toBe("executed")
+    expect(await controller.commands.runForAgent("wiki.backlinks", "Plans")).toEqual({
+      status: "executed",
+      value: "Embedded the links of Plans.md. Backlinks: none. Links out: World. Unresolved: Ghost."
+    })
     const plans = store.collections.cards.get("wiki-links-plans")
     if (plans?.kind !== "wiki-links") throw new Error("no rail card")
     expect(plans.payload.linksOut).toEqual([{ path: "World.md", title: "World" }])
@@ -139,9 +150,27 @@ describe("wiki.graph", () => {
     controller.dispose()
   })
 
-  test("the agent's act embeds the graph card, whole or around one note, with the dangling target as a missing node", async () => {
+  test("a bare call in a focused graph toggles back to the editor; a different focus refocuses instead", async () => {
     const { store, controller } = await setup()
-    expect((await controller.commands.runForAgent("wiki.graph")).status).toBe("executed")
+    expect((await controller.commands.run("wiki.graph", "Plans")).status).toBe("executed")
+    expect(store.session().wikiGraphPath).toBe("Plans.md")
+    // The header's Graph button (aria-pressed) and /wiki.graph carry no path: still a toggle from a focused graph.
+    expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
+    expect(store.session().wikiPane).toBe("document")
+    expect(store.session().wikiGraphPath).toBeNull()
+    expect((await controller.commands.run("wiki.graph", "Plans")).status).toBe("executed")
+    expect((await controller.commands.run("wiki.graph", "World")).status).toBe("executed")
+    expect(store.session().wikiPane).toBe("graph")
+    expect(store.session().wikiGraphPath).toBe("World.md")
+    controller.dispose()
+  })
+
+  test("the agent's act embeds the graph card, whole or around one note, with the dangling target as a missing node, and reads the counts back", async () => {
+    const { store, controller } = await setup()
+    expect(await controller.commands.runForAgent("wiki.graph")).toEqual({
+      status: "executed",
+      value: "Embedded the Wiki graph: 2 notes, 2 links, 1 unresolved target (Ghost)."
+    })
     expect(store.session().surface).toBe("chat")
     const whole = store.collections.cards.get("wiki-graph")
     if (whole?.kind !== "wiki-graph") throw new Error("no graph card")
@@ -155,7 +184,10 @@ describe("wiki.graph", () => {
       { source: "Plans.md", target: "World.md" },
       { source: "Plans.md", target: "Ghost.md" }
     ])
-    expect((await controller.commands.runForAgent("wiki.graph", "World")).status).toBe("executed")
+    expect(await controller.commands.runForAgent("wiki.graph", "World")).toEqual({
+      status: "executed",
+      value: "Embedded the Wiki graph around World.md: 2 notes, 1 link, 0 unresolved targets."
+    })
     const around = store.collections.cards.get("wiki-graph-world-home")
     if (around?.kind !== "wiki-graph") throw new Error("no focused graph card")
     expect(around.payload.path).toBe("World.md")
@@ -163,6 +195,45 @@ describe("wiki.graph", () => {
     expect(around.payload.links).toEqual([{ source: "Plans.md", target: "World.md" }])
     const missing = await controller.commands.runForAgent("wiki.graph", "Nowhere")
     expect(missing.status).toBe("failed")
+    controller.dispose()
+  })
+})
+
+describe("wiki.heading", () => {
+  test("scrolls the open note's editor to the heading's line through the registered handle, and names what it cannot do", async () => {
+    const { store, controller } = await setup()
+    const scrolled: number[] = []
+    // Nothing is open: the pane is closed.
+    const closed = await controller.commands.run("wiki.heading", "5")
+    expect(closed).toMatchObject({ status: "failed", error: "No Wiki note is open in the editor." })
+    expect((await controller.commands.run("wiki.open", "Plans")).status).toBe("executed")
+    // The note is open but its editor has not mounted yet (the surface loads lazily).
+    const loading = await controller.commands.run("wiki.heading", "5")
+    expect(loading).toMatchObject({ status: "failed", error: "The editor for Plans is still loading; try again in a moment." })
+    controller.attachWikiEditor({ scrollToLine: (line) => (scrolled.push(line), line <= 7) })
+    expect((await controller.commands.run("wiki.heading", "5")).status).toBe("executed")
+    expect(scrolled).toEqual([5])
+    expect(await controller.commands.run("wiki.heading", "9")).toMatchObject({ status: "failed", error: "Plans.md has no line 9." })
+    expect(await controller.commands.run("wiki.heading", "five")).toMatchObject({ status: "failed", error: "five is not a line number." })
+    // In graph mode there is no editor to scroll.
+    expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
+    expect((await controller.commands.run("wiki.heading", "5")).status).toBe("failed")
+    // The mount's release: the handle is gone.
+    expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
+    controller.attachWikiEditor(null)
+    expect((await controller.commands.run("wiki.heading", "5")).status).toBe("failed")
+    // The handle saw the two in-range calls only; graph mode and the released mount never reached it.
+    expect(scrolled).toEqual([5, 9])
+    expect(store.session().wikiPane).toBe("document")
+    controller.dispose()
+  })
+
+  test("the human's alone: the agent's door refuses and names the read it has instead", async () => {
+    const { controller } = await setup()
+    expect((await controller.commands.run("wiki.open", "Plans")).status).toBe("executed")
+    const agent = await controller.commands.runForAgent("wiki.heading", "5")
+    expect(agent.status).toBe("failed")
+    expect(agent.status === "failed" ? agent.error : "").toContain("wiki.open")
     controller.dispose()
   })
 })

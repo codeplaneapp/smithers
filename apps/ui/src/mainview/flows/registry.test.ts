@@ -554,6 +554,7 @@ describe("command registry bindings", () => {
       "wiki.open",
       "wiki.backlinks",
       "wiki.graph",
+      "wiki.heading",
       "wiki.delete",
       "wiki.delete.confirm",
       "wiki.delete.cancel",

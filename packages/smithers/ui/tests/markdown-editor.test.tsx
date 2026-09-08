@@ -167,6 +167,34 @@ describe("MarkdownEditor (fallback path)", () => {
   });
 });
 
+describe("MarkdownEditor scrollToLine (fallback path)", () => {
+  test("places the caret at the line's start, scrolls the textarea to it, and refuses a line past the end", async () => {
+    let handle: MarkdownEditorHandle | null = null;
+    await render(
+      <MarkdownEditor
+        ref={(h) => {
+          handle = h;
+        }}
+        value={"# Plans\n\nSee the world.\n\n## Next\n\nShip."}
+      />,
+    );
+    const textarea = container?.querySelector<HTMLTextAreaElement>('[data-testid="markdown-editor"]');
+    if (!textarea) throw new Error("textarea not found");
+    const scrolled = handle!.scrollToLine(5);
+    expect(scrolled).toBe(true);
+    // "# Plans\n" (8) + "\n" (1) + "See the world.\n" (15) + "\n" (1) = 25
+    expect(textarea.selectionStart).toBe(25);
+    expect(textarea.selectionEnd).toBe(25);
+    expect(textarea.scrollTop).toBeGreaterThan(0);
+    expect(document.activeElement).toBe(textarea);
+    expect(handle!.scrollToLine(1)).toBe(true);
+    expect(textarea.selectionStart).toBe(0);
+    expect(textarea.scrollTop).toBe(0);
+    expect(handle!.scrollToLine(8)).toBe(false);
+    expect(handle!.scrollToLine(0)).toBe(false);
+  });
+});
+
 describe("MarkdownEditor styling", () => {
   test("keeps generated Crepe fallbacks synchronized with Night Owl", () => {
     const variants = [themeRegistry["night-owl"].light, themeRegistry["night-owl"].dark];
