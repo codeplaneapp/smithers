@@ -339,7 +339,14 @@ export const layer: Layer.Layer<
     const normalize = (value: string): string => normalizeFrom(workspace.root, value)
     const logicalRoot = normalize(workspace.root)
     const boundaryRoot = yield* fileSystem.realPath(logicalRoot)
-    const batchRoot = atomic?.batchLimits === undefined ? undefined : yield* fileSystem.stat(boundaryRoot)
+    // Descriptor-relative hosts need the composition-time identity even when
+    // they expose no batching. Already-isolated volumes need no native inode.
+    const boundaryInfo = atomic === undefined || (atomic.isolated !== undefined && atomic.batchLimits === undefined)
+      ? undefined
+      : yield* fileSystem.stat(boundaryRoot)
+    const rootIdentity = boundaryInfo === undefined
+      ? Option.none<string>()
+      : Option.map(boundaryInfo.ino, (ino) => `${boundaryInfo.dev}:${ino}`)
     const refuse = (method: string, resource: string) => (error: PermissionError): PlatformError.PlatformError =>
       toPlatformError({ module: "FileSystem", method, pathOrDescriptor: resource, error })
     /**
@@ -435,7 +442,14 @@ export const layer: Layer.Layer<
       atomic === undefined
         ? Effect.fail(atomicUnavailable(action, value, method))
         : guard(action, value).pipe(
-          Effect.andThen(atomic.execute<A>({ ...request, boundaryRoot, logicalRoot }))
+          Effect.andThen(
+            atomic.execute<A>({
+              ...request,
+              boundaryRoot,
+              logicalRoot,
+              rootIdentity: Option.getOrUndefined(rootIdentity)
+            })
+          )
         )
     const atomicTwo = <A>(
       first: readonly ["fs:read" | "fs:write", string],
@@ -447,7 +461,14 @@ export const layer: Layer.Layer<
         ? Effect.fail(atomicUnavailable(first[0], first[1], method))
         : guard(first[0], first[1]).pipe(
           Effect.andThen(guard(second[0], second[1])),
-          Effect.andThen(atomic.execute<A>({ ...request, boundaryRoot, logicalRoot }))
+          Effect.andThen(
+            atomic.execute<A>({
+              ...request,
+              boundaryRoot,
+              logicalRoot,
+              rootIdentity: Option.getOrUndefined(rootIdentity)
+            })
+          )
         )
     const isolatedOne = <A>(
       action: "fs:read" | "fs:write",
@@ -834,11 +855,10 @@ export const layer: Layer.Layer<
         })
       })
     }
-    if (batchRoot === undefined) {
+    if (atomic?.batchLimits === undefined) {
       return guarded
     } else {
       const limits = atomic!.batchLimits!
-      const rootIdentity = Option.map(batchRoot.ino, (ino) => `${batchRoot.dev}:${ino}`)
       const executeBatch: Batch.FileSystemBatch["execute"] = Effect.fn("FileSystem.batch")(function*(requests) {
         if (requests.length === 0 || requests.length > Math.min(limits.size, Batch.maxBatchSize)) {
           return yield* Effect.fail(

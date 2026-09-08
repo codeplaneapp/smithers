@@ -195,6 +195,50 @@ describe("Node atomic filesystem", () => {
     30_000
   )
 
+  for (const swap of ["ancestor symlink", "real root directory"] as const) {
+    for (const operation of ["readFileString", "writeFileString", "remove"] as const) {
+      it.live(`refuses ${operation} after the ${swap} swap following authorization`, () =>
+        Effect.gen(function*() {
+          const directory = yield* Effect.promise(() => temporaryDirectory())
+          const parent = join(directory, "parent")
+          const root = join(parent, "workspace")
+          const outside = join(directory, "outside")
+          const replacement = join(outside, "workspace")
+          const parked = join(directory, "parked")
+          const target = join(root, "victim.txt")
+          yield* Effect.promise(async () => {
+            await mkdir(root, { recursive: true })
+            await mkdir(replacement, { recursive: true })
+            await writeFile(target, "inside")
+            await writeFile(join(replacement, "victim.txt"), "outside-secret")
+          })
+          const result = yield* run(
+            root,
+            Effect.gen(function*() {
+              const fs = yield* FileSystem.FileSystem
+              return yield* Effect.result(
+                operation === "writeFileString" ? fs.writeFileString(target, "escaped") : fs[operation](target)
+              )
+            }),
+            swappingHost(async () => {
+              if (swap === "ancestor symlink") {
+                await rename(parent, parked)
+                await symlink(outside, parent)
+              } else {
+                await rename(root, parked)
+                await rename(replacement, root)
+              }
+            })
+          )
+          expect(result).toMatchObject({ _tag: "Failure", failure: { reason: { _tag: "PermissionDenied" } } })
+          const outsideVictim = join(swap === "ancestor symlink" ? replacement : root, "victim.txt")
+          const insideVictim = join(parked, ...(swap === "ancestor symlink" ? ["workspace"] : []), "victim.txt")
+          expect(yield* Effect.promise(() => readFile(outsideVictim, "utf8"))).toBe("outside-secret")
+          expect(yield* Effect.promise(() => readFile(insideVictim, "utf8"))).toBe("inside")
+        }))
+    }
+  }
+
   /**
    * Listing is the one family that must not simply fail: it resolves nothing,
    * so the property to pin is that no path behind the planted link is ever
@@ -932,7 +976,8 @@ describe("Node atomic filesystem", () => {
 
   it.live("preserves the native empty answer for a relative selector containing a backslash", () =>
     Effect.gen(function*() {
-      const root = yield* Effect.promise(() => temporaryDirectory())
+      const root = yield* Effect.promise(async () => realpath(await temporaryDirectory()))
+      const info = yield* Effect.promise(() => lstat(root))
       yield* Effect.promise(() => writeFile(join(root, "a.txt"), ""))
       const native = yield* Effect.promise(async () => {
         const rows: Array<string> = []
@@ -945,6 +990,7 @@ describe("Node atomic filesystem", () => {
         return yield* extension.execute<Array<string>>({
           operation: "glob",
           boundaryRoot: root,
+          rootIdentity: `${info.dev}:${info.ino}`,
           logicalRoot: root,
           options: { exclude: [] },
           pattern: "\\*.txt",
@@ -963,7 +1009,8 @@ describe("Node atomic filesystem", () => {
    */
   it.live("refuses brace expansion before pending work reaches Python's recursion limit", () =>
     Effect.gen(function*() {
-      const root = yield* Effect.promise(() => temporaryDirectory())
+      const root = yield* Effect.promise(async () => realpath(await temporaryDirectory()))
+      const info = yield* Effect.promise(() => lstat(root))
       const pattern = "{,a}".repeat(1024)
       // Drive the atomic extension directly because the kernel turns a
       // relative pattern into an absolute capability resource first, which
@@ -975,6 +1022,7 @@ describe("Node atomic filesystem", () => {
           atomic.execute<Array<string>>({
             operation: "glob",
             boundaryRoot: root,
+            rootIdentity: `${info.dev}:${info.ino}`,
             logicalRoot: root,
             options: { exclude },
             pattern: selected,

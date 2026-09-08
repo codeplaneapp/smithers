@@ -769,16 +769,31 @@ def open_boundary(path):
 def root_identity(info):
     return "%d:%d" % (info.st_dev, info.st_ino)
 
-def open_batch_boundary(path):
-    try: return open_boundary(path)
-    except FileNotFoundError as error:
-        raise OSError(errno.EBUSY, "batch root unavailable: " + str(error)) from error
+def acquire_root(request):
+    # Every request acquires the canonical root component by component, then
+    # checks the descriptor against the identity captured at layer composition.
+    # O_NOFOLLOW on an absolute open alone would still follow ancestor links.
+    batch = request["operation"] == "batch"
+    try:
+        root = open_boundary(request["boundaryRoot"])
+    except OSError as error:
+        if batch and not isinstance(error, FileNotFoundError): raise
+        raise OSError(errno.EBUSY if batch else errno.EPERM,
+                      "atomic root unavailable: " + str(error)) from error
+    try:
+        if root_identity(os.fstat(root)) != request.get("rootIdentity"):
+            raise OSError(errno.EBUSY if batch else errno.EPERM,
+                          "atomic root no longer names the authorized descriptor")
+        return root
+    except BaseException:
+        os.close(root)
+        raise
 
 def check_root(root, request):
     identity = root_identity(os.fstat(root))
     if identity != request["rootIdentity"]:
         raise OSError(errno.EBUSY, "batch root no longer names the authorized descriptor")
-    current = open_batch_boundary(request["boundaryRoot"])
+    current = acquire_root(request)
     try:
         if root_identity(os.fstat(current)) != identity:
             raise OSError(errno.EBUSY, "batch root changed during measurement")
@@ -800,9 +815,7 @@ def main(request, content_limit, response_limit, pinned_root=None):
         # Every operation below decides for itself what that means, and
         # parent() refuses it, which keeps the destructive ones refused.
         return os.sep if relative == "." else os.sep + relative
-    root = (os.dup(pinned_root) if pinned_root is not None else
-            open_batch_boundary(request["boundaryRoot"]) if operation == "batch" else
-            os.open(request["boundaryRoot"], os.O_RDONLY | DIRECTORY | NOFOLLOW))
+    root = os.dup(pinned_root) if pinned_root is not None else acquire_root(request)
     try:
         if operation == "batch":
             requests = request["requests"]

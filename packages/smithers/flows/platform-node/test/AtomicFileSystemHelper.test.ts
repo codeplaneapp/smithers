@@ -25,7 +25,7 @@ import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect"
 import { execFile, spawn } from "node:child_process"
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -211,6 +211,28 @@ describe("atomic helper toolchain identity", () => {
         }).pipe(Effect.provide(AtomicFileSystem.layer))
       )
       expect(failure).toMatchObject({ reason: { _tag: "PermissionDenied" } })
+    }))
+})
+
+describe("atomic helper root identity", () => {
+  it.live("requires the authorized root identity for ordinary requests", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(async () => realpath(await temporaryDirectory()))
+      const target = join(root, "value")
+      yield* Effect.promise(() => writeFile(target, "inside"))
+      const info = yield* Effect.promise(() => stat(root))
+      const request = { operation: "readFileString", boundaryRoot: root, logicalRoot: root, path: target }
+      for (const rootIdentity of [undefined, "0:0"]) {
+        const failure = yield* Effect.flip(runDirect({ ...request, rootIdentity }, AtomicFileSystem.layer))
+        expect(failure).toMatchObject({ reason: { _tag: "PermissionDenied" } })
+        expect(described(failure)).toContain("root no longer names the authorized descriptor")
+      }
+      expect(
+        yield* runDirect<string>(
+          { ...request, rootIdentity: `${info.dev}:${info.ino}` },
+          AtomicFileSystem.layer
+        )
+      ).toBe("inside")
     }))
 })
 
@@ -1004,12 +1026,15 @@ describe("atomic special files", () => {
       // The length bound is driven directly: the kernel's own capability schema
       // refuses a 5000-character resource before the helper is reached, so the
       // helper's bound is only observable underneath it.
+      const boundaryRoot = yield* Effect.promise(() => realpath(root))
+      const info = yield* Effect.promise(() => stat(boundaryRoot))
       const long = yield* Effect.flip(runDirect(
         {
           operation: "glob",
           pattern: join(root, `${"a".repeat(5000)}.txt`),
           root,
-          boundaryRoot: root,
+          boundaryRoot,
+          rootIdentity: `${info.dev}:${info.ino}`,
           logicalRoot: root,
           options: { exclude: [] }
         },
