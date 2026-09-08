@@ -377,10 +377,16 @@ arm calls that step's compensation and re-raises, so a failure deeper in the
 chain unwinds one step at a time, most recent first, and the plan lists the
 compensation calls in reverse order. `onFailure` defaults to `compensate` in
 both halves. `make` refuses a step whose action or compensation is not a flow.
+Both compensation policies continue unwinding after an undo fails and report
+`PatternError { code: "compensation_failed" }`. Its cause holds the original
+`failure` and the failed undos in `residue`, sorted by step id. A clean unwind
+returns `{ compensated: true, failure }` under `compensate` and re-raises the
+original failure under `compensate-and-fail`.
 
 `Saga.run(input, { steps, onFailure })` registers one scope finalizer per
 completed step, so the unwind is LIFO and runs on interruption as well as on
-failure. A compensation that dies is recorded as a failed compensation rather
+failure. A compensation that dies or whose callback throws before returning an
+effect is recorded as a failed compensation rather
 than raised as a defect, so the residue still names it and the finalizers
 behind it still run. See
 [Undo work with compensation](/docs/guides/compensation/).

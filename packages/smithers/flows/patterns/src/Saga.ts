@@ -104,6 +104,15 @@ export interface Compensated<E> {
   readonly failure: E
 }
 
+// Only action failures enter this envelope. Each undo extends it immutably,
+// so graph planning and repeated evaluations cannot share mutable residue.
+interface Unwind {
+  readonly failure: unknown
+  readonly residue: ReadonlyArray<{ readonly id: string; readonly error: unknown }>
+}
+
+const CleanUnwind = Schema.Struct({ failure: Schema.Unknown, residue: Schema.Tuple([]) })
+
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
 
@@ -152,7 +161,10 @@ const declarationRefusal = (steps: ReadonlyArray<Step>): PatternError | undefine
  * step's compensation and re-raises, so a failure deeper in the chain unwinds
  * one step at a time, most recent first. Under `compensate`, the default, an
  * outer arm turns the re-raised failure into a settled {@link Compensated}
- * value; under `fail` no arm is declared at all.
+ * value only when every compensation succeeds; under `fail` no arm is declared
+ * at all. Failed compensations are collected without stopping earlier undos.
+ * Both compensation policies fail with `compensation_failed`, preserving the
+ * original failure and the residue sorted by step id.
  *
  * A step whose action or compensation is not a flow is refused here, because
  * the declaration cannot be built out of anything else.
@@ -186,31 +198,74 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       const visit = (index: number, completed: Readonly<Record<string, unknown>>): Node.Node<unknown, unknown> => {
         const step = steps[index]
         if (step === undefined) return Node.succeed(completed)
+        const action = call(step.action, { input, completed })
+        const guarded = policy === "fail" ? action : Node.catch(action, {
+          onFailure: Node.capture(
+            { step: step.id, forward: true },
+            (failure) => Node.fail<Unwind>({ failure, residue: [] })
+          )
+        })
         return Node.andThen(
-          call(step.action, { input, completed }),
+          guarded,
           Node.capture({ step: step.id }, (value) => {
             const rest = visit(index + 1, { ...completed, [step.id]: value })
             if (policy === "fail") return rest
             return Node.catch(rest, {
               onFailure: Node.capture(
                 { step: step.id },
-                (error: unknown) =>
-                  Node.andThen(
-                    call(step.compensation, { id: step.id, input, value }),
-                    Node.capture({ step: step.id }, () => Node.fail(error))
+                (error: unknown) => {
+                  const unwind = error as Unwind
+                  const undo = Node.catch(
+                    Node.map(
+                      call(step.compensation, { id: step.id, input, value }),
+                      Node.capture({ step: step.id }, () => unwind)
+                    ),
+                    {
+                      onFailure: Node.capture({ step: step.id, residue: true }, (undoError) =>
+                        Node.map(
+                          Node.succeed({ unwind, undoError }),
+                          Node.capture({ step: step.id, residue: true }, ({ unwind, undoError }): Unwind => ({
+                            failure: unwind.failure,
+                            residue: [...unwind.residue, { id: step.id, error: undoError }]
+                          }))
+                        ))
+                    }
                   )
+                  return Node.andThen(undo, Node.capture({ step: step.id }, (failure) => Node.fail(failure)))
+                }
               )
             })
           })
         )
       }
       const chain = visit(0, {})
-      if (policy !== "compensate") return chain
-      return Node.catch(chain, {
-        onFailure: Node.capture(
-          { settled: true },
-          (error: unknown) => Node.succeed({ compensated: true, failure: error })
-        )
+      if (policy === "fail") return chain
+      const reported = Node.catch(chain, {
+        onFailure: Node.capture({ residue: true }, (error: unknown) =>
+          Node.andThen(
+            Node.map(
+              Node.succeed(error as Unwind),
+              Node.capture({ residue: true }, (unwind) => {
+                if (unwind.residue.length === 0) return unwind
+                const residue = [...unwind.residue].sort((left, right) => left.id.localeCompare(right.id))
+                return new PatternError({
+                  code: "compensation_failed",
+                  message: `Saga compensation failed for: ${residue.map((entry) => entry.id).join(", ")}`,
+                  cause: { failure: unwind.failure, residue }
+                })
+              })
+            ),
+            Node.capture({ residue: true }, (failure) => Node.fail(failure))
+          ))
+      })
+      // A schema selects the clean arm at execution time; branching on a
+      // symbolic error while building the graph would hide the dirty arm.
+      return Node.catch(reported, {
+        error: CleanUnwind,
+        onFailure: Node.capture({ settled: true, onFailure: policy }, (unwind) =>
+          policy === "compensate"
+            ? Node.succeed({ compensated: true, failure: unwind.failure })
+            : Node.fail(unwind.failure))
       })
     })
   })
@@ -230,7 +285,8 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * A compensation that DIES counts as a failed compensation, not as a defect
  * the run raises: the undo did not happen, so the step belongs in the residue
- * with the typed failures. Letting the defect escape would lose both the
+ * with the typed failures. This includes a synchronous throw while constructing
+ * the compensation effect. Letting the defect escape would lose both the
  * residue and the failure that started the unwind.
  *
  * @category combinators
@@ -265,7 +321,7 @@ export const run = <I, A, E, R, E2, R2>(
         yield* Effect.addFinalizer((exit) =>
           Exit.isSuccess(exit)
             ? Effect.void
-            : Effect.matchCause(step.compensation({ id: step.id, input, value }), {
+            : Effect.matchCause(Effect.suspend(() => step.compensation({ id: step.id, input, value })), {
               onFailure: (cause) => {
                 residue.push({ id: step.id, error: Cause.squash(cause) })
               },

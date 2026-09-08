@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as TestRuntime from "@smthrs/core/TestRuntime"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -64,7 +65,7 @@ const scripted = (
 })
 
 describe("Saga", () => {
-  it("declares one catch per step and reverse-ordered compensations", () => {
+  it("declares forward, unwind, and residue catches with reverse-ordered compensations", () => {
     const graph = Graph.build(Saga.make({ steps: declared, onFailure: "compensate-and-fail" }), "order")
 
     expect(calledFlows(graph)).toEqual([
@@ -75,8 +76,9 @@ describe("Saga", () => {
       "undo-two",
       "undo-one"
     ])
-    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(3)
-    expect(Graph.nodes(graph).filter((node) => node.kind === "Fail")).toHaveLength(3)
+    // Three boundaries per step (action, continuation, undo), plus reporting and clean settlement.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(11)
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Fail")).toHaveLength(8)
   })
 
   it("declares no compensation arm under the fail policy", () => {
@@ -90,12 +92,141 @@ describe("Saga", () => {
     const graph = Graph.build(Saga.make({ steps: declared, onFailure: "compensate" }), "order")
     const catches = Graph.nodes(graph).filter((node) => node.kind === "Catch")
 
-    expect(catches).toHaveLength(4)
+    expect(catches).toHaveLength(11)
     expect(Graph.nodes(graph).at(-1)?.keyMaterial.body).toEqual({
       _tag: "Succeed",
-      value: { compensated: true, failure: { _tag: "PlannedInput", path: [] } }
+      value: { compensated: true, failure: { _tag: "PlannedInput", path: ["failure"] } }
     })
   })
+
+  for (const onFailure of [undefined, "compensate", "compensate-and-fail"] as const) {
+    it.effect(`matches declaration and runtime compensation residue under ${onFailure ?? "default"}`, () =>
+      Effect.gen(function*() {
+        const declarationTrace: Array<string> = []
+        const runtimeTrace: Array<string> = []
+        const steps = [
+          { id: "two", compensationFails: true },
+          { id: "one", compensationFails: true },
+          { id: "clean" },
+          { id: "three", fails: true }
+        ]
+        const declaredFlow = (id: string, fails: boolean) =>
+          Flow.make({
+            input: Schema.Unknown,
+            output: Schema.Unknown,
+            body: () => {
+              declarationTrace.push(id)
+              return fails ? Node.fail(new Boom({ step: id })) : Node.succeed(`${id}-done`)
+            }
+          })
+        const declaration = Saga.make({
+          onFailure,
+          steps: steps.map((step) => ({
+            id: step.id,
+            action: declaredFlow(step.id, step.fails === true),
+            compensation: declaredFlow(`undo-${step.id}`, step.compensationFails === true)
+          }))
+        })
+        const expected = new PatternError({
+          code: "compensation_failed",
+          message: "Saga compensation failed for: one, two",
+          cause: {
+            failure: new Boom({ step: "three" }),
+            residue: [
+              { id: "one", error: new Boom({ step: "undo-one" }) },
+              { id: "two", error: new Boom({ step: "undo-two" }) }
+            ]
+          }
+        })
+        const node = declaration.body!("order")
+        // Reusing the same declaration must not accumulate residue between evaluations.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          declarationTrace.length = 0
+          expect(TestRuntime.evaluateInline(node)).toEqual(Result.fail(expected))
+          expect(declarationTrace).toEqual(["two", "one", "clean", "three", "undo-clean", "undo-one", "undo-two"])
+        }
+        const runtime = yield* Effect.result(Saga.run("order", {
+          onFailure,
+          steps: steps.map((step) => scripted(runtimeTrace, step.id, step))
+        }))
+        expect(runtime).toEqual(Result.fail(expected))
+        expect(runtimeTrace).toEqual([
+          "do-two",
+          "do-one",
+          "do-clean",
+          "do-three",
+          "undo-clean",
+          "undo-one",
+          "undo-two"
+        ])
+      }))
+  }
+
+  for (const onFailure of [undefined, "compensate", "compensate-and-fail", "fail"] as const) {
+    it(`preserves clean declaration outcomes under ${onFailure ?? "default"}`, () => {
+      const failure = new PatternError({
+        code: "compensation_failed",
+        message: "An action may itself fail with a PatternError",
+        cause: { failure: "nested", residue: [] }
+      })
+      const action = (fails: boolean) =>
+        Flow.make({
+          input: Schema.Unknown,
+          output: Schema.Unknown,
+          body: () => fails ? Node.fail(failure) : Node.succeed("done")
+        })
+      const compensation = named("undo")
+      for (const failsAt of [-1, 0, 1]) {
+        const declaration = Saga.make({
+          onFailure,
+          steps: ["one", "two"].map((id, index) => ({ id, action: action(index === failsAt), compensation }))
+        })
+        // Building the conservative graph must not execute residue computations.
+        Graph.build(declaration, "order")
+        const result = TestRuntime.evaluateInline(declaration.body!("order"))
+        expect(result).toEqual(
+          failsAt === -1
+            ? Result.succeed({ one: "done", two: "done" })
+            : onFailure === "fail" || onFailure === "compensate-and-fail"
+            ? Result.fail(failure)
+            : Result.succeed({ compensated: true, failure })
+        )
+      }
+    })
+  }
+
+  it.effect("collects a throwing compensation factory alongside typed undo failures", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const defect = new Error("undo-two threw")
+      const result = yield* Effect.result(Saga.run("order", {
+        steps: [
+          scripted(trace, "one", { compensationFails: true }),
+          {
+            ...scripted(trace, "two"),
+            compensation: (): Effect.Effect<never> => {
+              trace.push("undo-two")
+              throw defect
+            }
+          },
+          scripted(trace, "three", { fails: true })
+        ]
+      }))
+      expect(trace).toEqual(["do-one", "do-two", "do-three", "undo-two", "undo-one"])
+      expect(result).toEqual(Result.fail(
+        new PatternError({
+          code: "compensation_failed",
+          message: "Saga compensation failed for: one, two",
+          cause: {
+            failure: new Boom({ step: "three" }),
+            residue: [
+              { id: "one", error: new Boom({ step: "undo-one" }) },
+              { id: "two", error: defect }
+            ]
+          }
+        })
+      ))
+    }))
 
   it("rejects an empty saga", () => {
     expect(() => Saga.make({ steps: [], onFailure: "compensate" })).toThrow(
@@ -350,7 +481,7 @@ describe("Saga", () => {
     const graph = Graph.build(Saga.make({ steps: declared }), "order")
     const explicit = Graph.build(Saga.make({ steps: declared, onFailure: "compensate" }), "order")
 
-    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(4)
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(11)
     expect(calledFlows(graph)).toEqual(calledFlows(explicit))
     // The default is normalized before it reaches key material, so omitting
     // the policy and naming it plan to the same node keys and hit the same
