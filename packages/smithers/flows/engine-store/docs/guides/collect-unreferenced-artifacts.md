@@ -37,6 +37,13 @@ sets how many rows one mark-phase page holds; it defaults to 500.
 being unreferenced. It defaults to the installed policy's bound, then to
 `ArtifactGc.defaultGraceMs`, which is 14 days, git's `gc.pruneExpire` default.
 
+Each collection reads its start time before resolving policy pins or scanning
+roots. The cutoff is `startTimeMs - graceMs` and stays fixed through inventory
+and deletion. Only mtimes strictly before the cutoff are eligible; equality
+is retained, including publications in the starting millisecond with zero
+grace. The remove-side mtime fence uses the same cutoff, so a slow scan cannot
+age a concurrent publication into eligibility.
+
 The bound is deliberately far beyond any live attempt's duration. A blob spilled
 by a running step is unreferenced until its attempt row finishes, and the grace
 period is the only thing protecting it in that window.

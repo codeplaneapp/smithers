@@ -22,9 +22,12 @@
  *   younger than `gc.pruneExpire` (two weeks), jj keeps operations newer than
  *   its keep bound, and Bazel's disk-cache collector
  *   (`reference/bazel/.../remote/disk/DiskCacheGarbageCollector.java`) fences
- *   on mtime. The grace period is what protects a writer racing the
- *   collector: a blob published — or freshened by a dedupe `put` — after the
- *   mark began carries a fresh mtime and survives, no lock required.
+ *   on mtime. The cutoff is the collection start time minus the grace period,
+ *   sampled before resolving policy pins or scanning roots and held fixed
+ *   through inventory and deletion. Only mtimes strictly before it are
+ *   eligible: a blob published — or freshened by a dedupe `put` — at or after
+ *   collection start survives, including same-millisecond writes at zero
+ *   grace, no lock required.
  *
  * Collection NEVER runs automatically. `gc()` is an explicit verb because
  * deletion is irreversible, and a human approving a plan must approve the
@@ -318,6 +321,8 @@ export const make = (
         if (!Number.isSafeInteger(grace) || grace < 0) {
           return yield* Effect.fail(invalidOptions("artifact GC graceMs must be a non-negative safe integer"))
         }
+        const startedAtMs = yield* Clock.currentTimeMillis
+        const bound = startedAtMs - grace
         const live = new Set<string>(gcOptions?.pins ?? [])
         if (Option.isSome(policy) && policy.value.pins !== undefined) {
           for (const digest of yield* policy.value.pins) live.add(digest)
@@ -327,14 +332,12 @@ export const make = (
         const blobs = yield* sweeper.inventory.pipe(
           Effect.mapError((cause) => sweepFailed(`the blob inventory refused: ${cause.message}`, cause))
         )
-        const now = yield* Clock.currentTimeMillis
-        const bound = now - grace
         const swept: Array<string> = []
         let reclaimedBytes = 0
         let keptByGrace = 0
         for (const blob of blobs) {
           if (live.has(blob.digest)) continue
-          if (blob.modifiedAtMs > bound) {
+          if (blob.modifiedAtMs >= bound) {
             keptByGrace++
             continue
           }
@@ -347,7 +350,9 @@ export const make = (
           // unreferenced-at-mark blob a concurrent `put` freshened since the
           // inventory fails the fence and is retained, exactly as a fresher
           // cache row survives a laggard's fenced evict (issue #119).
-          const removed = yield* sweeper.remove(blob.digest, { ifUnmodifiedSinceMs: bound }).pipe(
+          // remove's fence is inclusive; mtimes have millisecond resolution,
+          // so exclude cutoff equality there just as in the inventory check.
+          const removed = yield* sweeper.remove(blob.digest, { ifUnmodifiedSinceMs: bound - 1 }).pipe(
             Effect.mapError((cause) => sweepFailed(`sweeping ${blob.digest} refused: ${cause.message}`, cause))
           )
           if (removed) {

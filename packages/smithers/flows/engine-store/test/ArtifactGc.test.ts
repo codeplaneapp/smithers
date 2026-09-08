@@ -24,6 +24,7 @@ import * as Option from "effect/Option"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as ArtifactGc from "../src/ArtifactGc.ts"
 import * as TestStores from "../src/test/TestStores.ts"
+import { at } from "./Clocks.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
 
 const encoder = new TextEncoder()
@@ -522,6 +523,93 @@ describe("sweep: grace period, pins, and policy", () => {
 })
 
 describe("sweep: liveness under concurrency and crashes", () => {
+  it.live("retains a publication committed after marking even when inventory outlasts grace", () =>
+    Effect.gen(function*() {
+      const host = memoryFs()
+      const content = bytes("published-after-mark")
+      const digest = sha256(content)
+      const report = yield* withCrypto(
+        Effect.gen(function*() {
+          const store = yield* ArtifactStore.ArtifactStore
+          const cache = yield* CacheStore.CacheStore
+          const sweep = ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
+          const collector = yield* ArtifactGc.make().pipe(
+            Effect.provideService(ArtifactSweep.ArtifactSweep, {
+              ...sweep,
+              inventory: Effect.gen(function*() {
+                // Both root scans have finished. Publish bytes and commit their
+                // reference, then let the inventory take longer than graceMs.
+                yield* store.put(content)
+                yield* recordCacheEntry("late-publication", digest).pipe(
+                  Effect.provideService(CacheStore.CacheStore, cache)
+                )
+                yield* Effect.sleep("20 millis")
+                return yield* sweep.inventory
+              }).pipe(Effect.provide(NodeCrypto.layer), Effect.orDie)
+            })
+          )
+          const result = yield* collector.gc({ graceMs: 1 })
+          expect((yield* gc({ graceMs: 1 })).liveDigests).toBe(1)
+          return result
+        }).pipe(Effect.provide(harness(host)))
+      )
+      expect(report.liveDigests).toBe(0)
+      expect(report.scannedBlobs).toBe(1)
+      expect(report.sweptDigests).toEqual([])
+      expect(report.keptByGrace).toBe(1)
+      expect(host.hasBlob(digest)).toBe(true)
+    }))
+
+  it.live("retains cutoff-equal mtimes in real and dry-run inventories, including zero grace", () =>
+    Effect.gen(function*() {
+      const start = 10_000
+      for (const graceMs of [0, 1]) {
+        for (const dryRun of [false, true]) {
+          const host = memoryFs()
+          const equal = host.seedBlob("cutoff-equal", 0)
+          const older = host.seedBlob("cutoff-older", 0)
+          host.mtimes.set(blobPathOf(equal), start - graceMs)
+          host.mtimes.set(blobPathOf(older), start - graceMs - 1)
+          const report = yield* withCrypto(
+            at(start, gc({ graceMs, dryRun }).pipe(Effect.provide(harness(host))))
+          )
+          expect(report.sweptDigests).toEqual([older])
+          expect(report.keptByGrace).toBe(1)
+          expect(host.hasBlob(equal)).toBe(true)
+          expect(host.hasBlob(older)).toBe(dryRun)
+        }
+      }
+    }))
+
+  it.live("retains a blob freshened to the cutoff after inventory, including zero grace", () =>
+    Effect.gen(function*() {
+      const start = 10_000
+      for (const graceMs of [0, 1]) {
+        const host = memoryFs()
+        const digest = host.seedBlob("freshened-to-cutoff", 0)
+        host.mtimes.set(blobPathOf(digest), start - graceMs - 1)
+        const sweep = ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
+        const report = yield* withCrypto(
+          at(
+            start,
+            gc({ graceMs }).pipe(Effect.provide(harness(host, {
+              sweep: {
+                ...sweep,
+                inventory: Effect.gen(function*() {
+                  const blobs = yield* sweep.inventory
+                  host.mtimes.set(blobPathOf(digest), start - graceMs)
+                  return blobs
+                })
+              }
+            })))
+          )
+        )
+        expect(report.sweptDigests).toEqual([])
+        expect(report.keptByGrace).toBe(1)
+        expect(host.hasBlob(digest)).toBe(true)
+      }
+    }))
+
   it.live("a blob written or freshened during the sweep survives it", () =>
     Effect.gen(function*() {
       const host = memoryFs()
