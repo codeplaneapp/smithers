@@ -18,20 +18,19 @@
  * `repositoryFlows`). Each repository is read once per session, in the
  * background, the first time it becomes the target; `load` re-reads on demand.
  * No flow name is written in this app.
+ *
+ * The target is re-resolved after every transition rather than after a
+ * hand-kept list of them: the native app makes a checkout the target through
+ * `repos.loaded` (ControllerBoot at boot, targets.ts after repo.open), the
+ * cloud host through `repositories.loaded` and `repo.selected`, and a list
+ * that named some of these once missed the local host entirely (review
+ * finding on 9ab275caf5). Resolving is a few collection reads and the
+ * per-repository dedup makes a repeat resolution free.
  */
 import type { RepositoryFlow } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import type { SeamContext } from "./SeamContext"
 import { readFactoryProjection } from "./TriggersSeam"
-
-/** The transitions after which the target repository may have changed. */
-const TARGET_TRANSITIONS: ReadonlySet<string> = new Set([
-  "repo.selected",
-  "repositories.loaded",
-  "workingcopies.workspaces.loaded",
-  "repo.pinned",
-  "repo.unpinned"
-])
 
 export interface RepositoryFlowsSeam {
   /** Read one repository's declared flows into the collection now; an absent or unreadable projection clears its row. */
@@ -69,6 +68,7 @@ export const createRepositoryFlowsSeam = (ctx: SeamContext): RepositoryFlowsSeam
   }
 
   const loadTarget = (): void => {
+    if (disposed) return
     const target = resolveTargetRepo(ctx.store, undefined)
     if ("error" in target || read.has(target.repo)) return
     void load(target.repo)
@@ -77,7 +77,14 @@ export const createRepositoryFlowsSeam = (ctx: SeamContext): RepositoryFlowsSeam
   const subscribe: RepositoryFlowsSeam["subscribe"] = (onDispose) => {
     loadTarget()
     const subscription = ctx.store.collections.transitions.subscribeChanges((changes) => {
-      if (changes.some((change) => change.type === "insert" && TARGET_TRANSITIONS.has(change.value.type))) loadTarget()
+      /*
+       * After the commit, not inside it: the target of a local checkout is
+       * read through the `workingCopies` live view (WorkspaceViews.ts), which
+       * settles after the transitions subscribers of the same dispatch have
+       * run, so resolving synchronously here saw repos.loaded's activeRepoKey
+       * with no copy behind it and answered "no repository is loaded".
+       */
+      if (changes.some((change) => change.type === "insert")) queueMicrotask(loadTarget)
     })
     onDispose(() => {
       disposed = true
