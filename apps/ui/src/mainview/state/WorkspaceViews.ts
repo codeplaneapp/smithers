@@ -89,12 +89,35 @@ export const workingCopyLabel = (copy: Pick<WorkingCopy, "kind" | "label" | "sta
   if (copy.kind === "workspace") return copy.state === undefined ? copy.label : `${copy.label} · ${copy.state}`
   return copy.ahead === undefined ? copy.label : `${copy.label} · ${copy.ahead} ahead`
 }
+/** Approval wording and authority always project from the runtime record. */
+const projectApprovalCard = (card: Card, request: Card | undefined): Card => {
+  if (card.kind === "approval" && request?.kind === "approval") {
+    return { ...card, title: request.title, body: request.body, payload: {
+      ...request.payload,
+      decision: card.payload.decision,
+      decidedAt: card.payload.decidedAt,
+      pending: card.payload.pending,
+      error: card.payload.error
+    } }
+  }
+  if (card.kind === "approvals-inbox" && request?.kind === "approvals-inbox") {
+    return { ...card, title: request.title, body: request.body, payload: {
+      ...request.payload,
+      approvals: request.payload.approvals.map((row) => {
+        const state = card.payload.approvals.find((entry) => entry.requestId === row.requestId)
+        return { ...row, decision: state?.decision, pending: state?.pending, decisionError: state?.decisionError }
+      })
+    } }
+  }
+  return card
+}
 
 /** Materialized views, never persisted or written by reducers. */
 export const createWorkspaceViews = (
-  stored: Pick<StoredCollections, "cards" | "workingCopies" | "cloudWorkspaces" | "repositories">
+  stored: Pick<StoredCollections, "cards" | "workingCopies" | "cloudWorkspaces" | "repositories" | "approvalRequests">
 ) => {
   stored.cloudWorkspaces.createIndex((workspace) => workspace.id, { indexType: BTreeIndex })
+  stored.approvalRequests.createIndex((request) => request.id, { indexType: BTreeIndex })
   return {
     cards: createLiveQueryCollection({
       id: "app-live-cards",
@@ -113,7 +136,12 @@ export const createWorkspaceViews = (
             { workspace: stored.cloudWorkspaces },
             ({ entry, workspace }) => eq(entry.workspaceId, workspace.id)
           )
-          .fn.select(({ entry, workspace }): Card => projectWorkspaceCard(entry.card, workspace))
+          .leftJoin(
+            { request: stored.approvalRequests },
+            ({ entry, request }) => eq(entry.card.id, request.id)
+          )
+          .fn.select(({ entry, workspace, request }): Card =>
+            projectApprovalCard(projectWorkspaceCard(entry.card, workspace), request))
     }),
     workingCopies: createLiveQueryCollection({
       id: "app-live-working-copies",

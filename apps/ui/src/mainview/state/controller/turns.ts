@@ -8,6 +8,7 @@ import { parseSubmit } from "../../flows/registry"
 import { boundTurnRequest } from "../AgentTurnPolicy"
 import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
+import { isRuntimeOwnedCard } from "../isRuntimeOwnedCard"
 import { roleMenuEntries } from "../../AgentRoleMenu"
 import { currentAgentRoles } from "./agents"
 import type { ImpossibleAskClass, InstructionRole, InstructionStage } from "../Instructions"
@@ -107,11 +108,14 @@ export const createTurnController = (
 
   const handleCardFrame = (frame: Extract<AgentTurnFrame, { type: "card" | "card.update" }>): void => {
     if (frame.type === "card") {
+      if (isRuntimeOwnedCard(frame.card) || isRuntimeOwnedCard(store.collections.cards.get(frame.card.id)) ||
+        store.approvalRequest(frame.card.id) !== undefined) return
       store.dispatch({ type: "card.upsert", actor: "smithers", card: frame.card })
       return
     }
     const patch = CardPatchSchema.safeParse(frame.patch)
     const existing = store.collections.cards.get(frame.id)
+    if (isRuntimeOwnedCard(existing) || store.approvalRequest(frame.id) !== undefined) return
     if (!patch.success || existing === undefined) {
       console.warn("Smithers dropped a card.update frame for an unknown or invalid card", frame.id)
       return
@@ -945,9 +949,10 @@ export const createTurnController = (
         return
       }
     }
-    const card = store.collections.cards.get(id)
-    if (card === undefined || card.kind !== "approval" || card.status === "acted") return
-    if (card.payload.pending === true) return
+    const displayed = store.collections.cards.get(id)
+    const card = store.approvalRequest(id)
+    if (card?.kind !== "approval" || displayed?.kind !== "approval" || displayed.status === "acted") return
+    if (displayed.payload.pending === true || displayed.payload.decision !== undefined) return
     /*
      * A chain approval park (DESIGN.md §14): the decision resolves against
      * the runtime's pending ask, the card freezes, and the SAME lineage

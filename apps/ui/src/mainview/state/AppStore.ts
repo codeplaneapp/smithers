@@ -211,6 +211,18 @@ export const verboseTrace = (transition: AppTransition): string | undefined => {
   return `${transition.actor}: ${transition.type}${shown}`
 }
 
+type ApprovalRequest = Extract<Card, { kind: "approval" | "approvals-inbox" }>
+const isApprovalRequest = (card: Card | undefined): card is ApprovalRequest =>
+  card?.kind === "approval" || card?.kind === "approvals-inbox"
+
+const freezeRequest = <T>(value: T): T => {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) freezeRequest(child)
+    Object.freeze(value)
+  }
+  return value
+}
+
 type ApprovalCard = Extract<Card, { kind: "approval" }>
 
 /**
@@ -576,7 +588,7 @@ export type StoredCollections = {
   readonly [K in keyof typeof COLLECTION_DEFINITIONS]: ReturnType<typeof COLLECTION_DEFINITIONS[K]["create"]>
 }
 
-export type AppCollections = Omit<StoredCollections, "cards" | "workingCopies"> & ReturnType<typeof createWorkspaceViews>
+export type AppCollections = Omit<StoredCollections, "cards" | "workingCopies" | "approvalRequests"> & ReturnType<typeof createWorkspaceViews>
 
 export interface WorldStateSnapshot {
   readonly capturedAt: number
@@ -598,6 +610,8 @@ export interface AgentContextSnapshot {
 export interface AppStore {
   readonly collections: AppCollections
   readonly dispatch: (transition: AppTransition) => Transaction
+  /** Immutable runtime request; legacy model-authored cards have no authority. */
+  readonly approvalRequest: (id: string) => ApprovalRequest | undefined
   readonly persistenceMode: PersistenceMode
   /**
    * True when the store holding this user's data could not be opened, so the
@@ -639,6 +653,7 @@ const COLLECTION_DEFINITIONS = {
   connectorOperations: persistedCollection("app-connector-operations", ConnectorOperationSchema, byId),
   worldDocuments: persistedCollection("world-documents", WorldDocumentSchema, byId),
   cards: persistedCollection("app-cards", CardSchema, byId),
+  approvalRequests: persistedCollection("app-approval-requests", CardSchema, byId),
   transitions: persistedCollection("app-transitions", TransitionRecordSchema, byId),
   identitySessions: persistedCollection("app-identity-sessions", IdentitySessionSchema, byId),
   billingAccounts: persistedCollection("app-billing-accounts", BillingAccountSchema, byId),
@@ -904,6 +919,7 @@ const forgetAccountState = (collections: StoredCollections): void => {
     const collection of [
       collections.messages,
       collections.cards,
+      collections.approvalRequests,
       collections.toasts,
       collections.toolCalls,
       collections.chainEvents,
@@ -1052,6 +1068,11 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     for (const collection of Object.values(collections)) {
       collection.utils.acceptMutations(transaction)
     }
+  }
+
+  const approvalRequest = (id: string): ApprovalRequest | undefined => {
+    const request = collections.approvalRequests.get(id)
+    return isApprovalRequest(request) ? freezeRequest(structuredClone(CardSchema.parse(request)) as ApprovalRequest) : undefined
   }
 
   const dispatch = (transition: AppTransition): Transaction => {
@@ -1888,6 +1909,16 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
 
         case "card.upsert": {
           const existing = collections.cards.get(transition.card.id)
+          const trusted = approvalRequest(transition.card.id)
+          const incoming = transition.card
+          // Only runtime code creates approval authority. The model cannot
+          // replace a protected id with a presentation card to bypass this.
+          if ((isApprovalRequest(incoming) || isApprovalRequest(existing) || trusted !== undefined) &&
+            transition.actor !== "system") return
+          if (trusted !== undefined && !isApprovalRequest(incoming)) return
+          // One pending gate owns both its wording and envelope until decided.
+          if (trusted?.kind === "approval" && existing?.kind === "approval" &&
+            existing.payload.decision === undefined) return
           /*
            * A decided approval owns its id. An approval is a human
            * authorising an action, so a frame from the model's own
@@ -1907,14 +1938,28 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
             const incoming = transition.card.kind === "approval" ? transition.card : undefined
             if (incoming === undefined || approvalGateKey(incoming) === approvalGateKey(decided)) return
           }
-          if (existing === undefined) {
-            insertCard(transition.card)
-          } else {
-            collections.cards.update(transition.card.id, (draft) => {
-              Object.assign(draft, transition.card)
-            })
+          let card = transition.card
+          if (isApprovalRequest(card)) {
+            // A refreshed inbox may add/remove rows, but a surviving request
+            // keeps the exact description and envelope first shown to the human.
+            if (card.kind === "approvals-inbox" && trusted?.kind === "approvals-inbox") {
+              card = { ...card, title: trusted.title, payload: { ...trusted.payload, approvals: card.payload.approvals.map((row) => {
+                const prior = trusted.payload.approvals.find((entry) => entry.requestId === row.requestId)
+                return prior === undefined ? row : { ...row, runId: prior.runId, title: prior.title,
+                  approval: prior.approval, requestedAt: prior.requestedAt }
+              }) } }
+            }
+            const request = structuredClone(CardSchema.parse(card))
+            card = structuredClone(request)
+            if (trusted === undefined) collections.approvalRequests.insert(request)
+            else collections.approvalRequests.update(card.id, (draft) => { Object.assign(draft, request) })
           }
-          const frame = ensureCardFrame(transition.card.id)
+          if (existing === undefined) {
+            insertCard(card)
+          } else {
+            collections.cards.update(card.id, (draft) => { Object.assign(draft, card) })
+          }
+          const frame = ensureCardFrame(card.id)
           collections.frames.update(frame.id, (draft) => {
             draft.stateRevision = revision
             if (frame.snapshot !== undefined) draft.snapshot = snapshot()
@@ -1927,13 +1972,29 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           break
         }
 
-        case "card.updated":
-          if (collections.cards.get(transition.id) === undefined) return
-          // A patch carries no gate of its own, so the only thing it can
-          // do to a decided approval is reopen the one already answered.
-          if (decidedApproval(collections.cards.get(transition.id)) !== undefined) return
+        case "card.updated": {
+          const existing = collections.cards.get(transition.id)
+          if (existing === undefined) return
+          if (existing.kind === "approval") return
+          if (existing.kind === "approvals-inbox" && transition.actor === "smithers") return
+          let patch = transition.patch
+          if (existing.kind === "approvals-inbox") {
+            const trusted = approvalRequest(transition.id)
+            const merged = CardSchema.safeParse({ ...existing, ...patch })
+            if (trusted?.kind !== "approvals-inbox" || !merged.success || merged.data.kind !== "approvals-inbox") return
+            const updates = merged.data.payload.approvals
+            // Generic inbox updates can only settle decision state, never
+            // change which request a row or its wording refers to.
+            patch = { status: patch.status, payload: { ...trusted.payload,
+              approvals: trusted.payload.approvals.map((row) => {
+                const update = updates.find((entry) => entry.requestId === row.requestId)
+                return { ...row, decision: update?.decision, pending: update?.pending,
+                  decisionError: update?.decisionError }
+              }) } }
+            if (patch.status === undefined) delete patch.status
+          }
           collections.cards.update(transition.id, (draft) => {
-            Object.assign(draft, transition.patch)
+            Object.assign(draft, patch)
           })
           for (const frame of collections.frames.values()) {
             if (frame.cardId !== transition.id || frame.branchId !== activeBranchId) continue
@@ -1948,8 +2009,10 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
             draft.revision = revision
           })
           break
+        }
 
         case "card.approval.decision.pending": {
+          if (transition.actor !== "user" || approvalRequest(transition.id)?.kind !== "approval") return
           const card = collections.cards.get(transition.id)
           if (card === undefined || card.kind !== "approval" || card.status === "acted") return
           collections.cards.update(transition.id, (draft) => {
@@ -1965,6 +2028,7 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
         }
 
         case "card.approval.decision.failed": {
+          if (transition.actor !== "system" || approvalRequest(transition.id)?.kind !== "approval") return
           const card = collections.cards.get(transition.id)
           if (card === undefined || card.kind !== "approval" || card.status === "acted") return
           collections.cards.update(transition.id, (draft) => {
@@ -1981,6 +2045,7 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
         }
 
         case "card.approval.decided": {
+          if (transition.actor !== "user" || approvalRequest(transition.id)?.kind !== "approval") return
           const card = collections.cards.get(transition.id)
           // A failed decision attempt stays retryable, so "error" can still decide.
           if (card === undefined || card.kind !== "approval" || card.status === "acted") return
@@ -3043,9 +3108,11 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     }).isPersisted.promise
   }
 
+  const { approvalRequests: _approvalRequests, ...publicCollections } = collections
   return {
-    collections: { ...collections, ...views },
+    collections: { ...publicCollections, ...views },
     dispatch,
+    approvalRequest,
     persistenceMode: resolved.mode,
     persistenceDegraded: resolved.degraded,
     session,

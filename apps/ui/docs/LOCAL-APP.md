@@ -499,3 +499,21 @@ stale-fixture report, and fails before launching a test. Rerun normally after
 inspection; `SMITHERS_E2E_RECOVER_STALE=1 bun run test:e2e` explicitly repairs
 and continues in a single invocation. The packaged lane is macOS-only and the
 GitHub fixture scenario requires network access.
+
+
+### Approval ownership
+
+Approval and approvals-inbox cards are created by runtime transitions from
+chain policy or gateway requests. The store persists their trusted request
+records separately in `app-approval-requests`, binding the displayed question
+to the original submit-ready envelope. A pending gate cannot be relabeled or
+retargeted. Inbox refreshes retain the wording and envelope of existing rows.
+Decision submission reads the trusted record; decision state remains on the
+card. Signing out clears both collections.
+
+Model card frames and the chain's `card.show` and `card.update` calls cannot
+create or replace approval, approvals-inbox, grant-confirm, or flow-form cards,
+or patch existing cards of those kinds. Runtime flow handlers still create
+their own output. Chain policy registers approvals directly with the store.
+Legacy cards without a trusted request cannot authorize an operation; a fresh
+runtime request or gateway refresh must register the gate first.

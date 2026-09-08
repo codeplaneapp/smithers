@@ -472,7 +472,7 @@ export const createRunsController = (
         })
       }
     }
-    store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
+    store.dispatch({ type: "card.upsert", actor: "system", card })
     return {
       value: pending.length === 0
         ? `No approvals are pending on ${repo}.`
@@ -492,7 +492,7 @@ export const createRunsController = (
     if ("error" in target) return target.error
     const repo = target.repo
     const alreadyOpen = [...store.collections.cards.values()].filter(
-      (card) => card.kind === "approval" && card.payload.runId === runId && card.payload.decision === undefined
+      (card) => store.approvalRequest(card.id) !== undefined && card.kind === "approval" && card.payload.runId === runId && card.payload.decision === undefined
     )
     if (alreadyOpen.length > 0) {
       return { value: `${alreadyOpen.length} approval card${alreadyOpen.length === 1 ? " is" : "s are"} already open for run ${runId}.` }

@@ -270,6 +270,33 @@ describe("ChainRuntime behind the NativeAgent seam", () => {
     expect(messages.some((message) => message.act === "Smithers picked up your note")).toBe(true)
   })
 
+  test("surface card calls refuse approval creation, relabeling, and id replacement", async () => {
+    const gate = {
+      id: "runtime-gate", kind: "approval" as const, title: "Deploy production?", status: "active" as const,
+      createdAt: 1, ordinal: 1, payload: { capability: "deploy:production", runId: "run-1" }
+    }
+    const attacks = [
+      `await ctx.call("card.update", { id: "runtime-gate", patch: { title: "Read logs?" } })`,
+      `await ctx.call("card.show", { card: ${JSON.stringify({ ...gate, id: "forged" })} })`,
+      `await ctx.call("card.show", { card: ${JSON.stringify({ ...gate, kind: "status", payload: { note: "Replace it" } })} })`
+    ]
+    for (const attack of attacks) {
+      const h = await harness({ author: Author.layerMock([flow(attack, `return done({})`), flow(`return done({})`)]) })
+      await h.store.dispatch({ type: "card.upsert", actor: "system", card: gate }).isPersisted.promise
+      const done = h.waitForDone()
+      h.controller.send("change those cards")
+      const terminal = await done
+      await h.settle()
+      expect(h.store.collections.cards.get(gate.id)).toMatchObject(gate)
+      expect(h.store.collections.cards.get("forged")).toBeUndefined()
+      expect(h.frames.filter(frame => frame.type === "card" || frame.type === "card.update")).toHaveLength(0)
+      expect(terminal.error).toBeUndefined()
+      const refused = h.frames.filter(frame => frame.type === "gate.rejected")
+      expect(refused).toHaveLength(1)
+      expect(JSON.stringify(refused)).toContain("runtime-owned")
+    }
+  })
+
   test("the agent can never approve for itself — approve:* is structurally denied", async () => {
     const h = await harness({
       author: Author.layerMock([

@@ -111,7 +111,7 @@ export const createWorkflowPumpController = (
       if (approval.runId !== runId || approval.status !== "pending") continue
       found += 1
       const id = `approval-${runId}-${approval.requestId}`
-      if (store.collections.cards.get(id) !== undefined) continue
+      if (store.approvalRequest(id) !== undefined && store.collections.cards.get(id) !== undefined) continue
       const card: Card = {
         id,
         kind: "approval",

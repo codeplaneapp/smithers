@@ -6,6 +6,7 @@ import type { AgentChatMessage, AgentTurnFrame, FetchLike, StartAgentTurnRequest
 import type { CommandRegistry } from "../flows/Commands"
 import type { NativeAgent } from "../native/NativeBridge"
 import type { AppStore } from "../state/AppStore"
+import { isRuntimeOwnedCard } from "../state/isRuntimeOwnedCard"
 import { makeCollectionJournal } from "./CollectionJournal"
 import { commandEntries, disclosedEntries } from "./FlowCatalog"
 import { createChainPolicy } from "./Policy"
@@ -64,7 +65,7 @@ const goalOf = (messages: ReadonlyArray<AgentChatMessage>): string => {
 }
 
 /** The model's doors to the transcript, bound to this turn's frame stream. */
-const surfaceEntries = (emit: Emit, runId: string): ReadonlyArray<Catalog.Entry> => [
+const surfaceEntries = (emit: Emit, runId: string, store: AppStore): ReadonlyArray<Catalog.Entry> => [
   {
     name: "say",
     description: "Show the user a chat message (markdown). Payload: { text: string }",
@@ -97,6 +98,10 @@ const surfaceEntries = (emit: Emit, runId: string): ReadonlyArray<Catalog.Entry>
           })
         )
       }
+      if (isRuntimeOwnedCard(parsed.data) || isRuntimeOwnedCard(store.collections.cards.get(parsed.data.id)) ||
+        store.approvalRequest(parsed.data.id) !== undefined) {
+        return Effect.fail(new Catalog.CallError({ name: "card.show", message: "This card is runtime-owned." }))
+      }
       return Effect.sync(() => {
         emit({ runId, type: "card", card: parsed.data })
         return { shown: parsed.data.id }
@@ -115,6 +120,9 @@ const surfaceEntries = (emit: Emit, runId: string): ReadonlyArray<Catalog.Entry>
         return Effect.fail(
           new Catalog.CallError({ name: "card.update", message: "payload must be { id: string, patch: CardPatch }" })
         )
+      }
+      if (isRuntimeOwnedCard(store.collections.cards.get(record.id)) || store.approvalRequest(record.id) !== undefined) {
+        return Effect.fail(new Catalog.CallError({ name: "card.update", message: "This card is runtime-owned." }))
       }
       return Effect.sync(() => {
         emit({ runId, type: "card.update", id: record.id as string, patch: patch.data })
@@ -299,7 +307,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
         const ask = policy.pendingAsk(lineage)
         options.store.dispatch({
           type: "card.upsert",
-          actor: "smithers",
+          actor: "system",
           card: {
             id: `chain-approval-${lineage}`,
             kind: "approval",
@@ -432,7 +440,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
     cancelled.delete(request.runId)
 
     const commandCatalog = commandEntries(options.commands)
-    const surfaces = surfaceEntries(emit, request.runId)
+    const surfaces = surfaceEntries(emit, request.runId, options.store)
     const host = options.entries ?? []
     const treeEntries = [...commandCatalog, ...surfaces, ...worldview, ...host, backgroundEntry]
     const agentDisclosure: Catalog.Entry = {
@@ -530,14 +538,14 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
         if (outcome._tag === "Park" && outcome.reason.code === "approval") {
           /*
            * An approval park ends the turn awaiting the human: the card
-           * rides the ordinary card frame path, the park frame names the
+           * is registered directly by the runtime, the park frame names the
            * suspension, and resolveApproval + a fresh startTurn on the
            * same lineage resumes from the settled prefix and re-asks.
            */
           const ask = policy.pendingAsk(request.runId)
-          emit({
-            runId: request.runId,
-            type: "card",
+          options.store.dispatch({
+            type: "card.upsert",
+            actor: "system",
             card: {
               id: `chain-approval-${request.runId}`,
               kind: "approval",

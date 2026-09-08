@@ -96,6 +96,7 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-connector-operations",
   "world-documents",
   "app-cards",
+  "app-approval-requests",
   "app-transitions",
   "app-identity-sessions",
   "app-billing-accounts",

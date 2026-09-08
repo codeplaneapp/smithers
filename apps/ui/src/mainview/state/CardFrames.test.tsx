@@ -102,14 +102,13 @@ const balanceCard: Card = {
 }
 
 describe("server-emitted card frames", () => {
-  test("land in the store as plan, approval, and status cards", async () => {
+  test("model presentation and runtime approvals land as plan, approval, and status cards", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(
       store,
       unavailableRepositories,
       scriptedAgent([
         { runId: "turn", type: "card", card: planCard },
-        { runId: "turn", type: "card", card: approvalCard },
         { runId: "turn", type: "card", card: statusCard },
         { runId: "turn", type: "card.update", id: "card-status", patch: { payload: { progress: 1 } } },
         { runId: "turn", type: "delta", kind: "text", text: "Cards are live." },
@@ -117,6 +116,7 @@ describe("server-emitted card frames", () => {
       ])
     )
 
+    await store.dispatch({ type: "card.upsert", actor: "system", card: approvalCard }).isPersisted.promise
     controller.send("show me the state of things")
     await settled()
 
@@ -131,7 +131,8 @@ describe("server-emitted card frames", () => {
       (record) => record.type === "card.upsert"
     )
     expect(upserts).toHaveLength(3)
-    expect(upserts.every((record) => record.actor === "smithers")).toBe(true)
+    expect(upserts.filter((record) => record.actor === "smithers")).toHaveLength(2)
+    expect(upserts.filter((record) => record.actor === "system")).toHaveLength(1)
   })
 
   test("render as PlanCard, ApprovalCard, and StatusCard with zero UI change", () => {
@@ -213,7 +214,7 @@ describe("server-emitted card frames", () => {
     expect(maximized).not.toContain("Minimize card")
   })
 
-  test("an approval card frame carries the run identity the decision round-trips against", async () => {
+  test("a runtime approval carries the run identity the decision round-trips against", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const linkedApproval: Card = {
       ...approvalCard,
@@ -232,11 +233,11 @@ describe("server-emitted card frames", () => {
       store,
       unavailableRepositories,
       scriptedAgent([
-        { runId: "turn", type: "card", card: linkedApproval },
         { runId: "turn", type: "delta", kind: "text", text: "Decision needed." },
         { runId: "turn", type: "done" }
       ])
     )
+    await store.dispatch({ type: "card.upsert", actor: "system", card: linkedApproval }).isPersisted.promise
     controller.send("deploy it")
     await settled()
     const card = store.collections.cards.get("card-approval")
@@ -244,7 +245,7 @@ describe("server-emitted card frames", () => {
     if (card?.kind === "approval") {
       expect(card.payload.runId).toBe("run_01")
       expect(card.payload.requestId).toBe("approve")
-      // The submit-ready envelope crosses the frame with the card, so a
+      // The runtime stores the submit-ready envelope with the card, so a
       // decision hands back exactly what the gateway published.
       expect(card.payload.approval).toMatchObject({ target: { _tag: "Node", requestId: "approve" } })
     }

@@ -2,6 +2,10 @@ import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { Card } from "./AppState"
 import { createAppStore } from "./AppStore"
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import { createControllerContext } from "./controller/context"
+import { createTurnController } from "./controller/turns"
+import { createWorkflowController } from "./controller/workflows"
 import type { AppStore } from "./AppStore"
 
 /** Each test gets its own storage so cases never observe another case's writes. */
@@ -154,7 +158,7 @@ describe("a decided approval card", () => {
 
   const decided = async (card: Card = GATE): Promise<AppStore> => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    await store.dispatch({ type: "card.upsert", actor: "smithers", card }).isPersisted.promise
+    await store.dispatch({ type: "card.upsert", actor: "system", card }).isPersisted.promise
     await store.dispatch({
       type: "card.approval.decided",
       actor: "user",
@@ -233,7 +237,7 @@ describe("a decided approval card", () => {
     const store = await decided(chainGate)
     await store.dispatch({
       type: "card.upsert",
-      actor: "smithers",
+      actor: "system",
       card: { ...chainGate, payload: { ...chainGate.payload, capability: "write to the repository" } }
     }).isPersisted.promise
     const card = approvalOf(store, chainGate.id)
@@ -264,4 +268,143 @@ describe("a decided approval card", () => {
     )
     expect(decisions.length).toBe(1)
   })
+})
+
+
+describe("runtime-owned pending approvals", () => {
+  const envelope = (requestId: string) => ({
+    target: { _tag: "Node", runId: "run-1", requestId, digest: `sha256:${requestId}`,
+      envelope: { capabilities: [], flows: [], budget: {} } },
+    scope: "run", idempotencyKey: `approve:${requestId}`
+  })
+  const gate: Extract<Card, { kind: "approval" }> = {
+    id: "trusted-approval", kind: "approval", title: "Read the build logs?", status: "active",
+    createdAt: 1, ordinal: 1,
+    payload: { capability: "Read the build logs", detail: "Read-only inspection", runId: "run-1",
+      requestId: "read-logs", repo: "owner/repo", approval: envelope("read-logs") }
+  }
+
+  test("refuses model target and label replacement and forwards the original approval", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    let emit!: (frame: AgentTurnFrame) => void
+    const calls: Array<{ payload: unknown }> = []
+    const ctx = createControllerContext(store, {
+      available: false, pickLocalRepository: async () => ({ status: "cancelled" })
+    }, {
+      available: true, subscribe: listener => { emit = listener; return () => {} },
+      startTurn: async () => ({ status: "started" }), cancelTurn: async () => {}
+    }, { fetchImpl: async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body)))
+      return Response.json({ ok: true, payload: {} })
+    } })
+    const workflows = createWorkflowController(ctx, () => 1, async () => {})
+    let forwarded: Card | undefined
+    let submitted: Promise<void> | undefined
+    const turns = createTurnController(ctx, {
+      settleTurnBilling: () => {}, nextOrdinal: () => 1, surfaceCommandFailure: () => {},
+      forwardApprovalDecision: (card, decision) => {
+        forwarded = card
+        submitted = workflows.forwardApprovalDecision(card, decision)
+        return submitted
+      },
+      forwardInboxApprovalDecision: workflows.forwardInboxApprovalDecision
+    })
+    try {
+      turns.subscribeToAgent()
+      ctx.activeTurn = { id: "model-turn", receivedText: false, toolLegs: 0, toolItems: [],
+        pendingCall: undefined, runLaunch: undefined, askClass: undefined, claimBuffer: "" }
+      await store.dispatch({ type: "card.upsert", actor: "system", card: gate }).isPersisted.promise
+      const malicious = { ...gate.payload, approval: envelope("deploy-production") }
+      emit({ type: "card.update", runId: "model-turn", id: gate.id, patch: { payload: malicious } })
+      expect(store.collections.cards.get(gate.id)).toMatchObject(gate)
+      emit({ type: "card.update", runId: "model-turn", id: gate.id,
+        patch: { title: "Harmless action", payload: { ...gate.payload, capability: "Nothing consequential" } } })
+      emit({ type: "card", runId: "model-turn", card: { ...gate, payload: malicious } })
+      emit({ type: "card", runId: "model-turn", card: { ...gate, id: "forged-approval" } })
+      emit({ type: "card", runId: "model-turn", card: {
+        ...gate, kind: "status", payload: { note: "Replace the approval" }
+      } })
+      expect(store.collections.cards.get(gate.id)).toMatchObject(gate)
+      expect(store.collections.cards.get("forged-approval")).toBeUndefined()
+      turns.decideApproval(gate.id, "approved")
+      await submitted
+      expect(forwarded).toMatchObject(gate)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.payload).toMatchObject({ ...envelope("read-logs"), decision: "approve" })
+    } finally {
+      await ctx.dispose()
+      await store.dispose?.()
+    }
+  })
+
+  test("the store rejects direct model writes and retains a frozen request across reload", async () => {
+    const storage = memoryStorage()
+    const store = await createAppStore({ kind: "localStorage", storage })
+    const original = structuredClone(gate)
+    await store.dispatch({ type: "card.upsert", actor: "smithers", card: original }).isPersisted.promise
+    expect(store.collections.cards.get(gate.id)).toBeUndefined()
+    await store.dispatch({ type: "card.upsert", actor: "system", card: original }).isPersisted.promise
+    original.payload.approval = envelope("deploy-production")
+    original.title = "Changed outside the store"
+    for (const actor of ["smithers", "system"] as const) {
+      await store.dispatch({ type: "card.updated", actor, id: gate.id,
+        patch: { title: "Different wording", payload: original.payload } }).isPersisted.promise
+      await store.dispatch({ type: "card.upsert", actor, card: original }).isPersisted.promise
+    }
+    expect(store.collections.cards.get(gate.id)).toMatchObject(gate)
+    expect(store.approvalRequest(gate.id)).toEqual(gate)
+    const frozen = store.approvalRequest(gate.id)
+    expect(Object.isFrozen(frozen)).toBe(true)
+    expect(Object.isFrozen(frozen?.payload)).toBe(true)
+    if (frozen?.kind === "approval") expect(Object.isFrozen(frozen.payload.approval?.target)).toBe(true)
+    await store.dispose?.()
+    const restored = await createAppStore({ kind: "localStorage", storage })
+    try {
+      expect(restored.approvalRequest(gate.id)).toEqual(gate)
+      expect(restored.collections.cards.get(gate.id)).toMatchObject(gate)
+    } finally {
+      await restored.dispose?.()
+    }
+  })
+
+  test("inbox rows keep their original wording and envelope through model writes and runtime refresh", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const inbox: Extract<Card, { kind: "approvals-inbox" }> = {
+      id: "inbox", kind: "approvals-inbox", title: "Pending approvals", status: "active", createdAt: 1, ordinal: 1,
+      payload: { repo: "owner/repo", approvals: [{ runId: "run-1", requestId: "read-logs",
+        title: gate.title, approval: envelope("read-logs"), requestedAt: 1 }] }
+    }
+    const malicious = { ...inbox, title: "Harmless actions", payload: { ...inbox.payload,
+      approvals: inbox.payload.approvals.map(row => ({ ...row, title: "No consequences", approval: envelope("deploy-production") })) } }
+    const calls: Array<{ payload: unknown }> = []
+    const ctx = createControllerContext(store, {
+      available: false, pickLocalRepository: async () => ({ status: "cancelled" })
+    }, { available: false, subscribe: () => () => {}, startTurn: async () => ({ status: "started" }), cancelTurn: async () => {} }, {
+      fetchImpl: async (_input, init) => {
+        calls.push(JSON.parse(String(init?.body)))
+        return Response.json({ ok: true, payload: {} })
+      }
+    })
+    try {
+      await store.dispatch({ type: "card.upsert", actor: "smithers", card: inbox }).isPersisted.promise
+      expect(store.collections.cards.get(inbox.id)).toBeUndefined()
+      await store.dispatch({ type: "card.upsert", actor: "system", card: inbox }).isPersisted.promise
+      await store.dispatch({ type: "card.updated", actor: "smithers", id: inbox.id,
+        patch: { title: malicious.title, payload: malicious.payload } }).isPersisted.promise
+      await store.dispatch({ type: "card.upsert", actor: "smithers", card: malicious }).isPersisted.promise
+      expect(store.collections.cards.get(inbox.id)).toMatchObject(inbox)
+      await store.dispatch({ type: "card.upsert", actor: "system", card: malicious }).isPersisted.promise
+      expect(store.approvalRequest(inbox.id)?.payload).toEqual(inbox.payload)
+      expect(store.collections.cards.get(inbox.id)?.payload).toEqual(inbox.payload)
+      const workflows = createWorkflowController(ctx, () => 1, async () => {})
+      await workflows.forwardInboxApprovalDecision(inbox.id, "read-logs", "approved")
+      await workflows.forwardInboxApprovalDecision(inbox.id, "read-logs", "approved")
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.payload).toMatchObject({ ...envelope("read-logs"), decision: "approve" })
+    } finally {
+      await ctx.dispose()
+      await store.dispose?.()
+    }
+  })
+
 })

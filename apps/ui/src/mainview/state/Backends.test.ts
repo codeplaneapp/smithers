@@ -370,7 +370,7 @@ describe("approval round trip", () => {
         }
       }
     }
-    store.dispatch({ type: "card.upsert", actor: "smithers", card })
+    store.dispatch({ type: "card.upsert", actor: "system", card })
     return card
   }
 
@@ -461,7 +461,7 @@ describe("approval round trip", () => {
     const controller = createAppController(store, unavailableRepositories, silentAgent(), backend({}))
     store.dispatch({
       type: "card.upsert",
-      actor: "smithers",
+      actor: "system",
       card: {
         id: "approval-local",
         kind: "approval",

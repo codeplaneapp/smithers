@@ -483,7 +483,9 @@ export const createWorkflowController = (
     card: Extract<Card, { kind: "approval" }>,
     decision: "approved" | "denied"
   ): Promise<void> => {
-    const { repo, approval } = card.payload
+    const trusted = store.approvalRequest(card.id)
+    if (trusted?.kind !== "approval") return
+    const { repo, approval } = trusted.payload
     if (repo === undefined || approval === undefined) {
       store.dispatch({
         type: "card.approval.decision.failed",
@@ -532,8 +534,11 @@ export const createWorkflowController = (
   ): Promise<void> => {
     const card = store.collections.cards.get(cardId)
     if (card === undefined || card.kind !== "approvals-inbox") return
-    const row = card.payload.approvals.find((entry) => entry.requestId === requestId)
-    if (row === undefined || row.decision !== undefined || row.pending === true) return
+    const trusted = store.approvalRequest(cardId)
+    if (trusted?.kind !== "approvals-inbox") return
+    const row = trusted.payload.approvals.find((entry) => entry.requestId === requestId)
+    const displayed = card.payload.approvals.find((entry) => entry.requestId === requestId)
+    if (row === undefined || displayed === undefined || displayed.decision !== undefined || displayed.pending === true) return
     store.dispatch({
       type: "card.updated",
       actor: "user",
@@ -546,7 +551,7 @@ export const createWorkflowController = (
       }
     })
     const submitted = await gateway.submitApproval(
-      card.payload.repo,
+      trusted.payload.repo,
       row.approval as Parameters<typeof gateway.submitApproval>[1],
       decision === "approved" ? "approve" : "deny"
     )
