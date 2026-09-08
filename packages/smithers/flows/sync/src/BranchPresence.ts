@@ -90,8 +90,8 @@ export interface Service {
   readonly announce: (announcement: Announcement) => Effect.Effect<Participant, SyncError>
   readonly leave: (request: LeaveRequest) => Effect.Effect<void, SyncError>
   /**
-   * One branch's live roster, as a fresh array the caller may retain and sort.
-   * Reading it is also what drops the branch's expired leases.
+   * One branch's live roster, as a fresh array of detached participants and
+   * cursors. Reading drops expired leases and advances a cross-branch sweep.
    */
   readonly list: (request: RosterRequest) => Effect.Effect<ReadonlyArray<Participant>, SyncError>
   readonly changes: Stream.Stream<BranchId>
@@ -226,8 +226,8 @@ export const defaultMaxParticipants = 256
  * impersonate a collaborator.
  *
  * The roster is keyed by branch and then by participant, so listing one branch
- * costs that branch rather than every participant the process holds, and no
- * two branches can share a slot. One flat key built by concatenation collided
+ * costs that branch plus a bounded sweep of other branches, and no two
+ * branches can share a slot. One flat key built by concatenation collided
  * for valid branded ids, which let one announcement overwrite another branch's
  * participant.
  *
@@ -258,25 +258,53 @@ export const makeMemory = (
     const roster = new Map<BranchId, Map<ParticipantId, Participant>>()
     const changes = yield* PubSub.sliding<BranchId>(changesCapacity)
 
+    const expire = (branchId: BranchId, nowMs: number) => {
+      const branch = roster.get(branchId)
+      if (branch === undefined) return undefined
+      for (const [participantId, participant] of branch) {
+        if (participant.leaseExpiresAtMs <= nowMs) branch.delete(participantId)
+      }
+      if (branch.size === 0) {
+        roster.delete(branchId)
+        return undefined
+      }
+      return branch
+    }
+
+    // Each announce/list advances through at most 16 branch maps. Their
+    // participant counts are capped, so unrelated activity reclaims abandoned
+    // rosters without scanning the entire registry in a single request.
+    let sweepCursor = roster.keys()
+    const sweep = (nowMs: number) => {
+      for (let index = 0; index < 16; index++) {
+        const next = sweepCursor.next()
+        if (next.done) {
+          sweepCursor = roster.keys()
+          break
+        }
+        expire(next.value, nowMs)
+      }
+    }
+
+    const detach = (participant: Participant): Participant =>
+      new Participant({
+        ...participant,
+        cursor: participant.cursor === null ? null : new Cursor(participant.cursor)
+      })
+
     /**
-     * One branch's unexpired participants, dropping that branch's run-out
-     * leases on the way through, so expiry needs no timer fiber. A branch
-     * whose last lease lapses loses its own map, so an abandoned branch costs
-     * nothing.
+     * Drop this branch's expired leases and advance cleanup of other branches.
+     * Abandoned maps are reclaimed as announce/list calls advance the sweep;
+     * an idle registry keeps them until activity resumes. Results are detached
+     * from storage, including each participant's cursor.
      */
     const live = (branchId: BranchId, nowMs: number): Array<Participant> => {
-      const branch = roster.get(branchId)
+      sweep(nowMs)
+      const branch = expire(branchId, nowMs)
       if (branch === undefined) return []
-      const remaining: Array<Participant> = []
-      for (const [participantId, participant] of branch) {
-        if (participant.leaseExpiresAtMs <= nowMs) {
-          branch.delete(participantId)
-          continue
-        }
-        remaining.push(participant)
-      }
-      if (branch.size === 0) roster.delete(branchId)
-      return remaining.sort((left, right) => left.participantId < right.participantId ? -1 : 1)
+      return Array.from(branch.values(), detach).sort((left, right) =>
+        left.participantId < right.participantId ? -1 : 1
+      )
     }
 
     const announce = Effect.fn("BranchPresence.announce")(function*(announcement: Announcement) {
@@ -319,7 +347,7 @@ export const makeMemory = (
       branch.set(announcement.participantId, participant)
       roster.set(announcement.branchId, branch)
       yield* PubSub.publish(changes, announcement.branchId)
-      return participant
+      return detach(participant)
     })
 
     const leave = Effect.fn("BranchPresence.leave")(function*(request: LeaveRequest) {

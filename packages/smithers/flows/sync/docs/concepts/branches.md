@@ -110,10 +110,16 @@ collaborator. A branch holds at most
 is refused with `backpressure`.
 
 `BranchPresence.list` is authoritative and `changes` is only a low-latency wake.
-Reading the roster is also what drops that branch's expired leases, so expiry
-needs no timer fiber. A watcher re-lists once per lease as well as on every
-change, because a lapsed lease publishes nothing: a watch driven by change
-events alone would never observe the last participant leaving.
+Each announcement or list drops that branch's expired leases and sweeps up to
+16 branch rosters for expired participants, deleting empty maps. The sweep
+resumes where the previous call stopped, so activity on other branches reclaims
+abandoned rosters. An idle registry retains expired storage until activity
+resumes; no timer fiber is needed. Both operations return detached participant
+and cursor values, so callers cannot mutate the stored roster through a result.
+
+A watcher re-lists once per lease as well as on every change, because a lapsed
+lease publishes nothing: a watch driven by change events alone would never
+observe the last participant leaving.
 
 ## The projection converges
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Duration, Effect, Fiber, Layer, Redacted, Stream } from "effect"
 import { TestClock } from "effect/testing"
+import { vi } from "vitest"
 import * as BranchPresence from "../src/BranchPresence.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
 import * as BranchShare from "../src/BranchShare.ts"
@@ -123,6 +124,95 @@ describe("BranchPresence", () => {
       expect(afterExpiry).toEqual([])
       expect(otherAfterExpiry).toEqual([])
     }))
+
+  it.effect("sweeps an abandoned branch when only another branch is listed", () =>
+    run(Effect.gen(function*() {
+      const presence = yield* BranchPresence.BranchPresence
+      const capability = yield* capabilityFor(branchId, "write")
+      const otherCapability = yield* capabilityFor(otherBranchId, "write")
+      for (const [target, token] of [[branchId, capability], [otherBranchId, otherCapability]] as const) {
+        yield* presence.announce({
+          capability: token,
+          branchId: target,
+          participantId: participant("abandoned"),
+          displayName: "Abandoned",
+          cursor: null
+        })
+      }
+      yield* TestClock.adjust(Duration.millis(leaseMs))
+      // Observe storage removal directly, without listing the abandoned branch
+      // (which would hide the leak) or relying on nondeterministic collection.
+      const deleted = vi.spyOn(Map.prototype, "delete")
+      try {
+        expect(yield* presence.list({ capability, branchId })).toEqual([])
+        expect(deleted).toHaveBeenCalledWith(otherBranchId)
+        const index = deleted.mock.calls.findIndex(([key]) => key === otherBranchId)
+        const roster = deleted.mock.contexts[index] as Map<BranchProtocol.BranchId, unknown>
+        expect(roster.has(otherBranchId)).toBe(false)
+      } finally {
+        deleted.mockRestore()
+      }
+    })))
+
+  it.effect("makes bounded sweep progress across abandoned branches on announcements", () =>
+    run(Effect.gen(function*() {
+      const presence = yield* BranchPresence.BranchPresence
+      const capability = yield* capabilityFor(branchId, "write")
+      const abandoned = Array.from({ length: 40 }, (_, index) => `abandoned-${index}` as BranchProtocol.BranchId)
+      for (const target of abandoned) {
+        yield* presence.announce({
+          capability: yield* capabilityFor(target, "write"),
+          branchId: target,
+          participantId: participant("abandoned"),
+          displayName: "Abandoned",
+          cursor: null
+        })
+      }
+      yield* TestClock.adjust(Duration.millis(leaseMs))
+      const deleted = vi.spyOn(Map.prototype, "delete")
+      try {
+        for (let index = 0; index < 4; index++) {
+          yield* presence.announce({
+            capability,
+            branchId,
+            participantId: participant("active"),
+            displayName: "Active",
+            cursor: null
+          })
+        }
+        for (const target of abandoned) expect(deleted).toHaveBeenCalledWith(target)
+        expect(yield* presence.list({ capability, branchId })).toHaveLength(1)
+      } finally {
+        deleted.mockRestore()
+      }
+    })))
+
+  for (const result of ["list", "announce"] as const) {
+    it.effect(`detaches participant and cursor values returned by ${result}`, () =>
+      run(Effect.gen(function*() {
+        const presence = yield* BranchPresence.BranchPresence
+        const writer = yield* capabilityFor(branchId, "write")
+        const reader = yield* capabilityFor(branchId, "read")
+        const announcement = {
+          capability: writer,
+          branchId,
+          participantId: participant("alice"),
+          displayName: "Alice",
+          cursor: new BranchProtocol.Cursor({ cardId: "card-1", offset: 4 })
+        }
+        const announced = yield* presence.announce(announcement)
+        const exposed = result === "announce"
+          ? announced
+          : (yield* presence.list({ capability: reader, branchId }))[0]!
+        Object.assign(exposed, { displayName: "Changed by caller", leaseExpiresAtMs: 0 })
+        Object.assign(exposed.cursor!, { cardId: "changed", offset: 99 })
+        const roster = yield* presence.list({ capability: reader, branchId })
+        expect(roster).toHaveLength(1)
+        expect(roster[0]?.displayName).toBe("Alice")
+        expect(roster[0]?.cursor).toEqual(announcement.cursor)
+        expect(roster[0]?.leaseExpiresAtMs).toBe(leaseMs)
+      })))
+  }
 
   it.effect("drops a participant on an explicit leave and publishes the change", () =>
     Effect.gen(function*() {
