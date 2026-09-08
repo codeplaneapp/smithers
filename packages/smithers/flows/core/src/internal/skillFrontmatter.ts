@@ -63,19 +63,26 @@ export const split = (text: string): { readonly frontmatter: string | undefined;
  * @slop
  */
 export const parse = (frontmatter: string): Result.Result<Record<string, unknown>, string> => {
-  const document = parseDocument(frontmatter, {
-    schema: "failsafe",
-    uniqueKeys: true
-  })
+  let value: unknown
+  try {
+    const document = parseDocument(frontmatter, {
+      schema: "failsafe",
+      uniqueKeys: true
+    })
 
-  if (document.errors.length > 0) {
-    return Result.fail(document.errors.slice(0, 3).map(summarizeIssue).join("; "))
-  }
-  if (!isMap(document.contents)) {
-    return Result.fail("Skill frontmatter must be a YAML mapping")
-  }
+    if (document.errors.length > 0) {
+      return Result.fail(document.errors.slice(0, 3).map(summarizeIssue).join("; "))
+    }
+    if (!isMap(document.contents)) {
+      return Result.fail("Skill frontmatter must be a YAML mapping")
+    }
 
-  const value: unknown = document.toJS()
+    value = document.toJS()
+  } catch {
+    // Conversion can reject aliases. Keep the expansion guard enabled and
+    // discard exception messages, which may contain source text.
+    return Result.fail("Skill frontmatter could not be parsed or converted from YAML")
+  }
   /* v8 ignore next 3 -- a yaml mapping always converts to a non-null object; the guard is defensive against a parser change */
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return Result.fail("Skill frontmatter must be a YAML mapping")

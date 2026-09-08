@@ -240,6 +240,38 @@ describe("Skill", () => {
     expect(result.failure.message.length).toBeLessThanOrEqual(200)
   })
 
+  describe.each(["parseSkill", "lowerSkill"] as const)("%s YAML aliases", (entrypoint) => {
+    it.each([
+      ["unresolved alias", ["extra: *sk-live-SECRETVALUE"]],
+      ["forward alias", ["extra: *sk-live-SECRETVALUE", "anchor: &sk-live-SECRETVALUE value"]],
+      ["alias expansion limit", [
+        "a: &a [sk-live-SECRETVALUE,x,x,x,x,x,x,x,x,x]",
+        "b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a,*a]",
+        "c: [*b,*b,*b,*b,*b,*b,*b,*b,*b,*b]"
+      ]]
+    ])("returns a bounded, redacted failure for %s", (_, fields) => {
+      const result: Result.Result<unknown, Markdown.MarkdownError> = Markdown[entrypoint](
+        document(["name: example", "description: Example", ...fields])
+      )
+
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isSuccess(result)) return
+      expect(result.failure).toBeInstanceOf(Markdown.MarkdownError)
+      expect(result.failure.code).toBe("skill_invalid_frontmatter")
+      expect(result.failure.message).toBe("Skill frontmatter could not be parsed or converted from YAML")
+      expect(result.failure.message).not.toContain("sk-live-SECRETVALUE")
+      expect(result.failure.message.length).toBeLessThanOrEqual(200)
+    })
+
+    it("accepts a resolved alias below the expansion limit", () => {
+      const result: Result.Result<unknown, Markdown.MarkdownError> = Markdown[entrypoint](
+        document(["name: example", "description: &description Example", "extra: *description"])
+      )
+
+      expect(Result.isSuccess(result)).toBe(true)
+    })
+  })
+
   it("keeps the stable code for a second malformed YAML document", () => {
     expect(errorCode("---\nname: n\ndescription: d\nmetadata: {unterminated\n---\nPrompt")).toBe(
       "skill_invalid_frontmatter"
