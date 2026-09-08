@@ -152,10 +152,13 @@ write. `runBatch` is derived from it and returns only the observations, in job
 order.
 
 Both are governed by one rule: a scorer failure becomes an inconclusive
-observation and never fails the target or the batch. Fiber interruption still
-propagates. A score-store failure is logged as a warning and does not fail the
-batch either. `runBatch` records what each scorer _answered_, while
-`runBatchCorrelated` also records what the store did. A `duplicate` outcome
+observation and never fails the target or the batch. Batch interruption
+propagates. Each queued job runs in its own scoped fiber: its interruption or
+defect cannot stop the workers or cancel other jobs. Closing the layer scope
+still interrupts running jobs. A score-store failure is logged as a warning
+with `identity`, `targetStepKey`, and `scorerKey` annotations and the structured
+store error, and does not fail the batch either. `runBatch` records what each
+scorer _answered_, while `runBatchCorrelated` also records what the store did. A `duplicate` outcome
 means the identity was already claimed; it does not claim that the returned
 observation is the one already in the store.
 
@@ -194,9 +197,13 @@ four migrations when it is built. What it guarantees across a restart is in
 Three handoffs decide what a later mutation can still change, and each one has
 one answer.
 
-`submit` copies a job's scalar fields as it queues it, and `record` and
-`recordOnce` copy and fully encode an observation when they are _called_, not
-when the Effect they return is run. Building `record(observation)`, mutating the
+`submit` copies a job's scalar fields and nested observation keys synchronously
+when called, before its returned Effect runs. The score Effect and its captures
+stay shared. Batch methods snapshot each job when that job starts executing;
+keep batch inputs stable until then.
+
+`record` and `recordOnce` copy and fully encode an observation when they are
+_called_, not when the Effect they return is run. Building `record(observation)`, mutating the
 object, and then running the Effect stores the observation as it stood at the
 call.
 

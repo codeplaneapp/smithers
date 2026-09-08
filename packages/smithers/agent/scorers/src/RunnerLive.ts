@@ -7,6 +7,7 @@
  */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
 import * as Text from "./internal/text.ts"
@@ -60,9 +61,10 @@ const snapshot = (job: Runner.Job): Runner.Job => ({
 /**
  * Provides a scoped non-blocking queue and a blocking batch runner.
  *
- * Scorer failures become inconclusive observations. Fiber interruption still
- * propagates, while score-store failures never fail the target or batch: they
- * are logged as warnings instead. Total silence was the earlier behavior and
+ * Scorer failures become inconclusive observations. Batch interruption
+ * propagates; queued job interruption stays local to that job. Score-store
+ * failures never fail the target or batch: they are logged as warnings instead.
+ * Total silence was the earlier behavior and
  * it made a persisted observation, a duplicate suppressed by the job-claim
  * table, and an observation lost to a database failure indistinguishable.
  *
@@ -102,6 +104,11 @@ export const layer = (options: Options = {}): Layer.Layer<Runner.Runner, never, 
               Effect.map((recorded): Runner.Recorded => recorded ? "persisted" : "duplicate"),
               Effect.catch((error) =>
                 Effect.logWarning("Could not record a scorer observation", error).pipe(
+                  Effect.annotateLogs({
+                    identity: job.identity,
+                    targetStepKey: job.observation.targetStepKey,
+                    scorerKey: job.observation.scorerKey
+                  }),
                   Effect.as<Runner.Recorded>("failed")
                 )
               ),
@@ -111,7 +118,9 @@ export const layer = (options: Options = {}): Layer.Layer<Runner.Runner, never, 
         )
       const worker = Effect.forever(
         Queue.take(queue).pipe(
-          Effect.flatMap(execute),
+          // Observe the job's exit without propagating interruption or defects
+          // into the shared workers. The layer scope still owns every job.
+          Effect.flatMap((job) => execute(job).pipe(Effect.forkScoped, Effect.flatMap(Fiber.await))),
           Effect.asVoid
         )
       )

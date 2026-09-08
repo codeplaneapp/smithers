@@ -17,10 +17,14 @@ import { maxReasonBytes, type Observation, type ObservationBase } from "./ScoreS
 /**
  * One scorer execution request.
  *
- * A job is retained by reference until a worker takes it, so every field must
- * be stable from the moment it is submitted. `identity` is the durable
- * idempotency key: build it with {@link jobIdentity} rather than by joining
- * strings, so two different tuples cannot produce one identity. It must also be
+ * `submit` copies scalar fields and observation keys synchronously when called,
+ * before its returned Effect is run. Only the score Effect and its captured
+ * values stay shared. Batch methods snapshot each job when its execution starts,
+ * so batch inputs must remain stable until then.
+ *
+ * `identity` is the durable idempotency key: build it with {@link jobIdentity}
+ * rather than by joining strings, so two different tuples cannot produce one
+ * identity. It must also be
  * stable across a restart, or the retry after a crash records a second
  * observation for work that already happened.
  *
