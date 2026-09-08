@@ -127,6 +127,22 @@ including file type and permissions), `Suite`, `Alias`, `Materialize`, and
 `Files.Test`. `PackageDefaults` applies a function you provide to matching
 package directories. Keep shared package conventions in your repository.
 
+`Compose.checkGenerator` and `Compose.GenerateCheckLive` back up declared outputs
+outside the workspace before running the generator. Copies use eight workers,
+64 KiB buffers, a 256 MiB per-file ceiling, and a 1 GiB aggregate ceiling.
+`snapshotLimits.fileBytes` and `snapshotLimits.totalBytes` accept non-negative
+integers up to those ceilings. Exceeding a ceiling fails before the generator
+runs. Text drift previews are limited to 64 KiB per file; larger files still
+compare their full contents by digest.
+
+Rollback repairs declared directories replaced by files or symlinks before
+restoring descendants. It never follows a substituted symlink. Successful
+restoration removes the scratch tree, including after generator failure or
+cancellation. Failed restoration retains it and reports its absolute path in
+the error. The retained `files/` tree contains original regular-file bytes;
+`manifest.json` records workspace paths, file types, permissions, and link
+targets for recovery. Undeclared ancestors remain outside the repair contract.
+
 `BunSuite` runs a Vitest suite under Bun with coverage disabled. `FaultSuite`
 runs a separate fault-test suite. Both accept file and configuration overrides;
 your Vitest configuration controls test scheduling.

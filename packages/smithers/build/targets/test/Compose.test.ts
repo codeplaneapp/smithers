@@ -5,7 +5,15 @@
  * the resolver inputs exposed by import closures, and every refusal by which
  * file algebra avoids silently treating an unsupported target as an empty set.
  */
-import { describe, expect, it } from "vitest"
+import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import { constants as NodeFsConstants } from "node:fs"
+import * as Fs from "node:fs/promises"
+import * as Os from "node:os"
+import * as NodePath from "node:path"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("node:fs/promises", async (original) => ({ ...await original<typeof Fs>() }))
 import * as Compose from "../src/Compose.ts"
 import * as Filegroup from "../src/Filegroup.ts"
 import * as Input from "../src/Input.ts"
@@ -217,5 +225,152 @@ describe("file-set checks", () => {
     expect(plannedCalls(manifest)[0]?.payload).toEqual({
       target: "Test: a file-set difference can only compare to empty"
     })
+  })
+})
+
+describe("generator backup recovery and bounds", () => {
+  const temporary: Array<string> = []
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    await Promise.all(temporary.splice(0).map((path) => Fs.rm(path, { recursive: true, force: true })))
+  })
+  const directory = async () => {
+    const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "targets-backup-test-")))
+    temporary.push(root)
+    return root
+  }
+  const check = (root: string, program: string, changes = ["out"], snapshotLimits = {}) =>
+    Effect.runPromiseExit(Compose.checkGenerator({ workspaceRoot: root, snapshotLimits }, {
+      run: {
+        argv: [process.execPath, "-e", program],
+        cwd: ".",
+        env: {},
+        secrets: [],
+        expectedExitCodes: [0],
+        timeoutMs: 30_000
+      },
+      changes
+    } as never))
+
+  it.each(["file", "symlink"])("restores a declared directory replaced by a %s", async (kind) => {
+    const root = await directory()
+    const outside = await directory()
+    await Fs.mkdir(NodePath.join(root, "out/nested"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "out/nested/original.txt"), "irreplaceable bytes")
+    await Fs.chmod(NodePath.join(root, "out/nested/original.txt"), 0o640)
+    await Fs.writeFile(NodePath.join(outside, "sentinel.txt"), "untouched")
+    const replace = kind === "file"
+      ? "fs.writeFileSync('out', 'replacement')"
+      : `fs.symlinkSync(${JSON.stringify(outside)}, 'out')`
+    const exit = await check(root, `const fs = require('node:fs'); fs.rmSync('out', { recursive: true }); ${replace}`, [
+      "out",
+      "out/nested/original.txt"
+    ])
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect((await Fs.lstat(NodePath.join(root, "out"))).isDirectory()).toBe(true)
+    expect(await Fs.readFile(NodePath.join(root, "out/nested/original.txt"), "utf8")).toBe("irreplaceable bytes")
+    expect((await Fs.stat(NodePath.join(root, "out/nested/original.txt"))).mode & 0o777).toBe(0o640)
+    expect(await Fs.readdir(outside)).toEqual(["sentinel.txt"])
+    expect(await Fs.readFile(NodePath.join(outside, "sentinel.txt"), "utf8")).toBe("untouched")
+  })
+
+  it("bounds open descriptors while snapshotting many files", async () => {
+    const root = await directory()
+    await Fs.mkdir(NodePath.join(root, "out"))
+    for (let index = 0; index < 80; index++) await Fs.writeFile(NodePath.join(root, `out/${index}.txt`), "bytes")
+    const open = Fs.open
+    let active = 0
+    let peak = 0
+    vi.spyOn(Fs, "open").mockImplementation(async (...args) => {
+      const handle = await open(...args)
+      active += 1
+      peak = Math.max(peak, active)
+      const close = handle.close.bind(handle)
+      vi.spyOn(handle, "close").mockImplementation(async () => {
+        try {
+          await close()
+        } finally {
+          active -= 1
+        }
+      })
+      return handle
+    })
+    expect(Exit.isSuccess(await check(root, "void 0"))).toBe(true)
+    expect(active).toBe(0)
+    expect(peak).toBeLessThanOrEqual(16)
+  })
+
+  it.each([
+    [{ fileBytes: 3 }, "file byte limit"],
+    [{ totalBytes: 7 }, "aggregate byte limit"]
+  ])("refuses snapshot limits before running the generator: %s", async (limits, message) => {
+    const root = await directory()
+    await Fs.mkdir(NodePath.join(root, "out"))
+    await Fs.writeFile(NodePath.join(root, "out/a"), "four")
+    await Fs.writeFile(NodePath.join(root, "out/b"), "four")
+    const exit = await check(root, "require('node:fs').writeFileSync('ran', 'yes')", ["out"], limits)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain(message)
+    await expect(Fs.stat(NodePath.join(root, "ran"))).rejects.toThrow()
+    expect(await Fs.readFile(NodePath.join(root, "out/a"), "utf8")).toBe("four")
+  })
+
+  it("retains a recoverable tree and names it when restoration fails", async () => {
+    const root = await directory()
+    await Fs.mkdir(NodePath.join(root, "out"))
+    const original = NodePath.join(root, "out/original.txt")
+    await Fs.writeFile(original, "irreplaceable bytes")
+    await Fs.chmod(original, 0o640)
+    const mkdtemp = vi.spyOn(Fs, "mkdtemp")
+    const open = Fs.open
+    vi.spyOn(Fs, "open").mockImplementation(async (...args) => {
+      if (args[0] === original && typeof args[1] === "number" && (args[1] & NodeFsConstants.O_WRONLY) !== 0) {
+        throw new Error("injected restore failure")
+      }
+      return open(...args)
+    })
+    const exit = await check(
+      root,
+      "const fs = require('node:fs'); fs.rmSync('out', { recursive: true }); fs.writeFileSync('out', 'replacement')"
+    )
+    const backup = await mkdtemp.mock.results[0]!.value as string
+    temporary.push(backup)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("injected restore failure")
+    expect(JSON.stringify(exit)).toContain(`generator backup retained at ${backup}`)
+    expect(await Fs.readFile(NodePath.join(backup, "files/out/original.txt"), "utf8")).toBe("irreplaceable bytes")
+    const manifest = JSON.parse(await Fs.readFile(NodePath.join(backup, "manifest.json"), "utf8"))
+    expect(manifest.root).toBe(root)
+    expect(manifest.entries).toContainEqual(
+      expect.objectContaining({ path: "out/original.txt", kind: "file", mode: 0o640 })
+    )
+  })
+
+  it("streams multi-chunk binary files back and removes successful backups", async () => {
+    const root = await directory()
+    await Fs.mkdir(NodePath.join(root, "out"))
+    const bytes = Buffer.alloc(3 * 64 * 1024 + 7, 0xab)
+    await Fs.writeFile(NodePath.join(root, "out/binary"), bytes)
+    const mkdtemp = vi.spyOn(Fs, "mkdtemp")
+    const exit = await check(root, "require('node:fs').writeFileSync('out/binary', 'changed')")
+    const backup = await mkdtemp.mock.results[0]!.value as string
+    temporary.push(backup)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("text preview limited")
+    expect(await Fs.readFile(NodePath.join(root, "out/binary"))).toEqual(bytes)
+    await expect(Fs.stat(backup)).rejects.toThrow()
+  })
+
+  it("drains failed snapshot workers and removes their scratch files", async () => {
+    const root = await directory()
+    await Fs.mkdir(NodePath.join(root, "out"))
+    for (let index = 0; index < 40; index++) await Fs.writeFile(NodePath.join(root, `out/${index}`), "four")
+    const mkdtemp = vi.spyOn(Fs, "mkdtemp")
+    const exit = await check(root, "void 0", ["out"], { totalBytes: 7 })
+    const backup = await mkdtemp.mock.results[0]!.value as string
+    temporary.push(backup)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("aggregate byte limit")
+    await expect(Fs.stat(backup)).rejects.toThrow()
   })
 })

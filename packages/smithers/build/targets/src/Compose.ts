@@ -15,8 +15,10 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import { createHash } from "node:crypto"
 import { constants as NodeFsConstants } from "node:fs"
 import * as Fs from "node:fs/promises"
+import * as Os from "node:os"
 import * as NodePath from "node:path"
 import * as Attr from "./Attr.ts"
 import * as Exec from "./Exec.ts"
@@ -226,10 +228,11 @@ type OutputKind = "absent" | "directory" | "file" | "symlink" | "other"
 /** One declared output exactly as it stood before the generator ran. */
 interface OutputState {
   readonly kind: OutputKind
-  /** File contents, or the link target for a symlink. */
+  /** Link target, or a bounded file preview used only for the first drift. */
   readonly bytes: Buffer | undefined
   /** Permission bits, so a chmod-only change is drift and is undone. */
   readonly mode: number | undefined
+  readonly digest?: string | undefined
 }
 
 /** One declared output as it stood before the generator ran. */
@@ -241,6 +244,41 @@ interface OutputSnapshot extends OutputState {
 interface OutputTreeSnapshot {
   readonly root: string
   readonly entries: ReadonlyArray<OutputSnapshot>
+  readonly backup: string
+  restoreAttempted: boolean
+  restored: boolean
+}
+
+interface SnapshotLimits {
+  readonly fileBytes?: number | undefined
+  readonly totalBytes?: number | undefined
+}
+
+const maximumSnapshotFileBytes = 256 * 1024 * 1024
+const maximumSnapshotTotalBytes = 1024 * 1024 * 1024
+const snapshotConcurrency = 8
+const outputChunkBytes = 64 * 1024
+
+interface SnapshotBudget {
+  readonly fileBytes: number
+  readonly totalBytes: number
+  bytes: number
+}
+
+const snapshotBudget = (limits: SnapshotLimits): SnapshotBudget => {
+  const fileBytes = limits.fileBytes ?? maximumSnapshotFileBytes
+  const totalBytes = limits.totalBytes ?? maximumSnapshotTotalBytes
+  for (
+    const [name, value, maximum] of [
+      ["fileBytes", fileBytes, maximumSnapshotFileBytes],
+      ["totalBytes", totalBytes, maximumSnapshotTotalBytes]
+    ] as const
+  ) {
+    if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
+      throw new Error(`snapshot ${name} must be an integer from 0 to ${maximum}`)
+    }
+  }
+  return { fileBytes, totalBytes, bytes: 0 }
 }
 
 /** Maximum code units one excerpted line contributes to a drift message. */
@@ -270,6 +308,12 @@ const driftMessage = (path: string, previous: OutputState, current: OutputState)
   if (current.kind === "absent") return `${path} is carried by the checkout and the generator removes it`
   if (previous.kind !== current.kind) {
     return `${path} is a ${previous.kind} in the checkout and the generator leaves a ${current.kind}`
+  }
+  if (previous.kind === "file" && previous.digest === current.digest) {
+    return `${path} kept its contents and the generator changed its permissions`
+  }
+  if (previous.kind === "file" && (previous.bytes === undefined || current.bytes === undefined)) {
+    return `${path} changed its contents (text preview limited to ${outputChunkBytes} bytes)`
   }
   if (previous.bytes === undefined || current.bytes === undefined) {
     return `${path} changed and the change is not readable as text`
@@ -333,7 +377,13 @@ const checkedOutputPath = async (
 const readOutput = async (
   root: string,
   path: string,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  options: {
+    readonly metadataOnly?: boolean
+    readonly backup?: string
+    readonly budget?: SnapshotBudget
+    readonly preview?: boolean
+  } = {}
 ): Promise<OutputState> => {
   signal?.throwIfAborted()
   const absolute = await checkedOutputPath(root, path, signal)
@@ -350,13 +400,63 @@ const readOutput = async (
   }
   if (stats.isDirectory()) return { kind: "directory", bytes: undefined, mode: stats.mode & 0o7777 }
   if (!stats.isFile()) return { kind: "other", bytes: undefined, mode: stats.mode & 0o7777 }
-  const handle = await Fs.open(absolute, NodeFsConstants.O_RDONLY | NodeFsConstants.O_NOFOLLOW)
+  if (options.metadataOnly) return { kind: "file", bytes: undefined, mode: stats.mode & 0o7777 }
+  const handle = await Fs.open(
+    absolute,
+    NodeFsConstants.O_RDONLY | NodeFsConstants.O_NOFOLLOW | NodeFsConstants.O_NONBLOCK
+  )
+  let destination: Fs.FileHandle | undefined
   try {
     const opened = await handle.stat()
     if (!opened.isFile()) throw new Error(`declared output changed while it was being read: ${path}`)
-    return { kind: "file", bytes: await handle.readFile(), mode: opened.mode & 0o7777 }
+    const fileLimit = options.budget?.fileBytes ?? maximumSnapshotFileBytes
+    if (opened.size > fileLimit) throw new Error(`declared output exceeds its file byte limit of ${fileLimit}: ${path}`)
+    if (options.backup !== undefined) {
+      const target = NodePath.join(options.backup, "files", path)
+      await Fs.mkdir(NodePath.dirname(target), { recursive: true })
+      destination = await Fs.open(
+        target,
+        NodeFsConstants.O_WRONLY | NodeFsConstants.O_CREAT | NodeFsConstants.O_EXCL,
+        0o600
+      )
+    }
+    const hash = createHash("sha256")
+    const buffer = Buffer.alloc(outputChunkBytes)
+    const preview = options.preview && opened.size <= outputChunkBytes ? Buffer.alloc(opened.size) : undefined
+    let total = 0
+    while (true) {
+      signal?.throwIfAborted()
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null)
+      if (bytesRead === 0) break
+      const chunk = buffer.subarray(0, bytesRead)
+      if (preview !== undefined && total < preview.length) {
+        preview.set(chunk.subarray(0, preview.length - total), total)
+      }
+      total += bytesRead
+      if (total > fileLimit) throw new Error(`declared output exceeds its file byte limit of ${fileLimit}: ${path}`)
+      if (options.budget !== undefined) {
+        options.budget.bytes += bytesRead
+        if (options.budget.bytes > options.budget.totalBytes) {
+          throw new Error(`declared output snapshot exceeds its aggregate byte limit of ${options.budget.totalBytes}`)
+        }
+      }
+      hash.update(chunk)
+      await destination?.writeFile(chunk)
+    }
+    const after = await handle.stat()
+    if (
+      total !== opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs ||
+      after.ctimeMs !== opened.ctimeMs
+    ) {
+      throw new Error(`declared output changed while it was being read: ${path}`)
+    }
+    return { kind: "file", bytes: preview, digest: hash.digest("hex"), mode: opened.mode & 0o7777 }
   } finally {
-    await handle.close()
+    try {
+      await destination?.close()
+    } finally {
+      await handle.close()
+    }
   }
 }
 
@@ -445,7 +545,7 @@ const outputPaths = async (
     for (const path of expanded) paths.add(path)
     const declared = Input.resolvePath("", pattern)
     paths.add(declared)
-    if ((await readOutput(root, declared, signal)).kind === "directory") {
+    if ((await readOutput(root, declared, signal, { metadataOnly: true })).kind === "directory") {
       await walkOutputDirectory(root, declared, walk, signal)
     }
   }
@@ -455,20 +555,53 @@ const outputPaths = async (
 const snapshotOutputs = async (
   workspaceRoot: string,
   changes: ReadonlyArray<string>,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  limits: SnapshotLimits = {}
 ): Promise<OutputTreeSnapshot> => {
+  const budget = snapshotBudget(limits)
   const root = await SafeFs.canonicalRoot(workspaceRoot)
-  const entries = await Promise.all(
-    (await outputPaths(root, changes, signal)).map(async (path) => ({
-      path,
-      ...await readOutput(root, path, signal)
-    }))
-  )
-  return { root, entries }
+  const backup = await Fs.mkdtemp(NodePath.join(await Fs.realpath(Os.tmpdir()), "smithers-generator-backup-"))
+  try {
+    if (SafeFs.inside(root, backup)) throw new Error(`generator backup must be outside the workspace: ${backup}`)
+    const paths = await outputPaths(root, changes, signal)
+    const entries = new Array<OutputSnapshot>(paths.length)
+    let cursor = 0
+    let failure: unknown
+    const worker = async (): Promise<void> => {
+      while (failure === undefined) {
+        const index = cursor++
+        if (index >= paths.length) return
+        const path = paths[index]!
+        try {
+          entries[index] = { path, ...await readOutput(root, path, signal, { backup, budget }) }
+          if (entries[index].kind === "other") throw new Error(`declared output is not recoverable: ${path}`)
+        } catch (cause) {
+          failure = cause
+        }
+      }
+    }
+    // Drain every active copy before cleanup, including when one worker fails.
+    await Promise.all(Array.from({ length: Math.min(snapshotConcurrency, paths.length) }, worker))
+    if (failure !== undefined) throw failure
+    await Fs.writeFile(
+      NodePath.join(backup, "manifest.json"),
+      JSON.stringify({
+        root,
+        entries: entries.map(({ bytes, ...entry }) => ({ ...entry, link: bytes?.toString("utf8") }))
+      }),
+      { mode: 0o600 }
+    )
+    return { root, entries, backup, restoreAttempted: false, restored: false }
+  } catch (cause) {
+    await Fs.rm(backup, { recursive: true, force: true })
+    throw cause
+  }
 }
 
 const unchanged = (previous: OutputState, current: OutputState): boolean => {
-  if (previous.kind !== current.kind || previous.mode !== current.mode) return false
+  if (previous.kind !== current.kind || previous.mode !== current.mode || previous.digest !== current.digest) {
+    return false
+  }
   if (previous.bytes === undefined) return current.bytes === undefined
   return current.bytes !== undefined && equalBytes(previous.bytes, current.bytes)
 }
@@ -482,7 +615,7 @@ const unchanged = (previous: OutputState, current: OutputState): boolean => {
  * the restore applies recorded directory modes only after the whole tree exists.
  */
 const sameContents = (previous: OutputState, current: OutputState): boolean => {
-  if (previous.kind !== current.kind) return false
+  if (previous.kind !== current.kind || previous.digest !== current.digest) return false
   if (previous.bytes === undefined) return current.bytes === undefined
   return current.bytes !== undefined && equalBytes(previous.bytes, current.bytes)
 }
@@ -533,6 +666,7 @@ const restoreOutput = async (
   path: string,
   previous: OutputState,
   replace: boolean,
+  backup: string,
   signal: AbortSignal | undefined
 ): Promise<void> => {
   if (previous.kind === "absent" || previous.kind === "other") return
@@ -557,11 +691,31 @@ const restoreOutput = async (
     previous.mode ?? 0o644
   )
   try {
-    await handle.writeFile(previous.bytes ?? Buffer.alloc(0))
+    const source = await Fs.open(
+      NodePath.join(backup, "files", path),
+      NodeFsConstants.O_RDONLY | NodeFsConstants.O_NOFOLLOW
+    )
+    try {
+      const buffer = Buffer.alloc(outputChunkBytes)
+      while (true) {
+        signal?.throwIfAborted()
+        const { bytesRead } = await source.read(buffer, 0, buffer.length, null)
+        if (bytesRead === 0) break
+        await handle.writeFile(buffer.subarray(0, bytesRead))
+      }
+    } finally {
+      await source.close()
+    }
     if (previous.mode !== undefined) await handle.chmod(previous.mode)
   } finally {
     await handle.close()
   }
+}
+
+const byDepthThenPath = (left: { readonly path: string }, right: { readonly path: string }): number => {
+  const leftDepth = left.path === "." ? 0 : left.path.split("/").length
+  const rightDepth = right.path === "." ? 0 : right.path.split("/").length
+  return leftDepth - rightDepth || left.path.localeCompare(right.path)
 }
 
 /**
@@ -573,6 +727,17 @@ const restoreOutputs = async (
   changes: ReadonlyArray<string>,
   signal: AbortSignal | undefined
 ): Promise<GeneratedFile.DriftError | undefined> => {
+  const repaired = new Map<string, OutputState>()
+  // Only snapshotted directories are ours to repair. Undeclared ancestors
+  // still fail the no-follow check and leave the recovery tree intact.
+  for (const entry of before.entries.filter((entry) => entry.kind === "directory").sort(byDepthThenPath)) {
+    const current = await readOutput(before.root, entry.path, signal, { metadataOnly: true })
+    if (current.kind !== "directory") {
+      repaired.set(entry.path, current)
+      await removeOutput(before.root, entry.path, signal)
+      await restoreOutput(before.root, entry.path, entry, true, before.backup, signal)
+    }
+  }
   const previousByPath = new Map(before.entries.map((entry) => [entry.path, entry]))
   const paths = new Set(previousByPath.keys())
   for (const path of await outputPaths(before.root, changes, signal)) paths.add(path)
@@ -584,18 +749,22 @@ const restoreOutputs = async (
     .map((path) => ({
       path,
       previous: previousByPath.get(path) ?? absent,
-      current: currentByPath.get(path) ?? absent
+      current: repaired.get(path) ?? currentByPath.get(path) ?? absent
     }))
     .filter((entry) => !unchanged(entry.previous, entry.current))
   const first = [...changed].sort((left, right) => left.path.localeCompare(right.path))[0]
   if (first === undefined) return undefined
-  const byDepthThenPath = (left: { readonly path: string }, right: { readonly path: string }): number => {
-    const leftDepth = left.path === "." ? 0 : left.path.split("/").length
-    const rightDepth = right.path === "." ? 0 : right.path.split("/").length
-    return leftDepth - rightDepth || left.path.localeCompare(right.path)
-  }
+  const message = driftMessage(
+    first.path,
+    first.previous.kind === "file" && first.current.kind === "file"
+      ? await readOutput(NodePath.join(before.backup, "files"), first.path, signal, { preview: true })
+      : first.previous,
+    first.previous.kind === "file" && first.current.kind === "file"
+      ? await readOutput(before.root, first.path, signal, { preview: true })
+      : first.current
+  )
   for (const entry of [...changed].sort((left, right) => -byDepthThenPath(left, right))) {
-    if (needsReplacement(entry.previous, entry.current)) {
+    if (!repaired.has(entry.path) && needsReplacement(entry.previous, entry.current)) {
       await removeOutput(before.root, entry.path, signal)
     }
   }
@@ -604,7 +773,8 @@ const restoreOutputs = async (
       before.root,
       entry.path,
       entry.previous,
-      needsReplacement(entry.previous, entry.current),
+      !repaired.has(entry.path) && needsReplacement(entry.previous, entry.current),
+      before.backup,
       signal
     )
   }
@@ -617,7 +787,7 @@ const restoreOutputs = async (
   }
   const drift = GeneratedFile.driftError(
     first.path,
-    driftMessage(first.path, first.previous, first.current),
+    message,
     first.previous.kind === "absent" ? "missing" : "drifted"
   )
   return drift
@@ -628,11 +798,15 @@ const restoreOutputs = async (
  *
  * A generator writes into the real tree, which is the only tree it knows how
  * to write; the check snapshots every declared output first — its bytes, its
- * file type, and its permission bits, read without following a symlink — and
- * restores each one before it settles, so a `lint` run leaves the working tree
+ * file type, and its permission bits, copied to a scoped scratch tree without
+ * following a symlink — and restores each one before it settles, so a `lint`
+ * run leaves the working tree
  * as it found it, whether the generator succeeded, drifted, or failed. A
  * generator that writes outside its declared `changes` is outside the
  * contract, exactly as it is under the build system's enforced write set.
+ * Failed restoration retains the scratch tree and reports its recovery path.
+ * `snapshotLimits` can lower the 256 MiB per-file and 1 GiB aggregate ceilings;
+ * acquisition rejects an oversized snapshot before running the generator.
  *
  * @category effects
  * @since 0.1.0
@@ -640,6 +814,7 @@ const restoreOutputs = async (
 export const checkGenerator = (
   options: {
     readonly workspaceRoot: string
+    readonly snapshotLimits?: SnapshotLimits | undefined
     readonly cacheDirectory?: string | undefined
     readonly sensitiveEnv?: ReadonlyArray<string> | undefined
     readonly environment?: Exec.ToolEnvironment | undefined
@@ -649,38 +824,48 @@ export const checkGenerator = (
   const failed = (path: string) => (cause: unknown): GeneratedFile.DriftError =>
     GeneratedFile.driftError(path, GeneratedFile.failureMessage(cause), "unreadable")
   const declared = payload.changes[0] ?? "generated output"
+  const recoveryFailure = (before: OutputTreeSnapshot) => (cause: unknown): GeneratedFile.DriftError =>
+    failed(declared)(new Error(`${GeneratedFile.failureMessage(cause)}; generator backup retained at ${before.backup}`))
   const restore = (before: OutputTreeSnapshot) =>
+    Effect.uninterruptible(Effect.tryPromise({
+      try: async (signal) => {
+        before.restoreAttempted = true
+        const drift = await restoreOutputs(before, payload.changes, signal)
+        before.restored = true
+        return drift
+      },
+      catch: recoveryFailure(before)
+    }))
+  return Effect.acquireUseRelease(
     Effect.tryPromise({
-      try: (signal) => restoreOutputs(before, payload.changes, signal),
-      catch: failed(declared)
-    })
-  return Effect.flatMap(
-    Effect.tryPromise({
-      try: (signal) => snapshotOutputs(options.workspaceRoot, payload.changes, signal),
+      try: (signal) => snapshotOutputs(options.workspaceRoot, payload.changes, signal, options.snapshotLimits),
       catch: failed(declared)
     }),
     (before) =>
-      Effect.onInterrupt(
-        Effect.flatMap(
-          Effect.exit(Exec.run(options, payload.run)),
-          (ran) =>
-            Effect.flatMap(
-              restore(before),
-              (drift): Effect.Effect<void, Exec.ExecError | GeneratedFile.DriftError> =>
-                Exit.isFailure(ran)
-                  ? Effect.failCause(ran.cause)
-                  : drift === undefined
-                  ? Effect.void
-                  : Effect.fail(drift)
-            )
-        ),
-        // Cancellation settles the check after the generator has already
-        // written, and an interrupted fiber runs no more interruptible work,
-        // so the restore on the success and failure paths never reaches the
-        // disk. As a finalizer it does, and a cancelled `lint` leaves the
-        // checked-in bytes behind like every other way the check settles.
-        // The finalizer reports nothing: the interruption is the outcome.
-        () => Effect.ignore(restore(before))
+      Effect.flatMap(
+        Effect.exit(Exec.run(options, payload.run)),
+        (ran) =>
+          Effect.flatMap(
+            restore(before),
+            (drift): Effect.Effect<void, Exec.ExecError | GeneratedFile.DriftError> =>
+              Exit.isFailure(ran)
+                ? Effect.failCause(ran.cause)
+                : drift === undefined
+                ? Effect.void
+                : Effect.fail(drift)
+          )
+      ),
+    // An interrupted generator also returns its borrowed outputs. Failed
+    // restoration keeps the only recoverable copy and names it in the error.
+    (before) =>
+      Effect.andThen(
+        before.restoreAttempted ? Effect.void : Effect.orDie(restore(before)),
+        Effect.orDie(Effect.tryPromise({
+          try: async () => {
+            if (before.restored) await Fs.rm(before.backup, { recursive: true, force: true })
+          },
+          catch: recoveryFailure(before)
+        }))
       )
   )
 }
@@ -693,6 +878,7 @@ export const checkGenerator = (
  * @since 0.1.0
  */
 export const GenerateCheckLive = (options: {
+  readonly snapshotLimits?: SnapshotLimits | undefined
   readonly workspaceRoot: string
   readonly cacheDirectory?: string | undefined
   readonly sensitiveEnv?: ReadonlyArray<string> | undefined
