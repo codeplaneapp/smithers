@@ -68,10 +68,10 @@ import * as Schema from "effect/Schema"
 const publicRefusal = (error: { readonly message: string }): string => error.message
 
 /** Shell/test execution failures may contain OS diagnostics. */
-const publicExecutionError = (error: StdError): string | undefined =>
-  error.code === "command_failed" || error.code === "request_failed" || error.code === "timeout"
-    ? undefined
-    : error.message
+const publicExecutionError = (error: StdError): string | undefined => {
+  if (error.code === "timeout") return "The command timed out."
+  return error.code === "command_failed" || error.code === "request_failed" ? undefined : error.message
+}
 
 /** Native search may report raw stderr; publish only its corrective contract. */
 const publicSearchError = (error: StdError): string | undefined => {

@@ -4,48 +4,22 @@
 app took a workaround instead of changing a library. Will approves library
 changes personally.
 
-## 1. `FlowBinding` refusals lose the raw handler message
+## 1. CLOSED: `FlowBinding` public refusals and opaque failures
 
 - **File**: `packages/smithers/agent/harness/src/FlowBinding.ts`
-- **What**: `make`'s runner wraps every handler failure as
-  `` `Flow ${descriptor.name} failed: ${describe(produced.failure)}` `` and puts
-  that single string in `CallResult.message`. The original failure value is not
-  carried anywhere on the result.
-- **Why it matters here**: the app dispatches user-facing affordances through
-  the same bindings the agent calls. A handler's failure IS the copy the human
-  reads ("send needs the text to submit"), so the framing prefix is noise on the
-  UI surface while being useful on the cell surface. With only the framed string
-  available, the host has to re-derive the raw message by stripping a prefix it
-  reconstructs from the flow name — a string contract between two modules that
-  the type system does not check, and that silently degrades to the framed text
-  if the library ever rewords it.
-- **Workaround taken**: `apps/ui/src/mainview/flows/Commands.ts` has an
-  `unframe(name, message)` helper that strips the exact
-  `` `Flow ${name} failed: ` `` prefix when present and otherwise passes the
-  message through. It is correct today and fails safe (worst case the human sees
-  the framed text), but it duplicates a library string.
-- **Proposed diff sketch**: add an optional raw field to `Cell.CallResult` and
-  populate it in `FlowBinding.make`:
-
-  ```diff
-   export class CallResult extends Schema.Class<CallResult>("flows/harness/Cell/CallResult")({
-     outcome: Schema.Literals(["success", "failure"]),
-     value: Schema.Json,
-  -  message: Schema.optional(Schema.String)
-  +  message: Schema.optional(Schema.String),
-  +  /** The handler's own refusal, unframed, for hosts that surface it directly. */
-  +  detail: Schema.optional(Schema.String)
-   }) {}
-  ```
-
-  ```diff
-  -const refused = (message: string): CallResult => new CallResult({ outcome: "failure", value: null, message })
-  +const refused = (message: string, detail?: string): CallResult =>
-  +  new CallResult({ outcome: "failure", value: null, message, ...(detail === undefined ? {} : { detail }) })
-  ```
-
-  with the handler-failure branch passing `describe(produced.failure)` as
-  `detail`. Nothing existing reads `detail`, so the change is additive.
+- **Current contract**: unknown handler failures return `Flow <name> failed.`.
+  A binding may explicitly publish safe text with `publicError`, which returns
+  `Flow <name> failed: <public text>`. Raw diagnostic causes stay host-side.
+- **App binding**: `flows/entries/Declare.ts` opts returned refusal strings into
+  `publicError` and preserves thrown causes for host inspection without exposing
+  them to cells or journals.
+- **Workaround retained**: `flows/Commands.ts` uses `unframe(name, message)` to
+  strip the exact `Flow <name> failed: ` prefix from public refusals and map
+  the bare `Flow <name> failed.` form to `/<name> failed` for humans. Other
+  messages pass through. This still depends on the library's framing text.
+- **Resolution**: the proposed raw handler-message field is withdrawn because
+  it would bypass the explicit disclosure boundary. Any future structured
+  detail field must contain only text selected by `publicError`.
 
 ## 2. The cell loop's capability envelope refuses any host capability vocabulary
 

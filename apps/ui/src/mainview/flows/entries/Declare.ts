@@ -75,11 +75,12 @@ const APP_ACT: ReadonlyArray<string> = ["app:act"]
  */
 const act = (
   run: () => CommandResult | Promise<CommandResult>
-): Effect.Effect<{ readonly value?: string }, string | undefined> =>
+): Effect.Effect<{ readonly value?: string }, string | { readonly cause: unknown }> =>
   Effect.flatMap(
     Effect.tryPromise({
       try: async () => run(),
-      catch: () => undefined
+      // Preserve diagnostics for host-side error taps, including thrown strings.
+      catch: (cause) => ({ cause })
     }),
     (result) =>
       typeof result === "string"
@@ -135,7 +136,7 @@ export const flow = <I extends Payload>(declaration: Declaration<I>): FlowEntry 
         capabilities: capabilities ?? APP_ACT
       }),
       modelInvocable: userOnly !== true,
-      publicError: (message: string | undefined) => message,
+      publicError: (message) => typeof message === "string" ? message : undefined,
       handler: (payload) => act(() => handler(payload))
     }),
     metadata,

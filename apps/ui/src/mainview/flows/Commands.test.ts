@@ -10,6 +10,7 @@
  * nowhere stays `unknown-command`.
  */
 import { Effect } from "effect"
+import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { CallResult } from "@smthrs/harness/Cell"
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, spyOn, test } from "bun:test"
@@ -142,10 +143,35 @@ test("app flows publish returned refusals but withhold thrown host errors", asyn
   const make = (handler: () => string) => flow({ name: "test", input: NoPayload, summary: "Test", handler })
   const refusal = await invokeStartupRecovery(make(() => "Choose an available command."))
   expect(refusal.message).toBe("Flow test failed: Choose an available command.")
-  for (const cause of [new Error("SYNTHETIC_HOST_SECRET"), { headers: { Authorization: "SYNTHETIC_HOST_SECRET" } }]) {
+  for (const cause of [
+    "SYNTHETIC_HOST_SECRET",
+    new Error("SYNTHETIC_HOST_SECRET"),
+    { headers: { Authorization: "SYNTHETIC_HOST_SECRET" } }
+  ]) {
     const failed = await invokeStartupRecovery(make(() => { throw cause }))
     expect(failed.message).toBe("Flow test failed.")
     expect(JSON.stringify(failed)).not.toContain("SYNTHETIC_HOST_SECRET")
+  }
+})
+
+test("app flows retain thrown causes for host error inspection", async () => {
+  const cause = new Error("SYNTHETIC_HOST_SECRET")
+  let observed: unknown
+  const original = FlowBinding.make
+  const make = spyOn(FlowBinding, "make").mockImplementation((options) => original({
+    ...options,
+    handler: (input, call) => options.handler(input, call).pipe(
+      Effect.tapError((error) => Effect.sync(() => { observed = error }))
+    )
+  }))
+  try {
+    const entry = flow({ name: "test", input: NoPayload, summary: "Test", handler: () => { throw cause } })
+    const result = await invokeStartupRecovery(entry)
+    expect(observed).toEqual({ cause })
+    expect((observed as { cause: unknown }).cause).toBe(cause)
+    expect(result.message).toBe("Flow test failed.")
+  } finally {
+    make.mockRestore()
   }
 })
 

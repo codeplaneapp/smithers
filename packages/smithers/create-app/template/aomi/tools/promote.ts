@@ -259,6 +259,7 @@ export const promoteSource = (services: Context.Context<CellHistory | FlowStore>
     FlowBinding.provide(
       FlowBinding.make({
         flow: writeFlowFlow,
+        publicError: (error: PromoteError) => error.message,
         handler: (input) =>
           Effect.gen(function*() {
             // The router's own rule, imported rather than restated: a saved

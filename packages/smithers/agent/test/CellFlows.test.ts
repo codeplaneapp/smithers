@@ -454,6 +454,38 @@ ctx.done(suite.passed + " passed, " + suite.failed.join(","))`
     expect(spawned[0]).toContain("tests/test_widen.py")
   })
 
+  it("publishes fixed retry guidance for shell and test timeouts", async () => {
+    const spawner = Context.make(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.makeNoop({ spawn: () => Effect.never })
+    )
+    const outcome = await drive(collect({
+      flows: [
+        StandardFlows.shell(Context.merge(spawner, pathServices)),
+        StandardFlows.tests(Context.add(
+          spawner,
+          TestRunner.TestRunner,
+          TestRunner.make({
+            command: "SYNTHETIC_HOST_RUNNER",
+            timeoutMs: 1
+          })
+        ))
+      ],
+      cells: [`for (const [name, input] of [
+        ["bash", { mode: "unhermetic", command: "echo SYNTHETIC_COMMAND", timeoutMs: 1 }],
+        ["test", {}]
+      ]) { try { await ctx.call(name, input) } catch {} }
+      ctx.done("done")`]
+    }))
+    const settled = settledCalls(eventsOf(outcome))
+    expect(settled.map((event) => event.result.message)).toEqual([
+      "Flow bash failed: The command timed out.",
+      "Flow test failed: The command timed out."
+    ])
+    expect(settled.every((event) => event.result.code === "flow_failed")).toBe(true)
+    expect(JSON.stringify(settled.map((event) => event.result))).not.toContain("SYNTHETIC_")
+  })
+
   it("refuses a failing standard flow catchably rather than failing the run", async () => {
     const filesystem = files({})
     const outcome = await drive(
@@ -508,7 +540,7 @@ ctx.done(caught)`
     expect(settled[1]?.result.message).toBe("Flow grep failed.")
     expect(settled[2]?.result.message).toContain("Unsupported ripgrep pattern")
     expect(settled[3]?.result.message).toBe("Flow grep failed.")
-    expect(settled[4]?.result.message).toBe("Flow grep failed.")
+    expect(settled[4]?.result.message).toBe("Flow grep failed: The command timed out.")
     expect(settled[5]?.result.message).toContain("No search implementation is configured")
     expect(JSON.stringify(settled)).not.toContain(secret)
   })

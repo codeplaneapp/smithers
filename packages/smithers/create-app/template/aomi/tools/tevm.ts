@@ -51,9 +51,9 @@ const Quantity = Schema.String.annotate({
 /**
  * The one failure a chain call can report to a cell.
  *
- * `FlowBinding.make` turns a handler failure into a catchable `CallResult`, so
- * a reverted call or an unreachable RPC endpoint reaches the model as text it
- * can act on rather than as a run-ending defect.
+ * Each binding explicitly opts its message into the public failure with
+ * `publicError`. Keep messages model-facing and actionable; diagnostic causes
+ * stay host-side.
  */
 export class TevmError extends Schema.TaggedError<TevmError>()("aomi/tools/TevmError", {
   message: Schema.String,
@@ -315,7 +315,9 @@ const blockParam = (tag: string | undefined): NamedTag | bigint | undefined => {
   if (tag === undefined) return undefined
   if (isNamedTag(tag)) return tag
   if (/^\d+$/.test(tag)) return BigInt(tag)
-  throw new Error(`blockTag ${JSON.stringify(tag)} is neither a decimal block number nor one of ${NAMED_TAGS.join(", ")}`)
+  throw new TevmError({
+    message: `blockTag ${JSON.stringify(tag)} is neither a decimal block number nor one of ${NAMED_TAGS.join(", ")}`
+  })
 }
 
 /** Every value that crosses the boundary is a string, so bigints render here. */
@@ -341,10 +343,12 @@ const coerceArgs = (abi: Abi, functionName: string, args: ReadonlyArray<string>)
   const entry = abi.find((item): item is AbiFunction => item.type === "function" && item.name === functionName)
   if (entry === undefined) {
     const names = abi.filter((item) => item.type === "function").map((item) => (item as AbiFunction).name)
-    throw new Error(`the abi has no function ${JSON.stringify(functionName)}; it declares ${names.join(", ") || "none"}`)
+    throw new TevmError({
+      message: `the abi has no function ${JSON.stringify(functionName)}; it declares ${names.join(", ") || "none"}`
+    })
   }
   if (entry.inputs.length !== args.length) {
-    throw new Error(`${functionName} takes ${entry.inputs.length} argument(s), ${args.length} given`)
+    throw new TevmError({ message: `${functionName} takes ${entry.inputs.length} argument(s), ${args.length} given` })
   }
   return args.map((arg, index) => {
     const type = entry.inputs[index]?.type ?? ""
@@ -489,13 +493,13 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
   Layer.sync(Tevm)(() => {
     let open: Promise<{ client: MemoryClient; fork: Fork }> | undefined
 
-    /** Fails as a `TevmError` rather than as a run-ending defect. */
+    /** Only host-authored TevmError messages are public; SDK diagnostics stay in cause. */
     const attempt = <A>(what: string, run: () => Promise<A>): Effect.Effect<A, TevmError> =>
       Effect.tryPromise({
         try: run,
         catch: (cause) =>
-          new TevmError({
-            message: `${what} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+          cause instanceof TevmError ? cause : new TevmError({
+            message: `${what} failed.`,
             cause
           })
       })
@@ -505,7 +509,7 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
       if (open !== undefined) return open
       if (options.rpcUrl === undefined) {
         return Promise.reject(
-          new Error("no fork is open; call tevm/fork with an rpcUrl before any other tevm flow")
+          new TevmError({ message: "no fork is open; call tevm/fork with an rpcUrl before any other tevm flow" })
         )
       }
       open = connect(options.rpcUrl, options.blockTag)
@@ -561,11 +565,7 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
             // A read has nowhere to report a revert, so both outcomes fail;
             // the message still says which one happened.
             if (!isRevert(failure)) throw asError(input.functionName, failure)
-            throw new Error(
-              `${input.functionName} reverted: ${
-                revertReason(result.rawData, failure.shortMessage ?? failure.message ?? "revert")
-              }`
-            )
+            throw new TevmError({ message: `${input.functionName} reverted.`, cause: failure })
           }
           return { value: render(result.data), raw: result.rawData }
         }),
@@ -804,12 +804,17 @@ const getBlockFlow = Flow.make({
 export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source =>
   FlowBinding.source("tevm", [
     FlowBinding.provide(
-      FlowBinding.make({ flow: forkFlow, handler: (input) => Effect.flatMap(Tevm, (chain) => chain.fork(input)) }),
+      FlowBinding.make({
+        flow: forkFlow,
+        publicError: (error: TevmError) => error.message,
+        handler: (input) => Effect.flatMap(Tevm, (chain) => chain.fork(input))
+      }),
       services
     ),
     FlowBinding.provide(
       FlowBinding.make({
         flow: getBalanceFlow,
+        publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.getBalance(input))
       }),
       services
@@ -817,34 +822,49 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     FlowBinding.provide(
       FlowBinding.make({
         flow: readContractFlow,
+        publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.readContract(input))
       }),
       services
     ),
     FlowBinding.provide(
-      FlowBinding.make({ flow: callFlow, handler: (input) => Effect.flatMap(Tevm, (chain) => chain.call(input)) }),
+      FlowBinding.make({
+        flow: callFlow,
+        publicError: (error: TevmError) => error.message,
+        handler: (input) => Effect.flatMap(Tevm, (chain) => chain.call(input))
+      }),
       services
     ),
     FlowBinding.provide(
       FlowBinding.make({
         flow: setAccountFlow,
+        publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.setAccount(input))
       }),
       services
     ),
     FlowBinding.provide(
-      FlowBinding.make({ flow: mineFlow, handler: (input) => Effect.flatMap(Tevm, (chain) => chain.mine(input)) }),
+      FlowBinding.make({
+        flow: mineFlow,
+        publicError: (error: TevmError) => error.message,
+        handler: (input) => Effect.flatMap(Tevm, (chain) => chain.mine(input))
+      }),
       services
     ),
     FlowBinding.provide(
       FlowBinding.make({
         flow: simulateFlow,
+        publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.simulate(input))
       }),
       services
     ),
     FlowBinding.provide(
-      FlowBinding.make({ flow: getBlockFlow, handler: (input) => Effect.flatMap(Tevm, (chain) => chain.getBlock(input)) }),
+      FlowBinding.make({
+        flow: getBlockFlow,
+        publicError: (error: TevmError) => error.message,
+        handler: (input) => Effect.flatMap(Tevm, (chain) => chain.getBlock(input))
+      }),
       services
     )
   ])

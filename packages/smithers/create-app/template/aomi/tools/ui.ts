@@ -32,8 +32,8 @@ import * as Schema from "effect/Schema"
 /**
  * The one failure a UI call reports to a cell.
  *
- * `FlowBinding.make` renders it as a catchable `CallResult`, so the message is
- * written for the model: it names what was wrong and what to do next.
+ * Each binding explicitly opts its message into the public failure with
+ * `publicError`. Write it for the model: what was wrong and what to do next.
  */
 export class UiError extends Schema.TaggedError<UiError>()("aomi/tools/UiError", {
   message: Schema.String
@@ -198,6 +198,7 @@ export const uiSource = (services: Context.Context<CardSink | PaneNames>): FlowB
     FlowBinding.provide(
       FlowBinding.make({
         flow: paneFlow,
+        publicError: (error: UiError) => error.message,
         handler: (input, call) =>
           Effect.gen(function*() {
             const registry = yield* PaneNames
@@ -222,6 +223,7 @@ export const uiSource = (services: Context.Context<CardSink | PaneNames>): FlowB
     FlowBinding.provide(
       FlowBinding.make({
         flow: htmlFlow,
+        publicError: (error: UiError) => error.message,
         handler: (input, call) =>
           Effect.gen(function*() {
             const sink = yield* CardSink
