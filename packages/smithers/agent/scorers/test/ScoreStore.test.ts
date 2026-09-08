@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it } from "vitest"
 import { migration as initialScores } from "../src/migrations/0001_scores.ts"
 import { migration as failureCodes } from "../src/migrations/0003_score_failure_codes.ts"
 import { migration as requiredFailureCodes } from "../src/migrations/0004_require_failure_codes.ts"
+import * as Migrations from "../src/migrations/index.ts"
 import { ScorerError } from "../src/ScorerError.ts"
 import * as ScoreStore from "../src/ScoreStore.ts"
 import * as SqlScoreStore from "../src/SqlScoreStore.ts"
@@ -715,28 +716,28 @@ describe("ScoreStore", () => {
     expect(output.observations).toHaveLength(1)
   })
 
-  it("survives a restart against the same database file", async () => {
-    const filename = join(scratch, "restart.db")
+  it.each(["store", "migrations"])("survives a standalone restart after %s initialization", async (initialize) => {
+    const filename = join(scratch, `restart-${initialize}.db`)
+    if (initialize === "migrations") {
+      await Effect.runPromise(Effect.provide(
+        Effect.void,
+        Migrations.layer.pipe(Layer.provide(NodeDatabase.layer({ filename })))
+      ))
+    }
     const open = <A>(
-      program: Effect.Effect<A, ScorerError, ScoreStore.ScoreStore | SqlClient.SqlClient>
+      program: Effect.Effect<A, ScorerError, ScoreStore.ScoreStore>
     ) =>
       Effect.runPromise(
         Effect.provide(
           program,
           SqlScoreStore.layer.pipe(
-            Layer.provideMerge(DurableWriter.layer()),
-            Layer.provideMerge(NodeDatabase.layer({ filename }))
+            Layer.provide(DurableWriter.layer()),
+            Layer.provide(NodeDatabase.layer({ filename }))
           )
         )
       )
     const before = await open(Effect.gen(function*() {
-      const sql = yield* SqlClient.SqlClient
       const store = yield* ScoreStore.ScoreStore
-      // In production the score store shares the durable database with the
-      // engine, whose migration ledger is what the driver's 0.x file guard
-      // looks for. Create it so the reopen exercises this package's
-      // migrations rather than that guard.
-      yield* sql`CREATE TABLE IF NOT EXISTS flows_migrations (migration_id INTEGER PRIMARY KEY)`.pipe(Effect.orDie)
       return yield* store.recordOnce("durable", score({ score: 0.5, at: 7 }))
     }))
     const after = await open(Effect.gen(function*() {

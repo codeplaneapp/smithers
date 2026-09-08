@@ -3,6 +3,8 @@
  *
  * @since 0.1.0
  */
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
+import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Migrator from "effect/unstable/sql/Migrator"
 import { migration as scores } from "./0001_scores.ts"
@@ -18,15 +20,21 @@ const migrations = {
 }
 
 /**
- * Applies all score-store migrations.
+ * Bootstraps the shared database ledger and applies all score-store migrations.
  *
  * @category migrations
  * @since 0.1.0
  */
-export const run = Migrator.make({})({
-  loader: Migrator.fromRecord(migrations),
-  table: "flows_scorers_migrations"
-})
+export const run = DatabaseMigrations.run([]).pipe(
+  // A standalone file needs the shared ledger for NodeDatabase to reopen it.
+  // Keep the scorer ledger and its ids intact for already-migrated stores.
+  Effect.andThen(
+    Migrator.make({})({
+      loader: Migrator.fromRecord(migrations),
+      table: "flows_scorers_migrations"
+    })
+  )
+)
 
 /**
  * Applies score-store migrations when the layer is constructed.

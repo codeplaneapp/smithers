@@ -17,8 +17,9 @@ pnpm add @smthrs/scorers@next
 
 - Node.js 22.19.0 or later.
 - [`effect`](https://effect.website) 4.0.0-rc.112, the version this package is
-  built against. Every public function returns an `Effect`, and every schema is
-  an `effect/Schema`.
+  built against. Execution, validation, and persistence use `Effect`; schemas
+  use `effect/Schema`. Declaration and pure grading helpers are synchronous;
+  [`Scorer.make` throws on invalid declarations](./troubleshooting.md#scorermake-threw-instead-of-failing).
 - [`@smthrs/core`](/api/core) for `Flow` and `Digest`. A scorer is a flow
   declaration, and the canonical JSON that derives a `scorerKey` comes from
   `Digest`.
@@ -78,9 +79,12 @@ refuses to open with `unsupported_runtime`. For a test or a walkthrough,
 `:memory:` database in one layer, and the [Quickstart](./quickstart.md) uses
 it.
 
-Building the store applies this package's four migrations to whatever database
-it is pointed at, so no separate migration step is required. To apply them
-without building a store, use `Migrations.layer`.
+Building the store bootstraps the shared `flows_migrations` ledger through
+`@smthrs/database/Migrations` and applies this package's four migrations in
+`flows_scorers_migrations`. The shared ledger lets `NodeDatabase.layer` reopen
+this standalone file after the store closes; no engine tables or separate
+migration step are required. `Migrations.layer` performs the same bootstrap
+and migrations without building a store.
 
 ## Next step
 

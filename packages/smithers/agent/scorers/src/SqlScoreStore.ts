@@ -325,7 +325,8 @@ const decode = (row: ObservationRow): Effect.Effect<ScoreStore.Observation, Scor
   )
 
 /**
- * Builds the SQL-backed score store and applies its migrations.
+ * Builds the SQL-backed score store, bootstraps the shared database ledger,
+ * and applies score-store migrations.
  *
  * @category constructors
  * @since 0.1.0
