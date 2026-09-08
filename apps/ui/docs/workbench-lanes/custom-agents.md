@@ -75,7 +75,13 @@ for a custom agent.
    and the field is free text).
 2. **Storage and truth.** Native: `<stateDir>/agents.json` on the Bun host
    (`registerRepoTargetRoutes` shows the stateDir pattern) is the source of
-   truth, seeded from the five built-ins on first read; routes
+   truth, seeded from the five built-ins when the file is absent. Mutations
+   flush a unique sibling temporary file, rename it over `agents.json`, and
+   sync the parent directory. Invalid JSON or schema data is renamed to
+   `agents.json.corrupt-<timestamp>-<uuid>` and logged; reads and mutations
+   reject for that store instance. A fresh launch can seed a new store while
+   leaving the preserved bytes available for recovery. Other read errors
+   propagate without replacing the store. Routes
    `GET /api/agents`, `PUT /api/agents/{id}` (create or edit; validates
    harness exists in the registry and the model id matches), `DELETE
    /api/agents/{id}` (refuses builtin), `GET /api/harnesses/{id}/models`

@@ -1,13 +1,13 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { describe, expect, test } from "bun:test"
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AGENT_ROLE_IDS, AgentsResponseSchema, HarnessModelsResponseSchema } from "@smthrs/rpc/AgentRoles"
 import type { Harness } from "@smthrs/rpc/LocalApp"
 import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
+import { atomicWriteJson } from "../atomicWriteJson"
 import { createPtyManager } from "../Pty"
 import { startLocalServer } from "../server"
-import type { LocalServer } from "../server"
 import { createAgentStore, parseModelLines } from "./agents"
 
 /*
@@ -19,21 +19,6 @@ import { createAgentStore, parseModelLines } from "./agents"
  * opencode script here) under the cap.
  */
 
-let dist = ""
-let stateDir = ""
-let fakeOpencode = ""
-let server: LocalServer
-const ptyBodies: Array<Record<string, unknown>> = []
-
-const apiFetch = (path: string, init: RequestInit = {}): Promise<Response> => {
-  const headers = new Headers(init.headers)
-  headers.set(LOCAL_SESSION_HEADER, server.sessionToken)
-  return fetch(`${server.origin}${path}`, { ...init, headers })
-}
-
-const put = (id: string, body: unknown): Promise<Response> =>
-  apiFetch(`/api/agents/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-
 const reviewer = {
   label: "Reviewer",
   purpose: "Reviews diffs for correctness and tests.",
@@ -41,7 +26,7 @@ const reviewer = {
   model: { provider: "openai", id: "gpt-5.6-terra", label: "GPT-5.6 Terra" }
 } as const
 
-const harnesses = (): ReadonlyArray<Harness> => [
+const harnesses = (fakeOpencode: string): ReadonlyArray<Harness> => [
   {
     id: "codex",
     displayName: "Codex",
@@ -83,16 +68,16 @@ const harnesses = (): ReadonlyArray<Harness> => [
   }
 ]
 
-beforeAll(async () => {
-  dist = await mkdtemp(join(tmpdir(), "smithers-agents-dist-"))
+const setup = async () => {
+  const dist = await mkdtemp(join(tmpdir(), "smithers-agents-dist-"))
   await writeFile(join(dist, "index.html"), "<!doctype html><title>Smithers</title>")
-  stateDir = await mkdtemp(join(tmpdir(), "smithers-agents-state-"))
+  const stateDir = await mkdtemp(join(tmpdir(), "smithers-agents-state-"))
   /*
    * A fake `opencode` binary: `models` prints provider/model lines the way
    * the real one does (plus noise the parser drops); `models cerebras`
    * fails, the way a provider without a credential answers.
    */
-  fakeOpencode = join(dist, "opencode")
+  const fakeOpencode = join(dist, "opencode")
   await writeFile(
     fakeOpencode,
     [
@@ -106,14 +91,14 @@ beforeAll(async () => {
     ].join("\n")
   )
   await chmod(fakeOpencode, 0o755)
-  server = await startLocalServer({
+  const server = await startLocalServer({
     port: 0,
     distDir: dist,
     chatStub: true,
     node: { path: "/fake/node", version: "v22.19.0" },
     home: tmpdir(),
     stateDir,
-    harnesses: async () => harnesses(),
+    harnesses: async () => harnesses(fakeOpencode),
     pty: (deps) =>
       createPtyManager({
         ...deps,
@@ -125,17 +110,29 @@ beforeAll(async () => {
       }),
     log: () => {}
   })
-  void ptyBodies
-})
+  const apiFetch = (path: string, init: RequestInit = {}): Promise<Response> => {
+    const headers = new Headers(init.headers)
+    headers.set(LOCAL_SESSION_HEADER, server.sessionToken)
+    return fetch(`${server.origin}${path}`, { ...init, headers })
+  }
 
-afterAll(async () => {
-  await server.stop()
-  await rm(dist, { recursive: true, force: true })
-  await rm(stateDir, { recursive: true, force: true })
-})
+  const put = (id: string, body: unknown): Promise<Response> =>
+    apiFetch(`/api/agents/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+
+  return {
+    apiFetch, put, stateDir, harnesses: () => harnesses(fakeOpencode),
+    [Symbol.asyncDispose]: async () => {
+      await server.stop()
+      await rm(dist, { recursive: true, force: true })
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  }
+}
 
 describe("the agents routes", () => {
   test("GET seeds the built-ins on first read, in table order, with no argv stored", async () => {
+    await using fixture = await setup()
+    const { apiFetch } = fixture
     const response = await apiFetch("/api/agents")
     expect(response.status).toBe(200)
     const body = AgentsResponseSchema.parse(await response.json())
@@ -147,6 +144,8 @@ describe("the agents routes", () => {
   })
 
   test("PUT creates a custom agent (201), persists it under the state dir, and lists it after the built-ins", async () => {
+    await using fixture = await setup()
+    const { put, apiFetch, stateDir } = fixture
     const created = await put("reviewer", reviewer)
     expect(created.status).toBe(201)
     const body = (await created.json()) as { agent: { id: string; builtin: boolean; createdAt: number } }
@@ -161,6 +160,9 @@ describe("the agents routes", () => {
   })
 
   test("PUT edits an existing agent (200) and a built-in's model and purpose; a built-in's harness stays fixed", async () => {
+    await using fixture = await setup()
+    const { put } = fixture
+    expect((await put("reviewer", reviewer)).status).toBe(201)
     const edited = await put("reviewer", { ...reviewer, purpose: "Reviews diffs, strictly." })
     expect(edited.status).toBe(200)
     expect(((await edited.json()) as { agent: { purpose: string } }).agent.purpose).toBe("Reviews diffs, strictly.")
@@ -178,6 +180,8 @@ describe("the agents routes", () => {
   })
 
   test("PUT refuses a bad id, an unknown harness, a harness with no verified model flag, and a flag-shaped model id", async () => {
+    await using fixture = await setup()
+    const { put, apiFetch } = fixture
     const badId = await put("Bad%20Id", reviewer)
     expect(badId.status).toBe(400)
     expect(((await badId.json()) as { error: { code: string } }).error.code).toBe("invalid_id")
@@ -196,6 +200,9 @@ describe("the agents routes", () => {
   })
 
   test("a custom agent launches through POST /api/pty by role id with its composed argv", async () => {
+    await using fixture = await setup()
+    const { put, apiFetch } = fixture
+    expect((await put("reviewer", reviewer)).status).toBe(201)
     const response = await apiFetch("/api/pty", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -223,6 +230,9 @@ describe("the agents routes", () => {
   })
 
   test("DELETE removes a custom agent, refuses a built-in with the reason, and 404s an unknown id", async () => {
+    await using fixture = await setup()
+    const { put, apiFetch, stateDir } = fixture
+    expect((await put("reviewer", reviewer)).status).toBe(201)
     const builtin = await apiFetch("/api/agents/orchestrator", { method: "DELETE" })
     expect(builtin.status).toBe(409)
     expect(((await builtin.json()) as { error: { code: string; message: string } }).error).toMatchObject({ code: "builtin_agent" })
@@ -236,6 +246,8 @@ describe("the agents routes", () => {
   })
 
   test("GET /api/harnesses/{id}/models runs the harness's list command, falls back to the table's suggestions, and states failures", async () => {
+    await using fixture = await setup()
+    const { apiFetch } = fixture
     const listed = HarnessModelsResponseSchema.parse(await (await apiFetch("/api/harnesses/opencode/models")).json())
     expect(listed).toEqual({
       harnessId: "opencode",
@@ -261,6 +273,8 @@ describe("the agents routes", () => {
   })
 
   test("a failing list command answers empty with its exit and first stderr line", async () => {
+    await using fixture = await setup()
+    const { harnesses } = fixture
     const { listHarnessModels } = await import("./agents")
     const failing: Harness = { ...harnesses()[1]!, id: "opencode-cerebras", displayName: "OpenCode · Cerebras" }
     const result = await listHarnessModels(failing, async (argv) => {
@@ -285,17 +299,130 @@ describe("the agents routes", () => {
     expect(parseModelLines("a/b\n\n  c.d-e:f  \nnot a model\n-flag\n")).toEqual(["a/b", "c.d-e:f"])
   })
 
-  test("a corrupt store file starts from the built-ins and says so", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "smithers-agents-corrupt-"))
-    await writeFile(join(dir, "agents.json"), "{ not json")
+  for (const mutation of ["put", "remove"] as const) {
+    test.each(["write", "sync", "rename"])(`${mutation}: a failed %s preserves the durable store and memory`, async (failure) => {
+      await using fixture = await setup()
+      const { stateDir } = fixture
+      const path = join(stateDir, "agents.json")
+      let fail = false
+      const store = createAgentStore({
+        stateDir,
+        writeJson: (target, value) => atomicWriteJson(target, value, {
+          open: async (...args) => {
+            const file = await open(...args)
+            if (fail && args[1] === "wx") {
+              if (failure === "write") {
+                const write = file.writeFile.bind(file)
+                file.writeFile = async () => {
+                  await write('{ "agents": [', "utf8")
+                  throw new Error("injected write failure")
+                }
+              } else if (failure === "sync") {
+                file.sync = async () => { throw new Error("injected sync failure") }
+              }
+            }
+            return file
+          },
+          rename: async (from, to) => {
+            if (fail && failure === "rename") throw new Error("injected rename failure")
+            await rename(from, to)
+          }
+        })
+      })
+      expect((await store.put("reviewer", reviewer)).status).toBe("created")
+      const before = await readFile(path, "utf8")
+      const rows = await store.list()
+      fail = true
+      const mutate = () => mutation === "put"
+        ? store.put("reviewer", { ...reviewer, purpose: "Edited" })
+        : store.remove("reviewer")
+      await expect(mutate()).rejects.toThrow(`injected ${failure} failure`)
+      expect(await readFile(path, "utf8")).toBe(before)
+      expect(await store.list()).toEqual(rows)
+      expect(await createAgentStore({ stateDir }).list()).toEqual(rows)
+      expect((await readdir(stateDir)).filter((name) => name.endsWith(".tmp"))).toEqual([])
+      // A rejected mutation must not poison the serialization queue.
+      fail = false
+      expect((await mutate()).status).toBe(mutation === "put" ? "updated" : "removed")
+      expect(await createAgentStore({ stateDir }).list()).toEqual(await store.list())
+    })
+  }
+
+  test("atomic replacement flushes the sibling file before rename and the parent afterwards", async () => {
+    await using fixture = await setup()
+    const { stateDir } = fixture
+    const path = join(stateDir, "agents.json")
+    await writeFile(path, "previous bytes")
+    const events: Array<string> = []
+    const temporaryPaths: Array<string> = []
+    const io = {
+      open: async (...args: Parameters<typeof open>) => {
+        const file = await open(...args)
+        const kind = args[1] === "wx" ? "file" : "directory"
+        if (kind === "file") {
+          const temporary = String(args[0])
+          expect(temporary.startsWith(`${path}.`)).toBe(true)
+          expect(temporary.endsWith(".tmp")).toBe(true)
+          expect(args[2]).toBe(0o600)
+          temporaryPaths.push(temporary)
+        } else {
+          expect(args[0]).toBe(stateDir)
+        }
+        const sync = file.sync.bind(file)
+        const close = file.close.bind(file)
+        file.sync = async () => { events.push(`${kind}:sync`); await sync() }
+        file.close = async () => { events.push(`${kind}:close`); await close() }
+        return file
+      },
+      rename: async (from: Parameters<typeof rename>[0], to: Parameters<typeof rename>[1]) => {
+        expect(await readFile(path, "utf8")).toBe("previous bytes")
+        expect(JSON.parse(await readFile(from, "utf8"))).toEqual({ agents: [] })
+        events.push("rename")
+        await rename(from, to)
+      }
+    }
+    await atomicWriteJson(path, { agents: [] }, io)
+    expect(events).toEqual(["file:sync", "file:close", "rename", "directory:sync", "directory:close"])
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ agents: [] })
+    await writeFile(path, "previous bytes")
+    await atomicWriteJson(path, { agents: [] }, io)
+    expect(new Set(temporaryPaths).size).toBe(2)
+    expect((await readdir(stateDir)).filter((name) => name.endsWith(".tmp"))).toEqual([])
+  })
+
+  test("a store read error other than absence rejects without seeding", async () => {
+    await using fixture = await setup()
+    const { stateDir } = fixture
+    await mkdir(join(stateDir, "agents.json"))
+    const store = createAgentStore({ stateDir })
+    await expect(store.list()).rejects.toMatchObject({ code: "EISDIR" })
+    await expect(store.put("reviewer", reviewer)).rejects.toMatchObject({ code: "EISDIR" })
+    expect((await readdir(stateDir)).filter((name) => name.startsWith("agents.json"))).toEqual(["agents.json"])
+  })
+
+  test.each(["{ not json", '{"agents": [{}]}'])("a corrupt store is preserved and reported: %s", async (bytes) => {
+    await using fixture = await setup()
+    const { stateDir } = fixture
+    const path = join(stateDir, "agents.json")
+    await writeFile(path, bytes)
     const lines: Array<string> = []
-    const store = createAgentStore({ stateDir: dir, log: (line) => lines.push(line) })
-    expect((await store.list()).map((agent) => agent.id)).toEqual([...AGENT_ROLE_IDS])
-    expect(lines.some((line) => line.includes("not JSON"))).toBe(true)
-    // A store with no state dir is memory only: the built-ins, and a create that never touches disk.
+    const store = createAgentStore({ stateDir, log: (line) => lines.push(line) })
+    await expect(store.list()).rejects.toThrow("preserved")
+    await expect(store.put("reviewer", reviewer)).rejects.toThrow("preserved")
+    await expect(store.remove("reviewer")).rejects.toThrow("preserved")
+    const backups = (await readdir(stateDir)).filter((name) => name.startsWith("agents.json.corrupt-"))
+    expect(backups).toHaveLength(1)
+    expect(await readFile(join(stateDir, backups[0]!), "utf8")).toBe(bytes)
+    expect(lines.some((line) => line.includes("preserved") && line.includes(backups[0]!))).toBe(true)
+    await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" })
+    // Recovery on a fresh launch cannot overwrite the preserved bytes.
+    expect((await createAgentStore({ stateDir }).put("reviewer", reviewer)).status).toBe("created")
+    expect(await readFile(join(stateDir, backups[0]!), "utf8")).toBe(bytes)
+  })
+
+  test("a store without a state dir is memory only", async () => {
     const memory = createAgentStore()
     expect((await memory.put("scratch", reviewer)).status).toBe("created")
     expect((await memory.list()).map((agent) => agent.id)).toContain("scratch")
-    await rm(dir, { recursive: true, force: true })
   })
 })

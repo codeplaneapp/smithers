@@ -16,7 +16,8 @@
  *                                      verified suggestions; empty + reason
  *                                      on failure
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
+import { open, readFile, rename } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import {
   AGENT_ROLE_IDS,
@@ -31,6 +32,7 @@ import type { AgentPutRequest, AgentRole, HarnessModelsResponse } from "@smthrs/
 import { HARNESS_IDS } from "@smthrs/rpc/LocalApp"
 import type { Harness } from "@smthrs/rpc/LocalApp"
 import { z } from "zod"
+import { atomicWriteJson } from "../atomicWriteJson"
 import { DETECTORS, harnessModels } from "../Harnesses"
 import { json, jsonError, readJson, Router } from "../routes"
 import type { HarnessDetector } from "./harnesses"
@@ -66,6 +68,8 @@ export interface AgentStoreOptions {
   readonly stateDir?: string
   readonly log?: (line: string) => void
   readonly now?: () => number
+  /** Override persistence for fault-injection tests. */
+  readonly writeJson?: typeof atomicWriteJson
 }
 
 /**
@@ -111,18 +115,27 @@ export const createAgentStore = (options: AgentStoreOptions = {}): AgentStore =>
     let text: string
     try {
       text = await readFile(path, "utf8")
-    } catch {
-      // First read: the seed.
-      return [...AGENT_ROLES]
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [...AGENT_ROLES]
+      throw error
     }
     try {
-      const parsed = StoredAgentsSchema.safeParse(JSON.parse(text))
-      if (parsed.success) return [...withSeed(parsed.data.agents)]
-      log(`agents store at ${path} did not validate (${parsed.error.issues[0]?.message ?? "invalid"}); starting from the built-ins`)
-    } catch (error) {
-      log(`agents store at ${path} is not JSON (${error instanceof Error ? error.message : String(error)}); starting from the built-ins`)
+      return [...withSeed(StoredAgentsSchema.parse(JSON.parse(text)).agents)]
+    } catch (cause) {
+      const preserved = `${path}.corrupt-${now()}-${randomUUID()}`
+      // Do not recover in this store instance: every caller must see the error.
+      // If preservation fails, leave the original in place and reject the read.
+      await rename(path, preserved)
+      const directory = await open(dirname(path), "r")
+      try {
+        await directory.sync()
+      } finally {
+        await directory.close()
+      }
+      const message = `agents store at ${path} is invalid; preserved at ${preserved}: ${cause instanceof Error ? cause.message : String(cause)}`
+      log(message)
+      throw new Error(message, { cause })
     }
-    return [...AGENT_ROLES]
   }
 
   const agents = (): Promise<Array<AgentRole>> => {
@@ -130,11 +143,10 @@ export const createAgentStore = (options: AgentStoreOptions = {}): AgentStore =>
     return loaded
   }
 
-  /** Write the whole list; a failed write is logged and reported, never silently lost. */
+  /** Publish the whole list atomically; persistence errors reject the mutation. */
   const write = async (rows: ReadonlyArray<AgentRole>): Promise<void> => {
     if (path === undefined) return
-    await mkdir(dirname(path), { recursive: true })
-    await writeFile(path, JSON.stringify({ agents: rows }, null, 2))
+    await (options.writeJson ?? atomicWriteJson)(path, { agents: rows })
   }
 
   const list: AgentStore["list"] = async () => orderedAgentRoles(await agents())
