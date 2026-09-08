@@ -30,6 +30,7 @@ import * as PubSub from "effect/PubSub"
 import * as Queue from "effect/Queue"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -77,9 +78,10 @@ const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
  * caller's replay state at the run's durable tail, writes it as a checkpoint
  * at that sequence, and compacts the entries strictly below it.
  *
- * Both lossy and durable commits run the same post-commit policy after their
- * allocation permit is free. `capture` may therefore read or emit through the
- * journal without blocking unrelated allocation. A capture is interrupted
+ * Both channels run the policy after their allocation permit is free. Lossy
+ * commits fork scoped maintenance so the sole queue consumer keeps draining;
+ * durable emits await their attempt. `flush` awaits registered maintenance.
+ * `capture` may read or emit without blocking unrelated allocation. A capture is interrupted
  * after 30 seconds so caller code cannot wedge journal admission indefinitely.
  *
  * A failed or refused attempt (a live stream behind the boundary, a capture
@@ -268,6 +270,8 @@ interface RunBarrier {
    * this one.
    */
   readonly maintenance: Semaphore.Semaphore
+  /** Holders and waiters that can still use this exact barrier. */
+  users: number
   /** Open while a compaction owns the run; every admission awaits it. */
   compaction: Deferred.Deferred<void> | undefined
 }
@@ -650,6 +654,14 @@ export const layer = (
       // database transaction, so DB -> allocator and allocator -> DB ordering
       // would otherwise deadlock concurrent lifecycle writers.
       const allocation = yield* Semaphore.make(1)
+      // Close this scope AFTER the journal's flushing finalizer. Dynamically
+      // forking directly into the layer scope would register interruption
+      // finalizers ahead of the flush that must await these attempts.
+      const maintenanceScope = yield* Scope.make()
+      yield* Effect.addFinalizer((exit) => Scope.close(maintenanceScope, exit))
+      let pendingMaintenance = 0
+      const compactionCounts = new Map<RunId, number>()
+      const compactingRuns = new Set<RunId>()
       const runBarriers = new Map<RunId, RunBarrier>()
       const runDrainWaiters = new Map<RunId, Set<Deferred.Deferred<void>>>()
       const activeWritesByRun = new Map<RunId, number>()
@@ -661,10 +673,38 @@ export const layer = (
           semaphore: Semaphore.makeUnsafe(1),
           compactionLock: Semaphore.makeUnsafe(1),
           maintenance: Semaphore.makeUnsafe(1),
+          users: 0,
           compaction: undefined
         }
         runBarriers.set(runId, created)
         return created
+      }
+
+      /** A waiter owns a reference too, before it can yield on any permit. */
+      const withRunBarrier = <A, E, R>(
+        runId: RunId,
+        use: (barrier: RunBarrier) => Effect.Effect<A, E, R>
+      ): Effect.Effect<A, E, R> =>
+        Effect.suspend(() => {
+          const barrier = barrierFor(runId)
+          barrier.users += 1
+          return use(barrier).pipe(Effect.ensuring(Effect.sync(() => {
+            barrier.users -= 1
+          })))
+        })
+
+      /** Flush is the retirement boundary; allocation floors remain monotonic. */
+      const retireQuiescentRuns = (): void => {
+        for (const [runId, barrier] of runBarriers) {
+          if (
+            barrier.users > 0 || barrier.compaction !== undefined ||
+            state.pendingByRun.has(runId) || activeWritesByRun.has(runId) ||
+            runDrainWaiters.has(runId) || readers.has(runId) || wakes.has(runId) ||
+            compactingRuns.has(runId)
+          ) continue
+          runBarriers.delete(runId)
+          compactionCounts.delete(runId)
+        }
       }
 
       /** Blocks new admissions while a compaction owns the run. */
@@ -672,9 +712,8 @@ export const layer = (
         runId: RunId,
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> =>
-        Effect.suspend(() => {
-          const barrier = barrierFor(runId)
-          return barrier.semaphore.withPermit(
+        withRunBarrier(runId, (barrier) =>
+          barrier.semaphore.withPermit(
             Effect.suspend((): Effect.Effect<RunAdmission<A>, E, R> => {
               const gate = barrier.compaction
               return gate === undefined
@@ -689,8 +728,7 @@ export const layer = (
                   Effect.andThen(withRunAdmission(runId, effect))
                 )
             )
-          )
-        })
+          ))
 
       /** Acquires batch run permits in stable order so mixed-run batches cannot deadlock. */
       const withRunPermits = <A, E, R>(
@@ -701,7 +739,7 @@ export const layer = (
         const acquire = (index: number): Effect.Effect<A, E, R> =>
           index === ordered.length
             ? effect
-            : barrierFor(ordered[index]!).semaphore.withPermit(acquire(index + 1))
+            : withRunBarrier(ordered[index]!, (barrier) => barrier.semaphore.withPermit(acquire(index + 1)))
         return acquire(0)
       }
 
@@ -749,16 +787,17 @@ export const layer = (
         runId: RunId,
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> =>
-        Effect.suspend(() => {
-          const gate = barrierFor(runId).compaction
-          if (gate !== undefined) {
-            return Deferred.await(gate).pipe(
-              Effect.andThen(withActiveRunWrite(runId, effect))
-            )
-          }
-          activeWritesByRun.set(runId, (activeWritesByRun.get(runId) ?? 0) + 1)
-          return effect.pipe(Effect.ensuring(Effect.sync(() => endRunWrite(runId))))
-        })
+        withRunBarrier(runId, (barrier) =>
+          Effect.suspend(() => {
+            const gate = barrier.compaction
+            if (gate !== undefined) {
+              return Deferred.await(gate).pipe(
+                Effect.andThen(withActiveRunWrite(runId, effect))
+              )
+            }
+            activeWritesByRun.set(runId, (activeWritesByRun.get(runId) ?? 0) + 1)
+            return effect.pipe(Effect.ensuring(Effect.sync(() => endRunWrite(runId))))
+          }))
 
       const awaitRunDrained = (runId: RunId): Effect.Effect<void> =>
         Effect.suspend(() => {
@@ -791,9 +830,8 @@ export const layer = (
         runId: RunId,
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> =>
-        Effect.suspend(() => {
-          const barrier = barrierFor(runId)
-          return barrier.compactionLock.withPermit(
+        withRunBarrier(runId, (barrier) =>
+          barrier.compactionLock.withPermit(
             Effect.uninterruptibleMask((restore) => {
               const gate = Deferred.makeUnsafe<void>()
               return barrier.semaphore.withPermit(
@@ -812,8 +850,7 @@ export const layer = (
                 }))
               )
             })
-          )
-        })
+          ))
 
       /**
        * Raises the in-process seq allocation floor for a run.
@@ -881,7 +918,7 @@ export const layer = (
         if (state.status === "closed") {
           return Effect.fail(error("journal_closed", "journal is closed"))
         }
-        if (state.pending === 0) {
+        if (state.pending === 0 && pendingMaintenance === 0) {
           return Effect.void
         }
         const waiter = Deferred.makeUnsafe<void, JournalError>()
@@ -891,7 +928,7 @@ export const layer = (
             state.flushWaiters.delete(waiter)
           }))
         )
-      })
+      }).pipe(Effect.ensuring(Effect.sync(retireQuiescentRuns)))
 
       const prepare = (input: Input, emittedAtMs: number): Result.Result<Prepared, JournalError> =>
         Result.gen(function*() {
@@ -2101,8 +2138,6 @@ export const layer = (
       )
 
       const compactionPolicy = options.compaction
-      const compactionCounts = new Map<RunId, number>()
-      const compactingRuns = new Set<RunId>()
 
       const countEntries = (runId: RunId): Effect.Effect<number, SqlError.SqlError> =>
         Effect.map(
@@ -2165,7 +2200,9 @@ export const layer = (
 
       /**
        * Counts a run's committed entries toward the compaction policy and
-       * triggers an attempt at the threshold.
+       * triggers an attempt at the threshold. Lossy settlements register and
+       * fork it; durable settlements await it. Registration and handoff are
+       * uninterruptible so cancellation cannot leak the maintenance count.
        *
        * The count is seeded lazily from the durable COUNT on the run's first
        * committed entry in this process, mirroring `ensureFloors`, so a
@@ -2189,41 +2226,48 @@ export const layer = (
        * settlement of the same run, which is the stall {@link settleCommit}
        * moved this work off the allocation permit to avoid.
        */
-      const noteCommitted = (runId: RunId, committed: number): Effect.Effect<void> => {
+      const noteCommitted = (runId: RunId, committed: number, background = false): Effect.Effect<void> => {
         const policy = compactionPolicy
         if (policy === undefined || committed <= 0) {
           return Effect.void
         }
-        return barrierFor(runId).maintenance.withPermit(
-          Effect.gen(function*() {
-            if (compactingRuns.has(runId)) {
-              return false
-            }
-            const known = compactionCounts.get(runId)
-            const current = known === undefined ? yield* countEntries(runId) : known + committed
-            compactionCounts.set(runId, current)
-            if (current < policy.entryThreshold) {
-              return false
-            }
-            compactingRuns.add(runId)
-            return true
-          })
-        ).pipe(
-          Effect.flatMap((triggered) =>
-            triggered
-              ? Effect.ensuring(
-                policyCompact(policy, runId),
-                Effect.sync(() => {
+        return Effect.uninterruptibleMask((restore) =>
+          withRunBarrier(runId, (barrier) =>
+            restore(barrier.maintenance.withPermit(
+              Effect.gen(function*() {
+                if (compactingRuns.has(runId)) {
+                  return false
+                }
+                const known = compactionCounts.get(runId)
+                const current = known === undefined ? yield* countEntries(runId) : known + committed
+                compactionCounts.set(runId, current)
+                if (current < policy.entryThreshold) {
+                  return false
+                }
+                compactingRuns.add(runId)
+                pendingMaintenance += 1
+                return true
+              })
+            )).pipe(
+              Effect.flatMap((triggered) => {
+                if (!triggered) return Effect.void
+                const attempt = policyCompact(policy, runId).pipe(Effect.ensuring(Effect.sync(() => {
                   compactingRuns.delete(runId)
-                })
+                  pendingMaintenance -= 1
+                  if (state.pending === 0 && pendingMaintenance === 0) completeFlushWaiters(Effect.void)
+                })))
+                // The sole queue consumer must never await a compaction barrier:
+                // that barrier may need another batch from this very consumer.
+                return background
+                  ? Effect.asVoid(Effect.forkIn(Effect.interruptible(attempt), maintenanceScope))
+                  : restore(attempt)
+              }),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause as Cause.Cause<never>)
+                  : Effect.logWarning("journal compaction policy bookkeeping failed", cause)
               )
-              : Effect.void
-          ),
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause as Cause.Cause<never>)
-              : Effect.logWarning("journal compaction policy bookkeeping failed", cause)
-          )
+            ))
         )
       }
 
@@ -2246,7 +2290,7 @@ export const layer = (
 
       const settle = (count: number): void => {
         state.pending = Math.max(0, state.pending - count)
-        if (state.pending === 0) {
+        if (state.pending === 0 && pendingMaintenance === 0) {
           completeFlushWaiters(Effect.void)
         }
       }
@@ -2294,11 +2338,10 @@ export const layer = (
             Effect.tap((outcome) => publish(outcome.commits.map(({ commit }) => commit))),
             // The transaction has committed and publication is complete. Drop
             // the barrier counts before policy compaction takes this run's
-            // permit, while the global flush count still waits for the policy.
+            // permit. Maintenance has its own global flush count.
             Effect.tap(() => Effect.sync(() => settleRunPending(batch))),
-            // The policy runs BEFORE the batch settles so a `flush` barrier
-            // does not return while an auto-compaction it triggered is still
-            // in flight.
+            // Register maintenance BEFORE settling the batch, so flush cannot
+            // observe a gap between queued work and its policy attempt.
             Effect.tap((outcome) => {
               const perRun = new Map<RunId, number>()
               outcome.commits.forEach(({ commit, queued }) => {
@@ -2307,7 +2350,7 @@ export const layer = (
                 }
                 perRun.set(queued.runId, (perRun.get(queued.runId) ?? 0) + 1)
               })
-              return Effect.forEach(perRun, ([runId, committed]) => noteCommitted(runId, committed), {
+              return Effect.forEach(perRun, ([runId, committed]) => noteCommitted(runId, committed, true), {
                 discard: true
               })
             }),
