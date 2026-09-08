@@ -25,6 +25,51 @@ const storeOf = (
 ) => MemoryStore.MemoryStore.of({ searchFts } as unknown as MemoryStore.Service)
 
 describe("RecallFts", () => {
+  it.each([4, 5, 6])(
+    "recalls a tagged SQLite row behind %i rejected candidates at a five-row window",
+    async (rejected) => {
+      const result = await Effect.runPromise(
+        Effect.gen(function*() {
+          const store = yield* MemoryStore.MemoryStore
+          yield* store.putNote({
+            namespace: "bank",
+            id: "wanted",
+            text: "durable recovery guidance for restoring a workflow after an interrupted run",
+            tags: ["scope:wanted"],
+            provenance: {}
+          })
+          for (let index = 0; index < rejected; index++) {
+            yield* store.putNote({
+              namespace: "bank",
+              id: `other-${index}`,
+              text: "durable durable durable",
+              tags: ["scope:other"],
+              provenance: {}
+            })
+          }
+          yield* store.enableFts("flow")
+          const unfiltered = yield* store.searchFts({
+            namespace: "bank",
+            query: "durable",
+            status: "accepted",
+            limit: rejected + 1
+          })
+          const recalled = yield* Fts.recall({
+            banks: ["bank"],
+            query: "durable",
+            tagGroups: [{ tags: ["scope:wanted"], match: "all_strict" }],
+            maxTokens: 256
+          })
+          return { unfiltered, recalled }
+        }).pipe(Effect.provide(TestMemory.layer))
+      )
+
+      expect(result.unfiltered).toHaveLength(rejected + 1)
+      expect(result.unfiltered.at(-1)?.key).toBe("wanted")
+      expect(result.recalled.map((row) => row.key)).toEqual(["wanted"])
+    }
+  )
+
   it("quotes each term and preserves implicit AND", () => {
     expect(Fts.literalFtsQuery("one two\" three")).toBe("\"one\" \"two\"\"\" \"three\"")
     expect(Fts.literalFtsQuery(" \0 ")).toBe("")

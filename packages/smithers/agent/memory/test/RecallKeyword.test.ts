@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import * as MemoryStore from "../src/MemoryStore.ts"
 import * as Recall from "../src/Recall.ts"
 import * as Keyword from "../src/RecallKeyword.ts"
+import * as TestMemory from "../src/test/TestMemory.ts"
 
 const rows = [
   { key: "alpha", text: "alpha beta", tags: ["scope:x"], status: "accepted", updatedAtMs: 1 },
@@ -14,6 +15,49 @@ const storeOf = (searchRows: () => Effect.Effect<ReadonlyArray<Keyword.Row>>) =>
   MemoryStore.MemoryStore.of({ searchRows } as unknown as MemoryStore.Service)
 
 describe("RecallKeyword", () => {
+  it.each([4, 5, 6])(
+    "recalls a tagged SQLite row behind %i rejected candidates at a five-row window",
+    async (rejected) => {
+      const result = await Effect.runPromise(
+        Effect.gen(function*() {
+          const store = yield* MemoryStore.MemoryStore
+          yield* store.putNote({
+            namespace: "bank",
+            id: "wanted",
+            text: "durable recovery guidance for restoring a workflow after an interrupted run",
+            tags: ["scope:wanted"],
+            provenance: {}
+          })
+          for (let index = 0; index < rejected; index++) {
+            yield* store.putNote({
+              namespace: "bank",
+              id: `other-${index}`,
+              text: "durable durable durable",
+              tags: ["scope:other"],
+              provenance: {}
+            })
+          }
+          const unfiltered = yield* store.searchRows({
+            namespace: "bank",
+            status: "accepted",
+            limit: rejected + 1
+          })
+          const recalled = yield* Keyword.recall({
+            banks: ["bank"],
+            query: "durable",
+            tagGroups: [{ tags: ["scope:wanted"], match: "all_strict" }],
+            maxTokens: 256
+          })
+          return { unfiltered, recalled }
+        }).pipe(Effect.provide(TestMemory.layer))
+      )
+
+      expect(result.unfiltered).toHaveLength(rejected + 1)
+      expect(result.unfiltered.at(-1)?.key).toBe("wanted")
+      expect(result.recalled.map((row) => row.key)).toEqual(["wanted"])
+    }
+  )
+
   it("scores terms, applies authoritative tags/status, and breaks ties by recency", async () => {
     const store = MemoryStore.MemoryStore.of({
       searchRows: () => Effect.succeed(rows)

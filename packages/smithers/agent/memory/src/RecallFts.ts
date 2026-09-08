@@ -42,6 +42,7 @@ const run = (input: Recall.Input): Effect.Effect<Recall.Output, MemoryError.Memo
         store.searchFts({
           namespace,
           query: input.query,
+          tagGroups: input.tagGroups,
           limit: requested * 5,
           status: "accepted"
         })

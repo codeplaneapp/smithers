@@ -60,6 +60,7 @@ const run = (input: Recall.Input): Effect.Effect<Recall.Output, MemoryError.Memo
         store.searchRows({
           namespace,
           status: "accepted",
+          tagGroups: input.tagGroups,
           limit: scanLimit
         })
       ),
