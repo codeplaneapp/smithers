@@ -506,9 +506,10 @@ as its identity and classification, never as the effect's `input` or `output`.
 ## Composition
 
 `TimeTravel.layer` requires `TimeTravelStore`, `Journal`, `RunStore`,
-`CacheStore`, and `Jj`, and nothing else. Time travel is a library API in
-1.0.0-rc.0: the verbs are reached by injecting the service from your own
-program. The `smithers` command-line tool has no time-travel verb yet.
+`CacheStore`, and `Jj`, and nothing else. Time travel is a library API, also
+exposed as `smthrs runs inspect|replay|fork|rewind`; see the
+[CLI reference](https://smithers.sh/docs/reference/cli/). MCP exposes these verbs
+only through the unified command tools.
 
 The engine is the producer of everything the service reads.
 [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) stamps `meta.lineageId` on every

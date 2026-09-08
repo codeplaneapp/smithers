@@ -124,9 +124,10 @@ discarded future cannot answer them.
   handed out again, so the retry lands under a fresh lane name.
 - `Projection.reduce` receives store entries by reference. Treat them as
   read-only.
-- Time travel is a library API in 1.0.0-rc.0. You reach the verbs by injecting
-  the service from your own program; the `smithers` command-line tool has no
-  time-travel verb yet.
+- Time travel is a library API, also exposed as
+  `smthrs runs inspect|replay|fork|rewind`; see the
+  [CLI reference](https://smithers.sh/docs/reference/cli/). MCP exposes these
+  verbs only through the unified command tools.
 
 ## Documentation
 

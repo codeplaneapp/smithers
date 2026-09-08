@@ -42,9 +42,9 @@
 - Startup recovery reports a `Busy` outcome for an audit whose run another live
   process holds, and writes nothing, so the audit stays recoverable instead of
   being closed on the strength of a race.
-- Colocated documentation: `docs/` plus `docs/Manifest.ts`, `PACKAGE.ts`, and
-  `scripts/docs.mjs` generate `docs/pages/api/time-travel.md` and the surface
-  region of `docs/pages/concepts/time-travel.md`, and drift fails CI.
+- Colocated `docs/` is synced to `apps/docs/time-travel` by the shared
+  `contentSync` target and to the main site API reference by
+  `apps/site/scripts/sync-api-docs.mjs`.
 
 ### Changed
 
@@ -86,8 +86,10 @@
 - Error causes carry an effect's identity and classification, never its `input`
   or `output`. `TimeTravelError` encodes its cause, so a raw payload on one was
   a size and secret hazard.
-- Time travel is a library API in this release, and only a library API: no CLI
-  verb, no MCP tool, and it is not composed into `NodeControl`.
+- Time travel is a library API, also exposed as
+  `smthrs runs inspect|replay|fork|rewind`; see the
+  [CLI reference](https://smithers.sh/docs/reference/cli/). MCP exposes these
+  verbs only through the unified command tools.
 
 ### Fixed
 
