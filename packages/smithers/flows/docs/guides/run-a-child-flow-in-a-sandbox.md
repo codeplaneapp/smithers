@@ -191,3 +191,17 @@ The runtime the bundle is started with has to be on the guest's `PATH`, and
 nothing installs it. `node:22-alpine` has `node`; bare `alpine` does not, and a
 missing runtime comes back as `guest_failed` naming what it looked for. The full
 list of refusals is in [Troubleshooting](../troubleshooting.md).
+
+## Failure diagnostics
+
+Before writing a failed `result.json`, the guest applies the engine logger's
+shared credential key and text rules to error fields, messages, and string
+failures. The host applies the same rules to `SandboxedFlowError.message` and
+its provider causes, and redacts guest stdout/stderr before taking diagnostic
+tails. Sensitive fields such as `password` and nested `Authorization` become
+placeholders. Error details that do not match the rules remain available.
+
+These rules are best effort, not a guarantee for arbitrary secret text. They
+cover failure diagnostics, not successful output, request payloads, collected
+files, or the guest's original output streams. Keep secrets out of those
+surfaces or model them with `Schema.Redacted` where supported.

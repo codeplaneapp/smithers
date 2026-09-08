@@ -49,6 +49,8 @@
  * @since 1.0.0
  */
 import { Action, type Flow, FlowRuntime } from "@smthrs/flow"
+import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
+import * as Redaction from "@smthrs/journal/Redaction"
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import { Sandbox } from "@smthrs/sandbox"
 import type { ProviderError } from "@smthrs/sandbox/RemoteChildProcessSpawner"
@@ -261,15 +263,25 @@ const controlDirectory = ".smithers-sandbox"
 /** The most bytes of guest stdout or stderr a failure message quotes. */
 const quotedOutputBytes = 4096
 
-/** The last `quotedOutputBytes` of a stream's text, for a failure message. */
-const tail = (text: string): string =>
-  text.length > quotedOutputBytes ? `…${text.slice(text.length - quotedOutputBytes)}` : text
+/** Diagnostic copies use the same key and value rules as engine logs. */
+const redact = Redaction.make({ onTooDeep: "name" })
+
+/** Redact before taking a tail: the credential prefix may lie outside the bound. */
+const tail = (text: string): string => {
+  const redacted = String(redact(text))
+  return redacted.length > quotedOutputBytes ? `…${redacted.slice(redacted.length - quotedOutputBytes)}` : redacted
+}
 
 const failure = (
   code: SandboxedFlowError["code"],
   message: string,
   cause?: unknown
-): SandboxedFlowError => new SandboxedFlowError({ code, message, ...(cause === undefined ? {} : { cause }) })
+): SandboxedFlowError =>
+  new SandboxedFlowError({
+    code,
+    message: String(redact(message)),
+    ...(cause === undefined ? {} : { cause: RedactedLogger.redactArgument(cause, redact) })
+  })
 
 const sessionFailure = (context: string) => (cause: ProviderError): SandboxedFlowError =>
   failure("session_failed", `${context}: ${cause.message}`, cause)

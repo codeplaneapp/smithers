@@ -33,6 +33,8 @@
  */
 import { FlowEngine } from "@smthrs/engine"
 import { Action, type Flow, Interpreter } from "@smthrs/flow"
+import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
+import * as Redaction from "@smthrs/journal/Redaction"
 import * as Cause from "effect/Cause"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -137,14 +139,17 @@ export const guestCrypto: Crypto.Crypto = Crypto.make({
     }).pipe(Effect.map((buffer) => new Uint8Array(buffer)))
 })
 
+/** Diagnostic copies use the same key and value rules as engine logs. */
+const redact = Redaction.make({ onTooDeep: "name" })
+
 /** The most characters of a failure's fields a description quotes. */
 const quotedFieldCharacters = 1024
 
 /**
  * The own fields of a failure as JSON, `_tag`, `message`, and `stack` left
  * out, cut at {@link quotedFieldCharacters}; nothing when there are none or
- * they cannot be serialized (a defect can carry a cycle; a typed error
- * cannot, because the engine encoded it before it got here).
+ * they cannot be serialized. Redaction happens before truncation so a cut
+ * cannot separate a credential from the key or prefix that identifies it.
  */
 const fields = (value: object): string | undefined => {
   try {
@@ -165,7 +170,8 @@ const fields = (value: object): string | undefined => {
  * rendering of a tagged error with no `message` is the tag followed by a
  * stack trace into the bundle, which tells the host nothing.
  */
-const describe = (value: unknown): string => {
+const describe = (failure: unknown): string => {
+  const value = RedactedLogger.redactArgument(failure, redact)
   if (typeof value !== "object" || value === null) return String(value)
   const tag = Predicate.hasProperty(value, "_tag") && typeof value._tag === "string"
     ? value._tag
@@ -205,7 +211,10 @@ export const run = async (entry: Readonly<Record<string, unknown>>, environment:
   const resultPath = required(environment, "SMITHERS_SANDBOX_RESULT_PATH")
   const request = Schema.decodeUnknownSync(Request)(JSON.parse(await readFile(requestPath, "utf8")))
   const result = await Effect.runPromise(execute(entry, request))
-  await writeFile(resultPath, JSON.stringify(result))
+  await writeFile(
+    resultPath,
+    JSON.stringify(result.status === "failed" ? { ...result, error: String(redact(result.error)) } : result)
+  )
 }
 
 const execute = (

@@ -287,6 +287,62 @@ describe("SandboxedFlow.execute failures", () => {
       expect(failure.message).toContain("no machines left")
     }), 60_000)
 
+  it.live("redacts provider messages and nested causes in the returned error", () =>
+    Effect.gen(function*() {
+      const secret = "synthetic-provider-credential-NOT-A-REAL-SECRET"
+      const cause = Object.assign(new Error(`request failed: password=${secret}`), {
+        password: secret,
+        headers: { Authorization: `Bearer ${secret}` }
+      })
+      const failure = yield* run(Sum, { n: 1 }, {
+        provider: {
+          acquire: () =>
+            Effect.fail(
+              new ProviderError({
+                code: "unavailable",
+                message: `provider refused: Bearer ${secret}`,
+                cause
+              })
+            )
+        }
+      })
+      expect(failure.code).toBe("session_failed")
+      expect(failure.message).toContain("provider refused: Bearer [REDACTED_TOKEN]")
+      expect(JSON.stringify(failure)).not.toContain(secret)
+      expect(String(failure.cause)).not.toContain(secret)
+      expect(failure.cause).toMatchObject({
+        cause: {
+          message: "request failed: password=[REDACTED]",
+          password: "[REDACTED]",
+          headers: { Authorization: "[REDACTED]" }
+        }
+      })
+    }), 60_000)
+
+  for (const mode of ["failed", "missing", "invalid", "nonzero"] as const) {
+    it.live(`redacts guest diagnostics before truncating output for ${mode} results`, () =>
+      Effect.gen(function*() {
+        const secret = "synthetic-output-credential-NOT-A-REAL-SECRET"
+        // The credential prefix falls outside the raw tail bound.
+        const chatter = `Bearer ${secret.repeat(150)}`
+        const result = JSON.stringify({ status: "failed", error: `password=${secret}` })
+        const body = [
+          `printf '%s' '${chatter}'`,
+          `printf '%s' '${chatter}' >&2`,
+          mode === "failed" ? `printf '%s' '${result}' > "$SMITHERS_SANDBOX_RESULT_PATH"` : "",
+          mode === "invalid" ? `printf garbage > "$SMITHERS_SANDBOX_RESULT_PATH"` : "",
+          mode === "nonzero" ? "exit 1" : ""
+        ].join("\n")
+        const failure = yield* run(Sum, { n: 1 }, { runtime: guestRuntime(`redacted-${mode}`, body) })
+        expect(failure.code).toBe(
+          mode === "failed" ? "flow_failed" : mode === "nonzero" ? "guest_failed" : "result_unreadable"
+        )
+        expect(failure.message).toContain("stderr: Bearer [REDACTED_TOKEN]")
+        if (mode !== "nonzero") expect(failure.message).toContain("stdout: Bearer [REDACTED_TOKEN]")
+        expect(JSON.stringify(failure)).not.toContain(secret)
+      }), 60_000)
+  }
+
   it.live("names the runtime the image does not contain", () =>
     Effect.gen(function*() {
       const failure = yield* run(Sum, { n: 1 }, { runtime: "definitely-not-a-runtime-xyz" })
@@ -646,6 +702,64 @@ describe("the guest runner in process", () => {
     expect(result.status === "failed" && result.error).toContain("refused in process")
   })
 
+  it("redacts SDK error fields in persisted guest bytes and the returned host error", async () => {
+    const secret = "synthetic-review-credential-NOT-A-REAL-SECRET"
+    const Crash = Action.make("review/credential-failure", { payload: {}, success: Schema.Void })
+    const Child = Flow.make("review/credential-child", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Crash.call({})
+    })
+    const layer = Crash.toLayer(() =>
+      Effect.die(Object.assign(new Error(`SDK request refused: password=${secret}`), {
+        password: secret,
+        request: { headers: { Authorization: `Bearer ${secret}` }, password: secret },
+        statusCode: 401
+      }))
+    )
+    const environment = request("credential", { flow: Child._tag, executionId: "credential", payload: {} })
+    await Guest.run({ Child, layer }, environment)
+    const bytes = readFileSync(environment.SMITHERS_SANDBOX_RESULT_PATH!)
+    const result = resultOf(environment)
+    expect(result.status).toBe("failed")
+    expect(bytes.toString()).not.toContain(secret)
+    expect(result.status === "failed" && result.error).toContain("\"password\":\"[REDACTED]\"")
+    expect(result.status === "failed" && result.error).toContain("\"Authorization\":\"[REDACTED]\"")
+    expect(result.status === "failed" && result.error).toContain("\"statusCode\":401")
+
+    const directory = await Effect.runPromise(provider)
+    const failure = await Effect.runPromise(failureOf(SandboxedFlow.execute(Sum, { n: 1 }, {
+      entry,
+      session: "credential-readback",
+      provider: {
+        acquire: (key) =>
+          Effect.map(directory.acquire(key), (session) => ({
+            ...session,
+            readFile: (path) => path.endsWith("/result.json") ? Effect.succeed(bytes) : session.readFile(path)
+          }))
+      }
+    })))
+    expect(failure.code).toBe("flow_failed")
+    expect(failure.message).toContain("SDK request refused")
+    expect(JSON.stringify(failure)).not.toContain(secret)
+  }, 60_000)
+
+  for (const shape of ["error", "string"] as const) {
+    it(`redacts ${shape} failure text before persisting the guest result`, async () => {
+      const secret = "synthetic-message-credential-NOT-A-REAL-SECRET"
+      const flow = shape === "error" ? childEntry.Dying : childEntry.Plain
+      const payload = shape === "error"
+        ? { message: `Bearer ${secret}`, shape: "error" }
+        : { text: `password=${secret}` }
+      const environment = request(`credential-${shape}`, { flow: flow._tag, executionId: "credential", payload })
+      await Guest.run(childEntry, environment)
+      expect(resultOf(environment).status).toBe("failed")
+      const bytes = readFileSync(environment.SMITHERS_SANDBOX_RESULT_PATH!, "utf8")
+      expect(bytes).not.toContain(secret)
+      expect(bytes).toContain("[REDACTED")
+    })
+  }
+
   it("writes a failure for a payload the flow's schema refuses", async () => {
     const environment = request("bad-payload", { flow: Sum._tag, executionId: "in-process", payload: { n: "one" } })
     await Guest.run(childEntry, environment)
@@ -690,7 +804,7 @@ describe("the guest runner in process", () => {
     expect(result.status === "failed" && result.error).toBe("defect Error: boom")
   })
 
-  it("describes a defect it cannot serialize without dying on it", async () => {
+  it("describes a cyclic defect with the shared redaction marker", async () => {
     const environment = request("dying-cyclic", {
       flow: childEntry.Dying._tag,
       executionId: "in-process",
@@ -698,7 +812,22 @@ describe("the guest runner in process", () => {
     })
     await Guest.run(childEntry, environment)
     const result = resultOf(environment)
-    expect(result.status === "failed" && result.error).toBe("defect failure")
+    expect(result.status === "failed" && result.error).toBe(
+      "defect failure {\"kind\":\"cyclic\",\"loop\":\"[Circular]\"}"
+    )
+  })
+
+  it("omits redacted fields that JSON cannot serialize", async () => {
+    const Crash = Action.make("review/bigint-failure", { payload: {}, success: Schema.Void })
+    const Child = Flow.make("review/bigint-child", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Crash.call({})
+    })
+    const layer = Crash.toLayer(() => Effect.die({ count: 1n, password: "synthetic-bigint-credential" }))
+    const environment = request("bigint", { flow: Child._tag, executionId: "bigint", payload: {} })
+    await Guest.run({ Child, layer }, environment)
+    expect(resultOf(environment)).toEqual({ status: "failed", error: "defect failure" })
   })
 
   it("describes a bare failure value as itself", async () => {
