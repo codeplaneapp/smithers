@@ -93,7 +93,12 @@ server authenticates the connection; give each trust domain its own credential
 and policy rather than sharing an operator credential.
 
 Compatibility frames are bounded to 4 MiB; history results to 10,000 events and
-1 MiB. These are the `McpServer` library's bounds, not a claim about Incur's
+1 MiB. `watch_run` applies those history limits only to events after
+`afterSequence` and retains the supplied cursor when the delta is empty.
+`McpServer.serve` pauses input while replies are blocked, waits for each write
+to complete, and returns after input EOF only once all replies have completed.
+Transport errors stop the session; interruption releases its stream listeners.
+These are the `McpServer` library's bounds, not a claim about Incur's
 transport limits. `McpServer.unsupportedTools` and `unsupportedReasons` enumerate
 the retained tools that answer `unsupported`.
 

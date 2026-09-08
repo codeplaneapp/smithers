@@ -6,14 +6,20 @@
  * by the code that consumes them rather than by a reimplementation.
  */
 import { NodeServices } from "@effect/platform-node"
-import { ApprovalAuthority, Control as ControlService, ControlError, ControlRuntime } from "@smthrs/control"
+import {
+  ApprovalAuthority,
+  Control as ControlService,
+  ControlError,
+  ControlRuntime,
+  type ControlSchema
+} from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as McpClient from "@smthrs/mcp/McpClient"
 import { Cause, Effect, Exit, Layer, Schema, Stream } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { PassThrough } from "node:stream"
+import { PassThrough, Readable, Writable } from "node:stream"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import * as McpServer from "../src/McpServer.ts"
@@ -489,6 +495,8 @@ describe("the envelope", () => {
 
     expect(await rpcCallWith(largeControl, "get_run_events", { runId: "run-1" }))
       .toMatchObject({ ok: false, error: { code: "RESOURCE_LIMIT" } })
+    expect(await rpcCallWith(largeControl, "watch_run", { runId: "run-1", afterSequence: 0 }))
+      .toMatchObject({ ok: false, error: { code: "RESOURCE_LIMIT" } })
   })
 
   it("answers the raw surface with the command to run", async () => {
@@ -519,7 +527,7 @@ describe("what each tool answers on the path through", () => {
 
   const projectControl = TestControl.layer({ now: () => 0, flows: [demoFlow], approvalAuthority })
 
-  const event = (sequence: number, kind: string, payload: unknown) => ({
+  const event = (sequence: number, kind: string, payload: ControlSchema.ControlEvent["payload"]) => ({
     sequence,
     kind,
     runId: "run-1",
@@ -536,7 +544,7 @@ describe("what each tool answers on the path through", () => {
   /** A plane holding one running run with a fixed, finite history. */
   const runControl = (
     status = "running",
-    events: ReadonlyArray<unknown> = history
+    events: ReadonlyArray<ReturnType<typeof event>> = history
   ) =>
     Layer.effect(
       ControlService.Control,
@@ -552,7 +560,8 @@ describe("what each tool answers on the path through", () => {
                 } as never
               )
               : service.list(request),
-          watch: () => Stream.fromIterable(events as never)
+          watch: (request) =>
+            Stream.fromIterable(events.filter((event) => event.sequence > (request.afterSequence ?? 0)))
         }))
     ).pipe(Layer.provide(projectControl))
 
@@ -582,6 +591,39 @@ describe("what each tool answers on the path through", () => {
     // call should resume from rather than where this one started.
     expect(tail.data.events.map((one) => one.sequence)).toEqual([3])
     expect(tail.data.sequence).toBe(3)
+  })
+
+  it("polls only the delta beyond a history larger than the event limit", async () => {
+    const last = McpServer.maximumHistoryEvents + 1
+    const events = Array.from({ length: last }, (_, index) => event(index + 1, "tick", null))
+    const cursors: Array<number | undefined> = []
+    let reads = 0
+    const recordingControl = Layer.effect(
+      ControlService.Control,
+      Effect.map(ControlService.Control, (service) =>
+        ControlService.make({
+          ...service,
+          watch: (request) => {
+            cursors.push(request.afterSequence)
+            return Stream.fromIterable(events.slice(request.afterSequence ?? 0)).pipe(
+              Stream.tap(() =>
+                Effect.sync(() => {
+                  reads += 1
+                })
+              )
+            )
+          }
+        }))
+    ).pipe(Layer.provide(control))
+
+    expect(await rpcCallWith(recordingControl, "watch_run", { runId: "run-1", afterSequence: last - 1 }))
+      .toMatchObject({ ok: true, data: { events: [events[last - 1]], sequence: last } })
+    for (const afterSequence of [last, last + 10]) {
+      expect(await rpcCallWith(recordingControl, "watch_run", { runId: "run-1", afterSequence }))
+        .toMatchObject({ ok: true, data: { events: [], sequence: afterSequence } })
+    }
+    expect(cursors).toEqual([last - 1, last, last + 10])
+    expect(reads).toBe(1)
   })
 
   it("reads the whole event history, the transcript, and one node's output", async () => {
@@ -781,6 +823,158 @@ describe("the JSON-RPC surface", () => {
 })
 
 describe("the in-process stdio loop", () => {
+  it.each(["single chunk", "streamed chunks"])("bounds stalled replies and input from %s", async (mode) => {
+    const count = 1000
+    let produced = 0
+    const lines = function*() {
+      for (let id = 0; id < count; id++) {
+        produced += 1
+        yield `${JSON.stringify({ jsonrpc: "2.0", id, method: "ping" })}\n`
+      }
+    }
+    const input = mode === "single chunk"
+      ? Readable.from([Array.from(lines()).join("")])
+      : Readable.from(lines(), { objectMode: false, highWaterMark: 1 })
+    const replies: Array<number> = []
+    let release: (() => void) | undefined
+    const output = new Writable({
+      highWaterMark: 1,
+      write(chunk, _encoding, callback) {
+        replies.push(JSON.parse(chunk.toString()).id)
+        if (replies.length === 1) release = callback
+        else callback()
+      }
+    })
+    const abort = new AbortController()
+    let returned = false
+    const serving = Effect.runPromise(
+      McpServer.serve({ version: "test", input, output }).pipe(Effect.provide(control)),
+      { signal: abort.signal }
+    ).then(() => {
+      returned = true
+    })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(replies).toEqual([0])
+      expect(output.writableLength).toBeLessThan(100)
+      expect(input.isPaused()).toBe(true)
+      if (mode === "streamed chunks") expect(produced).toBeLessThanOrEqual(3)
+      expect(returned).toBe(false)
+      release!()
+      await serving
+      expect(replies).toEqual(Array.from({ length: count }, (_, index) => index))
+      expect(output.writableLength).toBe(0)
+    } finally {
+      abort.abort()
+      await serving.catch(() => {})
+      input.destroy()
+      output.destroy()
+    }
+  })
+
+  it.each(["ping", "oversized"])(
+    "waits for the last %s write callback after input EOF below the high water mark",
+    async (frame) => {
+      const input = new PassThrough()
+      let release: (() => void) | undefined
+      const output = new Writable({
+        write(_chunk, _encoding, callback) {
+          release = callback
+        }
+      })
+      const abort = new AbortController()
+      let returned = false
+      const serving = Effect.runPromise(
+        McpServer.serve({ version: "test", input, output }).pipe(Effect.provide(control)),
+        { signal: abort.signal }
+      ).then(() => {
+        returned = true
+      })
+      try {
+        input.end(
+          frame === "ping"
+            ? JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" })
+            : "x".repeat(McpServer.maximumFrameBytes + 1)
+        )
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(release).toBeTypeOf("function")
+        expect(returned).toBe(false)
+        release!()
+        await serving
+        expect(output.writableLength).toBe(0)
+      } finally {
+        abort.abort()
+        await serving.catch(() => {})
+        output.destroy()
+      }
+    }
+  )
+
+  it.each(["callback", "error", "close", "throw", "interrupt"])(
+    "releases transport listeners on %s during a blocked write",
+    async (mode) => {
+      const input = new PassThrough()
+      const failure = new Error("transport failed")
+      let release: ((error?: Error | null) => void) | undefined
+      let started!: () => void
+      const writing = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      const output = new Writable({
+        highWaterMark: 1,
+        write(_chunk, _encoding, callback) {
+          release = callback
+          started()
+          if (mode === "throw") throw failure
+        }
+      })
+      const abort = new AbortController()
+      const serving = Effect.runPromiseExit(
+        McpServer.serve({ version: "test", input, output }).pipe(Effect.provide(control)),
+        { signal: abort.signal }
+      )
+      try {
+        input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" })}\n`)
+        await writing
+        if (mode === "callback") release!(failure)
+        if (mode === "error") output.destroy(failure)
+        if (mode === "close") output.destroy()
+        if (mode === "interrupt") abort.abort()
+        const exit = await serving
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(
+            mode === "interrupt" ? Cause.hasInterrupts(exit.cause) : Cause.pretty(exit.cause).includes(
+              mode === "close" ? "MCP output closed" : failure.message
+            )
+          ).toBe(true)
+        }
+        expect(input.isPaused()).toBe(true)
+        for (const event of ["data", "end", "close", "error"]) expect(input.listenerCount(event)).toBe(0)
+        for (const event of ["drain", "close", "error"]) expect(output.listenerCount(event)).toBe(0)
+      } finally {
+        abort.abort()
+        await serving
+        input.destroy()
+        output.destroy()
+      }
+    }
+  )
+
+  it("observes output errors while awaiting input", async () => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    const serving = Effect.runPromiseExit(
+      McpServer.serve({ version: "test", input, output }).pipe(Effect.provide(control))
+    )
+    output.destroy(new Error("idle transport failed"))
+    const exit = await serving
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("idle transport failed")
+    expect(input.listenerCount("data")).toBe(0)
+    input.destroy()
+  })
+
   it("answers complete frames after malformed input and ends when input closes", async () => {
     const input = new PassThrough()
     const output = new PassThrough()

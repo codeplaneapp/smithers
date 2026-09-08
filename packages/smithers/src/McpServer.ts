@@ -27,7 +27,7 @@
  */
 import { Control as ControlService, ControlError, ControlSchema } from "@smthrs/control"
 import * as Redaction from "@smthrs/journal/Redaction"
-import { Context, Effect, Queue, Schema, Stream } from "effect"
+import { Cause, Context, Deferred, Effect, Queue, Schema, Stream } from "effect"
 import * as CliError from "./CliError.ts"
 import * as Forensics from "./Forensics.ts"
 import * as History from "./internal/History.ts"
@@ -193,12 +193,12 @@ const text = (value: unknown): string | undefined => typeof value === "string" ?
 
 const requireRunId = (args: Record<string, unknown>): string | undefined => text(args["runId"]) ?? text(args["run_id"])
 
-/** Every event of one run, oldest first. */
-const eventsOf = (runId: string) =>
+/** Events of one run after the cursor, oldest first. */
+const eventsOf = (runId: string, afterSequence = 0) =>
   Effect.gen(function*() {
     const control = yield* ControlService.Control
     return yield* History.collect(
-      control.watch({ runId, follow: false }),
+      control.watch({ runId, afterSequence, follow: false }),
       { operation: "MCP event-history read", subject: `run ${JSON.stringify(runId)}` },
       {
         maxEvents: maximumHistoryEvents,
@@ -389,12 +389,12 @@ export const supportedTools: ReadonlyArray<Tool> = [
       if (runId === undefined) return Effect.succeed(missingArgument("runId"))
       const after = typeof args["afterSequence"] === "number" ? args["afterSequence"] : 0
       return envelope(
-        Effect.all([eventsOf(runId), summaryOf(runId)]),
+        Effect.all([eventsOf(runId, after), summaryOf(runId)]),
         ([events, run]) =>
           succeeded({
             runId,
             status: run?.status,
-            events: events.filter((event) => event.sequence > after),
+            events,
             sequence: events.at(-1)?.sequence ?? after
           })
       )
@@ -791,77 +791,153 @@ type InputFrame =
   | { readonly _tag: "Oversized" }
 
 const inputFrames = (input: NodeJS.ReadableStream): Stream.Stream<InputFrame> =>
-  Stream.callback<InputFrame>((queue) =>
-    Effect.acquireRelease(
-      Effect.sync(() => {
-        let chunks: Array<Buffer> = []
-        let bytes = 0
-        let oversized = false
-        let closed = false
+  Stream.suspend(() => {
+    let chunks: Array<Buffer> = []
+    let bytes = 0
+    let oversized = false
 
-        const append = (chunk: Buffer): void => {
-          if (chunk.length === 0 || oversized) return
-          if (bytes + chunk.length > maximumFrameBytes) {
-            chunks = []
-            bytes = 0
-            oversized = true
-            return
+    const append = (chunk: Buffer): void => {
+      if (chunk.length === 0 || oversized) return
+      if (bytes + chunk.length > maximumFrameBytes) {
+        chunks = []
+        bytes = 0
+        oversized = true
+        return
+      }
+      chunks.push(chunk)
+      bytes += chunk.length
+    }
+
+    const finish = (): InputFrame => {
+      const frame: InputFrame = oversized
+        ? { _tag: "Oversized" }
+        : { _tag: "Line", line: Buffer.concat(chunks, bytes).toString("utf8") }
+      chunks = []
+      bytes = 0
+      oversized = false
+      return frame
+    }
+
+    const incoming = Stream.callback<Buffer, unknown>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const onData = (value: unknown): void => {
+            // Keep at most one input chunk pending while the current chunk's
+            // frames are consumed. Pausing alone cannot bound frames if one
+            // chunk contains thousands of lines, so parsing below is lazy too.
+            input.pause()
+            const chunk = Buffer.isBuffer(value)
+              ? value
+              : value instanceof Uint8Array
+              ? Buffer.from(value)
+              : Buffer.from(String(value), "utf8")
+            Queue.offerUnsafe(queue, chunk)
           }
-          chunks.push(chunk)
-          bytes += chunk.length
-        }
+          const onClose = (): void => {
+            Queue.endUnsafe(queue)
+          }
+          const onError = (error: unknown): void => {
+            Queue.failCauseUnsafe(queue, Cause.fail(error))
+          }
+          input.on("data", onData)
+          input.on("end", onClose)
+          input.on("close", onClose)
+          input.on("error", onError)
+          input.resume()
+          return { onData, onClose, onError }
+        }),
+        ({ onClose, onData, onError }) =>
+          Effect.sync(() => {
+            input.pause()
+            input.removeListener("data", onData)
+            input.removeListener("end", onClose)
+            input.removeListener("close", onClose)
+            input.removeListener("error", onError)
+          })
+      ), { bufferSize: 1 })
 
-        const finish = (): void => {
-          Queue.offerUnsafe(
-            queue,
-            oversized
-              ? { _tag: "Oversized" }
-              : { _tag: "Line", line: Buffer.concat(chunks, bytes).toString("utf8") }
-          )
-          chunks = []
-          bytes = 0
-          oversized = false
-        }
-
-        const onData = (value: unknown): void => {
-          const chunk = Buffer.isBuffer(value)
-            ? value
-            : value instanceof Uint8Array
-            ? Buffer.from(value)
-            : Buffer.from(String(value), "utf8")
+    const frames = incoming.pipe(Stream.flatMap((chunk) =>
+      Stream.fromIterable(
+        (function*() {
           let start = 0
           for (let index = 0; index < chunk.length; index++) {
             if (chunk[index] !== 0x0a) continue
             append(chunk.subarray(start, index))
-            finish()
+            yield finish()
             start = index + 1
           }
           append(chunk.subarray(start))
-        }
+          input.resume()
+        })(),
+        { chunkSize: 1 }
+      )
+    ))
+    return Stream.concat(frames, Stream.suspend(() => bytes > 0 || oversized ? Stream.make(finish()) : Stream.empty))
+      .pipe(Stream.orDie)
+  })
 
-        const onClose = (): void => {
-          if (closed) return
-          closed = true
-          if (bytes > 0 || oversized) finish()
-          Queue.endUnsafe(queue)
-        }
-
-        input.on("data", onData)
-        input.on("end", onClose)
-        input.on("close", onClose)
-        return { onData, onClose }
+/** One completed write at a time, with transport listeners owned by the session. */
+const outputWriter = (output: NodeJS.WritableStream) =>
+  Effect.gen(function*() {
+    const failed = yield* Deferred.make<never>()
+    const onError = (error: unknown): void => {
+      Deferred.doneUnsafe(failed, Effect.die(error))
+    }
+    const onClose = (): void => {
+      onError(new Error("MCP output closed before the session completed"))
+    }
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        output.on("error", onError)
+        output.on("close", onClose)
+        if (!output.writable) onClose()
       }),
-      ({ onClose, onData }) =>
+      () =>
         Effect.sync(() => {
-          input.removeListener("data", onData)
-          input.removeListener("end", onClose)
-          input.removeListener("close", onClose)
+          output.removeListener("error", onError)
+          output.removeListener("close", onClose)
         })
     )
-  )
+    const write = (frame: string) =>
+      Effect.callback<void>((resume) => {
+        let completed = false
+        let drained = false
+        let returned = false
+        const finish = (): void => {
+          if (returned && completed && drained) {
+            output.removeListener("drain", onDrain)
+            resume(Effect.void)
+          }
+        }
+        const onDrain = (): void => {
+          drained = true
+          finish()
+        }
+        output.on("drain", onDrain)
+        try {
+          const accepted = output.write(frame, (error?: Error | null) => {
+            if (error != null) {
+              // Node emits 'error' after invoking this callback. Leave the
+              // session listener attached until that emission has been observed.
+              setImmediate(() => onError(error))
+              return
+            }
+            completed = true
+            finish()
+          })
+          drained ||= accepted
+          returned = true
+          finish()
+        } catch (error) {
+          onError(error)
+        }
+        return Effect.sync(() => output.removeListener("drain", onDrain))
+      })
+    return { write, failed: Deferred.await(failed) }
+  })
 
 /**
- * Serves the MCP session over stdio until standard input closes.
+ * Serves the MCP session over stdio until input closes and all replies complete.
  *
  * @category constructors
  * @since 1.0.0
@@ -876,7 +952,7 @@ export const serve = (
   Effect.gen(function*() {
     const session = tools(options)
     const input = options.input ?? process.stdin
-    const output = options.output ?? process.stdout
+    const writer = yield* outputWriter(options.output ?? process.stdout)
     // One line in, one reply out, strictly in order: two `tools/call` handlers
     // writing concurrently would interleave frames and corrupt the protocol,
     // and an MCP client correlates replies by id rather than by arrival, so
@@ -886,21 +962,19 @@ export const serve = (
       (frame) =>
         Effect.gen(function*() {
           if (frame._tag === "Oversized") {
-            yield* Effect.sync(() =>
-              output.write(`${
-                JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: null,
-                  error: { code: -32001, message: resourceLimit().error?.message }
-                })
-              }\n`)
-            )
+            yield* writer.write(`${
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: null,
+                error: { code: -32001, message: resourceLimit().error?.message }
+              })
+            }\n`)
             return
           }
           const request = parse(frame.line)
           if (request === undefined) return
           const reply = yield* respond(request, session, options.version)
-          if (reply !== undefined) yield* Effect.sync(() => output.write(`${JSON.stringify(reply)}\n`))
+          if (reply !== undefined) yield* writer.write(`${JSON.stringify(reply)}\n`)
         })
-    )
-  })
+    ).pipe(Effect.raceFirst(writer.failed))
+  }).pipe(Effect.scoped)
