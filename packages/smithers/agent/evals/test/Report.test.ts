@@ -1,9 +1,22 @@
 import * as Effect from "effect/Effect"
+import { createRequire } from "node:module"
 import { describe, expect, it } from "vitest"
 import { EvalError } from "../src/EvalError.ts"
 import * as Regression from "../src/Regression.ts"
 import * as Report from "../src/Report.ts"
 import type * as Runner from "../src/Runner.ts"
+
+// Use the GFM parser already installed by the workspace's Mermaid dependency.
+const require = createRequire(import.meta.url)
+const { marked } = createRequire(require.resolve("mermaid"))("marked") as {
+  marked: { parse: (markdown: string, options: { gfm: boolean; async: false }) => string }
+}
+const html = (report: Regression.Report): string => marked.parse(Report.markdown(report), { gfm: true, async: false })
+const htmlText = (text: string): string =>
+  text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll(
+    "'",
+    "&#39;"
+  )
 
 const empty = (): Promise<Regression.Report> =>
   Effect.runPromise(
@@ -116,7 +129,7 @@ describe("Report", () => {
     const rendered = Report.markdown(crashed)
     expect(rendered).toContain("- Failed cases: 1")
     expect(rendered).toContain("## Case failures")
-    expect(rendered).toContain("| crashed | executor | Target failed for case 'crashed': boom |")
+    expect(rendered).toContain("| crashed | executor | Target failed for case 'crashed'\\: boom |")
   })
 
   it("names every regression, nondeterminism, missing, and inconclusive row", async () => {
@@ -196,10 +209,94 @@ describe("Report", () => {
       }]
     })
     const rendered = Report.markdown(hostile)
-    expect(rendered.startsWith("# Evaluation report: s <script>\\| next\n")).toBe(true)
+    expect(html(hostile)).toContain("<h1>Evaluation report: s &lt;script&gt;| next</h1>")
     expect(rendered).toContain("| run | a\\|b |")
     expect(rendered).toContain(`${"x".repeat(240)}…`)
     expect(rendered).toContain("line break")
+  })
+
+  it.each([
+    "a\\|b",
+    "a\\\\|b",
+    "[Approve](https://evil.example/phish)",
+    "![](https://evil.example/beacon.png)",
+    "<img src=\"https://evil.example/beacon.png\">",
+    "<script>alert(1)</script>",
+    "`code` **bold** _emphasis_ ~~strike~~ # heading",
+    "https://evil.example www.evil.example user@evil.example",
+    "&copy; &#124; &#x3c;img&#x3e;"
+  ])("renders hostile names literally in the heading and baseline cells: %s", async (name) => {
+    const result = await Effect.runPromise(Regression.compare(
+      { version: 1, suite: name, records: [{ suite: name, case: name, scorer: name, stepKey: name, score: 1 }] },
+      { runId: "run", suite: name, cases: [], observations: [] }
+    ))
+    const rendered = html(result)
+    expect(rendered).toContain(`<h1>Evaluation report: ${htmlText(name)}</h1>`)
+    const rows = [...rendered.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].slice(1)
+    expect(rows).toHaveLength(1)
+    expect([...rows[0]![1]!.matchAll(/<td>([\s\S]*?)<\/td>/g)].map((match) => match[1])).toEqual([
+      "run",
+      htmlText(name),
+      htmlText(name),
+      htmlText(name)
+    ])
+    expect(rendered).not.toMatch(/<(?:a|img|script|em|strong|code|del)\b/)
+  })
+
+  it("neutralizes scorer names, step keys, reasons, and executor error messages", async () => {
+    const name = "a\\|b ![image](https://evil.example) <img src=\"x\"> **bold**"
+    const base = await report({})
+    const result: Regression.Report = {
+      ...base,
+      regressions: base.regressions.map((item) => ({
+        ...item,
+        case: name,
+        actual: { ...item.actual, scorerName: name }
+      })),
+      nondeterminism: [{
+        case: name,
+        scorer: "0123456789abcdef",
+        baseline: { suite: "s", case: name, scorer: "0123456789abcdef", stepKey: name, score: 0.9 },
+        actual: observation(name, 0.5, { scorerName: name }) as Extract<Runner.Observation, { kind: "score" }>,
+        delta: -0.4
+      }],
+      missing: [{ side: "run", case: name, scorer: "0123456789abcdef", scorerName: name, stepKey: name }],
+      inconclusive: [{
+        case: name,
+        scorer: "0123456789abcdef",
+        scorerName: name,
+        stepKey: name,
+        kind: "inconclusive",
+        reason: name,
+        at: "t"
+      }],
+      run: {
+        ...base.run,
+        cases: [{ case: name, error: new EvalError({ code: "executor", message: name }), observations: [] }]
+      }
+    }
+    const rendered = html(result)
+    const rows = [...rendered.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
+      .filter((match) => match[1]!.includes("<td>"))
+    expect(rows.map((match) => (match[1]!.match(/<td(?:\s|>)/g) ?? []).length)).toEqual([5, 6, 3, 4, 4])
+    expect(rendered).toContain(`<td>${htmlText(name)} (01234567)</td>`)
+    expect(rendered).toContain(`<td>executor</td>\n<td>${htmlText(name)}</td>`)
+    expect(rendered).not.toMatch(/<(?:a|img|script|em|strong|code|del)\b/)
+  })
+
+  it.each(["\\", "|", "*", "`", "&", "😀"])("caps escaped text without splitting %s", async (suffix) => {
+    const prefix = "x".repeat(239)
+    const result = await report({
+      suite: prefix + suffix,
+      missing: [{
+        side: "run",
+        case: prefix + suffix,
+        scorer: "key",
+        stepKey: "step"
+      }]
+    })
+    expect(html(result)).toContain(`<h1>Evaluation report: ${prefix}…</h1>`)
+    expect(html(result)).toContain(`<td>${prefix}…</td>\n<td>key</td>\n<td>step</td>`)
   })
 
   it("coerces non-string Markdown cells and treats nullish cells as empty", async () => {
@@ -224,7 +321,7 @@ describe("Report", () => {
       } as unknown as string
     })
     expect(() => Report.markdown(unreadable)).not.toThrow()
-    expect(Report.markdown(unreadable)).toContain("# Evaluation report: [unreadable]")
+    expect(html(unreadable)).toContain("<h1>Evaluation report: [unreadable]</h1>")
   })
 
   it("falls back to the scorer key when the scorer has no name", async () => {

@@ -28,7 +28,7 @@ import type { Report as RegressionReport } from "./Regression.ts"
  */
 export const json = (report: RegressionReport): string => stringify(report, { maxStringLength })
 
-/** The longest run of text any single Markdown cell renders. */
+/** Maximum escaped UTF-16 code units per value, before a truncation ellipsis. */
 const maxCellLength = 240
 
 const cell = (value: unknown): string => {
@@ -43,14 +43,20 @@ const cell = (value: unknown): string => {
       }
     }
   }
-  const flattened = [...text]
-    .map((character) => {
-      const code = character.codePointAt(0)!
-      return code < 0x20 || code === 0x7f ? " " : character
-    })
-    .join("")
-    .replaceAll("|", "\\|")
-  return flattened.length <= maxCellLength ? flattened : `${flattened.slice(0, maxCellLength)}…`
+  let escaped = ""
+  for (const character of text) {
+    const code = character.codePointAt(0)!
+    // Escape each input character once, including backslashes before pipes.
+    // Ampersands prevent entities; dots, colons, and @ prevent GFM autolinks.
+    const token = code < 0x20 || code === 0x7f
+      ? " "
+      : /[\\|`*_[\]<>!#~&.:@]/u.test(character)
+      ? `\\${character}`
+      : character
+    if (escaped.length + token.length > maxCellLength) return `${escaped}…`
+    escaped += token
+  }
+  return escaped
 }
 
 const scorerCell = (scorer: string, scorerName: string | undefined): string =>
@@ -80,8 +86,10 @@ const section = (
  * gate undecided. A report that only counted them named nothing an operator
  * could act on, which is exactly the run that needs debugging.
  *
- * Cell text is escaped, stripped of control characters, and capped, so a suite,
- * case, or scorer name cannot inject Markdown into a rendered report.
+ * Every cell and the suite heading value replace C0 controls and DEL with
+ * spaces and escape backslashes, pipes, inline GFM syntax, raw HTML, entities,
+ * and URL/email autolinks. Values are capped at 240 escaped UTF-16 code units,
+ * plus an ellipsis when truncated, without splitting escapes or code points.
  *
  * @category rendering
  * @since 0.1.0

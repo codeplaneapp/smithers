@@ -149,8 +149,9 @@ what reaches the observation.
   (`[circular]`, `[depth exceeded]`, `[NaN]`, `[function]`), so the serializer is
   total. Nothing is redacted: a suite whose cases carry secrets must not print
   the report where the log is readable.
-- `Report.markdown` escapes, flattens, and caps every cell at 240 characters,
-  including the heading.
+- `Report.markdown` neutralizes inline GFM and raw HTML in every cell and the
+  suite heading value. It caps each value at 240 escaped UTF-16 code units,
+  plus an ellipsis when truncated, without splitting escapes or code points.
 
 ## Module reference
 
@@ -407,9 +408,15 @@ embedded output.
 `markdown` renders the report an operator reads in a CI log. Every count in
 the summary that is not zero has a section naming its rows: the regressions
 and the nondeterminism a gate reads as red, and the case failures, missing
-observations, and inconclusive observations that leave a gate undecided. Cell
-text is escaped, stripped of control characters, and capped, so a suite, case,
-or scorer name cannot inject Markdown into a rendered report.
+observations, and inconclusive observations that leave a gate undecided.
+Every cell and the suite heading value replace C0 controls (U+0000 through
+U+001F) and DEL (U+007F) with spaces. Backslashes, pipes, backticks, asterisks,
+underscores, brackets, angle brackets, exclamation marks, hashes, tildes,
+ampersands, dots, colons, and at signs are backslash-escaped. This preserves
+literal text instead of interpreting table delimiters, inline GFM formatting,
+links, images, raw HTML, entities, or URL/email autolinks. Each value is capped
+at 240 escaped UTF-16 code units, followed by an ellipsis when truncated;
+escapes and Unicode code points remain whole.
 
 ### Gate
 
