@@ -276,6 +276,69 @@ describe("the cell loop on the durable engine", () => {
     expect(providerCalls).toEqual(["test-model"])
   })
 
+  it("reconstructs a timed-out frame at its bridge frontier after a durable park", async () => {
+    const executed: Array<unknown> = []
+    const answers: Array<string> = []
+    let modelCalls = 0
+    let first = true
+    const model = Model.make({
+      stream: () =>
+        Stream.suspend(() => {
+          const text = modelCalls++ === 0
+            ? `var progress = 0
+             await ctx.call("fs/list", "read")
+             progress = 1
+             await ctx.call("fs/list", "wait")
+             progress = 2
+             await ctx.call("fs/write", "irreversible")`
+            : "ctx.done(String(progress))"
+          return Stream.fromIterable([
+            ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+            ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: "```cell\n" + text + "\n```" }),
+            ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+            ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+          ])
+        })
+    })
+    const calls: FlowEngineLike.CallRunner = {
+      authorize: () => Effect.void,
+      run: (call) =>
+        Effect.gen(function*() {
+          executed.push(call.input)
+          if (first && call.input === "read") yield* Effect.sleep(50)
+          if (first && call.input === "wait") yield* Effect.never
+          return new Cell.CallResult({ outcome: "success", value: call.input })
+        })
+    }
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const port = yield* FlowEngineLike.make({ model, route, calls })
+        yield* CellTurn.run({ state, flows, limits: { totalMs: 500, callMs: 5000 } }).pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              if (event._tag === "resolved") {
+                const part = event.message.content[0]
+                if (part?.type === "text") answers.push(part.text)
+              }
+            })
+          ),
+          Effect.provide(QuickJSSandbox.layer),
+          Effect.provideService(Steering.Source, Steering.makeNoop()),
+          Effect.provideService(EngineLike.EngineLike, port)
+        )
+        if (first) {
+          first = false
+          yield* port.suspend(new EngineLike.SuspendReason({ code: "waiting-input", message: "replay" }))
+        }
+      }),
+      { resume: true }
+    )
+    expect(outcome._tag).toBe("completed")
+    expect(answers).toEqual(["1", "1"])
+    expect(executed).toEqual(["read", "wait"])
+    expect(modelCalls).toBe(2)
+  })
+
   it("parks mid-cell, then resumes by replaying the settled prefix exactly once", async () => {
     const providerCalls: Array<string> = []
     const executed: Array<string> = []

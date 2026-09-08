@@ -1329,7 +1329,9 @@ describe("CellTurn frame failures", () => {
       code: "limit_exceeded",
       reason: "heap"
     })
-    expect(engine.recorder.records.filter((record) => record.name === "cell-frame")).toHaveLength(1)
+    expect(engine.recorder.records.filter((record) => record.name === "cell-frame")).toHaveLength(2)
+    expect(engine.recorder.records.filter((record) => record.name === "cell-frame")[1]?.identity.boundary)
+      .toMatch(/:attempt:1$/)
   }, 60_000)
 
   it("reports a limit the binding cannot honour when the realm opens", async () => {
@@ -1587,7 +1589,8 @@ const boundaryKey = (boundary: EngineLike.RecordBoundary<unknown>): string =>
 /** Wraps a scripted engine so its recorded boundaries persist in `records`. */
 const journaled = (
   fixture: ScriptedEngine.Fixture,
-  records: Map<string, unknown>
+  records: Map<string, unknown>,
+  replayDelay = 0
 ): Layer.Layer<EngineLike.EngineLike> =>
   EngineLike.layer(
     EngineLike.make({
@@ -1598,6 +1601,7 @@ const journaled = (
         const held = records.get(key)
         if (held !== undefined) {
           return Effect.fromResult(Schema.decodeUnknownResult(boundary.success)(held)).pipe(
+            Effect.delay(boundary.name === "cell-call" ? replayDelay : 0),
             Effect.mapError((cause) =>
               new HarnessError({ code: "engine_failed", message: `Boundary ${boundary.name} did not decode`, cause })
             )
@@ -1729,6 +1733,96 @@ describe("CellTurn recorded observations", () => {
     expect(of(second.events, "cell-call-settled").map((event) => event.result.code)).toEqual(["timeout", undefined])
   })
 
+  it.each(["call", "checkpoint", "call-timeout", "slow-journal"])(
+    "stops timeout replay at the interrupted %s frontier",
+    async (kind) => {
+      const records = new Map<string, unknown>()
+      const cached = new Map<string, Cell.CallResult>()
+      const effects: Array<unknown> = []
+      const captures: Array<string> = []
+      const dispatches: Array<unknown> = []
+      const cell = `var progress = 0
+      await ctx.call("work", "read")
+      progress = 1
+      await ${kind === "checkpoint" ? "ctx.checkpoint()" : "ctx.call(\"work\", \"wait\")"}
+      progress = 2
+      await ctx.call("work", "irreversible")
+      await ctx.checkpoint()
+      progress = 3`
+      const attempt = async (first: boolean) => {
+        const model = ScriptedModel.make([emits(cell), emits("ctx.done(String(progress))")])
+        const engine = ScriptedEngine.make(model.model)
+        const stub = EngineLike.make({
+          ...engine.engine,
+          call: (call) =>
+            Effect.gen(function*() {
+              dispatches.push(call.input)
+              const key = JSON.stringify(call.identity)
+              const previous = cached.get(key)
+              if (previous !== undefined) return previous
+              effects.push(call.input)
+              if (first && call.input === "read") {
+                yield* kind === "call-timeout" ? Effect.never : Effect.sleep(50)
+              }
+              if (first && call.input === "wait") yield* Effect.never
+              const result = new Cell.CallResult({ outcome: "success", value: call.input })
+              cached.set(key, result)
+              return result
+            }),
+          capture: ({ id }) =>
+            Effect.gen(function*() {
+              captures.push(id)
+              if (first) yield* Effect.never
+              return Option.none()
+            })
+        })
+        return collect({
+          state: state({ maxFrames: 2 }),
+          flows: [descriptor("work", { tier: "irreversible" })],
+          limits: kind === "call-timeout" ? { totalMs: 300, callMs: 200 } : { totalMs: 500, callMs: 5000 }
+        }, {
+          engine: journaled({ ...engine, engine: stub }, records, !first && kind === "slow-journal" ? 600 : 0)
+        })
+      }
+      const first = await attempt(true)
+      expect(first.failure).toBeUndefined()
+      expect(resolvedText(first.events)).toBe("1")
+      expect(of(first.events, "cell-settled")[0]?.outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+      expect(of(first.events, "cell-settled")[0]?.boundary).toEqual({
+        terminal: "timeout",
+        dispatched: 1,
+        settled: 0
+      })
+      const originalEffects = [...effects]
+      const originalCaptures = [...captures]
+      const originalDispatches = [...dispatches]
+      const replay = await attempt(false)
+      expect(replay.failure).toBeUndefined()
+      expect(effects).toEqual(originalEffects)
+      expect(dispatches).toEqual(originalDispatches)
+      expect(captures).toEqual(originalCaptures)
+      expect(resolvedText(replay.events)).toBe("1")
+      expect(of(replay.events, "cell-settled")).toEqual(of(first.events, "cell-settled"))
+      const settlementKey = [...records.keys()].find((key) => key.includes("cell-call:"))!
+      const settlement = records.get(settlementKey)
+      records.delete(settlementKey)
+      const incomplete = await attempt(false)
+      expect(incomplete.failure).toMatchObject({ code: "incompatible_journal" })
+      expect(dispatches).toEqual(originalDispatches)
+      records.set(settlementKey, settlement)
+      for (const [key, value] of records) {
+        if (key.includes("cell-frame:") && typeof value === "object" && value !== null && "boundary" in value) {
+          const { boundary: _, ...legacy } = value
+          records.set(key, legacy)
+        }
+      }
+      const legacy = await attempt(false)
+      expect(legacy.failure).toMatchObject({ code: "incompatible_journal" })
+      expect(dispatches).toEqual(originalDispatches)
+      expect(captures).toEqual(originalCaptures)
+    }
+  )
+
   it("replays a frame's recorded time limit instead of settling the frame twice over", async () => {
     const records = new Map<string, unknown>()
     const cut = new Cell.Rejected({
@@ -1770,7 +1864,12 @@ describe("CellTurn recorded observations", () => {
                             bindings: []
                           }
                           : interrupted
-                          ? { outcome: cut, prints: "", bindings: [] }
+                          ? {
+                            outcome: cut,
+                            prints: "",
+                            bindings: [],
+                            boundary: { terminal: "timeout", dispatched: -1, settled: -1 }
+                          }
                           : finished
                       )
                   } as Sandbox.Realm
@@ -1789,8 +1888,8 @@ describe("CellTurn recorded observations", () => {
     expect(resolvedText(first.events)).toBe("recovered")
 
     // The resumed attempt cannot re-fire that clock: every host call it makes
-    // replays instantly, so the frame runs to completion. The recorded outcome
-    // is what the loop must judge, or the run forks into a completion the
+    // replays instantly. Even if a foreign binding returns completion, the
+    // recorded outcome is what the loop judges, or the run forks into a completion the
     // original never reached and re-buys every key below it.
     const second = await attempt(false)
     expect(of(second.events, "cell-settled")[0]?.outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })

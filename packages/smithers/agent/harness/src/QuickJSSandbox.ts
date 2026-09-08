@@ -932,6 +932,7 @@ const openRealm = (
     let pending: Array<Sandbox.PendingCall> = []
     let closing = true
     let ordinal = 0
+    let boundary: typeof Sandbox.FrameBoundary.Type = { terminal: "timeout", dispatched: -1, settled: -1 }
     let lines: Array<printChannel.Statement> = []
     let retained = 0
     let unread = 0
@@ -1187,6 +1188,7 @@ const openRealm = (
         pending = []
         closing = false
         ordinal = 0
+        boundary = { terminal: "timeout", dispatched: -1, settled: -1 }
         lines = []
         retained = 0
         unread = 0
@@ -1204,6 +1206,9 @@ const openRealm = (
         // simply stopped printing.
         const frameOf = (outcome: Cell.Outcome): Sandbox.RealmFrame => ({
           outcome,
+          ...(outcome._tag === "rejected" && outcome.code === "limit_exceeded"
+            ? { boundary: { ...boundary, terminal: "settled" as const } }
+            : {}),
           prints: printChannel.buffer(lines, unread),
           bindings
         })
@@ -1277,6 +1282,10 @@ const openRealm = (
 
         const outcome = yield* Sandbox.driveCell({
           pending,
+          replay: evaluation.replay,
+          progress: (dispatched, settled) => {
+            boundary = { terminal: "timeout", dispatched, settled }
+          },
           ...(evaluation.mint === undefined
             ? {}
             : {
@@ -1340,6 +1349,12 @@ const openRealm = (
           )
         )
 
+        if (evaluation.replay !== undefined) {
+          // A timed-out attempt never reached the probe below. Keep its realm
+          // accounting too, so the next frame sees the same memory admission.
+          return { outcome: evaluation.replay.outcome, prints: "", bindings, boundary: evaluation.replay.boundary }
+        }
+
         // The panel, read from the realm the cell just ran in. It shares the
         // frame's remaining budget, so a cell that spent all of its own leaves
         // the previous reading standing rather than an empty one. What a cell
@@ -1362,10 +1377,12 @@ const openRealm = (
         return frameOf(outcome)
       }).pipe(
         Effect.timeoutOrElse({
-          duration: totalMs,
+          // Replay is stopped by its recorded boundary, not a second clock.
+          duration: evaluation.replay === undefined ? totalMs : Infinity,
           orElse: () =>
             Effect.succeed<Sandbox.RealmFrame>({
               outcome: timeLimitExceeded(totalMs),
+              boundary,
               prints: "",
               bindings
             })

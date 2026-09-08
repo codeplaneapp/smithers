@@ -40,6 +40,23 @@ settlements, journaled records, workspace measurement, checkpoints, and
 suspension. The package is the translation between the four; scheduling,
 persistence, transport, and model execution stay behind the ports.
 
+A frame lookup writes an empty attempt marker when no terminal record exists.
+Evaluation then runs outside the record activity, and its result is written
+to the next slot. Replay skips existing empty markers before reconstructing
+the terminal frame. An attempt that parks or is interrupted leaves a marker
+and can resume its calls without an enclosing frame activity.
+
+A whole-frame timeout records the last dispatched and last delivered bridge
+ordinals with the frame outcome. Replay reads that record before evaluating
+the cell, reconstructs the settled prefix, and interrupts the bridge at the
+recorded cutoff. Calls and checkpoints beyond that cutoff cannot run, and
+JavaScript awaiting the interrupted bridge receives the same teardown as the
+original attempt. Settled calls in this prefix use their recorded results,
+including per-call timeouts. A limit rejection without a recorded frontier
+still decodes for inspection, but replay fails with `incompatible_journal`
+before evaluating it. A binding must return the frontier to resume such a
+frame safely.
+
 ## Repl realm
 
 A run holds **one** realm for its whole life. The realm is the run's memory:

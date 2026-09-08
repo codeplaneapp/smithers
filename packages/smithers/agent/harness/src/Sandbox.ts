@@ -489,6 +489,8 @@ export const replTransition = (
  * @since 0.1.0
  */
 export interface RealmEvaluation {
+  /** Reconstruct a timed-out frame only through its recorded bridge prefix. */
+  readonly replay?: { readonly boundary: typeof FrameBoundary.Type; readonly outcome: Cell.Outcome } | undefined
   readonly cell: Cell.Source
   readonly frame: number
   readonly call: Handler
@@ -522,12 +524,30 @@ export interface RealmEvaluation {
 }
 
 /**
+ * The bridge frontier at a frame limit. Ordinals are zero-based;
+ * minus one means no dispatch or settlement occurred. A dispatched call may
+ * have been interrupted before its settlement was delivered to JavaScript.
+ * `timeout` requires truncating replay; `settled` identifies a limit the
+ * interpreter completed itself, such as its step or call budget.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const FrameBoundary = Schema.Struct({
+  terminal: Schema.Literals(["timeout", "settled"]),
+  dispatched: Schema.Int.check(Schema.isGreaterThanOrEqualTo(-1)),
+  settled: Schema.Int.check(Schema.isGreaterThanOrEqualTo(-1))
+})
+
+/**
  * Everything one REPL frame produced.
  *
  * @category models
  * @since 0.1.0
  */
 export interface RealmFrame {
+  /** Present when evaluation ended at a frame limit. */
+  readonly boundary?: typeof FrameBoundary.Type | undefined
   readonly outcome: Cell.Outcome
   /** What the cell printed, already bounded; empty when it printed nothing. */
   readonly prints: string
@@ -757,13 +777,26 @@ const drive = (
   handler: Handler,
   minter: Minter,
   bounded: boolean,
-  limits: Limits | undefined
+  limits: Limits | undefined,
+  replay: RealmEvaluation["replay"],
+  progress: ((dispatched: number, settled: number) => void) | undefined
 ): Effect.Effect<Cell.Outcome, SandboxError | HarnessError> =>
   Effect.gen(function*() {
     let calls = 0
+    let settledOrdinal = -1
     for (;;) {
       const next = pump.pending.shift()
       if (next !== undefined) {
+        if (
+          replay !== undefined && (next.ordinal > replay.boundary.settled || next.ordinal > replay.boundary.dispatched)
+        ) {
+          // Match interruption cleanup without delivering an answer that the
+          // original cell never received. This also covers queued checkpoints.
+          next.abort("The cell was interrupted")
+          pump.abort("The cell was interrupted")
+          pump.flush()
+          return replay.outcome
+        }
         if (limits?.calls !== undefined && calls >= limits.calls) {
           const message = `This cell exceeded its limit of ${limits.calls} flow calls`
           next.abort(message)
@@ -772,6 +805,7 @@ const drive = (
           return new Cell.Rejected({ code: "limit_exceeded", message })
         }
         calls = calls + 1
+        progress?.(next.ordinal, settledOrdinal)
         const callMs = limits?.callMs ?? defaultLimits.callMs
         // A mint is settled here rather than on a channel of its own so that it
         // is ordered against the calls around it. See `Minter`.
@@ -813,6 +847,8 @@ const drive = (
             )
           )
         next.settle(result)
+        settledOrdinal = next.ordinal
+        progress?.(next.ordinal, settledOrdinal)
         pump.flush()
         continue
       }
@@ -927,6 +963,8 @@ export const latch = (): Latch => makeLatch()
  * @slop
  */
 export const driveCell = (options: {
+  readonly replay?: RealmEvaluation["replay"]
+  readonly progress?: ((dispatched: number, settled: number) => void) | undefined
   readonly pending: Array<Pending>
   readonly flush: () => void
   readonly finished: () => Cell.Outcome | undefined
@@ -950,7 +988,9 @@ export const driveCell = (options: {
     options.handler,
     options.mint ?? mintUnavailable,
     options.bounded ?? false,
-    options.limits
+    options.limits,
+    options.replay,
+    options.progress
   )
 
 /**

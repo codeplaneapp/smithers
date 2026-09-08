@@ -1433,9 +1433,25 @@ const issued = (
   ordinal: number,
   callMs: number,
   flow: string,
-  issue: Effect.Effect<Cell.CallResult, HarnessError>
+  issue: Effect.Effect<Cell.CallResult, HarnessError>,
+  replaying: boolean
 ): Effect.Effect<Cell.CallResult, HarnessError> =>
   Effect.gen(function*() {
+    if (replaying) {
+      // A terminal frame proves this prefix settled. Read its settlements
+      // directly, including per-call timeouts whose host activity never settled.
+      return yield* engine.record({
+        name: "cell-call",
+        identity: { session: state.session, frame: state.frame, boundary: `cell-call:${cell}:${ordinal}` },
+        success: Cell.CallResultVariant,
+        execute: Effect.fail(
+          new HarnessError({
+            code: "incompatible_journal",
+            message: `The timed-out frame is missing settlement ${ordinal}`
+          })
+        )
+      }).pipe(Effect.flatMap(Cell.decodeCallResult))
+    }
     // An escape — a permission park, an abort, an engine failure — never
     // reaches the record at all, so nothing journals it and the attempt the
     // grant answers asks again. That is the whole reason the call sits outside
@@ -1458,11 +1474,13 @@ const issued = (
 /**
  * The schema one settled frame is journaled under.
  *
- * The realm's own answer, in full, because all three parts are things the loop
+ * The realm's own answer and execution boundary, because these are things the loop
  * branches on: the outcome decides the transition, the prints become the next
- * frame's context, and the bindings become the variables panel.
+ * frame's context, and the bindings become the variables panel. The boundary
+ * prevents a timed-out frame from reconstructing beyond its delivered prefix.
  */
 const RecordedFrame = Schema.Struct({
+  boundary: Schema.optional(Sandbox.FrameBoundary),
   outcome: Cell.Outcome,
   prints: Schema.String,
   bindings: Schema.Array(VariablesPanel.Binding)
@@ -1612,6 +1630,7 @@ const callHandler = (
   ledger: Array<TruncatedOutput.Capture>,
   performed: Set<number>,
   callMs: number,
+  replaying: boolean,
   emit: (event: AgentEvent.AgentEvent) => Effect.Effect<void>
 ): Sandbox.Handler =>
 (invocation) =>
@@ -1710,7 +1729,8 @@ const callHandler = (
       invocation.ordinal,
       callMs,
       invocation.flow,
-      engine.call(call)
+      Effect.suspend(() => engine.call(call)),
+      replaying
     )
     if (result.outcome === "success") ledger.push(...TruncatedOutput.captures(call.flowName, result.value))
     yield* emit(
@@ -2134,8 +2154,9 @@ const frame = (
     // where the settlement is recorded rather than in the drive loop, so the
     // number a run armed and the number its journal holds are the same one.
     const callMs = Sandbox.withDefaults(sandbox.capabilities, input.limits).callMs ?? Sandbox.defaultLimits.callMs
+    let replaying = false
     const observing: Sandbox.Handler = (invocation) =>
-      callHandler(state, cell, descriptors, engine, ledger, performed, callMs, emit)(invocation).pipe(
+      callHandler(state, cell, descriptors, engine, ledger, performed, callMs, replaying, emit)(invocation).pipe(
         Effect.tap((result) =>
           Effect.sync(() => {
             const rendered = result.outcome === "success"
@@ -2201,31 +2222,61 @@ const frame = (
       onNone: () => Effect.void,
       onSome: (recorder) => recorder.record(cell.text)
     })
-    const observedFrame = yield* realm.evaluate({
-      cell,
-      frame: state.frame,
-      call: observing,
-      mint,
-      // Every settlement this frame hands its cell is bounded and recorded by
-      // the boundary that produces it, so the loop must not race a clock of its
-      // own over the top. See `Sandbox.RealmEvaluation.bounded`.
-      bounded: true
-    })
-    // The realm is the run's memory, so a re-executed frame must still evaluate
-    // its cell: skipping it would leave every name a later frame reads unbound.
-    // What must not be re-derived is the frame's OUTCOME. A whole-frame ceiling
-    // cannot fire again on an attempt whose host calls all replay instantly, so
-    // an unrecorded outcome settles the frame differently from the attempt that
-    // wrote every key below it — with real prints where the record has none, and
-    // a completion the original never reached. That divergence runs in the
-    // dangerous direction: the run forks into fresh sealed keys and re-bought
-    // model calls.
-    const observedOutcome = yield* Cell.decodeOutcome(observedFrame.outcome)
-    const evaluated = yield* engine.record({
-      name: "cell-frame",
-      identity: { session: state.session, frame: state.frame, boundary: `cell-frame:${cell.digest}` },
-      success: RecordedFrame,
-      execute: Effect.succeed({ ...observedFrame, outcome: observedOutcome })
+    const evaluated = yield* Effect.gen(function*() {
+      // A null record marks an attempt that has not produced a frame yet.
+      // Skip saved markers until the terminal frame is found, or append a new
+      // marker and evaluate outside any activity. This keeps durable waits and
+      // permission parks out of the frame record's execution context.
+      for (let attempt = 0;; attempt++) {
+        const identity = (slot: number): EngineLike.BoundaryIdentity => ({
+          session: state.session,
+          frame: state.frame,
+          boundary: `cell-frame:${cell.digest}${slot === 0 ? "" : `:attempt:${slot}`}`
+        })
+        let fresh = false
+        const recorded = yield* engine.record({
+          name: "cell-frame",
+          identity: identity(attempt),
+          success: Schema.NullOr(RecordedFrame),
+          execute: Effect.sync(() => {
+            fresh = true
+            return null
+          })
+        })
+        if (recorded === null && !fresh) continue
+        if (
+          recorded !== null && recorded.boundary === undefined &&
+          recorded.outcome._tag === "rejected" && recorded.outcome.code === "limit_exceeded"
+        ) {
+          return yield* Effect.fail(
+            new HarnessError({
+              code: "incompatible_journal",
+              message: "Cannot reconstruct a limited frame without its recorded execution frontier"
+            })
+          )
+        }
+        const replay = recorded !== null && recorded.boundary?.terminal === "timeout"
+          ? { boundary: recorded.boundary, outcome: yield* Cell.decodeOutcome(recorded.outcome) }
+          : undefined
+        replaying = replay !== undefined
+        const frame = yield* realm.evaluate({
+          cell,
+          frame: state.frame,
+          call: observing,
+          mint,
+          replay,
+          // Settlements are bounded inside their recorded boundaries.
+          bounded: true
+        })
+        if (recorded !== null) return recorded
+        const outcome = yield* Cell.decodeOutcome(frame.outcome)
+        return yield* engine.record({
+          name: "cell-frame",
+          identity: identity(attempt + 1),
+          success: RecordedFrame,
+          execute: Effect.succeed({ ...frame, outcome })
+        })
+      }
     })
     const outcome = yield* Cell.decodeOutcome(evaluated.outcome)
     const bindings = evaluated.bindings
@@ -2241,7 +2292,12 @@ const frame = (
     const panel = VariablesPanel.stamp(state.panel, bindings, state.frame)
     const closed = yield* witness(engine, state, cell.digest, "close")
     yield* emit(
-      new AgentEvent.CellSettled({ eventType: eventType.cellSettled, cell: cell.digest, outcome })
+      new AgentEvent.CellSettled({
+        eventType: eventType.cellSettled,
+        cell: cell.digest,
+        outcome,
+        ...(evaluated.boundary === undefined ? {} : { boundary: evaluated.boundary })
+      })
     )
 
     // What this frame asked, folded into what the run had already asked. Every

@@ -9,6 +9,7 @@ import * as ModelRequest from "@smthrs/model/ModelRequest"
 import { Effect, Schema } from "effect"
 import * as Cell from "./Cell.ts"
 import * as EngineLike from "./EngineLike.ts"
+import * as Sandbox from "./Sandbox.ts"
 
 /**
  * The loop discipline a run was armed with, journaled once when it starts.
@@ -316,7 +317,9 @@ export class CellSettled extends Schema.TaggedClass<CellSettled>(
 )("cell-settled", {
   eventType: Schema.Literal("flows.harness.cell-settled.v1"),
   cell: Schema.String,
-  outcome: Cell.Outcome
+  outcome: Cell.Outcome,
+  /** Absent in journals written before execution frontiers were recorded. */
+  boundary: Schema.optional(Sandbox.FrameBoundary)
 }) {}
 
 /**

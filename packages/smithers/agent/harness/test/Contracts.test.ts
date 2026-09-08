@@ -361,6 +361,23 @@ describe("AgentEvent", () => {
     expect("verification" in events[1]!).toBe(false)
   })
 
+  it("decodes a legacy cell settlement without inventing an execution frontier", () => {
+    // Decode a historical wire payload directly: constructors must not supply
+    // defaults that conceal a missing field in an older journal.
+    const decoded = Schema.decodeUnknownSync(AgentEvent.AgentEvent)({
+      _tag: "cell-settled",
+      eventType: "flows.harness.cell-settled.v1",
+      cell: "legacy-cell",
+      outcome: {
+        _tag: "rejected",
+        code: "limit_exceeded",
+        message: "This cell exceeded its wall-clock limit of 50 milliseconds"
+      }
+    })
+    expect(decoded._tag).toBe("cell-settled")
+    expect("boundary" in decoded).toBe(false)
+  })
+
   it("defaults an absent duration to zero rather than rejecting the older payload", () => {
     const settled = new AgentEvent.ModelSettled({
       eventType: "flows.harness.model-settled.v1",
