@@ -10,7 +10,7 @@
  * implementation we would then have to keep honest.
  */
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Option, PlatformError, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, Option, PlatformError, Stream } from "effect"
 import { mkdtemp, rm } from "node:fs/promises"
 import * as NodeFsPromises from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -439,6 +439,124 @@ describe("BrowserFileSystem ownership across the backend boundary", () => {
       expect(names).toEqual(["a", "b", "z"])
       expect(second).toEqual(["a", "b"])
     }))
+})
+
+/** A manually released backend call, independent of Effect interruption. */
+const gate = () => {
+  let release!: () => void
+  const promise = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { promise, release }
+}
+
+describe("BrowserFileSystem settlement across interruption", () => {
+  it.each(["writeFile", "writeFileString"] as const)("settles %s before a replacement write", async (method) => {
+    const started = gate()
+    const pending = gate()
+    const events: Array<string> = []
+    let stored = new Uint8Array()
+    const fileSystem = BrowserFileSystem.make({
+      ...throwingFs(codeError("ENOENT")),
+      readFile: async () => stored,
+      writeFile: async (_path, data) => {
+        if (decoder.decode(data) === "old") {
+          started.release()
+          await pending.promise
+        }
+        stored = new Uint8Array(data)
+        events.push(decoder.decode(data))
+      }
+    })
+    const write = method === "writeFile"
+      ? fileSystem.writeFile("/p", encoder.encode("old"))
+      : fileSystem.writeFileString("/p", "old")
+    const fiber = Effect.runFork(Effect.ensuring(
+      write,
+      Effect.sync(() => {
+        events.push("cleanup")
+      })
+    ))
+    await started.promise
+    const replacement = Effect.runPromise(Effect.gen(function*() {
+      yield* Fiber.interrupt(fiber)
+      events.push("interrupted")
+      yield* fileSystem.writeFileString("/p", "new")
+    }))
+    // Let interruption and any premature replacement finish while the old
+    // backend call is still held open, then always drain it before asserting.
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    pending.release()
+    await replacement
+    expect(decoder.decode(await Effect.runPromise(fileSystem.readFile("/p")))).toBe("new")
+    expect(events).toEqual(["old", "cleanup", "interrupted", "new"])
+  })
+
+  it.each(["rename", "remove", "makeDirectory", "utimes"] as const)(
+    "settles %s before interruption cleanup",
+    async (method) => {
+      const started = gate()
+      const pending = gate()
+      const events: Array<string> = []
+      const mutate = async () => {
+        started.release()
+        await pending.promise
+        events.push("settled")
+      }
+      const fileSystem = BrowserFileSystem.make({
+        ...throwingFs(codeError("ENOENT")),
+        rename: mutate,
+        rm: mutate,
+        mkdir: mutate,
+        utimes: mutate
+      })
+      const operation = method === "rename" ?
+        fileSystem.rename("/from", "/to")
+        : method === "utimes" ?
+        fileSystem.utimes("/p", 0, 0)
+        : fileSystem[method]("/p")
+      const fiber = Effect.runFork(Effect.ensuring(
+        operation,
+        Effect.sync(() => {
+          events.push("cleanup")
+        })
+      ))
+      await started.promise
+      const interrupted = Effect.runPromise(Fiber.interrupt(fiber))
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      pending.release()
+      await interrupted
+      expect(events).toEqual(["settled", "cleanup"])
+    }
+  )
+
+  it.each([false, true])("settles a pending stream read before close (reject: %s)", async (reject) => {
+    const started = gate()
+    const pending = gate()
+    const events: Array<string> = []
+    const fileSystem = BrowserFileSystem.make({
+      ...throwingFs(codeError("ENOENT")),
+      open: async () => ({
+        read: async () => {
+          started.release()
+          await pending.promise
+          events.push("settled")
+          if (reject) throw codeError("EIO")
+          return { bytesRead: 0 }
+        },
+        close: async () => {
+          events.push("close")
+        }
+      })
+    })
+    const fiber = Effect.runFork(Stream.runDrain(fileSystem.stream("/p")))
+    await started.promise
+    const interrupted = Effect.runPromise(Fiber.interrupt(fiber))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    pending.release()
+    await interrupted
+    expect(events).toEqual(["settled", "close"])
+  })
 })
 
 describe("BrowserFileSystem operations over node:fs/promises", () => {

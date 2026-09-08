@@ -132,6 +132,8 @@ export const streamFile = (
             try: () => handle.read(buffer, 0, size, position),
             catch: platformError("stream.read", path)
           }).pipe(
+            // Keep the handle open until this non-cancellable read settles.
+            Effect.uninterruptible,
             Effect.flatMap(({ bytesRead }) =>
               !Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > size
                 ? Effect.fail(misreported(path))

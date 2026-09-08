@@ -29,6 +29,18 @@ The served operations are `readFile`, `readFileString`, `writeFile`,
 `writeFileString`, `stream`, `makeDirectory`, `readDirectory`, `stat`,
 `realPath`, `remove`, `access`, and `exists`.
 
+## Interruption waits for the backend
+
+`writeFile`, `writeFileString`, `rename`, `remove`, `makeDirectory`, and `utimes`
+defer interruption until their backend promise settles. Await interruption
+before starting a replacement write or cleanup that depends on the mutation
+having stopped. Independently started operations remain concurrent.
+
+A stream also waits for an in-flight read to settle before closing its handle,
+including when the read rejects. The backend interface has no cancellation
+signal, so a promise that never settles also prevents interruption from
+finishing.
+
 ## The options are honoured, not dropped
 
 | Option                                       | What it does here                                                                                                                                          |

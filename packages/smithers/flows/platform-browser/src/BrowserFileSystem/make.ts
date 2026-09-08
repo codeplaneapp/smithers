@@ -64,7 +64,7 @@ const writeBytes = (
         ...(mode === undefined ? {} : { mode })
       }),
     catch: platformError("writeFile", path)
-  })
+  }).pipe(Effect.uninterruptible)
 
 /**
  * Encodes a string and writes it. A string cannot change under the caller,
@@ -169,6 +169,10 @@ const denied = (path: string): PlatformError.PlatformError =>
  * array the caller owns, so a backend that answers from its own storage can
  * neither be corrupted through a result nor change one already returned.
  *
+ * Mutations defer interruption until the backend promise settles, so cleanup
+ * and replacement writes cannot overtake an abandoned mutation. The backend
+ * slice has no cancellation signal.
+ *
  * The service this builds carries **no** kernel isolation attestation; `layer`
  * is the composition that makes that claim.
  *
@@ -194,12 +198,12 @@ export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
       fs.rename === undefined ? unsupported("rename") : Effect.tryPromise({
         try: () => fs.rename!(from, to),
         catch: platformError("rename", from)
-      }),
+      }).pipe(Effect.uninterruptible),
     utimes: (path, atime, mtime) =>
       fs.utimes === undefined ? unsupported("utimes") : Effect.tryPromise({
         try: () => fs.utimes!(path, atime, mtime),
         catch: platformError("utimes", path)
-      }),
+      }).pipe(Effect.uninterruptible),
     makeTempDirectory: () => unsupported("makeTempDirectory"),
     makeTempDirectoryScoped: () => unsupported("makeTempDirectoryScoped"),
     makeTempFile: () => unsupported("makeTempFile"),
@@ -240,7 +244,7 @@ export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
               ...(options?.mode === undefined ? {} : { mode: options.mode })
             }),
           catch: platformError("makeDirectory", path)
-        })
+        }).pipe(Effect.uninterruptible)
       ),
     readDirectory: (path, options) => readDirectory(fs, path, options),
     stat: (path) =>
@@ -257,7 +261,7 @@ export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
             force: options?.force ?? false
           }),
         catch: platformError("remove", path)
-      }),
+      }).pipe(Effect.uninterruptible),
     /**
      * `readable` and `writable` are answered from the reported `mode` rather
      * than dropped: a `writable` check that succeeds on a read-only file is a
