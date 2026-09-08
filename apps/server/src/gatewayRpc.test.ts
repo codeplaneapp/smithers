@@ -110,6 +110,28 @@ describe("decodeGatewayResponse", () => {
     })
   })
 
+  test("names the flow a FlowNotFound refusal lacks, read off the encoded reasons array", () => {
+    // ControlError.FlowNotFound declares no message (verified: `new FlowNotFound({ flowId }).message === ""`),
+    // and Effect's RPC protocol encodes a failure cause as `[{ _tag: "Fail", error }]`.
+    const cause = [{ _tag: "Fail", error: { _tag: "/control/FlowNotFound", code: "flow_not_found", flowId: "prototype" } }]
+    expect(decodeGatewayResponse(exit({ _tag: "Failure", cause }))).toEqual({
+      ok: false,
+      error: { message: "No flow \"prototype\" is registered on this workspace.", detail: cause }
+    })
+    // A typed error with a message inside the reasons array leads with that message; one without falls back to its tag.
+    expect(
+      decodeGatewayResponse(exit({ _tag: "Failure", cause: [{ _tag: "Fail", error: { _tag: "/control/Unavailable", message: "the plane is down" } }] }))
+    ).toMatchObject({ ok: false, error: { message: "the plane is down" } })
+    expect(
+      decodeGatewayResponse(exit({ _tag: "Failure", cause: [{ _tag: "Fail", error: { _tag: "/control/RunNotFound", code: "run_not_found" } }] }))
+    ).toMatchObject({ ok: false, error: { message: "/control/RunNotFound" } })
+    // A defect carries no typed error; the refusal is still one the client can show.
+    expect(decodeGatewayResponse(exit({ _tag: "Failure", cause: [{ _tag: "Die", defect: "boom" }] }))).toMatchObject({
+      ok: false,
+      error: { message: "The workspace refused the call." }
+    })
+  })
+
   test("reads a nested error message when the cause carries one", () => {
     expect(
       decodeGatewayResponse(exit({ _tag: "Failure", cause: { error: { message: "the plane is down" } } }))

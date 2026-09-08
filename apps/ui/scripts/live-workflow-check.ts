@@ -213,7 +213,7 @@ let repoQuestion = 0
 for (let attempt = 0; attempt < 45; attempt += 1) {
   repoQuestion = await page.locator("[data-kind=\"workflow-repo\"]").count()
   if (repoQuestion > 0) break
-  if ((await page.locator("[data-kind=\"flow-run\"]").count()) > 0) break
+  if ((await page.locator("[data-kind=\"run-trace\"]").count()) > 0) break
   await page.waitForTimeout(1000)
 }
 /*
@@ -222,7 +222,7 @@ for (let attempt = 0; attempt < 45; attempt += 1) {
  * decide whether §2 gets verified: the slash form is the same command through
  * the same path, so drive it directly when the sentence did not.
  */
-if (repoQuestion === 0 && (await page.locator("[data-kind=\"flow-run\"]").count()) === 0) {
+if (repoQuestion === 0 && (await page.locator("[data-kind=\"run-trace\"]").count()) === 0) {
   note("the model answered without invoking flow.create — driving the slash form, the same command, same path")
   // The composer refuses a submit while a turn is still streaming, so let the
   // model's turn finish before driving the command.
@@ -243,7 +243,7 @@ if (repoQuestion === 0 && (await page.locator("[data-kind=\"flow-run\"]").count(
   for (let attempt = 0; attempt < 30; attempt += 1) {
     repoQuestion = await page.locator("[data-kind=\"workflow-repo\"]").count()
     if (repoQuestion > 0) break
-    if ((await page.locator("[data-kind=\"flow-run\"]").count()) > 0) break
+    if ((await page.locator("[data-kind=\"run-trace\"]").count()) > 0) break
     await page.waitForTimeout(1000)
   }
 }
@@ -263,7 +263,7 @@ if (repoQuestion > 0) {
 // The turn, the tool call, the provision, and the launch all happen here.
 let runCards = 0
 for (let attempt = 0; attempt < 90; attempt += 1) {
-  runCards = await page.locator("[data-kind=\"flow-run\"]").count()
+  runCards = await page.locator("[data-kind=\"run-trace\"]").count()
   if (runCards > 0) break
   await page.waitForTimeout(1000)
 }
@@ -271,7 +271,7 @@ await page.screenshot({ path: `${dir}/conversation.png`, fullPage: true })
 
 const transcript = (await page.locator(".smithers-transcript").textContent()) ?? ""
 if (runCards > 0) {
-  check("the conversation produced an EMBEDDED run card", true, "data-kind=flow-run in the transcript")
+  check("the conversation produced an EMBEDDED run card", true, "data-kind=run-trace in the transcript")
   // The embed law: it is a card in the chat, not a takeover.
   check(
     "the composer is still visible under the card (never a takeover)",
@@ -291,11 +291,11 @@ if (runCards > 0) {
       await approve.click()
       note("the run parked on an approval and the human's approve was clicked")
     }
-    const cardText = (await page.locator("[data-kind=\"flow-run\"]").first().textContent()) ?? ""
+    const cardText = (await page.locator("[data-kind=\"run-trace\"]").first().textContent()) ?? ""
     if (/Finished\.|Failed\.|Cancelled\./.test(cardText)) break
     await page.waitForTimeout(2000)
   }
-  const cardText = (await page.locator("[data-kind=\"flow-run\"]").first().textContent()) ?? ""
+  const cardText = (await page.locator("[data-kind=\"run-trace\"]").first().textContent()) ?? ""
   note(`run card, settled: ${cardText.replace(/\s+/g, " ").slice(0, 400)}`)
   await page.screenshot({ path: `${dir}/run-card.png`, fullPage: true })
   check(

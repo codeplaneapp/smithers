@@ -411,7 +411,23 @@ describe("repo.home", () => {
  * launch called is recorded so the test reads the launch off the wire, not
  * off the card alone.
  */
-const relayStubs = (options: { readonly refuseRun?: string } = {}) => {
+/**
+ * The relay's frame for a gateway `Plan` the control plane refused with
+ * ControlError.FlowNotFound: the Worker's sentence leads, and the whole
+ * encoded cause rides as the detail. Effect's RPC protocol encodes a failure
+ * cause as an array of reasons, `[{ _tag: "Fail", error }]`, and the error is
+ * the TaggedError's encoded form (verified: `new FlowNotFound({ flowId })`
+ * has an empty `message`, so only its tag and code identify it).
+ */
+const flowNotFoundFrame = (flowId: string) => ({
+  ok: false,
+  error: {
+    message: "/control/FlowNotFound",
+    detail: [{ _tag: "Fail", error: { _tag: "/control/FlowNotFound", code: "flow_not_found", flowId } }]
+  }
+})
+
+const relayStubs = (options: { readonly refuseRun?: string; readonly flows?: ReadonlyArray<string>; readonly refusePlan?: string } = {}) => {
   const procedures: Array<{ readonly procedure: string; readonly payload: Record<string, unknown> }> = []
   const rpc: Route = (init) => {
     const body = JSON.parse(String(init?.body ?? "{}")) as { procedure?: string; payload?: Record<string, unknown> }
@@ -419,7 +435,12 @@ const relayStubs = (options: { readonly refuseRun?: string } = {}) => {
     const payload = body.payload ?? {}
     procedures.push({ procedure, payload })
     switch (procedure) {
+      case "List":
+        return options.flows === undefined
+          ? json(200, { ok: false, error: { message: "no List" } })
+          : json(200, { ok: true, payload: { _tag: "flows", items: options.flows.map((flowId) => ({ flowId, description: "" })) } })
       case "Plan":
+        if (options.refusePlan !== undefined) return json(200, flowNotFoundFrame(options.refusePlan))
         return json(200, {
           ok: true,
           payload: { planId: "plan-1", flowId: payload.flowId, digest: "digest-1", envelope: { capabilities: [], flows: [], budget: {} }, nodes: [] }
@@ -466,8 +487,8 @@ const relayStubs = (options: { readonly refuseRun?: string } = {}) => {
   }
 }
 
-const runCards = (store: AppStore): Array<Extract<Card, { kind: "flow-run" }>> =>
-  [...store.collections.cards.values()].flatMap((card) => (card.kind === "flow-run" ? [card] : []))
+const runCards = (store: AppStore): Array<Extract<Card, { kind: "run-trace" }>> =>
+  [...store.collections.cards.values()].flatMap((card) => (card.kind === "run-trace" ? [card] : []))
 
 describe("feature.prototype", () => {
   test("signed in, the human's request starts a run of kind prototype on the workspace's prototype flow, tracked by the run card", async () => {
@@ -486,9 +507,10 @@ describe("feature.prototype", () => {
       expect(outcome.value).toContain("run-started workflow=prototype run=run-1")
       expect(outcome.value).toContain("kind=prototype")
     }
-    // The launch is flow.run's own: Plan, approve the plan, Run, on the prototype flow with the request as its goal.
-    expect(relay.procedures.map((call) => call.procedure).slice(0, 3)).toEqual(["Plan", "Approval.Submit", "Run"])
-    expect(relay.procedures[0]?.payload).toMatchObject({ flowId: "prototype", input: { goal: "a dark mode toggle" } })
+    // The flow list is asked first (it cannot answer here, so the launch is tried); then the launch is flow.run's
+    // own: Plan, approve the plan, Run, on the prototype flow with the request as its goal.
+    expect(relay.procedures.map((call) => call.procedure).slice(0, 4)).toEqual(["List", "Plan", "Approval.Submit", "Run"])
+    expect(relay.procedures[1]?.payload).toMatchObject({ flowId: "prototype", input: { goal: "a dark mode toggle" } })
     const [card] = runCards(store)
     expect(card?.id).toBe("flow-run-run-1")
     expect(card?.payload).toMatchObject({
@@ -497,9 +519,10 @@ describe("feature.prototype", () => {
       workflow: "prototype",
       kind: "prototype",
       input: { goal: "a dark mode toggle" },
-      // §6b: a prototype run opens on its trace; the pump tails the journal from the first cycle.
-      facet: "trace"
+      // Spec 06 §5: a new run-trace card starts on live tail; the pump tails the journal from the first cycle.
+      liveTail: true
     })
+    expect(card?.kind).toBe("run-trace")
     expect(card?.title).toBe("prototype · a dark mode toggle")
     // No chat turn is spent on a sketch: the run is the answer.
     expect(turns).toHaveLength(0)
@@ -540,14 +563,41 @@ describe("feature.prototype", () => {
     expect(relay.procedures).toEqual([])
   })
 
-  test("a workspace without the prototype flow is named, not guessed around", async () => {
-    const relay = relayStubs({ refuseRun: "Unknown flow: prototype" })
+  test("a workspace whose flow list lacks prototype is refused before anything is planned, naming the flow", async () => {
+    const relay = relayStubs({ flows: ["review-pr", "implement"] })
     const { store, controller } = await fixture(relay.routes)
     identity(store, "signed-in")
     await settled()
     const outcome = await controller.commands.run("feature.prototype", "a dark mode toggle")
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") expect(outcome.error).toBe(`${REPO} has no prototype flow on its workspace yet, so there is nothing to run the prototype with.`)
+    // The list answered, so nothing was planned, approved or run.
+    expect(relay.procedures.map((call) => call.procedure)).toEqual(["List"])
+    expect(runCards(store)).toEqual([])
+  })
+
+  test("a Plan the control plane refuses with FlowNotFound is read off the wire's shape, never off its prose", async () => {
+    // The list cannot answer (the gateway's registry is lazy), so the launch is tried and refused at Plan.
+    const relay = relayStubs({ refusePlan: "prototype" })
+    const { store, controller } = await fixture(relay.routes)
+    identity(store, "signed-in")
+    await settled()
+    const outcome = await controller.commands.run("feature.prototype", "a dark mode toggle")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toBe(`${REPO} has no prototype flow on its workspace yet, so there is nothing to run the prototype with.`)
+    expect(relay.procedures.map((call) => call.procedure)).toEqual(["List", "Plan"])
+    expect(runCards(store)).toEqual([])
+  })
+
+  test("any other launch refusal is surfaced as the workspace said it", async () => {
+    const relay = relayStubs({ flows: ["prototype"], refuseRun: "The workspace is out of capacity." })
+    const { store, controller } = await fixture(relay.routes)
+    identity(store, "signed-in")
+    await settled()
+    const outcome = await controller.commands.run("feature.prototype", "a dark mode toggle")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toBe("The workspace is out of capacity.")
+    expect(relay.procedures.map((call) => call.procedure)).toEqual(["List", "Plan", "Approval.Submit", "Run"])
     expect(runCards(store)).toEqual([])
   })
 })

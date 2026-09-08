@@ -87,7 +87,7 @@ export function CardView({
         data-kind={card.kind}
         data-status={card.status}
         data-maximized={maximized}
-        data-run-id={card.kind === "flow-run" ? card.payload.runId : undefined}
+        data-run-id={card.kind === "run-trace" ? card.payload.runId : undefined}
         data-testid={`card-${card.id}`}
         aria-label={card.title}
       >

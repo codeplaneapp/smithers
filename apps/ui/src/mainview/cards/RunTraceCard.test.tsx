@@ -7,12 +7,15 @@ import { PROTOTYPE_BANNER, RunTraceBody } from "./RunTraceCard"
 import { WorkflowRunCardBody } from "./WorkflowCards"
 
 /*
- * The run card's trace facet (design session §6b, mocks 7 and 8): a run of
- * kind prototype opens on the trace and wears the never-promoted banner, every
- * other run opens on its steps and reaches the trace through the Trace tab
- * (the runs.trace flow); the tree nests the journal, the waterfall has one bar
- * per span, selecting a span fills the pane with what the journal recorded,
- * and a run with no journal yet is the root alone with the run's status.
+ * The run trace (factory spec 06, mocks #s5 and #s6): one card shows every
+ * run as a trace. A run of kind prototype wears the never-promoted banner,
+ * offers `all | messages | failed` and no Steer row; every other run has the
+ * shared filters and the steer row while live. The tree nests the journal,
+ * the waterfall has one bar per span, the selected span fills the pane with
+ * what the journal recorded, and a run with no journal yet is the root alone
+ * with the run's status. Filter, selection and cursor are read off the card
+ * payload (§5) and every chip, row and bar dispatches a registered hidden
+ * flow (§6); the component holds no state of its own.
  */
 
 GlobalRegistrator.register()
@@ -43,10 +46,10 @@ const JOURNAL = [
 ]
 
 const runCard = (
-  overrides: Partial<Extract<Card, { kind: "flow-run" }>["payload"]>
-): Extract<Card, { kind: "flow-run" }> => ({
+  overrides: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>
+): Extract<Card, { kind: "run-trace" }> => ({
   id: "flow-run-run-1",
-  kind: "flow-run",
+  kind: "run-trace",
   title: "prototype · graph view of the wiki",
   status: "active",
   createdAt: 0,
@@ -63,6 +66,8 @@ const runCard = (
   }
 })
 
+const noop = (): void => {}
+
 const render = (element: React.ReactElement): HTMLElement => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -72,18 +77,27 @@ const render = (element: React.ReactElement): HTMLElement => {
   return host
 }
 
-const renderRun = (overrides: Partial<Extract<Card, { kind: "flow-run" }>["payload"]>) => {
+const renderRun = (overrides: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>) => {
   const dispatched: Array<{ name: string; args?: string }> = []
   const host = render(
     <WorkflowRunCardBody
       card={runCard(overrides)}
-      onStopRun={() => {}}
-      onRetryRun={() => {}}
+      onStopRun={noop}
+      onRetryRun={noop}
       onRunCommand={(name, args) => dispatched.push({ name, args })}
     />
   )
   return { host, dispatched }
 }
+
+const renderTrace = (overrides: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>) => {
+  const dispatched: Array<{ name: string; args?: string }> = []
+  const host = render(<RunTraceBody card={runCard(overrides)} onRunCommand={(name, args) => dispatched.push({ name, args })} />)
+  return { host, dispatched }
+}
+
+const chips = (host: HTMLElement): Array<string | null> =>
+  [...host.querySelectorAll("[data-filter]")].map((chip) => chip.getAttribute("data-filter"))
 
 const click = (element: Element | null): void => {
   flushSync(() => {
@@ -91,32 +105,37 @@ const click = (element: Element | null): void => {
   })
 }
 
-describe("the run card and its trace facet", () => {
-  test("a run of kind prototype opens on the trace, Trace tab first, wearing the never-promoted banner", () => {
+describe("the run card as a trace", () => {
+  test("a run of kind prototype wears the never-promoted banner, offers all | messages | failed, and has no Steer row", () => {
     const { host } = renderRun({ kind: "prototype", events: JOURNAL })
     expect(host.querySelector("[data-testid='run-trace-run-1']")).not.toBeNull()
     expect(host.querySelector("[data-testid='run-trace-banner-run-1']")?.textContent).toContain(PROTOTYPE_BANNER)
     expect(host.querySelector("[data-testid='run-trace-banner-run-1']")?.textContent).toContain("kind: prototype · never promoted")
-    const tabs = [...host.querySelectorAll("[role='tablist'] button")].map((tab) => tab.textContent)
-    expect(tabs).toEqual(["Trace", "Steps", "Transcript"])
+    expect(chips(host)).toEqual(["all", "messages", "failed"])
+    // Spec 06 §3: no Steer for a prototype; the run's other acts stay.
+    expect(host.querySelector("[data-testid='flow-run-steer-run-1']")).toBeNull()
+    expect(host.querySelector("[data-testid='flow-run-stop-run-1']")).not.toBeNull()
     expect(host.querySelector(".flow-run-card")?.getAttribute("data-run-kind")).toBe("prototype")
+    // The secondary tabs stay; there is no Trace tab because the trace is the body.
+    expect([...host.querySelectorAll("[role='tablist'] button")].map((tab) => tab.textContent)).toEqual(["Steps", "Transcript"])
   })
 
-  test("every other run opens on its steps; the Trace tab dispatches runs.trace and an implement run needs no banner", () => {
-    const { host, dispatched } = renderRun({ workflow: "review", steps: ["1 turn · 2 calls"] })
-    expect(host.querySelector("[data-testid='run-trace-run-1']")).toBeNull()
+  test("every other run is the same trace with the shared filters and the steer row while live; an implement run needs no banner", () => {
+    const { host } = renderRun({ workflow: "review", steps: ["1 turn · 2 calls"], events: JOURNAL })
+    expect(host.querySelector("[data-testid='run-trace-run-1']")).not.toBeNull()
     expect(host.textContent).toContain("1 turn · 2 calls")
-    expect([...host.querySelectorAll("[role='tablist'] button")].map((tab) => tab.textContent)).toEqual(["Steps", "Transcript", "Trace"])
-    click(host.querySelector("[data-testid='flow-run-facet-trace-run-1']"))
-    expect(dispatched).toEqual([{ name: "runs.trace", args: "run-1" }])
+    expect(chips(host)).toEqual(["all", "running", "failed", "model", "flow", "forks"])
+    expect(host.querySelector("[data-testid='flow-run-steer-run-1']")).not.toBeNull()
+    expect(host.querySelector("[data-testid='run-trace-banner-run-1']")).toBeNull()
 
     const implement = renderRun({ workflow: "implement", kind: "implement", events: JOURNAL })
     expect(implement.host.querySelector("[data-testid='run-trace-run-1']")).not.toBeNull()
     expect(implement.host.querySelector("[data-testid='run-trace-banner-run-1']")).toBeNull()
+    expect(implement.host.querySelector("[data-testid='flow-run-steer-run-1']")).not.toBeNull()
   })
 
-  test("the tree nests the journal, the waterfall has one bar per span, and the selected span fills the pane", () => {
-    const host = render(<RunTraceBody card={runCard({ kind: "prototype", facet: "trace", events: JOURNAL })} />)
+  test("the tree nests the journal, the waterfall has one bar per span, and the payload's selection fills the pane", () => {
+    const { host, dispatched } = renderTrace({ kind: "prototype", events: JOURNAL, liveTail: false })
     const nodes = [...host.querySelectorAll("[data-trace-span]")]
     expect(nodes.map((node) => `${node.getAttribute("data-depth")}:${node.getAttribute("data-kind")}:${node.getAttribute("data-status")}`)).toEqual([
       "0:run:running",
@@ -135,34 +154,59 @@ describe("the run card and its trace facet", () => {
     // 1300 → 4300 on a 1000 → 5100 axis.
     expect(failed?.style.left).toBe("7.32%")
     expect(failed?.style.width).toBe("73.17%")
+    // Spec 06 §7: a bar is a button named by the span summary.
+    expect(failed?.tagName).toBe("BUTTON")
+    expect(failed?.getAttribute("aria-label")).toBe("target.run · failed · 3.0s")
     expect(host.querySelector("[data-testid='run-trace-clock-run-1']")?.textContent).toBe("5 spans · 2 running · 1 failed · t = 4.1s")
 
-    // The run is selected until a span is: the pane names it and its kind.
+    // With live tail off and nothing selected, the run itself is selected: the pane names it and its kind.
     const pane = () => host.querySelector("[data-testid='run-trace-pane-run-1']")
     expect(pane()?.getAttribute("data-span")).toBe("run:run-1")
     expect(pane()?.textContent).toContain(`${"kind".padEnd(12)}prototype`)
 
+    // A row click and a bar click both dispatch runs.trace.select; nothing changes until the payload does.
     click(host.querySelector("[data-trace-span='call-1']"))
-    expect(pane()?.getAttribute("data-span")).toBe("call-1")
-    expect(pane()?.textContent).toContain("call · target.run")
-    expect(pane()?.textContent).toContain("//apps/ui:e2e-smoke")
-    expect(pane()?.querySelector("[role='alert']")?.textContent).toBe("12 fps at 500 nodes")
-    expect(pane()?.textContent).toContain("duration3.0s")
+    click(failed)
+    expect(dispatched).toEqual([
+      { name: "runs.trace.select", args: "run-1 call-1" },
+      { name: "runs.trace.select", args: "run-1 call-1" }
+    ])
+    expect(pane()?.getAttribute("data-span")).toBe("run:run-1")
 
-    click(host.querySelector("[data-trace-span='cell-2']"))
-    expect(pane()?.textContent).toContain("Cell")
-    expect(pane()?.textContent).toContain("await ctx.call(\"target.run\"")
-    expect(pane()?.textContent).toContain("Printed")
-    expect(pane()?.textContent).toContain("svg dies at 500 nodes")
+    const selectedCall = renderTrace({ kind: "prototype", events: JOURNAL, selection: "call-1" })
+    const callPane = selectedCall.host.querySelector("[data-testid='run-trace-pane-run-1']")
+    expect(callPane?.getAttribute("data-span")).toBe("call-1")
+    expect(callPane?.textContent).toContain("call · target.run")
+    expect(callPane?.textContent).toContain("//apps/ui:e2e-smoke")
+    expect(callPane?.querySelector("[role='alert']")?.textContent).toBe("12 fps at 500 nodes")
+    expect(callPane?.textContent).toContain("duration3.0s")
+    expect(selectedCall.host.querySelector("[data-trace-span='call-1']")?.getAttribute("aria-selected")).toBe("true")
+    expect(selectedCall.host.querySelector("[data-trace-bar='call-1'] .run-trace-water-bar")?.getAttribute("aria-pressed")).toBe("true")
 
-    click(host.querySelector("[data-trace-span='frame-1']"))
-    expect(pane()?.textContent).toContain("seatopenai:gpt-5.6-sol")
-    expect(pane()?.textContent).toContain("control.agent.turn-opened · #1")
+    const selectedCell = renderTrace({ kind: "prototype", events: JOURNAL, selection: "cell-2" })
+    const cellPane = selectedCell.host.querySelector("[data-testid='run-trace-pane-run-1']")
+    expect(cellPane?.textContent).toContain("Cell")
+    expect(cellPane?.textContent).toContain("await ctx.call(\"target.run\"")
+    expect(cellPane?.textContent).toContain("Printed")
+    expect(cellPane?.textContent).toContain("svg dies at 500 nodes")
+
+    const selectedFrame = renderTrace({ kind: "prototype", events: JOURNAL, selection: "frame-1" })
+    const framePane = selectedFrame.host.querySelector("[data-testid='run-trace-pane-run-1']")
+    expect(framePane?.textContent).toContain("seatopenai:gpt-5.6-sol")
+    expect(framePane?.textContent).toContain("control.agent.turn-opened · #1")
   })
 
-  test("the failed filter keeps the failing call's ancestors and drops the rest", () => {
-    const host = render(<RunTraceBody card={runCard({ facet: "trace", events: JOURNAL })} />)
-    click(host.querySelector("[data-filter='failed']"))
+  test("live tail selects the newest frame; a selection the fold no longer holds falls back the same way", () => {
+    const tailing = renderTrace({ events: JOURNAL })
+    expect(tailing.host.querySelector("[data-testid='run-trace-pane-run-1']")?.getAttribute("data-span")).toBe("frame-2")
+    const stale = renderTrace({ events: JOURNAL, selection: "call-99" })
+    expect(stale.host.querySelector("[data-testid='run-trace-pane-run-1']")?.getAttribute("data-span")).toBe("frame-2")
+    const parked = renderTrace({ events: JOURNAL, selection: "call-99", liveTail: false })
+    expect(parked.host.querySelector("[data-testid='run-trace-pane-run-1']")?.getAttribute("data-span")).toBe("run:run-1")
+  })
+
+  test("the payload's filter keeps the failing call's ancestors and drops the rest; a chip dispatches runs.trace.filter", () => {
+    const { host, dispatched } = renderTrace({ events: JOURNAL, filter: "failed" })
     expect([...host.querySelectorAll("[data-trace-span]")].map((node) => node.getAttribute("data-trace-span"))).toEqual([
       "run:run-1",
       "frame-1",
@@ -171,11 +215,30 @@ describe("the run card and its trace facet", () => {
     ])
     expect(host.querySelector("[data-filter='failed']")?.getAttribute("aria-pressed")).toBe("true")
     click(host.querySelector("[data-filter='all']"))
-    expect(host.querySelectorAll("[data-trace-span]")).toHaveLength(6)
+    expect(dispatched).toEqual([{ name: "runs.trace.filter", args: "run-1 all" }])
+    // The click is a request, not a change: the rows stay filtered until the payload says otherwise.
+    expect(host.querySelectorAll("[data-trace-span]")).toHaveLength(4)
+    expect(renderTrace({ events: JOURNAL }).host.querySelectorAll("[data-trace-span]")).toHaveLength(6)
+    // A filter the kind does not offer (a prototype has no `model` chip) renders as `all`, never as an invented chip.
+    const prototype = renderTrace({ kind: "prototype", events: JOURNAL, filter: "model" })
+    expect(prototype.host.querySelector("[data-filter='all']")?.getAttribute("aria-pressed")).toBe("true")
+    expect(prototype.host.querySelectorAll("[data-trace-span]")).toHaveLength(6)
+  })
+
+  test("the cursor renders the journal up to that seq, so a scrub shows the run as it stood", () => {
+    const { host } = renderTrace({ events: JOURNAL, cursorSeq: 4, liveTail: false })
+    expect([...host.querySelectorAll("[data-trace-span]")].map((node) => node.getAttribute("data-trace-span"))).toEqual([
+      "run:run-1",
+      "frame-1",
+      "cell-2",
+      "call-1"
+    ])
+    expect(host.querySelector("[data-trace-span='run:run-1']")?.getAttribute("data-status")).toBe("running")
+    expect(host.querySelector("[data-testid='run-trace-clock-run-1']")?.textContent).toBe("3 spans · 2 running · 1 failed · t = 3.3s")
   })
 
   test("no journal yet is the root alone with the run's status, never an invented span", () => {
-    const host = render(<RunTraceBody card={runCard({ kind: "prototype", facet: "trace", phase: "launching" })} />)
+    const { host } = renderTrace({ kind: "prototype", phase: "launching" })
     const nodes = [...host.querySelectorAll("[data-trace-span]")]
     expect(nodes).toHaveLength(1)
     expect(nodes[0]?.getAttribute("data-status")).toBe("launching")

@@ -134,7 +134,15 @@ const relay = (options: {
         // honestly — the only truthful "no such flow".
         const flowId = String(payload.flowId)
         if (!flows.some((entry) => entry.flowId === flowId)) {
-          return json(200, { ok: false, error: { message: `Unknown workflow: ${flowId}` } })
+          // In the wire's own shape: ControlError.FlowNotFound carries no message, so the relay
+          // writes the sentence and the encoded reasons array names the code the client reads.
+          return json(200, {
+            ok: false,
+            error: {
+              message: `No flow "${flowId}" is registered on this workspace.`,
+              detail: [{ _tag: "Fail", error: { _tag: "/control/FlowNotFound", code: "flow_not_found", flowId } }]
+            }
+          })
         }
         planned = { flowId, input: payload.input }
         return json(200, {
@@ -281,9 +289,9 @@ const signIn = async (store: Awaited<ReturnType<typeof webStore>>, loaded: strin
   await settle(2)
 }
 
-const runCard = (store: Awaited<ReturnType<typeof webStore>>): Extract<Card, { kind: "flow-run" }> | undefined => {
+const runCard = (store: Awaited<ReturnType<typeof webStore>>): Extract<Card, { kind: "run-trace" }> | undefined => {
   const card = store.collections.cards.get("flow-run-run-w11")
-  return card?.kind === "flow-run" ? card : undefined
+  return card?.kind === "run-trace" ? card : undefined
 }
 
 /** A scripted tool-loop agent (the ToolLoop.test.ts pattern). */
@@ -695,7 +703,7 @@ describe("wave 11 — workflows are presented", () => {
     await signIn(store)
 
     const outcome = await controller.commands.run("flow.create", "summarize my issues")
-    expect(said(outcome)).toContain("Unknown workflow: create-workflow")
+    expect(said(outcome)).toContain("No flow \"create-workflow\" is registered on this workspace.")
     expect(double.state.launched).toHaveLength(0)
     // It tried the launch — it did not refuse on a stale list.
     expect(double.calls.some((call) => (call.body as { procedure?: string } | undefined)?.procedure === "Plan")).toBe(

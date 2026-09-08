@@ -1,6 +1,6 @@
 /*
- * The run trace model (Factory design session 2026-09-07 §6b: "the run UI is
- * a trace").
+ * The run trace model (factory spec 06, "the run trace": one card shows every
+ * run).
  *
  * A run is a recursive program: the agent writes REPL cells in a code
  * container, every `ctx.call` is a durable span, and each turn is a frame. The
@@ -16,13 +16,6 @@
  * Pure: the card renders the model, the tests read it from a fixture.
  */
 
-/** The run kinds whose card opens on the trace (§6b: Implement and Prototype are traces first). */
-export const TRACED_RUN_KINDS: ReadonlySet<string> = new Set(["prototype", "implement"])
-
-/** The default facet of a run card, by the run's kind. */
-export const defaultRunFacet = (kind: string | undefined): "trace" | "steps" =>
-  kind !== undefined && TRACED_RUN_KINDS.has(kind) ? "trace" : "steps"
-
 /** One control journal record, as the run card stores it (the run-events projection's row shape). */
 export interface JournalRecord {
   readonly sequence?: number
@@ -31,8 +24,11 @@ export interface JournalRecord {
   readonly payload?: unknown
 }
 
-/** What kind of node a span is in the tree. */
-export type SpanKind = "run" | "frame" | "model" | "cell" | "call" | "approval" | "resolved" | "event"
+/**
+ * What kind of node a span is in the tree. `fork` is the row 0 of a forked run
+ * (spec 06 §1); no journal record folds into it yet, so no fold produces one.
+ */
+export type SpanKind = "run" | "frame" | "model" | "cell" | "call" | "approval" | "resolved" | "event" | "fork"
 
 /** What the journal said about the span; the run root wears the run's own status word. */
 export type SpanStatus = "running" | "completed" | "failed" | "waiting" | "approved" | "denied" | string
@@ -311,6 +307,8 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
       case "control.run.cancelled": {
         closeFrame(at)
         root.endedAt = at
+        // The journal's own verdict outranks the card's phase word: a scrub to this record shows the run settled.
+        root.status = kind.slice("control.run.".length)
         break
       }
       default: {
@@ -383,6 +381,9 @@ export const waterfallGeometry = (span: TraceSpan, extent: TraceExtent): { reado
   return { left: Math.round(left * 100) / 100, width: Math.round(bar * 100) / 100 }
 }
 
+/** The flows whose spans are messages between a coordinator and its workers (spec 06 §3). */
+const MESSAGE_FLOWS: ReadonlySet<string> = new Set(["agent/send", "agent/await"])
+
 /** Whether a span, or any span under it, passes the filter. */
 export const spanMatches = (span: TraceSpan, filter: TraceFilter): boolean => {
   const own = filter === "all"
@@ -393,20 +394,44 @@ export const spanMatches = (span: TraceSpan, filter: TraceFilter): boolean => {
     ? span.status === "failed"
     : filter === "model"
     ? span.kind === "model"
-    : span.kind === "call"
+    : filter === "flow"
+    ? span.kind === "call"
+    : filter === "forks"
+    ? span.kind === "fork"
+    : span.kind === "call" && MESSAGE_FLOWS.has(span.label)
   return own || span.children.some((child) => spanMatches(child, filter))
 }
 
-/** The tree's filters (§6b: all / running / failed / model calls / flow calls). */
-export type TraceFilter = "all" | "running" | "failed" | "model" | "calls"
+/** The tree's filters, in the slash grammar's words (spec 06 §6: `runs.trace.filter <runId> <filter>`). */
+export type TraceFilter = "all" | "running" | "failed" | "model" | "flow" | "forks" | "messages"
 
-export const TRACE_FILTERS: ReadonlyArray<readonly [TraceFilter, string]> = [
-  ["all", "all"],
-  ["running", "running"],
-  ["failed", "failed"],
-  ["model", "model calls"],
-  ["calls", "flow calls"]
-]
+export const TRACE_FILTER_IDS: ReadonlyArray<TraceFilter> = ["all", "running", "failed", "model", "flow", "forks", "messages"]
+
+const FILTER_LABELS: Readonly<Record<TraceFilter, string>> = {
+  all: "all",
+  running: "running",
+  failed: "failed",
+  model: "model calls",
+  flow: "flow calls",
+  forks: "forks",
+  messages: "messages"
+}
+
+/**
+ * The filter chips a run of this kind shows (spec 06 §2 and §3): a prototype
+ * has `all | messages | failed` and nothing else; every other run has the
+ * shared set. `messages` is a prototype's conversation across workers, so it
+ * is not offered elsewhere.
+ *
+ * @param kind the run's kind
+ */
+export const traceFiltersFor = (kind: string | undefined): ReadonlyArray<readonly [TraceFilter, string]> =>
+  (kind === "prototype"
+    ? (["all", "messages", "failed"] as const)
+    : (["all", "running", "failed", "model", "flow", "forks"] as const)).map((id) => [id, FILTER_LABELS[id]] as const)
+
+/** Whether a filter word is one the trace knows. */
+export const isTraceFilter = (value: string): value is TraceFilter => (TRACE_FILTER_IDS as ReadonlyArray<string>).includes(value)
 
 /** A duration in the trace's units: milliseconds under a second, seconds under a minute, minutes and seconds after. */
 export const durationWords = (ms: number): string => {

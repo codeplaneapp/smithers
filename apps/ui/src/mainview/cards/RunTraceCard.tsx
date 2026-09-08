@@ -1,37 +1,42 @@
 /*
- * The run trace (Factory design session 2026-09-07 §6b, mocks 7 and 8): the
- * run card's trace facet, built the way a debugger and a distributed tracer
- * show a recursive program. A call tree on the left (run → frame → cell →
- * call), a waterfall on top with one bar per span on a shared time axis, and
- * on the right the selected span's details: a cell's source and prints, a
- * call's input and settlement, a model call's tokens, the seat, and every
- * other field the journal bound at that span.
+ * The run trace (factory spec 06, mocks #s5 and #s6): the run card's body,
+ * built the way a debugger and a distributed tracer show a recursive program.
+ * A call tree on the left (run → frame → cell → call), a waterfall on top with
+ * one bar per span on a shared time axis, and on the right the selected span's
+ * details: a cell's source and prints, a call's input and settlement, a model
+ * call's tokens, the seat, and every other field the journal bound at that
+ * span.
  *
  * The model is RunTrace.ts's fold over the run card's `events` (the
- * `run-events` projection the pump keeps current while the facet is open).
- * A run with no journal yet is the root alone with the run's status. A run of
- * kind prototype wears the never-promoted banner; nothing else differs.
+ * `run-events` projection the pump keeps current while the run is live). A
+ * run with no journal yet is the root alone with the run's status. A run of
+ * kind prototype wears the never-promoted banner and the narrower filter set
+ * (§3); nothing else differs here.
  *
- * Selection and the filter are presentation state under the pointer; every
- * act that touches the run stays on the run card's own buttons.
+ * Every view fact lives in the card payload (§5): `filter`, `selection`,
+ * `cursorSeq` and `liveTail`. The chips and the rows dispatch the registered
+ * hidden flows `runs.trace.filter` and `runs.trace.select` (§6), so the
+ * keyboard, the click and the slash door change the same record. This
+ * component holds no state of its own.
  */
 import { EmptyState, StatusPill } from "@smthrs/ui"
-import { useState } from "react"
 import { timeLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
 import {
   durationWords,
   spanMatches,
-  TRACE_FILTERS,
   type TraceFilter,
+  traceFiltersFor,
   traceFromJournal,
   type TraceModel,
   type TraceSpan,
   waterfallGeometry
 } from "./RunTrace"
 
-/** The banner every prototype run wears (design session §6b, mock 8). */
+/** The banner every prototype run wears (spec 06 §3, mock #s6). */
 export const PROTOTYPE_BANNER = "Prototypes are evidence for /implement, then reaped. No review, no gates, no landing."
+
+type RunTraceCard = Extract<Card, { kind: "run-trace" }>
 
 const durationOf = (span: TraceSpan, model: TraceModel): string | undefined => {
   const end = span.endedAt ?? (span.status === "running" || span.status === "waiting" ? model.extent.end : undefined)
@@ -48,17 +53,62 @@ const json = (value: unknown): string => {
   }
 }
 
+const sequenceOf = (record: Record<string, unknown>): number => typeof record.sequence === "number" ? record.sequence : 0
+
+/**
+ * The trace the card shows: the whole journal, or the journal up to the scrub
+ * cursor (§2, the scrubber lands on a record and every region re-renders at
+ * that seq from the fold the client already holds). At a cursor before the
+ * journal's end the run had not settled, so the root wears `running` unless a
+ * `control.run.*` record within the cursor says otherwise.
+ *
+ * @param card the run card
+ */
+export const traceOf = (card: RunTraceCard): TraceModel => {
+  const { runId, workflow, phase, kind, events, cursorSeq } = card.payload
+  const journal = events ?? []
+  const latest = journal.reduce((max, record) => Math.max(max, sequenceOf(record)), 0)
+  const scrubbed = cursorSeq !== undefined && cursorSeq < latest
+  const records = scrubbed ? journal.filter((record) => sequenceOf(record) <= cursorSeq) : journal
+  return traceFromJournal(
+    { runId, flowId: workflow, status: scrubbed ? "running" : phase, ...(kind === undefined ? {} : { kind }) },
+    records
+  )
+}
+
+/**
+ * The selected node: the payload's selection when it names a row still in the
+ * fold, else the newest frame while live tail holds (§2: live tail follows the
+ * newest frame), else the run itself.
+ *
+ * @param card the run card
+ * @param model its trace
+ */
+export const selectedSpan = (card: RunTraceCard, model: TraceModel): TraceSpan => {
+  const { selection, liveTail } = card.payload
+  const named = selection === undefined ? undefined : model.rows.find((span) => span.id === selection)
+  if (named !== undefined) return named
+  if (liveTail !== false) {
+    const frames = model.rows.filter((span) => span.kind === "frame")
+    const newest = frames.at(-1)
+    if (newest !== undefined) return newest
+  }
+  return model.root
+}
+
 export const RunTraceBody = ({
-  card
+  card,
+  onRunCommand
 }: {
-  readonly card: Extract<Card, { kind: "flow-run" }>
+  readonly card: RunTraceCard
+  readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const { runId, workflow, phase, kind, events } = card.payload
-  const model = traceFromJournal({ runId, flowId: workflow, status: phase, ...(kind === undefined ? {} : { kind }) }, events ?? [])
-  const [filter, setFilter] = useState<TraceFilter>("all")
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
+  const { runId, phase, kind } = card.payload
+  const model = traceOf(card)
+  const filters = traceFiltersFor(kind)
+  const filter: TraceFilter = filters.some(([id]) => id === card.payload.filter) ? card.payload.filter ?? "all" : "all"
   const rows = model.rows.filter((span) => span.kind === "run" || spanMatches(span, filter))
-  const selected = model.rows.find((span) => span.id === selectedId) ?? model.root
+  const selected = selectedSpan(card, model)
   const wall = model.extent.end - model.extent.start
   return (
     <div className="run-trace" data-testid={`run-trace-${runId}`} data-kind={kind}>
@@ -70,15 +120,16 @@ export const RunTraceBody = ({
         ) :
         null}
       <div className="run-trace-bar" role="group" aria-label="Trace filters">
-        {TRACE_FILTERS.map(([id, label]) => (
+        {filters.map(([id, label]) => (
           <button
             key={id}
             type="button"
             className="run-trace-filter"
+            data-flow="runs.trace.filter"
             data-filter={id}
             data-on={filter === id}
             aria-pressed={filter === id}
-            onClick={() => setFilter(id)}
+            onClick={() => onRunCommand("runs.trace.filter", `${runId} ${id}`)}
           >
             {label}
           </button>
@@ -98,13 +149,14 @@ export const RunTraceBody = ({
               <button
                 type="button"
                 className="run-trace-node"
+                data-flow="runs.trace.select"
                 data-trace-span={span.id}
                 data-kind={span.kind}
                 data-status={span.status}
                 data-depth={span.depth}
                 aria-selected={selected.id === span.id}
                 style={{ paddingLeft: `${0.25 + span.depth * 0.875}rem` }}
-                onClick={() => setSelectedId(span.id)}
+                onClick={() => onRunCommand("runs.trace.select", `${runId} ${span.id}`)}
               >
                 <span className="run-trace-dot" data-status={span.status} aria-hidden />
                 <span className="run-trace-label">{span.label}</span>
@@ -126,15 +178,22 @@ export const RunTraceBody = ({
                 {rows.filter((span) => span.kind !== "run").map((span) => {
                   const bar = waterfallGeometry(span, model.extent)
                   const instant = span.endedAt !== undefined && span.endedAt <= span.startedAt
+                  const summary = `${span.label} · ${span.status}${durationOf(span, model) === undefined ? "" : ` · ${durationOf(span, model)}`}`
                   return (
                     <li key={span.id} className="run-trace-water-row" data-trace-bar={span.id} data-status={span.status}>
                       <span className="run-trace-water-label">{span.label}</span>
                       <span className="run-trace-track">
-                        <span
+                        <button
+                          type="button"
                           className="run-trace-water-bar"
+                          data-flow="runs.trace.select"
                           data-instant={instant}
                           data-open={span.endedAt === undefined}
+                          aria-label={summary}
+                          aria-pressed={selected.id === span.id}
+                          title={summary}
                           style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
+                          onClick={() => onRunCommand("runs.trace.select", `${runId} ${span.id}`)}
                         />
                       </span>
                     </li>

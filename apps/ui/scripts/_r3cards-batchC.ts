@@ -15,7 +15,7 @@ await say(`/files.read ${R} README.md`, "file")
 await say(`/issues.view ${R}#47`, "issue")
 await say(`/prs.view ${R}#5`, "pr")
 await say(`/admin.grant 5 codeplanesmithers`, "grant-confirm")
-await say(`/flow.run oneshot`, "flow-run", 12000)
+await say(`/flow.run oneshot`, "run-trace", 12000)
 console.log(
   "\n=== kinds ===",
   await page.evaluate(() =>

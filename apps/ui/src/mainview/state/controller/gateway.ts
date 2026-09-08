@@ -16,10 +16,23 @@ import type { ControlEvent, SteerMessage } from "@smthrs/control/ControlSchema"
 import type { ApprovalRow, NodeOutputRow, RunSummaryRow, TranscriptRow } from "@smthrs/gateway/GatewayProjection"
 import { WORKFLOW_RPC_PATH } from "@smthrs/rpc/AgentApiRoutes"
 
-/** What one relayed call answered. */
+/**
+ * What one relayed call answered. A refusal carries the sentence the relay
+ * wrote and, when the gateway raised a typed error, its `code` (ControlError's
+ * `code` field, else the error's tag), so a caller can answer a known refusal
+ * by shape rather than by matching prose.
+ */
 export type GatewayResult<A> =
   | { readonly status: "ok"; readonly value: A }
-  | { readonly status: "error"; readonly message: string }
+  | { readonly status: "error"; readonly message: string; readonly code?: string }
+
+/** ControlError.FlowNotFound on the wire: its `code` and its tag. */
+export const FLOW_NOT_FOUND_CODE = "flow_not_found"
+export const FLOW_NOT_FOUND_TAG = "/control/FlowNotFound"
+
+/** Whether a refusal's code is the control plane's "no flow with this id is registered". */
+export const isFlowNotFound = (code: string | undefined): boolean =>
+  code === FLOW_NOT_FOUND_CODE || code === FLOW_NOT_FOUND_TAG
 
 /** The rc.0 run statuses a card may render. */
 export type RunStatus = RunSummaryRow["status"]
@@ -41,6 +54,27 @@ export interface GatewayTransport {
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+/**
+ * The typed error's code in a relayed failure's `detail` (the gateway's
+ * cause, carried whole by the relay). Effect's RPC protocol encodes a failure
+ * cause as an array of reasons, `[{ _tag: "Fail", error }]`, so the first
+ * `Fail` reason's error is the typed refusal; a bare record is the error
+ * itself when it carries a code or a `/control/...` tag, else the `error` it
+ * wraps. The `code` field wins; a tag in the `/control/...` form is the
+ * fallback; anything else names no code.
+ */
+const errorCodeOf = (detail: unknown): string | undefined => {
+  const isTyped = (record: Record<string, unknown>): boolean =>
+    typeof record.code === "string" || (typeof record._tag === "string" && record._tag.startsWith("/"))
+  const typed = Array.isArray(detail)
+    ? asRecord(detail.map(asRecord).find((reason) => reason._tag === "Fail")?.error)
+    : isTyped(asRecord(detail))
+    ? asRecord(detail)
+    : asRecord(asRecord(detail).error)
+  if (typeof typed.code === "string" && typed.code !== "") return typed.code
+  return typeof typed._tag === "string" && typed._tag.startsWith("/") ? typed._tag : undefined
+}
 
 /**
  * The Plue floor, as this app's own seam: list flows and runs, launch, read a
@@ -75,10 +109,13 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     }
     if (body?.ok === true) return { status: "ok", value: body.payload }
     if (body?.ok === false) {
-      const message = asRecord(body.error).message
+      const error = asRecord(body.error)
+      const message = error.message
+      const code = errorCodeOf(error.detail)
       return {
         status: "error",
-        message: typeof message === "string" && message !== "" ? message : "The workspace refused the call."
+        message: typeof message === "string" && message !== "" ? message : "The workspace refused the call.",
+        ...(code === undefined ? {} : { code })
       }
     }
     if (typeof body?.message === "string") return { status: "error", message: body.message }

@@ -41,6 +41,7 @@ import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import { readErrorMessage } from "../seams/SeamContext"
 import type { ControllerContext } from "./context"
+import { isFlowNotFound } from "./gateway"
 import type { WorkflowController } from "./workflows"
 
 type OnboardingCard = Extract<Card, { kind: "repo-onboarding" }>
@@ -441,6 +442,15 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
    * then Plan, approve, Run through the gateway seam), and the card it
    * upserts carries the kind, so the run renders as a trace with the
    * never-promoted banner rather than as a second surface.
+   *
+   * No `prototype` flow ships yet, so the honest answer today is a refusal
+   * naming the flow the workspace lacks, never a fake run. The workspace is
+   * the only authority on which flows it has (`.smithers/factory.json` lists
+   * rules, not flows, and the flow list is a gateway read), so the check
+   * comes after provisioning and before anything is planned or approved: the
+   * flow.list seam answers first, and a launch the workspace still refuses
+   * with ControlError.FlowNotFound (which carries no message) is read off
+   * that error's code, never off its prose.
    */
   const prototypeFeature: OnboardingController["prototypeFeature"] = async (request, explicit) => {
     const what = request.trim()
@@ -456,6 +466,9 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
     const { repo } = target
     const provisioned = await deps.workflows.provisionWorkspace(repo)
     if (provisioned !== true) return provisioned
+    const missing = `${repo} has no ${PROTOTYPE_FLOW_ID} flow on its workspace yet, so there is nothing to run the prototype with.`
+    const flows = await ctx.gateway.listFlows(repo)
+    if (flows.status === "ok" && !flows.value.some((flow) => flow.flowId === PROTOTYPE_FLOW_ID)) return missing
     const launched = await deps.workflows.launchWorkflow({
       repo,
       workflow: PROTOTYPE_FLOW_ID,
@@ -463,12 +476,8 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
       title: `${PROTOTYPE_RUN_KIND} · ${what.length > 80 ? `${what.slice(0, 79)}…` : what}`,
       kind: PROTOTYPE_RUN_KIND
     })
-    if (typeof launched === "string") {
-      // A workspace without the prototype flow says so; the refusal names the flow, never a guess at another.
-      return /unknown|not found/i.test(launched)
-        ? `${repo} has no ${PROTOTYPE_FLOW_ID} flow on its workspace yet, so there is nothing to run the prototype with.`
-        : launched
-    }
+    // A workspace without the prototype flow says so; the refusal names the flow, never a guess at another.
+    if ("message" in launched) return isFlowNotFound(launched.code) ? missing : launched.message
     // The same minimal acknowledgment flow.run answers: the card is the claim surface.
     return { value: `run-started workflow=${PROTOTYPE_FLOW_ID} run=${launched.runId} repo=${repo} kind=${PROTOTYPE_RUN_KIND}` }
   }

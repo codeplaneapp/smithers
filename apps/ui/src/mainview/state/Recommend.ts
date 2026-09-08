@@ -190,7 +190,7 @@ export const ruleSuggestions = (
   const byName = new Map(offerable(input.catalog).map((command) => [command.name, command]))
   const cards = input.cards ?? []
   const gateOpen = cards.some((card) => card.kind === "approval" && card.status === "active")
-  const runLive = cards.some((card) => card.kind === "flow-run" && card.status === "active")
+  const runLive = cards.some((card) => card.kind === "run-trace" && card.status === "active")
   const lifecycle: Array<Suggestion> = []
   if (gateOpen && byName.has("approvals.list")) {
     lifecycle.push({

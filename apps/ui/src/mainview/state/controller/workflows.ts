@@ -1,9 +1,20 @@
 import { WORKFLOW_PROVISION_PATH } from "@smthrs/rpc/AgentApiRoutes"
-import { defaultRunFacet } from "../../cards/RunTrace"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
+import { isFlowNotFound } from "./gateway"
 import { resolveTargetRepo } from "../RepoContext"
 import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
+
+/**
+ * A launch the workspace refused, in the wire's own words and shape: the
+ * message the seam surfaces, and the typed error's code (or tag) when the
+ * gateway named one, so a caller can answer a known refusal by shape rather
+ * than by matching prose (ControlError.FlowNotFound carries no message at all).
+ */
+export interface LaunchRefusal {
+  readonly message: string
+  readonly code?: string
+}
 
 export interface WorkflowController {
   readonly createWorkflow: (description: string, repo?: string) => Promise<string | void | { readonly value: string }>
@@ -43,7 +54,7 @@ export interface WorkflowController {
     readonly input: Record<string, unknown>
     readonly title: string
     readonly kind?: string
-  }) => Promise<{ readonly runId: string } | string>
+  }) => Promise<{ readonly runId: string } | LaunchRefusal>
   /** A decision made on the workspace approvals inbox, for a gate whose own card never landed. */
   readonly forwardInboxApprovalDecision: (
     cardId: string,
@@ -209,9 +220,10 @@ export const createWorkflowController = (
   }): string => {
     const cardId = `flow-run-${args.runId}`
     const existing = store.collections.cards.get(cardId)
+    const held = existing?.kind === "run-trace" ? existing.payload : undefined
     const card: Card = {
       id: cardId,
-      kind: "flow-run",
+      kind: "run-trace",
       title: args.title,
       status: "active",
       createdAt: existing?.createdAt ?? Date.now(),
@@ -227,13 +239,20 @@ export const createWorkflowController = (
         ...(args.input === undefined ? {} : { input: args.input }),
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         /*
-         * §6b: a run of a traced kind opens on its trace, and the pump tails
-         * the journal for it from the first cycle. A card already in hand
-         * keeps the facet the human chose.
+         * The reader's view of the trace (spec 06 §5) survives a re-open: a
+         * card already in hand keeps its tab, filter, selection, cursor and
+         * live-tail flag. A new card starts on live tail, following the
+         * newest frame.
          */
-        facet: existing?.kind === "flow-run" && existing.payload.facet !== undefined
-          ? existing.payload.facet
-          : defaultRunFacet(args.kind)
+        ...(held === undefined
+          ? { liveTail: true }
+          : {
+            ...(held.facet === undefined ? {} : { facet: held.facet }),
+            ...(held.filter === undefined ? {} : { filter: held.filter }),
+            ...(held.selection === undefined ? {} : { selection: held.selection }),
+            ...(held.cursorSeq === undefined ? {} : { cursorSeq: held.cursorSeq }),
+            ...(held.liveTail === undefined ? {} : { liveTail: held.liveTail })
+          })
       }
     }
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
@@ -247,9 +266,9 @@ export const createWorkflowController = (
     readonly input: Record<string, unknown>
     readonly title: string
     readonly kind?: string
-  }): Promise<{ readonly runId: string } | string> => {
+  }): Promise<{ readonly runId: string } | LaunchRefusal> => {
     const launch = await gateway.launch(args.repo, args.workflow, args.input)
-    if (launch.status !== "ok") return launch.message
+    if (launch.status !== "ok") return { message: launch.message, ...(launch.code === undefined ? {} : { code: launch.code }) }
     const { runId } = launch.value
     upsertRunCard({
       runId,
@@ -358,7 +377,7 @@ export const createWorkflowController = (
       input: { prompt: description },
       title: `Creating a flow: ${repo}`
     })
-    if (typeof launched === "string") return launched
+    if ("message" in launched) return launched.message
     /*
      * Wave 12 §1: a MINIMAL machine acknowledgment. Wave 11's paragraph of
      * warnings was the model's only evidence and it rounded up anyway, so the
@@ -435,8 +454,9 @@ export const createWorkflowController = (
       input: {},
       title: `${name} — ${repo}`
     })
-    if (typeof launched === "string") {
-      if (!/unknown|not found/i.test(launched)) return launched
+    if ("message" in launched) {
+      // The miss is read off the wire's own shape (FlowNotFound's code), never off its prose.
+      if (!isFlowNotFound(launched.code)) return launched.message
       // A genuine miss: only now is it worth naming what the workspace has.
       const list = await gateway.listFlows(repo)
       const available = list.status === "ok"

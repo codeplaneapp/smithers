@@ -70,8 +70,6 @@ const PRESENTATION_ONLY = [
   "setSelectedPath", // world card doc selection: which note the embedded editor shows — local presentation state
   "onDismissDrawer(", // graph card detail drawer close: local presentation state (which node is focused)
   "setOpenLog(", // run timeline log panel: which row's log is open — local presentation state
-  "setFilter(", // run trace filter chips: which spans the tree shows, local presentation state
-  "setSelectedId(", // run trace tree: which span the pane describes, local presentation state
   "setDeleteDraft", // workspace card delete: the typed-confirm row's open state and its draft — local presentation state; the act itself rides workspace.delete
   "setDisconnectArmed", // connector-setup card disconnect: the confirm row's open state — local presentation state; the act itself rides linear.disconnect
   "onRunCommand(", // delegated: App.tsx binds it to the registry's runCommand/runCommandArgs
@@ -192,11 +190,12 @@ describe("launch-law parity: every affordance is a command", () => {
       /* The access-request queue's Approve. */
       "../cards/AdminCards.tsx": 1,
       /*
-       * The run card's lane-runs acts: the three facet tabs, Check again and
-       * Stop watching, Resume, Stop, Run again, the steer row's send, the
+       * The run card's lane-runs acts: the two secondary tabs under the trace
+       * (Steps, Transcript; Events under verbose), Check again and Stop
+       * watching, Resume, Stop, Run again, the steer row's send, the
        * repository chooser's row and the workflow list's Run.
        */
-      "../cards/WorkflowCards.tsx": 12,
+      "../cards/WorkflowCards.tsx": 11,
       "../DevtoolsPanel.tsx": 1,
       "../SurfaceChrome.tsx": 3,
       "../ToastStack.tsx": 1,
@@ -245,7 +244,12 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/GraphCard.tsx": 4,
       "../cards/HistoryCard.tsx": 2,
       "../cards/RunTimelineCard.tsx": 1,
-    "../cards/RunTraceCard.tsx": 2,
+      /*
+       * The run trace (spec 06 §6): the filter chips (runs.trace.filter), the
+       * tree rows and the waterfall bars (both runs.trace.select), all through
+       * onRunCommand; the view state lives in the card payload, never here.
+       */
+      "../cards/RunTraceCard.tsx": 3,
       /*
        * Lane runs: the run inbox's Open per row, its All/status filter chips,
        * and the Stop-all footer (all through onRunCommand), plus the

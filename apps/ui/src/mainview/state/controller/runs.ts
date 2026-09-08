@@ -6,7 +6,9 @@
  * on the workspace (runs.list), opening one as a card (runs.open), the
  * lifecycle acts (resume, rerun, signal, the steer family), the facets a run
  * card grows (transcript with follow, the verbose events tab), stopping them
- * all, and the workspace approvals inbox (approvals.list / approvals.open).
+ * all, the trace's reader gestures (runs.trace.filter / runs.trace.select,
+ * factory spec 06 §6), and the workspace approvals inbox (approvals.list /
+ * approvals.open).
  *
  * Every read is a projection and every act a control procedure over the one
  * gateway seam (gateway.ts); nothing here invents a wire. What the wire does
@@ -14,6 +16,8 @@
  * summary does not record, so runs.list says that instead of silently
  * dropping the filter.
  */
+import type { TraceFilter } from "../../cards/RunTrace"
+import { traceFromJournal } from "../../cards/RunTrace"
 import type { Card } from "../AppState"
 import type { CommandResult } from "../../flows/Flows"
 import type { ControllerContext } from "./context"
@@ -39,8 +43,10 @@ export interface RunsController {
   readonly showRunLogs: (runId: string, follow?: boolean) => Promise<CommandResult>
   readonly showRunSteps: (runId: string) => CommandResult
   readonly showRunEvents: (runId: string) => Promise<CommandResult>
-  /** The trace facet (design session §6b): the run's journal as a call tree and waterfall, kept live by the pump. */
-  readonly showRunTrace: (runId: string) => Promise<CommandResult>
+  /** `runs.trace.filter <runId> <filter>`: the trace's active filter, in the card payload (spec 06 §5, §6). */
+  readonly traceFilter: (runId: string, filter: TraceFilter) => CommandResult
+  /** `runs.trace.select <runId> <nodeId> [seq]`: the trace's selection and scrub cursor; leaves live tail. */
+  readonly traceSelect: (runId: string, nodeId: string, seq?: number) => CommandResult
   readonly stopAllRuns: (repo?: string) => Promise<CommandResult>
   readonly listApprovals: (repo?: string) => Promise<CommandResult>
   readonly openApproval: (runId: string) => Promise<CommandResult>
@@ -65,14 +71,14 @@ export const createRunsController = (
 ): RunsController => {
   const { store, gateway } = ctx
 
-  const runCardFor = (runId: string): Extract<Card, { kind: "flow-run" }> | undefined => {
+  const runCardFor = (runId: string): Extract<Card, { kind: "run-trace" }> | undefined => {
     const card = store.collections.cards.get(runCardId(runId))
-    return card?.kind === "flow-run" ? card : undefined
+    return card?.kind === "run-trace" ? card : undefined
   }
 
   const patchRunCard = (
     runId: string,
-    patch: Partial<Extract<Card, { kind: "flow-run" }>["payload"]>
+    patch: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>
   ): void => {
     const card = runCardFor(runId)
     if (card === undefined) return
@@ -231,7 +237,7 @@ export const createRunsController = (
       input: card.payload.input,
       title: `${card.payload.workflow} — ${repo}`
     })
-    if (typeof launched === "string") return launched
+    if ("message" in launched) return launched.message
     return { value: `run-started workflow=${card.payload.workflow} run=${launched.runId} repo=${repo}` }
   }
 
@@ -354,29 +360,30 @@ export const createRunsController = (
     return { value: `events run=${runId}` }
   }
 
-  /**
-   * The trace facet: the same `run-events` projection the events tab reads,
-   * folded by the card into the call tree and waterfall (RunTrace.ts). A
-   * product surface, not a debug one, so it is not gated on verbose; the pump
-   * re-reads the journal each cycle while the facet is open, so a live run's
-   * trace tails itself.
+  /*
+   * The trace's reader gestures (spec 06 §6). Both change the card payload
+   * alone (§5: the trace, selection, cursor, filters and live-tail flag live
+   * there), so the tree, the waterfall and the pane re-render from one record
+   * and no request leaves the browser. The pump keeps the journal current on
+   * its own cycle.
    */
-  const showRunTrace = async (runId: string): Promise<CommandResult> => {
-    const guard = workflows.workflowIdentityGuard()
-    if (guard !== undefined) return guard
+  const traceFilter = (runId: string, filter: TraceFilter): CommandResult => {
     const card = runCardFor(runId)
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
-    const target = repoForRun(runId)
-    if ("error" in target) return target.error
-    const events = await gateway.runEvents(target.repo, runId)
-    if (events.status !== "ok") return events.message
-    patchRunCard(runId, {
-      facet: "trace",
-      follow: false,
-      events: events.value.map((event) => ({ ...(event as unknown as Record<string, unknown>) }))
-    })
-    pokeRun(runId)
-    return { value: `trace run=${runId} spans=${events.value.length}` }
+    patchRunCard(runId, { filter })
+    return { value: `trace-filter run=${runId} filter=${filter}` }
+  }
+
+  const traceSelect = (runId: string, nodeId: string, seq?: number): CommandResult => {
+    const card = runCardFor(runId)
+    if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
+    // The node must be one the journal in hand folds to; a made-up id selects nothing, so say so.
+    const { workflow, phase, kind, events } = card.payload
+    const model = traceFromJournal({ runId, flowId: workflow, status: phase, ...(kind === undefined ? {} : { kind }) }, events ?? [])
+    if (!model.rows.some((span) => span.id === nodeId)) return `Run ${runId} has no trace node ${nodeId}.`
+    // A selection is the reader's focus: it leaves live tail (§2) until the reader resumes it.
+    patchRunCard(runId, { selection: nodeId, liveTail: false, ...(seq === undefined ? {} : { cursorSeq: seq }) })
+    return { value: `trace-select run=${runId} node=${nodeId}${seq === undefined ? "" : ` seq=${seq}`}` }
   }
 
   /** Stop every live run card's run — one workspace's, when named. Each cancel is durable; the cards settle from the pump. */
@@ -402,12 +409,12 @@ export const createRunsController = (
       )
       : ([...store.collections.cards.values()].filter(
         (card) =>
-          card.kind === "flow-run" &&
+          card.kind === "run-trace" &&
           (card.payload.phase === "launching" ||
             card.payload.phase === "running" ||
             card.payload.phase === "waiting-approval" ||
             card.payload.phase === "reconnecting")
-      ) as Array<Extract<Card, { kind: "flow-run" }>>)
+      ) as Array<Extract<Card, { kind: "run-trace" }>>)
         .filter((card) => repoArg === undefined || card.payload.repo === repoArg)
         .map((card) => ({ repo: card.payload.repo, runId: card.payload.runId }))
     if (live.length === 0) return repoArg === undefined ? "No runs are live." : `No runs are live on ${repoArg}.`
@@ -530,7 +537,8 @@ export const createRunsController = (
     showRunLogs,
     showRunSteps,
     showRunEvents,
-    showRunTrace,
+    traceFilter,
+    traceSelect,
     stopAllRuns,
     listApprovals,
     openApproval

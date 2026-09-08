@@ -76,18 +76,49 @@ const failure = (message: string, detail?: unknown): GatewayRpcFrame => ({
   error: detail === undefined ? { message } : { message, detail }
 })
 
+const asRecord = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+const isTyped = (record: Record<string, unknown>): boolean =>
+  typeof record.code === "string" || (typeof record._tag === "string" && record._tag.startsWith("/"))
+
+/**
+ * The typed error inside an encoded cause. Effect's RPC protocol encodes a
+ * failure cause as an array of reasons, `[{ _tag: "Fail", error }]`
+ * (`effect/unstable/rpc/RpcMessage` `ResponseExitDieEncoded` is the `Die`
+ * twin), so the first `Fail` reason's error is the typed refusal. A bare
+ * record is read too: the record itself when it carries a code or a
+ * `/control/...` tag, else the `error` it wraps.
+ */
+const typedError = (cause: unknown): Record<string, unknown> => {
+  if (Array.isArray(cause)) {
+    const failed = cause.map(asRecord).find((reason) => reason._tag === "Fail")
+    return failed === undefined ? {} : asRecord(failed.error)
+  }
+  const record = asRecord(cause)
+  return isTyped(record) ? record : asRecord(record.error)
+}
+
 /**
  * The first sentence of a gateway failure. Effect encodes a typed error as the
  * cause's payload, so the tag and message are read off it where they exist and
- * the whole cause is carried as the detail either way — a refusal the seam
+ * the whole cause is carried as the detail either way: a refusal the seam
  * cannot summarize is still a refusal the client can show.
+ *
+ * `FlowNotFound` (packages/smithers/control ControlError.ts) declares no
+ * message, so its tag would be the sentence; it is the one refusal written
+ * here in words, naming the flow the workspace lacks.
  */
 const describeCause = (cause: unknown): string => {
   if (typeof cause !== "object" || cause === null) return "The workspace refused the call."
-  const record = cause as Record<string, unknown>
-  const message = record.message ?? (record.error as Record<string, unknown> | undefined)?.message
+  const typed = typedError(cause)
+  if ((typed._tag === "/control/FlowNotFound" || typed.code === "flow_not_found") && typeof typed.flowId === "string") {
+    return `No flow "${typed.flowId}" is registered on this workspace.`
+  }
+  const record = asRecord(cause)
+  const message = record.message ?? asRecord(record.error).message ?? typed.message
   if (typeof message === "string" && message !== "") return message
-  const tag = record._tag ?? record.code
+  const tag = record._tag ?? record.code ?? typed._tag ?? typed.code
   return typeof tag === "string" && tag !== "" ? tag : "The workspace refused the call."
 }
 

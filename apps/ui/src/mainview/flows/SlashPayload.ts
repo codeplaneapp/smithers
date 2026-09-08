@@ -14,6 +14,7 @@
  * boundary contains an argument check.
  */
 import { parseFileArgs } from "./FileArgs"
+import { isTraceFilter, TRACE_FILTER_IDS } from "../cards/RunTrace"
 import { splitTrailingRepo } from "../state/RepoContext"
 
 /** A parsed invocation, or the honest refusal that names what is missing. */
@@ -235,7 +236,26 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     if (rest.length > 0) return no("runs.logs takes a run id and optionally --follow")
     return ok(follow ? { runId, follow } : { runId })
   },
-  "runs.trace": (args) => required("runId", args, "runs.trace needs a run id"),
+  /* The run trace's reader gestures (factory spec 06 §6): a filter word, or a node with an optional journal seq. */
+  "runs.trace.filter": (args) => {
+    const [runId, filter, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.trace.filter needs a run id")
+    if (filter === undefined || !isTraceFilter(filter)) {
+      return no(`runs.trace.filter needs one of ${TRACE_FILTER_IDS.join(", ")}`)
+    }
+    if (rest.length > 0) return no("runs.trace.filter takes a run id and one filter")
+    return ok({ runId, filter })
+  },
+  "runs.trace.select": (args) => {
+    const [runId, nodeId, seqText, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.trace.select needs a run id")
+    if (nodeId === undefined) return no("runs.trace.select needs the trace node to select")
+    if (rest.length > 0) return no("runs.trace.select takes a run id, a node and optionally a journal seq")
+    if (seqText === undefined) return ok({ runId, nodeId })
+    const seq = Number(seqText)
+    if (!Number.isInteger(seq) || seq < 0) return no("runs.trace.select's seq is a journal sequence number")
+    return ok({ runId, nodeId, seq })
+  },
   "runs.events": (args) => required("runId", args, "runs.events needs a run id"),
   "runs.steps": (args) => required("runId", args, "runs.steps needs a run id"),
   "approvals.list": (args) => repoOnly("approvals.list", args),

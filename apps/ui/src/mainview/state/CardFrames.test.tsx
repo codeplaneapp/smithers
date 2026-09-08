@@ -317,7 +317,7 @@ describe("server-emitted card frames", () => {
     }
     const runCard = (phase: "running" | "quiet" | "stopped"): Card => ({
       id: "flow-run-run-1",
-      kind: "flow-run",
+      kind: "run-trace",
       title: "Creating a flow: will/flows",
       status: "active",
       createdAt: 5,

@@ -157,21 +157,37 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: Schema.Struct({ runId: Schema.String }),
     handler: ({ runId }) => actions.showRunSteps(runId)
   }),
+  /*
+   * The run trace's own interactions (factory spec 06 §6): the filter chips
+   * and the row / bar selection. Hidden from the palette but registered, so
+   * the click, the keyboard and the slash door all dispatch through the
+   * registry, and the state they change lives in the card payload (§5), never
+   * in the component. User-only for the spec's reasons.
+   */
   flow({
-    /*
-     * The run card's Trace tab (design session §6b): the run's journal as a
-     * call tree, a waterfall and a details pane. The card's own presentation
-     * act, so it stays hidden; the read is the gateway's run-events projection,
-     * so it needs the signed-in workspace.
-     */
-    name: "runs.trace",
-    summary: "Show a run's trace on its card: the call tree and waterfall",
+    name: "runs.trace.filter",
+    summary: "Filter a run's trace: all, running, failed, model, flow, forks or messages",
     runtime: ["cloud"],
     hidden: true,
-    args: "<runId>",
-    requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String }),
-    handler: ({ runId }) => actions.showRunTrace(runId)
+    userOnly: true,
+    userOnlyReason: "a view filter is the reader's gesture",
+    args: "<runId> <all|running|failed|model|flow|forks|messages>",
+    input: Schema.Struct({
+      runId: Schema.String,
+      filter: Schema.Literals(["all", "running", "failed", "model", "flow", "forks", "messages"])
+    }),
+    handler: ({ runId, filter }) => actions.traceFilter(runId, filter)
+  }),
+  flow({
+    name: "runs.trace.select",
+    summary: "Select a node of a run's trace, optionally scrubbing to a journal seq",
+    runtime: ["cloud"],
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "selection and scrub are the reader's focus",
+    args: "<runId> <nodeId> [seq]",
+    input: Schema.Struct({ runId: Schema.String, nodeId: Schema.String, seq: Schema.optional(Schema.Number) }),
+    handler: ({ runId, nodeId, seq }) => actions.traceSelect(runId, nodeId, seq)
   }),
   flow({
     /* The raw journal is a debug surface; the controller gates it on verbose. */

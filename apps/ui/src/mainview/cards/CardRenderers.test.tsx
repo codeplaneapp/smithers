@@ -54,7 +54,7 @@ describe("CardRenderers", () => {
   test("an error card wears failed before its family is asked", () => {
     const completed: Card = {
       ...base,
-      kind: "flow-run",
+      kind: "run-trace",
       status: "error",
       payload: { repo: "o/r", runId: "run-1", workflow: "review", phase: "completed", steps: [], result: null, lastSeq: 0 }
     }

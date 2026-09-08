@@ -53,10 +53,10 @@ const inboxCard = (
 })
 
 const runCard = (
-  overrides: Partial<Extract<Card, { kind: "flow-run" }>["payload"]>
-): Extract<Card, { kind: "flow-run" }> => ({
+  overrides: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>
+): Extract<Card, { kind: "run-trace" }> => ({
   id: "flow-run-run-1",
-  kind: "flow-run",
+  kind: "run-trace",
   title: "deploy — repo",
   status: "active",
   createdAt: 0,
@@ -186,7 +186,7 @@ describe("the approvals inbox card", () => {
 
 describe("the run card, per phase and waiting reason", () => {
   const renderRun = (
-    overrides: Partial<Extract<Card, { kind: "flow-run" }>["payload"]>,
+    overrides: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>,
     debugVerbose = false
   ): { host: HTMLElement; dispatched: Array<{ name: string; args?: string }> } => {
     const dispatched: Array<{ name: string; args?: string }> = []

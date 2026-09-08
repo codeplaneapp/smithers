@@ -2032,6 +2032,11 @@
 	border-radius: 4px;
 }
 .run-trace-water-bar {
+	/* A button (spec 06 §7: bars are buttons named by the span summary), drawn as the bar alone. */
+	border: 0;
+	padding: 0;
+	cursor: pointer;
+	font: inherit;
 	position: absolute;
 	top: 0;
 	bottom: 0;

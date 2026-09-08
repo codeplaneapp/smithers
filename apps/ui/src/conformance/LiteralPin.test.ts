@@ -191,7 +191,8 @@ describe("the vocabularies are derived from the app and are never empty", () => 
     expect(vocabularies.cardKinds.size).toBeGreaterThan(20)
     // Derived from the schema, so this is a spot check on the derivation
     // itself rather than a second hand-written list.
-    expect(vocabularies.cardKinds.has("flow-run")).toBe(true)
+    expect(vocabularies.cardKinds.has("run-trace")).toBe(true)
+    expect(vocabularies.cardKinds.has("flow-run")).toBe(false)
     expect(vocabularies.cardKinds.has("workflow-run")).toBe(false)
   })
 
@@ -356,7 +357,10 @@ describe("the pin catches the 2026-08-15 rename it was built for", () => {
     const messages = fixtureViolations.map((violation) => violation.message)
     expect(messages.some((message) => message.includes(`"workflow.create"`) && message.includes(`"flow.create"`)))
       .toBe(true)
-    expect(messages.some((message) => message.includes(`"workflow-run"`) && message.includes(`"flow-run"`))).toBe(true)
+    // The run card is `run-trace` now (factory spec 06), which shares no tail with `workflow-run`,
+    // so the dead kind is reported with no lead rather than a stranger; `flow-run` is retired too.
+    expect(messages.some((message) => message.includes(`"workflow-run"`) && !message.includes(`"flow-run"`))).toBe(true)
+    expect(messages.some((message) => message.includes(`"run-trace"`))).toBe(false)
     expect(messages.some((message) => message.includes(`"workflow-run-"`) && message.includes(`"flow-run-"`))).toBe(
       true
     )
@@ -370,7 +374,7 @@ describe("the pin catches the 2026-08-15 rename it was built for", () => {
   test("the surviving literals in the same shapes are clean", () => {
     const CLEAN = [
       `controller.runCommand("flow.create");`,
-      `if (card.kind !== "flow-run") fail("no run card");`,
+      `if (card.kind !== "run-trace") fail("no run card");`,
       `const runCardId = \`flow-run-\${runId}\`;`,
       `await page.evaluate(\`document.querySelector('[data-flow="flow.run"]')\`);`,
       ""
@@ -461,9 +465,9 @@ describe("a card kind is checked wherever it appears, not only in the two easy p
     const FIXTURE = [
       `const wanted = "workflow-run";`,
       `if (card.kind === wanted) fail("still here");`,
-      `const picked = admin ? "workflow-status" : "flow-run";`,
+      `const picked = admin ? "workflow-status" : "run-trace";`,
       `if (card.kind !== picked) fail("no card");`,
-      `for (const kind of ["workflow-approval", "flow-run"]) {`,
+      `for (const kind of ["workflow-approval", "run-trace"]) {`,
       `\tif (card.kind === kind) fail("kind is back");`,
       `}`,
       `const { kind = "workflow-plan" } = frame;`,
@@ -477,7 +481,7 @@ describe("a card kind is checked wherever it appears, not only in the two easy p
     expect(reported).toContain("card-kind:workflow-approval")
     expect(reported).toContain("card-kind:workflow-plan")
     // The live kind in two of the same shapes is not reported.
-    expect(reported).not.toContain("card-kind:flow-run")
+    expect(reported).not.toContain("card-kind:run-trace")
   })
 
   test("a dead kind in a switch case or a membership set is reported", () => {
@@ -489,7 +493,7 @@ describe("a card kind is checked wherever it appears, not only in the two easy p
       `switch (card.kind) {`,
       `\tcase "workflow-run":`,
       `\t\treturn "run";`,
-      `\tcase "flow-run":`,
+      `\tcase "run-trace":`,
       `\t\treturn "run";`,
       `\tdefault:`,
       `\t\treturn "other";`,
@@ -502,7 +506,7 @@ describe("a card kind is checked wherever it appears, not only in the two easy p
     expect(reported).toContain("card-kind:workflow-run")
     expect(reported).toContain("card-kind:workflow-approval")
     // The live kinds sitting in the same two positions are left alone.
-    expect(reported).not.toContain("card-kind:flow-run")
+    expect(reported).not.toContain("card-kind:run-trace")
     expect(reported).not.toContain("card-kind:approval")
   })
 
@@ -539,7 +543,7 @@ describe("a card kind is checked wherever it appears, not only in the two easy p
       `\t{ type: "delta", kind: "text", text: "Here is what finished." },`,
       `\tcard({`,
       `\t\tid: "copy-run-done",`,
-      `\t\tkind: "flow-run",`,
+      `\t\tkind: "run-trace",`,
       `\t\ttitle: "Run finished",`,
       `\t\tstatus: "acted",`,
       `\t\tcreatedAt: 1700000000000,`,

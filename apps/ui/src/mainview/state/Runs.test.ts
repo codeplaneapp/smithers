@@ -6,9 +6,9 @@
  * refusal — the wire records no launcher), opening a run as a card, the
  * lifecycle acts (resume, rerun with its launch input or the honest refusal,
  * signal, the steer family), the facets (transcript with follow, the
- * verbose-gated events tab), stop-all, and the approvals inbox — including
- * the `inboxCardId:requestId` decision routing that lets a human decide a
- * gate whose own approval card never landed.
+ * verbose-gated events tab), the trace's reader gestures, stop-all, and the
+ * approvals inbox, including the `inboxCardId:requestId` decision routing
+ * that lets a human decide a gate whose own approval card never landed.
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
@@ -195,7 +195,12 @@ const relay = (options: {
             return rowsAnswer("workspace-runs", (options.runs ?? []).map(summaryRow))
           case "run-summary": {
             const spec = (options.runs ?? []).find((run) => run.runId === selector.runId)
-            return rowsAnswer("run-summary", spec === undefined ? [] : [summaryRow(spec)])
+            // The control plane counts the steers it holds for the run, so the summary reports them once a Steer landed.
+            const steeringPending = state.steered.filter((steer) => steer.runId === selector.runId).length
+            return rowsAnswer(
+              "run-summary",
+              spec === undefined ? [] : [summaryRow(spec.steeringPending === undefined && steeringPending > 0 ? { ...spec, steeringPending } : spec)]
+            )
           }
           case "approvals": {
             const rows = (options.approvals ?? []).filter((row) =>
@@ -338,8 +343,8 @@ describe("runs.open / resume / signal / steer — the run's acts", () => {
     const opened = await controller.commands.run("runs.open", "run-9")
     expect(said(opened)).toContain("run-opened run=run-9")
     const card = store.collections.cards.get("flow-run-run-9")
-    expect(card?.kind === "flow-run" && card.payload.workflow).toBe("deploy")
-    expect(card?.kind === "flow-run" && card.payload.repo).toBe(REPO)
+    expect(card?.kind === "run-trace" && card.payload.workflow).toBe("deploy")
+    expect(card?.kind === "run-trace" && card.payload.repo).toBe(REPO)
   })
 
   test("runs.open names the miss honestly", async () => {
@@ -408,7 +413,7 @@ describe("runs.open / resume / signal / steer — the run's acts", () => {
     expect(double.state.steered[2]?.message).toMatchObject({ kind: "Tools", toolNames: ["bash", "edit"] })
 
     const card = store.collections.cards.get("flow-run-run-4")
-    expect(card?.kind === "flow-run" && card.payload.steeringPending).toBe(true)
+    expect(card?.kind === "run-trace" && card.payload.steeringPending).toBe(true)
   })
 })
 
@@ -429,7 +434,7 @@ describe("runs.rerun — the same flow, the same input, or the honest refusal", 
       id: `flow-run-${firstRunId}`,
       patch: {
         payload: {
-          ...(store.collections.cards.get(`flow-run-${firstRunId}`) as Extract<Card, { kind: "flow-run" }>).payload,
+          ...(store.collections.cards.get(`flow-run-${firstRunId}`) as Extract<Card, { kind: "run-trace" }>).payload,
           input: { prompt: "summarize my open issues" }
         }
       }
@@ -478,28 +483,28 @@ describe("the run card's facets — transcript, follow, and the verbose events t
     const shown = await controller.commands.run("runs.logs", "run-6")
     expect(said(shown)).toContain("transcript run=run-6")
     let card = store.collections.cards.get("flow-run-run-6")
-    expect(card?.kind === "flow-run" && card.payload.facet).toBe("transcript")
-    expect(card?.kind === "flow-run" && card.payload.follow).toBe(false)
-    expect(card?.kind === "flow-run" && card.payload.transcriptRows?.map((row) => row.text))
+    expect(card?.kind === "run-trace" && card.payload.facet).toBe("transcript")
+    expect(card?.kind === "run-trace" && card.payload.follow).toBe(false)
+    expect(card?.kind === "run-trace" && card.payload.transcriptRows?.map((row) => row.text))
       .toEqual(["turn 1 begins", "asks: deploy?"])
 
     const followed = await controller.commands.run("runs.logs", "run-6 --follow")
     expect(said(followed)).toContain("following run=run-6")
     card = store.collections.cards.get("flow-run-run-6")
-    expect(card?.kind === "flow-run" && card.payload.follow).toBe(true)
+    expect(card?.kind === "run-trace" && card.payload.follow).toBe(true)
     // The pump merges the transcript on its own cycle while follow holds.
     await waitFor(() => {
       const current = store.collections.cards.get("flow-run-run-6")
-      return current?.kind === "flow-run" && (current.payload.transcriptRows?.length ?? 0) === 2
+      return current?.kind === "run-trace" && (current.payload.transcriptRows?.length ?? 0) === 2
     })
     // Following again unfollows.
     await controller.commands.run("runs.logs", "run-6 --follow")
     card = store.collections.cards.get("flow-run-run-6")
-    expect(card?.kind === "flow-run" && card.payload.follow).toBe(false)
+    expect(card?.kind === "run-trace" && card.payload.follow).toBe(false)
     // And the Steps tab is the way back.
     await controller.commands.run("runs.steps", "run-6")
     card = store.collections.cards.get("flow-run-run-6")
-    expect(card?.kind === "flow-run" && card.payload.facet).toBe("steps")
+    expect(card?.kind === "run-trace" && card.payload.facet).toBe("steps")
   })
 
   test("runs.events exists only where verbose does", async () => {
@@ -519,13 +524,13 @@ describe("the run card's facets — transcript, follow, and the verbose events t
     const shown = await controller.commands.run("runs.events", "run-7")
     expect(said(shown)).toContain("events run=run-7")
     const card = store.collections.cards.get("flow-run-run-7")
-    expect(card?.kind === "flow-run" && card.payload.facet).toBe("events")
-    expect(card?.kind === "flow-run" && card.payload.events).toHaveLength(1)
+    expect(card?.kind === "run-trace" && card.payload.facet).toBe("events")
+    expect(card?.kind === "run-trace" && card.payload.events).toHaveLength(1)
   })
 })
 
-describe("the run card's trace facet: runs.trace and the pump's tail", () => {
-  test("runs.trace shows the journal as the trace and the pump keeps it current while the facet is open", async () => {
+describe("the run trace's reader gestures and the pump's tail (spec 06 §5, §6)", () => {
+  test("runs.open builds the run-trace card under the flow-run id, on live tail, and the pump keeps its journal current", async () => {
     const store = await webStore()
     const journal: Array<Record<string, unknown>> = [
       { kind: "control.agent.turn-opened", payload: { seat: "openai:gpt-5.6-sol", at: 100 }, sequence: 1, occurredAt: 100 }
@@ -538,40 +543,54 @@ describe("the run card's trace facet: runs.trace and the pump's tail", () => {
     await signIn(store)
     await controller.commands.run("runs.open", "run-8")
     let card = store.collections.cards.get("flow-run-run-8")
-    // A run of no traced kind opens on its steps; the trace is one tab away, not gated on verbose.
-    expect(card?.kind === "flow-run" && card.payload.facet).toBe("steps")
-    expect(card?.kind === "flow-run" && card.payload.kind).toBeUndefined()
+    expect(card?.kind).toBe("run-trace")
+    expect(card?.kind === "run-trace" && card.payload.kind).toBeUndefined()
+    expect(card?.kind === "run-trace" && card.payload.liveTail).toBe(true)
+    // The trace is the card's body, so the journal arrives without a further act.
+    await waitFor(() => {
+      const current = store.collections.cards.get("flow-run-run-8")
+      return current?.kind === "run-trace" && (current.payload.events?.length ?? 0) === 1
+    })
 
-    const shown = await controller.commands.run("runs.trace", "run-8")
-    expect(said(shown)).toBe("trace run=run-8 spans=1")
-    card = store.collections.cards.get("flow-run-run-8")
-    expect(card?.kind === "flow-run" && card.payload.facet).toBe("trace")
-    expect(card?.kind === "flow-run" && card.payload.events?.length).toBe(1)
-
-    // The workspace journals a call; the pump's next cycle carries it onto the card without another act.
+    // The workspace journals a call; the pump's next cycle carries it onto the card.
     journal.push({ kind: "control.agent.cell-call-started", payload: { flowName: "files.read", input: { path: "README.md" }, at: 250 }, sequence: 2, occurredAt: 250 })
     await waitFor(() => {
       const current = store.collections.cards.get("flow-run-run-8")
-      return current?.kind === "flow-run" && (current.payload.events?.length ?? 0) === 2
+      return current?.kind === "run-trace" && (current.payload.events?.length ?? 0) === 2
     })
     expect(double.calls.filter((call) => JSON.stringify(call.body).includes("\"run-events\"")).length).toBeGreaterThanOrEqual(2)
 
-    // The Steps tab is the way back, and the pump stops re-reading the journal.
-    await controller.commands.run("runs.steps", "run-8")
+    // A filter is one word on the payload; nothing leaves the browser for it.
+    const reads = double.calls.length
+    const filtered = await controller.commands.run("runs.trace.filter", "run-8 failed")
+    expect(said(filtered)).toBe("trace-filter run=run-8 filter=failed")
     card = store.collections.cards.get("flow-run-run-8")
-    expect(card?.kind === "flow-run" && card.payload.facet).toBe("steps")
-    const reads = double.calls.filter((call) => JSON.stringify(call.body).includes("\"run-events\"")).length
-    await settle(20)
-    expect(double.calls.filter((call) => JSON.stringify(call.body).includes("\"run-events\"")).length).toBe(reads)
+    expect(card?.kind === "run-trace" && card.payload.filter).toBe("failed")
+    expect(double.calls.length).toBe(reads)
+
+    // A selection names a node the journal in hand folds to, leaves live tail, and may scrub to a seq.
+    const selected = await controller.commands.run("runs.trace.select", "run-8 call-1 2")
+    expect(said(selected)).toBe("trace-select run=run-8 node=call-1 seq=2")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "run-trace" && card.payload).toMatchObject({ selection: "call-1", liveTail: false, cursorSeq: 2, filter: "failed" })
+    const invented = await controller.commands.run("runs.trace.select", "run-8 call-9")
+    expect(said(invented)).toBe("Run run-8 has no trace node call-9.")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "run-trace" && card.payload.selection).toBe("call-1")
+
+    // A re-open keeps the reader's view (§5): filter, selection, cursor and live tail survive.
+    await controller.commands.run("runs.open", "run-8")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "run-trace" && card.payload).toMatchObject({ selection: "call-1", liveTail: false, cursorSeq: 2, filter: "failed" })
   })
 
-  test("runs.trace needs the run's card first", async () => {
+  test("both gestures need the run's card first", async () => {
     const store = await webStore()
     const double = relay({ runs: [{ runId: "run-9", flowId: "deploy", status: "running" }] })
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store)
-    const refused = await controller.commands.run("runs.trace", "run-9")
-    expect(said(refused)).toContain("runs.open run-9")
+    expect(said(await controller.commands.run("runs.trace.filter", "run-9 failed"))).toContain("runs.open run-9")
+    expect(said(await controller.commands.run("runs.trace.select", "run-9 frame-1"))).toContain("runs.open run-9")
   })
 })
 

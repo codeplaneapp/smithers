@@ -1,7 +1,7 @@
 /*
- * The workflow cards: the embedded run card (flow-run) with its steer row, the
- * which-repository chooser (workflow-repo), and the workspace's workflow
- * listing (workflow-list). WorkflowRunCardBody and WorkflowListCardBody are
+ * The workflow cards: the embedded run card (run-trace) with its trace body
+ * and steer row, the which-repository chooser (workflow-repo), and the
+ * workspace's workflow listing (workflow-list). WorkflowRunCardBody and WorkflowListCardBody are
  * exported because the Flows pane and the runs tests mount them directly: one
  * list with two mounts, never a second implementation of the same listing.
  */
@@ -12,7 +12,6 @@ import type { Card } from "../state/AppState"
 import { timeLabel as clockLabel } from "../Timestamps"
 import type { CardFamily } from "./CardFamily"
 import { defaultPill, settledPill } from "./CardFamily"
-import { defaultRunFacet } from "./RunTrace"
 import { RunTraceBody } from "./RunTraceCard"
 
 /*
@@ -41,29 +40,16 @@ export const WorkflowRunCardBody = ({
   onRunCommand,
   debugVerbose = false
 }: {
-  readonly card: Extract<Card, { kind: "flow-run" }>
+  readonly card: Extract<Card, { kind: "run-trace" }>
   readonly onStopRun: (cardId: string) => void
   readonly onRetryRun: (cardId: string) => void
   readonly onRunCommand: (name: string, args?: string) => void
   readonly debugVerbose?: boolean
 }) => {
-  const { phase, steps, result, error, runId } = card.payload
-  /* §6b: a run of a traced kind (prototype, implement) opens on its trace; every other run on its steps. */
-  const facet = card.payload.facet ?? defaultRunFacet(card.payload.kind)
-  const traceFirst = defaultRunFacet(card.payload.kind) === "trace"
-  const traceTab = (
-    <Button
-      size="sm"
-      variant={facet === "trace" ? "default" : "outline"}
-      data-flow="runs.trace"
-      data-testid={`flow-run-facet-trace-${runId}`}
-      onClick={() => onRunCommand("runs.trace", runId)}
-    >
-      Trace
-    </Button>
-  )
+  const { phase, steps, result, error, runId, kind } = card.payload
+  const facet = card.payload.facet ?? "steps"
   return (
-    <div className="flow-run-card" data-run-kind={card.payload.kind}>
+    <div className="flow-run-card" data-run-kind={kind}>
       {result !== null ? <Markdown className="smithers-card-markdown" content={result} /> : null}
       <p className="smithers-card-note">{WORKFLOW_RUN_PHASE_WORDS[phase] ?? phase}</p>
       {/* Lane runs: why a live run is not moving, in the control plane's word. */}
@@ -79,13 +65,14 @@ export const WorkflowRunCardBody = ({
       {card.payload.steeringPending === true ?
         <p className="smithers-card-note">steering pending · delivered at the next turn</p> :
         null}
+      {/* The run as a trace (spec 06): the card's body for every run kind. Its chips and rows dispatch runs.trace.*. */}
+      <RunTraceBody card={card} onRunCommand={onRunCommand} />
       {/*
-       * The facets the card grows (lane runs): the steps tail by default, the
+       * The secondary tabs (lane runs): the steps tail by default, the
        * transcript on demand (runs.logs), the raw journal only where verbose
        * is on (runs.events). Each tab is a registered flow, never local state.
        */}
       <div className="flow-run-actions" role="tablist" aria-label="Run views">
-        {traceFirst ? traceTab : null}
         <Button
           size="sm"
           variant={facet === "steps" ? "default" : "outline"}
@@ -104,7 +91,6 @@ export const WorkflowRunCardBody = ({
         >
           Transcript
         </Button>
-        {traceFirst ? null : traceTab}
         {debugVerbose ?
           (
             <Button
@@ -119,7 +105,6 @@ export const WorkflowRunCardBody = ({
           ) :
           null}
       </div>
-      {facet === "trace" ? <RunTraceBody card={card} /> : null}
       {facet === "transcript" ?
         card.payload.transcriptRows === undefined || card.payload.transcriptRows.length === 0 ?
           <p className="smithers-card-note">The transcript is empty so far.</p> :
@@ -226,7 +211,8 @@ export const WorkflowRunCardBody = ({
           </div>
         ) :
         null}
-      {LIVE_RUN_PHASES.has(phase) ? <RunSteerRow runId={runId} onRunCommand={onRunCommand} /> : null}
+      {/* Spec 06 §3: a prototype is never steered; its header has no Steer, so its card has no steer row. */}
+      {LIVE_RUN_PHASES.has(phase) && kind !== "prototype" ? <RunSteerRow runId={runId} onRunCommand={onRunCommand} /> : null}
     </div>
   )
 }
@@ -450,8 +436,8 @@ export const WorkflowListCardBody = ({
   )
 }
 
-export const workflowCardFamily: CardFamily<"flow-run" | "workflow-repo" | "workflow-list"> = {
-  "flow-run": {
+export const workflowCardFamily: CardFamily<"run-trace" | "workflow-repo" | "workflow-list"> = {
+  "run-trace": {
     render: (card, actions) => (
       <WorkflowRunCardBody
         card={card}

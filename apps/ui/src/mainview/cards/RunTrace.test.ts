@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { defaultRunFacet, durationWords, spanMatches, traceFromJournal, waterfallGeometry } from "./RunTrace"
+import { durationWords, isTraceFilter, spanMatches, traceFiltersFor, traceFromJournal, waterfallGeometry } from "./RunTrace"
 import type { JournalRecord } from "./RunTrace"
 
 /*
@@ -141,15 +141,35 @@ describe("the trace model", () => {
     expect(visible("failed")).toEqual(["run:run-1", "frame-1", "cell-4", "call-2"])
     expect(visible("running")).toEqual(["run:run-1", "frame-2", "cell-12", "call-3", "approval-req-1"])
     expect(visible("model")).toEqual(["run:run-1", "frame-1", "model-3"])
-    expect(visible("calls")).toEqual(["run:run-1", "frame-1", "cell-4", "call-1", "call-2", "frame-2", "cell-12", "call-3"])
+    expect(visible("flow")).toEqual(["run:run-1", "frame-1", "cell-4", "call-1", "call-2", "frame-2", "cell-12", "call-3"])
     expect(visible("all")).toHaveLength(11)
   })
 
-  test("the traced kinds open on the trace; every other run on its steps", () => {
-    expect(defaultRunFacet("prototype")).toBe("trace")
-    expect(defaultRunFacet("implement")).toBe("trace")
-    expect(defaultRunFacet(undefined)).toBe("steps")
-    expect(defaultRunFacet("review")).toBe("steps")
+  test("a prototype offers all, messages and failed; every other run the shared six (spec 06 §2, §3)", () => {
+    expect(traceFiltersFor("prototype").map(([id]) => id)).toEqual(["all", "messages", "failed"])
+    expect(traceFiltersFor("implement").map(([id]) => id)).toEqual(["all", "running", "failed", "model", "flow", "forks"])
+    expect(traceFiltersFor(undefined).map(([id, label]) => `${id}=${label}`)).toEqual([
+      "all=all",
+      "running=running",
+      "failed=failed",
+      "model=model calls",
+      "flow=flow calls",
+      "forks=forks"
+    ])
+    expect(isTraceFilter("messages")).toBe(true)
+    expect(isTraceFilter("calls")).toBe(false)
+  })
+
+  test("the messages filter keeps a prototype's agent/send and agent/await spans with their ancestors", () => {
+    const model = traceFromJournal({ runId: "run-2", flowId: "prototype", status: "running", kind: "prototype" }, [
+      at(1, "control.agent.turn-opened", { seat: "openai:gpt-5.6-sol" }, 1000),
+      at(2, "control.agent.cell-produced", { language: "ts", digest: "c1", text: "await ctx.call(\"agent/send\", { to: \"w2\", text: \"edges are note→target\" })" }, 1100),
+      at(3, "control.agent.cell-call-started", { flowName: "files.read", input: { path: "README.md" } }, 1200),
+      at(4, "control.agent.cell-call-started", { flowName: "agent/send", input: { to: "w2", text: "edges are note→target" } }, 1300),
+      at(5, "control.agent.cell-call-started", { flowName: "agent/await", input: { from: "w4" } }, 1400)
+    ])
+    const visible = model.rows.filter((span) => span.kind === "run" || spanMatches(span, "messages")).map((span) => span.label)
+    expect(visible).toEqual(["run run-2 · prototype", "frame 1 · openai:gpt-5.6-sol", "cell · ts", "agent/send", "agent/await"])
   })
 
   test("durations read in the trace's units", () => {

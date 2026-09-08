@@ -210,9 +210,9 @@ const signIn = async (store: Awaited<ReturnType<typeof webStore>>, loaded: strin
   await settle(2)
 }
 
-const runCard = (store: Awaited<ReturnType<typeof webStore>>): Extract<Card, { kind: "flow-run" }> | undefined => {
+const runCard = (store: Awaited<ReturnType<typeof webStore>>): Extract<Card, { kind: "run-trace" }> | undefined => {
   const card = store.collections.cards.get("flow-run-run-w12")
-  return card?.kind === "flow-run" ? card : undefined
+  return card?.kind === "run-trace" ? card : undefined
 }
 
 /** The whole rendered turn, as the transcript holds it. */

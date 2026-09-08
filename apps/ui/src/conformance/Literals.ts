@@ -487,7 +487,7 @@ export const dataAttributesIn = (value: string): ReadonlyArray<string> => [
   ...new Set([...value.matchAll(/(?<![\w-])data-[a-z0-9]+(?:-[a-z0-9]+)*/g)].map((match) => match[0]))
 ]
 
-/** The value a CSS selector pins an attribute to: `[data-kind="flow-run"]` → `flow-run`. */
+/** The value a CSS selector pins an attribute to: `[data-kind="run-trace"]` → `run-trace`. */
 export const attributeSelectorValues = (value: string, attribute: string): ReadonlyArray<string> => {
   const pattern = new RegExp(`\\[${attribute}\\s*=\\s*(?:\\\\?"([^"\\\\]*)\\\\?"|'([^']*)')`, "g")
   return [...value.matchAll(pattern)].map((match) => match[1] ?? match[2] ?? "")

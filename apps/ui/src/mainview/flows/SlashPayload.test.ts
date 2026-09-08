@@ -145,9 +145,30 @@ describe("the runs grammar", () => {
   })
 
   test("the id-scoped acts refuse a blank run id", () => {
-    for (const name of ["runs.resume", "runs.rerun", "runs.events", "runs.trace", "runs.steps", "approvals.open"]) {
+    for (const name of ["runs.resume", "runs.rerun", "runs.events", "runs.steps", "approvals.open"]) {
       expect(payloadFor(name, "")).toEqual({ error: `${name} needs a run id` })
     }
+  })
+
+  test("the trace's reader gestures take a filter word, or a node with an optional journal seq", () => {
+    expect(payloadFor("runs.trace.filter", "run-1 failed")).toEqual({ payload: { runId: "run-1", filter: "failed" } })
+    expect(payloadFor("runs.trace.filter", "")).toEqual({ error: "runs.trace.filter needs a run id" })
+    expect(payloadFor("runs.trace.filter", "run-1")).toEqual({
+      error: "runs.trace.filter needs one of all, running, failed, model, flow, forks, messages"
+    })
+    expect(payloadFor("runs.trace.filter", "run-1 calls")).toEqual({
+      error: "runs.trace.filter needs one of all, running, failed, model, flow, forks, messages"
+    })
+    expect(payloadFor("runs.trace.filter", "run-1 failed extra")).toEqual({
+      error: "runs.trace.filter takes a run id and one filter"
+    })
+    expect(payloadFor("runs.trace.select", "run-1 call-2")).toEqual({ payload: { runId: "run-1", nodeId: "call-2" } })
+    expect(payloadFor("runs.trace.select", "run-1 call-2 7")).toEqual({ payload: { runId: "run-1", nodeId: "call-2", seq: 7 } })
+    expect(payloadFor("runs.trace.select", "run-1")).toEqual({ error: "runs.trace.select needs the trace node to select" })
+    expect(payloadFor("runs.trace.select", "run-1 call-2 soon")).toEqual({
+      error: "runs.trace.select's seq is a journal sequence number"
+    })
+    expect(payloadFor("runs.trace.select", "")).toEqual({ error: "runs.trace.select needs a run id" })
   })
 
   test("approvals.list takes just an owner/repo", () => {

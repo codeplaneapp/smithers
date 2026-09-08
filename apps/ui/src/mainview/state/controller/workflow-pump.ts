@@ -11,7 +11,7 @@ export interface WorkflowPumpController {
 }
 
 /** How a run card reads each rc.0 run status. */
-const PHASE_OF_STATUS: Readonly<Record<RunStatus, Extract<Card, { kind: "flow-run" }>["payload"]["phase"]>> = {
+const PHASE_OF_STATUS: Readonly<Record<RunStatus, Extract<Card, { kind: "run-trace" }>["payload"]["phase"]>> = {
   accepted: "running",
   running: "running",
   parked: "running",
@@ -50,15 +50,15 @@ export const createWorkflowPumpController = (
    */
   const RUN_QUIET_AFTER_MS = services.workflowQuietMs ?? 10 * 60 * 1000
 
-  const liveRunCards = (): Array<Extract<Card, { kind: "flow-run" }>> =>
+  const liveRunCards = (): Array<Extract<Card, { kind: "run-trace" }>> =>
     [...store.collections.cards.values()].filter(
       (card) =>
-        card.kind === "flow-run" &&
+        card.kind === "run-trace" &&
         (card.payload.phase === "launching" ||
           card.payload.phase === "running" ||
           card.payload.phase === "waiting-approval" ||
           card.payload.phase === "reconnecting")
-    ) as Array<Extract<Card, { kind: "flow-run" }>>
+    ) as Array<Extract<Card, { kind: "run-trace" }>>
 
   const pokeableWait = (cardId: string, ms: number): Promise<void> =>
     new Promise((resolve) => {
@@ -76,11 +76,11 @@ export const createWorkflowPumpController = (
 
   const patchRunCard = (
     cardId: string,
-    patch: Partial<Extract<Card, { kind: "flow-run" }>["payload"]>,
+    patch: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>,
     status?: Card["status"]
   ): void => {
     const card = store.collections.cards.get(cardId)
-    if (card === undefined || card.kind !== "flow-run") return
+    if (card === undefined || card.kind !== "run-trace") return
     store.dispatch({
       type: "card.updated",
       actor: "system",
@@ -160,7 +160,7 @@ export const createWorkflowPumpController = (
       for (;;) {
         if (pump.stopped) return
         const card = store.collections.cards.get(cardId)
-        if (card === undefined || card.kind !== "flow-run") return
+        if (card === undefined || card.kind !== "run-trace") return
         if (
           card.payload.phase === "completed" ||
           card.payload.phase === "failed" ||
@@ -214,7 +214,7 @@ export const createWorkflowPumpController = (
          * the card already pays for. Unfollowing stops the merge, and a
          * terminal run keeps its last transcript standing.
          */
-        let transcriptRows: Extract<Card, { kind: "flow-run" }>["payload"]["transcriptRows"]
+        let transcriptRows: Extract<Card, { kind: "run-trace" }>["payload"]["transcriptRows"]
         if (card.payload.follow === true) {
           const transcript = await gateway.transcript(repo, runId)
           if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
@@ -230,13 +230,13 @@ export const createWorkflowPumpController = (
         }
 
         /*
-         * The trace facet (design session §6b) tails the journal the same
-         * way: while the card shows the trace, each cycle re-reads the
-         * run-events projection so the call tree and waterfall follow the
-         * live run. A terminal run keeps its last journal standing.
+         * The trace (spec 06) is the card's body, so every cycle re-reads the
+         * run-events projection: the call tree and waterfall follow the live
+         * run without a further act. A terminal run keeps its last journal
+         * standing; a read that fails leaves the journal in hand untouched.
          */
-        let events: Extract<Card, { kind: "flow-run" }>["payload"]["events"]
-        if (card.payload.facet === "trace") {
+        let events: Extract<Card, { kind: "run-trace" }>["payload"]["events"]
+        {
           const journal = await gateway.runEvents(repo, runId)
           if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
           if (journal.status === "ok") {
@@ -327,9 +327,9 @@ export const createWorkflowPumpController = (
    * The two acts a quiet run offers, both registered commands so the card's
    * buttons dispatch through the one path everything else does.
    */
-  const runCardFor = (cardId: string): Extract<Card, { kind: "flow-run" }> | undefined => {
+  const runCardFor = (cardId: string): Extract<Card, { kind: "run-trace" }> | undefined => {
     const card = store.collections.cards.get(cardId)
-    return card?.kind === "flow-run" ? card : undefined
+    return card?.kind === "run-trace" ? card : undefined
   }
 
   /**

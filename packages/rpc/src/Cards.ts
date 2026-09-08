@@ -639,15 +639,20 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   }),
   /*
-   * Wave 11 — the embedded run card: a workflow run on the user's workspace
-   * gateway, tracked live from the relay event stream. `steps` is the node
-   * progress in words (a short tail); `result` leads once the run settles.
-   * `lastSeq` is the per-run event cursor so a reload resumes the pump from
-   * exactly where it stopped (reconnect-and-replay).
+   * The run trace (factory spec 06, review/RULINGS.md #6): one card kind for
+   * every run, whatever its kind (implement, prototype, review, ...). The
+   * card tracks the run live (phase, `steps` as a short tail of progress
+   * words, `result` once it settles, `lastSeq` as the per-run cursor a reload
+   * resumes the pump from) and renders its journal as a trace: a call tree,
+   * a waterfall and a span pane, folded on the client from `events` (the
+   * `run-events` projection) until the gateway serves a run-trace projection.
+   * The reader's view state (selection, cursor, filter, live tail) lives
+   * here too, so the tree, the waterfall and the pane never disagree. The id
+   * scheme `flow-run-<runId>` stays so links resolve.
    */
   z.object({
     ...cardBaseShape,
-    kind: z.literal("flow-run"),
+    kind: z.literal("run-trace"),
     payload: z.object({
       repo: z.string(),
       runId: z.string(),
@@ -689,10 +694,10 @@ export const CardSchema = z.discriminatedUnion("kind", [
       /** The launch input, so `runs.rerun` relaunches the same flow with the same arguments. */
       input: z.record(z.string(), z.unknown()).optional(),
       /**
-       * The run's kind (Factory design session 2026-09-07 §6b): "prototype"
-       * for a run `feature.prototype` started, "implement" for an Implement
-       * run. Prototype is a run kind, not its own UI: the kind selects the
-       * trace as the card's default facet and the never-promoted banner.
+       * The run's kind (factory spec 06 §3): "prototype" for a run
+       * `feature.prototype` started, "implement" for an Implement run.
+       * Prototype is a run kind, never a card kind: it selects the
+       * never-promoted banner, drops the Steer row and narrows the filters.
        * Absent for every other run.
        */
       kind: z.string().optional(),
@@ -700,8 +705,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
       waiting: z.string().optional(),
       /** Whether an operator steer is queued for the run. */
       steeringPending: z.boolean().optional(),
-      /** Which body tab the card shows; the steps tail by default, the trace for a run of a traced kind. */
-      facet: z.enum(["steps", "transcript", "events", "trace"]).optional(),
+      /** Which secondary tab the card shows under the trace; the steps tail by default. */
+      facet: z.enum(["steps", "transcript", "events"]).optional(),
       /** Whether the transcript keeps following the live run. */
       follow: z.boolean().optional(),
       /** The transcript tab's rows, merged from the transcript projection while the card follows. */
@@ -716,8 +721,20 @@ export const CardSchema = z.discriminatedUnion("kind", [
           })
         )
         .optional(),
-      /** The events tab's records: the run's raw control events in journal order. */
-      events: z.array(z.record(z.string(), z.unknown())).optional()
+      /**
+       * The run's journal: its control events in journal order, as the
+       * `run-events` projection serves them. The trace folds from these
+       * (RunTrace.ts) and the verbose events tab lists them raw.
+       */
+      events: z.array(z.record(z.string(), z.unknown())).optional(),
+      /** The selected trace node (a span id from the fold); absent selects the newest frame while live tail holds, else the run. */
+      selection: z.string().optional(),
+      /** The scrub cursor, a journal sequence: the trace renders the journal up to it. Absent renders the whole journal. */
+      cursorSeq: z.number().int().nonnegative().optional(),
+      /** The tree's active filter (factory spec 06 §2, §3); `all` when absent. */
+      filter: z.enum(["all", "running", "failed", "model", "flow", "forks", "messages"]).optional(),
+      /** Whether the trace follows the newest frame (factory spec 06 §2); true when absent. A select turns it off. */
+      liveTail: z.boolean().optional()
     })
   }),
   /* The workspace's workflows as an embedded card (flow.list). */
