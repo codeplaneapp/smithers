@@ -21997,9 +21997,13 @@ Configuration for `make` and `layer`.
 | `owner`         | `{ hostId: string }`      | Stable identity of this engine host.                                                                                                                                                                                                       |
 | `isAlive`       | `Ownership.LivenessCheck` | Whether a previously recorded owner is still alive. Required, and a stub is not an answer: a check that returns `false` without asking makes the engine steal runs out of live processes. Receives the claim context as well as the owner. |
 
-`Ownership.sameHostPidProbe` from [`@smthrs/run-store`](/docs/reference/api/run-store/) asks this
-machine's process table and never declares another host's owner dead. A
-multi-process deployment answers from its supervisor or lease system instead.
+`Ownership.sameHostPidProbe` from [`@smthrs/run-store`](/docs/reference/api/run-store/) probes
+the process table only for the claim context's host (`context.claimant.hostId`).
+It returns `false` (treated as dead) for an owner on another host, allowing
+takeover once that owner's lease has expired. A fresh heartbeat still blocks
+takeover. To preserve foreign-host owners, use `HostLiveness.isAlive({ hostId })`
+from [`@smthrs/platform-node`](/docs/reference/api/platform-node/), which returns `true` for
+foreign hosts, or supply a distributed liveness check.
 
 ### `RuntimeConfigurationError`
 

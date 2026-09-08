@@ -103,11 +103,11 @@ console.log(
 run ended as Transitioned
 ```
 
-The third argument to `claimAndOwn` is the row as you last read it, restated as
-the three fields a claim guards. The claim is admitted only while the row still
-matches, so a peer that took the run between your read and your write loses the
-race instead of overwriting it. Had that happened, `transitionOwned` would have
-returned `FenceLost` and changed nothing.
+The second argument to `claimAndOwn` is the row as you last read it, restated as
+the three fields a claim guards. The third argument is the new owner. The claim
+is admitted only while the row still matches. If a peer took the run between
+your read and your write, this caller loses the race and leaves the peer's
+ownership unchanged. The example then returns before calling `transitionOwned`.
 
 ## How this relates to @smthrs/flows
 
