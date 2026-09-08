@@ -33,6 +33,12 @@
 
 ### Fixed
 
+- Carried `Source.confinementRoot` from packs into discovery. When real paths
+  are available, every descended directory and selected entry file is checked
+  against the pack root; nested symlink escapes are skipped with `outside_root`
+  before they can contribute descriptors, loaded bodies, or catalog imports.
+  Links within the pack and unrestricted project sources remain supported.
+
 - Confined pack manifest paths to the pack root. A `flows` or `skills` entry
   that is absolute, traverses with `..`, or resolves through a symlink to a
   directory outside the pack is refused as `invalid_pack` instead of registering

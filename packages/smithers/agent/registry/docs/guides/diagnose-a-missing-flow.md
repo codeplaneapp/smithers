@@ -35,8 +35,7 @@ scans of the same tree report them in the same order.
 
 ## The flow produced no entry at all
 
-Four codes mean a file contributed nothing. Everything else leaves an entry
-behind, possibly a different one than the author expected.
+These codes mean a file or directory contributed nothing:
 
 | Code                  | What happened                                                                                                                                                                                                              | What to change                                                                                                         |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -44,6 +43,7 @@ behind, possibly a different one than the author expected.
 | `root_level_entry`    | An entry file sits directly in the root of a path-named source, so there are no directory segments to name it.                                                                                                             | Move it into a subdirectory: `flows/review/flow.mdx`, not `flows/flow.mdx`.                                            |
 | `entry_too_large`     | The file is past `Discovery.entrySizeLimit`, 4 MiB. The message reports the byte count.                                                                                                                                    | Check for a build artifact or generated file under the source root.                                                    |
 | `unreadable`          | A directory or file could not be read or inspected. `cause` carries the host error.                                                                                                                                        | Fix the permission or the broken link.                                                                                 |
+| `outside_root`        | A directory or selected entry file resolves outside `Source.confinementRoot`, which packs set to their root. The target is skipped before reading its contents.                                                            | Move the target inside the pack and update the symlink.                                                                |
 
 Two more stop the walk rather than one entry:
 

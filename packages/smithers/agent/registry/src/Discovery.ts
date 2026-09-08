@@ -4,7 +4,8 @@
  * Governing contract: `packages/smithers/agent/registry/docs/api.md`, published as
  * https://smithers.sh/docs/reference/api/registry.
  *
- * Discovery follows symbolic links when the host `FileSystem.stat` does. A
+ * Discovery follows symbolic links when the host `FileSystem.stat` does,
+ * confined to `Source.confinementRoot` when real paths are available. A
  * visited-directory identity set stops cycles and aliases, while a 32-segment
  * depth ceiling bounds hosts that cannot supply stable directory identities.
  *
@@ -175,6 +176,26 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
         const entries: Array<FlowDescriptor> = []
         const warnings: Array<DiscoveryWarning> = []
 
+        const realRoot = source.confinementRoot === undefined
+          ? undefined
+          : yield* Effect.result(fs.realPath(source.confinementRoot))
+        const withinRoot = Effect.fnUntraced(function*(location: string) {
+          if (realRoot === undefined || Result.isFailure(realRoot)) return true
+          const realLocation = yield* Effect.result(fs.realPath(location))
+          if (Result.isFailure(realLocation)) return true
+          const root = path.resolve(realRoot.success)
+          const candidate = path.resolve(realLocation.success)
+          if (candidate !== root && !candidate.startsWith(path.join(root, path.sep))) {
+            warnings.push(warning(
+              "outside_root",
+              location,
+              `Path "${location}" resolves outside confinement root "${realRoot.success}"`
+            ))
+            return false
+          }
+          return true
+        })
+
         const exists = yield* fs.exists(source.root).pipe(
           Effect.mapError((cause) =>
             discoveryError({
@@ -213,6 +234,10 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
               description: `source root "${source.root}" is not a directory`
             })
           )
+        }
+
+        if (!(yield* withinRoot(source.root))) {
+          return new SourceScan({ entries, warnings })
         }
 
         const rootEntries = yield* fs.readDirectory(source.root).pipe(
@@ -306,7 +331,7 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
 
             const candidates = entryPrecedence.filter((entry) => files.has(entry))
             const selected = candidates[0]
-            if (selected !== undefined) {
+            if (selected !== undefined && (yield* withinRoot(path.join(directory, selected)))) {
               const location = path.join(directory, selected)
               const selectedInfo = files.get(selected)!
               if (candidates.length > 1) {
@@ -431,6 +456,7 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
             }
 
             for (const child of directories) {
+              if (!(yield* withinRoot(child.location))) continue
               if (visitedDirectories.has(child.identity)) {
                 const ancestor = directoryOrigins.get(child.identity)!
                 warnings.push(

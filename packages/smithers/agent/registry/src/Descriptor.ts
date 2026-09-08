@@ -313,6 +313,8 @@ export interface Source {
   readonly root: string
   readonly naming: "path" | "frontmatter"
   readonly system?: boolean | undefined
+  /** Pack root whose real path bounds discovery when the host can resolve it. */
+  readonly confinementRoot?: string | undefined
 }
 
 /**
@@ -349,6 +351,7 @@ export const DiscoveryWarningCode = Schema.Literals([
   "root_level_entry",
   "shadowed",
   "symlink_cycle",
+  "outside_root",
   "max_depth_exceeded",
   "entry_too_large",
   "unreadable"

@@ -11,12 +11,15 @@
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
+import { Flow } from "@smthrs/flow"
+import { Node as PlanNode } from "@smthrs/plan"
 import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as Discovery from "../src/Discovery.ts"
+import * as Executable from "../src/Executable.ts"
 import * as Pack from "../src/Pack.ts"
 import * as Registry from "../src/Registry.ts"
 
@@ -367,8 +370,8 @@ describe("Pack.sources", () => {
     )
 
     await expect(packSources(pack)).resolves.toEqual([
-      { source: "pack:acme/review", root: "/pack/a/b", naming: "path" },
-      { source: "pack:acme/review", root: "/pack/skills/review", naming: "path" }
+      { source: "pack:acme/review", root: "/pack/a/b", confinementRoot: "/pack", naming: "path" },
+      { source: "pack:acme/review", root: "/pack/skills/review", confinementRoot: "/pack", naming: "path" }
     ])
   })
 
@@ -385,6 +388,161 @@ describe("Pack.sources", () => {
 
       expect(error).toMatchObject({ code: "invalid_pack", path: join(packDir, "pack.json") })
       expect(error.message).toContain("flows")
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("pack discovery confinement", () => {
+  it.each(["pack", "project"] as const)(
+    "preserves permitted directory and entry-file links for %s sources",
+    async (kind) => {
+      const temporary = mkdtempSync(join(tmpdir(), "smithers-registry-pack-"))
+      const packDir = join(temporary, "pack")
+      const alias = join(temporary, "alias")
+      const resources = join(kind === "pack" ? packDir : temporary, "resources")
+      mkdirSync(join(packDir, "flows", "linked-file"), { recursive: true })
+      mkdirSync(resources, { recursive: true })
+      writeFileSync(
+        join(resources, "flow.mdx"),
+        "---\ndescription: Permitted prompt\ncapabilities: []\n---\nINSIDE_BODY\n"
+      )
+      symlinkSync(packDir, alias, "dir")
+      symlinkSync(resources, join(packDir, "flows", "linked-directory"), "dir")
+      symlinkSync(join(resources, "flow.mdx"), join(packDir, "flows", "linked-file", "flow.mdx"), "file")
+      const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
+      try {
+        const scan = await Effect.runPromise(
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const path = yield* Path.Path
+            const sources = kind === "pack"
+              ? yield* Pack.sources(installed(alias, localManifest, "installed"), path)
+              : [{ source: "project", root: join(alias, "flows"), naming: "path" as const }]
+            return yield* Discovery.make(fs, path).scan(sources[0]!)
+          }).pipe(Effect.provide(platform))
+        )
+        expect(scan.entries.map((entry) => entry.name)).toEqual(["linked-directory", "linked-file"])
+        expect(scan.warnings).toEqual([])
+      } finally {
+        rmSync(temporary, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it("rechecks a source root redirected after Pack.sources", async () => {
+    const nodes = tree(packTree({ dir: "/pack", manifest: localManifest, flows: { review: "Body" } }))
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const path = yield* Path.Path
+        const fs = virtualFileSystem(nodes)
+        const sources = yield* Pack.sources(installed("/pack", localManifest, "installed"), path).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs)
+        )
+        return yield* Discovery.make({
+          ...fs,
+          realPath: (location) => Effect.succeed(location === "/pack/flows" ? "/outside" : location),
+          readDirectory: () => {
+            throw new Error("Outside directory must not be read")
+          }
+        }, path).scan(sources[0]!)
+      }).pipe(Effect.provide(NodePath.layer))
+    )
+    expect(result.entries).toEqual([])
+    expect(result.warnings).toEqual([expect.objectContaining({ code: "outside_root", path: "/pack/flows" })])
+  })
+
+  it("allows the confinement root itself and hosts that cannot resolve an entry real path", async () => {
+    const nodes = tree(packTree({ dir: "/pack", manifest: localManifest, flows: { review: "Body" } }))
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const path = yield* Path.Path
+        const fs = virtualFileSystem(nodes)
+        return yield* Discovery.make({
+          ...fs,
+          realPath: (location) =>
+            location.endsWith("flow.mdx")
+              ? Effect.fail(denied("realPath", location))
+              : Effect.succeed(location)
+        }, path).scan({ source: "confined", root: "/pack", confinementRoot: "/pack", naming: "path" })
+      }).pipe(Effect.provide(NodePath.layer))
+    )
+    expect(result.entries.map((entry) => entry.name)).toEqual(["flows/review"])
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ code: "unprojectable_authority", path: "/pack/flows/review/flow.mdx" })
+    ])
+  })
+
+  it.each(
+    [
+      ["directory", "flow.mdx"],
+      ["directory", "SKILL.md"],
+      ["directory", "flow.ts"],
+      ["file", "flow.mdx"],
+      ["file", "SKILL.md"],
+      ["file", "flow.ts"]
+    ] as const
+  )("refuses an outside %s symlink to %s before loading or importing", async (kind, entry) => {
+    const temporary = mkdtempSync(join(tmpdir(), "smithers-registry-pack-"))
+    const packDir = join(temporary, "pack")
+    // A shared prefix is not containment.
+    const outside = join(temporary, "pack-outside")
+    const escape = join(packDir, "flows", "escape")
+    const marker = join(temporary, "imported")
+    mkdirSync(join(packDir, "flows"), { recursive: true })
+    mkdirSync(outside)
+    writeFileSync(
+      join(outside, entry),
+      entry === "flow.ts"
+        ? [
+          "import { writeFileSync } from \"node:fs\"",
+          `writeFileSync(${JSON.stringify(marker)}, "imported")`,
+          "const Flow = { make: (value) => value }",
+          "export default Flow.make({ description: \"Outside module\", capabilities: [] })"
+        ].join("\n")
+        : "---\ndescription: Outside prompt\n---\nOUTSIDE_PACK_BODY\n"
+    )
+    if (kind === "directory") {
+      symlinkSync(outside, escape, "dir")
+    } else {
+      mkdirSync(escape)
+      symlinkSync(join(outside, entry), join(escape, entry), "file")
+    }
+    const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
+    const registryLayer = Registry.layerFromPacks([
+      installed(packDir, localManifest, "installed")
+    ], { runtimeVersion: "1.0.0" }).pipe(
+      Layer.provide(Discovery.layer.pipe(Layer.provide(platform))),
+      Layer.provide(platform)
+    )
+
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function*() {
+          const registry = yield* Registry.Registry
+          return {
+            entries: yield* registry.list(),
+            body: yield* Effect.result(registry.loadBody("escape")),
+            catalog: yield* Executable.catalog({
+              delegates: [Flow.make("agent", {
+                payload: Executable.Invocation,
+                success: Schema.String,
+                body: (payload) => PlanNode.succeed(payload.prompt)
+              })]
+            }),
+            warnings: yield* registry.warnings()
+          }
+        }).pipe(Effect.provide(registryLayer), Effect.provide(platform))
+      )
+
+      expect.soft(result.entries).toEqual([])
+      expect.soft(result.body).toMatchObject({ _tag: "Failure", failure: { code: "not_found" } })
+      expect.soft(result.catalog).toEqual({ executables: [], refused: [] })
+      expect.soft(existsSync(marker)).toBe(false)
+      expect.soft(result.warnings).toEqual([
+        expect.objectContaining({ code: "outside_root", path: kind === "directory" ? escape : join(escape, entry) })
+      ])
     } finally {
       rmSync(temporary, { recursive: true, force: true })
     }

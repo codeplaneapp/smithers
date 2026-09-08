@@ -12,8 +12,10 @@
  * The old smithers verbs (`pack add | remove | list | update | eject`) are the
  * CLI half and are not here. This module is the runtime contract underneath
  * them. It holds one filesystem policy: every contributed source must remain
- * inside its pack root. Packs are third-party content, so callers cannot be
- * trusted to have validated manifest paths or symlink targets first.
+ * inside its pack root. Discovery checks descended directories and selected
+ * entry files against that root when the host can resolve real paths.
+ * Packs are third-party content, so callers cannot be trusted to have
+ * validated manifest paths or symlink targets first.
  *
  * Precedence is `local` before `installed`, by name. That is the one rule the
  * old pack system had that a plain source list cannot express: two sources
@@ -395,12 +397,14 @@ export const compatible = (range: string, runtimeVersion: string): boolean => {
 /**
  * The registry sources one pack contributes, in manifest order.
  *
- * Every path in `flows` and `skills` becomes an ordinary source rooted inside
+ * Every path in `flows` and `skills` becomes a confined source rooted inside
  * the pack, so a pack is discovered by exactly the pipeline a project
  * directory is. Lexical containment is always enforced. When both real paths
  * are available, real-path containment also refuses symlink escapes; hosts
  * that cannot answer `realPath` and sources not created yet use the lexical
- * verdict. This defense is repeated because callers may construct `Installed`
+ * verdict. `confinementRoot` carries the pack root into discovery so descended
+ * directories and selected entry files receive the same real-path check.
+ * This defense is repeated because callers may construct `Installed`
  * values without decoding a manifest. `source` carries the pack name, which
  * is what a `DiscoveryWarning` about a pack file reads back.
  *
@@ -452,6 +456,7 @@ export const sources = (
       output.push({
         source: `pack:${pack.manifest.name}`,
         root: sourcePath,
+        confinementRoot: root,
         naming: "path"
       })
     }

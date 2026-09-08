@@ -98,6 +98,7 @@ interface Source {
   readonly root: string
   readonly naming: "path" | "frontmatter"
   readonly system?: boolean | undefined
+  readonly confinementRoot?: string | undefined
 }
 ```
 
@@ -106,6 +107,9 @@ each descriptor's provenance. `naming` selects whether a flow's name comes from
 its directory path below `root` or from the file's own `name` field.
 `system: true` makes a name collision with this source a
 `system_collision` failure instead of a first-found resolution.
+`confinementRoot` bounds directories and selected entry files to that root
+when the host can resolve both real paths. `Pack.sources` sets it to the pack
+root; ordinary project sources leave it unset.
 
 ### Descriptor.Provenance and Descriptor.PackRef
 
@@ -295,7 +299,7 @@ reported this way rather than raised, and read back through
 | Naming and description | `missing_description`, `invalid_description`, `missing_name`, `invalid_name`, `directory_name_mismatch`, `name_field_ignored`, `duplicate_name`, `root_level_entry`                                                                                 |
 | Declaration fields     | `unknown_frontmatter_key`, `invalid_allowed_tools`, `invalid_capabilities`, `invalid_budget`, `invalid_model_invocation`, `invalid_compatibility`, `invalid_license`, `invalid_metadata`, `unsupported_input_schema`, `unsupported_module_metadata` |
 | Authority              | `unprojectable_authority`, `invalid_effect_declaration`, `invalid_effect_tier`                                                                                                                                                                      |
-| Source shape           | `multiple_entry_files`, `frontmatter_parse_error`, `non_serializable_frontmatter`, `symlink_cycle`, `max_depth_exceeded`, `entry_too_large`, `unreadable`                                                                                           |
+| Source shape           | `multiple_entry_files`, `frontmatter_parse_error`, `non_serializable_frontmatter`, `symlink_cycle`, `outside_root`, `max_depth_exceeded`, `entry_too_large`, `unreadable`                                                                           |
 | Packs                  | `unknown_pack_key`, `shadowed`                                                                                                                                                                                                                      |
 
 Each code, with its cause and its fix, is in
@@ -323,7 +327,11 @@ there is no partial scan.
 Discovery follows symbolic links wherever the host `FileSystem.stat` does. A
 visited-directory identity set, keyed on device and inode, stops cycles and
 aliases with a `symlink_cycle` warning, and a depth ceiling bounds hosts that
-cannot supply stable directory identities.
+cannot supply stable directory identities. When `confinementRoot` is set,
+discovery checks the source root, every descended directory, and every selected
+entry file before reading it. A real path outside the confinement root produces
+`outside_root` and is skipped. Both real paths must be available for this check;
+hosts that cannot answer `realPath` retain lexical manifest validation.
 
 ### Discovery.make
 
@@ -1077,15 +1085,21 @@ const sources: (
 ```
 
 The registry sources one pack contributes, in manifest order. Every `flows` and
-`skills` path becomes an ordinary path-named source rooted inside the pack, so
-a pack is discovered by exactly the pipeline a project directory is. `source`
+`skills` path becomes a path-named source with `confinementRoot` set to the
+pack root. Discovery uses the same pipeline as project directories. `source`
 carries `pack:<name>`, which is what a warning about a pack file reads back.
 
 Lexical containment is always enforced. When both real paths are available,
 real-path containment also refuses symlink escapes; hosts that cannot answer
 `realPath`, and sources not created yet, use the lexical verdict. The defense
 is repeated here because callers may construct an `Installed` value without
-decoding a manifest first.
+decoding a manifest first. Discovery repeats the real-path check for the
+source root, every descended directory, and every selected entry file. Nested
+directory and entry-file symlink escapes produce `outside_root` and contribute
+no descriptor for body loading or executable catalog import. Links to other
+locations inside the pack remain eligible. This is a discovery-time check,
+not a sandbox for module imports or protection against concurrent filesystem
+changes.
 
 ### Pack.checkCompatible, Pack.compatible
 

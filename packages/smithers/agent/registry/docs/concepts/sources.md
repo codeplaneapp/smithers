@@ -13,6 +13,7 @@ interface Source {
   readonly root: string
   readonly naming: "path" | "frontmatter"
   readonly system?: boolean | undefined
+  readonly confinementRoot?: string | undefined
 }
 ```
 
@@ -86,7 +87,16 @@ emptying the catalog.
 ## Walking a real tree safely
 
 Discovery follows symbolic links wherever the host `FileSystem.stat` does,
-which is what the ordinary Node file system does. Two guards bound the walk:
+which is what the ordinary Node file system does. `Pack.sources` sets
+`confinementRoot` to the pack root. When the host can resolve both real paths,
+discovery skips a source root, descended directory, or selected entry file
+outside that root with `outside_root`, before reading its contents. Links
+within the pack remain eligible, including links outside the declared source
+directory but inside the pack. Ordinary project sources leave `confinementRoot`
+unset and retain unrestricted symlink traversal. Hosts that cannot answer
+`realPath` retain lexical manifest validation.
+
+Two guards bound the walk:
 
 - A visited-directory identity set, keyed on device and inode, refuses to
   descend into a directory already visited and reports `symlink_cycle`.
