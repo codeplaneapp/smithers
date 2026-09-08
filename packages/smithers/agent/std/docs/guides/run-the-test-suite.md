@@ -76,6 +76,13 @@ The result is a reading, not a log:
 When `parsed` is false, `tail` is all there is, and base attribution is omitted
 rather than guessed at.
 
+Unittest skips and expected failures, and TAP skips and TODO failures, do not
+count as passing or failing tests. A successful TAP TODO counts as passing.
+Unittest unexpected successes count as failures; attribution requires their
+reported ids. Python 3.10 class-only headers and Python 3.11+ full test ids are
+both supported. Missing failure ids or unknown unittest summary fields leave
+`parsed` false.
+
 ## Attribute a failure to your own edit
 
 `against: "base"` runs the same selection a second time against the pristine

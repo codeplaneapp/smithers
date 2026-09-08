@@ -83,6 +83,117 @@ describe("TestReport", () => {
     })
   })
 
+  it.each([
+    {
+      name: "Python 3.11 failure ids",
+      output: "FAIL: test_x (tests.Case.test_x)\nRan 2 tests in 0.001s\nFAILED (failures=1)",
+      expected: { passed: 1, failed: ["tests.Case.test_x"], reportedFailed: 1, parsed: true }
+    },
+    {
+      name: "unittest skips only",
+      output: "Ran 2 tests in 0.001s\nOK (skipped=2)",
+      expected: { passed: 0, failed: [], reportedFailed: 0, parsed: true }
+    },
+    {
+      name: "unittest pass, skip and failure",
+      output: "FAIL: test_x (tests.Case.test_x)\nRan 3 tests in 0.001s\nFAILED (failures=1, skipped=1)",
+      expected: { passed: 1, failed: ["tests.Case.test_x"], reportedFailed: 1, parsed: true }
+    },
+    {
+      name: "unittest expected failure",
+      output: "Ran 1 test in 0.001s\nOK (expected failures=1)",
+      expected: { passed: 0, failed: [], reportedFailed: 0, parsed: true }
+    },
+    {
+      name: "unittest failure and expected failure",
+      output: "FAIL: test_x (tests.Case.test_x)\nRan 3 tests in 0.001s\nFAILED (failures=1, expected failures=1)",
+      expected: { passed: 1, failed: ["tests.Case.test_x"], reportedFailed: 1, parsed: true }
+    },
+    {
+      name: "unittest unexpected success",
+      output: "UNEXPECTED SUCCESS: test_x (tests.Case.test_x)\nRan 1 test in 0.001s\nFAILED (unexpected successes=1)",
+      expected: { passed: 0, failed: ["tests.Case.test_x"], reportedFailed: 1, parsed: true }
+    },
+    {
+      name: "unittest unexpected success without an id",
+      output: "Ran 1 test in 0.001s\nFAILED (unexpected successes=1)",
+      expected: { passed: 0, failed: [], reportedFailed: 1, parsed: false }
+    },
+    {
+      name: "unittest unrecognised outcome",
+      output: "Ran 1 test in 0.001s\nOK (custom=1)",
+      expected: { passed: 0, failed: [], reportedFailed: undefined, parsed: false }
+    },
+    {
+      name: "TAP skip only",
+      output: "1..1\nok 1 - unavailable # SKIP missing dependency",
+      expected: { passed: 0, failed: [], reportedFailed: 0, parsed: true }
+    },
+    {
+      name: "TAP pass, skip and failure",
+      output: "1..3\nok 1 - works\nok 2 - unavailable # skip missing dependency\nnot ok 3 - broken",
+      expected: { passed: 1, failed: ["broken"], reportedFailed: 1, parsed: true }
+    },
+    {
+      name: "TAP TODO failure",
+      output: "1..1\nnot ok 1 - future behavior # TODO implement",
+      expected: { passed: 0, failed: [], reportedFailed: 0, parsed: true }
+    },
+    {
+      name: "TAP TODO success",
+      output: "1..1\nok 1 - future behavior # todo implemented",
+      expected: { passed: 1, failed: [], reportedFailed: 0, parsed: true }
+    },
+    {
+      name: "TAP skipped failure",
+      output: "1..1\nnot ok 1 - unavailable # SkIp missing dependency",
+      expected: { passed: 0, failed: [], reportedFailed: 0, parsed: true }
+    },
+    {
+      name: "TAP unnamed failure",
+      output: "1..1\nnot ok 1",
+      expected: { passed: 0, failed: [], reportedFailed: 1, parsed: false }
+    },
+    {
+      name: "TAP duplicate failure descriptions",
+      output: "1..2\nnot ok 1 - broken\nnot ok 2 - broken",
+      expected: { passed: 0, failed: ["broken"], reportedFailed: 2, parsed: false }
+    },
+    {
+      name: "TAP incomplete skip capture",
+      output: "1..2\nok 1 - unavailable # SKIP missing dependency",
+      expected: { passed: 0, failed: [], reportedFailed: 0, parsed: false }
+    }
+  ])("reads $name and gates attribution", ({ output, expected }) => {
+    const report = TestReport.parse(output)
+    expect(report).toEqual(expected)
+    const clean = { passed: 1, failed: [], reportedFailed: 0, parsed: true }
+    expect(TestReport.attribute(report, clean)).toEqual(
+      expected.parsed
+        ? { introduced: expected.failed, preexisting: [], fixed: [] }
+        : undefined
+    )
+    expect(TestReport.attribute(clean, report)).toEqual(
+      expected.parsed
+        ? { introduced: [], preexisting: [], fixed: expected.failed }
+        : undefined
+    )
+  })
+
+  it.each(["", "OK\n"])("reads pytest with captured output %j", (prefix) => {
+    expect(TestReport.parse(
+      prefix + [
+        "FAILED tests/test_a.py::test_two - AssertionError",
+        "========================= 1 failed, 1 passed in 0.10s ========================="
+      ].join("\n")
+    )).toEqual({
+      passed: 1,
+      failed: ["tests/test_a.py::test_two"],
+      reportedFailed: 1,
+      parsed: true
+    })
+  })
+
   it("reads TAP", () => {
     const output = ["TAP version 13", "1..2", "ok 1 - widens", "not ok 2 - narrows"].join("\n")
     expect(TestReport.parse(output)).toEqual({ passed: 1, failed: ["narrows"], reportedFailed: 1, parsed: true })

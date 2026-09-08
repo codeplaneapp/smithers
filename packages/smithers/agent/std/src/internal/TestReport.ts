@@ -83,21 +83,34 @@ const pytest = (text: string): Report | undefined => {
  */
 const unittest = (text: string): Report | undefined => {
   const ran = count(text, /^Ran (\d+) tests?\b/m)
-  const outcomes = [...text.matchAll(/^(?:FAIL|ERROR):[ \t]+(\S+)[ \t]+\(([^)\s]+)\)/gm)]
-  const summary = /^FAILED \(([^)]*)\)\s*$/m.exec(text)?.[1]
-  const ok = /^OK(?: \([^)]*\))?\s*$/m.test(text)
-  if (ran === undefined && outcomes.length === 0 && summary === undefined && !ok) return undefined
-  const failed = unique(outcomes.map((match) => `${match[2]}.${match[1]}`))
-  const reportedFailed = summary === undefined
-    ? ok ? 0 : undefined
-    : [...summary.matchAll(/(?:failures|errors)=(\d+)/g)].reduce((total, match) => total + Number(match[1]), 0)
-  const passed = ran === undefined || reportedFailed === undefined ? 0 : Math.max(0, ran - reportedFailed)
+  const outcomes = [...text.matchAll(/^(?:FAIL|ERROR|UNEXPECTED SUCCESS):[ \t]+(\S+)[ \t]+\(([^)\s]+)\)/gm)]
+  if (ran === undefined && outcomes.length === 0) return undefined
+  const failed = unique(
+    outcomes.map((match) => match[2]!.endsWith(`.${match[1]}`) ? match[2]! : `${match[2]}.${match[1]}`)
+  )
+  const summary = /^(OK|FAILED)(?: \(([^)]*)\))?[ \t]*$/m.exec(text)
+  const counts = new Map<string, number>()
+  let known = summary !== null
+  for (const entry of summary?.[2]?.split(", ") ?? []) {
+    const match = /^(failures|errors|skipped|expected failures|unexpected successes)=(\d+)$/.exec(entry)
+    if (match === null || counts.has(match[1]!)) known = false
+    else counts.set(match[1]!, Number(match[2]))
+  }
+  const reportedFailed = known
+    ? (counts.get("failures") ?? 0) + (counts.get("errors") ?? 0) + (counts.get("unexpected successes") ?? 0)
+    : undefined
+  const skipped = counts.get("skipped") ?? 0
+  const expectedFailures = counts.get("expected failures") ?? 0
+  const passed = ran === undefined || reportedFailed === undefined
+    ? 0
+    : Math.max(0, ran - reportedFailed - skipped - expectedFailures)
   return {
     passed,
     failed,
     reportedFailed,
     parsed: ran !== undefined && reportedFailed !== undefined && failed.length === reportedFailed &&
-      passed + failed.length === ran
+      (summary?.[1] === "OK" ? reportedFailed === 0 : reportedFailed > 0) &&
+      passed + failed.length + skipped + expectedFailures === ran
   }
 }
 
@@ -105,16 +118,25 @@ const unittest = (text: string): Report | undefined => {
  * TAP, which several ecosystems emit and which names each test on its own line.
  */
 const tap = (text: string): Report | undefined => {
-  const failed = unique(collect(text, /^not ok\b[ \t]*\d*[ \t]*-?[ \t]*(.*\S)?/gm))
-  const passed = collect(text, /^ok\b[ \t]*\d*[ \t]*-?[ \t]*(.*)$/gm).length
+  const outcomes = [...text.matchAll(/^(not ok|ok)\b[ \t]*\d*[ \t]*-?[ \t]*(.*)$/gm)].map((match) => {
+    const directive = /[ \t]*#[ \t]*(SKIP|TODO)\b.*$/i.exec(match[2]!)
+    return {
+      ok: match[1] === "ok",
+      id: match[2]!.slice(0, directive?.index).trim(),
+      directive: directive?.[1]?.toUpperCase()
+    }
+  })
+  const failures = outcomes.filter((outcome) => !outcome.ok && outcome.directive === undefined)
+  const failed = unique(failures.flatMap((outcome) => outcome.id === "" ? [] : [outcome.id]))
+  const passed = outcomes.filter((outcome) => outcome.ok && outcome.directive !== "SKIP").length
   const planned = count(text, /^1\.\.(\d+)\b/m)
-  if (passed === 0 && failed.length === 0) return undefined
-  const reportedFailed = failed.length
+  if (outcomes.length === 0 && planned === undefined) return undefined
+  const reportedFailed = failures.length
   return {
     passed,
     failed,
     reportedFailed,
-    parsed: planned !== undefined && passed + failed.length === planned && failed.length === reportedFailed
+    parsed: planned !== undefined && outcomes.length === planned && failed.length === reportedFailed
   }
 }
 

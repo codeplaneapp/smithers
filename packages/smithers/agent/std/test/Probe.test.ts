@@ -7,6 +7,7 @@
  * positive suppresses genuine regression evidence.
  */
 import { describe, expect, it } from "vitest"
+import * as TestReport from "../src/internal/TestReport.ts"
 import * as Probe from "../src/Probe.ts"
 
 const failing = (text: string, exitCode = 1) => Probe.classify({ exitCode, stdout: "", stderr: text })
@@ -168,21 +169,24 @@ describe("Probe.classify against a genuine failure that prints refusal wording",
   })
 
   it("leaves an import error raised inside a unittest case that ran alone", () => {
-    expect(
-      failing(
-        [
-          ".....E",
-          "ERROR: test_optional_dep (tests.test_compat.CompatTests.test_optional_dep)",
-          "Traceback (most recent call last):",
-          "    from app.compat import pytz_shim",
-          "ImportError: No module named pytz",
-          "----------------------------------------------------------------------",
-          "Ran 6 tests in 0.013s",
-          "",
-          "FAILED (errors=1)"
-        ].join("\n")
-      )
-    ).toBeUndefined()
+    const output = [
+      ".....E",
+      "ERROR: test_optional_dep (tests.test_compat.CompatTests.test_optional_dep)",
+      "Traceback (most recent call last):",
+      "    from app.compat import pytz_shim",
+      "ImportError: No module named pytz",
+      "----------------------------------------------------------------------",
+      "Ran 6 tests in 0.013s",
+      "",
+      "FAILED (errors=1)"
+    ].join("\n")
+    expect(failing(output)).toBeUndefined()
+    expect(TestReport.parse(output)).toEqual({
+      passed: 5,
+      failed: ["tests.test_compat.CompatTests.test_optional_dep"],
+      reportedFailed: 1,
+      parsed: true
+    })
   })
 
   it("leaves a test that asserts on a shell's own not-found message alone", () => {
