@@ -147,7 +147,6 @@
     "@effect/vitest": "4.0.0-rc.112",
     "@eslint/js": "9.39.5",
     "@smthrs/artifacts": "1.0.0-rc.0",
-    "@smthrs/capability": "1.0.0-rc.0",
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/kernel": "1.0.0-rc.0",

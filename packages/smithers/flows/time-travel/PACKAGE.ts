@@ -1,4 +1,5 @@
 import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
+import { ReviewTagsMigrationsAndKeys } from "@smthrs/repo-targets"
 /**
  * Standard package targets.
  *
@@ -11,6 +12,15 @@ const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheck
   cwd: "packages/smithers/flows/time-travel"
 })
 
+/**
+ * The durable-identity review: identity strings, migrations, persisted
+ * schemas, and durable keys, read out of this package's own changed sources.
+ *
+ * @since 0.1.0
+ * @category lint
+ */
+const reviewTagsMigrationsAndKeys = ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/time-travel" })
+
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, docsFiles, fmt, lib, lint, test }
+  targets: { check, circular, docs, docsFiles, reviewTagsMigrationsAndKeys, fmt, lib, lint, test }
 })

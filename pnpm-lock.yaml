@@ -5302,9 +5302,6 @@ importers:
       '@smthrs/artifacts':
         specifier: 1.0.0-rc.0
         version: link:../artifacts
-      '@smthrs/capability':
-        specifier: 1.0.0-rc.0
-        version: link:../capability
       '@smthrs/engine':
         specifier: 1.0.0-rc.0
         version: link:../engine
