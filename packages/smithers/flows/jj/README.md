@@ -169,9 +169,9 @@ Seven of the eight operations work there, with real change ids and a real
 operation log. `revert` has no operation in the compiled module and reports
 `not_installed`. The backend also diverges from the command line in ways worth
 reading before you assume parity: repositories use jj's Simple backend with no
-git interop, every operation auto-initializes the repository, symlinks degrade
-to regular files, and durability belongs to the mount rather than to this
-layer. All of them are listed in
+git interop, every operation auto-initializes the repository, real symlinks are
+rejected before snapshotting, and durability belongs to the mount rather than
+to this layer. All of them are listed in
 [Run jj in a browser tab](https://jj.smithers.sh/guides/run-jj-in-a-browser/).
 
 ## More

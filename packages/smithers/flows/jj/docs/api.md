@@ -346,7 +346,7 @@ because the frozen wasm ABI has no operation or field for it:
 - `root(from)` answers the configured slice root, and fails when `from` is not
   inside it rather than answering for an unrelated tree.
 
-Every other divergence, including initialization and symlink degradation,
+Every other divergence, including initialization and real symlink rejection,
 is in [Run jj in a browser tab](./guides/run-jj-in-a-browser.md#where-the-wasm-backend-answers-differently).
 
 ### @smthrs/jj/browser/WasiPreview1

@@ -264,6 +264,35 @@ const instantiate = async (
 }
 
 /**
+ * The shipped WASI reactor reads real symlinks as target bytes. Refuse them
+ * before any operation that snapshots, including implicit snapshots on reads.
+ * Inspect link metadata only, and include ignored paths: the host does not
+ * interpret jj's ignore rules. Repository metadata directories are not working
+ * copy inputs, but links at those names must still be rejected.
+ */
+const assertNoSymlinks = (fs: SyncFsLike, root: string): void => {
+  const pending = [root]
+  while (pending.length > 0) {
+    const path = pending.pop()!
+    const stats = fs.lstatSync(path)
+    if (stats.isSymbolicLink()) {
+      throw new Error("real symlinks are unsupported by the browser reactor; remove them before snapshotting")
+    }
+    if (!stats.isDirectory()) continue
+    for (const entry of fs.readdirSync(path, { withFileTypes: true })) {
+      const child = `${path}/${entry.name}`
+      if (entry.name === ".jj" || entry.name === ".git") {
+        if (fs.lstatSync(child).isSymbolicLink()) {
+          throw new Error("real symlinks are unsupported by the browser reactor; remove them before snapshotting")
+        }
+        continue
+      }
+      pending.push(child)
+    }
+  }
+}
+
+/**
  * Creates a `Jj` backed by a `flows_jj.wasm` module over a synchronous
  * filesystem slice.
  *
@@ -371,6 +400,11 @@ export const make = (options: BrowserJjOptions): Jj => {
           Effect.suspend(() => {
             let text: string
             try {
+              // Keep the guard and the synchronous ABI call in one turn under
+              // the permit, before even auto-init can write repository state.
+              if (["snapshot", "status", "diff", "restore", "workspaceAdd"].includes(method)) {
+                assertNoSymlinks(host.fs, String(request.root))
+              }
               // Older shipped reactors auto-initialize on reads. Refuse missing
               // repositories before entering them, and keep initialization an
               // explicit ABI operation on the compensable snapshot path.

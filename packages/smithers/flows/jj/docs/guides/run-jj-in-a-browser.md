@@ -150,18 +150,25 @@ inside it and fails for a path that is not. Answering for an unrelated tree
 would be a wrong answer rather than a missing one. Containment is computed in
 namespace coordinates, so `/repo/../outside` is correctly outside `/repo`.
 
-### Symlinks degrade to regular files
+### Real symlinks are rejected
 
-jj-lib on `wasm32-wasip1` reports symlinks unsupported, the same posture as jj
-on Windows without developer mode. Two consequences:
+The shipped `wasm32-wasip1` reactor cannot safely snapshot real symlinks: its
+fallback reads target bytes instead of link text. `BrowserJj` rejects real
+symlinks with a `JjError` (`code: "unknown"`) before `snapshot`, `status`,
+`diff`, `restore`, or `workspaceAdd` enters the reactor. All five operations
+can snapshot the working copy, including reads of existing revisions.
 
-- Checking out a tree symlink materializes a regular file, not a link.
-- Snapshotting a real on-disk symlink stores the **linked file's content** as
-  the symlink target, because the library reads the path with a call that
-  follows the link.
+The check walks the workspace using link metadata without opening targets.
+It includes ignored directories and dangling links, skips `.jj` and `.git`
+contents, and rejects links at those metadata names. A rejected operation
+writes no repository state, including on the first snapshot. Remove real
+symlinks before retrying. The scan and reactor call run synchronously under
+the layer's operation permit; the host must prevent concurrent filesystem
+mutation by other workers during an operation.
 
-The degraded representation is stable: re-snapshotting reproduces an identical
-tree entry, so state does not drift across further snapshot and restore cycles.
+Checking out an existing tree symlink still materializes a regular file
+containing link text. Native symlink snapshots require a future reactor fix.
+Direct consumers of the WASM ABI do not receive the `BrowserJj` guard.
 
 ### Synchronous, single threaded, and our own output text
 

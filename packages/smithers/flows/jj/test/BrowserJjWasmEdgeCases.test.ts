@@ -302,50 +302,85 @@ describe.skipIf(wasmBytes === undefined)("BrowserJj edge cases over flows_jj.was
   })
 
   describe("symlinks in the working copy", () => {
-    // KNOWN DIVERGENCE from NodeJj, pinned deliberately: jj-lib on
-    // wasm32-wasip1 reports symlinks unsupported (`check_symlink_support()` in
-    // the jj fork's lib/src/file_util.rs `cfg(target_os = "wasi")`), the same
-    // posture as jj on Windows without developer mode. Checkout therefore
-    // materializes tree symlinks as regular "fake symlink" files, and — more
-    // surprisingly — snapshotting a REAL on-disk symlink (which the browser
-    // slice can create) stores the linked file's CONTENT as the symlink
-    // target, because `write_symlink_to_store` reads the path with `fs::read`,
-    // which follows the link. The shim's `path_symlink`/`path_readlink` are
-    // wired and unit-tested but jj-lib never issues them on wasi. If a jj bump
-    // changes any of this, this test failing is the signal to re-read it.
-    it.effect("degrades a real symlink to a regular file carrying the target's content", () =>
-      Effect.gen(function*() {
-        const host = freshHost()
-        const jj = yield* jjFor(host)
-        write(host, "target.txt", "the target\n")
-        fsModule.symlinkSync("target.txt", join(host, "repo", "link"))
-        const { changeId: withLink } = yield* (jj.snapshot("with symlink"))
+    for (const target of ["../private/token", "ignored/token"]) {
+      it.effect(
+        `rejects every snapshotting operation without persisting secret bytes from ${target}`,
+        () =>
+          Effect.gen(function*() {
+            const host = freshHost()
+            const jj = yield* jjFor(host)
+            write(host, ".gitignore", "ignored/\n")
+            const secretPath = join(host, "repo", target)
+            fsModule.mkdirSync(dirname(secretPath), { recursive: true })
+            fsModule.writeFileSync(secretPath, "SYNTHETIC_PRIVATE_TOKEN_314159\n")
+            const { changeId: before } = yield* jj.snapshot("before link")
+            const metadata = join(host, "repo", ".jj")
+            // Compare every durable file, including unreachable objects: a clean
+            // diff alone would miss target bytes written before a failed commit.
+            const store = () =>
+              fsModule.readdirSync(metadata, { recursive: true, withFileTypes: true })
+                .filter((entry) => entry.isFile())
+                .map((entry) => {
+                  const path = join(entry.parentPath, entry.name)
+                  return [path, fsModule.readFileSync(path).toString("base64")]
+                })
+                .sort(([a], [b]) => a!.localeCompare(b!))
+            const beforeStore = store()
+            const link = join(host, "repo", "innocent-link")
+            fsModule.symlinkSync(target, link)
+            const operations = [
+              ["snapshot", jj.snapshot("with link")],
+              ["status", jj.status()],
+              ["diff", jj.diff(before, "@")],
+              ["restore", jj.restore(before)],
+              ["workspaceAdd", jj.workspaceAdd("lane", "/lane")]
+            ] as const
+            for (const [method, operation] of operations) {
+              const error = yield* flip(operation)
+              expect(error).toMatchObject({ code: "unknown", module: "BrowserJj", method })
+              expect(error.message).toContain("real symlinks are unsupported")
+              expect(error.message).not.toContain("SYNTHETIC_PRIVATE_TOKEN_314159")
+              expect(store()).toEqual(beforeStore)
+            }
+            expect(fsModule.existsSync(join(host, "lane"))).toBe(false)
+            fsModule.unlinkSync(secretPath)
+            fsModule.unlinkSync(link)
+            const { changeId: after } = yield* jj.snapshot("link removed")
+            expect(yield* jj.diff(before, after)).toBe("")
+          }),
+        { timeout }
+      )
+    }
 
-        fsModule.unlinkSync(join(host, "repo", "link"))
-        const { changeId: without } = yield* (jj.snapshot("link removed"))
+    for (const name of [".jj", ".git"]) {
+      it.effect(`rejects a symlink at ${name} without following repository metadata`, () =>
+        Effect.gen(function*() {
+          const host = freshHost()
+          fsModule.mkdirSync(join(host, "private"))
+          fsModule.writeFileSync(join(host, "private", "token"), "SYNTHETIC_PRIVATE_TOKEN_314159\n")
+          fsModule.symlinkSync("../private", join(host, "repo", name))
+          const jj = yield* jjFor(host)
+          const error = yield* flip(jj.snapshot())
+          expect(error.message).toContain("real symlinks are unsupported")
+          expect(fsModule.readdirSync(join(host, "repo"))).toEqual([name])
+          expect(fsModule.readdirSync(join(host, "private"))).toEqual(["token"])
+        }), { timeout })
+    }
 
-        // The tree entry is a symlink (mode 120000) whose target is the linked
-        // file's content — followed at snapshot time, not read as a link.
-        const diff = yield* (jj.diff(without, withLink))
-        expect(diff).toContain("new file mode 120000")
-        expect(diff).toContain("+the target")
-
-        // Restore materializes the fake-symlink form: a plain file, no link.
-        yield* (jj.restore(withLink))
-        const restored = fsModule.lstatSync(join(host, "repo", "link"))
-        expect(restored.isSymbolicLink()).toBe(false)
-        expect(restored.isFile()).toBe(true)
-        expect(read(host, "link")).toBe("the target\n")
-
-        // The degraded representation is stable: re-snapshotting the fake
-        // symlink reproduces the identical tree entry, so state cannot drift
-        // across further snapshot/restore cycles.
-        const { changeId: resnap } = yield* (jj.snapshot("resnap"))
-        expect(yield* (jj.diff(withLink, resnap))).toBe("")
-
-        yield* (jj.restore(without))
-        expect(fsModule.existsSync(join(host, "repo", "link"))).toBe(false)
-      }), { timeout })
+    for (const target of ["missing", "../../../private", "."]) {
+      it.effect(`rejects nested or ignored symlinks to ${target} before initializing`, () =>
+        Effect.gen(function*() {
+          const host = freshHost()
+          const jj = yield* jjFor(host)
+          write(host, ".gitignore", "ignored/\n")
+          write(host, "ignored/nested/kept.txt", "kept\n")
+          fsModule.mkdirSync(join(host, "private"))
+          fsModule.symlinkSync(target, join(host, "repo", "ignored", "nested", "link"))
+          const error = yield* flip(jj.snapshot())
+          expect(error.message).toContain("real symlinks are unsupported")
+          expect(fsModule.existsSync(join(host, "repo", ".jj"))).toBe(false)
+        }), { timeout })
+    }
   })
 
   describe("concurrent operations on one instance", () => {

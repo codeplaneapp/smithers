@@ -194,13 +194,13 @@ Forgetting drops the workspace registration and does not touch the commits made
 in the lane or the directory on disk. Removing the directory is the caller's
 job, on both backends.
 
-### A browser symlink became a regular file
+### Browser operations reject real symlinks
 
-jj-lib on `wasm32-wasip1` reports symlinks unsupported. Checking out a tree
-symlink materializes a regular file, and snapshotting a real on-disk symlink
-stores the linked file's content as the target. The representation is stable
-across further snapshot and restore cycles. See
-[Run jj in a browser tab](./guides/run-jj-in-a-browser.md#symlinks-degrade-to-regular-files).
+Remove real symlinks from the working copy, including ignored directories,
+then retry. `BrowserJj` rejects them before any operation that snapshots,
+because the shipped reactor would otherwise persist target bytes. Existing
+tree symlinks still check out as regular files containing link text. See
+[Run jj in a browser tab](./guides/run-jj-in-a-browser.md#real-symlinks-are-rejected).
 
 ### Browser changes vanished after a reload
 

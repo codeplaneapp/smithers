@@ -18,8 +18,13 @@ import * as BrowserJj from "../src/browser/BrowserJj.ts"
 import { isJjError, Jj, type JjError, type JjFailure } from "../src/Jj.ts"
 import { emptyWasmModule, fakeFlowsJjWasm } from "./FakeFlowsJjWasm.ts"
 
-/** The fake module never touches the filesystem; any structural slice will do. */
-const slice = { ...fs, statSync: () => fs.statSync(import.meta.filename) }
+/** The fake module sees an empty workspace and existing repository metadata. */
+const slice = {
+  ...fs,
+  statSync: () => fs.statSync(import.meta.filename),
+  lstatSync: () => fs.lstatSync(import.meta.dirname),
+  readdirSync: () => []
+}
 
 /**
  * `Jj`'s error channel is `JjFailure` because the capability kernel decorates
