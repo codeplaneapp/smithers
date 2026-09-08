@@ -155,7 +155,16 @@ const localAddressing = (
   }
 }
 
-const unsafePath = (path: string): boolean => {
+/**
+ * A path that leaves the repository's namespace, in the one place that
+ * decides it. `encodeRepoPath` does not escape a dot, and a URL parser
+ * collapses `..` before the request leaves the page, so
+ * `/api/repos/{o}/{r}/contents/../../../../user/secrets` resolves to
+ * `/api/user/secrets` and is sent same-origin with the visitor's cookies.
+ * Every route that spends a caller's path on a URL asks this first: the
+ * files flows here, and the sidebar's tree seam (RepoTreeSeam.loadDirectory).
+ */
+export const unsafePath = (path: string): boolean => {
   const slashNormalized = path.replace(/\\/g, "/")
   return slashNormalized.split("/").some((segment) => {
     let decoded = segment

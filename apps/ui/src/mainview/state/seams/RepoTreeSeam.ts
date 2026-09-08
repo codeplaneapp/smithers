@@ -16,13 +16,15 @@
  * one order a listing reads in (`FilesSeam.sortEntries`: directories first,
  * then by name), because the three routes do not agree on one — the mirror
  * answers a git tree's byte order — and the sidebar reads the same for a
- * checkout, a box, and the shared copy. Never throws.
+ * checkout, a box, and the shared copy. A path that leaves the repository
+ * is refused before any route is asked (FilesSeam.unsafePath), because
+ * the encodings these three URLs use leave `..` alone. Never throws.
  */
 import { isRecord } from "@smthrs/canonical/Record"
 import type { Repo } from "@smthrs/rpc/LocalApp"
 import type { RepoTreeEntry, WorkingCopy } from "../AppState"
 import { createCloudClient } from "./CloudClient"
-import { encodeRepoPath, parseEntry, requestLocalFiles, sortEntries } from "./FilesSeam"
+import { encodeRepoPath, parseEntry, requestLocalFiles, sortEntries, unsafePath } from "./FilesSeam"
 import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
@@ -175,6 +177,18 @@ export const createRepoTreeSeam = (ctx: SeamContext): RepoTreeSeam => {
   }
   const loadDirectory: RepoTreeSeam["loadDirectory"] = async (copyId, pathArg) => {
     const path = normalizeTreePath(pathArg)
+    /*
+     * The one guard the three routes share (FilesSeam.unsafePath, the same
+     * refusal the files flows answer). `normalizeTreePath` drops empty
+     * segments and nothing else, and per-segment encoding leaves `..`
+     * alone, so a caller's `..` would collapse in the URL and address a
+     * route outside the repository's namespace with the visitor's own
+     * cookies. Refused before any request, in place, in the seam's words.
+     */
+    if (unsafePath(path)) {
+      failed(copyId, path, "File paths must stay inside the repository.")
+      return
+    }
     const copy = ctx.store.collections.workingCopies.get(copyId)
     if (copy?.kind === "workspace") {
       await loadWorkspaceDirectory(copy, path)

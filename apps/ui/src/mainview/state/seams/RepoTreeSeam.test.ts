@@ -309,6 +309,24 @@ describe("repo tree seam — one directory per request, the route's answer verba
     expect(store.collections.repoTree.size).toBe(0)
   })
 
+  /*
+   * The guard belongs to the seam, not to one route: every copy kind refuses
+   * a path that leaves the repository before it spends that path on a URL
+   * or a request body (FilesSeam.unsafePath, the wording the files flows
+   * answer with).
+   */
+  test("a path that leaves the repository fails the row in place, and the local app is never posted", async () => {
+    const { store, controller, requests } = await treeController()
+    expect((await controller.commands.run("repo.tree", `${COPY}#../../../../user/secrets`)).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId(COPY, "../../../../user/secrets"))).toMatchObject({
+      state: "failed",
+      expanded: true,
+      entries: [],
+      error: "File paths must stay inside the repository."
+    })
+    expect(requests).toEqual([])
+  })
+
   test("repo.tree is one flow with three doors: the caret, the slash, and the agent (the three-door law); the agent reads contents with files.list", async () => {
     const { controller } = await treeController()
     const catalog = controller.commands.all().find((command) => command.name === "repo.tree")
@@ -478,6 +496,37 @@ describe("repo tree seam: the shared read-only copy reads the mirror's contents 
     expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "missing"))?.error).toBe("smithersai/smithers has no missing")
     expect((await controller.commands.run("repo.tree", `${SHARED}#README.md`)).status).toBe("executed")
     expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "README.md"))?.error).toBe("README.md in smithersai/smithers is a file; run /files.read README.md instead")
+  })
+
+  /*
+   * `..` never leaves the repository's namespace. `encodeRepoPath` does not
+   * escape a dot and a URL parser collapses the segments before the request
+   * leaves the page, so `.../contents/../../../../user/secrets` resolves to
+   * `/api/user/secrets` and would be sent same-origin with the visitor's own
+   * cookies, then painted as this copy's file rows. `repo.tree` is not
+   * userOnly, so the agent can name that path: the seam refuses it in place,
+   * before any request, and the mirror is never asked.
+   */
+  test("a path that leaves the repository is refused in place, and the mirror is never asked", async () => {
+    const { store, controller, requests, boxRequests, sharedRequests } = await loadShared()
+    expect((await controller.commands.run("repo.tree", `${SHARED}#../../../../user/secrets`)).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "../../../../user/secrets"))).toMatchObject({
+      copyId: SHARED,
+      state: "failed",
+      expanded: true,
+      entries: [],
+      error: "File paths must stay inside the repository."
+    })
+    expect(sharedRequests).toEqual([])
+    expect(requests).toEqual([])
+    expect(boxRequests).toEqual([])
+    // A percent-encoded escape is the same path, so it is the same refusal.
+    expect((await controller.commands.run("repo.tree", `${SHARED}#apps/%2e%2e/%2e%2e/user/secrets`)).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId(SHARED, "apps/%2e%2e/%2e%2e/user/secrets"))?.error).toBe("File paths must stay inside the repository.")
+    expect(sharedRequests).toEqual([])
+    // A path that stays inside still lists, so the guard costs the tree nothing.
+    expect((await controller.commands.run("repo.tree", `${SHARED}#apps`)).status).toBe("executed")
+    expect(sharedRequests).toEqual([`${SHARED_CONTENTS}/apps`])
   })
 
   test("the shared copy is never a checkout on this machine: the local resolver says so in place", async () => {
