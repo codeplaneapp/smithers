@@ -28,6 +28,7 @@ import * as PlatformError from "effect/PlatformError"
 import * as ArtifactBackupLease from "./ArtifactBackupLease.ts"
 import * as ArtifactStore from "./ArtifactStore.ts"
 import * as ArtifactLocks from "./internal/ArtifactLocks.ts"
+import * as ArtifactPath from "./internal/ArtifactPath.ts"
 
 /**
  * One enumerated blob: its content address, when it was last written or
@@ -180,25 +181,32 @@ export const makeFileSystem = (
   fs: FileSystem.FileSystem,
   options: SweepOptions = {}
 ): Service => {
-  const directory = options.directory ?? ArtifactStore.defaultDirectory
+  const directory = (options.directory ?? ArtifactStore.defaultDirectory).replace(/([^/])\/+$/, "$1")
   const coordination = options.coordination ?? "required"
   const blobPath = (digest: string): string => `${directory}/${digest.slice(0, 2)}/${digest}`
 
   const inventory: Service["inventory"] = Effect.gen(function*() {
     // A store that never published anything has no directory; that is an
     // empty inventory, not a failure.
-    const entries = yield* fs.readDirectory(directory, { recursive: true }).pipe(
-      Effect.catch((cause) =>
-        isNotFound(cause)
-          ? Effect.succeed([] as ReadonlyArray<string>)
-          : Effect.fail(hostFailure(cause))
-      )
+    const checkRoot = yield* ArtifactPath.guard(fs, directory).pipe(Effect.mapError(hostFailure))
+    const parents = yield* fs.readDirectory(directory).pipe(
+      Effect.catch((cause) => isNotFound(cause) ? Effect.succeed([] as Array<string>) : Effect.fail(hostFailure(cause)))
     )
+    const entries: Array<string> = []
+    for (const parent of parents) {
+      if (!/^[0-9a-f]{2}$/.test(parent)) continue
+      yield* checkRoot.pipe(Effect.mapError(hostFailure))
+      const safe = yield* ArtifactPath.guard(fs, `${directory}/${parent}`).pipe(Effect.option)
+      if (Option.isNone(safe)) continue
+      const children = yield* fs.readDirectory(`${directory}/${parent}`).pipe(
+        Effect.orElseSucceed(() => [] as Array<string>)
+      )
+      for (const child of children) entries.push(`${parent}/${child}`)
+    }
     const blobs: Array<BlobStat> = []
     for (const entry of entries) {
       if (entry.includes(".tmp-")) continue
       const separator = entry.indexOf("/")
-      if (separator === -1) continue
       const fan = entry.slice(0, separator)
       const digest = entry.slice(separator + 1)
       if (!/^[0-9a-f]{64}$/.test(digest) || fan !== digest.slice(0, 2)) continue
@@ -206,7 +214,12 @@ export const makeFileSystem = (
       // removed between the listing and here simply is not in the
       // inventory, and one whose mtime the host cannot report offers no
       // age evidence, so the sweep must never judge it.
-      const info = yield* fs.stat(`${directory}/${entry}`).pipe(Effect.option)
+      const info = yield* Effect.gen(function*() {
+        yield* checkRoot
+        yield* ArtifactPath.guard(fs, `${directory}/${fan}`)
+        yield* ArtifactPath.guard(fs, `${directory}/${entry}`, "File")
+        return yield* fs.stat(`${directory}/${entry}`)
+      }).pipe(Effect.option)
       if (Option.isNone(info) || info.value.type !== "File") continue
       const mtime = Option.getOrUndefined(info.value.mtime)
       if (mtime === undefined) continue
@@ -223,6 +236,13 @@ export const makeFileSystem = (
     Effect.gen(function*() {
       const validated = yield* ArtifactStore.validateDigest(digest)
       yield* Effect.annotateCurrentSpan({ digest: validated })
+      const checkRoot = yield* ArtifactPath.guard(fs, directory).pipe(Effect.mapError(hostFailure))
+      const checkParent = yield* ArtifactPath.guard(fs, `${directory}/${validated.slice(0, 2)}`).pipe(
+        Effect.mapError(hostFailure)
+      )
+      if (coordination === "required") {
+        yield* ArtifactPath.guard(fs, `${directory}/${ArtifactLocks.directoryName}`).pipe(Effect.mapError(hostFailure))
+      }
       return yield* ArtifactLocks.withDigest(
         fs,
         directory,
@@ -239,6 +259,9 @@ export const makeFileSystem = (
       function removeBlob(): Effect.Effect<boolean, ArtifactStore.ArtifactStoreError> {
         return Effect.gen(function*() {
           const path = blobPath(validated)
+          yield* checkRoot.pipe(Effect.mapError(hostFailure))
+          yield* checkParent.pipe(Effect.mapError(hostFailure))
+          const checkBlob = yield* ArtifactPath.guard(fs, path, "File").pipe(Effect.mapError(hostFailure))
           const bound = removeOptions?.ifUnmodifiedSinceMs
           if (bound !== undefined) {
             const info = yield* fs.stat(path).pipe(Effect.option)
@@ -248,6 +271,9 @@ export const makeFileSystem = (
             const mtime = Option.getOrUndefined(info.value.mtime)
             if (mtime === undefined || mtime.getTime() > bound) return false
           }
+          yield* checkRoot.pipe(Effect.mapError(hostFailure))
+          yield* checkParent.pipe(Effect.mapError(hostFailure))
+          yield* checkBlob.pipe(Effect.mapError(hostFailure))
           return yield* fs.remove(path).pipe(
             Effect.as(true),
             // The blob may have been removed between the fence and here; only a

@@ -89,7 +89,7 @@ export const withDigest = <A, E, R, E2>(
         const owner = yield* token
         const lockDirectory = `${directory}/${directoryName}`
         const lockPath = `${lockDirectory}/${digest}.lock`
-        yield* fs.makeDirectory(lockDirectory, { recursive: true }).pipe(Effect.mapError(failure))
+        yield* fs.makeDirectory(lockDirectory, { recursive: true, mode: 0o700 }).pipe(Effect.mapError(failure))
         /**
          * Whether this call created the lock file, and therefore owes a release.
          * It is set in the same uninterruptible step that creates the file, so

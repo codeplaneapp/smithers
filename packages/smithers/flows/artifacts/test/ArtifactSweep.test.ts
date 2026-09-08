@@ -6,6 +6,7 @@
  * freshens a loose object's mtime when a write deduplicates against it so
  * `git prune`'s expiry window keeps protecting re-referenced bytes.
  */
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
@@ -78,30 +79,64 @@ const memoryFs = (options: {
           : Effect.fail(new Error(`ENOENT: ${path}`))
       )) as never,
     makeDirectory: (() => Effect.void) as never,
+    readLink: () =>
+      Effect.fail(PlatformError.systemError({
+        _tag: "Unknown",
+        module: "test",
+        method: "readLink",
+        cause: { code: "EINVAL" }
+      })),
+    open: ((path: string, options?: { flag?: string }) =>
+      Effect.suspend(() => {
+        if (options?.flag === "wx") {
+          if (files.has(path)) return Effect.fail(systemError("AlreadyExists", "open"))
+          files.set(path, new Uint8Array())
+        }
+        return Effect.succeed({
+          stat: fs.stat(path),
+          writeAll: (content: Uint8Array) => fs.writeFile(path, content),
+          sync: Effect.void
+        })
+      })) as never,
     readDirectory: ((directory: string) =>
       Effect.suspend(() => {
         const prefix = `${directory}/`
         return Effect.succeed([
-          ...[...files.keys()].filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length)),
-          ...(options.directories ?? []),
-          ...(options.phantoms ?? [])
+          ...new Set(
+            [
+              ...files.keys(),
+              ...(options.directories ?? []).map((path) => `.flows/objects/${path}`),
+              ...(options.phantoms ?? []).map((path) => `.flows/objects/${path}`)
+            ].filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length).split("/")[0]!)
+          )
         ])
       })) as never,
     stat: ((path: string) =>
       Effect.suspend(() => {
         const relative = path.startsWith(".flows/objects/") ? path.slice(".flows/objects/".length) : path
-        if (options.directories?.includes(relative) === true) {
-          return Effect.succeed({ type: "Directory", mtime: Option.some(new Date(0)), size: BigInt(0) })
+        if (
+          path === ".flows/objects" || /^\.flows\/objects\/[0-9a-f]{2}$/.test(path) ||
+          options.directories?.includes(relative) === true
+        ) {
+          return Effect.succeed({
+            type: "Directory",
+            dev: 1,
+            ino: Option.some(1),
+            mtime: Option.some(new Date(0)),
+            size: BigInt(0)
+          })
         }
         return files.has(path)
           ? Effect.succeed({
             type: "File",
+            dev: 1,
+            ino: Option.some(1),
             mtime: path === options.withoutMtimeFor
               ? Option.none()
               : Option.some(new Date(mtimes.get(path) ?? 0)),
             size: BigInt(files.get(path)!.length)
           })
-          : Effect.fail(new Error(`ENOENT: ${path}`))
+          : Effect.fail(systemError("NotFound", "stat"))
       })) as never,
     utimes: ((path: string, _atime: Date | number, mtime: Date | number) =>
       Effect.suspend(() => {
@@ -459,3 +494,81 @@ describe("put freshens a deduplicated blob (git's loose-object freshening)", () 
       expect(text(host.files.get(blobPath))).toBe(artifact)
     }))
 })
+
+describe("Node filesystem sweep security", () => {
+  for (const entry of ["root", "fanout", "blob"] as const) {
+    it.live(`refuses deletion through a ${entry} symlink`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-sweep-link-" })
+        const directory = `${root}/objects`
+        const outside = `${root}/outside`
+        yield* fs.makeDirectory(`${outside}/${digest.slice(0, 2)}`, { recursive: true })
+        yield* fs.makeDirectory(`${directory}/${digest.slice(0, 2)}`, { recursive: true })
+        for (const path of [`${outside}/${digest}`, `${outside}/${digest.slice(0, 2)}/${digest}`]) {
+          yield* fs.writeFileString(path, artifact)
+        }
+        const path = entry === "root" ? directory : entry === "fanout" ?
+          `${directory}/${digest.slice(0, 2)}`
+          : `${directory}/${digest.slice(0, 2)}/${digest}`
+        yield* fs.remove(path, { recursive: true, force: true })
+        yield* fs.symlink(entry === "blob" ? `${outside}/${digest}` : outside, path)
+        const sweep = ArtifactSweep.makeFileSystem(fs, { directory: `${directory}/` })
+        expect(Exit.isFailure(yield* sweep.remove(digest).pipe(Effect.exit))).toBe(true)
+        for (const path of [`${outside}/${digest}`, `${outside}/${digest.slice(0, 2)}/${digest}`]) {
+          expect(yield* fs.readFileString(path)).toBe(artifact)
+        }
+        if (entry !== "root") expect(yield* sweep.inventory).toEqual([])
+      })).pipe(Effect.provide(NodeFileSystem.layer)))
+  }
+
+  for (const entry of ["root", "fanout"] as const) {
+    it.live(`refuses ${entry} replacement after measuring the deletion fence`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-sweep-replace-" })
+        const directory = `${root}/objects`
+        const outside = `${root}/outside`
+        const path = `${directory}/${digest.slice(0, 2)}/${digest}`
+        yield* fs.makeDirectory(`${directory}/${digest.slice(0, 2)}`, { recursive: true })
+        yield* fs.makeDirectory(`${outside}/${digest.slice(0, 2)}`, { recursive: true })
+        for (const blob of [path, `${outside}/${digest}`, `${outside}/${digest.slice(0, 2)}/${digest}`]) {
+          yield* fs.writeFileString(blob, artifact)
+        }
+        let stats = 0
+        const hostile = {
+          ...fs,
+          stat: (candidate: string) =>
+            Effect.gen(function*() {
+              const info = yield* fs.stat(candidate)
+              // The first blob stat inspects its type; the second measures the fence.
+              if (candidate === path && ++stats === 2) {
+                const replaced = entry === "root" ? directory : `${directory}/${digest.slice(0, 2)}`
+                yield* fs.rename(replaced, `${replaced}-saved`)
+                yield* fs.symlink(outside, replaced)
+              }
+              return info
+            })
+        }
+        const exit = yield* ArtifactSweep.makeFileSystem(hostile, { directory, coordination: "process" })
+          .remove(digest, { ifUnmodifiedSinceMs: Number.MAX_SAFE_INTEGER }).pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(stats).toBe(2)
+        expect(yield* fs.readFileString(`${outside}/${digest}`)).toBe(artifact)
+        expect(yield* fs.readFileString(`${outside}/${digest.slice(0, 2)}/${digest}`)).toBe(artifact)
+      })).pipe(Effect.provide(NodeFileSystem.layer)))
+  }
+})
+
+it.effect("skips fanouts that become unreadable during inventory", () =>
+  Effect.gen(function*() {
+    const host = memoryFs({ seed: { [blobPath]: artifact } })
+    const fs = {
+      ...host.fs,
+      readDirectory: (path: string) =>
+        path === ".flows/objects"
+          ? host.fs.readDirectory(path)
+          : Effect.fail(systemError("PermissionDenied", "readDirectory"))
+    }
+    expect(yield* ArtifactSweep.makeFileSystem(fs).inventory).toEqual([])
+  }))

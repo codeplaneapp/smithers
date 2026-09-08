@@ -84,6 +84,40 @@ anything. The `get` measured what it read before returning it, so a blob that
 had been truncated or overwritten would have failed with
 `ArtifactCorruption` rather than handing back the wrong bytes.
 
+## Filesystem security and existing stores
+
+New payloads are created exclusively (`wx`) with mode `0600`. New objects,
+fanout, and lock directories use `0700`. The host umask may restrict these
+modes further. Set `fileMode` and `directoryMode` explicitly to share payloads
+and object directories; lock directories remain private. Creation modes do
+not change existing entries or ACLs.
+
+Scratch creation retries collisions with a fresh random token, keeping the
+opened handle through writing and syncing. Both durability modes require
+exclusive writable handles and symlink inspection. `best-effort` tolerates
+sync refusals only. Hosts without those capabilities fail as `unavailable`;
+use the memory or remote tier until the host supplies them.
+
+Publication and sweep removal reject detected symlinks at the objects root,
+fanout, and blob paths, and recheck directory identities before mutation.
+Scratch cleanup and inventory inspect one directory level at a time and skip
+symlinked entries. The portable Effect filesystem API provides no `lstat`,
+no-follow open, or descriptor-relative rename/unlink. Inspection uses
+`readLink` plus `stat`; a replacement after the final check can still redirect
+a pathname operation. These checks are defense in depth, not containment
+against a process able to replace directory entries concurrently. Keep the
+store and its ancestors writable only by trusted principals, or supply a
+filesystem confined by the host. Closing this race requires a host capability
+that enforces containment during each mutation.
+
+Before reusing an existing store, stop writers and sweepers and audit the
+objects root, its ancestors, fanouts, blobs, lock entries, ownership, modes,
+and ACLs without following symlinks. Remove unexpected links and migrate
+verified blobs into a newly created private store, or apply owner-only modes
+to verified regular files and directories. Do not run a recursive permission
+change across unaudited links. Existing readable blobs remain readable after
+an upgrade, including deduplicated blobs.
+
 ## The stores you can compose
 
 Every implementation is the same four operations, `put`, `get`, `has`, and

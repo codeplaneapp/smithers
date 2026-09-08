@@ -12,6 +12,7 @@
  * proof let a `put` report success over a blob corrupted behind the store's
  * back without healing it, so verification now runs on every put.
  */
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
@@ -81,34 +82,64 @@ const memoryFs = (options: {
       Effect.sync(() => {
         directories.add(path)
       })) as never,
+    readLink: () =>
+      Effect.fail(PlatformError.systemError({
+        _tag: "Unknown",
+        module: "test",
+        method: "readLink",
+        cause: { code: "EINVAL" }
+      })),
     readDirectory: ((directory: string) =>
       Effect.suspend(() => {
-        directoryReads++
+        if (directory === ".flows/objects") {
+          directoryReads++
+        }
         if (options.failDirectoryRead === true) {
           return Effect.fail(new Error("ENOENT: no objects directory"))
         }
         const prefix = `${directory}/`
-        return Effect.succeed(
-          [...files.keys()].filter((path) =>
-            path.startsWith(prefix)
-          ).map((path) => path.slice(prefix.length))
-        )
+        return Effect.succeed([
+          ...new Set(
+            [...files.keys(), ...directories].filter((path) =>
+              path.startsWith(prefix)
+            )
+              .map((path) => path.slice(prefix.length).split("/")[0]!)
+          )
+        ])
       })) as never,
-    stat: ((path: string) => {
-      const mtime = options.mtimes?.[path]
-      return mtime === undefined
-        ? Effect.fail(new Error(`ENOENT: ${path}`))
-        : Effect.succeed({ mtime: Option.some(new Date(mtime)) })
-    }) as never,
-    open: ((path: string) =>
-      options.supportsOpen === true
-        ? Effect.sync(() => ({
-          sync: Effect.sync(() => {
-            if (options.failSyncOf?.(path) === true) throw new Error(`EIO: sync ${path}`)
-            syncs.push(path)
+    stat: ((path: string) =>
+      Effect.suspend(() => {
+        const directory = directories.has(path) || [...files.keys()].some((file) => file.startsWith(`${path}/`))
+        return directory || files.has(path)
+          ? Effect.succeed({
+            type: directory ? "Directory" : "File",
+            dev: 1,
+            ino: Option.some(1),
+            mtime: Option.fromUndefinedOr(options.mtimes?.[path]).pipe(Option.map((ms) => new Date(ms)))
           })
-        }))
-        : Effect.fail(new Error(`ENOTSUP: open ${path}`))) as never,
+          : Effect.fail(PlatformError.systemError({ _tag: "NotFound", module: "test", method: "stat" }))
+      })) as never,
+    open: ((path: string, openOptions?: { flag?: string }) =>
+      Effect.suspend(() => {
+        if (options.supportsOpen === false) {
+          return Effect.fail(PlatformError.systemError({ _tag: "PermissionDenied", module: "test", method: "open" }))
+        }
+        if (openOptions?.flag === "wx") {
+          if (files.has(path)) {
+            return Effect.fail(PlatformError.systemError({ _tag: "AlreadyExists", module: "test", method: "open" }))
+          }
+          files.set(path, new Uint8Array())
+        }
+        return Effect.succeed({
+          stat: fs.stat(path),
+          writeAll: (content: Uint8Array) => fs.writeFile(path, content),
+          sync: Effect.suspend(() => {
+            if (options.failSyncOf?.(path) === true) return Effect.fail(new Error(`EIO: sync ${path}`))
+            syncs.push(path)
+            return Effect.void
+          })
+        })
+      })) as never,
     writeFile: ((path: string, content: Uint8Array) =>
       Effect.sync(() => {
         writes.push(path)
@@ -182,11 +213,15 @@ describe("atomic publication (issues #117, #131, #138)", () => {
       const release = yield* Deferred.make<void>()
       const gated = FileSystem.makeNoop({
         ...host.fs,
-        writeFile: ((path: string, content: Uint8Array) =>
-          Deferred.succeed(entered, undefined).pipe(
-            Effect.andThen(Deferred.await(release)),
-            Effect.andThen(host.fs.writeFile(path, content))
-          )) as never
+        open: (path, options) =>
+          host.fs.open(path, options).pipe(Effect.map((file) => ({
+            ...file,
+            writeAll: (content) =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(file.writeAll(content))
+              )
+          })))
       })
       const input = bytes(artifact)
       const running = yield* withCrypto(
@@ -219,14 +254,18 @@ describe("atomic publication (issues #117, #131, #138)", () => {
       })
       const latched = FileSystem.makeNoop({
         ...host.fs,
-        writeFile: ((path: string, content: Uint8Array) =>
-          Effect.promise(async () => {
-            parked.push(path)
-            host.files.set(path, content)
-            host.writes.push(path)
-            if (parked.length >= 2) release!()
-            await bothWritten
-          })) as never
+        open: (path, options) =>
+          host.fs.open(path, options).pipe(Effect.map((file) => ({
+            ...file,
+            writeAll: (content) =>
+              Effect.promise(async () => {
+                parked.push(path)
+                host.files.set(path, content)
+                host.writes.push(path)
+                if (parked.length >= 2) release!()
+                await bothWritten
+              })
+          })))
       })
       // Distinct filesystem service identities model separate processes: the
       // in-process digest lock cannot coordinate them, so their unique temp
@@ -273,14 +312,14 @@ describe("atomic publication (issues #117, #131, #138)", () => {
       expect(host.syncs[1]).toBe(`.flows/objects/${digest.slice(0, 2)}`)
     }))
 
-  it.effect("still publishes on a host with no writable file handles", () =>
+  it.effect("refuses publication on a host with no exclusive writable file handles", () =>
     Effect.gen(function*() {
-      // `BrowserFileSystem` fails `open` rather than pretending. Such a host
-      // keeps the temp+rename atomicity and simply forgoes the durability bound.
+      // Best-effort durability may skip sync, but cannot skip exclusive creation.
       const host = memoryFs({ supportsOpen: false })
-      yield* withCrypto(store(host).put(bytes(artifact)))
+      const exit = yield* withCrypto(store(host).put(bytes(artifact)).pipe(Effect.exit))
+      expect(Exit.isFailure(exit)).toBe(true)
       expect(host.syncs).toEqual([])
-      expect(text(host.files.get(blobPath))).toBe(artifact)
+      expect(host.files.has(blobPath)).toBe(false)
     }))
 
   it.effect("fails publication when a required durability barrier fails", () =>
@@ -523,7 +562,7 @@ describe("reads, probes, and refusals", () => {
     Effect.gen(function*() {
       const host = memoryFs({ seed: { [blobPath]: artifact }, failReadOf: blobPath, failExists: true })
       const exit = yield* withCrypto(store(host).get(digest).pipe(Effect.exit))
-      expect(errorOf(exit)).toMatchObject({ code: "unavailable" })
+      expect(errorOf(exit), JSON.stringify(exit)).toMatchObject({ code: "unavailable" })
     }))
 
   it.effect.each<[string, string]>([
@@ -590,3 +629,288 @@ describe("layers", () => {
       expect(host.files.has(blobPath)).toBe(true)
     }))
 })
+
+describe("Node filesystem publication security", () => {
+  it.live("creates private payloads and directories under umask 022, with explicit sharing options", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-modes-" })
+      yield* Effect.acquireRelease(
+        Effect.sync(() => process.umask(0o022)),
+        (previous) => Effect.sync(() => process.umask(previous))
+      )
+      for (const sharing of [false, true]) {
+        const directory = `${root}/${sharing ? "shared" : "private"}/objects`
+        const artifacts = ArtifactStore.makeFileSystem(fs, {
+          directory,
+          ...(sharing ? { fileMode: 0o640, directoryMode: 0o750 } : {})
+        })
+        yield* artifacts.put(bytes(artifact))
+        const empty = yield* artifacts.put(new Uint8Array())
+        expect((yield* artifacts.get(empty)).byteLength).toBe(0)
+        const fan = `${directory}/${digest.slice(0, 2)}`
+        for (const path of [directory, fan]) {
+          expect((yield* fs.stat(path)).mode & 0o777).toBe(sharing ? 0o750 : 0o700)
+        }
+        expect((yield* fs.stat(`${directory}/.locks`)).mode & 0o777).toBe(0o700)
+        expect((yield* fs.stat(`${fan}/${digest}`)).mode & 0o777).toBe(sharing ? 0o640 : 0o600)
+      }
+    })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+
+  it.live("retries a preplanted scratch symlink without touching its target or removing the collision", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-collision-" })
+      const victim = `${root}/victim`
+      yield* fs.writeFileString(victim, "unrelated data")
+      const attempts: Array<string> = []
+      const hostile = {
+        ...fs,
+        open: (path: string, options?: Parameters<typeof fs.open>[1]) =>
+          Effect.gen(function*() {
+            if (options?.flag === "wx") {
+              attempts.push(path)
+              expect(options.mode).toBe(0o600)
+              if (attempts.length === 1) yield* fs.symlink(victim, path)
+            }
+            return yield* fs.open(path, options)
+          })
+      }
+      const directory = `${root}/objects`
+      yield* ArtifactStore.makeFileSystem(hostile, { directory }).put(bytes(artifact))
+      expect(attempts).toHaveLength(2)
+      expect(attempts[0]).not.toBe(attempts[1])
+      expect(yield* fs.readLink(attempts[0]!)).toBe(victim)
+      expect(yield* fs.readFileString(victim)).toBe("unrelated data")
+      expect(yield* fs.readFileString(`${directory}/${digest.slice(0, 2)}/${digest}`)).toBe(artifact)
+    })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+
+  it.live("bounds collision retries without deleting another writer's files", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-collisions-" })
+      const paths: Array<string> = []
+      const hostile = {
+        ...fs,
+        open: (path: string, options?: Parameters<typeof fs.open>[1]) =>
+          Effect.gen(function*() {
+            if (options?.flag === "wx") {
+              paths.push(path)
+              yield* fs.writeFileString(path, "other writer", { flag: "wx" })
+            }
+            return yield* fs.open(path, options)
+          })
+      }
+      const exit = yield* ArtifactStore.makeFileSystem(hostile, { directory: `${root}/objects` }).put(bytes(artifact))
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(paths).toHaveLength(16)
+      for (const path of paths) expect(yield* fs.readFileString(path)).toBe("other writer")
+    })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+
+  for (const entry of ["root", "fanout", "locks", "blob"] as const) {
+    it.live(`refuses a pre-existing ${entry} symlink before publication`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-link-" })
+        const directory = `${root}/objects`
+        const outside = `${root}/outside`
+        yield* fs.makeDirectory(outside)
+        yield* fs.makeDirectory(`${directory}/${digest.slice(0, 2)}`, { recursive: true })
+        const path = entry === "root" ? directory : entry === "locks" ?
+          `${directory}/.locks`
+          : entry === "fanout"
+          ? `${directory}/${digest.slice(0, 2)}`
+          : `${directory}/${digest.slice(0, 2)}/${digest}`
+        yield* fs.remove(path, { recursive: true, force: true })
+        const target = entry === "blob" ? `${outside}/victim` : outside
+        if (entry === "blob") yield* fs.writeFileString(target, artifact)
+        yield* fs.symlink(target, path)
+        const exit = yield* ArtifactStore.makeFileSystem(fs, { directory: `${directory}/` }).put(bytes(artifact)).pipe(
+          Effect.exit
+        )
+        expect(errorOf(exit), JSON.stringify(exit)).toMatchObject({ code: "unavailable" })
+        expect(yield* fs.readDirectory(outside)).toEqual(entry === "blob" ? ["victim"] : [])
+        if (entry === "blob") expect(yield* fs.readFileString(target)).toBe(artifact)
+      })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+  }
+
+  for (const entry of ["root", "fanout"] as const) {
+    it.live(`refuses ${entry} replacement after writing and before rename`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-replacement-" })
+        const directory = `${root}/objects`
+        const outside = `${root}/outside`
+        yield* fs.makeDirectory(outside)
+        const hostile = {
+          ...fs,
+          open: (path: string, options?: Parameters<typeof fs.open>[1]) =>
+            fs.open(path, options).pipe(
+              Effect.map((file) =>
+                options?.flag !== "wx" ? file : {
+                  ...file,
+                  stat: file.stat,
+                  writeAll: (data: Uint8Array) => file.writeAll(data),
+                  sync: file.sync.pipe(Effect.andThen(Effect.gen(function*() {
+                    const replaced = entry === "root" ? directory : `${directory}/${digest.slice(0, 2)}`
+                    yield* fs.rename(replaced, `${replaced}-saved`)
+                    yield* fs.symlink(outside, replaced)
+                  })))
+                }
+              )
+            )
+        }
+        const exit = yield* ArtifactStore.makeFileSystem(hostile, { directory, coordination: "process" }).put(
+          bytes(artifact)
+        ).pipe(Effect.exit)
+        expect(errorOf(exit), JSON.stringify(exit)).toMatchObject({ code: "unavailable" })
+        expect(yield* fs.readDirectory(outside)).toEqual([])
+      })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+  }
+
+  it.live("keeps the opened handle when a scratch name is replaced during the write", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-handle-" })
+      const victim = `${root}/victim`
+      yield* fs.writeFileString(victim, "unrelated data")
+      const hostile = {
+        ...fs,
+        open: (path: string, options?: Parameters<typeof fs.open>[1]) =>
+          fs.open(path, options).pipe(
+            Effect.map((file) =>
+              options?.flag !== "wx" ? file : {
+                ...file,
+                stat: file.stat,
+                sync: file.sync,
+                writeAll: (data: Uint8Array) =>
+                  fs.remove(path).pipe(
+                    Effect.andThen(fs.symlink(victim, path)),
+                    Effect.andThen(file.writeAll(data))
+                  )
+              }
+            )
+          )
+      }
+      const exit = yield* ArtifactStore.makeFileSystem(hostile, { directory: `${root}/objects` }).put(bytes(artifact))
+        .pipe(Effect.exit)
+      expect(errorOf(exit), JSON.stringify(exit)).toMatchObject({ code: "unavailable" })
+      expect(yield* fs.readFileString(victim)).toBe("unrelated data")
+    })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+
+  it.live("skips orphan cleanup through symlinked fanouts and scratch entries", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-orphans-" })
+      const directory = `${root}/objects`
+      const outside = `${root}/outside`
+      yield* fs.makeDirectory(outside)
+      yield* fs.makeDirectory(`${directory}/bb`, { recursive: true })
+      yield* fs.writeFileString(`${outside}/old.tmp-dead`, "keep")
+      yield* fs.utimes(`${outside}/old.tmp-dead`, new Date(0), new Date(0))
+      yield* fs.symlink(outside, `${directory}/aa`)
+      yield* fs.symlink(`${outside}/old.tmp-dead`, `${directory}/bb/link.tmp-dead`)
+      yield* ArtifactStore.makeFileSystem(fs, { directory }).put(bytes(artifact))
+      expect(yield* fs.readFileString(`${outside}/old.tmp-dead`)).toBe("keep")
+      expect(yield* fs.readLink(`${directory}/bb/link.tmp-dead`)).toBe(`${outside}/old.tmp-dead`)
+    })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+})
+
+describe("filesystem capability refusals", () => {
+  it.effect("reports unsupported symlink inspection as unavailable", () =>
+    Effect.gen(function*() {
+      const host = memoryFs()
+      const fs = {
+        ...host.fs,
+        readLink: () =>
+          Effect.fail(PlatformError.systemError({
+            _tag: "PermissionDenied",
+            module: "test",
+            method: "readLink"
+          }))
+      }
+      const exit = yield* withCrypto(ArtifactStore.makeFileSystem(fs).put(bytes(artifact))).pipe(Effect.exit)
+      expect(errorOf(exit)).toMatchObject({ code: "unavailable" })
+      expect(host.writes).toEqual([])
+    }))
+
+  it.effect("best-effort durability still publishes if syncing the retained handle fails", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ failSyncOf: () => true })
+      expect(yield* withCrypto(store(host).put(bytes(artifact)))).toBe(digest)
+      expect(text(host.files.get(blobPath))).toBe(artifact)
+    }))
+
+  it.effect("skips unreadable orphan directories and foreign nested entries", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ seed: { ".flows/objects/aa/old.tmp-dead": "keep", ".flows/objects/README": "foreign" } })
+      for (const entries of [undefined, ["../victim.tmp-dead", "..\\victim.tmp-dead"]]) {
+        const fs = {
+          ...host.fs,
+          readDirectory: (path: string) =>
+            path.endsWith("/aa")
+              ? entries === undefined
+                ? Effect.fail(
+                  PlatformError.systemError({ _tag: "PermissionDenied", module: "test", method: "readDirectory" })
+                )
+                : Effect.succeed(entries)
+              : host.fs.readDirectory(path)
+        }
+        const body = entries === undefined ? artifact : "second"
+        yield* withCrypto(ArtifactStore.makeFileSystem(fs, { coordination: "process" }).put(bytes(body)))
+      }
+      expect(text(host.files.get(".flows/objects/aa/old.tmp-dead"))).toBe("keep")
+    }))
+
+  for (const replacement of ["directory", "missing", "file"] as const) {
+    it.live(`refuses a fanout replaced with ${replacement} after scratch sync`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "artifacts-g1-identity-" })
+        const directory = `${root}/objects`
+        const parent = `${directory}/${digest.slice(0, 2)}`
+        const hostile = {
+          ...fs,
+          open: (path: string, options?: Parameters<typeof fs.open>[1]) =>
+            fs.open(path, options).pipe(
+              Effect.map((file) =>
+                options?.flag !== "wx" ? file : {
+                  ...file,
+                  stat: file.stat,
+                  writeAll: (data: Uint8Array) => file.writeAll(data),
+                  sync: file.sync.pipe(Effect.andThen(Effect.gen(function*() {
+                    yield* fs.rename(parent, `${parent}-saved`)
+                    if (replacement === "directory") yield* fs.makeDirectory(parent)
+                    if (replacement === "file") yield* fs.writeFileString(parent, "foreign")
+                  })))
+                }
+              )
+            )
+        }
+        const exit = yield* ArtifactStore.makeFileSystem(hostile, { directory, coordination: "process" }).put(
+          bytes(artifact)
+        ).pipe(Effect.exit)
+        expect(errorOf(exit)).toMatchObject({ code: "unavailable" })
+        if (replacement === "directory") expect(yield* fs.readDirectory(parent)).toEqual([])
+        if (replacement === "file") expect(yield* fs.readFileString(parent)).toBe("foreign")
+      })).pipe(Effect.provide(NodeFileSystem.layer), withCrypto))
+  }
+})
+
+it.effect("fails closed when directory metadata cannot be inspected", () =>
+  Effect.gen(function*() {
+    const host = memoryFs()
+    const fs = {
+      ...host.fs,
+      stat: () =>
+        Effect.fail(PlatformError.systemError({
+          _tag: "PermissionDenied",
+          module: "test",
+          method: "stat"
+        }))
+    }
+    const exit = yield* withCrypto(ArtifactStore.makeFileSystem(fs).put(bytes(artifact))).pipe(Effect.exit)
+    expect(errorOf(exit)).toMatchObject({ code: "unavailable" })
+    expect(host.writes).toEqual([])
+  }))

@@ -84,7 +84,8 @@ token enters no persisted identity, so its randomness is invisible to replay.
 `FileSystemOptions.durability` controls the fsync. `required`, the default,
 reports success only after syncing both the blob and its fanout directory, and
 propagates any refusal. `best-effort` is the explicit weaker capability for a
-host that cannot open file handles for syncing, such as a browser filesystem.
+host that cannot sync file or directory handles. Both modes require exclusive
+writable handles and symlink inspection; unsupported hosts fail as `unavailable`.
 
 ### An existing blob is verified on every put
 

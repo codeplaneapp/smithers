@@ -24,6 +24,7 @@ import * as Random from "effect/Random"
 import * as Schema from "effect/Schema"
 import * as ArtifactStoreMetrics from "./ArtifactStoreMetrics.ts"
 import * as ArtifactLocks from "./internal/ArtifactLocks.ts"
+import * as ArtifactPath from "./internal/ArtifactPath.ts"
 
 /**
  * Schema for a content address: exactly 64 lowercase hexadecimal SHA-256
@@ -268,11 +269,15 @@ export interface FileSystemOptions {
    * the store never publishes.
    */
   readonly directory?: string | undefined
+  /** New payload mode, default `0600`, restricted by the umask. Existing blobs are unchanged. */
+  readonly fileMode?: number | undefined
+  /** New objects and fanout directory mode, default `0700`. Existing directories are unchanged. */
+  readonly directoryMode?: number | undefined
   /**
    * `required` reports success only after syncing both the blob and the
    * containing fanout directory. `best-effort` is the explicit weaker
-   * capability for hosts such as browser filesystems that cannot open file
-   * handles for syncing.
+   * capability for hosts that cannot sync file or directory handles.
+   * Both modes require exclusive writable handles and symlink inspection.
    */
   readonly durability?: "required" | "best-effort" | undefined
   /**
@@ -360,37 +365,17 @@ const fanout = (directory: string, digest: string): { readonly parent: string; r
  * @slop
  */
 export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOptions = {}): Service => {
-  const directory = options.directory ?? defaultDirectory
+  const directory = (options.directory ?? defaultDirectory).replace(/([^/])\/+$/, "$1")
   const durability = options.durability ?? "required"
   const coordination = options.coordination ?? "required"
-  /**
-   * Distinguishes concurrent temp paths for the same digest across writers.
-   * The counter separates in-flight writers of this service instance; the
-   * random token separates instances — the objects directory is
-   * workspace-shared, so two processes publishing the same digest would
-   * otherwise both write `<blob>.tmp-0`, clobber each other's completed temp
-   * file, and publish torn bytes at the canonical content address. The token
-   * never enters any persisted identity, so its randomness is invisible to
-   * replay.
-   *
-   * It is drawn from Effect's `Random` — the sanctioned swappable port for
-   * nondeterminism — rather than ambient `Math.random`, and memoized on first
-   * publication so one token per service instance is all it costs and
-   * `makeFileSystem` itself stays synchronous.
-   */
-  let tempToken: string | undefined
-  const freshTempToken: Effect.Effect<string> = Effect.suspend(() =>
-    tempToken === undefined
-      ? Effect.map(
-        Random.nextIntBetween(0, Number.MAX_SAFE_INTEGER, { halfOpen: true }),
-        (drawn) => {
-          tempToken = drawn.toString(36).slice(0, 10).padEnd(10, "0")
-          return tempToken
-        }
-      )
-      : Effect.succeed(tempToken)
+  const fileMode = options.fileMode ?? 0o600
+  const directoryMode = options.directoryMode ?? 0o700
+  // Every attempt draws a new token; exclusivity, not unpredictability, protects
+  // an existing entry. Bound retries so a hostile directory cannot hang put.
+  const freshTempToken = Effect.map(
+    Random.nextIntBetween(0, Number.MAX_SAFE_INTEGER, { halfOpen: true }),
+    (drawn) => drawn.toString(36)
   )
-  let tempSequence = 0
   /**
    * Best-effort reclamation of scratch files orphaned by a crash: `.tmp-*`
    * payloads left between the temp write and the rename, and `.locks/*` files
@@ -422,29 +407,41 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
   const sweepOrphanedTemps = Effect.gen(function*() {
     if (sweepDone) return
     sweepDone = true
-    const entries = yield* fs.readDirectory(directory, { recursive: true }).pipe(
-      Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>))
-    )
+    const checkRoot = yield* ArtifactPath.guard(fs, directory)
+    const parents = yield* fs.readDirectory(directory)
     const now = yield* Clock.currentTimeMillis
-    for (const entry of entries) {
-      if (!isScratch(entry)) continue
-      const orphanPath = `${directory}/${entry}`
-      const info = yield* fs.stat(orphanPath).pipe(Effect.option)
-      if (Option.isNone(info)) continue
-      const mtime = Option.getOrUndefined(info.value.mtime)
-      if (mtime === undefined || now - mtime.getTime() < staleScratchMs) continue
-      yield* fs.remove(orphanPath).pipe(Effect.ignore)
+    for (const parent of parents) {
+      if (!/^[0-9a-f]{2}$/.test(parent) && parent !== ArtifactLocks.directoryName) continue
+      const parentPath = `${directory}/${parent}`
+      yield* checkRoot
+      const checkParent = yield* ArtifactPath.guard(fs, parentPath).pipe(Effect.option)
+      if (Option.isNone(checkParent)) continue
+      const entries = yield* fs.readDirectory(parentPath).pipe(Effect.orElseSucceed(() => [] as Array<string>))
+      for (const entry of entries) {
+        if (entry.includes("/") || entry.includes("\\") || !isScratch(`${parent}/${entry}`)) continue
+        const orphanPath = `${parentPath}/${entry}`
+        yield* Effect.gen(function*() {
+          const checkFile = yield* ArtifactPath.guard(fs, orphanPath, "File")
+          const info = yield* fs.stat(orphanPath)
+          const mtime = Option.getOrUndefined(info.mtime)
+          if (mtime === undefined || now - mtime.getTime() < staleScratchMs) return
+          yield* checkRoot
+          yield* checkParent.value
+          yield* checkFile
+          yield* fs.remove(orphanPath)
+        }).pipe(Effect.ignore)
+      }
     }
-  })
+  }).pipe(Effect.ignore)
+
   /**
    * Flushes a freshly written temp file before it is renamed into place.
    *
    * Bazel does exactly this in `DiskCacheClient.saveFile`: "fsync temp before
    * we rename it to avoid data loss in the case of machine crashes (the OS may
-   * reorder the writes and the rename)". Hosts such as browser filesystems
-   * that cannot open writable handles must select the explicit `best-effort`
-   * capability. Required durability propagates every open or sync refusal
-   * instead of claiming a durable write.
+   * reorder the writes and the rename)". Scratch files sync on their retained
+   * handle; this helper syncs published blobs and directories. Best-effort
+   * durability tolerates sync refusals, but still requires exclusive creation.
    */
   const syncPath = (path: string, flag: "r" | "r+"): Effect.Effect<void, ArtifactStoreError> => {
     const sync = Effect.scoped(Effect.flatMap(fs.open(path, { flag }), (file) => file.sync)).pipe(
@@ -457,85 +454,135 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
       snapshotBytes(bytes),
       (snapshot) =>
         Effect.flatMap(measureBytes(snapshot), (digest) =>
-          ArtifactLocks.withDigest(
-            fs,
-            directory,
-            digest,
-            Effect.gen(function*() {
-              yield* Effect.annotateCurrentSpan({ digest })
-              const blob = fanout(directory, digest)
-              const stored = yield* fs.exists(blob.path).pipe(Effect.mapError(hostFailure))
-              // Existence alone is not validity: a truncated blob left by a crashing
-              // writer or by disk corruption would otherwise be trusted forever at
-              // write time while `get` digest-verifies and refuses — a permanent
-              // failure with no repair path even though this process holds the correct
-              // bytes. The existing blob is digest-verified on EVERY put (an
-              // unreadable blob counts as corrupt), and only a verified match skips
-              // the write; a mismatch falls through to the atomic rewrite below,
-              // healing the address. Verification is deliberately not memoized: the
-              // objects directory is workspace-shared, so a blob can change behind
-              // this store's back, and a remembered proof let a later `put` report
-              // success over corrupt bytes without repairing them — `get` would then
-              // refuse the digest forever even though every `put` held the cure.
-              // Re-verifying costs a constant factor, never a new asymptote: a `put`
-              // already pays one O(blob size) hash to measure its own input.
-              let verified = stored &&
-                (yield* fs.readFile(blob.path).pipe(
-                  Effect.flatMap((existing) => Effect.map(measureBytes(existing), (measured) => measured === digest)),
-                  Effect.catch(() => Effect.succeed(false))
-                ))
-              if (verified) {
-                // Freshen the blob's mtime on a dedupe hit — git's loose-object
-                // freshening, and the touch Bazel's `DiskCacheClient` performs on a
-                // cache hit. The mtime is the age evidence a mark/sweep collector
-                // fences its deletions on (`ArtifactSweep`), so a re-publication of
-                // old bytes must read as a recent reference or the grace period
-                // cannot protect the entry recorded moments later. Best-effort on
-                // hosts without `utimes` (the browser filesystem): a failed freshen
-                // over a blob that still exists keeps the dedupe skip and accepts
-                // git's freshen-versus-prune race; a failed freshen over a blob that
-                // VANISHED — a sweep won it — falls through to the atomic rewrite
-                // below, healing the address.
-                const now = yield* Clock.currentTimeMillis
-                const timestamp = new Date(now)
-                const alive = yield* fs.utimes(blob.path, timestamp, timestamp).pipe(
-                  Effect.as(true),
-                  Effect.catch(() => fs.exists(blob.path).pipe(Effect.catch(() => Effect.succeed(true))))
+          Effect.gen(function*() {
+            yield* ArtifactPath.guard(fs, directory).pipe(Effect.mapError(hostFailure))
+            yield* fs.makeDirectory(directory, { recursive: true, mode: directoryMode }).pipe(
+              Effect.mapError(hostFailure)
+            )
+            const checkRoot = yield* ArtifactPath.guard(fs, directory).pipe(Effect.mapError(hostFailure))
+            if (coordination === "required") {
+              yield* ArtifactPath.guard(fs, `${directory}/${ArtifactLocks.directoryName}`).pipe(
+                Effect.mapError(hostFailure)
+              )
+            }
+            return yield* ArtifactLocks.withDigest(
+              fs,
+              directory,
+              digest,
+              Effect.gen(function*() {
+                yield* Effect.annotateCurrentSpan({ digest })
+                const blob = fanout(directory, digest)
+                yield* checkRoot.pipe(Effect.mapError(hostFailure))
+                yield* ArtifactPath.guard(fs, blob.parent).pipe(Effect.mapError(hostFailure))
+                yield* fs.makeDirectory(blob.parent, { mode: directoryMode, recursive: true }).pipe(
+                  Effect.mapError(hostFailure)
                 )
-                if (!alive) {
-                  verified = false
-                }
+                const checkParent = yield* ArtifactPath.guard(fs, blob.parent).pipe(Effect.mapError(hostFailure))
+                const checkBlob = yield* ArtifactPath.guard(fs, blob.path, "File").pipe(Effect.mapError(hostFailure))
+                const stored = yield* fs.exists(blob.path).pipe(Effect.mapError(hostFailure))
+                // Existence alone is not validity: a truncated blob left by a crashing
+                // writer or by disk corruption would otherwise be trusted forever at
+                // write time while `get` digest-verifies and refuses — a permanent
+                // failure with no repair path even though this process holds the correct
+                // bytes. The existing blob is digest-verified on EVERY put (an
+                // unreadable blob counts as corrupt), and only a verified match skips
+                // the write; a mismatch falls through to the atomic rewrite below,
+                // healing the address. Verification is deliberately not memoized: the
+                // objects directory is workspace-shared, so a blob can change behind
+                // this store's back, and a remembered proof let a later `put` report
+                // success over corrupt bytes without repairing them — `get` would then
+                // refuse the digest forever even though every `put` held the cure.
+                // Re-verifying costs a constant factor, never a new asymptote: a `put`
+                // already pays one O(blob size) hash to measure its own input.
+                let verified = stored &&
+                  (yield* fs.readFile(blob.path).pipe(
+                    Effect.flatMap((existing) => Effect.map(measureBytes(existing), (measured) => measured === digest)),
+                    Effect.catch(() => Effect.succeed(false))
+                  ))
                 if (verified) {
-                  yield* syncPath(blob.path, "r+")
-                  yield* syncPath(blob.parent, "r")
+                  // Freshen the blob's mtime on a dedupe hit — git's loose-object
+                  // freshening, and the touch Bazel's `DiskCacheClient` performs on a
+                  // cache hit. The mtime is the age evidence a mark/sweep collector
+                  // fences its deletions on (`ArtifactSweep`), so a re-publication of
+                  // old bytes must read as a recent reference or the grace period
+                  // cannot protect the entry recorded moments later. Best-effort on
+                  // hosts without `utimes` (the browser filesystem): a failed freshen
+                  // over a blob that still exists keeps the dedupe skip and accepts
+                  // git's freshen-versus-prune race; a failed freshen over a blob that
+                  // VANISHED — a sweep won it — falls through to the atomic rewrite
+                  // below, healing the address.
+                  const now = yield* Clock.currentTimeMillis
+                  const timestamp = new Date(now)
+                  yield* checkRoot.pipe(Effect.mapError(hostFailure))
+                  yield* checkParent.pipe(Effect.mapError(hostFailure))
+                  yield* checkBlob.pipe(Effect.mapError(hostFailure))
+                  const alive = yield* fs.utimes(blob.path, timestamp, timestamp).pipe(
+                    Effect.as(true),
+                    Effect.catch(() => fs.exists(blob.path).pipe(Effect.catch(() => Effect.succeed(true))))
+                  )
+                  if (!alive) {
+                    verified = false
+                  }
+                  if (verified) {
+                    yield* syncPath(blob.path, "r+")
+                    yield* syncPath(blob.parent, "r")
+                  }
                 }
-              }
-              if (!verified) {
-                // Atomic publication: a plain write to the canonical address could be
-                // observed — or survive a crash — as a partial file that every later
-                // read of this digest would trust. The payload lands at a temp path in
-                // the same fanout directory (so the rename never crosses a filesystem)
-                // and is renamed into place; an existing blob is rewritten only when
-                // its bytes no longer match its address.
-                yield* fs.makeDirectory(blob.parent, { recursive: true }).pipe(Effect.mapError(hostFailure))
-                yield* sweepOrphanedTemps
-                const tempPath = `${blob.path}.tmp-${yield* freshTempToken}-${tempSequence++}`
-                // A failed publication removes its own scratch file; a crash cannot,
-                // which is what the sweep above reclaims.
-                yield* fs.writeFile(tempPath, snapshot).pipe(
-                  Effect.andThen(syncPath(tempPath, "r+")),
-                  Effect.andThen(fs.rename(tempPath, blob.path)),
-                  Effect.andThen(syncPath(blob.parent, "r")),
-                  Effect.mapError(hostFailure),
-                  Effect.onError(() => fs.remove(tempPath).pipe(Effect.ignore))
-                )
-              }
-              yield* Metric.update(ArtifactStoreMetrics.puts, 1)
-              return digest
-            }),
-            hostFailure,
-            coordination
-          ))
+                if (!verified) {
+                  // Atomic publication: a plain write to the canonical address could be
+                  // observed — or survive a crash — as a partial file that every later
+                  // read of this digest would trust. The payload lands at a temp path in
+                  // the same fanout directory (so the rename never crosses a filesystem)
+                  // and is renamed into place; an existing blob is rewritten only when
+                  // its bytes no longer match its address.
+                  yield* sweepOrphanedTemps
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    for (let attempt = 0; attempt < 16; attempt++) {
+                      yield* checkRoot
+                      yield* checkParent
+                      const tempPath = `${blob.path}.tmp-${yield* freshTempToken}-${attempt}`
+                      const file = yield* fs.open(tempPath, { flag: "wx", mode: fileMode }).pipe(
+                        Effect.map(Option.some),
+                        Effect.catch((cause) =>
+                          cause.reason._tag === "AlreadyExists"
+                            ? Effect.succeed(Option.none())
+                            : Effect.fail(cause)
+                        )
+                      )
+                      if (Option.isNone(file)) continue
+                      // Install cleanup only after exclusive acquisition. Never unlink
+                      // a colliding entry, which may belong to another writer.
+                      const checkTemp = yield* ArtifactPath.guard(fs, tempPath, "File", yield* file.value.stat)
+                      yield* Effect.gen(function*() {
+                        if (snapshot.byteLength > 0) yield* file.value.writeAll(snapshot)
+                        yield* durability === "best-effort" ? Effect.ignore(file.value.sync) : file.value.sync
+                        yield* checkRoot
+                        yield* checkParent
+                        yield* checkTemp
+                        yield* fs.rename(tempPath, blob.path)
+                        yield* syncPath(blob.parent, "r")
+                      }).pipe(Effect.onError(() =>
+                        Effect.gen(function*() {
+                          yield* checkRoot
+                          yield* checkParent
+                          yield* checkTemp
+                          yield* fs.remove(tempPath)
+                        }).pipe(Effect.ignore)
+                      ))
+                      return
+                    }
+                    return yield* Effect.fail(
+                      error("unavailable", "artifact scratch creation exhausted collision retries")
+                    )
+                  })).pipe(Effect.mapError(hostFailure))
+                }
+                yield* Metric.update(ArtifactStoreMetrics.puts, 1)
+                return digest
+              }),
+              hostFailure,
+              coordination
+            )
+          }))
     )
   )
 
