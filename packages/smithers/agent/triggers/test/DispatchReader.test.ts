@@ -104,7 +104,13 @@ describe("DispatchReader", () => {
         const claim = { triggerId: hourly.id, expectedRevision: registered.revision }
         yield* store.claimFire({ ...claim, occurrence: hour })
         const reserved = yield* reader.list(triggers)
-        yield* store.recordResult({ triggerId: hourly.id, occurrence: hour, outcome: "launched", runId: "run-1" })
+        yield* store.recordResult({
+          triggerId: hourly.id,
+          occurrence: hour,
+          outcome: "launched",
+          runId: "run-1",
+          reservationId: (yield* store.inspect(hourly.id)).activeRunId!
+        })
         yield* store.claimFire({ ...claim, occurrence: 2 * hour })
         yield* TestClock.adjust(2 * hour + 1)
         yield* store.heartbeat("box-1")
@@ -131,7 +137,13 @@ describe("DispatchReader", () => {
         const registered = yield* store.register(hourly)
         const claim = { triggerId: hourly.id, expectedRevision: registered.revision }
         yield* store.claimFire({ ...claim, occurrence: hour })
-        yield* store.recordResult({ triggerId: hourly.id, occurrence: hour, outcome: "launched", runId: "run-1" })
+        yield* store.recordResult({
+          triggerId: hourly.id,
+          occurrence: hour,
+          outcome: "launched",
+          runId: "run-1",
+          reservationId: (yield* store.inspect(hourly.id)).activeRunId!
+        })
         yield* store.claimFire({ ...claim, occurrence: 2 * hour })
         yield* store.recordResult({
           triggerId: hourly.id,

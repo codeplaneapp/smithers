@@ -129,8 +129,9 @@ const seed = (
     yield* store.recordResult({
       triggerId: declaration.id,
       occurrence: 0,
-      outcome,
-      ...(outcome === "launched" ? { runId: "seed" } : {})
+      ...(outcome === "launched"
+        ? { outcome, runId: "seed", reservationId: (yield* store.inspect(declaration.id)).activeRunId! }
+        : { outcome })
     })
   })
 

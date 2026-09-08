@@ -100,7 +100,9 @@ caller has something to cancel.
 
 Between winning a claim and having a run id, a host holds a **reservation**: a
 placeholder written into the trigger's active-run column, spelled
-`trigger-reservation:<triggerId>:<occurrence>`.
+`trigger-reservation:<triggerId>:<attempt>:<occurrence>`. Each attempt gets a
+fresh UUID, including a retry of the same occurrence. Keep the token returned
+by the claim; the two-argument helper below constructs legacy ids.
 
 ```ts
 import * as TriggerStore from "@smthrs/triggers/TriggerStore"
@@ -139,9 +141,45 @@ than leaving two runs alive.
 | `buffered`   | The overlap policy remembered the occurrence.                         |
 | `superseded` | A newer occurrence replaced this one.                                 |
 
-A terminal result clears the active run only when it names the run that owned
-it. A late result with no run id is fenced to the run recorded for its own
-occurrence, so a straggler cannot clear a newer active run.
+A launched result must include a non-empty `runId` and the `reservationId`
+returned by its claim:
+
+```ts
+const result: TriggerStore.Result = {
+  triggerId: "nightly-report",
+  occurrence: 3_600_000,
+  outcome: "launched",
+  runId: "run-42",
+  reservationId: "trigger-reservation:nightly-report:attempt-uuid:3600000"
+}
+```
+
+The transaction checks the active token and the fire state (`null` or
+`buffered`) before changing either row. A stale token or terminal fire fails
+with `stale_owner` and leaves the ledger, cursor, and active owner unchanged.
+The scheduler logs the refusal and cancels the losing accepted run unless an
+idempotent retry has adopted it. A missing,
+empty, or whitespace-only run id fails with `invalid_options` at `runId`.
+
+A terminal result clears the active run only when it names the run recorded
+for its occurrence. Terminal callers may omit `runId` to settle that recorded
+run. Before launch, pass `reservationId` to fence a failure to the exact claim
+attempt. Repeated decisions and settlements do not rewrite a fire. A supersede
+claim settles the displaced reservation inside its claim transaction.
+
+## Buffered compensation is atomic
+
+`claimPending` consumes the pending pointer when it reserves buffered work.
+If dispatch fails, `restorePending({ triggerId, occurrence, reservationId })`
+restores the pointer and releases only that matching unfinished reservation in
+one transaction. It coalesces with newer pending work. A failed write retains
+the lease, so a process crash still leaves a recovery path. The scheduler logs
+compensation failures.
+
+If cancellation of a predecessor fails, the same operation restores the
+predecessor only while its fire is still launched and queues the replacement
+atomically. Stale compensation fails with `stale_owner` and cannot release a
+newer reservation.
 
 ## Two watermarks, and why both exist
 

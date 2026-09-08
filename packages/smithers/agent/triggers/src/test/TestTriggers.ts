@@ -21,6 +21,7 @@ import {
   reservationId,
   reservationLeaseMs,
   reservationOccurrence,
+  resultRefusal,
   type Service,
   TriggerStore
 } from "../TriggerStore.ts"
@@ -122,7 +123,7 @@ const applyClaim = (
   const existingOutcome = current.fires.get(fireKey)
   const existingRunId = current.fireRunIds.get(fireKey)
   let activeRunId = current.active.get(fire.triggerId)
-  const reservation = reservationId(fire.triggerId, fire.occurrence)
+  const reservation = reservationId(fire.triggerId, fire.occurrence, globalThis.crypto.randomUUID())
   const claimTime = current.activeClaimedAt.get(fire.triggerId)
   const expiredReservation = activeRunId !== undefined && isReservation(activeRunId) &&
       (claimTime === undefined || claimTime <= claimedAt - reservationLeaseMs)
@@ -131,7 +132,9 @@ const applyClaim = (
   if (fireExists) {
     const resumableBuffer = fire.resumeBuffered === true && existingOutcome === "buffered"
     const resumableReservation = existingOutcome === null &&
-      (activeRunId === undefined || (activeRunId === reservation && expiredReservation !== undefined))
+      (activeRunId === undefined ||
+        (activeRunId !== undefined && reservationOccurrence(activeRunId) === fire.occurrence &&
+          expiredReservation !== undefined))
     const resumableSupersede = fire.resumeBuffered === true && existingOutcome === null &&
       trigger.overlap === "supersede" && activeRunId !== undefined && existingRunId === activeRunId
     if (!resumableBuffer && !resumableReservation && !resumableSupersede) {
@@ -210,8 +213,8 @@ const applyClaim = (
       const predecessor = current.fireRunIds.get(key(fire.triggerId, activeOccurrence))
       if (predecessor !== undefined) {
         supersededRunId = predecessor
-        fires.set(key(fire.triggerId, activeOccurrence), "superseded")
       }
+      fires.set(key(fire.triggerId, activeOccurrence), "superseded")
     }
     if (supersededRunId !== undefined && !isReservation(supersededRunId)) {
       fireRunIds.set(fireKey, supersededRunId)
@@ -327,7 +330,14 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
           return [Effect.succeed(Option.some({ occurrence, claim: decision.claim })), next]
         }).pipe(Effect.flatten)),
     recordResult: (result) =>
-      requireTrigger(result.triggerId, (trigger, current) => {
+      requireTrigger(result.triggerId, (trigger, current): readonly [Effect.Effect<void, TriggerError>, State] => {
+        const existingOutcome = current.fires.get(key(result.triggerId, result.occurrence))
+        const existing = existingOutcome === undefined
+          ? undefined
+          : fireRecord(current, key(result.triggerId, result.occurrence), existingOutcome)
+        const refusal = resultRefusal(result, existing, current.active.get(result.triggerId))
+        if (refusal !== undefined) return [Effect.fail(refusal), current]
+        if (result.outcome !== "launched" && existing?.outcome === result.outcome) return [Effect.void, current]
         const triggers = new Map(current.triggers).set(result.triggerId, advanced(trigger, result.occurrence))
         const active = new Map(current.active)
         const activeOccurrences = new Map(current.activeOccurrences)
@@ -341,39 +351,36 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
         const terminal = result.outcome === "completed" ||
           result.outcome === "failed" ||
           result.outcome === "superseded"
-        if (fires.has(fireKey)) {
-          fires.set(fireKey, result.outcome)
-          if (result.runId !== undefined) fireRunIds.set(fireKey, result.runId)
-          else if (!terminal) fireRunIds.delete(fireKey)
-          // The SQL store overwrites the error column on every result.
-          if (result.error === undefined) fireErrors.delete(fireKey)
-          else fireErrors.set(fireKey, result.error)
-        }
+        // resultRefusal proved this ledger entry exists and can transition.
+        fires.set(fireKey, result.outcome)
+        if (result.runId !== undefined) fireRunIds.set(fireKey, result.runId)
+        else if (!terminal) fireRunIds.delete(fireKey)
+        // The SQL store overwrites the error column on every result.
+        if (result.error === undefined) fireErrors.delete(fireKey)
+        else fireErrors.set(fireKey, result.error)
         if (result.outcome === "launched") {
-          if (result.runId === undefined) {
-            active.delete(result.triggerId)
-            activeOccurrences.delete(result.triggerId)
-          } else {
-            active.set(result.triggerId, result.runId)
-            activeOccurrences.set(result.triggerId, result.occurrence)
-            runOccurrences.set(result.runId, result.occurrence)
-          }
+          active.set(result.triggerId, result.runId)
+          activeOccurrences.set(result.triggerId, result.occurrence)
+          runOccurrences.set(result.runId, result.occurrence)
           activeClaimedAt.delete(result.triggerId)
         } else if (terminal) {
           const currentRunId = active.get(result.triggerId)
-          const resultOwner = result.runId ?? recordedRunId ?? reservationId(result.triggerId, result.occurrence)
+          const resultOwner = existing?.outcome === "launched"
+            ? recordedRunId
+            : result.reservationId ?? result.runId ?? currentRunId
           if (currentRunId === resultOwner) {
             active.delete(result.triggerId)
             activeOccurrences.delete(result.triggerId)
             activeClaimedAt.delete(result.triggerId)
           }
-        } else if (active.get(result.triggerId) === reservationId(result.triggerId, result.occurrence)) {
+        } else {
+          // A changed skip/buffer decision passed the reservation fence above.
           active.delete(result.triggerId)
           activeOccurrences.delete(result.triggerId)
           activeClaimedAt.delete(result.triggerId)
         }
         return [
-          undefined,
+          Effect.void,
           {
             ...current,
             triggers,
@@ -386,7 +393,43 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
             activeClaimedAt
           }
         ]
-      }),
+      }).pipe(Effect.flatten),
+    restorePending: (fire) =>
+      requireTrigger(fire.triggerId, (_trigger, current): readonly [Effect.Effect<void, TriggerError>, State] => {
+        const outcome = current.fires.get(key(fire.triggerId, fire.occurrence))
+        if (
+          current.active.get(fire.triggerId) !== fire.reservationId ||
+          reservationOccurrence(fire.reservationId) !== fire.occurrence || (outcome !== null && outcome !== "buffered")
+        ) {
+          return [
+            Effect.fail(
+              new TriggerError({ code: "stale_owner", message: "pending restoration no longer owns reservation" })
+            ),
+            current
+          ]
+        }
+        const pending = new Map(current.pending).set(
+          fire.triggerId,
+          Overlap.pendingAfter({ running: false, pending: current.pending.get(fire.triggerId), due: fire.occurrence })
+        )
+        const active = new Map(current.active)
+        const activeOccurrences = new Map(current.activeOccurrences)
+        const activeClaimedAt = new Map(current.activeClaimedAt)
+        const predecessor = current.fireRunIds.get(key(fire.triggerId, fire.occurrence))
+        const predecessorOccurrence = predecessor === undefined ? undefined : current.runOccurrences.get(predecessor)
+        if (
+          predecessor !== undefined && predecessorOccurrence !== undefined &&
+          current.fires.get(key(fire.triggerId, predecessorOccurrence)) === "launched"
+        ) {
+          active.set(fire.triggerId, predecessor)
+          activeOccurrences.set(fire.triggerId, current.runOccurrences.get(predecessor) as number)
+        } else {
+          active.delete(fire.triggerId)
+          activeOccurrences.delete(fire.triggerId)
+        }
+        activeClaimedAt.delete(fire.triggerId)
+        return [Effect.void, { ...current, pending, active, activeOccurrences, activeClaimedAt }]
+      }).pipe(Effect.flatten),
     setPending: (fire) =>
       requireTrigger(fire.triggerId, (_trigger, current) => {
         const pending = new Map(current.pending)

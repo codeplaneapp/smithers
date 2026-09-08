@@ -342,12 +342,32 @@ the run it displaced.
 ```ts
 type Outcome = "launched" | "completed" | "skipped" | "buffered" | "superseded" | "failed"
 
-interface Result extends Fire {
-  readonly outcome: Outcome
-  readonly runId?: string | undefined
-  readonly error?: string | undefined
-}
+type Result =
+  & Fire
+  & { readonly error?: string | undefined }
+  & (
+    | { readonly outcome: "launched"; readonly runId: string; readonly reservationId: string }
+    | {
+      readonly outcome: Exclude<Outcome, "launched">
+      readonly runId?: string | undefined
+      readonly reservationId?: string | undefined
+    }
+  )
 ```
+
+A launched result requires a non-empty `runId` and the exact `reservationId`
+returned by its claim. Missing, empty, or whitespace-only run ids fail with
+`invalid_options` at `runId`. Launches commit only while that reservation owns
+an unfinished fire (`null` or `buffered`). Stale ownership or an impermissible
+fire transition fails with `stale_owner` without changing the ledger, cursor,
+lease, or active run. Terminal results may omit `runId` to settle the run
+already recorded for that occurrence. Before launch, pass `reservationId` to
+fence settlement to a particular attempt. Repeated terminal results and
+claim decisions leave the existing row unchanged.
+
+`resultRefusal(result, fire, activeRunId)` returns a `TriggerError` for invalid
+or stale results, or `undefined` for a permissible transition. Store adapters
+call this helper inside their atomic write before mutating state.
 
 ### TriggerStore.Service
 
@@ -363,6 +383,7 @@ interface Service {
     readonly expectedRevision: number
   }) => Effect.Effect<Option.Option<{ readonly occurrence: number; readonly claim: Claim }>, TriggerError>
   readonly recordResult: (result: Result) => Effect.Effect<void, TriggerError>
+  readonly restorePending: (fire: Fire & { readonly reservationId: string }) => Effect.Effect<void, TriggerError>
   readonly setPending: (fire: Fire) => Effect.Effect<void, TriggerError>
   readonly takePending: (triggerId: string) => Effect.Effect<Option.Option<number>, TriggerError>
   readonly activeRun: (triggerId: string) => Effect.Effect<Option.Option<string>, TriggerError>
@@ -378,24 +399,25 @@ interface Service {
 }
 ```
 
-| Method             | Contract                                                                                                                                                                                       |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`         | Upsert. A first write is revision 1; every replacement increments. Re-validates the declaration.                                                                                               |
-| `get`              | One trigger, or `None`.                                                                                                                                                                        |
-| `list`             | Every trigger, ordered by id.                                                                                                                                                                  |
-| `listEnabled`      | Every enabled trigger, ordered by id. Not a due-time query: due-ness is the scheduler's cron computation.                                                                                      |
-| `claimFire`        | The claim protocol for one occurrence.                                                                                                                                                         |
-| `claimPending`     | Reads the buffered occurrence, applies the same claim rules, and clears the buffer only when the decision consumes it, in one transaction.                                                     |
-| `recordResult`     | Records how one occurrence ended and settles the trigger's active run and cursor.                                                                                                              |
-| `setPending`       | Buffers an occurrence, coalescing with any already pending.                                                                                                                                    |
-| `takePending`      | Removes and returns the buffered occurrence.                                                                                                                                                   |
-| `activeRun`        | The run id or launch reservation the trigger currently holds. Expires a stale reservation as a side effect.                                                                                    |
-| `activeOccurrence` | The occurrence owned by one active run or reservation. `lastFiredAt` cannot answer this, because later skipped and buffered occurrences advance that cursor while an older run remains active. |
-| `clearActive`      | Compare-and-swap release of one run id.                                                                                                                                                        |
-| `history`          | The fire ledger, newest occurrence first, filtered and paged by a `HistoryQuery`. A limit that is not a positive safe integer is refused with `invalid_options` and `path` `"limit"`.          |
-| `inspect`          | The run or reservation and the buffered occurrence one trigger holds, read as the row has them. Expires nothing; `activeRun` is the read that expires a stale reservation.                     |
-| `heartbeat`        | Records that `host` polled the store at the store clock's current time. One row per host; a later poll overwrites.                                                                             |
-| `lastHeartbeat`    | The newest heartbeat across every host, or `None` when no scheduler has ever polled. Equal times fall to the lower host name so the answer is one row.                                         |
+| Method             | Contract                                                                                                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `register`         | Upsert. A first write is revision 1; every replacement increments. Re-validates the declaration.                                                                                                                   |
+| `get`              | One trigger, or `None`.                                                                                                                                                                                            |
+| `list`             | Every trigger, ordered by id.                                                                                                                                                                                      |
+| `listEnabled`      | Every enabled trigger, ordered by id. Not a due-time query: due-ness is the scheduler's cron computation.                                                                                                          |
+| `claimFire`        | The claim protocol for one occurrence.                                                                                                                                                                             |
+| `claimPending`     | Reads the buffered occurrence, applies the same claim rules, and clears the buffer only when the decision consumes it, in one transaction.                                                                         |
+| `recordResult`     | Records how one occurrence ended and settles the trigger's active run and cursor.                                                                                                                                  |
+| `restorePending`   | Atomically restores pending work and releases the matching unfinished reservation. Retains a predecessor only if its fire is still launched. Stale tokens fail with `stale_owner`; failed writes retain the lease. |
+| `setPending`       | Buffers an occurrence, coalescing with any already pending.                                                                                                                                                        |
+| `takePending`      | Removes and returns the buffered occurrence.                                                                                                                                                                       |
+| `activeRun`        | The run id or launch reservation the trigger currently holds. Expires a stale reservation as a side effect.                                                                                                        |
+| `activeOccurrence` | The occurrence owned by one active run or reservation. `lastFiredAt` cannot answer this, because later skipped and buffered occurrences advance that cursor while an older run remains active.                     |
+| `clearActive`      | Compare-and-swap release of one run id.                                                                                                                                                                            |
+| `history`          | The fire ledger, newest occurrence first, filtered and paged by a `HistoryQuery`. A limit that is not a positive safe integer is refused with `invalid_options` and `path` `"limit"`.                              |
+| `inspect`          | The run or reservation and the buffered occurrence one trigger holds, read as the row has them. Expires nothing; `activeRun` is the read that expires a stale reservation.                                         |
+| `heartbeat`        | Records that `host` polled the store at the store clock's current time. One row per host; a later poll overwrites.                                                                                                 |
+| `lastHeartbeat`    | The newest heartbeat across every host, or `None` when no scheduler has ever polled. Equal times fall to the lower host name so the answer is one row.                                                             |
 
 Every method addressing one trigger fails with `unknown_trigger` when no such
 row exists, except `clearActive`, whose compare-and-swap cannot tell a missing
@@ -467,13 +489,16 @@ class TriggerStore extends Context.Service<TriggerStore, Service>()("flows/trigg
 ```ts
 const reservationLeaseMs: number
 const reservationPrefix: string
-const reservationId: (triggerId: string, occurrence: number) => string
+const reservationId: (triggerId: string, occurrence: number, attempt?: string) => string
 const isReservation: (runId: string | undefined) => boolean
 const reservationOccurrence: (runId: string) => number | undefined
 ```
 
 `reservationPrefix` is `trigger-reservation:`, and `reservationId` appends the
-trigger id and the occurrence. `reservationLeaseMs` is 300,000 milliseconds, or
+trigger id, optional attempt, and occurrence. Store claims supply a fresh UUID
+for each attempt, including retries. Use the token returned by the claim; do
+not reconstruct it. The two-argument helper reads and constructs legacy ids.
+`reservationLeaseMs` is 300,000 milliseconds, or
 5 minutes, and both store implementations use it so swapping one for the other
 cannot change recovery timing.
 
@@ -848,6 +873,7 @@ message.
 | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `unknown_trigger`         | A claim, result, pending-state, active-run, or inspect operation requires a trigger row that does not exist. |
 | `trigger_disabled`        | A claim reads a disabled trigger inside its transaction.                                                     |
+| `stale_owner`             | A result or compensation no longer owns a permissible fire transition.                                       |
 | `revision_mismatch`       | `ClaimFire.expectedRevision` differs from the revision read by the claim transaction.                        |
 | `invalid_schedule`        | `Schedule.make` cannot decode the schedule declaration.                                                      |
 | `invalid_trigger`         | `Trigger.make` cannot decode a trigger, or SQL registration receives input with no JSON representation.      |
@@ -886,7 +912,7 @@ fails with `trigger_disabled`.
 
 A launch-capable claim writes a reservation before it starts a run.
 `TriggerStore.reservationPrefix` is `trigger-reservation:`, and
-`TriggerStore.reservationId` appends the trigger ID and occurrence;
+`TriggerStore.reservationId` appends the trigger ID, optional attempt, and occurrence;
 `TriggerStore.reservationOccurrence` reads that occurrence back. The
 `SqlTriggerStore.reservationLeaseMs` lease is 300,000 milliseconds, or 5
 minutes. `TriggerStore.reservationLeaseMs` owns the shared value and
@@ -901,7 +927,16 @@ claim rules as `claimFire`, and clears the buffer only when the decision
 consumes it, inside one transaction. A refused claim leaves the buffer intact,
 and a concurrent active run that buffers it again keeps it pending. If a
 process dies after claiming ordinary or buffered work but before launching it,
-expiration of that launch reservation restores the occurrence.
+expiration of that launch reservation restores the occurrence. After a failed
+buffered launch, `restorePending` restores the pointer and releases the matching
+reservation in one transaction. Compensation failures are logged and retain the
+lease for recovery. Cancellation failures use the same operation to restore a
+still-launched predecessor with its pending replacement.
+
+A launched result carries the claim token and a non-empty run id. The store
+checks ownership and unfinished fire state in the transaction that publishes
+the run. A delayed result cannot overwrite a newer owner or revive a terminal
+fire. The scheduler logs `stale_owner` and cancels a losing accepted run unless a retry of that occurrence has adopted it.
 
 The persisted `last_fired_at_ms` watermark only moves forward. A completed
 skip or buffer advances it inside the claim transaction; a fire or supersede

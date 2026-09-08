@@ -33,7 +33,8 @@ describe("TestTriggers", () => {
           triggerId: trigger.id,
           occurrence: 5,
           outcome: "launched",
-          runId: "run-5"
+          runId: "run-5",
+          reservationId: (yield* store.inspect(trigger.id)).activeRunId!
         })
         const replaced = yield* store.register({ ...trigger, flowId: "next" })
         return { all: yield* store.list(), enabled: yield* store.listEnabled(), replaced }
@@ -49,13 +50,15 @@ describe("TestTriggers", () => {
       Effect.gen(function*() {
         const store = yield* TriggerStore.TriggerStore
         const registered = yield* store.register(trigger)
-        yield* store.claimFire({ triggerId: trigger.id, occurrence: 20, expectedRevision: registered.revision })
+        yield* store.claimFire({ triggerId: trigger.id, occurrence: 10, expectedRevision: registered.revision })
         yield* store.recordResult({
           triggerId: trigger.id,
-          occurrence: 20,
-          outcome: "completed",
-          runId: "run-20"
+          occurrence: 10,
+          outcome: "launched",
+          runId: "run-10",
+          reservationId: (yield* store.inspect(trigger.id)).activeRunId!
         })
+        yield* store.claimFire({ triggerId: trigger.id, occurrence: 20, expectedRevision: registered.revision })
         yield* store.recordResult({ triggerId: trigger.id, occurrence: 10, outcome: "completed" })
         return yield* store.get(trigger.id)
       })
@@ -73,18 +76,20 @@ describe("TestTriggers", () => {
           triggerId: trigger.id,
           occurrence: 1,
           outcome: "launched",
-          runId: "run-1"
+          runId: "run-1",
+          reservationId: (yield* store.inspect(trigger.id)).activeRunId!
         })
         yield* store.clearActive(trigger.id, "run-2")
         const stale = yield* store.activeRun(trigger.id)
         yield* store.clearActive(trigger.id, "run-1")
         const cleared = yield* store.activeRun(trigger.id)
-        yield* store.recordResult({
+        const refused = yield* Effect.flip(store.recordResult({
           triggerId: trigger.id,
           occurrence: 1,
           outcome: "completed",
           runId: "run-9"
-        })
+        }))
+        expect(refused.code).toBe("stale_owner")
         return { stale, cleared, missing: yield* store.get("absent") }
       })
     )

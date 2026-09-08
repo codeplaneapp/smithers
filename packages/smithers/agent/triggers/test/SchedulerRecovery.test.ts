@@ -1,5 +1,7 @@
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
@@ -91,6 +93,126 @@ const inMemory = <A, E>(effect: Effect.Effect<A, E, TriggerStore.TriggerStore>) 
   )
 
 describe("Scheduler recovery", () => {
+  it("cancels a delayed losing launch across two schedulers before lease expiry", async () => {
+    await inMemory(Effect.scoped(Effect.gen(function*() {
+      const store = yield* TriggerStore.TriggerStore
+      yield* seedFired(store, { ...trigger("supersede", "one"), cron: "* * * * *" })
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const runner = runnerFixture()
+      const hostA = yield* Scheduler.make().pipe(Effect.provideService(Scheduler.Runner, {
+        ...runner.service,
+        start: () =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(Effect.sync(() => {
+              runner.active.add("old-run")
+              return "old-run"
+            }))
+          )
+      }))
+      const hostB = yield* Scheduler.make().pipe(Effect.provideService(Scheduler.Runner, runner.service))
+      yield* TestClock.setTime(60_000)
+      const first = yield* Effect.forkScoped(hostA.runOnce)
+      yield* Deferred.await(entered)
+      yield* TestClock.setTime(120_000)
+      yield* hostB.runOnce
+      expect(yield* store.activeRun("hourly")).toEqual(Option.some("run-1"))
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(first)
+      expect(yield* store.activeRun("hourly")).toEqual(Option.some("run-1"))
+      expect(runner.cancelled).toEqual(["old-run"])
+      expect([...runner.active]).toEqual(["run-1"])
+      expect((yield* store.history({ triggerId: "hourly" })).items.find((fire) => fire.occurrence === 60_000)?.outcome)
+        .toBe("superseded")
+    })))
+  })
+
+  it.each(["committed", "reserved"])("keeps an idempotent run adopted by a newer %s attempt", async (owner) => {
+    await inMemory(Effect.scoped(Effect.gen(function*() {
+      const store = yield* TriggerStore.TriggerStore
+      const registered = yield* seedFired(store, trigger("skip", "one"))
+      const runner = runnerFixture({
+        start: () =>
+          Effect.gen(function*() {
+            yield* TestClock.adjust(TriggerStore.reservationLeaseMs + 1)
+            const replacement = yield* store.claimFire({
+              triggerId: "hourly",
+              occurrence: hour,
+              expectedRevision: registered.revision
+            })
+            if (!replacement.claimed || replacement.action !== "fire") return yield* Effect.die("expected replacement")
+            if (owner === "committed") {
+              yield* store.recordResult({
+                triggerId: "hourly",
+                occurrence: hour,
+                outcome: "launched",
+                runId: "shared-run",
+                reservationId: replacement.reservationId
+              })
+            }
+            return "shared-run"
+          })
+      })
+      const scheduler = yield* Scheduler.make().pipe(Effect.provideService(Scheduler.Runner, runner.service))
+      yield* TestClock.setTime(hour)
+      yield* scheduler.runOnce
+      expect(runner.cancelled).toEqual([])
+      const held = yield* store.inspect("hourly")
+      if (owner === "committed") expect(held.activeRunId).toBe("shared-run")
+      else expect(TriggerStore.reservationOccurrence(held.activeRunId!)).toBe(hour)
+    })))
+  })
+
+  it("treats a runner refusal before acceptance as a fenced launch failure", async () => {
+    await inMemory(Effect.scoped(Effect.gen(function*() {
+      const store = yield* TriggerStore.TriggerStore
+      yield* seedFired(store, trigger("skip", "one"))
+      const runner = runnerFixture({
+        start: () => Effect.fail(new TriggerError({ code: "stale_owner", message: "runner refused" }))
+      })
+      const scheduler = yield* Scheduler.make().pipe(Effect.provideService(Scheduler.Runner, runner.service))
+      yield* TestClock.setTime(hour)
+      yield* scheduler.runOnce
+      expect((yield* store.history()).items[0]?.outcome).toBe("failed")
+      expect(yield* store.inspect("hourly")).toEqual({})
+      expect(runner.cancelled).toEqual([])
+    })))
+  })
+
+  it("retains a buffered lease when atomic compensation fails and recovers after a crash", async () => {
+    await inMemory(Effect.scoped(Effect.gen(function*() {
+      const store = yield* TriggerStore.TriggerStore
+      const registered = yield* store.register(trigger("buffer-one", "none"))
+      yield* store.claimFire({ triggerId: "hourly", occurrence: 0, expectedRevision: registered.revision })
+      yield* store.claimFire({ triggerId: "hourly", occurrence: hour, expectedRevision: registered.revision })
+      yield* store.recordResult({ triggerId: "hourly", occurrence: 0, outcome: "completed" })
+      const refuse = () => Effect.fail(new TriggerError({ code: "store", message: "disk full while rearming" }))
+      const flaky = { ...store, setPending: refuse, restorePending: refuse }
+      const failingRunner = runnerFixture({
+        start: () => Effect.fail(new TriggerError({ code: "runner", message: "launch failed" }))
+      })
+      yield* TestClock.setTime(hour)
+      yield* Effect.scoped(Effect.gen(function*() {
+        const scheduler = yield* Scheduler.make().pipe(
+          Effect.provideService(TriggerStore.TriggerStore, flaky),
+          Effect.provideService(Scheduler.Runner, failingRunner.service)
+        )
+        yield* scheduler.runOnce
+      }))
+      const held = yield* store.inspect("hourly")
+      expect(TriggerStore.isReservation(held.activeRunId)).toBe(true)
+      expect(held.pendingAt).toBeUndefined()
+      yield* TestClock.adjust(TriggerStore.reservationLeaseMs + 1)
+      const recoveredRunner = runnerFixture()
+      const recovered = yield* Scheduler.make().pipe(Effect.provideService(Scheduler.Runner, recoveredRunner.service))
+      yield* recovered.runOnce
+      expect(recoveredRunner.starts.map((start) => start.idempotencyKey)).toEqual([
+        `hourly:${new Date(hour).toISOString()}`
+      ])
+    })))
+  })
+
   // The watermark used to advance before the work it gates, so a transient
   // claim failure was logged, abandoned, and never recomputed: the next tick
   // saw the occurrence as already observed and returned nothing.
@@ -243,7 +365,8 @@ describe("Scheduler recovery", () => {
         })
       )
     )
-    const reservation = TriggerStore.reservationId("hourly", 0)
+    const reservation = Option.getOrThrow(outcome.afterFirst)
+    expect(reservation).toMatch(/^trigger-reservation:hourly:[^:]+:0$/)
     expect(outcome.afterFirst).toMatchObject({ _tag: "Some", value: reservation })
     expect(outcome.afterSecond).toMatchObject({ _tag: "Some", value: reservation })
     expect(runner.starts).toHaveLength(0)
@@ -278,7 +401,7 @@ describe("Scheduler recovery", () => {
       `hourly:${new Date(0).toISOString()}`
     ])
     expect(active).toMatchObject({ _tag: "Some", value: "run-1" })
-    expect(runner.inspected).not.toContain(TriggerStore.reservationId("hourly", 0))
+    expect(runner.inspected.some(TriggerStore.isReservation)).toBe(false)
   })
 
   it("rechecks a claimed buffer and re-arms it after its lease expires", async () => {
@@ -298,7 +421,8 @@ describe("Scheduler recovery", () => {
             triggerId: registered.id,
             occurrence: 0,
             outcome: "launched",
-            runId: "prior-run"
+            runId: "prior-run",
+            reservationId: (yield* store.inspect(registered.id)).activeRunId!
           })
           yield* store.claimFire({
             triggerId: registered.id,
@@ -398,7 +522,8 @@ describe("Scheduler recovery", () => {
             triggerId: registered.id,
             occurrence: 0,
             outcome: "launched",
-            runId: "prior-run"
+            runId: "prior-run",
+            reservationId: (yield* store.inspect(registered.id)).activeRunId!
           })
           const scheduler = yield* Scheduler.make().pipe(
             Effect.provideService(Scheduler.Runner, runner.service)
@@ -473,7 +598,8 @@ describe("Scheduler recovery", () => {
             triggerId: registered.id,
             occurrence: 0,
             outcome: "launched",
-            runId: "prior-run"
+            runId: "prior-run",
+            reservationId: (yield* store.inspect(registered.id)).activeRunId!
           })
           yield* store.claimFire({
             triggerId: registered.id,
@@ -750,7 +876,8 @@ describe("Scheduler over real SQLite", () => {
           triggerId: registered.id,
           occurrence: hour,
           outcome: "launched",
-          runId: "settled-run"
+          runId: "settled-run",
+          reservationId: (yield* triggers.inspect(registered.id)).activeRunId!
         })
         const scheduler = yield* Scheduler.make().pipe(
           Effect.provideService(Scheduler.Runner, runnerFixture().service)
@@ -786,7 +913,8 @@ describe("Scheduler over real SQLite", () => {
           triggerId: registered.id,
           occurrence: hour,
           outcome: "launched",
-          runId: "settled-run"
+          runId: "settled-run",
+          reservationId: (yield* triggers.inspect(registered.id)).activeRunId!
         })
         yield* triggers.claimFire({
           triggerId: registered.id,
@@ -937,7 +1065,7 @@ describe("Scheduler dispatch edges", () => {
               }
           })
         }),
-      setPending: () =>
+      restorePending: () =>
         Effect.sync(() => {
           rearmed++
         })

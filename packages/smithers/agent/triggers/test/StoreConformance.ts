@@ -38,6 +38,7 @@ export const storeConformance = <LayerError>(
             Effect.flip(store.claimFire({ triggerId: "absent", occurrence: 1, expectedRevision: 1 })),
             Effect.flip(store.recordResult({ triggerId: "absent", occurrence: 1, outcome: "completed" })),
             Effect.flip(store.setPending({ triggerId: "absent", occurrence: 1 })),
+            Effect.flip(store.restorePending({ triggerId: "absent", occurrence: 1, reservationId: "absent" })),
             Effect.flip(store.takePending("absent")),
             Effect.flip(store.activeRun("absent")),
             Effect.flip(store.activeOccurrence("absent", "run-1")),
@@ -118,7 +119,7 @@ export const storeConformance = <LayerError>(
       expect(result.first).toMatchObject({ claimed: true, action: "fire" })
       expect(result.live).toMatchObject({
         _tag: "Some",
-        value: TriggerStore.reservationId(declaration.id, 1)
+        value: expect.stringMatching(/^trigger-reservation:daily:[^:]+:1$/)
       })
       expect(result.expired).toMatchObject({ _tag: "None" })
       expect(result.retried).toMatchObject({ claimed: true, action: "fire" })
@@ -146,7 +147,8 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 7,
             outcome: "launched",
-            runId: "run-7"
+            runId: "run-7",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           const launched = yield* store.activeOccurrence(declaration.id, "run-7")
           const unknown = yield* store.activeOccurrence(declaration.id, "run-missing")
@@ -182,7 +184,8 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 7,
             outcome: "launched",
-            runId: "run-7"
+            runId: "run-7",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           return { claimed, launched: yield* store.get(declaration.id) }
         })
@@ -206,7 +209,8 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 1,
             outcome: "launched",
-            runId: "run-1"
+            runId: "run-1",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           yield* store.recordResult({
             triggerId: declaration.id,
@@ -223,7 +227,8 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 2,
             outcome: "launched",
-            runId: "run-2"
+            runId: "run-2",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           yield* store.recordResult({ triggerId: declaration.id, occurrence: 1, outcome: "completed" })
           const afterOld = yield* store.activeRun(declaration.id)
@@ -257,7 +262,7 @@ export const storeConformance = <LayerError>(
       expect(result.claim).toMatchObject({
         claimed: true,
         action: "fire",
-        reservationId: TriggerStore.reservationId(declaration.id, 2)
+        reservationId: expect.stringMatching(/^trigger-reservation:daily:[^:]+:2$/)
       })
       expect(result.pending).toMatchObject({ _tag: "Some", value: 1 })
     })
@@ -276,7 +281,8 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 1,
             outcome: "launched",
-            runId: "run-1"
+            runId: "run-1",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           const first = yield* store.claimFire({
             triggerId: declaration.id,
@@ -328,7 +334,7 @@ export const storeConformance = <LayerError>(
       expect(result.second).toMatchObject({
         claimed: true,
         action: "supersede",
-        activeRunId: TriggerStore.reservationId(declaration.id, 1)
+        activeRunId: expect.stringMatching(/^trigger-reservation:daily:[^:]+:1$/)
       })
     })
 
@@ -346,7 +352,8 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 1,
             outcome: "launched",
-            runId: "run-1"
+            runId: "run-1",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           yield* store.claimFire({
             triggerId: declaration.id,
@@ -407,18 +414,27 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 1,
             outcome: "launched",
-            runId: "run-1"
+            runId: "run-1",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           yield* store.claimFire({
             triggerId: declaration.id,
             occurrence: 2,
             expectedRevision: registered.revision
           })
+          yield* store.restorePending({
+            triggerId: declaration.id,
+            occurrence: 2,
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
+          })
+          yield* store.clearActive(declaration.id, "run-1")
+          yield* store.claimFire({ triggerId: declaration.id, occurrence: 3, expectedRevision: registered.revision })
           yield* store.recordResult({
             triggerId: declaration.id,
-            occurrence: 1,
+            occurrence: 3,
             outcome: "launched",
-            runId: "run-2"
+            runId: "run-2",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           yield* store.setPending({ triggerId: declaration.id, occurrence: 2 })
           const claimed = yield* store.claimPending({
@@ -476,7 +492,8 @@ export const storeConformance = <LayerError>(
             triggerId: "active-null",
             occurrence: 1,
             outcome: "launched",
-            runId: activeReservation
+            runId: activeReservation,
+            reservationId: (yield* store.inspect("active-null")).activeRunId!
           })
           const active = yield* store.activeRun("active-null")
 
@@ -491,7 +508,8 @@ export const storeConformance = <LayerError>(
             triggerId: "claim-null",
             occurrence: 1,
             outcome: "launched",
-            runId: claimReservation
+            runId: claimReservation,
+            reservationId: (yield* store.inspect("claim-null")).activeRunId!
           })
           const claim = yield* store.claimFire({
             triggerId: "claim-null",
@@ -505,29 +523,211 @@ export const storeConformance = <LayerError>(
       expect(result.claim).toMatchObject({
         claimed: true,
         action: "fire",
-        reservationId: TriggerStore.reservationId("claim-null", 2)
+        reservationId: expect.stringMatching(/^trigger-reservation:claim-null:[^:]+:2$/)
       })
     })
 
-    it("releases a launch reservation when no run id is reported", async () => {
-      const active = await run(
-        Effect.gen(function*() {
-          const store = yield* TriggerStore.TriggerStore
-          const registered = yield* store.register(declaration)
-          yield* store.claimFire({
+    it.each([undefined, "", "   "])("rejects an invalid launched run id %s without changing state", async (runId) => {
+      await run(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register(declaration)
+        const claim = yield* store.claimFire({
+          triggerId: declaration.id,
+          occurrence: 1,
+          expectedRevision: registered.revision
+        })
+        if (!claim.claimed || claim.action !== "fire") return yield* Effect.die("expected reservation")
+        const before = yield* store.inspect(declaration.id)
+        const result = yield* Effect.exit(store.recordResult({
+          triggerId: declaration.id,
+          occurrence: 1,
+          outcome: "launched",
+          runId,
+          reservationId: claim.reservationId
+        } as TriggerStore.Result))
+        expect(result._tag).toBe("Failure")
+        expect(yield* store.inspect(declaration.id)).toEqual(before)
+        expect((yield* store.history()).items[0]?.outcome).toBe(null)
+      }))
+    })
+
+    it.each(["newer claim", "terminal settlement"])("fences delayed launched results after %s", async (after) => {
+      await run(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register({ ...declaration, overlap: "supersede" })
+        const first = yield* store.claimFire({
+          triggerId: declaration.id,
+          occurrence: 1,
+          expectedRevision: registered.revision
+        })
+        if (!first.claimed || first.action !== "fire") return yield* Effect.die("expected reservation")
+        if (after === "newer claim") {
+          const second = yield* store.claimFire({
             triggerId: declaration.id,
-            occurrence: 1,
+            occurrence: 2,
             expectedRevision: registered.revision
           })
+          if (!second.claimed || (second.action !== "fire" && second.action !== "supersede")) {
+            return yield* Effect.die("expected reservation")
+          }
+          yield* store.recordResult({
+            triggerId: declaration.id,
+            occurrence: 2,
+            outcome: "launched",
+            runId: "new-run",
+            reservationId: second.reservationId
+          })
+        } else {
           yield* store.recordResult({
             triggerId: declaration.id,
             occurrence: 1,
-            outcome: "launched"
+            outcome: "completed",
+            reservationId: first.reservationId
           })
-          return yield* store.activeRun(declaration.id)
+        }
+        const before = yield* store.inspect(declaration.id)
+        const ledger = yield* store.history()
+        const late = yield* Effect.exit(
+          store.recordResult(
+            {
+              triggerId: declaration.id,
+              occurrence: 1,
+              outcome: "launched",
+              runId: "old-run",
+              reservationId: first.reservationId
+            } as TriggerStore.Result
+          )
+        )
+        expect(yield* store.inspect(declaration.id)).toEqual(before)
+        expect(yield* store.history()).toEqual(ledger)
+        expect(late._tag).toBe("Failure")
+      }))
+    })
+
+    it("refuses results for unclaimed occurrences without moving the cursor", async () => {
+      await run(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        yield* store.register(declaration)
+        const before = yield* store.get(declaration.id)
+        expect(
+          (yield* Effect.flip(store.recordResult({ triggerId: declaration.id, occurrence: 1, outcome: "completed" })))
+            .code
+        ).toBe("stale_owner")
+        expect(yield* store.history()).toEqual({ items: [] })
+        expect(yield* store.get(declaration.id)).toEqual(before)
+      }))
+    })
+
+    it.each([true, false])("restores only a still-launched predecessor (%s)", async (live) => {
+      await run(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register({ ...declaration, overlap: "supersede" })
+        const fire = { triggerId: declaration.id, occurrence: 1, expectedRevision: registered.revision }
+        yield* store.claimFire(fire)
+        yield* store.recordResult({
+          ...fire,
+          outcome: "launched",
+          runId: "predecessor",
+          reservationId: (yield* store.inspect(declaration.id)).activeRunId!
         })
-      )
-      expect(active).toMatchObject({ _tag: "None" })
+        const replacement = yield* store.claimFire({ ...fire, occurrence: 2 })
+        if (!replacement.claimed || replacement.action !== "supersede") return yield* Effect.die("expected supersede")
+        if (!live) yield* store.recordResult({ ...fire, outcome: "superseded", runId: "predecessor" })
+        yield* store.restorePending({ ...fire, occurrence: 2, reservationId: replacement.reservationId })
+        expect(yield* store.inspect(declaration.id)).toEqual(
+          live ? { activeRunId: "predecessor", pendingAt: 2 } : { pendingAt: 2 }
+        )
+      }))
+    })
+
+    it("fences a previous attempt after the same occurrence is reclaimed", async () => {
+      await run(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register(declaration)
+        const fire = { triggerId: declaration.id, occurrence: 1, expectedRevision: registered.revision }
+        const first = yield* store.claimFire(fire)
+        yield* TestClock.adjust(reservationLeaseMs + 1)
+        const second = yield* store.claimFire(fire)
+        if (!first.claimed || first.action !== "fire" || !second.claimed || second.action !== "fire") {
+          return yield* Effect.die("expected reservations")
+        }
+        expect(first.reservationId).not.toBe(second.reservationId)
+        const before = yield* store.inspect(declaration.id)
+        for (const outcome of ["launched", "failed", "superseded"] as const) {
+          const stale = yield* Effect.flip(
+            store.recordResult({ ...fire, outcome, runId: "old-run", reservationId: first.reservationId })
+          )
+          expect(stale.code).toBe("stale_owner")
+          expect(yield* store.inspect(declaration.id)).toEqual(before)
+          expect((yield* store.history()).items[0]?.outcome).toBe(null)
+        }
+        yield* store.recordResult({
+          ...fire,
+          outcome: "launched",
+          runId: "new-run",
+          reservationId: second.reservationId
+        })
+        expect(yield* store.inspect(declaration.id)).toEqual({ activeRunId: "new-run" })
+      }))
+    })
+
+    it("atomically restores a buffered reservation and refuses stale compensation", async () => {
+      await run(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register({ ...declaration, overlap: "buffer-one" })
+        const fire = { triggerId: declaration.id, occurrence: 1, expectedRevision: registered.revision }
+        yield* store.claimFire(fire)
+        yield* store.claimFire({ ...fire, occurrence: 2 })
+        yield* store.recordResult({ ...fire, outcome: "completed" })
+        const pending = yield* store.claimPending(fire)
+        if (pending._tag !== "Some" || !pending.value.claim.claimed || pending.value.claim.action !== "fire") {
+          return yield* Effect.die("expected buffered reservation")
+        }
+        const reservationId = pending.value.claim.reservationId
+        const restore = { triggerId: declaration.id, occurrence: 2, reservationId }
+        expect(yield* store.inspect(declaration.id)).toEqual({ activeRunId: reservationId })
+        yield* store.restorePending(restore)
+        expect(yield* store.inspect(declaration.id)).toEqual({ pendingAt: 2 })
+        expect((yield* store.history()).items[0]?.outcome).toBe("buffered")
+        const retry = yield* store.claimPending(fire)
+        if (retry._tag !== "Some" || !retry.value.claim.claimed || retry.value.claim.action !== "fire") {
+          return yield* Effect.die("expected retry")
+        }
+        yield* store.setPending({ ...fire, occurrence: 3 })
+        const before = yield* store.inspect(declaration.id)
+        expect((yield* Effect.flip(store.restorePending(restore))).code).toBe("stale_owner")
+        expect(yield* store.inspect(declaration.id)).toEqual(before)
+        yield* store.restorePending({ ...restore, reservationId: retry.value.claim.reservationId })
+        expect(yield* store.inspect(declaration.id)).toEqual({ pendingAt: 3 })
+      }))
+    })
+
+    it("refuses a terminal result naming a different run without rewriting the ledger", async () => {
+      await run(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register(declaration)
+        const fire = { triggerId: declaration.id, occurrence: 1, expectedRevision: registered.revision }
+        const claim = yield* store.claimFire(fire)
+        if (!claim.claimed || claim.action !== "fire") return yield* Effect.die("expected reservation")
+        yield* store.recordResult({ ...fire, outcome: "launched", runId: "run", reservationId: claim.reservationId })
+        const before = yield* store.history()
+        expect((yield* Effect.flip(store.recordResult({ ...fire, outcome: "completed", runId: "other-run" }))).code)
+          .toBe("stale_owner")
+        expect(yield* store.history()).toEqual(before)
+        expect(yield* store.inspect(declaration.id)).toEqual({ activeRunId: "run" })
+        yield* store.recordResult({ ...fire, outcome: "completed" })
+        const settled = yield* store.history()
+        yield* store.recordResult({ ...fire, outcome: "completed", runId: "run" })
+        expect((yield* Effect.flip(store.recordResult({ ...fire, outcome: "completed", runId: "other-run" }))).code)
+          .toBe("stale_owner")
+        expect(yield* store.history()).toEqual(settled)
+        expect(yield* store.inspect(declaration.id)).toEqual({})
+        expect(
+          (yield* Effect.flip(
+            store.recordResult({ ...fire, outcome: "launched", runId: "late-run", reservationId: claim.reservationId })
+          )).code
+        ).toBe("stale_owner")
+      }))
     })
 
     it("claims and clears one buffered occurrence atomically", async () => {
@@ -584,7 +784,8 @@ export const storeConformance = <LayerError>(
             triggerId: declaration.id,
             occurrence: 1,
             outcome: "launched",
-            runId: "run-1"
+            runId: "run-1",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
           })
           yield* store.claimFire({
             triggerId: declaration.id,
@@ -718,7 +919,13 @@ export const storeConformance = <LayerError>(
           const registered = yield* store.register(declaration)
           const claim = { triggerId: declaration.id, expectedRevision: registered.revision }
           yield* store.claimFire({ ...claim, occurrence: 1 })
-          yield* store.recordResult({ triggerId: declaration.id, occurrence: 1, outcome: "launched", runId: "run-1" })
+          yield* store.recordResult({
+            triggerId: declaration.id,
+            occurrence: 1,
+            outcome: "launched",
+            runId: "run-1",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
+          })
           // Skipped inside the claim: run-1 is still active under the skip policy.
           yield* store.claimFire({ ...claim, occurrence: 2 })
           yield* store.recordResult({
@@ -804,7 +1011,13 @@ export const storeConformance = <LayerError>(
           yield* store.claimFire({ ...claim, occurrence: 1 })
           const reserved = yield* store.inspect(declaration.id)
           yield* store.claimFire({ ...claim, occurrence: 2 })
-          yield* store.recordResult({ triggerId: declaration.id, occurrence: 1, outcome: "launched", runId: "run-1" })
+          yield* store.recordResult({
+            triggerId: declaration.id,
+            occurrence: 1,
+            outcome: "launched",
+            runId: "run-1",
+            reservationId: (yield* store.inspect(declaration.id)).activeRunId!
+          })
           const running = yield* store.inspect(declaration.id)
           yield* TestClock.adjust(reservationLeaseMs + 1)
           const later = yield* store.inspect(declaration.id)
@@ -812,7 +1025,7 @@ export const storeConformance = <LayerError>(
         })
       )
       expect(result.empty).toEqual({})
-      expect(result.reserved).toEqual({ activeRunId: TriggerStore.reservationId(declaration.id, 1) })
+      expect(result.reserved).toEqual({ activeRunId: expect.stringMatching(/^trigger-reservation:daily:[^:]+:1$/) })
       expect(result.running).toEqual({ activeRunId: "run-1", pendingAt: 2 })
       expect(result.later).toEqual(result.running)
     })

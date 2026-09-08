@@ -479,7 +479,7 @@ export const make = (
         occurrence,
         outcome: "failed",
         error: error.message,
-        ...(runId === undefined ? {} : { runId })
+        runId
       })
 
     const launch = (
@@ -504,7 +504,8 @@ export const make = (
             triggerId: trigger.id,
             occurrence,
             outcome: "launched",
-            runId
+            runId,
+            reservationId: reservation
           })
           launchRecorded = true
           yield* Deferred.succeed(started, undefined)
@@ -524,21 +525,45 @@ export const make = (
                 yield* recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)
                 return
               }
-              if (runId !== undefined) {
-                // The runtime accepted the idempotent launch, but its run id
-                // did not reach durable state. Re-arm before releasing the
-                // reservation so a failed compensation still falls back to
-                // lease recovery. Marking this occurrence failed would lose
-                // the only retry path even though work is already running.
-                yield* store.setPending({ triggerId: trigger.id, occurrence }).pipe(
-                  Effect.andThen(store.clearActive(trigger.id, reservation)),
-                  Effect.ignore
+              if (error.code === "stale_owner" && runId !== undefined) {
+                yield* Effect.logWarning("A trigger launch lost its reservation", error).pipe(
+                  Effect.annotateLogs({ triggerId: trigger.id, occurrence: String(occurrence) })
                 )
-              } else if (preserveBuffered) {
-                yield* store.clearActive(trigger.id, reservation).pipe(Effect.ignore)
-              } else {
-                yield* recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)
+                const losingRunId = runId
+                yield* isolate(
+                  { triggerId: trigger.id, runId },
+                  "losing run reconciliation",
+                  Effect.gen(function*() {
+                    const held = yield* store.inspect(trigger.id)
+                    // An idempotent retry may have committed this same run.
+                    // An unfinished retry of the same occurrence will adopt it.
+                    if (
+                      held.activeRunId === losingRunId ||
+                      (held.activeRunId !== undefined && reservationOccurrence(held.activeRunId) === occurrence)
+                    ) return
+                    yield* runner.cancel(losingRunId)
+                  })
+                ).pipe(Effect.ignore)
+                yield* Deferred.succeed(started, undefined)
+                return
               }
+              if (!preserveBuffered) {
+                if (runId !== undefined) {
+                  yield* isolate(
+                    { triggerId: trigger.id },
+                    "launch compensation",
+                    store.restorePending({
+                      triggerId: trigger.id,
+                      occurrence,
+                      reservationId: reservation
+                    })
+                  ).pipe(Effect.ignore)
+                } else {
+                  yield* recordFailed(trigger, occurrence, error, reservation).pipe(Effect.ignore)
+                }
+              }
+              // Buffered dispatch is compensated once by resumePending. Until
+              // its atomic write commits the original lease stays recoverable.
               yield* Deferred.fail(started, error)
             })
           ),
@@ -572,6 +597,7 @@ export const make = (
       trigger: Registered,
       prior: Active,
       replacementOccurrence: number,
+      replacementReservation: string,
       queueReplacement: boolean
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
@@ -582,30 +608,24 @@ export const make = (
               // reservation. If cancellation fails, restore that run as active
               // and queue the replacement so neither side of the hand-off is
               // lost. Keep its monitor attached: it is still running.
-              const restore = Number.isFinite(prior.occurrence)
-                ? store.recordResult({
-                  triggerId: trigger.id,
-                  occurrence: prior.occurrence,
-                  outcome: "launched",
-                  runId: prior.runId
-                })
+              const restore = queueReplacement
+                ? isolate(
+                  { triggerId: trigger.id },
+                  "supersede compensation",
+                  store.restorePending({
+                    triggerId: trigger.id,
+                    occurrence: replacementOccurrence,
+                    reservationId: replacementReservation
+                  })
+                )
                 : Effect.void
               return restore.pipe(
-                Effect.ignore,
-                Effect.andThen(
-                  queueReplacement
-                    ? store.setPending({
-                      triggerId: trigger.id,
-                      occurrence: replacementOccurrence
-                    }).pipe(Effect.ignore)
-                    : Effect.void
-                ),
                 Effect.andThen(Effect.fail(error))
               )
             })
           )
         }
-        if (Number.isFinite(prior.occurrence)) {
+        if (Number.isFinite(prior.occurrence) && !isReservation(prior.runId)) {
           yield* store.recordResult({
             triggerId: trigger.id,
             occurrence: prior.occurrence,
@@ -666,6 +686,7 @@ export const make = (
                     runId: superseded
                   },
                 occurrence,
+                claim.reservationId,
                 !resumeBuffered
               )
             }
@@ -741,19 +762,13 @@ export const make = (
               true
             ).pipe(
               Effect.onError(() =>
-                (
+                isolate(
+                  { triggerId: current.id },
+                  "buffered launch compensation",
                   claim.action === "fire" || claim.action === "supersede"
-                    ? store.clearActive(current.id, claim.reservationId)
-                    : Effect.void
-                ).pipe(
-                  Effect.andThen(
-                    store.setPending({
-                      triggerId: current.id,
-                      occurrence
-                    })
-                  ),
-                  Effect.ignore
-                )
+                    ? store.restorePending({ triggerId: current.id, occurrence, reservationId: claim.reservationId })
+                    : store.setPending({ triggerId: current.id, occurrence })
+                ).pipe(Effect.ignore)
               )
             )
           })

@@ -108,8 +108,8 @@ export const reservationPrefix = "trigger-reservation:"
  * @category constructors
  * @since 0.1.0
  */
-export const reservationId = (triggerId: string, occurrence: number): string =>
-  `${reservationPrefix}${triggerId}:${occurrence}`
+export const reservationId = (triggerId: string, occurrence: number, attempt?: string): string =>
+  `${reservationPrefix}${triggerId}:${attempt === undefined ? "" : `${attempt}:`}${occurrence}`
 
 /**
  * Whether a stored `active_run_id` is a launch reservation.
@@ -146,10 +146,50 @@ export type Outcome = "launched" | "completed" | "skipped" | "buffered" | "super
  * @category models
  * @since 0.1.0
  */
-export interface Result extends Fire {
-  readonly outcome: Outcome
-  readonly runId?: string | undefined
-  readonly error?: string | undefined
+export type Result =
+  & Fire
+  & { readonly error?: string | undefined }
+  & (
+    | { readonly outcome: "launched"; readonly runId: string; readonly reservationId: string }
+    | {
+      readonly outcome: Exclude<Outcome, "launched">
+      readonly runId?: string | undefined
+      readonly reservationId?: string | undefined
+    }
+  )
+
+/**
+ * Refuses results that no longer own a permissible fire transition.
+ * Launched run ids are validated at runtime for adapters outside TypeScript.
+ *
+ * @category predicates
+ * @since 1.0.0-rc.0
+ */
+export const resultRefusal = (
+  result: Result,
+  fire: FireRecord | undefined,
+  activeRunId: string | undefined
+): TriggerError | undefined => {
+  if (result.outcome === "launched" && (typeof result.runId !== "string" || result.runId.trim().length === 0)) {
+    return new TriggerError({ code: "invalid_options", message: "launched requires a non-empty runId", path: "runId" })
+  }
+  const unfinished = fire?.outcome === null || fire?.outcome === "buffered"
+  const reservation = activeRunId !== undefined && isReservation(activeRunId) &&
+    reservationOccurrence(activeRunId) === result.occurrence
+  const owner = result.reservationId ?? result.runId ?? (reservation ? activeRunId : undefined)
+  const permitted = result.outcome === "launched"
+    ? unfinished && reservation && result.reservationId === activeRunId
+    : fire !== undefined && (
+      // A repeated decision or settlement is harmless; callers do not rewrite it.
+      (fire.outcome === result.outcome && (result.runId === undefined || result.runId === fire.runId)) ||
+      (fire.outcome === "launched" && result.outcome !== "skipped" && result.outcome !== "buffered" &&
+        result.reservationId === undefined && (result.runId === undefined || result.runId === fire.runId)) ||
+      (unfinished && reservation && owner === activeRunId)
+    )
+  return permitted ? undefined : new TriggerError({
+    code: "stale_owner",
+    message: `result no longer owns trigger ${result.triggerId} occurrence ${result.occurrence}`
+  })
 }
 
 /**
@@ -312,6 +352,11 @@ export interface Service {
     TriggerError
   >
   readonly recordResult: (result: Result) => Effect.Effect<void, TriggerError>
+  /** Atomically re-arms unfinished work and releases only its matching reservation.
+   * A retained predecessor is restored with the pending pointer in the same write.
+   * A stale token fails with `stale_owner`; a failed write leaves the lease intact.
+   */
+  readonly restorePending: (fire: Fire & { readonly reservationId: string }) => Effect.Effect<void, TriggerError>
   readonly setPending: (fire: Fire) => Effect.Effect<void, TriggerError>
   readonly takePending: (triggerId: string) => Effect.Effect<Option.Option<number>, TriggerError>
   readonly activeRun: (triggerId: string) => Effect.Effect<Option.Option<string>, TriggerError>
@@ -369,6 +414,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
   claimFire: () => unavailable("claimFire"),
   claimPending: () => unavailable("claimPending"),
   recordResult: () => unavailable("recordResult"),
+  restorePending: () => unavailable("restorePending"),
   setPending: () => unavailable("setPending"),
   takePending: () => unavailable("takePending"),
   activeRun: () => unavailable("activeRun"),

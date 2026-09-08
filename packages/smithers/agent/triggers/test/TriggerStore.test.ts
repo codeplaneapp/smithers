@@ -26,6 +26,48 @@ const layerWithSql = SqlTriggerStore.layer.pipe(Layer.provideMerge(TestDatabase.
 storeConformance("SqlTriggerStore", layer)
 
 describe("TriggerStore", () => {
+  it("settles a legacy launched row with no run id without clearing a newer reservation", async () => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const sql = yield* SqlClient.SqlClient
+        const registered = yield* store.register({ ...trigger, overlap: "supersede" })
+        yield* sql`INSERT INTO flows_trigger_fires (trigger_id, occurrence_at_ms, outcome) VALUES ('daily', 1, 'launched')`
+        yield* store.claimFire({ triggerId: "daily", occurrence: 2, expectedRevision: registered.revision })
+        const before = yield* store.inspect("daily")
+        yield* store.recordResult({ triggerId: "daily", occurrence: 1, outcome: "completed" })
+        expect(yield* store.inspect("daily")).toEqual(before)
+      }).pipe(Effect.provide(layerWithSql))
+    )
+  })
+
+  it("rolls back both halves of buffered compensation when the pending write fails", async () => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const sql = yield* SqlClient.SqlClient
+        const registered = yield* store.register({ ...trigger, overlap: "buffer-one" })
+        const fire = { triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision }
+        yield* store.claimFire(fire)
+        yield* store.claimFire({ ...fire, occurrence: 2 })
+        yield* store.recordResult({ ...fire, outcome: "completed" })
+        const pending = yield* store.claimPending(fire)
+        if (
+          pending._tag !== "Some" || !pending.value.claim.claimed || pending.value.claim.action !== "fire"
+        ) return yield* Effect.die("expected reservation")
+        const restore = { triggerId: trigger.id, occurrence: 2, reservationId: pending.value.claim.reservationId }
+        const before = yield* store.inspect(trigger.id)
+        yield* sql`CREATE TRIGGER refuse_rearm AFTER UPDATE OF pending_at_ms ON flows_triggers
+        WHEN NEW.pending_at_ms IS NOT NULL BEGIN SELECT RAISE(ABORT, 'rearm failed'); END`
+        expect((yield* Effect.flip(store.restorePending(restore))).code).toBe("store")
+        expect(yield* store.inspect(trigger.id)).toEqual(before)
+        yield* sql`DROP TRIGGER refuse_rearm`
+        yield* store.restorePending(restore)
+        expect(yield* store.inspect(trigger.id)).toEqual({ pendingAt: 2 })
+      }).pipe(Effect.provide(layerWithSql))
+    )
+  })
+
   it("refuses to register a cron the calendar never satisfies", async () => {
     const error = await Effect.runPromise(
       Effect.gen(function*() {
@@ -52,15 +94,17 @@ describe("TriggerStore", () => {
   it("retains an active run across buffered and skipped outcomes and clears it on completion", async () => {
     const program = Effect.gen(function*() {
       const store = yield* TriggerStore.TriggerStore
-      const registered = yield* store.register(trigger)
-      for (const occurrence of [1, 2, 3]) {
-        yield* store.claimFire({ triggerId: trigger.id, occurrence, expectedRevision: registered.revision })
-      }
+      const registered = yield* store.register({ ...trigger, overlap: "buffer-one" })
+      yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
+      yield* store.claimFire({ triggerId: trigger.id, occurrence: 2, expectedRevision: registered.revision })
+      const updated = yield* store.register(trigger)
+      yield* store.claimFire({ triggerId: trigger.id, occurrence: 3, expectedRevision: updated.revision })
       yield* store.recordResult({
         triggerId: trigger.id,
         occurrence: 1,
         outcome: "launched",
-        runId: "run-1"
+        runId: "run-1",
+        reservationId: (yield* store.inspect(trigger.id)).activeRunId!
       })
       yield* store.recordResult({ triggerId: trigger.id, occurrence: 2, outcome: "buffered" })
       yield* store.recordResult({ triggerId: trigger.id, occurrence: 3, outcome: "skipped" })
@@ -109,7 +153,8 @@ describe("TriggerStore", () => {
           triggerId: trigger.id,
           occurrence: 7,
           outcome: "launched",
-          runId: "run-1"
+          runId: "run-1",
+          reservationId: (yield* store.inspect(trigger.id)).activeRunId!
         })
         const withCursor = yield* store.get(trigger.id)
         return { written, withCursor }
@@ -166,7 +211,8 @@ describe("TriggerStore", () => {
           triggerId: trigger.id,
           occurrence: 1,
           outcome: "launched",
-          runId: "run-1"
+          runId: "run-1",
+          reservationId: (yield* store.inspect(trigger.id)).activeRunId!
         })
         yield* store.clearActive(trigger.id, "run-2")
         const stale = yield* store.activeRun(trigger.id)
@@ -209,7 +255,8 @@ describe("TriggerStore", () => {
           triggerId: trigger.id,
           occurrence: 1,
           outcome: "launched",
-          runId: "run-1"
+          runId: "run-1",
+          reservationId: (yield* store.inspect(trigger.id)).activeRunId!
         })
         yield* store.claimFire({ triggerId: trigger.id, occurrence: 2, expectedRevision: registered.revision })
         const afterSkip = yield* store.get(trigger.id)
@@ -269,7 +316,8 @@ describe("TriggerStore", () => {
           triggerId: trigger.id,
           occurrence: 1,
           outcome: "launched",
-          runId: "run-1"
+          runId: "run-1",
+          reservationId: (yield* store.inspect(trigger.id)).activeRunId!
         })
         return yield* store.claimFire({
           triggerId: trigger.id,
@@ -282,7 +330,7 @@ describe("TriggerStore", () => {
       claimed: true,
       action: "supersede",
       activeRunId: "run-1",
-      reservationId: "trigger-reservation:daily:2"
+      reservationId: expect.stringMatching(/^trigger-reservation:daily:[^:]+:2$/)
     })
   })
 

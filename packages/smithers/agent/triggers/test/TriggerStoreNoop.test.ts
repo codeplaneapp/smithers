@@ -39,6 +39,8 @@ const call = (store: TriggerStore.Service, method: keyof TriggerStore.Service) =
       return store.claimFire({ triggerId: "daily", occurrence: 1, expectedRevision: 1 })
     case "recordResult":
       return store.recordResult({ triggerId: "daily", occurrence: 1, outcome: "completed" })
+    case "restorePending":
+      return store.restorePending({ triggerId: "daily", occurrence: 1, reservationId: "reservation" })
     case "setPending":
       return store.setPending({ triggerId: "daily", occurrence: 1 })
     case "takePending":
@@ -69,6 +71,7 @@ const methods: ReadonlyArray<keyof TriggerStore.Service> = [
   "listEnabled",
   "claimFire",
   "recordResult",
+  "restorePending",
   "setPending",
   "takePending",
   "activeRun",
@@ -80,6 +83,18 @@ const methods: ReadonlyArray<keyof TriggerStore.Service> = [
   "heartbeat",
   "lastHeartbeat"
 ]
+
+// @ts-expect-error A launch acknowledgement cannot omit the run id.
+const missingRun: TriggerStore.Result = {
+  triggerId: "daily",
+  occurrence: 1,
+  outcome: "launched",
+  reservationId: "reservation"
+}
+// @ts-expect-error A launch acknowledgement cannot omit the claim token.
+const missingToken: TriggerStore.Result = { triggerId: "daily", occurrence: 1, outcome: "launched", runId: "run" }
+void missingRun
+void missingToken
 
 describe("TriggerStore.makeNoop", () => {
   it("fails every method as an unavailable store", async () => {

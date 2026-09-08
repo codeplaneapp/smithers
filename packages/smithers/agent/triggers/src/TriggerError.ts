@@ -23,6 +23,7 @@ export const TriggerErrorCode = Schema.Literals([
   "unknown_trigger",
   "trigger_disabled",
   "revision_mismatch",
+  "stale_owner",
   "invalid_schedule",
   "invalid_trigger",
   "invalid_options",
