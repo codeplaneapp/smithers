@@ -66,6 +66,42 @@ const harness = (
 
 const TOKEN = "ghp_test_token_never_served"
 
+/**
+ * A real RSA key pair for the GitHub App secrets: the handler signs an App JWT
+ * with it, so these tests exercise the same WebCrypto path the Worker runs.
+ */
+const pair = await crypto.subtle.generateKey(
+  { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: Uint8Array.of(1, 0, 1), hash: "SHA-256" },
+  true,
+  ["sign", "verify"]
+)
+const exported = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey))
+let exportedBinary = ""
+for (const byte of exported) exportedBinary += String.fromCharCode(byte)
+const APP_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----\n${btoa(exportedBinary).replace(/(.{64})/g, "$1\n")}\n-----END PRIVATE KEY-----\n`
+const APP_ENV = { SMITHERS_GITHUB_APP_ID: "4163546", SMITHERS_GITHUB_APP_PRIVATE_KEY: APP_PRIVATE_KEY }
+const INSTALLATION_TOKEN = "ghs_installation_token_never_served"
+
+/** Runs the pending microtasks so an in-flight refresh has issued its fetches. */
+const flush = async () => {
+  for (let tick = 0; tick < 10; tick += 1) await Promise.resolve()
+}
+
+const pathOf = (req: Request) => new URL(req.url).pathname
+const appCalls = (requests: ReadonlyArray<Request>) => requests.filter((req) => pathOf(req).startsWith("/app/")).map(pathOf)
+const statsCalls = (requests: ReadonlyArray<Request>) => requests.filter((req) => pathOf(req).startsWith("/repos/"))
+
+/** GitHub as the App sees it: the installation lookup, the token exchange, then the metadata reads. */
+const asTheApp = (
+  installations: unknown = [{ id: 150824198, account: { login: "smithersai" }, repository_selection: "all" }],
+  token: string = INSTALLATION_TOKEN
+) =>
+(req: Request) => {
+  if (pathOf(req) === "/app/installations") return Response.json(installations)
+  if (pathOf(req).endsWith("/access_tokens")) return Response.json({ token }, { status: 201 })
+  return answerEach(req)
+}
+
 describe("the curated catalog", () => {
   test("lists only Smithers at launch", () => {
     expect(AVAILABLE_REPOS.map((repo) => repo.name)).toEqual(["smithersai/smithers"])
@@ -182,7 +218,9 @@ describe("public available repositories", () => {
     const pending = new Map<string, (response: Response) => void>()
     const { handler, requests } = harness((req) => new Promise((resolve) => { pending.set(repoName(req), resolve) }), CLAIMED_ROSTER)
     const served = handler(request())
-    await Promise.resolve()
+    // A refresh first asks the GitHub App layer for a bearer (undefined here,
+    // with no secrets set), so the metadata reads start a few microtasks in.
+    await flush()
     expect(requests).toHaveLength(CLAIMED_ROSTER.length + COMING_SOON_REPOS.length)
     expect([...pending.keys()]).toEqual([...CLAIMED_ROSTER.map((repo) => repo.name), ...COMING_SOON_REPOS.map((repo) => repo.name)])
     pending.get("example/later")!(answerEach(requests[2]!))
@@ -321,6 +359,88 @@ describe("public available repositories", () => {
       expect(req.headers.has("authorization")).toBe(false)
       expect(req.headers.has("x-github-api-version")).toBe(false)
     }
+  })
+
+  test("mints one GitHub App installation token and sends it on every stats read", async () => {
+    const { handler, requests, advance } = harness(asTheApp())
+    const response = await handler(request(), APP_ENV)
+    expect(appCalls(requests)).toEqual(["/app/installations", "/app/installations/150824198/access_tokens"])
+    expect(statsCalls(requests)).toHaveLength(FETCH_COUNT)
+    for (const req of statsCalls(requests)) {
+      expect(req.headers.get("authorization")).toBe(`Bearer ${INSTALLATION_TOKEN}`)
+      expect(req.headers.get("x-github-api-version")).toBe("2022-11-28")
+    }
+    const catalog = await response.clone().json() as PublicRepoCatalog
+    expect(catalog.repos[0]!.stats?.stars).toBe(407)
+    // The token outlives the catalog's five-minute window: a second refresh reuses it.
+    advance(300_001)
+    await handler(request(), APP_ENV)
+    expect(appCalls(requests)).toHaveLength(2)
+    expect(statsCalls(requests)).toHaveLength(FETCH_COUNT * 2)
+    // Neither credential is ever served.
+    const served = `${[...response.headers.entries()].join("\n")}\n${await response.text()}`
+    expect(served).not.toContain(INSTALLATION_TOKEN)
+    expect(served).not.toContain("PRIVATE KEY")
+  })
+
+  test("a 401 on a stats read buys exactly one new installation token, and no more", async () => {
+    let exchanges = 0
+    const { handler, requests, advance } = harness((req) => {
+      if (pathOf(req) === "/app/installations") return Response.json([{ id: 150824198, account: { login: "smithersai" } }])
+      if (pathOf(req).endsWith("/access_tokens")) {
+        exchanges += 1
+        return Response.json({ token: `ghs_round_${exchanges}` }, { status: 201 })
+      }
+      // The first installation token has been revoked; the second one works.
+      return req.headers.get("authorization") === "Bearer ghs_round_1"
+        ? Response.json({ message: "Bad credentials" }, { status: 401 })
+        : answerEach(req)
+    })
+    const catalog = await (await handler(request(), APP_ENV)).json() as PublicRepoCatalog
+    expect(exchanges).toBe(2)
+    expect(statsCalls(requests)).toHaveLength(FETCH_COUNT * 2)
+    expect(statsCalls(requests).at(-1)!.headers.get("authorization")).toBe("Bearer ghs_round_2")
+    expect(catalog.repos[0]!.stats?.stars).toBe(407)
+    // The renewed token is held: the next window does not exchange again.
+    advance(300_001)
+    await handler(request(), APP_ENV)
+    expect(exchanges).toBe(2)
+  })
+
+  test("a token GitHub keeps refusing nulls the stats without a second re-exchange", async () => {
+    let exchanges = 0
+    const { handler, requests } = harness((req) => {
+      if (pathOf(req) === "/app/installations") return Response.json([{ id: 150824198, account: { login: "smithersai" } }])
+      if (pathOf(req).endsWith("/access_tokens")) {
+        exchanges += 1
+        return Response.json({ token: INSTALLATION_TOKEN }, { status: 201 })
+      }
+      return Response.json({ message: "Bad credentials" }, { status: 401 })
+    })
+    const response = await handler(request(), APP_ENV)
+    expect(exchanges).toBe(2)
+    expect(statsCalls(requests)).toHaveLength(FETCH_COUNT * 2)
+    expect(await response.json()).toEqual({ repos: expectedRepos(() => null), comingSoon: expectedComingSoon(() => null) })
+  })
+
+  test("GITHUB_TOKEN overrides the App, and an App installed nowhere reads anonymously", async () => {
+    const override = harness(asTheApp())
+    await override.handler(request(), { ...APP_ENV, GITHUB_TOKEN: TOKEN })
+    expect(appCalls(override.requests)).toEqual([])
+    for (const req of statsCalls(override.requests)) expect(req.headers.get("authorization")).toBe(`Bearer ${TOKEN}`)
+
+    const uninstalled = harness(asTheApp([]))
+    const warned: Array<unknown> = []
+    const warn = console.warn
+    console.warn = (line: unknown) => warned.push(line)
+    const response = await uninstalled.handler(request(), APP_ENV).finally(() => {
+      console.warn = warn
+    })
+    expect(warned).toEqual(["the GitHub App is not installed on any organization"])
+    expect(appCalls(uninstalled.requests)).toEqual(["/app/installations"])
+    expect(statsCalls(uninstalled.requests)).toHaveLength(FETCH_COUNT)
+    for (const req of statsCalls(uninstalled.requests)) expect(req.headers.has("authorization")).toBe(false)
+    expect((await response.json() as PublicRepoCatalog).repos[0]!.stats?.stars).toBe(407)
   })
 
   test("the Worker hands its env to the catalog route, so a deployed secret reaches GitHub", async () => {

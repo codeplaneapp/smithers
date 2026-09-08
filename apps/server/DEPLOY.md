@@ -221,7 +221,7 @@ ceilings (300 per address or login, 5000 deployment-wide). The route needs:
 
 `CEREBRAS_MODEL` (var, optional) overrides the model id.
 
-### The public catalog's GitHub stats can use a token
+### The public catalog's GitHub stats authenticate as a GitHub App
 
 `GET /api/public/repos` reads each catalog repository's stars, forks, and open
 issue count from `api.github.com`, one request per repository per cache
@@ -230,12 +230,56 @@ unauthenticated address 60 requests an hour, so a busy hour or a shared egress
 address can trip the limit and every landing-page card then shows "Stats
 unavailable" until the limit resets.
 
-- `GITHUB_TOKEN` (secret, optional, `wrangler secret put GITHUB_TOKEN`). A
-  fine-grained or classic token with no scopes; every catalog repository is
-  public. Set, the stats reads carry `authorization: Bearer` and
-  `x-github-api-version: 2022-11-28`, and GitHub meters them at 5000 requests
-  an hour. The token is sent to GitHub only; it never enters the response, the
-  edge cache, or a log line. Unset, the reads go unauthenticated.
+Those reads authenticate as the GitHub App **`smitherspreviewrelease`** (app id
+`4163546`, owned by the `smithersai` organization, installed on that org with
+every repository selected), not as anyone's personal access token. The App
+credential belongs to the organization, its installation token expires in an
+hour, and it can be rotated without touching a person's account. `src/githubApp.ts`
+signs a 9-minute RS256 JWT with WebCrypto, calls `GET /app/installations` to
+find the `smithersai` installation, exchanges the JWT for an installation
+token at `POST /app/installations/{id}/access_tokens`, and holds that token for
+55 minutes in the isolate and in the Cache API under a private URL, so a cold
+isolate does not exchange again. One `401` on a stats read buys exactly one new
+token.
+
+- `SMITHERS_GITHUB_APP_ID` (secret, **already set** on `smithers-mvp-web` as of
+  2026-09-08): the numeric app id.
+- `SMITHERS_GITHUB_APP_PRIVATE_KEY` (secret, **already set** on
+  `smithers-mvp-web` as of 2026-09-08): the App's PEM private key, stored
+  exactly as GitHub issues it — PKCS#1, `-----BEGIN RSA PRIVATE KEY-----`. The
+  Worker wraps that DER in a PKCS#8 `PrivateKeyInfo` before
+  `crypto.subtle.importKey`, so no `openssl` conversion is needed; a PKCS#8 key
+  (`-----BEGIN PRIVATE KEY-----`) is imported directly.
+- `GITHUB_TOKEN` (secret, optional): now an **override**. Set, it is sent as the
+  bearer and no App exchange happens at all — a fine-grained or classic token
+  with no scopes, since every catalog repository is public. Unset, the App
+  credential is used. With neither, the reads go unauthenticated.
+
+Setting either secret needs `wrangler`, which is **not** a dependency of this
+package (`apps/server/package.json` has no `wrangler`; the deploy script shells
+out to whatever `wrangler` the environment provides). Use `npx wrangler` from
+this directory, or the copy in another worktree's `node_modules/.bin`:
+
+```sh
+npx wrangler secret put SMITHERS_GITHUB_APP_ID       # paste 4163546
+npx wrangler secret put SMITHERS_GITHUB_APP_PRIVATE_KEY  # paste the PEM, armor lines included
+npx wrangler secret list                              # confirm both are on smithers-mvp-web
+```
+
+Every App failure is honest and lands on the anonymous read the catalog has
+always had, never a thrown stats route. One warning line names the cause, and
+the failure is remembered for five minutes so a broken secret cannot turn every
+refresh into two more GitHub calls:
+
+| What went wrong | The line in `wrangler tail` |
+| --- | --- |
+| The App is installed on no organization | `the GitHub App is not installed on any organization` |
+| The private key does not import | `the GitHub App private key could not be imported` |
+| GitHub refused the lookup or the exchange | `the GitHub App installation lookup answered <status>` / `... token exchange answered <status>` |
+
+The private key, the JWT, and the installation token never enter a log line, a
+response body, or a cache key; they leave the Worker only inside the GitHub
+request's authorization header.
 
 A 403 or 429 from GitHub nulls that repository's stats and keeps the normal
 five-minute cache, so the Worker never retries into a tripped limit. Only a

@@ -353,9 +353,24 @@ export interface WorkerEnv extends RecommendEnv, CloudRoleEnv {
   /** Identity worker (GitHub OAuth + allowlist) upstream. Unset = 501. */
   readonly IDENTITY_UPSTREAM_URL?: string
   /**
+   * The Smithers GitHub App's numeric id (`smitherspreviewrelease`, 4163546).
+   * With the private key below, the public catalog's stats reads authenticate
+   * as the App's installation on the `smithersai` organization
+   * (src/githubApp.ts) instead of as a person's token.
+   */
+  readonly SMITHERS_GITHUB_APP_ID?: string
+  /**
+   * The App's PEM private key, as GitHub issues it (PKCS#1,
+   * `-----BEGIN RSA PRIVATE KEY-----`); a PKCS#8 key is accepted too. Unset —
+   * or unimportable — the catalog reads fall back to the token below, and then
+   * to an anonymous read.
+   */
+  readonly SMITHERS_GITHUB_APP_PRIVATE_KEY?: string
+  /**
    * Optional GitHub token for the public catalog's stats reads
-   * (src/publicRepos.ts). Raises GitHub's ceiling from 60 to 5000 requests an
-   * hour; unset, the reads go unauthenticated and a rate limit shows as
+   * (src/publicRepos.ts). It overrides the GitHub App above when both are set.
+   * Either credential raises GitHub's ceiling from 60 to 5000 requests an
+   * hour; with neither, the reads go unauthenticated and a rate limit shows as
    * "Stats unavailable" on the landing page.
    */
   readonly GITHUB_TOKEN?: string

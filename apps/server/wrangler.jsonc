@@ -140,10 +140,21 @@
 		//                              (src/recommend.ts); unset = the route answers an honest 503 and the client
 		//                              keeps its rule-based pills. CEREBRAS_MODEL (var, optional) overrides the
 		//                              default gpt-oss-120b.
+		//   SMITHERS_GITHUB_APP_ID   (secret, SET) the numeric id of the GitHub App smitherspreviewrelease
+		//                              (4163546, owned by the smithersai org). With the private key below,
+		//                              GET /api/public/repos authenticates its api.github.com stats reads as
+		//                              that App's installation (src/githubApp.ts) instead of as a person's
+		//                              token: no PAT to mint, rotate, or leak.
+		//   SMITHERS_GITHUB_APP_PRIVATE_KEY (secret, SET) the App's PEM private key, stored exactly as GitHub
+		//                              issues it (PKCS#1, "BEGIN RSA PRIVATE KEY"); a PKCS#8 key works too.
+		//                              The Worker signs a 9-minute RS256 JWT with it, exchanges that for an
+		//                              installation token, and caches the token for 55 minutes. Unimportable
+		//                              or uninstalled = one warning line and an anonymous read, never a throw.
 		//   GITHUB_TOKEN             (secret, optional) a GitHub token GET /api/public/repos sends as a bearer on
-		//                              its api.github.com stats reads (src/publicRepos.ts), raising GitHub's
-		//                              ceiling from 60 to 5000 requests an hour; needs no scopes, since every
-		//                              catalog repository is public. Unset = unauthenticated reads.
+		//                              its api.github.com stats reads (src/publicRepos.ts). It OVERRIDES the
+		//                              GitHub App above when both are set. Either credential raises GitHub's
+		//                              ceiling from 60 to 5000 requests an hour; the token needs no scopes,
+		//                              since every catalog repository is public. Neither = unauthenticated reads.
 		// The identity and billing workers both gate on the browser Origin, so their
 		// ALLOWED_ORIGINS must list this Worker's own origin — it is what the proxy sends.
 		// The legacy GATEWAY_UPSTREAM_URL / GATEWAY_AUTH_TOKEN / GATEWAY_SESSION_USER_*
