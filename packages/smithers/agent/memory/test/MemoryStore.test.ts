@@ -1024,17 +1024,17 @@ describe("MemoryStore", () => {
       const mismatched = yield* Effect.flip(store.compactMessages({
         threadId: "thread",
         summary: { threadId: "other", id: "summary", role: "system", text: "s", at: 0 },
-        deleteIds: []
+        sourceMessages: []
       }))
       const summaryOnly = yield* store.compactMessages({
         threadId: "thread",
         summary: { threadId: "thread", id: "summary", role: "system", text: "s", at: 0 },
-        deleteIds: ["summary"]
+        sourceMessages: [{ threadId: "thread", id: "summary", role: "system", text: "s", at: 0 }]
       })
       const unknownThread = yield* Effect.flip(store.compactMessages({
         threadId: "ghost",
         summary: { threadId: "ghost", id: "ghost-summary", role: "system", text: "s", at: 0 },
-        deleteIds: ["ghost-message"]
+        sourceMessages: [{ threadId: "ghost", id: "ghost-message", role: "user", text: "s", at: 0 }]
       }))
       const remaining = yield* store.countMessages({ threadId: "thread" })
       return { emptyCount, noIds, duplicates, chunked, mismatched, summaryOnly, unknownThread, remaining }
@@ -1050,14 +1050,127 @@ describe("MemoryStore", () => {
     ])
     expect(result.summaryOnly).toBe(0)
     expect([result.unknownThread.code, result.unknownThread.message]).toEqual([
-      "store",
-      "could not compact memory history"
+      "compaction_conflict",
+      "source message \"ghost-message\" changed or disappeared before compaction"
     ])
     expect(result.remaining).toBe(0)
   })
 
+  it.each([
+    ["id", ""],
+    ["role", ""],
+    ["at", -5],
+    ["at", Number.MAX_SAFE_INTEGER + 1],
+    ["at", Number.NaN]
+  ])("validates compaction summary %s=%s before writing", async (field, value) => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const source = { threadId: "thread", id: "source", role: "user", text: "original", at: 1 }
+      yield* store.appendMessage(source)
+      const outcome = yield* Effect.result(store.compactMessages({
+        threadId: "thread",
+        summary: { threadId: "thread", id: "summary", role: "system", text: "s", at: 0, [field]: value },
+        sourceMessages: [source]
+      }))
+      return { outcome, source, messages: yield* store.listMessages({ threadId: "thread" }) }
+    }))
+
+    expect(result.outcome).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "invalid_argument", path: ["summary", field] }
+    })
+    expect(result.messages).toEqual([result.source])
+  })
+
+  it.each(["role", "text", "at", "missing"] as const)(
+    "rejects changed source %s without touching history",
+    async (field) => {
+      const result = await run(Effect.gen(function*() {
+        const store = yield* MemoryStore.MemoryStore
+        const source = { threadId: "thread", id: "source", role: "user", text: "original", at: 1 }
+        yield* store.appendMessage(source)
+        yield* store.deleteMessages({ threadId: "thread", ids: [source.id] })
+        if (field !== "missing") {
+          yield* store.appendMessage({ ...source, [field]: field === "at" ? 2 : "changed" })
+        }
+        const before = yield* store.listMessages({ threadId: "thread" })
+        const failure = yield* Effect.flip(store.compactMessages({
+          threadId: "thread",
+          summary: { threadId: "thread", id: "summary", role: "system", text: "stale", at: 0 },
+          sourceMessages: [source]
+        }))
+        return { before, failure, after: yield* store.listMessages({ threadId: "thread" }) }
+      }))
+
+      expect(result.failure).toMatchObject({ code: "compaction_conflict", path: ["sourceMessages"] })
+      expect(result.after).toEqual(result.before)
+    }
+  )
+
+  it("captures compaction input before its Effect runs and de-duplicates sources", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const source = { threadId: "thread", id: "source", role: "user", text: "original", at: 1 }
+      yield* store.appendMessage(source)
+      const input = {
+        threadId: "thread",
+        summary: { threadId: "thread", id: "summary", role: "system", text: "s", at: 1 },
+        sourceMessages: [source, source]
+      }
+      const compact = store.compactMessages(input)
+      input.threadId = "other"
+      input.summary.text = "mutated"
+      source.text = "mutated"
+      input.sourceMessages.length = 0
+      const deleted = yield* compact
+      return { deleted, messages: yield* store.listMessages({ threadId: "thread" }) }
+    }))
+
+    expect(result.deleted).toBe(1)
+    expect(result.messages).toEqual([{ threadId: "thread", id: "summary", role: "system", text: "s", at: 1 }])
+  })
+
+  it("rejects empty thread ids and sources belonging to another thread", async () => {
+    const failures = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const summary = { threadId: "thread", id: "summary", role: "system", text: "s", at: 0 }
+      return [
+        yield* Effect.flip(store.compactMessages({ threadId: "", summary, sourceMessages: [] })),
+        yield* Effect.flip(store.compactMessages({
+          threadId: "thread",
+          summary,
+          sourceMessages: [{ threadId: "other", id: "source", role: "user", text: "s", at: 0 }]
+        }))
+      ]
+    }))
+
+    expect(failures.map(({ code, path }) => ({ code, path }))).toEqual([
+      { code: "invalid_argument", path: ["threadId"] },
+      { code: "invalid_argument", path: ["sourceMessages"] }
+    ])
+  })
+
+  it("rejects an identical retry of a committed compaction", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.appendMessage({ threadId: "thread", id: "source", role: "user", text: "original", at: 1 })
+      const input = {
+        threadId: "thread",
+        summary: { threadId: "thread", id: "summary", role: "system", text: "s", at: 1 },
+        sourceMessages: yield* store.listMessages({ threadId: "thread" })
+      }
+      const deleted = yield* store.compactMessages(input)
+      const failure = yield* Effect.flip(store.compactMessages(input))
+      return { deleted, failure, summary: input.summary, messages: yield* store.listMessages({ threadId: "thread" }) }
+    }))
+
+    expect(result.deleted).toBe(1)
+    expect(result.failure).toMatchObject({ code: "idempotency_conflict", path: ["summary", "id"] })
+    expect(result.messages).toEqual([result.summary])
+  })
+
   // A durable caller replaying a compaction after a crash has to tell "this
-  // summary already landed, the retry is a no-op" from "the database is broken".
+  // summary already exists" from "the database is broken".
   // Both used to answer `code: "store"`.
   it("names an already-written summary as an idempotency conflict", async () => {
     const conflict = await run(Effect.gen(function*() {
@@ -1067,7 +1180,7 @@ describe("MemoryStore", () => {
       return yield* Effect.flip(store.compactMessages({
         threadId: "thread",
         summary: { threadId: "thread", id: "summary", role: "system", text: "s", at: 1 },
-        deleteIds: ["m-0"]
+        sourceMessages: [{ threadId: "thread", id: "m-0", role: "user", text: "a", at: 0 }]
       }))
     }))
 
@@ -1577,7 +1690,7 @@ describe("MemoryStore", () => {
         noop.compactMessages({
           threadId: "t",
           summary: { threadId: "t", id: "s", role: "system", text: "x", at: 0 },
-          deleteIds: ["m"]
+          sourceMessages: [{ threadId: "thread", id: "m", role: "user", text: "a", at: 0 }]
         })
       ]
     ]

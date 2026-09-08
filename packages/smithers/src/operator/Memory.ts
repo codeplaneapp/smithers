@@ -428,7 +428,11 @@ export const createMemoryCli = () => {
                 text: context.options.summary,
                 at: candidates[candidates.length - 1]!.at
               }
-              const removed = yield* store.compactMessages({ threadId: context.args.thread, summary, deleteIds: ids })
+              const removed = yield* store.compactMessages({
+                threadId: context.args.thread,
+                summary,
+                sourceMessages: candidates
+              })
               return { threadId: context.args.thread, summaryId: summary.id, removed }
             })
           ))

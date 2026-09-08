@@ -20,6 +20,7 @@ export const MemoryErrorCode = Schema.Literals([
   "invalid_argument",
   "supersede_conflict",
   "idempotency_conflict",
+  "compaction_conflict",
   "embedding_unavailable",
   "vector_model_mismatch",
   "store"

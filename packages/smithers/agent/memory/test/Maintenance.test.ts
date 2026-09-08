@@ -166,6 +166,163 @@ describe("Maintenance", () => {
     ])
   })
 
+  it("rejects a stale summary after a thread reset reuses source ids", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* append(store, "thread", 3)
+      const started = yield* Deferred.make<void>()
+      const resume = yield* Deferred.make<void>()
+      const fiber = yield* Effect.result(Maintenance.compact({
+        threadId: "thread",
+        keepRecent: 1,
+        summarizer: {
+          summarize: ({ rendered }) =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(resume)),
+              Effect.as(rendered)
+            )
+        }
+      })).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(started)
+      yield* store.deleteThread({ threadId: "thread" })
+      yield* store.appendMessage({
+        threadId: "thread",
+        id: "thread-message-0",
+        role: "user",
+        text: "NEW INFORMATION NEVER SUMMARIZED",
+        at: 100
+      })
+      const before = yield* store.listMessages({ threadId: "thread" })
+      yield* Deferred.succeed(resume, undefined)
+      const compacted = yield* Fiber.join(fiber)
+      return { before, compacted, after: yield* store.listMessages({ threadId: "thread" }) }
+    }))
+
+    expect(result.compacted).toMatchObject({ _tag: "Failure", failure: { code: "compaction_conflict" } })
+    expect(result.after).toEqual(result.before)
+  })
+
+  it("preserves messages appended while the summarizer is suspended", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* append(store, "thread", 3)
+      const started = yield* Deferred.make<void>()
+      const resume = yield* Deferred.make<void>()
+      let frozen = false
+      const fiber = yield* Maintenance.compact({
+        threadId: "thread",
+        keepRecent: 1,
+        makeSummaryId: () => "summary-fixed",
+        summarizer: {
+          summarize: ({ messages }) =>
+            Effect.sync(() => {
+              frozen = Object.isFrozen(messages) && messages.every(Object.isFrozen)
+            }).pipe(
+              Effect.andThen(Deferred.succeed(started, undefined)),
+              Effect.andThen(Deferred.await(resume)),
+              Effect.as("summary")
+            )
+        }
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(started)
+      const appended = { threadId: "thread", id: "new", role: "user", text: "new information", at: 100 }
+      yield* store.appendMessage(appended)
+      yield* Deferred.succeed(resume, undefined)
+      const compacted = yield* Fiber.join(fiber)
+      return { frozen, compacted, appended, messages: yield* store.listMessages({ threadId: "thread" }) }
+    }))
+
+    expect(result.frozen).toBe(true)
+    expect(result.compacted).toEqual({ compactedThreads: 1, deletedMessages: 2 })
+    expect(result.messages.map((message) => message.id)).toEqual(["summary-fixed", "thread-message-2", "new"])
+    expect(result.messages.at(-1)).toEqual(result.appended)
+  })
+
+  it("rolls back interruption after inserting the summary and deleting the first chunk", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* MemoryStore.MemoryStore
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        yield* append(store, "thread", 903)
+        const before = JSON.stringify(yield* store.listMessages({ threadId: "thread" }))
+        const started = yield* Deferred.make<ReadonlyArray<{ readonly id: string }>>()
+        let deletions = 0
+        const pausedSql = new Proxy(sql, {
+          apply(target, thisArg, argumentsList) {
+            const statement = Array.isArray(argumentsList[0]) ? argumentsList[0].join(" ") : ""
+            if (statement.includes("DELETE FROM memory_messages") && ++deletions === 2) {
+              return {
+                raw: sql<{ readonly id: string }>`SELECT id FROM memory_messages ORDER BY at_ms, id`.pipe(
+                  Effect.flatMap((rows) => Deferred.succeed(started, rows)),
+                  Effect.andThen(Effect.never)
+                )
+              }
+            }
+            return Reflect.apply(target, thisArg, argumentsList)
+          }
+        })
+        const pausedStore = yield* MemoryStore.make.pipe(Effect.provideService(SqlClient.SqlClient, pausedSql))
+        const options = {
+          threadId: "thread",
+          summarizer: { summarize: () => Effect.succeed("s") },
+          makeSummaryId: () => "summary-fixed"
+        }
+        const fiber = yield* Maintenance.compact(options).pipe(
+          Effect.provideService(MemoryStore.MemoryStore, pausedStore),
+          Effect.forkChild({ startImmediately: true })
+        )
+        const inside = yield* Deferred.await(started)
+        yield* Fiber.interrupt(fiber)
+        const afterFailure = yield* store.listMessages({ threadId: "thread" })
+        const retried = yield* Maintenance.compact(options)
+        return { before, inside, afterFailure, retried }
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(result.inside.map((row) => row.id)).toEqual([
+      "summary-fixed",
+      "thread-message-900",
+      "thread-message-901",
+      "thread-message-902"
+    ])
+    expect(JSON.stringify(result.afterFailure)).toBe(result.before)
+    expect(result.afterFailure.some((message) => message.id === "summary-fixed")).toBe(false)
+    expect(result.retried).toEqual({ compactedThreads: 1, deletedMessages: 901 })
+  })
+
+  it.each([0, 900])("rolls back summary and deletion chunks when source %i fails to delete", async (failAt) => {
+    const result = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* append(store, "thread", 903)
+      const before = JSON.stringify(yield* store.listMessages({ threadId: "thread" }))
+      yield* sql.unsafe(`CREATE TRIGGER fail_compaction BEFORE DELETE ON memory_messages
+        WHEN OLD.id = 'thread-message-${failAt}'
+          AND EXISTS (SELECT 1 FROM memory_messages WHERE id = 'summary-fixed')
+        BEGIN SELECT RAISE(ABORT, 'injected compaction delete failure'); END`)
+      const options = {
+        threadId: "thread",
+        summarizer: { summarize: () => Effect.succeed("summary text") },
+        makeSummaryId: () => "summary-fixed"
+      }
+      const failure = yield* Effect.flip(Maintenance.compact(options))
+      const afterFailure = yield* store.listMessages({ threadId: "thread" })
+      yield* sql`DROP TRIGGER fail_compaction`
+      const retried = yield* Maintenance.compact(options)
+      return { before, failure, afterFailure, retried, afterRetry: yield* store.listMessages({ threadId: "thread" }) }
+    }))
+
+    expect(result.failure.code).toBe("store")
+    expect(JSON.stringify(result.afterFailure)).toBe(result.before)
+    expect(result.afterFailure.some((message) => message.id === "summary-fixed")).toBe(false)
+    expect(result.retried).toEqual({ compactedThreads: 1, deletedMessages: 901 })
+    expect(result.afterRetry.map((message) => message.id)).toEqual([
+      "summary-fixed",
+      "thread-message-901",
+      "thread-message-902"
+    ])
+  })
+
   it("keeps source messages when the summarizer or summary write fails", async () => {
     const result = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore

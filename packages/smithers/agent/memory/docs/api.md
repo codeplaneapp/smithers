@@ -152,7 +152,8 @@ Statuses and supersession are answered in SQL. Tag groups are answered by `Names
 | `invalid_tag`           | a tag or tag group violates the vocabulary or a published ceiling |
 | `invalid_argument`      | any other rejected argument, with a `path` to the field           |
 | `supersede_conflict`    | a supersession request contradicts what is already stored         |
-| `idempotency_conflict`  | a retry reused an id with different immutable creation data       |
+| `idempotency_conflict`  | different creation data on retry, or an existing summary id       |
+| `compaction_conflict`  | a summarized source row disappeared or its payload changed       |
 | `embedding_unavailable` | the embedding provider failed or answered an invalid batch        |
 | `vector_model_mismatch` | a stored vector under the requested model has the wrong dimension |
 | `store`                 | the backend failed                                                |
@@ -245,7 +246,7 @@ The `mode`, `onConflict`, and `tier` values in the two effect declarations below
 
 | Export            | Signature                                            | Behavior                                                                                                    |
 | ----------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `MemoryErrorCode` | schema and type                                      | The ten stable codes listed in [Failure codes](#failure-codes).                                             |
+| `MemoryErrorCode` | schema and type                                      | The eleven stable codes listed in [Failure codes](#failure-codes).                                             |
 | `MemoryError`     | `Schema.TaggedError`, tag `flows/memory/MemoryError` | The error raised by memory validation, storage, search, and projection: `{ code, message, path?, cause? }`. |
 
 ### `@smthrs/memory/MemoryStore`
@@ -282,7 +283,7 @@ Model types, all plain interfaces unless noted:
 | `EnableFtsInput`       | `Namespace.Kind`.                                                                                                                     |
 | `SearchFtsInput`       | `SearchRowsInput` plus `query`.                                                                                                       |
 | `FtsRow`               | `SearchRow` plus `rank` (raw SQLite BM25) and `score`.                                                                                |
-| `CompactMessagesInput` | `{ threadId, summary: Message, deleteIds }`.                                                                                          |
+| `CompactMessagesInput` | `{ threadId, summary: Message, sourceMessages: ReadonlyArray<Message> }`.                                                                                          |
 
 The service tag is `MemoryStore`, `Context.Service` tag `flows/memory/MemoryStore`. Every operation fails only with `MemoryError`:
 
@@ -312,6 +313,8 @@ The service tag is `MemoryStore`, `Context.Service` tag `flows/memory/MemoryStor
 | `listThreadIds`      | `Effect<string[]>`                                | Every thread id, ordered by creation.                                                                                                                   |
 | `deleteMessages`     | `({ threadId, ids }) => Effect<number>`           | Deletes the named messages, in bounded chunks.                                                                                                          |
 | `compactMessages`    | `(CompactMessagesInput) => Effect<number>`        | Inserts the summary and deletes the sources in one durable write. A summary id that already exists fails `idempotency_conflict`.                        |
+
+`compactMessages` captures the full `sourceMessages` rows and verifies them inside the write transaction before inserting or deleting. Missing or changed sources fail with `compaction_conflict`. An existing summary id fails with `idempotency_conflict`, including identical retries.
 
 | Export      | Signature                                                                      | Behavior                                                                              |
 | ----------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |

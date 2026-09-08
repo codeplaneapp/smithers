@@ -62,7 +62,7 @@ const summarized = Effect.gen(function*() {
 - `keepRecent` messages stay untouched, defaulting to 2. A thread with no more messages than that is skipped, and so is a thread whose only old message is a system message.
 - The summarizer receives the thread id, the old messages, and their rendered `role: text` lines, and answers the summary text.
 - The summary lands as a `system` message timestamped at the oldest removed message, with the id `makeSummaryId` returns. The default id derives from a digest of the thread and message ids, so a retried pass targets the same summary.
-- The summarizer runs before the write transaction. After it succeeds, `MemoryStore.compactMessages` inserts the summary and deletes the sources in one durable write, so a failure or interruption before that commit leaves the source messages intact. A summary id that already exists fails with `idempotency_conflict`.
+- The summarizer runs before the write transaction. After it succeeds, `MemoryStore.compactMessages` checks the immutable `sourceMessages` snapshot against the stored rows, then inserts the summary and deletes the sources in one durable write, so a failure or interruption before that commit leaves the source messages intact. A missing or changed source fails with `compaction_conflict`; read and summarize the current history again. Concurrent appends outside the snapshot remain intact. A summary id that already exists fails with `idempotency_conflict`, even on an identical retry. See [Troubleshooting](../troubleshooting.md#idempotency_conflict) to check a compaction after a lost response.
 
 ## Next steps
 

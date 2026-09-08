@@ -212,8 +212,9 @@ const readAllMessages = (
  * Summarizes old history and atomically replaces it with a summary.
  *
  * The summarizer runs before the write transaction. After it succeeds,
- * `MemoryStore.compactMessages` inserts the summary before deleting source
- * messages in one `Database.write`. Failure or fiber interruption before that
+ * `MemoryStore.compactMessages` verifies the full source rows, then inserts the
+ * summary and deletes the sources in one `Database.write`. Changed or missing
+ * sources fail with `compaction_conflict`. Failure or fiber interruption before that
  * commit leaves the source messages intact.
  *
  * @category effects
@@ -243,7 +244,9 @@ export const compact = <E, R>(
       if (messages.length <= keepRecent) {
         continue
       }
-      const oldMessages = keepRecent === 0 ? messages : messages.slice(0, -keepRecent)
+      const oldMessages = Object.freeze(
+        (keepRecent === 0 ? messages : messages.slice(0, -keepRecent)).map((message) => Object.freeze({ ...message }))
+      )
       if (oldMessages.length === 1 && oldMessages[0]!.role === "system") {
         continue
       }
@@ -263,7 +266,7 @@ export const compact = <E, R>(
           text: summaryText,
           at: oldMessages[0]!.at
         },
-        deleteIds: oldMessages.map((message) => message.id)
+        sourceMessages: oldMessages
       })
       compactedThreads += 1
       deletedMessages += deleted

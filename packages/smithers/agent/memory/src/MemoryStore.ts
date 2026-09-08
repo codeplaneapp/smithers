@@ -425,7 +425,8 @@ export interface FtsRow extends SearchRow {
 export interface CompactMessagesInput {
   readonly threadId: string
   readonly summary: Message
-  readonly deleteIds: ReadonlyArray<string>
+  /** Full rows supplied to the summarizer, checked again inside the write transaction. */
+  readonly sourceMessages: ReadonlyArray<Message>
 }
 
 /**
@@ -1585,9 +1586,17 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         )
       })
 
-    const compactMessages: Service["compactMessages"] = (input) =>
-      Effect.gen(function*() {
-        if (input.summary.threadId !== input.threadId) {
+    const compactMessages: Service["compactMessages"] = (input) => {
+      // Capture scalar payloads now so caller mutation cannot change a suspended write.
+      const threadId = input.threadId
+      const summary = { ...input.summary }
+      const sources = input.sourceMessages.map((message) => ({ ...message }))
+      return Effect.gen(function*() {
+        yield* validateNonEmpty(threadId, "threadId", ["threadId"])
+        yield* validateNonEmpty(summary.id, "summary id", ["summary", "id"])
+        yield* validateNonEmpty(summary.role, "summary role", ["summary", "role"])
+        yield* validateTime(summary.at, "summary at", ["summary", "at"])
+        if (summary.threadId !== threadId) {
           return yield* Effect.fail(
             error(
               "invalid_argument",
@@ -1597,32 +1606,61 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
             )
           )
         }
-        const ids = Array.from(new Set(input.deleteIds)).filter((id) => id !== input.summary.id)
+        if (sources.some((message) => message.threadId !== threadId)) {
+          return yield* Effect.fail(
+            error("invalid_argument", "source threadId must match the compacted thread", undefined, ["sourceMessages"])
+          )
+        }
+        const ids = Array.from(new Set(sources.map((message) => message.id))).filter((id) => id !== summary.id)
         if (ids.length === 0) {
           return 0
         }
-        const result = yield* database.write(
+        return yield* database.write(
           Effect.gen(function*() {
-            const inserted = yield* sql`INSERT INTO memory_messages (id, thread_id, role, text, at_ms)
-            VALUES (
-              ${input.summary.id}, ${input.summary.threadId}, ${input.summary.role},
-              ${input.summary.text}, ${input.summary.at}
-            ) ON CONFLICT (thread_id, id) DO NOTHING`.raw
-            if (changed(inserted) === 0) {
+            // Preserve the existing-summary error even on a retry whose sources are gone.
+            const existing = yield* sql<MessageRow>`SELECT thread_id, id, role, text, at_ms
+              FROM memory_messages WHERE thread_id = ${threadId} AND id = ${summary.id}`
+            if (existing.length > 0) {
               return yield* Effect.fail(
                 error(
                   "idempotency_conflict",
-                  `summary id "${input.summary.id}" already exists`,
+                  `summary id "${summary.id}" already exists`,
                   undefined,
                   ["summary", "id"]
                 )
               )
             }
-            return yield* deleteMessageRows(input.threadId, ids)
+            for (let offset = 0; offset < sources.length; offset += DELETE_MESSAGES_CHUNK_SIZE) {
+              const chunk = sources.slice(offset, offset + DELETE_MESSAGES_CHUNK_SIZE)
+              const rows = yield* sql<MessageRow>`SELECT thread_id, id, role, text, at_ms
+                FROM memory_messages WHERE thread_id = ${threadId} AND ${
+                sql.in("id", chunk.map((message) => message.id))
+              }`
+              const byId = new Map(rows.map((row) => [row.id, row]))
+              for (const source of chunk) {
+                const row = byId.get(source.id)
+                if (
+                  row === undefined || row.role !== source.role || row.text !== source.text ||
+                  Number(row.at_ms) !== source.at
+                ) {
+                  return yield* Effect.fail(
+                    error(
+                      "compaction_conflict",
+                      `source message "${source.id}" changed or disappeared before compaction`,
+                      undefined,
+                      ["sourceMessages"]
+                    )
+                  )
+                }
+              }
+            }
+            yield* sql`INSERT INTO memory_messages (id, thread_id, role, text, at_ms)
+              VALUES (${summary.id}, ${summary.threadId}, ${summary.role}, ${summary.text}, ${summary.at})`
+            return yield* deleteMessageRows(threadId, ids)
           })
         ).pipe(Effect.mapError(storeError("could not compact memory history")))
-        return result
       })
+    }
 
     return MemoryStore.of({
       putFact,
