@@ -15,8 +15,9 @@
  *   keeps no history simply reports an empty script.
  * - `flows/write-flow` takes the three files that come back and writes them
  *   through a {@link FlowStore.FlowStore}. When a `Registry` is in context it is
- *   refreshed afterwards, which is what makes the new flow appear in
- *   `ctx.flows` on the very next frame instead of the next run.
+ *   refreshed afterwards. When that registry is also passed to `Agent.run`,
+ *   a successful refresh makes the new model-invocable flow appear in
+ *   `ctx.flows` on the next frame. Each frame journals its catalog for replay.
  *
  * The rules and the skeleton are the host's, because the file layout a saved
  * flow lands in is the host's. {@link bestPractices} and {@link flowTemplate}

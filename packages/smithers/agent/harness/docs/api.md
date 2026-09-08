@@ -251,8 +251,10 @@ the model-id catalog. The callback lives outside serializable `State`; the
 resolved token count is carried in state across frames.
 
 `CellTurn.teach(contextWindow, flows)` prepends the cell contract and the
-callable-flow catalog to a context window as prefix segments, so the teaching
-is stable for the life of the run.
+callable-flow catalog to a context window as prefix segments. Pass
+`refreshFlows` on `CellTurn.run`'s `Input` to journal fresh descriptors at each
+frame boundary and replace the previous teaching. The prompt, `ctx.flows`,
+and admission share the recorded snapshot. Omit it to keep `flows` fixed.
 
 ## Sandbox
 
@@ -287,7 +289,7 @@ export interface Realm {
 }
 ```
 
-`RealmEvaluation` is `{ cell, frame, call, mint?, bounded?, limits? }`;
+`RealmEvaluation` is `{ cell, frame, call, flows?, mint?, bounded?, limits? }`;
 `RealmFrame` is `{ outcome, prints, bindings }`. The `Sandbox.Handler`
 resolves one `Sandbox.Invocation` (`{ ordinal, flow, input, at? }`) into a
 `Cell.CallResult`; the `Sandbox.Minter` settles one `ctx.checkpoint()` mint on

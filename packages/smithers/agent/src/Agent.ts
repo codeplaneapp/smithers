@@ -383,13 +383,10 @@ const runProductionUnmeasured: Service["run"] = (options) =>
           const composed = yield* FlowBinding.catalog(options.flows ?? [])
           const contributed = yield* CellPlugin.flows(kernel.plugins, composed.entries)
           const catalog = yield* Effect.fromResult(FlowBinding.catalogResult(contributed))
-          // One snapshot answers both questions. The registry the model is
-          // shown is the registry the boundary resolves against, so a
-          // declaration digest a cell was written against is the one checked
-          // when the call arrives.
+          // The controller journals a fresh visible snapshot at each frame.
+          // Call resolution still verifies the declaration digest against this
+          // registry before executing, so a mid-frame change is refused.
           const registry = FlowBinding.registry(discovered, catalog)
-          const visible = yield* registry.visible()
-          const flows = visible.filter((descriptor) => descriptor.modelInvocable)
           const resolver = CellCalls.make({
             registry,
             catalog,
@@ -429,7 +426,7 @@ const runProductionUnmeasured: Service["run"] = (options) =>
             layers,
             capabilityEnvelope: options.capabilityEnvelope ?? [],
             placement: options.placement ?? Option.none(),
-            contextWindow: opening(options, flows),
+            contextWindow: opening(options, []),
             contextWindowTokens: options.seat.contextWindowTokens,
             maxFrames: options.maxFrames,
             readOnlyCap: options.readOnlyCap,
@@ -442,7 +439,10 @@ const runProductionUnmeasured: Service["run"] = (options) =>
           })
           return CellTurn.run({
             state,
-            flows,
+            flows: [],
+            refreshFlows: Effect.suspend(() => registry.visible()).pipe(
+              Effect.map((visible) => visible.filter((descriptor) => descriptor.modelInvocable))
+            ),
             limits: options.limits,
             contextWindowTokensFor: options.contextWindowTokensFor
           }).pipe(

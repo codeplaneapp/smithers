@@ -34,8 +34,17 @@ const run = agent.run({
 - `flows/write-flow` takes the three files that come back (the flow, its
   end-to-end test, and the fixture that test replays) and writes them through a
   `FlowStore`. When a `Registry` is in context it is refreshed afterwards,
-  which is what makes the saved flow appear in `ctx.flows` on the next frame
-  rather than the next run.
+  and a successful refresh makes the saved model-invocable flow appear in
+  `ctx.flows` on the next frame. Supply the same registry to `Agent.run` and
+  the promotion binding's context. Refresh is best effort; a failed refresh
+  leaves the files saved and discovery waits for a later successful refresh.
+
+`Agent.run` reads the visible catalog at each frame boundary and journals the
+descriptor snapshot. The model prompt, `ctx.flows`, and call admission use that
+snapshot for the whole frame. Existing frames replay their recorded catalogs;
+new frames read the current registry. Call resolution checks the declaration
+digest before executing, so a registry entry changed during a cell is refused
+until the next frame reads it.
 
 The rules and the skeleton are the host's too: `PromoteFlows.source(services, { bestPractices, template })`
 replaces both for a host whose flows are laid out differently.

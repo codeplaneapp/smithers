@@ -323,6 +323,57 @@ it("rejects controller state decoded from the previous journal format before cal
   expect(model.recorder.requests).toHaveLength(0)
 })
 
+describe("CellTurn frame catalogs", () => {
+  it("replays each catalog snapshot for disclosure, admission and declaration identity", async () => {
+    const promoted = descriptor("promoted")
+    let reads = 0
+    const snapshots = new Map<string, unknown>()
+    const refreshFlows = Effect.sync(() => {
+      reads += 1
+      return reads === 1 ? [lister] : reads === 2 ? [promoted] : [descriptor("changed-on-replay")]
+    })
+    const attempt = async () => {
+      const model = ScriptedModel.make([
+        emits(`var originalCatalog = ctx.flows; console.log(Object.keys(ctx.flows))`),
+        emits(`var value = await ctx.call("promoted", {});
+var removed = await ctx.call("fs/list", {});
+ctx.done({ names: Object.keys(ctx.flows), original: Object.keys(originalCatalog), frozen: Object.isFrozen(ctx.flows), value, removed })`)
+      ])
+      const fixture = ScriptedEngine.make(model.model, [], [{ _tag: "Success", value: null }])
+      const result = await collect({
+        state: state({ contextWindow: CellTurn.teach(opening(), []), maxFrames: 2 }),
+        flows: [],
+        refreshFlows
+      }, { engine: journaled(fixture, snapshots) })
+      expect(result.failure).toBeUndefined()
+      expect(result.interrupted).toBe(false)
+      expect(fixture.recorder.calls.map((call) => [call.flowName, call.identity.declaration])).toEqual([
+        ["promoted", Cell.declarationDigest(promoted)]
+      ])
+      const output = JSON.parse(resolvedText(result.events))
+      expect(output).toEqual({
+        names: ["promoted"],
+        original: ["fs/list"],
+        frozen: true,
+        value: null,
+        removed: { ok: false, error: expect.objectContaining({ code: "unknown_flow" }) }
+      })
+      const catalogs = model.recorder.requests.map((request) =>
+        request.system.map((part) => part.text).filter((text) => text.startsWith("Flows callable with ctx.call"))
+      )
+      expect(catalogs[0]).toEqual([expect.stringContaining("fs/list")])
+      expect(catalogs[1]).toEqual([expect.stringContaining("promoted")])
+      expect(catalogs[1]?.[0]).not.toContain("fs/list")
+      return model.recorder.requests
+    }
+    const original = await attempt()
+    expect(reads).toBe(2)
+    expect([...snapshots.keys()].filter((key) => key.startsWith("flow-catalog\u0000"))).toHaveLength(2)
+    expect(await attempt()).toEqual(original)
+    expect(reads).toBe(2)
+  })
+})
+
 describe("CellTurn seat and placement", () => {
   it("keys a sealed step on every placement a run may declare, and on none when it declares none", async () => {
     const declared: ReadonlyArray<readonly [Descriptor.Placement, Placement.Placement]> = [

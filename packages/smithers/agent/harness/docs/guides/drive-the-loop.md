@@ -173,3 +173,12 @@ The full list is in the [`AgentEvent` reference](../api.md#agentevent).
 - For the steering queue's drain semantics, see
   [`Steering`](../api.md#steering).
 - For the assembled production host, see [`@smthrs/agent`](/api/agent).
+
+## Refresh the catalog between frames
+
+Pass `refreshFlows` to `CellTurn.run` as an Effect returning the visible,
+model-invocable descriptors. The controller records its result through
+`EngineLike.record` at every frame boundary, including the first. It replaces
+its previous teaching and passes the same snapshot to call admission and the
+realm's `ctx.flows`. Replay uses the recorded descriptors without reading the
+live registry. Omit `refreshFlows` to keep the supplied `flows` array fixed.

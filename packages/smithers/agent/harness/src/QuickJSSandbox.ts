@@ -259,6 +259,7 @@ ${preludeHelpers}
   // and it is cleared per frame by the function this prelude returns — a park
   // whose reason is refused is asked again inside the same frame, and a realm
   // still sealed from the refused attempt would answer that retry with nothing.
+  var catalog = freeze(${catalog})
   var sealed = null
   var sealedEnvelope = freeze(parse(${JSON.stringify(JSON.stringify(sealedCall))}))
   var unprintable = function (value, error) {
@@ -292,7 +293,7 @@ ${preludeHelpers}
   host("console", freezeValue({ log: line, info: line, warn: line, error: line }))
   host("ctx", freezeValue({
 ${preludeCall(`      if (sealed !== null) return Deferred.resolve(sealed)\n`)}
-    flows: freeze(${catalog}),
+    get flows() { return catalog },
     done: function (output) {
       if (sealed !== null) return
       if (arguments.length === 0) {
@@ -312,7 +313,10 @@ ${preludeCall(`      if (sealed !== null) return Deferred.resolve(sealed)\n`)}
   }))
   // Handed back to the host, which calls it as each frame opens. See the seal
   // above for why the clearing is per frame rather than per run.
-  return function () { sealed = null }
+  return function (nextCatalog) {
+    sealed = null
+    if (nextCatalog !== undefined) catalog = freeze(parse(nextCatalog))
+  }
 })()`
 
 const Catalog = Schema.Record(Schema.String, Cell.FlowProjection)
@@ -1197,7 +1201,16 @@ const openRealm = (
         // The realm's own per-frame state: the seal a completion set. A frame
         // whose transition the harness refused is asked again inside the same
         // frame, so the retry has to open on an unsealed realm.
-        context.unwrapResult(context.callFunction(openFrame, context.undefined)).dispose()
+        if (evaluation.flows === undefined) {
+          context.unwrapResult(context.callFunction(openFrame, context.undefined)).dispose()
+        } else {
+          const catalog = context.newString(catalogOf(evaluation.flows))
+          try {
+            context.unwrapResult(context.callFunction(openFrame, context.undefined, catalog)).dispose()
+          } finally {
+            catalog.dispose()
+          }
+        }
 
         // Whatever the frame produced, the prints are delivered with it and the
         // panel is read after it, so the answer is assembled in one place. A

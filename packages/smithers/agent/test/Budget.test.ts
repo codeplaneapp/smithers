@@ -170,6 +170,11 @@ const ParkedSteps = Flow.make("agent/test/budget/ParkedSteps", {
   payload: { diff: Schema.String },
   success: Review,
   error: AgentAction.AgentFailure,
+  // A frame now records its catalog before asking the budget. That extra
+  // boundary can reach the default 1.5x polling ladder's fractional delays;
+  // TestClock exposes those as fractional wall times, which the journal
+  // correctly refuses. Keep this budget fixture's polling on whole millis.
+  suspendedRetryPolicy: RetryPolicy.make({ initialMs: 200, factor: 1, maxMs: 200 }),
   body: ({ diff }) =>
     First.call({ diff }).pipe(
       Node.bindPlanned(() => Pause.call({ id: "boundary" })),

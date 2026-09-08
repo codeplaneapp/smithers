@@ -660,6 +660,8 @@ export interface Input {
   readonly contextWindowTokensFor?: ((seat: string) => Effect.Effect<number, HarnessError>) | undefined
   /** The flows this frame may call, already narrowed by seat visibility. */
   readonly flows: ReadonlyArray<Descriptor.FlowDescriptor>
+  /** Re-read and journal the callable catalog before each frame, including the first. */
+  readonly refreshFlows?: Effect.Effect<ReadonlyArray<Descriptor.FlowDescriptor>, HarnessError> | undefined
   readonly limits?: Sandbox.Limits | undefined
 }
 
@@ -2262,6 +2264,7 @@ const frame = (
         const frame = yield* realm.evaluate({
           cell,
           frame: state.frame,
+          flows: input.refreshFlows === undefined ? undefined : projections,
           call: observing,
           mint,
           replay,
@@ -2973,6 +2976,7 @@ export const run = (
       const steering = yield* Steering.Source
 
       let current = input.state
+      let flows = input.flows
       if (current.journalVersion !== journalVersion) {
         return yield* new HarnessError({
           code: "incompatible_journal",
@@ -3036,7 +3040,30 @@ export const run = (
           )
           return
         }
-        const step = yield* frame({ ...input, state: current }, engine, sandbox, realm, steering, emit).pipe(
+        if (input.refreshFlows !== undefined) {
+          const refreshed = yield* engine.record({
+            name: "flow-catalog",
+            identity: { session: current.session, frame: current.frame, boundary: "flow-catalog" },
+            success: Schema.Array(Descriptor.FlowDescriptor),
+            execute: input.refreshFlows
+          })
+          // Replace only the teaching we supplied, preserving the host's
+          // prefix and the accumulated transcript. Rebuild before compaction
+          // so token accounting and the sealed request use this snapshot too.
+          const previous = teach(ContextWindow.empty(current.contextWindow.modelId), flows)
+          const digests = new Set(previous.segments.map((segment) => segment.digest))
+          current = advance(current, {
+            contextWindow: teach(
+              ContextWindow.make({
+                ...current.contextWindow,
+                segments: current.contextWindow.segments.filter((segment) => !digests.has(segment.digest))
+              }),
+              refreshed
+            )
+          })
+          flows = refreshed
+        }
+        const step = yield* frame({ ...input, state: current, flows }, engine, sandbox, realm, steering, emit).pipe(
           Effect.catch((error) => {
             const request = permissionRequired(error)
             if (request === undefined) {

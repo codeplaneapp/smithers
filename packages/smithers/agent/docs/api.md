@@ -1428,9 +1428,10 @@ Promotion as two ordinary flows:
   into, so a host that keeps no history reports an empty script.
 - `flows/write-flow` takes the three files that come back and writes them
   through a `FlowStore`. When a `Registry` is in context it is refreshed
-  afterwards, which is what makes the saved flow appear in `ctx.flows` on the
-  next frame rather than the next run. The id is validated before the store is
-  asked, so a bad id is never misread as "nowhere to save".
+  afterwards. Pass that same registry to `Agent.run`: a successful refresh
+  makes the saved model-invocable flow visible and callable next frame. Each
+  frame journals its descriptor snapshot for replay. The id is validated before
+  the store is asked, so a bad id is never misread as "nowhere to save".
 
 ### PromoteFlows.Options
 

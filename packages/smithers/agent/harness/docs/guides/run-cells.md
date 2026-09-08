@@ -77,14 +77,17 @@ frame 7 says which cell threw. The returned `Sandbox.RealmFrame` carries:
 
 The evaluation options are `Sandbox.RealmEvaluation`:
 
-| Field     | Purpose                                                                                                        |
-| --------- | -------------------------------------------------------------------------------------------------------------- |
-| `cell`    | The `Cell.Source` to run; construct it with `Cell.source(text)`.                                               |
-| `frame`   | The controller frame number.                                                                                   |
-| `call`    | The `Sandbox.Handler` that resolves the cell's flow calls.                                                     |
-| `mint`    | Optional `Sandbox.Minter` that settles `ctx.checkpoint()`. Absent means the run pins no trees.                 |
-| `bounded` | Set when the caller journals and bounds each settlement itself, so the loop adds no `callMs` clock of its own. |
-| `limits`  | Per-evaluation limit overrides.                                                                                |
+| Field     | Purpose                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `cell`    | The `Cell.Source` to run; construct it with `Cell.source(text)`.                                                   |
+| `frame`   | The controller frame number.                                                                                       |
+| `call`    | The `Sandbox.Handler` that resolves the cell's flow calls.                                                         |
+| `flows`   | Optional replacement for the frozen `ctx.flows` catalog before this cell runs. Omit to retain the current catalog. |
+| `mint`    | Optional `Sandbox.Minter` that settles `ctx.checkpoint()`. Absent means the run pins no trees.                     |
+| `bounded` | Set when the caller journals and bounds each settlement itself, so the loop adds no `callMs` clock of its own.     |
+| `limits`  | Per-evaluation limit overrides.                                                                                    |
+
+References retained by earlier cells keep their old frozen catalog snapshots.
 
 ## Write the handler
 

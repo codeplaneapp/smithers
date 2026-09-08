@@ -491,6 +491,8 @@ export const replTransition = (
 export interface RealmEvaluation {
   /** Reconstruct a timed-out frame only through its recorded bridge prefix. */
   readonly replay?: { readonly boundary: typeof FrameBoundary.Type; readonly outcome: Cell.Outcome } | undefined
+  /** Replaces ctx.flows with this frame's frozen catalog; omitted keeps the current catalog. */
+  readonly flows?: Readonly<Record<string, Cell.FlowProjection>> | undefined
   readonly cell: Cell.Source
   readonly frame: number
   readonly call: Handler
@@ -571,7 +573,7 @@ export interface Realm {
 }
 
 /**
- * What a realm is opened with, which is everything that is fixed for the run.
+ * The initial catalog and limits a realm is opened with.
  *
  * @category models
  * @since 0.1.0
