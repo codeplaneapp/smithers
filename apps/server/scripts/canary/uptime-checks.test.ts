@@ -29,9 +29,12 @@ import {
   type ProbeOptions,
   type ProbeReport,
   renderAlertBody,
+  parseSessionRead,
   resolveProbeOrigin,
   runUptimeProbe,
   type Sample,
+  SCOPED_IDENTITY_CHECK_ID,
+  scopedIdentityVerdict,
   tallyChecks,
   TURN_FIRST_FRAME_NOTE,
   TURN_FIRST_FRAME_SAMPLES,
@@ -482,14 +485,30 @@ const options = (over: Partial<ProbeOptions> = {}): ProbeOptions => ({
   gapMs: 0,
   requestTimeoutMs: 20_000,
   sessionCookie: undefined,
+  expectedSessionLogin: "smithers-visitor",
+  privilegedLogins: [],
   runId: "run-1",
   ...over
 })
 
+/**
+ * The scoped-down account the metered half must authenticate as: a plain
+ * signed-in login with no admin claim (RULINGS 35). `allowlisted` is true
+ * because open sign-in makes identity answer true for every login.
+ */
+const SCOPED_SESSION = "{\"login\":\"smithers-visitor\",\"allowlisted\":true,\"admin\":false}"
+
 const healthy = (url: string): Response => {
   if (url.endsWith("/api/agent/turn")) return new Response("Unauthorized", { status: 401 })
+  if (url.endsWith("/api/auth/session")) return new Response(SCOPED_SESSION, { status: 200 })
   return new Response("ok", { status: 200 })
 }
+
+/** Turn-seam calls only: the identity read-back carries a cookie too. */
+const meteredCalls = (calls: ReadonlyArray<{ url: string; init: RequestInit }>): number =>
+  calls.filter((call) =>
+    call.url.endsWith("/api/agent/turn") && (call.init.headers as Record<string, string>).cookie !== undefined
+  ).length
 
 const ndjson = (frames: ReadonlyArray<string>): ReadableStream<Uint8Array> =>
   new ReadableStream({
@@ -586,7 +605,8 @@ describe("runUptimeProbe", () => {
     const report = await runUptimeProbe(deps, options({ sessionCookie: "smithers_session=abc" }))
 
     expect(report.meteredTurns).toBe(1)
-    expect(calls.filter((call) => (call.init.headers as Record<string, string>).cookie !== undefined)).toHaveLength(1)
+    expect(meteredCalls(calls)).toBe(1)
+    expect(byId(report.checks, SCOPED_IDENTITY_CHECK_ID).status).toBe("pass")
     const check = byId(report.checks, "latency:turn-first-frame")
     expect(check.status).toBe("pass")
     expect(check.detail).toContain(`budget ${LATENCY_BUDGETS_MS.turnFirstFrame}ms`)
@@ -695,9 +715,7 @@ describe("runUptimeProbe", () => {
 
     expect(TURN_FIRST_FRAME_SAMPLES).toBe(1)
     expect(report.meteredTurns).toBe(TURN_FIRST_FRAME_SAMPLES)
-    expect(calls.filter((call) => (call.init.headers as Record<string, string>).cookie !== undefined)).toHaveLength(
-      TURN_FIRST_FRAME_SAMPLES
-    )
+    expect(meteredCalls(calls)).toBe(TURN_FIRST_FRAME_SAMPLES)
     const check = byId(report.checks, "latency:turn-first-frame")
     expect(check.detail).toContain(TURN_FIRST_FRAME_NOTE)
     expect(renderAlertBody(report, "https://runs.test/1")).toContain(TURN_FIRST_FRAME_NOTE)
@@ -764,5 +782,140 @@ describe("the scheduled workflow invokes the probe with an origin", () => {
 
   test("the step exports the CANARY_URL the invocation and the fallback both read", () => {
     expect(canaryYml).toMatch(/^\s*CANARY_URL: /m)
+  })
+})
+
+/*
+ * RULINGS 35: the probes run as a scoped-down signed-in user, never an admin
+ * and never a hand-seeded allowlist entry, so a permission bug that refuses
+ * ordinary visitors cannot hide behind the operator's own privileges. These
+ * assertions are the loud failure that ruling asks for.
+ */
+describe("parseSessionRead", () => {
+  test("reads a plain signed-in account", () => {
+    expect(parseSessionRead(200, "{\"login\":\"visitor\",\"allowlisted\":true,\"admin\":false}")).toEqual({
+      state: "known",
+      login: "visitor",
+      admin: false,
+      allowlisted: true
+    })
+  })
+
+  test("treats both signed-out shapes the same, because the Worker restates the 401 as a 200", () => {
+    expect(parseSessionRead(401, "{\"error\":\"Unauthorized\"}")).toEqual({ state: "signed-out" })
+    expect(parseSessionRead(200, "{\"status\":\"signed-out\"}")).toEqual({ state: "signed-out" })
+  })
+
+  test("an absent admin field is 'not stated', never a quiet false", () => {
+    const read = parseSessionRead(200, "{\"login\":\"visitor\",\"allowlisted\":true}")
+    expect(read).toEqual({ state: "known", login: "visitor", admin: undefined, allowlisted: true })
+  })
+
+  test("a non-200, a non-JSON body and a body with no login are unreadable, not answers", () => {
+    expect(parseSessionRead(500, "upstream failure").state).toBe("unreadable")
+    expect(parseSessionRead(200, "<html>error</html>").state).toBe("unreadable")
+    expect(parseSessionRead(200, "{\"allowlisted\":true}").state).toBe("unreadable")
+  })
+})
+
+describe("scopedIdentityVerdict", () => {
+  const expectation = { expectedLogin: "smithers-visitor", privilegedLogins: ["will", "octocat"] }
+  const known = (over: Partial<{ login: string; admin: boolean | undefined; allowlisted: boolean | undefined }>) =>
+    ({ state: "known", login: "smithers-visitor", admin: false, allowlisted: true, ...over }) as const
+
+  test("a plain signed-in account passes and states what it read", () => {
+    const check = scopedIdentityVerdict(known({}), expectation)
+    expect(check.status).toBe("pass")
+    expect(check.detail).toContain("signed in as smithers-visitor")
+    expect(check.detail).toContain("admin=false")
+  })
+
+  test("an admin cookie fails and names the claim", () => {
+    const check = scopedIdentityVerdict(known({ admin: true }), expectation)
+    expect(check.status).toBe("fail")
+    expect(check.detail).toContain("admin claim")
+  })
+
+  test("a cookie for another login fails, so a swapped secret is caught by name", () => {
+    const check = scopedIdentityVerdict(known({ login: "someone-else" }), expectation)
+    expect(check.status).toBe("fail")
+    expect(check.detail).toContain("smithers-visitor")
+  })
+
+  test("a login on the hand-seeded roster fails even with admin false", () => {
+    const check = scopedIdentityVerdict(
+      known({ login: "octocat", admin: false }),
+      { expectedLogin: "octocat", privilegedLogins: ["will", "octocat"] }
+    )
+    expect(check.status).toBe("fail")
+    expect(check.detail).toContain("$CANARY_ALLOWLIST_LOGINS")
+  })
+
+  test("allowlisted:true alone never fails, because open sign-in sets it for every login", () => {
+    expect(scopedIdentityVerdict(known({ allowlisted: true }), expectation).status).toBe("pass")
+  })
+
+  test("with no admin field and no declared login the check refuses to guess", () => {
+    const check = scopedIdentityVerdict(
+      known({ admin: undefined }),
+      { expectedLogin: undefined, privilegedLogins: [] }
+    )
+    expect(check.status).toBe("fail")
+    expect(check.detail).toContain("$CANARY_SESSION_LOGIN")
+  })
+
+  test("with no admin field a declared login that matches is enough", () => {
+    expect(scopedIdentityVerdict(known({ admin: undefined }), expectation).status).toBe("pass")
+  })
+
+  test("a cookie that authenticated nobody fails rather than buying a signed-out measurement", () => {
+    const check = scopedIdentityVerdict({ state: "signed-out" }, expectation)
+    expect(check.status).toBe("fail")
+    expect(check.detail).toContain("authenticated nobody")
+  })
+
+  test("a session that could not be read fails and carries the reason", () => {
+    const check = scopedIdentityVerdict({ state: "unreadable", detail: "HTTP 503" }, expectation)
+    expect(check.status).toBe("fail")
+    expect(check.detail).toContain("HTTP 503")
+  })
+})
+
+describe("runUptimeProbe refuses to spend under a privileged cookie", () => {
+  const adminDeployment = (url: string): Response => {
+    if (url.endsWith("/api/auth/session")) {
+      return new Response("{\"login\":\"smithers-visitor\",\"allowlisted\":true,\"admin\":true}", { status: 200 })
+    }
+    return healthy(url)
+  }
+
+  test("an admin cookie fails the run, takes no turn, and says the latency was not measured", async () => {
+    const { deps, calls } = makeDeps(10, (url) => adminDeployment(url))
+    const report = await runUptimeProbe(deps, options({ samplesPerEndpoint: 1, sessionCookie: "s=1" }))
+
+    expect(report.failed).toBe(true)
+    expect(report.meteredTurns).toBe(0)
+    expect(meteredCalls(calls)).toBe(0)
+    expect(byId(report.checks, SCOPED_IDENTITY_CHECK_ID).status).toBe("fail")
+    const latency = byId(report.checks, "latency:turn-first-frame")
+    expect(latency.status).toBe("skip")
+    expect(latency.detail).toContain("not a scoped-down user")
+  })
+
+  test("the identity read never becomes a sample, so CN-20 and CN-21 mean the same on every tick", async () => {
+    const { deps } = makeDeps(10, (url) => healthy(url))
+    const metered = await runUptimeProbe(deps, options({ samplesPerEndpoint: 5, sessionCookie: "s=1" }))
+    const free = await runUptimeProbe(makeDeps(10, (url) => healthy(url)).deps, options({ samplesPerEndpoint: 5 }))
+
+    expect(metered.samples.filter((sample) => sample.label !== "turn-first-frame")).toHaveLength(free.samples.length)
+    expect(metered.samples.some((sample) => sample.label.includes("session"))).toBe(false)
+  })
+
+  test("without a cookie the run states the cookie is unset, not that the identity was wrong", async () => {
+    const { deps } = makeDeps(10, (url) => healthy(url))
+    const report = await runUptimeProbe(deps, options({ samplesPerEndpoint: 1 }))
+
+    expect(report.checks.some((check) => check.id === SCOPED_IDENTITY_CHECK_ID)).toBe(false)
+    expect(byId(report.checks, "latency:turn-first-frame").detail).toContain("$CANARY_SESSION_COOKIE is unset")
   })
 })

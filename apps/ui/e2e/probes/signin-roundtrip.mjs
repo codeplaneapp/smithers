@@ -13,6 +13,12 @@
 //   SMITHERS_E2E_NOTES    notes file outside the repo holding a `password: <value>` line
 //                         (default the multi-test-github-account memory file)
 //   SMITHERS_E2E_USER     GitHub login of the test account (default codeplanesmithers)
+//
+// The account is a SCOPED-DOWN one (Factory spec 2026-09-08, RULINGS 35): a plain signed-in
+// GitHub login with no admin claim and no hand-seeded allowlist entry, so this probe proves the
+// door works under the permissions a real visitor has. The probe reads the session back and fails
+// when the account turns out to be an admin, because every check above it would then pass on
+// privileges nobody else holds. See apps/server/DEPLOY.md and apps/ui/e2e/README.md.
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -77,5 +83,15 @@ if (!(await acct.count())) await fail("no Account chrome button");
 await acct.click(); await page.waitForTimeout(3000);
 const t2 = await page.evaluate(() => document.body.innerText);
 if (!new RegExp(`Account · @${user}`, "i").test(t2)) await fail("Account card does not name the test user");
-console.log(`OK: the sign-in door returned to ${redact(landed)}; ${repo} signed in as @${user}`);
+// The scoped-down check: an admin session would pass every assertion above while the product
+// refused everyone else, so read the session back and refuse to call that a visitor's round trip.
+const session = await page.evaluate(async () => {
+  try {
+    const r = await fetch("/api/auth/session", { credentials: "include" });
+    return { status: r.status, body: await r.json().catch(() => null) };
+  } catch (e) { return { status: 0, body: null, error: String(e) }; }
+});
+if (session.status !== 200 || !session.body?.login) await fail(`/api/auth/session answered ${session.status} with no login, so nothing shows this is a visitor's session`);
+if (session.body.admin === true) await fail(`the test account @${session.body.login} carries the admin claim; this probe must run as a scoped-down user (apps/server/DEPLOY.md)`);
+console.log(`OK: the sign-in door returned to ${redact(landed)}; ${repo} signed in as @${user} (admin=${String(session.body.admin)}, allowlisted=${String(session.body.allowlisted)})`);
 await ctx.close();

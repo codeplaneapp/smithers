@@ -12,10 +12,29 @@
  *   $CANARY_URL             the origin, when no POSITIONAL origin is given.
  *                           The origin is argv[0] and nothing else, so a
  *                           flag's value can never become the target.
- *   $CANARY_SESSION_COOKIE  a signed-in cookie header. Present: the run takes
- *                           ONE metered turn and measures CN-19's real bar.
+ *   $CANARY_SESSION_COOKIE  a signed-in cookie header for the SCOPED-DOWN test
+ *                           account. Present: the run reads the session back,
+ *                           and only if that account is a plain visitor does it
+ *                           take ONE metered turn and measure CN-19's real bar.
  *                           Absent: the run measures the signed-out refusal
  *                           gate and says so, and never claims otherwise.
+ *   $CANARY_SESSION_LOGIN   the login that cookie must belong to. Falls back to
+ *                           $SMITHERS_E2E_USER, the same scoped account the
+ *                           browser sign-in probe uses
+ *                           (apps/ui/e2e/probes/signin-roundtrip.mjs). Unset,
+ *                           and with a deployment that states no `admin` field,
+ *                           the identity check fails rather than guess.
+ *   $CANARY_ALLOWLIST_LOGINS the hand-seeded closed-alpha roster, the same
+ *                           repository variable invite-probe.ts reads. A cookie
+ *                           belonging to one of those logins fails the run.
+ *
+ * WHOSE ACCOUNT. Will's ruling (Factory spec 2026-09-08, RULINGS 35): the
+ * canary and e2e suites run as a scoped-down signed-in user, never an admin and
+ * never an allowlisted one, so a permission bug that refuses ordinary visitors
+ * cannot hide behind the operator's own privileges. A probe that needs admin
+ * says so with its own credential and skips out loud without it — invite-probe.ts
+ * and $IDENTITY_ADMIN_TOKEN are the one example. The accounts and variables are
+ * documented in apps/server/DEPLOY.md.
  *
  * WHAT THIS RUN COSTS. Without the cookie: nothing. Every request is a static
  * asset read, an unauthenticated scopes read, or a refusal that never reaches
@@ -39,6 +58,7 @@ import {
   SAMPLES_PER_ENDPOINT,
   tallyChecks
 } from "./uptime-checks.ts"
+import { parseLogins } from "./invite-verdict.ts"
 
 const args = process.argv.slice(2)
 const flagValue = (name: string): string | undefined => {
@@ -68,6 +88,8 @@ if ("error" in resolved) {
 }
 const origin = resolved.origin
 const cookie = args.includes("--no-turn") ? undefined : process.env.CANARY_SESSION_COOKIE
+const expectedSessionLogin = (process.env.CANARY_SESSION_LOGIN ?? process.env.SMITHERS_E2E_USER)?.trim()
+const privilegedLogins = parseLogins(process.env.CANARY_ALLOWLIST_LOGINS)
 
 const report = await runUptimeProbe(
   {
@@ -81,6 +103,8 @@ const report = await runUptimeProbe(
     gapMs: positive("--gap-ms", SAMPLE_GAP_MS),
     requestTimeoutMs: positive("--timeout-ms", REQUEST_TIMEOUT_MS),
     sessionCookie: cookie === "" ? undefined : cookie,
+    expectedSessionLogin: expectedSessionLogin === "" ? undefined : expectedSessionLogin,
+    privilegedLogins,
     runId: `canary-uptime-probe-${Date.now()}`
   }
 )

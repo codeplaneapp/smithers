@@ -21,7 +21,15 @@ const serverDir = join(scriptsDir, "..", "..")
 const workDir = mkdtempSync(join(tmpdir(), "canary-uptime-"))
 
 /** How the fake deployment behaves for the run in progress. */
-let mode: "healthy" | "spa-down" | "turn-open" = "healthy"
+let mode: "healthy" | "spa-down" | "turn-open" | "admin-session" = "healthy"
+
+/*
+ * The scoped-down account the metered half must be (RULINGS 35). The probe
+ * reads its own session back before it spends anything, so the fake answers
+ * /api/auth/session the way the deployment does — and `admin-session` answers
+ * as an admin, which is the cookie the probe must refuse.
+ */
+const SCOPED_LOGIN = "smithers-canary"
 
 let server: Server<undefined>
 
@@ -36,6 +44,10 @@ beforeAll(() => {
           : new Response("<html>smithers</html>", { status: 200 })
       }
       if (url.pathname === "/api/auth/scopes") return new Response("{\"scopes\":[]}", { status: 200 })
+      if (url.pathname === "/api/auth/session") {
+        if (request.headers.get("cookie") === null) return new Response("{\"status\":\"signed-out\"}", { status: 200 })
+        return Response.json({ login: SCOPED_LOGIN, allowlisted: true, admin: mode === "admin-session" })
+      }
       if (url.pathname === "/api/agent/turn") {
         if (mode === "turn-open") return new Response("streaming to anyone", { status: 200 })
         if (request.headers.get("cookie") === null) return new Response("Unauthorized", { status: 401 })
@@ -77,7 +89,15 @@ const runProbe = async (
       stderr: "pipe",
       // A cookie leaking in from the developer's shell would spend real
       // money from a unit test, so the environment is stated, not inherited.
-      env: { ...process.env, CANARY_URL: "", CANARY_SESSION_COOKIE: "", ...env }
+      env: {
+        ...process.env,
+        CANARY_URL: "",
+        CANARY_SESSION_COOKIE: "",
+        CANARY_SESSION_LOGIN: SCOPED_LOGIN,
+        SMITHERS_E2E_USER: "",
+        CANARY_ALLOWLIST_LOGINS: "",
+        ...env
+      }
     }
   )
   const stdout = await new Response(child.stdout).text()
@@ -132,6 +152,7 @@ describe("uptime-probe.ts against a live HTTP origin", () => {
       CANARY_SESSION_COOKIE: "smithers_session=probe"
     })
 
+    expect(stdout).toContain("ok: the metered turn runs as a scoped-down user")
     expect(stdout).toContain("ok: turn-seam first-frame latency")
     expect(stdout).toContain("1 metered turn(s) spent")
     expect(exitCode).toBe(0)
@@ -148,6 +169,19 @@ describe("uptime-probe.ts against a live HTTP origin", () => {
     })
     expect(stdout).toContain("0 metered turn(s) spent")
     expect(stdout).toContain("skip: turn-seam first-frame latency")
+  })
+
+  test("an admin cookie fails the run and spends nothing (RULINGS 35)", async () => {
+    mode = "admin-session"
+    const { exitCode, stdout } = await runProbe(["--samples", "1"], {
+      CANARY_SESSION_COOKIE: "smithers_session=probe"
+    })
+    mode = "healthy"
+
+    expect(stdout).toContain("FAIL: the metered turn runs as a scoped-down user")
+    expect(stdout).toContain("0 metered turn(s) spent")
+    expect(stdout).toContain("CANARY UPTIME PROBE FAILED")
+    expect(exitCode).toBe(1)
   })
 
   test("a 5xx from the SPA fails uptime and the error rate, and exits 1", async () => {

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
+import { SCOPED_TEST_USER, SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
 
 /*
  * Lane runs T1 (docs/workbench-lanes/runs.md "Exit"): launch a fixture flow,
@@ -41,7 +42,7 @@ const summaryRow = (status: string) => ({
   diagnosis: "Verdict   done."
 })
 
-/** Install the server double: signed in and allowlisted, one loaded repo, one gateway that accepts everything. */
+/** Install the server double: signed in as the scoped-down user, one loaded repo, one gateway that accepts everything. */
 const serve = async (page: Page): Promise<{ rpc: Array<RpcCall> }> => {
   const rpc: Array<RpcCall> = []
   let planned: { flowId: string; input: unknown } | undefined
@@ -60,9 +61,9 @@ const serve = async (page: Page): Promise<{ rpc: Array<RpcCall> }> => {
   })))
   await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [] })))
   await page.route("**/api/auth/session", (route) =>
-    route.fulfill(json({ login: "will", allowlisted: true, admin: false })))
+    route.fulfill(json(SCOPED_TEST_USER)))
   await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json({ state: "signed-in", username: "will", expiresAt: "2027-01-01T00:00:00.000Z" })))
+    route.fulfill(json(SCOPED_TEST_USER_CLOUD_SESSION)))
   await page.route("**/api/cloud/api/user/repos", (route) =>
     route.fulfill(json({
       repos: [{ owner: "smithersai", name: "smithers", full_name: REPO, default_bookmark: "main" }]

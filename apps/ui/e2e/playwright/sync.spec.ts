@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
+import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
 
 /*
  * Lane sync T1 (docs/workbench-lanes/sync.md "Exit", ADR 0005): against a
@@ -94,7 +95,7 @@ const serve = async (page: Page): Promise<void> => {
   })))
   await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [] })))
   await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json({ state: "signed-in", username: "will", expiresAt: "2027-01-01T00:00:00.000Z" })))
+    route.fulfill(json(SCOPED_TEST_USER_CLOUD_SESSION)))
   await page.route("**/api/cloud/api/user/repos", (route) =>
     route.fulfill(json({ repos: [{ owner: "smithersai", name: "smithers", full_name: REPO, default_bookmark: "main" }] })))
   await page.route("**/api/cloud/api/user/orgs", (route) => route.fulfill(json({ orgs: [{ login: "smithersai" }] })))

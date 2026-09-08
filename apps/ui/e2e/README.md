@@ -60,3 +60,35 @@ and `SMITHERS_E2E_USER` overrides the login. The probe never prints
 credentials; when the saved GitHub session has expired it logs the account in
 again from the notes file, and it fails with a reason when GitHub asks for a
 device code. Run it after every deploy that touches auth, chrome, or the shell.
+
+After the Account card check it reads `GET /api/auth/session` back and fails
+when the account carries the `admin` claim, so a probe run under an operator's
+profile is loud rather than quietly green. See "The identity the suites run as"
+below.
+
+## The identity the suites run as
+
+Will's ruling (Factory spec 2026-09-08, `review/RULINGS.md` 35): open sign-in
+is on and the permission tiers behind it stay deliberately narrow, so the e2e
+and canary suites run as a scoped-down signed-in user and prove the product
+works under the permissions a real visitor has. A suite that authenticates as
+the factory admin is green while the product refuses everyone else, which is
+the permission bug the suite exists to catch.
+
+`codeplanesmithers` is that scoped-down account. It is a plain GitHub login: it
+must not appear in the identity Worker's `ADMIN_LOGINS`, must not hold a
+maintainer claim on any repository, and must not appear on the hand-seeded
+closed-alpha roster `CANARY_ALLOWLIST_LOGINS`. The sign-in probe signs in as it
+(`$SMITHERS_E2E_USER`), and the server-side canary carries its session in
+`$CANARY_SESSION_COOKIE` and its login in `$CANARY_SESSION_LOGIN`; those
+variables are documented in `apps/server/DEPLOY.md`, under "The canary and e2e
+suites sign in as a scoped-down user".
+
+T1's server doubles answer with the same account. `playwright/identity.ts`
+holds it once, `SCOPED_TEST_USER` for `/api/auth/session` and
+`SCOPED_TEST_USER_CLOUD_SESSION` for `/api/cloud-auth/session`, so no spec
+invents a login of its own. `allowlisted` is `true` there because open sign-in
+makes identity answer `true` for every login (Factory spec 01 §3); the
+privilege is the `admin` claim and the seeded roster, never that flag. A spec
+that genuinely needs a maintainer or an admin says so in the spec, with the
+reason, rather than raising the constant for every other spec.

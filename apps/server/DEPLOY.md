@@ -285,6 +285,50 @@ A 403 or 429 from GitHub nulls that repository's stats and keeps the normal
 five-minute cache, so the Worker never retries into a tripped limit. Only a
 network error or a 5xx shortens the cache to 30 s.
 
+### The canary and e2e suites sign in as a scoped-down user
+
+The probes that authenticate must hold a plain visitor's session, not an
+operator's. Will's ruling (Factory spec 2026-09-08, `review/RULINGS.md` 35):
+open sign-in is on and the permission tiers behind it stay deliberately narrow,
+so the canary and e2e suites run as a scoped-down signed-in user and prove the
+product works under the permissions a real visitor has. A probe holding an
+admin's cookie is green while the deployment refuses everyone else, which is
+the permission bug the probe exists to surface.
+
+**The account.** `codeplanesmithers` is the shared test account, and it is a
+scoped-down one: a plain GitHub login that must NOT appear in the identity
+Worker's `ADMIN_LOGINS`, must NOT hold a maintainer claim on any repository,
+and must NOT appear on the hand-seeded closed-alpha roster
+`CANARY_ALLOWLIST_LOGINS`. It signs the browser sign-in probe in
+(`apps/ui/e2e/probes/signin-roundtrip.mjs`, `$SMITHERS_E2E_USER`), it is the
+login the T1 Playwright doubles answer with
+(`apps/ui/e2e/playwright/identity.ts`), and its session is what
+`$CANARY_SESSION_COOKIE` carries.
+
+| Variable | Kind | What it names |
+| --- | --- | --- |
+| `SMITHERS_E2E_USER` | repository variable, and an env var for the browser probe | the scoped-down account's GitHub login; default `codeplanesmithers` |
+| `CANARY_SESSION_COOKIE` | secret, `Canary` workflow | that account's signed-in cookie header, sent on the hourly tick only |
+| `CANARY_SESSION_LOGIN` | repository variable, optional | the login `$CANARY_SESSION_COOKIE` must belong to; falls back to `SMITHERS_E2E_USER` |
+| `CANARY_ALLOWLIST_LOGINS` | repository variable | the hand-seeded closed-alpha roster; `invite-probe.ts` reads it back, and `uptime-probe.ts` refuses a cookie belonging to one of those logins |
+
+**The assertion.** `uptime-probe.ts` reads its own session back through
+`GET /api/auth/session` before it spends anything. It fails the run, taking no
+metered turn at all, when the session carries the `admin` claim, belongs to a
+login on `CANARY_ALLOWLIST_LOGINS`, is not the declared account, or
+authenticated nobody. When the deployment states no `admin` field and no login
+is declared, the check fails rather than guess, and says to set
+`CANARY_SESSION_LOGIN`. Rotating the cookie into an operator's account
+therefore reddens the canary instead of quietly passing on privileges no
+visitor has.
+
+**The one probe that needs admin.** `scripts/canary/invite-probe.ts` reads and
+writes the allowlist, so it needs the identity Worker's admin credential. It
+declares that credential by its own name, `IDENTITY_ADMIN_TOKEN`, and prints a
+`skip:` line naming the missing variable rather than running under some other
+identity. Any future probe of an admin surface follows that shape: a separate,
+named credential and an honest skip, never a shared privileged session.
+
 ### The engine gateway relay needs an identity upstream
 
 When `GATEWAY_UPSTREAM_URL` is set, this Worker relays `/rpc`, `/projections`,

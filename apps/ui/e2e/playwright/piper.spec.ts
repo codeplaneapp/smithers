@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
+import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
 
 /*
  * Lane piper T1 (docs/workbench-lanes/piper.md "Exit", ADR 0001): the app
@@ -50,7 +51,7 @@ const serve = async (page: Page): Promise<void> => {
   })))
   await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [SMITHERS_REPO] })))
   await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json({ state: "signed-in", username: "will", expiresAt: "2027-01-01T00:00:00.000Z" })))
+    route.fulfill(json(SCOPED_TEST_USER_CLOUD_SESSION)))
   await page.route("**/api/cloud/api/user/repos", (route) =>
     route.fulfill(json({
       repos: [{ owner: "smithersai", name: "smithers", full_name: "smithersai/smithers", default_bookmark: "main" }]

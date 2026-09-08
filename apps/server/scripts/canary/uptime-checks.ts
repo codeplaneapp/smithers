@@ -19,7 +19,7 @@
  * fails only the error rate. An endpoint that is up and reliable but slow fails
  * only latency. Collapsing them would lose which of the three is true.
  */
-import { AUTH_SCOPES_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import { AUTH_SCOPES_PATH, AUTH_SESSION_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { AgentTurnFrameSchema } from "@smthrs/rpc/NativeAgent"
 import { resolveOrigin } from "./BuildStamp.ts"
 
@@ -301,6 +301,149 @@ export const uptimeVerdict = (samples: ReadonlyArray<Sample>): Check => {
     : fail(id, label, `${detail}; fully down: ${down.join(", ")}`)
 }
 
+/*
+ * WHOSE SESSION SPENDS THE METERED TURN.
+ *
+ * Will's ruling (Factory spec 2026-09-08, review/RULINGS.md 35): open sign-in
+ * is on and the permission tiers behind it stay deliberately narrow, so the
+ * canary and the e2e suites run as a SCOPED-DOWN signed-in user — not an
+ * admin, not a hand-seeded allowlist entry — and prove the product works under
+ * the permissions a real visitor has. A probe holding an admin's cookie passes
+ * every check while the deployment refuses everyone else, which is exactly the
+ * permission bug this probe is supposed to surface.
+ *
+ * So the probe reads its own session back through AUTH_SESSION_PATH before it
+ * spends anything, and refuses to spend under a privileged one. That read is
+ * free: it reaches no model and no upstream beyond the identity Worker.
+ *
+ * ON `allowlisted`. Under open sign-in, identity answers `allowlisted: true`
+ * for every login (Factory spec 01 §3), so the flag is a fact this check
+ * REPORTS and never one it asserts — asserting `false` would red the canary on
+ * the day the allowlist is flipped off. What separates a visitor from an
+ * admitted alpha account is membership in the roster $CANARY_ALLOWLIST_LOGINS
+ * names, the same roster invite-probe.ts reads back, so that is what is tested.
+ */
+export type SessionRead =
+  | { readonly state: "signed-out" }
+  | { readonly state: "unreadable"; readonly detail: string }
+  | {
+    readonly state: "known"
+    readonly login: string
+    /** undefined when the session route named no `admin` field at all. */
+    readonly admin: boolean | undefined
+    readonly allowlisted: boolean | undefined
+  }
+
+export const SCOPED_IDENTITY_CHECK_ID = "identity:scoped"
+export const SCOPED_IDENTITY_LABEL = "the metered turn runs as a scoped-down user"
+
+/** A body fragment short enough to read inside a GitHub issue. */
+const preview = (body: string): string => {
+  const flat = body.replace(/\s+/g, " ").trim()
+  return flat.length <= 120 ? flat : `${flat.slice(0, 117)}...`
+}
+
+/**
+ * Read AUTH_SESSION_PATH's body. The product Worker restates identity's 401 as
+ * a 200 naming the signed-out state (`probeAuthSession`, apps/server/src/index.ts),
+ * so both shapes mean one thing here: the cookie authenticated nobody.
+ */
+export const parseSessionRead = (status: number, body: string): SessionRead => {
+  if (status === 401) return { state: "signed-out" }
+  if (status !== 200) {
+    return { state: "unreadable", detail: `HTTP ${status} from ${AUTH_SESSION_PATH}: ${preview(body)}` }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return {
+      state: "unreadable",
+      detail: `${AUTH_SESSION_PATH} answered 200 with a body that is not JSON: ${preview(body)}`
+    }
+  }
+  const record = typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : undefined
+  if (record?.status === "signed-out") return { state: "signed-out" }
+  const login = record?.login
+  if (typeof login !== "string" || login === "") {
+    return {
+      state: "unreadable",
+      detail: `${AUTH_SESSION_PATH} answered 200 with no login: ${preview(body)}`
+    }
+  }
+  return {
+    state: "known",
+    login,
+    admin: typeof record?.admin === "boolean" ? record.admin : undefined,
+    allowlisted: typeof record?.allowlisted === "boolean" ? record.allowlisted : undefined
+  }
+}
+
+export interface ScopedIdentityExpectation {
+  /**
+   * The login the deployment declares for this cookie: $CANARY_SESSION_LOGIN,
+   * else $SMITHERS_E2E_USER, the same scoped account the browser sign-in probe
+   * signs in as (apps/ui/e2e/probes/signin-roundtrip.mjs).
+   */
+  readonly expectedLogin: string | undefined
+  /** The hand-seeded closed-alpha roster, $CANARY_ALLOWLIST_LOGINS. */
+  readonly privilegedLogins: ReadonlyArray<string>
+}
+
+const sameLogin = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase()
+
+/**
+ * Is the cookie a plain visitor's? Every failing branch names what it saw and
+ * what it wanted, because the operator reading it is holding a secret they
+ * cannot print.
+ */
+export const scopedIdentityVerdict = (read: SessionRead, expectation: ScopedIdentityExpectation): Check => {
+  const id = SCOPED_IDENTITY_CHECK_ID
+  const label = SCOPED_IDENTITY_LABEL
+  if (read.state === "signed-out") {
+    return fail(
+      id,
+      label,
+      `${label}: $CANARY_SESSION_COOKIE authenticated nobody, so a turn taken under it would have measured the signed-out gate at the price of a real turn`
+    )
+  }
+  if (read.state === "unreadable") {
+    return fail(
+      id,
+      label,
+      `${label}: the session could not be read, so nothing here shows this cookie is a visitor's — ${read.detail}`
+    )
+  }
+  const stated = `signed in as ${read.login}: admin=${
+    read.admin === undefined ? "not stated" : String(read.admin)
+  }, allowlisted=${read.allowlisted === undefined ? "not stated" : String(read.allowlisted)}`
+  const expected = expectation.expectedLogin === undefined || expectation.expectedLogin === ""
+    ? undefined
+    : expectation.expectedLogin
+  const reasons: Array<string> = []
+  if (read.admin === true) {
+    reasons.push(
+      "the session carries the admin claim, so every check below would pass on privileges no visitor has"
+    )
+  }
+  if (expected !== undefined && !sameLogin(expected, read.login)) {
+    reasons.push(`the declared account is ${expected} ($CANARY_SESSION_LOGIN, else $SMITHERS_E2E_USER)`)
+  }
+  if (expectation.privilegedLogins.some((entry) => sameLogin(entry, read.login))) {
+    reasons.push(
+      `${read.login} is on the hand-seeded roster $CANARY_ALLOWLIST_LOGINS, so it is an admitted alpha account rather than an ordinary visitor`
+    )
+  }
+  if (read.admin === undefined && expected === undefined) {
+    reasons.push(
+      `${AUTH_SESSION_PATH} stated no admin field and no account is declared, so nothing here could tell an admin's cookie from a visitor's — set $CANARY_SESSION_LOGIN`
+    )
+  }
+  return reasons.length === 0
+    ? pass(id, label, `${label}: ${stated} — a plain signed-in account, the permission level a real visitor has`)
+    : fail(id, label, `${label}: ${stated} — ${reasons.join("; ")}`)
+}
+
 export interface ProbeReport {
   readonly origin: string
   readonly generatedAt: string
@@ -571,6 +714,14 @@ export interface ProbeOptions {
    * measured a turn.
    */
   readonly sessionCookie: string | undefined
+  /*
+   * Who that cookie must be. `expectedSessionLogin` is $CANARY_SESSION_LOGIN,
+   * else $SMITHERS_E2E_USER; `privilegedLogins` is the hand-seeded roster
+   * $CANARY_ALLOWLIST_LOGINS. Both feed `scopedIdentityVerdict`, which decides
+   * whether this run may spend anything at all.
+   */
+  readonly expectedSessionLogin: string | undefined
+  readonly privilegedLogins: ReadonlyArray<string>
   readonly runId: string
 }
 
@@ -604,6 +755,28 @@ const takeSample = async (deps: ProbeDeps, options: ProbeOptions, endpoint: Endp
       elapsedMs: deps.now() - started,
       transportError: errorText(error)
     }
+  }
+}
+
+/*
+ * The identity read is deliberately NOT a Sample.
+ *
+ * Samples feed CN-20's error rate and CN-21's uptime, and this request is only
+ * made on a metered run. Counting it would move both numbers between the
+ * hourly tick and the quarter-hour ticks, so a rate that moved would say
+ * "which schedule ran" rather than "how the deployment behaved". Its verdict
+ * is a Check of its own instead.
+ */
+const readSessionIdentity = async (deps: ProbeDeps, options: ProbeOptions, cookie: string): Promise<SessionRead> => {
+  try {
+    const response = await deps.fetch(`${options.origin}${AUTH_SESSION_PATH}`, {
+      method: "GET",
+      headers: { cookie },
+      signal: AbortSignal.timeout(options.requestTimeoutMs)
+    })
+    return parseSessionRead(response.status, await response.text())
+  } catch (error) {
+    return { state: "unreadable", detail: errorText(error) }
   }
 }
 
@@ -712,14 +885,25 @@ export const runUptimeProbe = async (deps: ProbeDeps, options: ProbeOptions): Pr
     }
   }
 
+  // Who the cookie is, before a cent of model credit is spent under it. A
+  // privileged cookie fails here and takes no turn: the run then says the
+  // identity was wrong instead of reporting a latency nobody can trust.
+  const cookie = options.sessionCookie === undefined || options.sessionCookie === ""
+    ? undefined
+    : options.sessionCookie
+  const identityCheck = cookie === undefined ? undefined : scopedIdentityVerdict(
+    await readSessionIdentity(deps, options, cookie),
+    { expectedLogin: options.expectedSessionLogin, privilegedLogins: options.privilegedLogins }
+  )
+
   // TURN_FIRST_FRAME_SAMPLES is 1 and is a cost decision, not an oversight.
   // Read its comment before raising it: each extra sample is another short
   // model turn on every hourly tick.
   const turnSamples: Array<Sample> = []
-  if (options.sessionCookie !== undefined && options.sessionCookie !== "") {
+  if (cookie !== undefined && identityCheck?.status === "pass") {
     for (let index = 0; index < TURN_FIRST_FRAME_SAMPLES; index += 1) {
       if (index > 0) await deps.sleep(options.gapMs)
-      const taken = await meteredTurnSample(deps, options, options.sessionCookie)
+      const taken = await meteredTurnSample(deps, options, cookie)
       turnSamples.push(taken)
       samples.push(taken)
     }
@@ -737,12 +921,15 @@ export const runUptimeProbe = async (deps: ProbeDeps, options: ProbeOptions): Pr
       )
     )
   }
+  if (identityCheck !== undefined) checks.push(identityCheck)
   checks.push(
     turnSamples.length === 0
       ? skip(
         "latency:turn-first-frame",
         "turn-seam first-frame latency",
-        "turn-seam first-frame latency: not measured — $CANARY_SESSION_COOKIE is unset, so this run measured the signed-out refusal gate only"
+        identityCheck === undefined
+          ? "turn-seam first-frame latency: not measured — $CANARY_SESSION_COOKIE is unset, so this run measured the signed-out refusal gate only"
+          : "turn-seam first-frame latency: not measured — the canary session is not a scoped-down user, so this run spent nothing under it"
       )
       : latencyVerdict(
         "latency:turn-first-frame",

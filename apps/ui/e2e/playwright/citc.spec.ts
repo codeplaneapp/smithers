@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
+import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
 
 /*
  * Lane citc T1 (docs/workbench-lanes/citc.md "Exit", ADR 0002): against a
@@ -51,9 +52,7 @@ const serve = async (
   await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [] })))
   await page.route("**/api/cloud-auth/session", (route) =>
     route.fulfill(json({
-      state: "signed-in",
-      username: "will",
-      expiresAt: "2027-01-01T00:00:00.000Z",
+      ...SCOPED_TEST_USER_CLOUD_SESSION,
       ...(options.degraded === true ? { scopes: "degraded" } : {})
     })))
   await page.route("**/api/cloud/api/user/repos", (route) =>
