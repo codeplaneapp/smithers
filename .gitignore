@@ -98,14 +98,16 @@ apps/observability/data/
 .flows/
 
 # `.smithers/` holds the workspace declaration (WORKSPACE.ts), the factory
-# declaration beside it (FACTORY.ts), and the two files `//:factoryProjection`
-# projects from it (factory.json, home.json), all of which are source. Only
-# run state written beside them is ignored.
+# declaration beside it (FACTORY.ts), the two files `//:factoryProjection`
+# projects from it (factory.json, home.json), and the target index
+# `//:targetIndex` generates (target-index.json), all of which are source.
+# Only run state written beside them is ignored.
 /.smithers/*
 !/.smithers/WORKSPACE.ts
 !/.smithers/FACTORY.ts
 !/.smithers/factory.json
 !/.smithers/home.json
+!/.smithers/target-index.json
 **/.smithers/*.db
 **/.smithers/*.db-*
 **/.smithers/runs/

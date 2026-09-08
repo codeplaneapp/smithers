@@ -115,6 +115,7 @@
     "./SortPackageJson": "./src/SortPackageJson.ts",
     "./Stamp": "./src/Stamp.ts",
     "./Target": "./src/Target.ts",
+    "./TargetIndex": "./src/TargetIndex.ts",
     "./ToolBuild": "./src/ToolBuild.ts",
     "./ToolRun": "./src/ToolRun.ts",
     "./Toolchain": "./src/Toolchain.ts",
@@ -534,6 +535,11 @@
         "types": "./dist/esm/Target.d.ts",
         "import": "./dist/esm/Target.js",
         "require": "./dist/cjs/Target.js"
+      },
+      "./TargetIndex": {
+        "types": "./dist/esm/TargetIndex.d.ts",
+        "import": "./dist/esm/TargetIndex.js",
+        "require": "./dist/cjs/TargetIndex.js"
       },
       "./ToolBuild": {
         "types": "./dist/esm/ToolBuild.d.ts",

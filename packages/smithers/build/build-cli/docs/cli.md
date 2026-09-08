@@ -7,7 +7,7 @@ description: "Every smithers-build command, argument, option, exit code, and err
 smithers-build <command> [arguments] [options]
 ```
 
-`makeCli` registers 23 commands, including the `gitHooks` alias and grouped
+`makeCli` registers 24 commands, including the `gitHooks` alias and grouped
 `cache` and `show` surfaces. `normalizeArgv` adds another spelling: an argv
 whose first token starts with `//` or `:` is rewritten to `target <label>`, so
 `smithers-build //packages/api:lint` runs the bare-label form.
@@ -186,6 +186,7 @@ These take the workspace options and execute no targets.
 | ----------- | ----------- | --------------- |
 | `install`   |             |                 |
 | `query`     | `<expr>`    |                 |
+| `index`     | `<pattern>` |                 |
 | `graph`     | `<pattern>` | `--mermaid, -m` |
 | `owners`    | `[paths…]`  | `--diff, -d`    |
 | `git-hooks` |             | `--write`       |
@@ -225,6 +226,29 @@ a pattern that resolves to several.
 
 A `Repo.Target` row that a child workspace could not answer for carries a
 `refusal`, rendered for a person and carried in the envelope.
+
+### index
+
+Lists every target a pattern selects as its declaration states it.
+
+```bash
+pnpm exec smithers-build index '//...'
+pnpm exec smithers-build index '//packages/api/...' --format json
+```
+
+Each row carries the label, the declaring package and target name, the rule,
+the kinds, the summary and featured flag, the generator mode when the rule
+declares one, whether the target is cacheable, the declared inputs as `kind`
+records (`file`, `glob`, `pnpm-workspace`, `git-diff`) with their paths
+resolved from the declaring package, the workspace-relative paths the
+target writes, its labeled dependencies, and the PACKAGE.ts that declared it.
+A row carries no cache key, no content digest, no line number, and no host
+fact, so the same declarations index the same way on every machine. For a
+person the listing is aligned `LABEL`, `RULE`, and `KINDS` columns with the
+outputs after an arrow and a star on a featured row. The root `//:targetIndex`
+target (`Smithers.TargetIndex`) commits the same rows as
+`.smithers/target-index.json`: `target //:targetIndex --write` writes the
+file and `lint '//:targetIndex'` fails on drift.
 
 ### graph
 
@@ -378,7 +402,7 @@ A structured failure carries a code alongside its message.
 | `build_failed`, `test_failed`, `lint_failed`, `docs_failed`, `review_failed`, `run_failed`, `ci_failed`, `target_failed` | The command threw before or during execution.                      |
 | `install_failed`                                                                                                         | Install planning or execution failed.                              |
 | `create_app_failed`                                                                                                      | The scaffold refused or failed.                                    |
-| `query_failed`, `graph_failed`, `owners_failed`                                                                          | The workspace could not be read, or the expression was rejected.   |
+| `query_failed`, `index_failed`, `graph_failed`, `owners_failed`                                                          | The workspace could not be read, or the expression was rejected.   |
 | `git_hooks_failed`                                                                                                       | Rendering or installing the hooks failed.                          |
 | `git_hooks_drift`                                                                                                        | Checked hooks differ from the declaration.                         |
 

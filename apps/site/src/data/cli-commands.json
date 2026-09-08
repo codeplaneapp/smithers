@@ -1637,6 +1637,43 @@
       }
     },
     {
+      "name": "index",
+      "description": "List every target a pattern selects as its declaration states it: rule, kinds, inputs, outputs, dependencies, and the declaring file",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
       "name": "info",
       "description": "Report workspace and host configuration for diagnosis",
       "schema": {

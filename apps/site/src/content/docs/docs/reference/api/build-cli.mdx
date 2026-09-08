@@ -291,6 +291,24 @@ Query result models and their text rendering. From `@smthrs/build-cli/Query`.
 | `PackageOwners` | An `owners(label)` query: `{ query, package, owners, agentPolicy, upstream }`.                                  |
 | `text`          | `(result, style?: Ansi.Palette) => string`. Renders any of the four for a person.                               |
 
+## TargetIndex
+
+The declaration-derived target index: what `smithers-build index` emits and
+the root `//:targetIndex` generator commits as `.smithers/target-index.json`.
+From `@smthrs/build-cli/TargetIndex`.
+
+| Export    | What it is                                                                                                                          |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `Row`     | One labeled target as its declaration states it, re-exported from `@smthrs/targets/TargetIndex`.                                    |
+| `Listing` | `{ pattern, targets }`, rows sorted by label.                                                                                       |
+| `build`   | `(index: PackageIndex, pattern, signal?) => Promise<Listing>`. Reads the loaded declarations and their labeled edges; keys nothing. |
+| `text`    | `(listing, style?: Ansi.Palette) => string`. Aligned `LABEL`, `RULE`, `KINDS` columns, the outputs a row owns, a star on featured.  |
+
+A row carries `{ label, package, name, rule, kinds, summary?, featured?, mode?,
+cacheable, inputs, outputs, dependencies, source?, refusal? }`. An input is a
+`kind` record (`file`, `glob`, `pnpm-workspace`, `git-diff`) whose paths are
+workspace-relative.
+
 ## Audience
 
 Import `@smthrs/build-cli/Audience` for the shared, side-effect-free consumer

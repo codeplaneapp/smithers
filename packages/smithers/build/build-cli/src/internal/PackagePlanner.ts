@@ -49,6 +49,7 @@ import * as Planner from "../Planner.ts"
 import * as RepoResolution from "../RepoResolution.ts"
 import * as Reporter from "../Reporter.ts"
 import * as Resolver from "../Resolver.ts"
+import * as TargetIndex from "../TargetIndex.ts"
 import * as Workspace from "../Workspace.ts"
 import * as WorkspaceToolchain from "../WorkspaceToolchain.ts"
 import { collectTargets } from "./Attrs.ts"
@@ -1268,14 +1269,19 @@ const visit = async (
   // tool identity is still keyed, and before the body runs, so the rule's own
   // argv builder is unchanged.
   const plannedMode = context.rootModes.get(label) ?? options.mode
-  const attrs = withFactory(
+  const attrs = await withTargetIndex(
     rule,
-    withPlannedMode(
+    withFactory(
       rule,
-      WorkspaceToolchain.fill(metadata.workspaceAttrs, view.attrs, context.workspaceToolchain),
-      plannedMode
+      withPlannedMode(
+        rule,
+        WorkspaceToolchain.fill(metadata.workspaceAttrs, view.attrs, context.workspaceToolchain),
+        plannedMode
+      ),
+      context.index.factory
     ),
-    context.index.factory
+    context.index,
+    context.signal
   )
 
   // Dependencies: always visited for key material; the execution edges are a
@@ -2907,7 +2913,7 @@ const dataLabelsOf = (
  * because their `build` verb writes whatever the declaration says today, and
  * the executor suite pins that.
  */
-const plannedModeRules: ReadonlySet<string> = new Set(["FactoryProjection"])
+const plannedModeRules: ReadonlySet<string> = new Set(["FactoryProjection", "TargetIndex"])
 
 const withPlannedMode = (rule: string, attrs: unknown, mode: Mode): unknown =>
   plannedModeRules.has(rule) && mode !== "execute" && typeof attrs === "object" && attrs !== null
@@ -2930,6 +2936,25 @@ const withFactory = (rule: string, attrs: unknown, factory: PackageIndexModule.P
       ...(factory?.home === undefined ? {} : { home: factory.home })
     }
     : attrs
+
+/**
+ * The target index carries the rows the planner built from the loaded
+ * declarations, never ones a `PACKAGE.ts` wrote: they ride in the attrs so
+ * every declaration the pattern covers is key material, and an edit to any
+ * of them re-keys the check. Nothing here plans a target: the rows are
+ * metadata and labeled edges, plus the child query a `Repo.Target` row needs.
+ */
+const withTargetIndex = async (
+  rule: string,
+  attrs: unknown,
+  index: PackageIndexModule.PackageIndex,
+  signal: AbortSignal | undefined
+): Promise<unknown> => {
+  if (rule !== "TargetIndex" || typeof attrs !== "object" || attrs === null) return attrs
+  const pattern = (attrs as { readonly pattern?: unknown }).pattern
+  const listing = await TargetIndex.build(index, typeof pattern === "string" ? pattern : "//...", signal)
+  return { ...attrs, targets: listing.targets }
+}
 
 /** The mode one root executes under, given the invocation. */
 const rootMode = (rule: string, options: RunOptions): Mode => {

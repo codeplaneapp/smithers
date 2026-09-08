@@ -137,6 +137,20 @@ const factoryProjection = Smithers.FactoryProjection({
 })
 // --- end factory projection ------------------------------------------------
 
+// --- target index ----------------------------------------------------------
+// The declaration-derived target index smithers.sh reads from the public
+// mirror to show targets beside files: one row per labeled target with its
+// rule, kinds, declared inputs and outputs, labeled dependencies, and the
+// declaring file, and nothing keyed on a host. The planner fills the rows
+// from the loaded declarations, so their content is key material and an edit
+// to any PACKAGE.ts re-keys the check. `build --write` writes the file and
+// `lint` fails on drift; `smithers-build index '//...'` prints the same rows.
+const targetIndex = Smithers.TargetIndex({
+  summary: "Regenerate and drift-check .smithers/target-index.json, the declaration-derived target index.",
+  featured: true
+})
+// --- end target index ------------------------------------------------------
+
 const ubuntu = "ubuntu-latest"
 
 const node = Smithers.CiToolchain.Node({ release: "22.19.0", npmRelease: "11.16.0" })
@@ -307,7 +321,10 @@ const ci = Smithers.GithubCiGen({
         // the featured flows, the Dispatcher table, and the home pane,
         // declared in .smithers/FACTORY.ts, rendered over the flows/ tree,
         // checked in.
-        { name: "Factory projection drift", verb: Smithers.Verb.Lint, pattern: "//:factoryProjection" }
+        { name: "Factory projection drift", verb: Smithers.Verb.Lint, pattern: "//:factoryProjection" },
+        // The declaration-derived target index smithers.sh reads from the
+        // public mirror, one row per labeled target, checked in.
+        { name: "Target index drift", verb: Smithers.Verb.Lint, pattern: "//:targetIndex" }
       ]
     },
     {
@@ -632,6 +649,7 @@ export const Package = Smithers.Package({
     nodeModules,
     projectCopy,
     repoAbout,
+    targetIndex,
     tsconfig
   }
 })

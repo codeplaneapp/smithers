@@ -82,6 +82,7 @@ const policies: Readonly<Record<string, Policy>> = {
   "Shell.Serve": { outward: true, service: true },
   "Shell.Test": { overlay: true, cache: "execute" },
   "Size.Budgets": { cache: "always" },
+  "TargetIndex": { check: true },
   "Test": { cache: "always" }
 }
 

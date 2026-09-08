@@ -90,6 +90,7 @@
     "./ServiceSupervisor": "./src/ServiceSupervisor.ts",
     "./StampExec": "./src/StampExec.ts",
     "./TargetExecution": "./src/TargetExecution.ts",
+    "./TargetIndex": "./src/TargetIndex.ts",
     "./Watch": "./src/Watch.ts",
     "./Workspace": "./src/Workspace.ts",
     "./WorkspaceLoader": "./src/WorkspaceLoader.ts",
@@ -353,6 +354,11 @@
         "types": "./dist/esm/TargetExecution.d.ts",
         "import": "./dist/esm/TargetExecution.js",
         "require": "./dist/cjs/TargetExecution.js"
+      },
+      "./TargetIndex": {
+        "types": "./dist/esm/TargetIndex.d.ts",
+        "import": "./dist/esm/TargetIndex.js",
+        "require": "./dist/cjs/TargetIndex.js"
       },
       "./Watch": {
         "types": "./dist/esm/Watch.d.ts",

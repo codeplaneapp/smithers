@@ -351,6 +351,11 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Target index drift
+        run: pnpm exec smthrs lint '//:targetIndex' --verbose
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       # Ordinary workspace CI omits this exclusive tier; the explicit label opts in.
       - name: Exclusive fault matrix
         run: pnpm exec smthrs test '//packages/...:faults' --jobs 1 --verbose

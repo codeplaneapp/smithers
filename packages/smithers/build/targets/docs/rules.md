@@ -109,6 +109,7 @@ under a bare Flow runtime fails loudly instead of doing nothing.
 | `Size.Budgets`           | NodeArtifact      | test               | yes       | no               | package executor |
 | `SortPackageJson`        | SortPackageJson   | build, lint        | no        | yes              | flow body        |
 | `Suite`                  | Compose           | test               | no        | no               | package executor |
+| `TargetIndex`            | TargetIndex       | build, lint        | by attrs  | by attrs         | flow body        |
 | `Test`                   | Compose           | test               | no        | no               | flow body        |
 | `ToolBuild`              | ToolBuild         | build              | by attrs  | yes              | flow body        |
 | `ToolRun`                | ToolRun           | run                | no        | no               | flow body        |

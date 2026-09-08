@@ -35,6 +35,7 @@ import * as Planner from "./Planner.ts"
 import * as Query from "./Query.ts"
 import * as RepoResolution from "./RepoResolution.ts"
 import * as Reporter from "./Reporter.ts"
+import * as TargetIndex from "./TargetIndex.ts"
 import * as Watch from "./Watch.ts"
 import { type RemoteCacheAccess, remoteCacheOf, type ResolvedRemoteCache } from "./Workspace.ts"
 
@@ -1466,6 +1467,22 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           return present(context, config, result, (style) => Query.text(result, style))
         } catch (cause) {
           return context.error({ code: "query_failed", exitCode: 1, message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("index", {
+      description:
+        "List every target a pattern selects as its declaration states it: rule, kinds, inputs, outputs, dependencies, and the declaring file",
+      args: patternArgument,
+      options: workspaceOption,
+      alias: { workspace: "w" },
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const listing = await TargetIndex.build(index, context.args.pattern, config.signal)
+          return present(context, config, listing, (style) => TargetIndex.text(listing, style))
+        } catch (cause) {
+          return context.error({ code: "index_failed", exitCode: 1, message: Diagnostic.describe(cause) })
         }
       }
     })
