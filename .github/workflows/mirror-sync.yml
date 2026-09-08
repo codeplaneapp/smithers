@@ -14,6 +14,11 @@
 # repository. It reaches git as an Authorization header, never as part of the
 # remote URL, so no progress line or error message carries it.
 #
+# The Basic header is registered with ::add-mask:: before it is used. Actions
+# redacts the secret itself in logs, but not a value derived from it, and this
+# repository is public, so the base64 of `x-access-token:<token>` would reach a
+# world-readable log unredacted if git or the shell ever echoed the header.
+#
 # HONESTY. A checkout without the secret (a fork, or this repository before
 # the secret is added) skips the push with a notice that names the secret; it
 # does not fail, because a missing credential is a configuration state and not
@@ -56,6 +61,7 @@ jobs:
             exit 0
           fi
           authorization="Basic $(printf 'x-access-token:%s' "$SMITHERS_CLOUD_MIRROR_TOKEN" | base64 -w0)"
+          echo "::add-mask::$authorization"
           git -c "http.extraHeader=Authorization: $authorization" push "$MIRROR_URL" HEAD:refs/heads/main
           echo "Pushed $(git rev-parse HEAD) to $MIRROR_URL main."
         shell: bash

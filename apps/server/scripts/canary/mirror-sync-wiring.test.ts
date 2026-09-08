@@ -67,6 +67,21 @@ describe("mirror-sync.yml keeps the Cloud mirror on main", () => {
     expect(push?.env?.SMITHERS_CLOUD_MIRROR_TOKEN).toBe("${{ secrets.SMITHERS_CLOUD_MIRROR_TOKEN }}")
   })
 
+  it("masks the derived Basic header before any command can echo it", () => {
+    // Actions redacts a secret's own value, never a value derived from it, and
+    // this repository's logs are world-readable. The base64 of
+    // `x-access-token:<token>` is a write credential for the mirror, so it is
+    // registered with ::add-mask:: between the line that builds it and the
+    // first command that receives it.
+    const run = push?.run ?? ""
+    const built = run.indexOf("authorization=")
+    const mask = run.indexOf("::add-mask::$authorization")
+    const used = run.indexOf("git -c")
+    expect(built).toBeGreaterThanOrEqual(0)
+    expect(mask).toBeGreaterThan(built)
+    expect(used).toBeGreaterThan(mask)
+  })
+
   it("skips with a notice naming the secret when it is unset, and fails a rejected push", () => {
     const run = push?.run ?? ""
     const guard = run.indexOf('[ -z "$SMITHERS_CLOUD_MIRROR_TOKEN" ]')
