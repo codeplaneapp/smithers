@@ -191,6 +191,8 @@ const relay = (options: {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
       const absolute = new URL(url, "https://app.test")
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+      // The repository-flows seam reads .smithers/factory.json in the background whenever the target repository changes (the slash leaves); it is not this test's request.
+      if (absolute.pathname.endsWith("/contents/.smithers/factory.json")) return json(404, { status: "error", message: "no projection" })
       calls.push({ path: absolute.pathname + absolute.search, method: init?.method ?? "GET", body })
       if (absolute.pathname === "/api/workflow/provision") {
         if (options.provisionDelayMs !== undefined) {

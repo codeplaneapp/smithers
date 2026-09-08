@@ -20,6 +20,7 @@
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type { AppBootstrap, RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
 import type { Schema } from "effect"
+import type { Parsed } from "./SlashPayload"
 import * as account from "./entries/account"
 import * as admin from "./entries/admin"
 import * as agent from "./entries/agent"
@@ -140,6 +141,14 @@ export interface FlowMetadata {
    * (flows/FlowForms.ts); a flow with no hints still gets a derived form.
    */
   readonly form?: FormHints
+  /**
+   * The slash grammar of a flow declared at RUNTIME (a repository's flow
+   * leaf, entries/flow.ts `repositoryFlowLeaves`). SlashPayload's table names
+   * the app's own flows and cannot name one that arrives with a projection,
+   * so such a flow carries its parser; the composer boundary consults the
+   * table first and this second. Absent for every declared flow.
+   */
+  readonly grammar?: (args: string | undefined) => Parsed
 }
 
 /** The confirmation label an agent invocation of this flow needs, or undefined when it needs none. */
@@ -449,10 +458,22 @@ export const namespacesOf = <C extends CatalogItem>(
     .map(([id, count]) => ({ ...namespace(id), count }))
 }
 
-/** One row of the slash menu: a flow to run, or a namespace to open. */
+/** One row of the slash menu: a flow to run, a namespace to open, or a one-line note the listing needs. */
 export type SlashRow<C extends CatalogItem> =
   | { readonly kind: "flow"; readonly flow: C; readonly recommended: boolean }
   | { readonly kind: "namespace"; readonly namespace: Namespace; readonly count: number }
+  | { readonly kind: "note"; readonly text: string }
+
+/**
+ * The collision rule (owner decision, six-area plan): a repository may
+ * declare a flow whose id is one of the app's namespaces (`review`). A bare
+ * `/review` runs the repository's flow; `/review.` (the trailing dot) opens
+ * the namespace; the listing for the bare name says so in one row.
+ */
+export const collisionNote = <C extends CatalogItem>(id: string): SlashRow<C> => ({
+  kind: "note",
+  text: `Enter runs /${id}, this repository's flow. Type /${id}. to open the ${id} flows instead.`
+})
 
 /**
  * The slash menu as a tree.
@@ -480,10 +501,19 @@ export const slashTree = <C extends CatalogItem>(
   })
   const asFlow = (item: SlashItem<C>): SlashRow<C> => ({ kind: "flow", flow: item.flow, recommended: item.recommended })
   if (query === "") {
-    const leaves = slashItems(state, "", commands).filter(
-      (item) => item.recommended || namespaceOf(item.flow.name) === undefined
-    )
-    return [...leaves.map(asFlow), ...namespaces.map(asNamespace)]
+    /*
+     * The top level is the recommendations, then EVERY bare leaf in registry
+     * order: the surface switches, then the repository's own flows (its
+     * projection's rows, featured first). Uncapped on purpose: the cap
+     * answers a fuzzy filter, where a wall hides the answer; the top level
+     * is the map, and the namespace rows follow it anyway.
+     */
+    const recommended = slashItems(state, "", commands).filter((item) => item.recommended)
+    const named = new Set(recommended.map((item) => item.flow.name))
+    const bare = visible(offerable(state, commands))
+      .filter((command) => namespaceOf(command.name) === undefined && !named.has(command.name))
+      .map((flow): SlashItem<C> => ({ flow, recommended: false }))
+    return [...recommended.map(asFlow), ...bare.map(asFlow), ...namespaces.map(asNamespace)]
   }
   const branch = query.endsWith(".") ? query.slice(0, -1) : undefined
   if (branch !== undefined && namespaces.some((row) => row.id === branch)) {
@@ -495,8 +525,25 @@ export const slashTree = <C extends CatalogItem>(
   const heads = query.includes(".")
     ? []
     : namespaces.filter((row) => row.id.startsWith(query) && row.id !== query).map(asNamespace)
-  return [...heads, ...slashItems(state, needle, commands).map(asFlow)]
+  const collides = !query.includes(".") &&
+    namespaces.some((row) => row.id === query) &&
+    visible(commands).some((command) => command.name === query)
+  return [...(collides ? [collisionNote<C>(query)] : []), ...heads, ...slashItems(state, needle, commands).map(asFlow)]
 }
+
+/**
+ * §1.2: signed out, sign-in is the one step, so a listing offers only what
+ * works signed out. The whole registry used to be listed: `/auth.sign-out`,
+ * `/billing.upgrade`, `/issues.create`, every one of which needs a session.
+ * Nothing is un-invokable: typing a name still defers through sign-in
+ * (§6.2), which is why a flow the user named OUTRIGHT (the whole name) is
+ * offered anyway. Enter on it is the deferral, never a different flow.
+ * What changes is what the app PRESENTS as available.
+ */
+const offerable = <C extends CatalogItem>(state: CommandState, commands: ReadonlyArray<C>, query = ""): Array<C> =>
+  state.signedOut
+    ? commands.filter((command) => command.name.toLowerCase() === query || unmetRequirements(command, state).length === 0)
+    : [...commands]
 
 /** The flows listed to the user: hidden id-scoped actions never show. */
 export const visible = <C extends CatalogItem>(
@@ -571,19 +618,8 @@ export const slashItems = <C extends CatalogItem>(
   needle: string,
   commands: ReadonlyArray<C>
 ): Array<SlashItem<C>> => {
-  /*
-   * §1.2: signed out, sign-in is the one step, so the listing offers only
-   * what works signed out. The whole registry used to be listed —
-   * `/auth.sign-out`, `/billing.upgrade`, `/issues.create`,
-   * every one of which needs a session. Nothing is un-invokable: typing a
-   * name still defers through sign-in (§6.2). What changes is what the app
-   * PRESENTS as available.
-   */
-  const offerable = state.signedOut
-    ? commands.filter((command) => unmetRequirements(command, state).length === 0)
-    : commands
-  const shown = filtered(needle, visible(offerable))
   const query = needle.trim().toLowerCase()
+  const shown = filtered(needle, visible(offerable(state, commands, query)))
   const names = recommendedNames(state)
   const recommendedSet = new Set(names)
   // Within one rank, the recommendations lead in recommendation order.

@@ -15,6 +15,7 @@
  */
 import type { SearchAction, SearchItem } from "@smthrs/rpc/Cards"
 import type { CatalogItem } from "./flows/Commands"
+import { Fragment } from "react"
 import type { SlashRow } from "./flows/registry"
 import { actionForKey, prefixRow } from "./flows/SearchQuery"
 import type { PrefixRow } from "./flows/SearchQuery"
@@ -22,7 +23,7 @@ import type { PaletteAnswer } from "./state/seams/SearchSeam"
 
 /** One selectable row of the overlay. */
 export type PaletteRow =
-  | { readonly kind: "slash"; readonly row: SlashRow<CatalogItem> }
+  | { readonly kind: "slash"; readonly row: SlashLeafRow }
   | { readonly kind: "item"; readonly item: SearchItem; readonly group: string; readonly recommended: boolean }
   | { readonly kind: "action"; readonly action: SearchAction; readonly item: SearchItem }
   | { readonly kind: "help"; readonly row: PrefixRow & { readonly available: boolean } }
@@ -38,9 +39,19 @@ export interface PaletteRows {
 /** The legend the mock prints on the head line (§9). */
 export const PALETTE_LEGEND = "↑↓ move · → actions · ?"
 
+/** A slash row the overlay lists as a choice: a note is a caption, not a row. */
+export type SlashLeafRow = Exclude<SlashRow<CatalogItem>, { readonly kind: "note" }>
+
 export const paletteRows = (answer: PaletteAnswer, slashRows: ReadonlyArray<SlashRow<CatalogItem>>, actionsRef: string | null): PaletteRows => {
   if (answer.parsed.mode === "flows") {
-    return { rows: slashRows.map((row) => ({ kind: "slash", row })), groups: [] }
+    // A note row is a caption over the rows that follow it, never a choice: it renders as a group label.
+    const rows: Array<PaletteRow> = []
+    const groups: Array<{ label: string; start: number }> = []
+    for (const row of slashRows) {
+      if (row.kind === "note") groups.push({ label: row.text, start: rows.length })
+      else rows.push({ kind: "slash", row })
+    }
+    return { rows, groups }
   }
   if (answer.help !== undefined) {
     return { rows: answer.help.map((row) => ({ kind: "help", row })), groups: [] }
@@ -186,25 +197,32 @@ export function PaletteOverlay({ answer, rows, highlighted, slashBranch, onHighl
         if (row.kind === "slash" && row.row.kind === "namespace") {
           const { namespace, count } = row.row
           return (
-            <button {...common} key={`ns:${namespace.id}`} data-namespace={namespace.id} className="slash-menu-item slash-menu-namespace" onClick={() => onChoose(row)}>
-              <span className="slash-menu-name">/{namespace.id} ›</span>
-              <span className="slash-menu-description">
-                {namespace.label}
-                {namespace.summary === "" ? "" : ` — ${namespace.summary}`}
-              </span>
-              <span className="slash-menu-count">{count}</span>
-            </button>
+            <Fragment key={`ns:${namespace.id}`}>
+              {heading}
+              <button {...common} data-namespace={namespace.id} className="slash-menu-item slash-menu-namespace" onClick={() => onChoose(row)}>
+                <span className="slash-menu-name">/{namespace.id} ›</span>
+                <span className="slash-menu-description">
+                  {namespace.label}
+                  {namespace.summary === "" ? "" : ` — ${namespace.summary}`}
+                </span>
+                <span className="slash-menu-count">{count}</span>
+              </button>
+            </Fragment>
           )
         }
         if (row.kind === "slash" && row.row.kind === "flow") {
           const { flow, recommended } = row.row
           return (
-            <button {...common} key={flow.name} data-gold={recommended} data-flow={flow.name} className="slash-menu-item" onClick={() => onChoose(row)}>
-              <span className="slash-menu-name">/{flow.name}</span>
-              <span className="slash-menu-description">{flow.summary}</span>
-            </button>
+            <Fragment key={flow.name}>
+              {heading}
+              <button {...common} data-gold={recommended} data-flow={flow.name} className="slash-menu-item" onClick={() => onChoose(row)}>
+                <span className="slash-menu-name">/{flow.name}</span>
+                <span className="slash-menu-description">{flow.summary}</span>
+              </button>
+            </Fragment>
           )
         }
+        // Unreachable (a leaf row is a namespace or a flow); it narrows `row` for the branches below.
         if (row.kind === "slash") return null
         if (row.kind === "help") {
           const { prefix, label: shown, searches, available } = row.row

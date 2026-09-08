@@ -64,6 +64,7 @@ import {
   PinnedRepoSchema,
   RECOMMENDATION_ID,
   RepoTreeRowSchema,
+  RepositoryFlowsRowSchema,
   repoTreeRowId,
   StarredTargetSchema,
   RecommendationSchema,
@@ -664,6 +665,12 @@ const COLLECTION_DEFINITIONS = {
     persisted: false as const,
     create: (_backend: PersistenceBackend) => createCollection(localOnlyCollectionOptions({
       id: "app-repo-tree", schema: RepoTreeRowSchema, getKey: byId
+    }))
+  },
+  repositoryFlows: {
+    persisted: false as const,
+    create: (_backend: PersistenceBackend) => createCollection(localOnlyCollectionOptions({
+      id: "app-repository-flows", schema: RepositoryFlowsRowSchema, getKey: byId
     }))
   }
 } as const
@@ -2708,6 +2715,28 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           ) return
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.activeRepoKey = transition.id
+            draft.revision = revision
+          })
+          break
+        }
+        case "repository-flows.loaded": {
+          /*
+           * One row per repository, replaced whole: the projection is the
+           * catalog, so a reload keeps nothing of a stale one, and an absent
+           * projection (an empty list) leaves no row and therefore no leaves.
+           */
+          const existing = collections.repositoryFlows.get(transition.repo)
+          if (transition.flows.length === 0) {
+            if (existing !== undefined) collections.repositoryFlows.delete(transition.repo)
+          } else if (existing === undefined) {
+            collections.repositoryFlows.insert({ id: transition.repo, flows: [...transition.flows], loadedAt: createdAt })
+          } else {
+            collections.repositoryFlows.update(transition.repo, (draft) => {
+              draft.flows = [...transition.flows]
+              draft.loadedAt = createdAt
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
             draft.revision = revision
           })
           break

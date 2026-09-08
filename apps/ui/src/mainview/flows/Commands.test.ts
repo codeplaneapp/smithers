@@ -195,7 +195,7 @@ describe("hosts — the download flows exist only on the web", () => {
     expect(prompt.metadata.hidden).not.toBe(true)
     expect(modelInvocable(prompt)).toBe(true)
     expect(controller.commands.disclosed().map((descriptor) => descriptor.name)).toContain("app.download.prompt")
-    expect(controller.slashTree("app.").map((row) => (row.kind === "flow" ? row.flow.name : row.namespace.id))).toEqual([
+    expect(controller.slashTree("app.").map((row) => (row.kind === "flow" ? row.flow.name : row.kind === "namespace" ? row.namespace.id : row.text))).toEqual([
       "app.download.prompt"
     ])
   })

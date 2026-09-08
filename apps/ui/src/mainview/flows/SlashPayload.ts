@@ -984,7 +984,18 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
  *
  * @category conversions
  */
-export const payloadFor = (name: string, args: string | undefined): Parsed => {
-  const parse = GRAMMAR[name]
+export const payloadFor = (
+  name: string,
+  args: string | undefined,
+  grammar?: (args: string | undefined) => Parsed
+): Parsed => {
+  const parse = GRAMMAR[name] ?? grammar
   return parse === undefined ? NONE : parse(args)
 }
+
+/**
+ * The grammar of a flow declared at runtime that takes only its optional
+ * `owner/repo` target (a repository's flow leaf, entries/flow.ts): the table
+ * above cannot name it, so the flow carries this as `metadata.grammar`.
+ */
+export const repoTargetGrammar = (name: string) => (args: string | undefined): Parsed => repoOnly(name, args)

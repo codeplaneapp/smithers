@@ -63,6 +63,32 @@ export const PinnedRepoSchema = z.object({
 export type PinnedRepo = z.infer<typeof PinnedRepoSchema>
 
 /*
+ * The flows one repository declares (Factory design session 2026-09-07 §4):
+ * the `flows` rows of `.smithers/factory.json`, read for the active
+ * repository through the public contents route, one row per repository. The
+ * registry derives a slash leaf from every flow row (flows/entries/flow.ts
+ * `repositoryFlowLeaves`), so `/review` runs the repository's review flow
+ * exactly as `/flow.run review` does. Collection state, never persisted: a
+ * projection changes when the repository lands, so every launch re-reads it.
+ */
+export const RepositoryFlowSchema = z.object({
+  id: z.string().min(1),
+  description: z.string(),
+  summary: z.string().nullable(),
+  featured: z.boolean(),
+  modelInvocable: z.boolean()
+})
+export type RepositoryFlow = z.infer<typeof RepositoryFlowSchema>
+export const RepositoryFlowsRowSchema = z.object({
+  /** The `owner/repo` the projection belongs to. */
+  id: z.string(),
+  /** The projection's flow rows, featured first, in catalog order. */
+  flows: z.array(RepositoryFlowSchema),
+  loadedAt: z.number()
+})
+export type RepositoryFlowsRow = z.infer<typeof RepositoryFlowsRowSchema>
+
+/*
  * The sidebar's repository file tree (docs/workbench-lanes/sidebar-tree.md):
  * one row per directory the user expanded in a working copy, keyed
  * `<copyId>#<path>` (`""` is the copy's root). `expanded` is the caret;
@@ -1472,6 +1498,8 @@ export type AppTransition =
   | { type: "repo-tree.loading"; actor: "user"; copyId: string; path: string }
   | { type: "repo-tree.loaded"; actor: "system"; copyId: string; path: string; entries: ReadonlyArray<RepoTreeEntry>; truncated: boolean }
   | { type: "repo-tree.failed"; actor: "system"; copyId: string; path: string; error: string }
+  /* The repository's declared flows landed (or went absent: an empty list) from its factory projection. */
+  | { type: "repository-flows.loaded"; actor: "system"; repo: string; flows: ReadonlyArray<RepositoryFlow> }
   /* The workspace heading: its name, and the inline editor the pencil opens. */
   | { type: "workspace.renamed"; actor: Actor; name: string }
   | { type: "workspace.rename.toggled"; actor: "user"; open: boolean }

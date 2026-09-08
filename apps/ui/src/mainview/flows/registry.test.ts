@@ -229,7 +229,7 @@ describe("command registry pure model", () => {
       expect(alias).toBeDefined()
       expect(alias?.metadata.hidden).toBe(true)
     }
-    const rows = controller.slashTree("wi").map((row) => (row.kind === "flow" ? row.flow.name : `${row.namespace.id}/`))
+    const rows = controller.slashTree("wi").map((row) => (row.kind === "flow" ? row.flow.name : row.kind === "namespace" ? `${row.namespace.id}/` : row.text))
     expect(rows).toContain("wiki")
     expect(rows).toContain("wiki.new-note")
     expect(rows.some((row) => row === "world" || row.startsWith("world"))).toBe(false)
@@ -273,7 +273,7 @@ describe("command registry pure model", () => {
       { name: "chat.clear", summary: "Clear" }
     ]
     const rows = slashTree(chatState, "", commands)
-    expect(rows.map((row) => (row.kind === "flow" ? row.flow.name : `${row.namespace.id}/`))).toEqual([
+    expect(rows.map((row) => (row.kind === "flow" ? row.flow.name : row.kind === "namespace" ? `${row.namespace.id}/` : row.text))).toEqual([
       "connect",
       "wiki",
       "chat",

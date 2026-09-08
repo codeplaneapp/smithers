@@ -6,6 +6,8 @@
 import { Schema } from "effect"
 import { flow, NoPayload, RepoTarget, CardTarget } from "./Declare"
 import type { FlowEntry, Namespace } from "../registry"
+import { repoTargetGrammar } from "../SlashPayload"
+import type { RepositoryFlow } from "../../state/AppState"
 import type { CommandActions } from "./Declare"
 
 /** The `flow` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
@@ -128,6 +130,64 @@ export const flowFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ name, repo }) => actions.runWorkflow(name, repo)
   })
 ]
+
+/** The active repository's declared flows, as the controller reads them off the `repositoryFlows` collection. */
+export interface RepositoryFlowCatalog {
+  readonly repo: string
+  /** The projection's rows, featured first. */
+  readonly flows: ReadonlyArray<RepositoryFlow>
+  /** When the row landed: the registry's cache key beside `repo`. */
+  readonly loadedAt: number
+}
+
+/** A projection id as a slash name: a `/` in the id is a namespace dot (`create-flow/clarify` lists under `/create-flow.`). */
+export const repositoryFlowName = (id: string): string => id.replaceAll("/", ".")
+
+/** The slash grammar every flow name obeys (registry.ts parseSubmit): an id outside it has no slash leaf. */
+const SLASH_NAME = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/
+
+const firstLine = (text: string): string => text.split("\n")[0]?.trim() ?? ""
+
+/**
+ * One slash leaf per flow the repository declares (Factory design session
+ * 2026-09-07 §4: "flows are slash commands, and the featured ones are the
+ * repository's to declare"). The rows are `.smithers/factory.json`'s, read at
+ * runtime (state/seams/RepositoryFlowsSeam.ts); nothing here names a flow.
+ *
+ * Every door is flow.run's: the same `signed-in` requirement (so a signed-out
+ * `/review` parks and renders the sign-in step), the same cloud runtime, the
+ * same launch claim, and the same controller call, so the workspace
+ * provisioning and the run card are exactly what `/flow.run review` gets. The
+ * leaf binds its repository: a bare `/review` runs THIS repository's review,
+ * and a trailing `owner/repo` still retargets it as flow.run's does. A row the
+ * repository marks not model-invocable is the human's alone here too.
+ */
+export const repositoryFlowLeaves = (
+  actions: CommandActions,
+  repo: string,
+  flows: ReadonlyArray<RepositoryFlow>
+): ReadonlyArray<FlowEntry> =>
+  flows.flatMap((row) => {
+    const name = repositoryFlowName(row.id)
+    if (!SLASH_NAME.test(name)) return []
+    return [
+      flow({
+        name,
+        summary: row.summary ?? firstLine(row.description),
+        runtime: ["cloud"],
+        requires: ["signed-in"],
+        capabilities: ["outbound:launch"],
+        args: "[owner/repo]",
+        grammar: repoTargetGrammar(name),
+        form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+        ...(row.modelInvocable
+          ? {}
+          : { userOnly: true, userOnlyReason: `${repo} declares ${row.id} is not for a model to start (.smithers/FACTORY.ts)` }),
+        input: RepoTarget,
+        handler: ({ repo: target }) => actions.runWorkflow(row.id, target ?? repo)
+      })
+    ]
+  })
 
 /** `flow.run.stop-all`, registered after the `runs.*` block it acts across. */
 export const flowRunStopAllFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

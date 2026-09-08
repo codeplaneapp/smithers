@@ -279,7 +279,7 @@ describe("host parity — the web and native catalogs against the servers' own c
     const walk = (needle: string): void => {
       for (const row of web.commands.slashTree(needle)) {
         if (row.kind === "flow") slashNames.add(row.flow.name)
-        else walk(`${row.namespace.id}.`)
+        else if (row.kind === "namespace") walk(`${row.namespace.id}.`)
       }
     }
     walk("")

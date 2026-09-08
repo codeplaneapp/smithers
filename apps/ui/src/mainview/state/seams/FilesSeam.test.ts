@@ -136,6 +136,8 @@ const filesBackend = () => {
       if (!url.includes("/contents")) {
         return json(404, { status: "error", message: `no stub for ${url}` })
       }
+      // The repository-flows seam reads .smithers/factory.json in the background whenever the target repository changes (the slash leaves); it is not this seam's request.
+      if (url.endsWith("/contents/.smithers/factory.json")) return json(404, { status: "error", message: "no projection" })
       requests.push({ method: "GET", url })
       if (url.includes("net.txt")) throw new Error("socket hang up")
       const route = routes[url]
@@ -483,6 +485,8 @@ const localFilesBackend = () => {
           ? json(404, { error: { code: "path_not_found", message: `Path not found: ${body.path}` } })
           : answer()
       }
+      // The repository-flows seam reads .smithers/factory.json in the background whenever the target repository changes (the slash leaves); it is not this seam's request.
+      if (url.endsWith("/contents/.smithers/factory.json")) return json(404, { status: "error", message: "no projection" })
       requests.push({ url })
       if (url.includes("/contents")) return json(404, { code: "not_found", message: "repository not found" })
       return json(404, { status: "error", message: `no stub for ${url}` })

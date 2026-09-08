@@ -78,7 +78,7 @@ describe("smithers.who", () => {
       if (entry === undefined) continue
       expect(entry.metadata.hidden).not.toBe(true)
       expect(modelInvocable(entry)).toBe(true)
-      expect(controller.slashTree("smithers.").map((row) => (row.kind === "flow" ? row.flow.name : row.namespace.id))).toEqual([
+      expect(controller.slashTree("smithers.").map((row) => (row.kind === "flow" ? row.flow.name : row.kind === "namespace" ? row.namespace.id : row.text))).toEqual([
         "smithers.who"
       ])
     }

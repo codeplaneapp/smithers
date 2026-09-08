@@ -20,6 +20,7 @@ import { agentFailureText, agentToolSpecs, executeAgentToolCall, userOnlyError }
 import type { AppTransition } from "../state/AppState"
 import type { CommandActions } from "./Flows"
 import { adminFlows, baseFlows } from "./Flows"
+import { repositoryFlowLeaves } from "./entries/flow"
 import type { CatalogItem, CommandState, FlowEntry, MissingDoor, SlashItem, SlashRow } from "./registry"
 import {
   absentDoor,
@@ -194,10 +195,34 @@ const valueOf = (value: unknown): string | undefined => {
 export const createCommandRegistry = (actions: CommandActions, agentActions: CommandActions = actions): CommandRegistry => {
   const base = baseFlows(actions)
   const admin = adminFlows(actions)
+  /*
+   * The repository's own flows, derived from its factory projection each
+   * time the projection lands (entries/flow.ts `repositoryFlowLeaves`) and
+   * gone with it. Cached on the row's identity because the slash tree reads
+   * the registry per keystroke. A declared flow keeps its name: a projection
+   * row that shares one (`chat`, `flow.list`) gets no leaf, so no name ever
+   * resolves to two entries.
+   */
+  let leafCache: { readonly repo: string; readonly loadedAt: number; readonly leaves: ReadonlyArray<FlowEntry> } | undefined
+  const leaves = (): ReadonlyArray<FlowEntry> => {
+    const catalog = actions.repositoryFlows()
+    if (catalog === undefined) return []
+    if (leafCache !== undefined && leafCache.repo === catalog.repo && leafCache.loadedAt === catalog.loadedAt) return leafCache.leaves
+    const taken = new Set([...base, ...admin].map(nameOf))
+    const built = repositoryFlowLeaves(actions, catalog.repo, catalog.flows).filter((entry) => !taken.has(nameOf(entry)))
+    leafCache = { repo: catalog.repo, loadedAt: catalog.loadedAt, leaves: built }
+    return built
+  }
   let agentEntries: ReadonlyArray<FlowEntry> | undefined
   const agentEntry = (name: string): FlowEntry | undefined => {
     agentEntries ??= agentActions === actions ? [...base, ...admin] : [...baseFlows(agentActions), ...adminFlows(agentActions)]
-    return agentEntries.find((candidate) => nameOf(candidate) === name)
+    const declared = agentEntries.find((candidate) => nameOf(candidate) === name)
+    if (declared !== undefined) return declared
+    if (agentActions === actions) return leaves().find((candidate) => nameOf(candidate) === name)
+    const catalog = agentActions.repositoryFlows()
+    return catalog === undefined
+      ? undefined
+      : repositoryFlowLeaves(agentActions, catalog.repo, catalog.flows).find((candidate) => nameOf(candidate) === name)
   }
 
   const available = (entry: FlowEntry): boolean => {
@@ -212,7 +237,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
   }
 
   const entries = (): ReadonlyArray<FlowEntry> =>
-    (actions.snapshot().admin ? [...base, ...admin] : base).filter(available)
+    [...(actions.snapshot().admin ? [...base, ...admin] : base), ...leaves()].filter(available)
 
   const items = (): ReadonlyArray<CatalogItem> => entries().map(itemOf)
 
@@ -228,7 +253,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
   const explainAbsent = (name: string): AbsentExplanation | undefined => {
     const bootstrap = actions.bootstrap
     if (bootstrap === undefined || find(name) !== undefined) return undefined
-    const declared = base.find((entry) => nameOf(entry) === name)
+    const declared = base.find((entry) => nameOf(entry) === name) ?? leaves().find((entry) => nameOf(entry) === name)
     if (declared === undefined) return undefined
     const missing = absentDoor(declared.metadata, bootstrap)
     if (missing === undefined) return undefined
@@ -381,7 +406,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
      * exactly once, here, and a text that cannot be parsed is refused before
      * the binding runs.
      */
-    const parsed = payloadFor(nameOf(target), args)
+    const parsed = payloadFor(nameOf(target), args, target.metadata.grammar)
     if ("error" in parsed) {
       /*
        * THE FORM LAW: a line without the flow's required input renders the

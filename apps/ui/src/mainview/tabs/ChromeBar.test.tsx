@@ -653,7 +653,8 @@ describe("the sidebar's file tree", () => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
         const parsed = new URL(url, "http://cloud.test")
         const path = parsed.pathname
-        requests.push(`${path}${parsed.search}`)
+        // The repository-flows seam reads .smithers/factory.json in the background whenever the target repository changes (the slash leaves); it is not this test's request.
+        if (!path.endsWith("/contents/.smithers/factory.json")) requests.push(`${path}${parsed.search}`)
         const at = parsed.searchParams.get("path") ?? ""
         if (path === "/api/cloud/api/repos/will/flows/workspaces/ws-1/files") {
           if (at === "") return json(200, { path: "", entries: [{ name: "apps", path: "apps", type: "dir", size: 0 }, { name: "README.md", path: "README.md", type: "file", size: 6 }] })

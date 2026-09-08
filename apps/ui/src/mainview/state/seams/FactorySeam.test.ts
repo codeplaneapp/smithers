@@ -75,7 +75,8 @@ const backend = (tree: Tree = "full") => {
   const services: AppServices = {
     fetchImpl: async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-      requests.push({ method: init?.method ?? "GET", url })
+      // The repository-flows seam reads .smithers/factory.json in the background whenever the target repository changes (the slash leaves); it is not this seam's request.
+      if (!url.endsWith("/contents/.smithers/factory.json")) requests.push({ method: init?.method ?? "GET", url })
       if (url === "/api/repos/will/flows/contents") {
         if (tree === "root-throw") throw new Error("socket hang up")
         if (tree === "root-500" || tree === "root-500-no-smithers-dir") return json(500, { message: "the mirror is rebuilding" })

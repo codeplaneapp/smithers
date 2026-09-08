@@ -169,7 +169,8 @@ describe("triggers seam: the declaration, signed out", () => {
       triggers: [],
       webhooks: []
     })
-    expect(seen).toEqual([PROJECTION])
+    // The projection is read once for the card (and once more by the repository-flows seam, which reads the same file for the slash leaves).
+    expect(new Set(seen)).toEqual(new Set([PROJECTION]))
     expect(seen.some((path) => path.startsWith(LIVE))).toBe(false)
   })
 
@@ -247,7 +248,8 @@ describe("triggers seam: the box, signed in", () => {
       { id: "sweep", flowId: "issue", cron: "*/15 * * * *", enabled: false }
     ])
     expect(card.payload.webhooks).toEqual([{ name: "github-push", flowId: "review" }])
-    expect(seen).toEqual([PROJECTION, `${LIVE}?repo=will%2Fflows`])
+    expect(seen.filter((path) => path !== PROJECTION)).toEqual([`${LIVE}?repo=will%2Fflows`])
+    expect(seen).toContain(PROJECTION)
   })
 
   test("signed in with no box answering, the card is the declaration alone with live false", async () => {

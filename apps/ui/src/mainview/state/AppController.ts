@@ -14,7 +14,7 @@ import { localSocketProtocols } from "../runtime/LocalSession"
 import type { FrameHistoryPort } from "../runtime/FrameHistory"
 import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
-import { activeCatalogRepositoryId, activeRepositoryId } from "./RepoContext"
+import { activeCatalogRepositoryId, activeRepositoryId, resolveTargetRepo } from "./RepoContext"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import { createSearchSeam } from "./seams/SearchSeam"
 import type { PaletteAnswer, SearchSeam } from "./seams/SearchSeam"
@@ -74,6 +74,8 @@ import { createHistorySeam } from "./seams/HistorySeam"
 import type { HistorySeam } from "./seams/HistorySeam"
 import { createTriggersSeam } from "./seams/TriggersSeam"
 import type { TriggersSeam } from "./seams/TriggersSeam"
+import { createRepositoryFlowsSeam } from "./seams/RepositoryFlowsSeam"
+import type { RepositoryFlowCatalog } from "../flows/entries/flow"
 import type { SecretsSeam } from "./seams/SecretsSeam"
 import { createOnboardingController } from "./controller/onboarding"
 import type { OnboardingController } from "./controller/onboarding"
@@ -117,6 +119,13 @@ export interface AppController {
   readonly nativeRepositoriesAvailable: boolean
   /** The command registry: every interactive affordance routes through it. */
   readonly commands: CommandRegistry
+  /**
+   * The active repository's declared flows (the `flows` rows of its
+   * .smithers/factory.json, seams/RepositoryFlowsSeam.ts), from which the
+   * registry derives one slash leaf each; undefined without a target
+   * repository or before its projection has landed.
+   */
+  readonly repositoryFlows: () => RepositoryFlowCatalog | undefined
   readonly slashItems: (needle: string) => Array<SlashItem<CatalogItem>>
   readonly slashTree: (needle: string) => Array<SlashRow<CatalogItem>>
   readonly changeDraft: (draft: string) => void
@@ -653,6 +662,13 @@ export const createAppController = (
     actor: () => ctx.commandActor,
     nextOrdinal: nextTranscriptOrdinal
   }
+  const repositoryFlowsSeam = createRepositoryFlowsSeam(seamCtx)
+  const repositoryFlows = (): RepositoryFlowCatalog | undefined => {
+    const target = resolveTargetRepo(store, undefined)
+    if ("error" in target) return undefined
+    const row = store.collections.repositoryFlows.get(target.repo)
+    return row === undefined ? undefined : { repo: row.id, flows: row.flows, loadedAt: row.loadedAt }
+  }
   const issuesSeam = actors.pair(seamCtx, (context) => createIssuesSeam(context))
   const landingsSeam = actors.pair(seamCtx, (context) => createLandingsSeam(context))
   const billingSeam = actors.pair(seamCtx, (context) => createBillingSeam(context))
@@ -1172,6 +1188,7 @@ export const createAppController = (
     promptStorageRecovery,
     exportStorageRecovery,
     bootstrap: services.bootstrap,
+    repositoryFlows,
     changeDraft,
     withAgentActor: <T>(work: () => Promise<T>): Promise<T> => work(),
     reset,
@@ -1480,6 +1497,8 @@ export const createAppController = (
   subscribeToAgent()
   // Material transitions regenerate the next-step pills through the `recommend` flow.
   recommender.subscribe()
+  // The active repository's flow catalog, read now and on every change of target, so its leaves are in the registry.
+  repositoryFlowsSeam.subscribe(ctx.onDispose)
   watchIdentityAcrossTabs()
   // Cmd+T / Cmd+W / Cmd+1..9 on the document, released with the controller.
   if (typeof document !== "undefined") ctx.onDispose(installKeyboard(document))
@@ -1505,6 +1524,7 @@ export const createAppController = (
     promptStorageRecovery,
     exportStorageRecovery,
     bootstrap: services.bootstrap,
+    repositoryFlows,
     downloadUrl,
     features,
     nativeAgentAvailable: agent.available,

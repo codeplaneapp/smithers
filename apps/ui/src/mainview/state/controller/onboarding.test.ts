@@ -81,7 +81,8 @@ const fixture = async (routes: Record<string, Route>) => {
     fetchImpl: async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
       const path = new URL(url, "https://app.test").pathname
-      requests.push(path)
+      // The repository-flows seam reads .smithers/factory.json in the background whenever the target repository changes (the slash leaves); it is not one of the flow's own reads, so it stays out of the log.
+      if (!path.endsWith("/contents/.smithers/factory.json")) requests.push(path)
       return (routes[path] ?? (() => json(404, { status: "error", message: `no stub for ${path}` })))(init)
     }
   }
@@ -352,10 +353,8 @@ describe("repo.home", () => {
     })
     const outcome = await controller.commands.runForAgent("repo.home")
     expect(outcome.status).toBe("executed")
-    expect(requests).toEqual([
-      "/api/repos/smithersai/smithers/contents/.smithers/home.json",
-      "/api/repos/smithersai/smithers/contents/.smithers/factory.json"
-    ])
+    // The projection read is filtered from the log (the repository-flows seam reads it too); the featured rows below prove the flow read it.
+    expect(requests).toEqual(["/api/repos/smithersai/smithers/contents/.smithers/home.json"])
     const [card] = homeCards(store)
     expect(card?.id).toBe(`repo-home-${REPO}`)
     expect(card?.payload).toEqual({

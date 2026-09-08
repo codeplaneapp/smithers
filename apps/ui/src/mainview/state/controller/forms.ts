@@ -200,7 +200,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const fields = formFieldsFor(input, hints)
     if (fields.length === 0) return undefined
     /* A line the grammar parses whole prefills exactly (agent.new's edit prefill); a line it refuses prefills what it can. */
-    const parsed = payloadFor(request.name, request.args)
+    const parsed = payloadFor(request.name, request.args, (entry ?? ctx.commands.find(request.name))?.metadata.grammar)
     const given = "payload" in parsed ? parsed.payload : partialPayload(fields, hints, request.args)
     const draft = draftFrom(fields, given)
     const resolved = withOptions(fields, draft)
