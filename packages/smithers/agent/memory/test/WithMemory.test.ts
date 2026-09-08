@@ -280,10 +280,10 @@ describe("WithMemory", () => {
           { banks: [], query: "durable" }
         )
         const unscoped = yield* Flows.runRecallFor(Flows.recall, { banks: [], query: "durable" })
-        const explicit = yield* Flows.runRecallFor(
+        const explicit = yield* Effect.flip(Flows.runRecallFor(
           WithMemory.withMemory(Flows.recall, policy),
           { banks: ["flow-elsewhere"], query: "durable" }
-        )
+        ))
         return { scoped, unscoped, explicit }
       }).pipe(
         Effect.provide(RecallKeyword.layer),
@@ -293,9 +293,95 @@ describe("WithMemory", () => {
 
     expect(result.scoped.map((row) => row.key)).toEqual(["ledger"])
     expect(result.unscoped).toEqual([])
-    // An explicit bank list wins: the policy supplies a default, never an override.
-    expect(result.explicit.map((row) => row.key)).toEqual(["other"])
+    expect(result.explicit).toBeInstanceOf(MemoryError)
+    expect(result.explicit.code).toBe("invalid_namespace")
   })
+
+  it("rejects foreign recall banks before calling the selected service", async () => {
+    const scoped = WithMemory.withMemory(Flows.recall, policy)
+    for (const banks of [["user-other"], ["flow-trellis", "user-other"], ["agent-trellis"], ["elsewhere"]]) {
+      const error = await Effect.runPromise(
+        Effect.flip(Flows.handlersFor(scoped).recall({ banks, query: "durable" })).pipe(
+          Effect.provide(Recall.layer({ recall: () => Effect.die("foreign banks must not reach recall") }))
+        )
+      )
+      expect(error).toBeInstanceOf(MemoryError)
+      expect(error.code).toBe("invalid_namespace")
+    }
+  })
+
+  it("rejects a foreign remember before overwriting its existing fact", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* remembered("user-other", "private", "original")
+        const error = yield* Effect.flip(
+          Flows.handlersFor(WithMemory.withMemory(Flows.remember, policy))
+            .remember({ bank: "user-other", key: "private", text: "overwritten" })
+        )
+        const store = yield* MemoryStore.MemoryStore
+        return { error, fact: yield* store.getFact({ namespace: "user-other", key: "private" }) }
+      }).pipe(Effect.provide(TestMemory.layer))
+    )
+    expect(result.error).toBeInstanceOf(MemoryError)
+    expect(result.error.code).toBe("invalid_namespace")
+    expect(result.fact?.value).toEqual({ content: "original", tags: [] })
+  })
+
+  it.each(["flow", "agent", "user", "global"] as const)(
+    "rejects foreign reads and overwrites under a %s policy over the real store",
+    async (kind) => {
+      const scopedPolicy = { ...policy, namespace: { kind, id: "trellis" } }
+      const result = await Effect.runPromise(
+        Effect.gen(function*() {
+          yield* remembered("user-other", "private", "durable private text")
+          const recallError = yield* Effect.flip(
+            Flows.handlersFor(WithMemory.withMemory(Flows.recall, scopedPolicy))
+              .recall({ banks: ["user-other"], query: "durable" })
+          )
+          const remember = Flows.handlersFor(WithMemory.withMemory(Flows.remember, scopedPolicy)).remember
+          const writeErrors = yield* Effect.forEach(
+            ["user-other", "flow-elsewhere", "agent-trellis"].filter(
+              (bank) => bank !== Recall.bankForNamespace(scopedPolicy.namespace)
+            ),
+            (bank) => Effect.flip(remember({ bank, key: "private", text: "overwritten" }))
+          )
+          const store = yield* MemoryStore.MemoryStore
+          return { recallError, writeErrors, facts: yield* store.listAllFacts }
+        }).pipe(Effect.provide(RecallKeyword.layer), Effect.provide(TestMemory.layer))
+      )
+      for (const error of [result.recallError, ...result.writeErrors]) {
+        expect(error).toBeInstanceOf(MemoryError)
+        expect(error.code).toBe("invalid_namespace")
+      }
+      expect(result.facts).toHaveLength(1)
+      expect(result.facts[0]?.namespace).toEqual({ kind: "user", id: "other" })
+      expect(result.facts[0]?.value).toEqual({ content: "durable private text", tags: [] })
+    }
+  )
+
+  it.each(["flow", "agent", "user", "global"] as const)(
+    "accepts explicit banks resolving to the %s policy namespace",
+    async (kind) => {
+      const scopedPolicy = { ...policy, namespace: { kind, id: "trellis" } }
+      const banks = kind === "flow" ? ["trellis", "flow-trellis"] : [`${kind}-trellis`]
+      const rows = await Effect.runPromise(
+        Effect.gen(function*() {
+          for (const bank of banks) {
+            yield* Flows.runRememberFor(WithMemory.withMemory(Flows.remember, scopedPolicy), {
+              bank,
+              key: "allowed",
+              text: "durable allowed text"
+            })
+          }
+          return yield* Flows.runRecallFor(WithMemory.withMemory(Flows.recall, scopedPolicy), {
+            banks,
+            query: "durable"
+          })
+        }).pipe(Effect.provide(RecallKeyword.layer), Effect.provide(TestMemory.layer))
+      )
+      expect(rows.map((row) => row.key)).toEqual(["allowed"])
+    }
+  )
 
   it("returns no rows and never asks the recall service when the policy says none", async () => {
     const rows = await Effect.runPromise(

@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A memory policy decides which namespace a flow tree reads and writes, the recall budget, and whether recall and retention run at all. [Memory policies](../concepts/policies.md) explains the model. This guide attaches one and binds it.
+A memory policy decides which namespace a flow tree reads and writes, the default recall budget, and whether recall and retention run at all. [Memory policies](../concepts/policies.md) explains the model. This guide attaches one and binds it.
 
 ## Attach the policy
 
@@ -37,7 +37,7 @@ const bound = WithMemory.withMemory(Flows.recall, policy)
 const binding = FlowBinding.make({ flow: bound, handler: Flows.handlersFor(bound).recall })
 ```
 
-The copy keeps the declaration's input and output schemas, which is what makes that call compile: `FlowBinding.make` reads `flow.input` to type the handler. Binding `Flows.recall` with the bare `Flows.runRecall` instead reaches the store with no namespace, no budget cap, and no way to honor `recall: "none"`.
+The copy keeps the declaration's input and output schemas, which is what makes that call compile: `FlowBinding.make` reads `flow.input` to type the handler. Binding `Flows.recall` with the bare `Flows.runRecall` instead uses the caller's banks and the recall service's budget default, without enforcing the policy namespace or `recall: "none"`.
 
 Every handler takes exactly one argument, the decoded flow input, because `FlowBinding.make` types its handler as `(input, call)` and passes the `Call` in the second position. Bind run coordinates once, when the handler is built:
 
@@ -53,7 +53,7 @@ Every fact the returned `remember` handler writes records that provenance. A pro
 
 ## Call the scoped handlers directly
 
-Outside a host, `Flows.runRecallFor` and `Flows.runRememberFor` apply a flow's policy to one call. The policy supplies defaults and never overrides:
+Outside a host, `Flows.runRecallFor` and `Flows.runRememberFor` apply a flow's policy to one call. The policy namespace is an allowlist. Empty banks use it; explicit banks must resolve to the same `kind` and `id`. A foreign bank fails with `invalid_namespace` before the recall service or store runs. A mixed recall request also fails in full. Equivalent spellings such as `release-notes` and `flow-release-notes` are allowed. The policy has no extra readable-bank list. An explicit `maxTokens` still overrides the budget default:
 
 ```ts
 import * as Flows from "@smthrs/memory/Flows"
@@ -70,7 +70,9 @@ const scopedCalls = Effect.gen(function*() {
 })
 ```
 
-Two policy values are refusals, not defaults: `recall: "none"` answers no rows and never reaches the recall service, and `retain: "never"` answers `{ key }` while nothing reaches the store.
+Two policy values short-circuit before bank validation or I/O: `recall: "none"` answers no rows and never reaches the recall service, and `retain: "never"` answers `{ key }` while nothing reaches the store.
+
+Bare handlers, direct `runRecall` / `runRemember` calls, recall services, and store methods do not enforce flow policies. Bind the policy-carrying declarations for model-facing access.
 
 ## Cover generated work with MemoryTrellis
 

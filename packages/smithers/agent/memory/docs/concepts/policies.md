@@ -1,6 +1,6 @@
 ---
 title: "Memory policies"
-description: "The memory policy a flow tree inherits: four fields, attached as an annotation, read back as defaults and two refusals."
+description: "The memory policy a flow tree inherits: four fields, attached as an annotation, enforced as a namespace allowlist, budget default, and two refusals."
 sidebar:
   order: 3
 ---
@@ -26,16 +26,20 @@ The annotation takes no part in flow identity. Applying a policy never changes t
 
 Only a flow whose collaborators are data, one declared with `flows: [...]` and no body, carries children a decorator can rewrite. A flow with a body reaches its collaborators by calling them, and those calls are graph nodes rather than a list, so `WithMemory.children` returns nothing for one. `WithMemory.references` is the wider view: it includes registry names the runtime has not resolved to a flow yet, which a policy carries through untouched.
 
-## Defaults and refusals
+## Namespace boundary, defaults, and refusals
 
-The runtime bindings `Flows.runRecallFor` and `Flows.runRememberFor` read the policy back, and `Flows.handlersFor(flow)` is the pair a host binds. The policy supplies defaults and never overrides:
+The runtime bindings `Flows.runRecallFor` and `Flows.runRememberFor` read the policy back, and `Flows.handlersFor(flow)` is the pair a host binds. The policy namespace is the only namespace these scoped handlers may read or write:
 
-- `runRecallFor` fills in the policy bank when the caller names no banks, and the policy budget when the caller states no `maxTokens`. A caller that names its own keeps them.
-- `runRememberFor` resolves an empty bank to the policy namespace.
+- `runRecallFor` fills an empty `banks` list with the policy bank. Every explicit bank must resolve to the policy namespace, matching both `kind` and `id`. A foreign bank fails the whole request with `invalid_namespace` before the recall service runs, including requests that mix allowed and foreign banks.
+- `runRememberFor` resolves an empty bank to the policy namespace. An explicit foreign bank fails with `invalid_namespace` before the store runs.
+- Equivalent spellings are allowed: `release-notes` and `flow-release-notes` both resolve to `{ kind: "flow", id: "release-notes" }`. There is no additional readable-bank list.
+- `maxTokens` remains a default: the policy budget applies only when the caller omits it.
 
-Two policy values are refusals rather than defaults, and they win over what the caller asked for:
+Two policy values short-circuit before bank validation or I/O:
 
 - `recall: "none"` returns no rows and never reaches the recall service.
 - `retain: "never"` drops the write. The caller still receives the key it asked for, and nothing reaches the store.
+
+The boundary applies through `Flows.handlersFor` on a policy-carrying declaration, or through `runRecallFor` and `runRememberFor`. Bare handlers, direct `runRecall` / `runRemember` calls, recall services, and store methods do not enforce flow policies. Hosts must bind the scoped declarations for model-facing access.
 
 For the binding mechanics, provenance, and the delegation case, see [Scope a flow tree to a namespace](../guides/scope-a-flow-tree.md).

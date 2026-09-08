@@ -27,6 +27,8 @@ const recalled = Effect.gen(function*() {
 
 `banks` accepts at most 16 names, de-duplicated on the resolved namespace. `maxTokens` is a UTF-8 byte ceiling over the serialized result array, at most 65,536; rows with empty text drop out before the budget fills. `tagGroups` accepts at most 16 groups, and every group must match a row's tags for the row to rank.
 
+The example uses bare handlers and has no policy boundary. For model-facing access, bind a policy-carrying declaration with `Flows.handlersFor`, or call `Flows.runRecallFor`. An empty `banks` list then selects the policy namespace; every explicit bank must resolve to the same `kind` and `id`. Any foreign bank fails the whole request with `invalid_namespace` before the recall service runs. Equivalent bank spellings are allowed; there is no extra readable-bank list. `recall: "none"` returns no rows before bank validation. The policy budget fills an omitted `maxTokens`; an explicit budget still wins.
+
 ## Keyword recall
 
 `RecallKeyword.layer` needs only the store. It scores each row by the number of normalized query terms occurring in its key and text, breaks ties by newest update, and applies the byte cap:
@@ -114,6 +116,6 @@ When a host composes flows rather than calling handlers directly, bind the flow-
 
 ## Next steps
 
-- Constrain which banks a flow tree may read: [Scope a flow tree to a namespace](./scope-a-flow-tree.md).
+- Enforce one namespace for a flow tree's recall and writes: [Scope a flow tree to a namespace](./scope-a-flow-tree.md).
 - Freeze recall into an agent's opening context: [Give an agent opening memory](./agent-opening-context.md).
 - Diagnose empty results: [Troubleshooting](../troubleshooting.md).

@@ -14,7 +14,7 @@ import * as Pattern from "@smthrs/patterns/Pattern"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { resolveNamespace } from "./internal/Bank.ts"
-import type { MemoryError } from "./MemoryError.ts"
+import { MemoryError } from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Namespace from "./Namespace.ts"
 import * as Recall from "./Recall.ts"
@@ -243,13 +243,26 @@ export const runRecall = (
 ): Effect.Effect<RecallOutputType, MemoryError, Recall.Recall> =>
   Effect.flatMap(Recall.Recall, (service) => service.recall(input))
 
+const validatePolicyBank = (bank: string, policy: WithMemory.Policy): Effect.Effect<void, MemoryError> =>
+  Effect.gen(function*() {
+    const { namespace } = yield* resolveNamespace(bank)
+    if (namespace.kind !== policy.namespace.kind || namespace.id !== policy.namespace.id) {
+      return yield* Effect.fail(
+        new MemoryError({
+          code: "invalid_namespace",
+          message: "memory bank is outside the policy namespace"
+        })
+      )
+    }
+  })
+
 /**
  * Applies the memory policy a flow carries to a recall request.
  *
- * The policy supplies defaults, never overrides: a caller that names its own
- * banks or its own budget keeps them. A policy of `recall: "none"` is the one
- * exception, and it is a refusal rather than a default, so the request never
- * reaches the recall service at all.
+ * Empty banks use the policy namespace; every explicit bank must resolve to
+ * that same namespace or the entire request fails before recall runs. The
+ * policy budget is a default the caller may override. `recall: "none"`
+ * returns no rows before bank validation or any call to the recall service.
  *
  * @category handlers
  * @since 0.1.0
@@ -261,18 +274,23 @@ export const runRecallFor = (
   const policy = WithMemory.policyOf(flow)
   if (policy === undefined) return runRecall(input)
   if (policy.recall === "none") return Effect.succeed([])
-  return runRecall({
-    ...input,
-    banks: input.banks.length > 0 ? input.banks : [Recall.bankForNamespace(policy.namespace)],
-    maxTokens: input.maxTokens ?? policy.maxTokens
+  return Effect.gen(function*() {
+    const banks = input.banks.length > 0 ? input.banks : [Recall.bankForNamespace(policy.namespace)]
+    for (const bank of banks) yield* validatePolicyBank(bank, policy)
+    return yield* runRecall({
+      ...input,
+      banks,
+      maxTokens: input.maxTokens ?? policy.maxTokens
+    })
   })
 }
 
 /**
  * Applies the memory policy a flow carries to a memory write.
  *
- * An unnamed bank resolves to the policy namespace. `retain: "never"` drops
- * the write: the caller still receives the key it asked for, and nothing
+ * An unnamed bank resolves to the policy namespace. An explicit foreign bank
+ * fails before the store runs. `retain: "never"` drops the write before bank
+ * validation: the caller still receives the key it asked for, and nothing
  * reaches the store. The optional provenance argument is forwarded unchanged.
  *
  * The flow comes first so this can never be mistaken for a `FlowBinding`
@@ -289,9 +307,11 @@ export const runRememberFor = (
   const policy = WithMemory.policyOf(flow)
   if (policy === undefined) return runRememberWith(provenance)(input)
   if (policy.retain === "never") return Effect.succeed({ key: input.key })
-  return runRememberWith(provenance)(
-    input.bank.length > 0 ? input : { ...input, bank: Recall.bankForNamespace(policy.namespace) }
-  )
+  return Effect.gen(function*() {
+    const bank = input.bank.length > 0 ? input.bank : Recall.bankForNamespace(policy.namespace)
+    yield* validatePolicyBank(bank, policy)
+    return yield* runRememberWith(provenance)({ ...input, bank })
+  })
 }
 
 /**
