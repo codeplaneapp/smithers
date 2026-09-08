@@ -16,7 +16,17 @@
  *
  * One preopen is exposed: fd 3 names `"/"`, mapped to `root` in the slice —
  * exactly what wasi-libc's preopen scan expects, so every absolute path the
- * module opens resolves inside the slice.
+ * module opens resolves inside the slice, subject to the namespace ownership
+ * requirement below.
+ *
+ * This shim is not a security sandbox for a concurrently mutated native
+ * filesystem. `SyncFsLike` has only path-based calls: no retained directory
+ * handles, atomic confined resolution, or no-follow open flags. Checks and
+ * subsequent reads or mutations are separate backend calls. The host must
+ * prevent other writers (including backend callbacks) from replacing path
+ * components during a syscall, including `root` and its host ancestors, or
+ * supply a backend that independently confines every operation. Synchronous
+ * guest execution alone does not exclude native processes or other workers.
  *
  * The namespace is POSIX: `/` is the only separator, in guest paths and in
  * symlink targets alike, and `root` is expected to be a path the slice joins
@@ -257,7 +267,12 @@ const zeroStats = { size: 0, atimeMs: 0, mtimeMs: 0, ctimeMs: 0 }
  * @slop
  */
 export interface WasiPreview1Options {
-  /** The synchronous filesystem the module's WASI namespace is served from. */
+  /**
+   * The synchronous filesystem the module's WASI namespace is served from.
+   * The host must exclude concurrent namespace mutation during each syscall,
+   * or the backend must independently confine every path operation. `root`
+   * alone does not sandbox `node:fs` against a concurrent native writer.
+   */
   readonly fs: SyncFsLike
   /**
    * The slice path preopened as the WASI namespace root `"/"`. Defaults to
@@ -362,9 +377,10 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       : `${hostPrefix}/${segments.join("/")}`
 
   /**
-   * Resolves a path in NAMESPACE coordinates, so no path escapes the preopened
-   * slice: `.` and empty segments drop, `..` pops, and — as in POSIX — `..` of
-   * the namespace root is the root.
+   * Resolves a path in NAMESPACE coordinates under the namespace ownership
+   * requirement above. `.` and empty segments drop; every traversed ancestor
+   * must exist and be a directory after symlink expansion, even if a following
+   * `..` consumes it. `..` of the namespace root remains the root.
    *
    * Every component EXCEPT the last is followed through symlinks here, and each
    * hop is re-rooted the same way, so a link naming a directory cannot smuggle
@@ -378,8 +394,8 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
    * `path_open` follows only when `symlinkFollow` is set.
    */
   const walk = (base: ReadonlyArray<string>, raw: string): Resolved => {
-    let resolved: Array<string> = raw.startsWith("/") ? [] : [...base]
-    const pending = partsOf(raw).reverse()
+    let resolved: Array<string> = []
+    const pending = (raw.startsWith("/") ? partsOf(raw) : [...base, ...partsOf(raw)]).reverse()
     let hops = 0
     for (let segment = pending.pop(); segment !== undefined; segment = pending.pop()) {
       if (segment === "..") {
@@ -387,12 +403,16 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
         continue
       }
       const candidate = [...resolved, segment]
-      if (pending.length > 0 && isSymlink(hostPathOf(candidate))) {
-        if (hops++ >= 40) return fail(Errno.loop)
-        const link = fs.readlinkSync(hostPathOf(candidate))
-        if (link.startsWith("/")) resolved = []
-        pending.push(...partsOf(link).reverse())
-        continue
+      if (pending.length > 0) {
+        const stats = fs.lstatSync(hostPathOf(candidate))
+        if (stats.isSymbolicLink()) {
+          if (hops++ >= 40) return fail(Errno.loop)
+          const link = fs.readlinkSync(hostPathOf(candidate))
+          if (link.startsWith("/")) resolved = []
+          pending.push(...partsOf(link).reverse())
+          continue
+        }
+        if (!stats.isDirectory()) return fail(Errno.notdir)
       }
       resolved = candidate
     }
@@ -856,9 +876,8 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     fstflags: number
   ): number => {
     // The slice has no `lutimesSync`, so this always follows the last component
-    // (the documented divergence). It follows it through the confined resolver
-    // rather than through the backend, so the timestamps it sets are never
-    // those of a file outside the preopen.
+    // (the documented divergence). It follows it through the namespace resolver,
+    // subject to the same exclusive-namespace requirement as other path calls.
     const target = resolveLinkTarget(resolvePath(fd, ptr, len))
     const times = resolveTimes(() => fs.statSync(target.hostPath), atim, mtim, fstflags)
     fs.utimesSync(target.hostPath, times.atimeSec, times.mtimeSec)
@@ -931,6 +950,9 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     fdflags: number,
     retPtr: number
   ): number => {
+    // These checks are not atomic with openFile. In particular, no-follow
+    // rejects a stable final link; it cannot stop an external writer replacing
+    // that file or any ancestor before the backend's string-path open.
     const requested = resolvePath(dirFd, pathPtr, pathLen)
     const follow = (dirflags & LOOKUPFLAGS.symlinkFollow) !== 0
     const linked = isSymlink(requested.hostPath)

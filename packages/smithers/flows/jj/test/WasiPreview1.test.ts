@@ -256,6 +256,55 @@ afterAll(() => {
   fsModule.rmSync(base, { recursive: true, force: true })
 })
 
+describe("WasiPreview1 native concurrency contract", () => {
+  it("documents that native path operations require an exclusive namespace", () => {
+    const guide = fsModule.readFileSync(new URL("../docs/guides/run-jj-in-a-browser.md", import.meta.url), "utf8")
+    expect(guide).toContain("`root` is not a security sandbox for `node:fs` under concurrent mutation")
+  })
+
+  // Characterization of UNSUPPORTED use, not a confinement guarantee. The
+  // slice has no atomic confined path operation. These interleavings explain
+  // why the documented exclusive-namespace requirement is necessary, even
+  // though the guest and all slice calls are synchronous.
+  it.skipIf(!supportsNativeSymlinks).each(["file", "ancestor"] as const)(
+    "exposes the documented native race when a checked %s becomes a host-absolute link",
+    (component) => {
+      const root = freshDir()
+      const outside = freshDir()
+      const gate = join(root, "gate")
+      fsModule.mkdirSync(gate)
+      const target = join(gate, "secret")
+      const secret = join(outside, "secret")
+      fsModule.writeFileSync(target, "inside")
+      fsModule.writeFileSync(secret, "SYNTHETIC_OUTSIDE_SECRET")
+      const checkedPath = component === "file" ? target : gate
+      let raced = false
+      const h = host({
+        root,
+        fs: {
+          ...nodeFs,
+          lstatSync: (path) => {
+            const stats = nodeFs.lstatSync(path)
+            if (path === checkedPath && !raced) {
+              raced = true
+              fsModule.renameSync(checkedPath, `${checkedPath}-held`)
+              fsModule.symlinkSync(component === "file" ? secret : outside, checkedPath)
+            }
+            return stats
+          }
+        }
+      })
+      const fd = open(h, "/gate/secret", { dirflags: 0 })
+      try {
+        expect(raced).toBe(true)
+        expect(readAll(h, fd, 64)).toBe("SYNTHETIC_OUTSIDE_SECRET")
+      } finally {
+        expect(h.sys.fd_close!(fd)).toBe(E.success)
+      }
+    }
+  )
+})
+
 describe("WasiPreview1 bookkeeping", () => {
   it("requires initialize(memory) before the first memory-touching syscall", () => {
     const wasi = make({ fs: nodeFs })
@@ -465,6 +514,36 @@ describe("WasiPreview1 path_open", () => {
     const p = h.str(PATH_A, "..")
     expect(h.sys.path_filestat_get!(3, 1, p.ptr, p.len, STAT)).toBe(E.success)
     expect(h.view().getUint8(STAT + 16)).toBe(3)
+  })
+
+  it.each([
+    ["/file/../victim", E.notdir],
+    ["/missing/../victim", E.noent]
+  ])("validates ancestors before consuming '..' in %s", (path, errno) => {
+    const root = freshDir()
+    fsModule.writeFileSync(join(root, "file"), "not a directory")
+    fsModule.writeFileSync(join(root, "victim"), "keep")
+    const h = host({ root })
+    expect(openErrno(h, path)).toBe(errno)
+    const p = h.str(PATH_A, path)
+    expect(h.sys.path_unlink_file!(3, p.ptr, p.len)).toBe(errno)
+    expect(fsModule.readFileSync(join(root, "victim"), "utf8")).toBe("keep")
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("validates expanded link ancestors before consuming '..'", () => {
+    const root = freshDir()
+    fsModule.writeFileSync(join(root, "file"), "not a directory")
+    fsModule.writeFileSync(join(root, "victim"), "keep")
+    fsModule.symlinkSync("file", join(root, "link"))
+    fsModule.symlinkSync("missing", join(root, "dangling"))
+    fsModule.symlinkSync("/file/../victim", join(root, "invalid-target"))
+    const h = host({ root })
+    expect(openErrno(h, "/link/../victim")).toBe(E.notdir)
+    expect(openErrno(h, "/dangling/../victim")).toBe(E.noent)
+    expect(openErrno(h, "/invalid-target")).toBe(E.notdir)
+    const p = h.str(PATH_A, "/link/../victim")
+    expect(h.sys.path_unlink_file!(3, p.ptr, p.len)).toBe(E.notdir)
+    expect(fsModule.readFileSync(join(root, "victim"), "utf8")).toBe("keep")
   })
 
   it("rejects the empty path and non-directory dirfds", () => {
