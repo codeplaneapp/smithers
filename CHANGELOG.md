@@ -155,10 +155,18 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1639 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1659 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **ui:** order the chrome Wiki, Dispatcher, Flows, Secrets, History, Account ([ec7841bb75](https://github.com/smithersai/smithers/commit/ec7841bb755bf8d5a7f4b9fbfa1e4ae5e7726ec3))
+- **ui,server,rpc:** show the dispatcher signed out from the declared rules ([8dcfce5629](https://github.com/smithersai/smithers/commit/8dcfce56293b1ac8853ff6be57c1a2cd95b284ee))
+- **ui,rpc:** the run card renders a run as a trace ([bdbdc1cf93](https://github.com/smithersai/smithers/commit/bdbdc1cf93f6810efe2908168cf5cec601e5a7d5))
+- **ui,rpc:** feature.prototype starts a run of kind prototype ([6ee3c8020f](https://github.com/smithersai/smithers/commit/6ee3c8020f273a512d91d3c5022cc99ae896e0ed))
+- **ui,rpc:** show a repository's factory as a card behind /factory.show ([127cb321de](https://github.com/smithersai/smithers/commit/127cb321de998723df5c815c0fa4bcf00f96dc16))
+- **targets,build-cli,rpc,ui:** declare a factory home pane in PACKAGE.ts and render it above the welcome ([87f466808a](https://github.com/smithersai/smithers/commit/87f466808a2ffa4a1e699d055b9981df73bb37ba))
+- **ui,rpc:** show the mythical history behind the History chrome button ([9907835457](https://github.com/smithersai/smithers/commit/990783545753ae9cef815803a7bb74f1a9239e14))
+- **ui,rpc:** show the signed-in account as a card behind an Account chrome button ([15e4503ad3](https://github.com/smithersai/smithers/commit/15e4503ad30264590071caa681fc301a3ba7e7db))
 - **ui:** render the anonymous ceiling refusal as its own card ([26e9f72d4d](https://github.com/smithersai/smithers/commit/26e9f72d4d17b06d31d3b3c039288e9b060c407c))
 - **site,server:** give every coming-soon repository its own page at /<owner>/<name> ([610aa45496](https://github.com/smithersai/smithers/commit/610aa45496d46195424e1d3163651c63a8d98bff))
 - **ui:** label the workspace namespace Boxes and add the Dispatcher chrome button ([43a451181c](https://github.com/smithersai/smithers/commit/43a451181c538b75cc39d66805c29d4335ab326a))
@@ -374,6 +382,16 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **server:** a triggers read never provisions or resumes a box ([34a0566d5a](https://github.com/smithersai/smithers/commit/34a0566d5a760d5dd6f20717a548a807771b6960))
+- **ui:** render the history count clause only when a seam exposes a count ([335fa4a763](https://github.com/smithersai/smithers/commit/335fa4a763de4ea5847d532bcde7f8c0bc5bda4b))
+- **ui:** never call a .smithers file absent from a tree the factory never read ([6bcbaa2d03](https://github.com/smithersai/smithers/commit/6bcbaa2d03a10afe8fe59934dabe262f55f012e7))
+- **bug-worker:** bind fetch so workerd stops rejecting deps.fetch ([b30424ff4a](https://github.com/smithersai/smithers/commit/b30424ff4a280f1927333026cf60584117b8875d))
+- **ui,rpc:** stack history epics and read exactly the notes the tree names ([718a71d1fb](https://github.com/smithersai/smithers/commit/718a71d1fbe83aa501f46350ac1bbb17d25ee5db))
+- **server:** request a manual redirect on public catalog stats reads ([e98534190f](https://github.com/smithersai/smithers/commit/e98534190feeca4e016be04d60930557a313a2f6))
+- **bug-worker:** request GitHub redirects manually so workerd accepts nominations ([bb4fb8acc3](https://github.com/smithersai/smithers/commit/bb4fb8acc397b910ef509643b52acf54acc08e3f))
+- **ui:** show the anonymous ceiling card only to a known signed-out session ([fe2a5b8083](https://github.com/smithersai/smithers/commit/fe2a5b8083cd1d0d5241c7e47f18c4a3175d8a01))
+- **server,site:** run the Worker first for every coming-soon owner so the pages answer in any case ([a4c3d22c5f](https://github.com/smithersai/smithers/commit/a4c3d22c5f1a21f72d5d82d6624b78b8a083620d))
+- **bug-worker:** gate maintainer claims behind the operator token ([57bccb034e](https://github.com/smithersai/smithers/commit/57bccb034e5831c87ff2ff8762da4c234714556f))
 - **cli:** keep the Next actions on the human `smthrs flow list` ([9a16544abe](https://github.com/smithersai/smithers/commit/9a16544abe2756ce2c9306a78e2875e961713bc2))
 - **server:** the catalog summary says flows, never workflow ([fab55714b4](https://github.com/smithersai/smithers/commit/fab55714b4d75a5a0d966abd9a2203335e3efdb8))
 - **ui:** smithers.who names the selected repository ([f401a27514](https://github.com/smithersai/smithers/commit/f401a275146b779bd3ad16701bebcd8b40c28272))
@@ -1508,6 +1526,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **ci(release):** mirror the flow catalog and home pane drift gates ([9d102e44a9](https://github.com/smithersai/smithers/commit/9d102e44a9e163d19cce3b986ce8667460a85a10))
+- **test(ui):** pin the History chrome door to the countless empty state ([48045efd27](https://github.com/smithersai/smithers/commit/48045efd27f077bd4ccf372244227ee2f5bdadac))
 - **build:** refresh bun.lock for the site island dependencies ([64660abee8](https://github.com/smithersai/smithers/commit/64660abee8a1f925be489cadb6675fb66f0b2017))
 - **test(flows):** pin the flows workspace and the release scripts in the conformance roster ([207d4ae2e2](https://github.com/smithersai/smithers/commit/207d4ae2e2a5f0e5dfaa6833cccdcaddb35fd769))
 - **style(rpc):** format the repo-onboarding activity counts schema ([e5e48629ad](https://github.com/smithersai/smithers/commit/e5e48629ad0d8ca802ef75b56afbb1a0c06ee0a2))
