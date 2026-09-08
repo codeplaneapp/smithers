@@ -5413,7 +5413,7 @@ export const follow = Effect.gen(function*() {
 }).pipe(Effect.provide(TestSync.layerTest), Effect.scoped)
 ```
 
-The protocol is read-only: `Sync.Read` and `Sync.Subscribe` are the whole wire. A scope names either one run or every run in the workspace.
+The protocol is read-only: `Sync.Read` and `Sync.Subscribe` deliver journal entries; `Sync.Snapshot` fetches an explicitly public projection for recovery. A scope names either one run or every run in the workspace.
 
 ## 2. Read history first, then follow live
 
@@ -5444,7 +5444,32 @@ const following = sync.subscribe({
 
 `upsertReadModel` stands for your projection: any effect that folds one entry into your own tables.
 
-Compaction is the one case where a cursor names history that no longer exists. When the server refuses a cursor below a run's compaction floor, the client moves that run's cursor to the checkpoint and restarts the subscription, and `onResync` runs before the cursor moves. Use `onResync` to restore a snapshot of your projection, rebuild it from another source, or fail the subscription. The sync checkpoint identifies a position; it does not contain your application's projection. `Journal.latestCheckpoint(runId)` requires direct journal access and is not a remote snapshot API. The default hook logs the skipped range and continues, which is suitable only when losing the earlier entries is acceptable.
+Compaction is the one case where a cursor names history that no longer exists. The client fails closed: without an explicit `onResync` handler, it propagates the server's `compacted` error without advancing the cursor. The handler must restore the missing state and return the actual restored `RunCursor` for that run, with `afterSeq` at or above `resync.checkpointSeq`. Only then does the client advance the cursor and restart the subscription. An invalid receipt fails with `invalid_request`; a failed restore leaves the cursor unchanged.
+
+Use `sync.snapshot(...)`, the client path to `Sync.Snapshot`, to fetch an explicitly public projection. The host must configure `SyncServer.SnapshotSource` for the requested run, lineage, projection and schema version. Fetching a snapshot alone does not apply state or advance a cursor.
+
+```ts
+const following = sync.subscribe({
+  scope: { _tag: "Run", runId },
+  cursors: [],
+  apply: (entry) => upsertReadModel(entry),
+  onResync: (resync) => Effect.gen(function*() {
+    const snapshot = yield* sync.snapshot({
+      ...snapshotIdentity,
+      protocolVersion: 1,
+      runId: resync.runId,
+      atLeastSeq: resync.checkpointSeq
+    })
+    const cursor = { runId: snapshot.runId, afterSeq: snapshot.seq }
+    yield* restoreReadModel(snapshot, cursor)
+    return cursor
+  })
+})
+```
+
+`snapshotIdentity` supplies your `lineageId`, `projection`, `projectionVersion` and optional branch `capability`. `restoreReadModel` must validate the application's projection schema and transactionally replace its state and durable cursor before succeeding. Return `snapshot.seq`, which can be newer than the reported compaction floor, so replay starts after the state actually restored.
+
+The compaction response identifies a position; it does not contain your application's projection. You can also rebuild from an authorized local source. `Journal.latestCheckpoint(runId)` requires direct journal access, and its raw execution state is not safe to expose as a public projection.
 
 ## Verify it worked
 
@@ -5663,10 +5688,10 @@ smthrs memory list --namespace flow:deploy-status
 smthrs memory get deploy-target --namespace flow:deploy-status
 ```
 
-- `list` prints one entry per fact with `key`, `value`, and `updatedAtMs`. To narrow the listing, pass `--prefix deploy-`: only facts whose key starts with the prefix print.
-- `get` prints the fact's value: a string prints as typed, and a JSON value prints as JSON. A key the namespace does not hold exits 2.
+- `list` returns up to 100 facts by default; use `--limit` to change the limit. Each entry includes `key`, `value`, and `updatedAtMs`. To narrow the listing, pass `--prefix deploy-`: only facts whose key starts with the prefix return.
+- `get` returns the full `Fact` record: `namespace`, `key`, `value`, `provenance`, `createdAtMs`, `updatedAtMs`, and optional `tags` and `ttlMs`. A key the namespace does not hold exits 1.
 - Without `--namespace`, every subcommand works in `user:cli`.
-- `--json` prints the same data in compact JSON; for `get` the value is JSON-encoded, so a string prints quoted.
+- `--json` selects machine-readable JSON output; `get` includes the full record with the stored value in its `value` field.
 
 ## 2. Set and delete facts by hand
 
@@ -5676,14 +5701,14 @@ smthrs memory rm deploy-target --namespace flow:deploy-status
 ```
 
 - A value that parses as JSON is stored as JSON; anything else is stored as the string as typed.
-- `set` prints `{ "key": "...", "written": true }`. Writing an existing key replaces its value.
-- `rm` prints `{ "key": "...", "removed": ... }`, where `removed` reports whether the fact existed.
+- `set` returns `{ "key": "deploy-target", "namespace": { "kind": "flow", "id": "deploy-status" }, "stored": true }` for the example above. Writing an existing key replaces its value.
+- `rm` returns `{ "key": "deploy-target", "deleted": true }` if the fact existed, or `deleted: false` if it did not.
 
 Reach for these to seed a fact before a run starts or to remove one afterwards. The command never reads or writes run history; `smthrs gc` handles that.
 
 ## 3. Choose the namespace
 
-`--namespace` spells a namespace as `<kind:id>`, where the kind is `flow`, `agent`, `user`, or `global`. Any other spelling, or an id containing control characters, exits 2.
+Select a namespace with `--namespace <kind:id>` or `--namespace <kind> --id <id>`, where the kind is `flow`, `agent`, `user`, or `global`. For example, `--namespace flow:deploy-status` and `--namespace flow --id deploy-status` select the same namespace. Do not combine `kind:id` with `--id`. An invalid kind, an empty id, an id containing control characters, or combining both spellings exits 1.
 
 The kind is a stable lifetime, so pick it by who the fact belongs to:
 
@@ -5718,8 +5743,8 @@ Facts live in `.flows/control.db`, so the project backup in [Back up, gc, and re
 
 ## Verify it worked
 
-- A `set` followed by `get` prints the value back, and `list` shows the fact with its `updatedAtMs`.
-- After `rm`, a `get` on the same key exits 2.
+- A `set` followed by `get` returns the full fact with the stored `value`, and `list` includes the fact with its `updatedAtMs` within the requested limit.
+- After `rm`, a `get` on the same key exits 1.
 - A maintenance pass returns its counts: `{ deletedFacts: 0, deletedMessages: 0 }` on a store with nothing expired and short threads.
 
 ## See also
@@ -6899,7 +6924,7 @@ Use `SubscribeOptions.apply` to update the follower's state. The client advances
 
 Design the projection to tolerate repeated application. A transport can disconnect after a local write but before progress is acknowledged. Use recorded event identity to avoid counting the same event twice.
 
-On reconnect, the client resumes from acknowledged cursors with bounded backoff. If compaction removed the history the follower needs, `onResync` runs before the cursor moves to the checkpoint. The wire does not supply the missing projection state; restore or rebuild it through your application's recovery path.
+On reconnect, the client resumes from acknowledged cursors with bounded backoff. If compaction removed the history the follower needs, the client fails closed unless an explicit `onResync` handler restores the missing state and returns its actual run cursor at or above the compaction floor. `Sync.Snapshot` can fetch an explicitly public projection; your recovery handler must apply it before returning the cursor.
 
 ## Keep observation separate from control
 
@@ -6915,7 +6940,7 @@ Subscriptions stop when their signed credential expires. Sharing history therefo
 
 ## Bound and validate incoming history
 
-The server bounds pages by entry count and frame size. The default frame ceiling is 1 MiB. A partial page reports `done: false`; one entry larger than the frame ceiling fails with `frame_too_large`.
+The server bounds pages by entry count and frame size. The default frame ceiling is 2 MiB. A partial page reports `done: false`; one entry larger than the frame ceiling fails with `frame_too_large`.
 
 The client rejects frames that mix in another run, reorder sequences, or send entries at or before the cursor. Such a response produces `protocol_violation` before cursor advancement.
 
@@ -19320,10 +19345,28 @@ schema-composition face of [`digest`](#digest).
 - Operational failures become `SchemaError` issues whose message is
   `[code] message` and whose annotations carry the stable `code` and the typed
   `Sha256Error` as `cause`.
-- The schema annotates `parseOptions: { reportInput: false }`, which overrides
-  a caller that asked for input reporting, so no enclosing schema issue
-  retains the hashed value.
+- The schema annotates `parseOptions: { reportInput: false }`, overriding
+  input reporting for its own node only. Enclosing Struct, Array, and Union
+  issues use their own options and can retain the original input, including
+  when a sibling field fails. Pass `reportInput: false` at the outermost
+  decode boundary and do not re-enable it on descendant schemas.
 - Identifier: `@smthrs/crypto/Sha256`.
+
+For composed schemas, disable input reporting on the complete decode:
+
+```ts
+import { Sha256 } from "@smthrs/crypto"
+import * as Schema from "effect/Schema"
+
+const Manifest = Schema.Struct({ name: Schema.String, contents: Sha256 })
+const decodeManifest = (input: unknown) => Schema.decodeUnknownEffect(Manifest)(input, { reportInput: false })
+// Provide a Crypto service when running the returned Effect.
+```
+
+This suppresses parser input capture throughout this schema. It does not
+sanitize preserved host or encoder causes, schema paths, custom messages, or
+annotations. Keep those free of secrets or sanitize them before serializing
+or inspecting a complete error.
 
 `Sha256.Digest`, `Sha256.digest`, and `Sha256.digestSync` are the same values
 as the named exports, attached for consumers that reached them through the
@@ -25430,13 +25473,22 @@ literals. `WasiExitError` is what a `proc_exit` from a reactor module becomes: a
 thrown error that traps the calling export, which `BrowserJj` reports as a
 failed operation.
 
-The `root` option confines the guest to one slice of the backing filesystem.
-`..` of the namespace root is the root, and every symlink is resolved in
-namespace coordinates rather than handed to the backend: an absolute link target
-is re-rooted at the preopen, a relative one is clamped against the link's own
-directory, and intermediate components are resolved too, so a link naming a
-directory cannot smuggle the rest of a path out of the slice. A chain that does
-not terminate within the hop budget is `ELOOP`.
+The `root` option maps the guest namespace to one slice only when the host
+excludes concurrent namespace mutation during each WASI syscall or the backend
+independently confines every read and mutation. This includes replacement of
+`root` and its host ancestors by native processes, other workers, or reentrant
+backend callbacks. `SyncFsLike` uses separate string-path checks and operations;
+the shim is not a security sandbox for `node:fs` under concurrent mutation and
+does not detect or reject concurrent writers. Synchronous guest execution alone
+does not satisfy the namespace-ownership requirement.
+
+With that requirement satisfied, `..` of the namespace root is the root.
+Symlinks resolve in namespace coordinates: absolute targets are re-rooted at
+the preopen, and relative targets resolve against the link's directory.
+Traversed ancestors must exist and be directories after expansion, including
+components consumed by `..`. `/file/../victim` returns `ENOTDIR` when `file` is a
+regular file; `/missing/../victim` returns `ENOENT`. A chain that exceeds the hop
+budget returns `ELOOP`. No-follow rejects stable final symlinks with `ELOOP`.
 
 Honest divergences from a kernel WASI host, documented rather than hidden:
 
@@ -27930,15 +27982,19 @@ A policy is an annotation, and an annotation takes no part in flow identity. App
 
 ### Reading a policy back
 
-`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` read the policy, and `Flows.handlersFor(flow)` is the pair a host binds. The policy supplies defaults and never overrides:
+`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` read the policy, and `Flows.handlersFor(flow)` is the pair a host binds. The policy namespace is the only namespace these scoped handlers may read or write:
 
-- `runRecallFor` fills in the policy bank when the caller names no banks, and the policy budget when the caller states no `maxTokens`. A caller that names its own keeps them.
-- `runRememberFor` resolves an empty bank to the policy namespace.
+- `runRecallFor` fills an empty `banks` list with the policy bank. Every explicit bank must resolve to the policy namespace, matching both `kind` and `id`. A foreign bank fails the whole request with `invalid_namespace` before the recall service runs, including requests that mix allowed and foreign banks.
+- `runRememberFor` resolves an empty bank to the policy namespace. An explicit foreign bank fails with `invalid_namespace` before the store runs.
+- Equivalent spellings are allowed: `release-notes` and `flow-release-notes` both resolve to `{ kind: "flow", id: "release-notes" }`. There is no additional readable-bank list.
+- `maxTokens` remains a default: the policy budget applies only when the caller omits it.
 
-Two policy values are refusals rather than defaults, and they win over what the caller asked for:
+Two policy values short-circuit before bank validation or I/O:
 
 - `recall: "none"` returns no rows and never reaches the recall service.
 - `retain: "never"` drops the write. The caller still receives the key it asked for, and nothing reaches the store.
+
+The boundary applies through `Flows.handlersFor` on a policy-carrying declaration, or through `runRecallFor` and `runRememberFor`. Bare handlers, direct `runRecall` / `runRemember` calls, recall services, and store methods do not enforce flow policies. Hosts must bind the scoped declarations for model-facing access.
 
 ```ts
 import { Flows, WithMemory } from "@smthrs/memory"
@@ -28113,8 +28169,8 @@ The `mode`, `onConflict`, and `tier` values in the two effect declarations below
 | `runRememberWith`     | `(provenance) => (input: RememberInput) => Effect<RememberOutput, MemoryError, MemoryStore>` | Runtime binding carrying explicit provenance, bound once when a host builds the handler. Stores the fact value `{ content: text }`.                                 |
 | `runRemember`         | `(input: RememberInput) => Effect<RememberOutput, MemoryError, MemoryStore>`                 | Runtime binding with no provenance. Takes exactly one argument so a host can hand it to `FlowBinding.make`.                                                         |
 | `runRecall`           | `(input: RecallInput) => Effect<RecallOutput, MemoryError, Recall>`                          | Delegates to whichever recall service the context provides.                                                                                                         |
-| `runRecallFor`        | `(flow: Flow.Any, input: RecallInput) => Effect<RecallOutput, MemoryError, Recall>`          | Applies the flow's policy as defaults. `recall: "none"` answers no rows and never reaches the service.                                                              |
-| `runRememberFor`      | `(flow, input, provenance = {}) => Effect<RememberOutput, MemoryError, MemoryStore>`         | Applies the flow's policy: an empty bank resolves to the policy namespace, and `retain: "never"` drops the write while still answering `{ key }`.                   |
+| `runRecallFor`        | `(flow: Flow.Any, input: RecallInput) => Effect<RecallOutput, MemoryError, Recall>`          | Defaults empty banks and the budget; rejects foreign namespaces with `invalid_namespace` before recall. `recall: "none"` short-circuits to no rows.                                                              |
+| `runRememberFor`      | `(flow, input, provenance = {}) => Effect<RememberOutput, MemoryError, MemoryStore>`         | Defaults an empty bank; rejects foreign namespaces with `invalid_namespace` before writing. `retain: "never"` short-circuits to `{ key }`.                   |
 | `Handlers`            | interface                                                                                    | The one-argument `remember` and `recall` handlers one bound declaration answers with.                                                                               |
 | `handlersFor`         | `(flow: Flow.Any, provenance = {}) => Handlers`                                              | Builds the handlers for one memory declaration, reading the policy it carries and binding provenance once.                                                          |
 | `handlers`            | `Handlers`                                                                                   | The handlers for the bare declarations this module exports. They carry no policy, so they behave as unscoped memory.                                                |

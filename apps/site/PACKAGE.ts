@@ -279,6 +279,9 @@ const docsTextTest = Smithers.Shell.Test({
   data: [
     Smithers.file("scripts/docs-text.mjs"),
     Smithers.file("scripts/docs-text.test.mjs"),
+    Smithers.file("src/content/docs/docs/guides/sync-followers.mdx"),
+    Smithers.file("src/content/docs/docs/concepts/sync.mdx"),
+    Smithers.file("//packages/smithers/flows/sync/src/SyncProtocol.ts"),
     Smithers.file("scripts/check-built-site.mjs"),
     Smithers.file("scripts/built-site.test.mjs")
   ]

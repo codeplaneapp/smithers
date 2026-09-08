@@ -12,6 +12,29 @@ test("Dispatcher documents the registration refusal and supported alternatives u
   assert.ok(source.includes("/docs/guides/triggers/"))
 })
 
+test("sync follower guide requires explicit compaction recovery and a restored cursor", () => {
+  const guide = readFileSync(new URL("../src/content/docs/docs/guides/sync-followers.mdx", import.meta.url), "utf8")
+  assert.doesNotMatch(guide, /The default hook logs the skipped range and continues/)
+  assert.doesNotMatch(guide, /`Sync.Read` and `Sync.Subscribe` are the whole wire/)
+  assert.match(guide, /fails closed/)
+  assert.match(guide, /`compacted`/)
+  assert.match(guide, /`invalid_request`/)
+  assert.match(guide, /`Sync.Snapshot`/)
+  assert.match(guide, /onResync:.*Effect\.gen/s)
+  assert.match(guide, /afterSeq: snapshot\.seq/)
+  assert.match(guide, /yield\* restoreReadModel\(snapshot, cursor\)\s+return cursor/)
+})
+
+test("sync concept frame ceiling agrees with the protocol default", () => {
+  const concept = readFileSync(new URL("../src/content/docs/docs/concepts/sync.mdx", import.meta.url), "utf8")
+  const protocol = readFileSync(new URL("../../../packages/smithers/flows/sync/src/SyncProtocol.ts", import.meta.url), "utf8")
+  const defaultMiB = /defaultMaxFrameBytes = (\d+) \* 1024 \* 1024/.exec(protocol)
+  assert.ok(defaultMiB, "protocol declares its frame default in MiB")
+  const documentedMiB = /The default frame ceiling is (\d+) MiB/.exec(concept)
+  assert.ok(documentedMiB, "concept documents the frame default")
+  assert.equal(documentedMiB[1], defaultMiB[1])
+})
+
 test("preserves example imports while removing MDX imports", () => {
   const source = 'import { Code } from "@astrojs/starlight/components"\n\n```ts title="main.ts"\nimport { Action } from "@smthrs/flow"\nconst value = 1\n```'
   const result = docsText(source)

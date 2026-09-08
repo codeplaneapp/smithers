@@ -41,7 +41,7 @@ export const follow = Effect.gen(function*() {
 }).pipe(Effect.provide(TestSync.layerTest), Effect.scoped)
 ```
 
-The protocol is read-only: `Sync.Read` and `Sync.Subscribe` are the whole wire. A scope names either one run or every run in the workspace.
+The protocol is read-only: `Sync.Read` and `Sync.Subscribe` deliver journal entries; `Sync.Snapshot` fetches an explicitly public projection for recovery. A scope names either one run or every run in the workspace.
 
 ## 2. Read history first, then follow live
 
@@ -72,7 +72,32 @@ const following = sync.subscribe({
 
 `upsertReadModel` stands for your projection: any effect that folds one entry into your own tables.
 
-Compaction is the one case where a cursor names history that no longer exists. When the server refuses a cursor below a run's compaction floor, the client moves that run's cursor to the checkpoint and restarts the subscription, and `onResync` runs before the cursor moves. Use `onResync` to restore a snapshot of your projection, rebuild it from another source, or fail the subscription. The sync checkpoint identifies a position; it does not contain your application's projection. `Journal.latestCheckpoint(runId)` requires direct journal access and is not a remote snapshot API. The default hook logs the skipped range and continues, which is suitable only when losing the earlier entries is acceptable.
+Compaction is the one case where a cursor names history that no longer exists. The client fails closed: without an explicit `onResync` handler, it propagates the server's `compacted` error without advancing the cursor. The handler must restore the missing state and return the actual restored `RunCursor` for that run, with `afterSeq` at or above `resync.checkpointSeq`. Only then does the client advance the cursor and restart the subscription. An invalid receipt fails with `invalid_request`; a failed restore leaves the cursor unchanged.
+
+Use `sync.snapshot(...)`, the client path to `Sync.Snapshot`, to fetch an explicitly public projection. The host must configure `SyncServer.SnapshotSource` for the requested run, lineage, projection and schema version. Fetching a snapshot alone does not apply state or advance a cursor.
+
+```ts
+const following = sync.subscribe({
+  scope: { _tag: "Run", runId },
+  cursors: [],
+  apply: (entry) => upsertReadModel(entry),
+  onResync: (resync) => Effect.gen(function*() {
+    const snapshot = yield* sync.snapshot({
+      ...snapshotIdentity,
+      protocolVersion: 1,
+      runId: resync.runId,
+      atLeastSeq: resync.checkpointSeq
+    })
+    const cursor = { runId: snapshot.runId, afterSeq: snapshot.seq }
+    yield* restoreReadModel(snapshot, cursor)
+    return cursor
+  })
+})
+```
+
+`snapshotIdentity` supplies your `lineageId`, `projection`, `projectionVersion` and optional branch `capability`. `restoreReadModel` must validate the application's projection schema and transactionally replace its state and durable cursor before succeeding. Return `snapshot.seq`, which can be newer than the reported compaction floor, so replay starts after the state actually restored.
+
+The compaction response identifies a position; it does not contain your application's projection. You can also rebuild from an authorized local source. `Journal.latestCheckpoint(runId)` requires direct journal access, and its raw execution state is not safe to expose as a public projection.
 
 ## Verify it worked
 
