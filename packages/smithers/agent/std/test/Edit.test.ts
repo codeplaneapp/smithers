@@ -329,13 +329,18 @@ describe("Edit anchoring", () => {
     // around their real edits. A patch is content; mode is not this library's
     // to change.
     const chmods: Array<{ readonly path: string; readonly mode: number }> = []
+    let temporary = ""
     let mode = 0o100644
     const host = Layer.succeed(FileSystem.FileSystem)(FileSystem.makeNoop({
+      realPath: (path) => Effect.succeed(path),
+      rename: () => Effect.void,
+      remove: () => Effect.void,
       stat: () => Effect.succeed(fileInfo(mode)),
       readFile: () => Effect.succeed(new TextEncoder().encode("value = 1\n")),
       readFileString: () => Effect.succeed("value = 1\n"),
-      writeFileString: () =>
+      writeFileString: (path) =>
         Effect.sync(() => {
+          temporary = path
           // A host that writes by replacing the file loses its bits.
           mode = 0o100755
         }),
@@ -349,7 +354,8 @@ describe("Edit anchoring", () => {
       Edit.run({ path: "/a.py", oldString: "value = 1", newString: "value = 2" }),
       host
     ))
-    expect(chmods).toEqual([{ path: "/a.py", mode: 0o644 }])
+    expect(temporary).toMatch(/^\/\.smithers-.+\.tmp$/)
+    expect(chmods).toEqual([{ path: temporary, mode: 0o644 }])
   })
 
   it("declares compensable hermetic effects and narrows each invocation", () => {

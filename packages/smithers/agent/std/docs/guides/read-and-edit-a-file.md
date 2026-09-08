@@ -141,6 +141,18 @@ It preserves the file's mode, and it refuses to write over a directory with
 `command_failed`. Prefer `edit` for a targeted change: a whole-file write of a
 file you only partly know is how an unrelated region disappears.
 
+`write`, `edit`, and `apply_patch` updates stage replacement bytes in a unique
+sibling file, preserve existing permission bits and ownership, then rename it
+over the destination. A failure before rename leaves the original bytes intact.
+Existing symlinks continue to target the same file. Hard links to the old inode
+keep its old contents. The host must support exclusive creation and atomic
+rename; unsupported operations fail without falling back to truncation.
+
+Temporary files are removed on failure and Effect interruption. Process death
+can leave an unused temporary file. This is per-file atomicity, not a transaction
+across a whole patch or a promise of persistence after power loss. No `fsync` is
+performed. Timestamps and extended metadata such as ACLs are not copied.
+
 ## Apply a patch instead
 
 `apply_patch` accepts Codex's V4A patch text as one string, so a model trained on

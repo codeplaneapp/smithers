@@ -81,6 +81,9 @@ describe("Write", () => {
     const host = FileSystem.makeNoop({
       exists: () => Effect.succeed(true),
       makeDirectory: () => Effect.void,
+      realPath: (path) => Effect.succeed(path),
+      rename: () => Effect.void,
+      remove: () => Effect.void,
       stat: () => Effect.succeed(fileInfo(mode)),
       writeFileString: (_path, value) =>
         Effect.sync(() => {
@@ -132,17 +135,22 @@ describe("Write", () => {
     expect(writes).toBe(0)
   })
 
-  it("reports when content was written but chmod cannot restore the mode", async () => {
-    let mode = 0o100644
+  it("preserves the original when chmod cannot prepare the replacement mode", async () => {
+    let staged = ""
     let content = "old"
     const host = FileSystem.makeNoop({
       exists: () => Effect.succeed(true),
       makeDirectory: () => Effect.void,
-      stat: () => Effect.succeed(fileInfo(mode)),
+      realPath: (path) => Effect.succeed(path),
+      remove: () => Effect.void,
+      stat: (path) => Effect.succeed(fileInfo(path === "/file.txt" ? 0o100644 : 0o100755)),
       writeFileString: (_path, value) =>
         Effect.sync(() => {
-          content = value
-          mode = 0o100755
+          staged = value
+        }),
+      rename: () =>
+        Effect.sync(() => {
+          content = staged
         }),
       chmod: () => Effect.fail(systemError("PermissionDenied", "chmod", "/file.txt"))
     })
@@ -156,10 +164,11 @@ describe("Write", () => {
     ))
     const failure = failureOf(exit)
     expect(failure).toMatchObject({ code: "command_failed", path: "/file.txt" })
-    expect(failure?.message).toContain("content was written")
-    expect(failure?.message).toContain("mode could not be restored")
-    expect(content).toBe("new")
-    expect(mode).toBe(0o100755)
+    expect(failure?.message).toContain("Could not preserve the mode")
+    expect(failure?.message).toContain("before replacement")
+    expect(staged).toBe("new")
+    expect(content).toBe("old")
+    expect((await execute(host.stat("/file.txt"))).mode).toBe(0o100644)
   })
 
   it("does not call chmod when the mode is unchanged", async () => {
@@ -168,6 +177,9 @@ describe("Write", () => {
     const host = FileSystem.makeNoop({
       exists: () => Effect.succeed(true),
       makeDirectory: () => Effect.void,
+      realPath: (path) => Effect.succeed(path),
+      rename: () => Effect.void,
+      remove: () => Effect.void,
       stat: () => Effect.succeed(fileInfo(0o100644)),
       writeFileString: () =>
         Effect.sync(() => {

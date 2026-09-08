@@ -1,0 +1,180 @@
+import { NodeFileSystem } from "@effect/platform-node"
+import { Deferred, Effect, Exit, Fiber, FileSystem, Path, PlatformError } from "effect"
+import { describe, expect, it } from "vitest"
+import * as ApplyPatch from "../src/ApplyPatch.ts"
+import * as Edit from "../src/Edit.ts"
+import * as Preserve from "../src/internal/Preserve.ts"
+import type * as StdError from "../src/StdError.ts"
+import * as Write from "../src/Write.ts"
+
+const original = "original content that must survive a failed replacement\n"
+const replacement = "replacement content\n"
+const handlers: ReadonlyArray<
+  { name: string; run: (path: string) => Effect.Effect<unknown, StdError.StdError, FileSystem.FileSystem | Path.Path> }
+> = [
+  { name: "write", run: (path: string) => Write.run({ path, content: replacement }) },
+  { name: "edit", run: (path: string) => Edit.run({ path, oldString: original, newString: replacement }) },
+  {
+    name: "apply_patch",
+    run: (path: string) =>
+      ApplyPatch.run({
+        input:
+          `*** Begin Patch\n*** Update File: ${path}\n@@\n-${original.trimEnd()}\n+${replacement.trimEnd()}\n*** End Patch`
+      })
+  }
+]
+
+const failure = (method: string, path: string) =>
+  Effect.fail(PlatformError.systemError({
+    _tag: "Unknown",
+    module: "FileSystem",
+    method,
+    pathOrDescriptor: path,
+    description: "injected failure after persisting a prefix"
+  }))
+
+describe("atomic replacement", () => {
+  for (const handler of handlers) {
+    it(`${handler.name} publishes exact bytes and preserves metadata`, async () => {
+      await Effect.runPromise(
+        Effect.scoped(Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const dir = yield* fs.makeTempDirectoryScoped()
+          const path = `${dir}/target.txt`
+          yield* fs.writeFileString(path, original)
+          yield* fs.chmod(path, 0o4750)
+          const before = yield* fs.stat(path)
+          yield* handler.run(path)
+          const after = yield* fs.stat(path)
+          expect(new Uint8Array(yield* fs.readFile(path))).toEqual(new TextEncoder().encode(replacement))
+          expect(after.mode & 0o7777).toBe(0o4750)
+          expect(after.uid).toEqual(before.uid)
+          expect(after.gid).toEqual(before.gid)
+          expect(yield* fs.readDirectory(dir)).toEqual(["target.txt"])
+        })).pipe(Effect.provide(NodeFileSystem.layer), Effect.provide(Path.layer))
+      )
+    })
+
+    it(`${handler.name} removes the staged file when interrupted before rename`, async () => {
+      await Effect.runPromise(
+        Effect.scoped(Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const dir = yield* fs.makeTempDirectoryScoped()
+          const path = `${dir}/target.txt`
+          yield* fs.writeFileString(path, original)
+          const staged = yield* Deferred.make<void>()
+          const faulty = {
+            ...fs,
+            stat: (target: string) =>
+              target === path ?
+                fs.stat(target) :
+                Deferred.succeed(staged, undefined).pipe(Effect.andThen(Effect.never))
+          }
+          const fiber = yield* handler.run(path).pipe(
+            Effect.provideService(FileSystem.FileSystem, faulty),
+            Effect.forkChild
+          )
+          yield* Deferred.await(staged)
+          yield* Fiber.interrupt(fiber)
+          expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true)
+          expect(yield* fs.readFileString(path)).toBe(original)
+          expect(yield* fs.readDirectory(dir)).toEqual(["target.txt"])
+        })).pipe(Effect.provide(NodeFileSystem.layer), Effect.provide(Path.layer))
+      )
+    })
+
+    it.each(["write", "rename"])(`${handler.name} preserves original bytes on %s failure`, async (boundary) => {
+      await Effect.runPromise(
+        Effect.scoped(Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const dir = yield* fs.makeTempDirectoryScoped()
+          const path = `${dir}/target.txt`
+          yield* fs.writeFileString(path, original)
+          yield* fs.chmod(path, 0o640)
+          const faulty = {
+            ...fs,
+            writeFileString: (target: string, value: string, options?: Parameters<typeof fs.writeFileString>[2]) =>
+              boundary === "write"
+                ? fs.writeFileString(target, value.slice(0, 3), options).pipe(
+                  Effect.andThen(failure("writeFileString", target))
+                )
+                : fs.writeFileString(target, value, options),
+            writeFile: (target: string, value: Uint8Array, options?: Parameters<typeof fs.writeFile>[2]) =>
+              boundary === "write"
+                ? fs.writeFile(target, value.slice(0, 3), options).pipe(Effect.andThen(failure("writeFile", target)))
+                : fs.writeFile(target, value, options),
+            rename: (from: string, to: string) => boundary === "rename" ? failure("rename", to) : fs.rename(from, to)
+          }
+          const exit = yield* Effect.exit(handler.run(path).pipe(Effect.provideService(FileSystem.FileSystem, faulty)))
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(yield* fs.readFileString(path)).toBe(original)
+          expect((yield* fs.stat(path)).mode & 0o7777).toBe(0o640)
+          expect(yield* fs.readDirectory(dir)).toEqual(["target.txt"])
+        })).pipe(Effect.provide(NodeFileSystem.layer), Effect.provide(Path.layer))
+      )
+    })
+  }
+  it("preserves an existing symlink and replaces its target in the target directory", async () => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        yield* fs.makeDirectory(`${dir}/nested`)
+        const target = `${dir}/nested/target.txt`
+        const link = `${dir}/link.txt`
+        yield* fs.writeFileString(target, original)
+        yield* fs.symlink(target, link)
+        yield* Preserve.writeFileString(fs, link, replacement)
+        expect(yield* fs.readLink(link)).toBe(target)
+        expect(yield* fs.readFileString(target)).toBe(replacement)
+        expect(yield* fs.readDirectory(`${dir}/nested`)).toEqual(["target.txt"])
+      })).pipe(Effect.provide(NodeFileSystem.layer))
+    )
+  })
+
+  it("does not remove or overwrite a colliding temporary file", async () => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        const path = `${dir}/target.txt`
+        yield* fs.writeFileString(path, original)
+        let collision = ""
+        const faulty = {
+          ...fs,
+          writeFileString: (target: string, content: string, options?: Parameters<typeof fs.writeFileString>[2]) =>
+            Effect.gen(function*() {
+              collision = target
+              yield* fs.writeFileString(target, "someone else's bytes")
+              yield* fs.writeFileString(target, content, options)
+            })
+        }
+        expect(Exit.isFailure(yield* Effect.exit(Preserve.writeFileString(faulty, path, replacement)))).toBe(true)
+        expect(yield* fs.readFileString(path)).toBe(original)
+        expect(yield* fs.readFileString(collision)).toBe("someone else's bytes")
+      })).pipe(Effect.provide(NodeFileSystem.layer))
+    )
+  })
+
+  it.each(["write", "rename"])("leaves a new destination absent on %s failure", async (boundary) => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        const faulty = {
+          ...fs,
+          writeFileString: (target: string, content: string, options?: Parameters<typeof fs.writeFileString>[2]) =>
+            boundary === "write"
+              ? fs.writeFileString(target, content.slice(0, 3), options).pipe(
+                Effect.andThen(failure("writeFileString", target))
+              )
+              : fs.writeFileString(target, content, options),
+          rename: (from: string, to: string) => boundary === "rename" ? failure("rename", to) : fs.rename(from, to)
+        }
+        expect(Exit.isFailure(yield* Effect.exit(Preserve.writeFileString(faulty, `${dir}/new.txt`, replacement))))
+          .toBe(true)
+        expect(yield* fs.readDirectory(dir)).toEqual([])
+      })).pipe(Effect.provide(NodeFileSystem.layer))
+    )
+  })
+})

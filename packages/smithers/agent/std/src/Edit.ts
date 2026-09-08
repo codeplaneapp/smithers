@@ -270,7 +270,7 @@ export const run = Effect.fn("Edit.run")(function*(
       new StdError.StdError({
         code: "command_failed",
         message: error.reason.method === "chmod"
-          ? `The content was written to ${input.path}, but its mode could not be restored by chmod`
+          ? `Could not preserve the mode of ${input.path} before replacement by chmod`
           : `Could not write ${input.path}`,
         path: input.path
       })

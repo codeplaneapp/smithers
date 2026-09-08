@@ -116,7 +116,7 @@ export const run = Effect.fn("Write.run")(function*(
       writeError(
         input.path,
         error.reason.method === "chmod"
-          ? `The content was written to ${input.path}, but its mode could not be restored by chmod`
+          ? `Could not preserve the mode of ${input.path} before replacement by chmod`
           : `Could not write ${input.path}`
       )
     )

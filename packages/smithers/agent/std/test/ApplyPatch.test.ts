@@ -394,10 +394,19 @@ describe("printSummary", () => {
 describe("ApplyPatch.run", () => {
   it("adds, updates, moves, and deletes files", async () => {
     const patch = wrap(
-      "*** Add File: /added.txt\n+hello\n*** Update File: /update.txt\n@@\n-old\n+new\n*** Update File: /move-src.txt\n*** Move to: /move-dst.txt\n@@\n-from\n+to\n*** Delete File: /gone.txt"
+      "*** Add File: /nested/add/added.txt\n+hello\n*** Update File: /update.txt\n@@\n-old\n+new\n*** Update File: /move-src.txt\n*** Move to: /nested/move/move-dst.txt\n@@\n-from\n+to\n*** Delete File: /gone.txt"
     )
     const result = await execute(Effect.provide(
-      ApplyPatch.run({ input: patch }),
+      Effect.gen(function*() {
+        const result = yield* ApplyPatch.run({ input: patch })
+        const fs = yield* FileSystem.FileSystem
+        expect(yield* fs.readFile("/nested/add/added.txt")).toEqual(new TextEncoder().encode("hello\n"))
+        expect(yield* fs.readFile("/update.txt")).toEqual(new TextEncoder().encode("a\nnew\nb\n"))
+        expect(yield* fs.readFile("/nested/move/move-dst.txt")).toEqual(new TextEncoder().encode("to\n"))
+        expect(yield* fs.exists("/gone.txt")).toBe(false)
+        expect(yield* fs.exists("/move-src.txt")).toBe(false)
+        return result
+      }),
       layer({
         files: {
           "/update.txt": "a\nold\nb\n",
@@ -407,10 +416,10 @@ describe("ApplyPatch.run", () => {
       })
     ))
     expect(result.output).toBe(
-      "Success. Updated the following files:\nA /added.txt\nM /update.txt\nM /move-dst.txt\nD /gone.txt\n"
+      "Success. Updated the following files:\nA /nested/add/added.txt\nM /update.txt\nM /nested/move/move-dst.txt\nD /gone.txt\n"
     )
-    expect(result.added).toEqual(["/added.txt"])
-    expect(result.modified).toEqual(["/update.txt", "/move-dst.txt"])
+    expect(result.added).toEqual(["/nested/add/added.txt"])
+    expect(result.modified).toEqual(["/update.txt", "/nested/move/move-dst.txt"])
     expect(result.deleted).toEqual(["/gone.txt"])
   })
 
@@ -420,12 +429,17 @@ describe("ApplyPatch.run", () => {
     // sections around their real edits, and a grader that reverse-applies a
     // patch can fail on a mode section the agent never intended.
     const chmods: Array<{ readonly path: string; readonly mode: number }> = []
+    let temporary = ""
     let mode = 0o100644
     const host = FileSystem.makeNoop({
+      realPath: (path) => Effect.succeed(path),
+      rename: () => Effect.void,
+      remove: () => Effect.void,
       stat: () => Effect.succeed(fileInfo(mode)),
       readFile: () => Effect.succeed(new TextEncoder().encode("old\n")),
-      writeFile: () =>
+      writeFile: (path) =>
         Effect.sync(() => {
+          temporary = path
           // A host that writes by replacing the file loses its bits.
           mode = 0o100755
         }),
@@ -443,7 +457,8 @@ describe("ApplyPatch.run", () => {
       ),
       layer()
     ))
-    expect(chmods).toEqual([{ path: "/a.txt", mode: 0o644 }])
+    expect(temporary).toMatch(/^\/\.smithers-.+\.tmp$/)
+    expect(chmods).toEqual([{ path: temporary, mode: 0o644 }])
   })
 
   it.each([

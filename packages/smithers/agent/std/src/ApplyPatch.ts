@@ -259,7 +259,7 @@ export const run = Effect.fn("ApplyPatch.run")(function*(
             mutationError(
               "command_failed",
               error.reason.method === "chmod"
-                ? `The content was written to ${destination}, but its mode could not be restored by chmod`
+                ? `Could not preserve the mode of ${destination} before replacement by chmod`
                 : `Failed to write file ${destination}`,
               destination
             )
