@@ -85,23 +85,15 @@
 	tab-size: 2;
 }
 
-/* Theme-aware docs images: each variant renders only under its own theme. */
-.theme-only-dark {
-	display: block;
-}
-.theme-only-light {
-	display: none;
-}
-:root[data-theme="light"] .theme-only-dark {
-	display: none;
-}
-:root[data-theme="light"] .theme-only-light {
-	display: block;
-}
-
 /* The hero animation reads better wide: let it break out of the text column
-   on viewports with room, never causing horizontal scroll on small ones. */
+   on viewports with room, never causing horizontal scroll on small ones. Its
+   <picture> wrapper, which offers the browser one theme-selected source, is
+   inline by default and would otherwise sit on a text baseline. */
+picture:has(> img.hero-anim) {
+	display: block;
+}
 img.hero-anim {
+	display: block;
 	width: 100%;
 	height: auto;
 }

@@ -70,3 +70,10 @@ test("removes wrapper indentation without changing fenced source", () => {
   assert.ok(!/^ +$/m.test(result))
   assert.ok(result.includes('`kept  `'))
 })
+
+test("exports the theme-selected animation as its single image", () => {
+  const result = docsText(
+    '<picture>\n  <source srcset="/images/light.gif" media="(prefers-color-scheme: light)" />\n  <img src="/images/dark.gif" class="hero-anim" alt="The graph." loading="lazy" decoding="async" />\n</picture>'
+  )
+  assert.equal(result, "![The graph.](/images/dark.gif)")
+})

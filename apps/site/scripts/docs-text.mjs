@@ -22,7 +22,7 @@ export function docsText(source, { raw = {}, versions = {} } = {}) {
       })
       .replace(/<img\b[^>]*\/>/g, (tag) => `![${attr(tag, "alt")}](${attr(tag, "src")})`)
       .replace(/<TabItem\b[^>]*label="([^"]+)"[^>]*>/g, "\n**$1**\n")
-      .replace(/<\/?(?:CardGrid|FileTree|Steps|Tabs|TabItem)\b[^>]*>/g, "")
+      .replace(/<\/?(?:CardGrid|FileTree|Steps|Tabs|TabItem|picture|source)\b[^>]*>/g, "")
       .replace(/\{versions\.(\w+)\}/g, (_, key) => {
         if (!(key in versions)) throw new Error(`Unknown version field: ${key}`)
         return String(versions[key])

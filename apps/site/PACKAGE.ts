@@ -298,6 +298,24 @@ const repoStatsTest = Smithers.Shell.Test({
   ]
 })
 
+/**
+ * The generated project copy matches its source, and the overview animation
+ * offers the browser one image: two eager <img> candidates hidden by CSS still
+ * download both megabyte recordings.
+ */
+const projectCopyTest = Smithers.Shell.Test({
+  shell: "node --test apps/site/scripts/generate-project-copy.test.mjs",
+  data: [
+    Smithers.file("scripts/generate-project-copy.mjs"),
+    Smithers.file("scripts/generate-project-copy.test.mjs"),
+    Smithers.file("src/data/project.json"),
+    Smithers.file("src/content/docs/docs/developers.mdx"),
+    Smithers.file("src/content/docs/docs/index.mdx"),
+    Smithers.file("//README.md"),
+    Smithers.file("//package.json")
+  ]
+})
+
 /** Preserve checkout state while recording against an owned detached worktree. */
 const recordTapeTest = Smithers.Shell.Test({
   shell: "node --test apps/site/scripts/record-tape.test.mjs",
@@ -420,6 +438,7 @@ export const Package = Smithers.Package({
     docsLint,
     docsTextTest,
     repoStatsTest,
+    projectCopyTest,
     recordTapeTest,
     supportMatrixTest,
     docsRuntimeTests,

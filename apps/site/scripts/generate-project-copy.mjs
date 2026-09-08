@@ -139,11 +139,19 @@ docs = replaceRegion(docs, "project-description", description, docsPath)
 const developersPath = join(site, "src/content/docs/docs/developers.mdx")
 let developers = readFileSync(developersPath, "utf8")
 developers = replaceRegion(developers, "project-support", supportSection, developersPath)
+// One image candidate, never two. The animations are megabytes each, so the
+// page offers the browser a single source: `media` picks the light recording
+// for a light reader before any request, and `loading="lazy"` holds even that
+// one until the animation nears the viewport. Hiding a second <img> with CSS
+// would still download it. Readers who override their system theme with the
+// Starlight theme select keep the system-matched recording.
 developers = replaceRegion(
   developers,
   "project-animation",
-  `<img src="${animation.dark}" class="theme-only-dark hero-anim" alt="${animation.alt}" />\n` +
-    `<img src="${animation.light}" class="theme-only-light hero-anim" alt="${animation.alt}" />`,
+  `<picture>\n` +
+    `<source srcset="${animation.light}" media="(prefers-color-scheme: light)" />\n` +
+    `<img src="${animation.dark}" class="hero-anim" alt="${animation.alt}" loading="lazy" decoding="async" />\n` +
+    `</picture>`,
   developersPath
 )
 developers = replaceRegion(
