@@ -243,6 +243,246 @@ describe("Permission construction and PlatformError projection", () => {
     expect(required.meta).toEqual({ a: { b: 1 } })
   })
 
+  it.each([
+    "{\"__proto__\":\"audit context\",\"ok\":1}",
+    "{\"__proto__\":{\"audit\":\"context\"},\"ok\":1}",
+    "{\"nested\":{\"__proto__\":\"audit context\"}}",
+    "{\"nested\":[{\"__proto__\":{\"audit\":\"context\"}}]}"
+  ])("preserves own __proto__ data in the snapshot and journal round-trip: %s", (json) => {
+    const meta = JSON.parse(json)
+    const required = permissionRequired({ requestId: "request-1", capability, tier: "sealed", meta })
+    const encoded = Schema.encodeUnknownSync(PermissionRequired)(required)
+    const decoded = Schema.decodeUnknownSync(PermissionRequired)(JSON.parse(JSON.stringify(encoded)))
+
+    expect(JSON.stringify(required.meta)).toBe(json)
+    expect(JSON.stringify(encoded.meta)).toBe(json)
+    expect(JSON.stringify(decoded.meta)).toBe(json)
+    expect(required.meta).toEqual(meta)
+  })
+
+  it("copies each shared DAG container once", () => {
+    let graph: Record<string, unknown> = { leaf: "context" }
+    for (let depth = 0; depth < 7; depth++) graph = { left: graph, right: graph }
+    const required = permissionRequired({
+      requestId: "request-1",
+      capability,
+      tier: "sealed",
+      meta: { graph }
+    })
+    const seen = new Set<object>()
+    const visit = (value: unknown): void => {
+      if (value === null || typeof value !== "object" || seen.has(value)) return
+      seen.add(value)
+      expect(Object.isFrozen(value)).toBe(true)
+      for (const child of Object.values(value)) visit(child)
+    }
+    visit(required.meta)
+    expect(seen.size).toBe(9)
+    expect(required.meta.graph).not.toBe(graph)
+    expect(Schema.encodeUnknownSync(PermissionRequired)(required).meta).toEqual({ graph })
+  })
+
+  it("rejects a deep chain with a field-specific schema failure", () => {
+    let chain: Record<string, unknown> = {}
+    for (let depth = 0; depth < 10_000; depth++) chain = { next: chain }
+    const construct = () =>
+      permissionRequired({
+        requestId: "request-1",
+        capability,
+        tier: "sealed",
+        meta: { deepChain: chain }
+      })
+    expect(construct).toThrow(Schema.SchemaError)
+    expect(construct).toThrow(/deepChain.*depth 16/)
+  })
+
+  it("bounds the expanded member count of a shared DAG", () => {
+    let graph: Record<string, unknown> = { leaf: true }
+    for (let depth = 0; depth < 14; depth++) graph = { left: graph, right: graph }
+    expect(() =>
+      permissionRequired({
+        requestId: "request-1",
+        capability,
+        tier: "sealed",
+        meta: { sharedGraph: graph }
+      })
+    ).toThrow(/sharedGraph.*1024 members/)
+  })
+
+  it("accepts depth 16 and checks a shared subtree at its deepest occurrence", () => {
+    const shared = { leaf: true }
+    let nested: Record<string, unknown> = shared
+    for (let depth = 0; depth < 14; depth++) nested = { next: nested }
+    const meta = { shallow: shared, deep: nested }
+    expect(permissionRequired({ requestId: "r", capability, tier: "sealed", meta }).meta).toEqual(meta)
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { shallow: shared, tooDeep: { next: nested } }
+      })
+    ).toThrow(/tooDeep.*depth 16/)
+  })
+
+  it("accepts 1024 members and refuses the next array element", () => {
+    const items = Array.from({ length: 1023 }, () => null)
+    expect(
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { items }
+      }).meta.items
+    ).toEqual(items)
+    items.push(null)
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { items }
+      })
+    ).toThrow(/items.*1024 members/)
+  })
+
+  it("counts omitted properties toward the member work budget, including shared records", () => {
+    const shared = Object.fromEntries(Array.from({ length: 511 }, (_, index) => [String(index), undefined]))
+    expect(
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { first: shared, second: shared }
+      }).meta
+    ).toEqual({ first: {}, second: {} })
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { first: shared, second: shared, omitted: undefined }
+      })
+    ).toThrow(/omitted.*1024 members/)
+  })
+
+  it("accepts exactly 64 KiB of serialized JSON and refuses one more byte", () => {
+    const text = "a".repeat(64 * 1024 - 11)
+    const required = permissionRequired({ requestId: "r", capability, tier: "sealed", meta: { text } })
+    expect(new TextEncoder().encode(JSON.stringify(required.meta)).byteLength).toBe(64 * 1024)
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { text: text + "a" }
+      })
+    ).toThrow(/text.*65536 bytes/)
+  })
+
+  it.each([
+    ["huge", "a".repeat(65_537)],
+    ["unicode", "😀".repeat(16_384)],
+    ["escaped", "\n".repeat(32_768)]
+  ])("bounds serialized bytes for %s strings", (key, value) => {
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { [key]: value }
+      })
+    ).toThrow(new RegExp(`${key}.*65536 bytes`))
+  })
+
+  it("counts keys and shared values toward the serialized byte limit", () => {
+    const shared = { text: "a".repeat(32_760) }
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { first: shared, second: shared }
+      })
+    ).toThrow(/second.*65536 bytes/)
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { longKey: { ["a".repeat(65_537)]: null } }
+      })
+    ).toThrow(/longKey.*65536 bytes/)
+    expect(() =>
+      permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { longKey: { ["😀".repeat(16_384)]: null } }
+      })
+    ).toThrow(/longKey.*65536 bytes/)
+  })
+
+  it.each([[null], [[]], [new Date()], ["text"]])("rejects non-record metadata roots: %s", (meta) => {
+    expect(() =>
+      new PermissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: meta as unknown as Record<string, unknown>
+      })
+    ).toThrow(/meta.*plain record/)
+  })
+
+  it.each([NaN, Infinity, -Infinity, Symbol("context"), new Map(), new class Context {}()])(
+    "rejects non-JSON values with a field-specific schema error: %s",
+    (value) => {
+      const construct = () =>
+        permissionRequired({
+          requestId: "r",
+          capability,
+          tier: "sealed",
+          meta: { invalid: value }
+        })
+      expect(construct).toThrow(Schema.SchemaError)
+      expect(construct).toThrow(/invalid/)
+    }
+  )
+
+  it("preserves sharing through arrays and snapshots null-prototype records", () => {
+    const record = Object.assign(Object.create(null), { kept: true, omitted: undefined })
+    const shared = [record]
+    const required = permissionRequired({
+      requestId: "r",
+      capability,
+      tier: "sealed",
+      meta: { first: shared, second: shared }
+    })
+    expect(required.meta.first).toBe(required.meta.second)
+    expect(required.meta).toEqual({ first: [{ kept: true }], second: [{ kept: true }] })
+    expect(Object.isFrozen(record)).toBe(false)
+  })
+
+  it("ignores inherited enumerable properties", () => {
+    Object.defineProperty(Object.prototype, "inheritedMetadata", {
+      value: "ignored",
+      enumerable: true,
+      configurable: true
+    })
+    let snapshot: unknown
+    try {
+      snapshot = permissionRequired({
+        requestId: "r",
+        capability,
+        tier: "sealed",
+        meta: { own: true }
+      }).meta
+    } finally {
+      Reflect.deleteProperty(Object.prototype, "inheritedMetadata")
+    }
+    expect(snapshot).toEqual({ own: true })
+  })
+
   it("drops an undefined metadata property before encoding", () => {
     const required = permissionRequired({
       requestId: "request-1",
@@ -402,6 +642,8 @@ describe("Permission construction and PlatformError projection", () => {
     )
     expect(() => permissionRequired({ requestId: "request-2", capability, tier: "sealed", meta: { cyclicArray } }))
       .toThrow(/Expected JSON value/)
+    expect(() => permissionRequired({ requestId: "r", capability, tier: "sealed", meta: { cyclicArray } }))
+      .toThrow(/cyclicArray.*cycles/)
   })
 
   it("preserves a numeric file descriptor in the PlatformError projection", () => {

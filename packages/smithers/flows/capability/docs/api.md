@@ -379,7 +379,15 @@ deep-frozen snapshot and does not retain the caller's object; an
 `undefined` object property is dropped, mirroring `JSON.stringify`, while an
 `undefined` array element is rejected because serialization would change it to
 `null`. A value the journal could not encode fails at the construction site
-naming the key. The error retains a defensive copy of the capability, and its
+naming the key. Own `__proto__` data properties are preserved at every depth.
+The limits are depth 16 (the metadata root is depth 0), 1024 object properties
+and array elements in total, and 64 KiB of UTF-8 JSON after dropping undefined
+properties. Omitted properties still count toward the member limit. Shared
+references reuse one frozen copy, but each occurrence counts toward depth,
+members and serialized bytes. Cycles and exceeded limits raise a field-specific
+schema error before journal encoding.
+
+The error retains a defensive copy of the capability, and its
 `capability` and `meta` slots are non-writable.
 
 ### Permission.PermissionDenied

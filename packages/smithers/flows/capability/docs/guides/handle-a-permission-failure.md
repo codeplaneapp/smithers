@@ -131,7 +131,16 @@ naming the key, rather than later at the persistence boundary:
   it to `null` rather than omit it.
 - A `bigint`, a `Date`, a `Map`, or a class instance is rejected rather than
   flattened into an empty object.
-- A cycle is reported as a schema failure rather than overflowing the stack.
+- Own `__proto__` data properties are preserved, including in nested objects.
+- The maximum depth is 16, counting the metadata root as depth 0.
+- At most 1024 object properties and array elements are accepted in total.
+  Dropped `undefined` properties still count toward this work limit.
+- Serialized metadata is limited to 64 KiB of UTF-8 JSON, including keys,
+  punctuation and escapes, after dropping undefined properties.
+- Shared references reuse one frozen copy. Each occurrence counts toward depth,
+  members and serialized bytes, so a compact graph cannot expand past the limits.
+- A cycle or exceeded limit raises a schema error naming the field at
+  construction, before journal encoding.
 
 Construction takes a deep-frozen snapshot and never retains your object, and
 the `meta` and `capability` slots are non-writable. Mutating the object you
