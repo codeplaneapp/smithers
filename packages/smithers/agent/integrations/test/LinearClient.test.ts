@@ -1,5 +1,5 @@
 import { Cause, Effect, Exit } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { IntegrationError } from "../src/core/IntegrationError.ts"
 import { DEFAULT_API_BASE_URL, resolve } from "../src/linear/Config.ts"
 import { make, normalizePriority, type Priority, retryDelayMs } from "../src/linear/LinearClient.ts"
@@ -12,6 +12,7 @@ let fixture: Fixture | undefined
 afterEach(async () => {
   await fixture?.close()
   fixture = undefined
+  vi.unstubAllGlobals()
 })
 
 const client = () => make({ apiKey: API_KEY, apiBaseUrl: (fixture as Fixture).origin })
@@ -733,4 +734,128 @@ describe("adversarial mutation results", () => {
     const created = await Effect.runPromise(client().createIssue({ teamKey: "ENG", title: "t" }))
     expect(created.id).toBe(ISSUE.id)
   })
+})
+
+describe("Linear response lifecycle", () => {
+  it.each([429, 503])("cancels unread %i bodies before retrying", async (status) => {
+    const cancelled = vi.fn()
+    let signal: AbortSignal | null | undefined
+    const request = vi.fn<typeof fetch>().mockImplementationOnce(async (_url, init) => {
+      signal = init?.signal
+      return new Response(new ReadableStream({ cancel: cancelled }), {
+        status,
+        headers: { "retry-after": "0" }
+      })
+    }).mockImplementationOnce(async () => {
+      expect(cancelled).toHaveBeenCalledOnce()
+      expect(signal?.aborted).toBe(true)
+      return Response.json({ data: { x: true } })
+    })
+    vi.stubGlobal("fetch", request)
+    expect(await Effect.runPromise(make({ apiKey: API_KEY }).query("query X { x }"))).toEqual({ x: true })
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it("cancels an unread write 503 without repeating the write", async () => {
+    const cancelled = vi.fn()
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new ReadableStream({ cancel: cancelled }), { status: 503 })
+    )
+    vi.stubGlobal("fetch", request)
+    const failure = await Effect.runPromise(Effect.flip(
+      make({ apiKey: API_KEY }).query("mutation X { x }", {}, { retryServerErrors: false })
+    ))
+    expect(failure.details).toMatchObject({ outcomeUnknown: true })
+    expect(cancelled).toHaveBeenCalledOnce()
+    expect(request).toHaveBeenCalledOnce()
+  })
+
+  it.each([true, false])("preserves write ambiguity on a body reset (readOnly=%s)", async (readOnly) => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("{\"data\":"))
+          },
+          pull(controller) {
+            controller.error(new Error("connection reset"))
+          }
+        })
+      )
+    )
+    vi.stubGlobal("fetch", request)
+    const failure = await Effect.runPromise(Effect.flip(
+      make({ apiKey: API_KEY }).query(readOnly ? "query X { x }" : "mutation X { x }", {}, {
+        retryServerErrors: readOnly
+      })
+    ))
+    expect(failure.reason).toBe("delivery-failed")
+    expect(failure.details).toMatchObject({ outcomeUnknown: !readOnly, cause: "connection reset" })
+    expect(request).toHaveBeenCalledOnce()
+  })
+
+  it("does not retry a fetch rejection", async () => {
+    const request = vi.fn<typeof fetch>().mockRejectedValue(new Error("connection reset"))
+    vi.stubGlobal("fetch", request)
+    const failure = await Effect.runPromise(Effect.flip(make({ apiKey: API_KEY }).query("query X { x }")))
+    expect(failure.reason).toBe("delivery-failed")
+    expect(request).toHaveBeenCalledOnce()
+  })
+})
+
+it("redacts a primitive body read failure and preserves write ambiguity", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(`connection reset ${API_KEY}`)
+          }
+        })
+      )
+    )
+  )
+  const failure = await Effect.runPromise(Effect.flip(
+    make({ apiKey: API_KEY }).query("mutation X { x }", {}, { retryServerErrors: false })
+  ))
+  expect(failure.details).toMatchObject({ cause: "connection reset [REDACTED]", outcomeUnknown: true })
+  expect(JSON.stringify(failure)).not.toContain(API_KEY)
+})
+
+it("cancels the response before entering rate-limit backoff", async () => {
+  const cancelled = vi.fn()
+  const request = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(new ReadableStream({ cancel: cancelled }), {
+      status: 429,
+      headers: { "retry-after": "30" }
+    })
+  )
+  vi.stubGlobal("fetch", request)
+  const controller = new AbortController()
+  const running = Effect.runPromiseExit(make({ apiKey: API_KEY }).query("query X { x }"), {
+    signal: controller.signal
+  })
+  try {
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce())
+    expect(request).toHaveBeenCalledOnce()
+  } finally {
+    controller.abort()
+    await running
+  }
+})
+
+it("interrupts a pending Linear response body read", async () => {
+  let closed = false
+  fixture = await startFixture((_request, response) => {
+    response.on("close", () => {
+      closed = true
+    })
+    response.writeHead(200, { "content-type": "application/json" })
+    response.write("{\"data\":")
+  })
+  const exit = await Effect.runPromise(Effect.exit(Effect.timeout(client().query("query X { x }"), "100 millis")))
+  expect(exit._tag).toBe("Failure")
+  await vi.waitFor(() => expect(closed).toBe(true))
+  expect(fixture.requests).toHaveLength(1)
 })

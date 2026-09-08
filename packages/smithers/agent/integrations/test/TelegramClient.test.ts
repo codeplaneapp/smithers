@@ -1,7 +1,7 @@
 import { ERROR_REFERENCE_URL } from "@smthrs/errors/ErrorCode"
 import { Cause, Effect, Exit } from "effect"
 import type { ServerResponse } from "node:http"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { fromIntegrationError } from "../src/core/ActionFailure.ts"
 import { type IntegrationError, isIntegrationError, isRetryable } from "../src/core/IntegrationError.ts"
 import { resolve } from "../src/telegram/Config.ts"
@@ -21,6 +21,7 @@ let fixture: Fixture | undefined
 afterEach(async () => {
   await fixture?.close()
   fixture = undefined
+  vi.unstubAllGlobals()
 })
 
 const client = (extra: { readonly maxRateLimitRetries?: number; readonly maxRetryAfterSeconds?: number } = {}) =>
@@ -449,7 +450,7 @@ describe("a multi-chunk send names what it delivered", () => {
     expect(failure.message).toContain("already delivered")
   })
 
-  it("uses an empty description when a later chunk gets an unreadable error", async () => {
+  it.each([200, 502])("uses an empty description when a later chunk gets an unreadable %i", async (status) => {
     let calls = 0
     fixture = await startFixture((_request, response) => {
       calls += 1
@@ -457,7 +458,7 @@ describe("a multi-chunk send names what it delivered", () => {
         json(response, 200, ok({ message_id: 101 }))
         return
       }
-      response.writeHead(502, { "content-type": "text/plain" })
+      response.writeHead(status, { "content-type": "text/plain" })
       response.end("bad gateway")
     })
     const failure = await Effect.runPromise(
@@ -466,6 +467,8 @@ describe("a multi-chunk send names what it delivered", () => {
     expect(isTelegramApiError(failure)).toBe(true)
     expect((failure as TelegramApiError).deliveredMessageIds).toEqual([101])
     expect(failure.details).toMatchObject({ description: "" })
+    expect((toIntegrationError(failure) as IntegrationError).reason)
+      .toBe(status === 200 ? "decode-failed" : "delivery-failed")
   })
 
   it("refuses a response that is not a Bot API envelope", async () => {
@@ -750,4 +753,77 @@ describe("toIntegrationError", () => {
     const original = new TelegramApiError("boom", { method: "sendMessage", errorCode: 429 })
     expect((toIntegrationError(original) as IntegrationError).cause).toBe(original)
   })
+})
+
+describe("Telegram response lifecycle", () => {
+  it.each([false, true])("preserves write ambiguity on a body reset (multipleChunks=%s)", async (multipleChunks) => {
+    const request = vi.fn<typeof fetch>()
+    if (multipleChunks) request.mockResolvedValueOnce(Response.json(ok({ message_id: 101 })))
+    request.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("{\"ok\":true,\"result\":"))
+          },
+          pull(controller) {
+            controller.error(new Error(`connection reset /bot${TOKEN}/sendMessage`))
+          }
+        })
+      )
+    )
+    vi.stubGlobal("fetch", request)
+    const failure = await Effect.runPromise(Effect.flip(
+      make({ botToken: TOKEN }).sendMessageSmart(
+        55,
+        multipleChunks ? "x".repeat(5000) : "hi",
+        { typing: false, parseMode: "none" }
+      )
+    ))
+    const mapped = toIntegrationError(failure) as IntegrationError
+    expect(mapped.reason).toBe("delivery-failed")
+    expect(mapped.details).toMatchObject({ outcomeUnknown: true })
+    expect(mapped.details?.["cause"]).toContain("connection reset")
+    expect(JSON.stringify(mapped)).not.toContain(TOKEN)
+    expect(fromIntegrationError(mapped).outcomeUnknown).toBe(true)
+    expect(mapped.details?.["deliveredMessageIds"]).toEqual(multipleChunks ? [101] : [])
+    expect(request).toHaveBeenCalledTimes(multipleChunks ? 2 : 1)
+  })
+})
+
+it.each([200, 503, 429])("classifies a failed Telegram read body at status %i", async (status) => {
+  const request = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(`connection reset /bot${TOKEN}/getMe`)
+        }
+      }),
+      { status }
+    )
+  )
+  vi.stubGlobal("fetch", request)
+  const failure = await Effect.runPromise(Effect.flip(
+    make({ botToken: TOKEN, maxRateLimitRetries: 0 }).call("getMe")
+  ))
+  const mapped = toIntegrationError(failure) as IntegrationError
+  expect(mapped.reason).toBe("delivery-failed")
+  expect(mapped.details).toMatchObject({ errorCode: status, outcomeUnknown: status === 503 })
+  expect(mapped.details?.["cause"]).toContain("connection reset")
+  expect(JSON.stringify(mapped)).not.toContain(TOKEN)
+  expect(request).toHaveBeenCalledOnce()
+})
+
+it("interrupts a pending Telegram response body read", async () => {
+  let closed = false
+  fixture = await startFixture((_request, response) => {
+    response.on("close", () => {
+      closed = true
+    })
+    response.writeHead(200, { "content-type": "application/json" })
+    response.write("{\"ok\":true,\"result\":")
+  })
+  const exit = await Effect.runPromise(Effect.exit(Effect.timeout(client().call("getMe"), "100 millis")))
+  expect(exit._tag).toBe("Failure")
+  await vi.waitFor(() => expect(closed).toBe(true))
+  expect(fixture.requests).toHaveLength(1)
 })

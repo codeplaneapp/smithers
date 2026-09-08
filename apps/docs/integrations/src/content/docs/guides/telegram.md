@@ -204,3 +204,9 @@ limit is several `sendMessage` calls, and a partway failure journals
 failures keep their classification across the journal: an exhausted rate
 limit reads `retryable: true`, a chat that does not exist reads
 `decode-failed`, and a blocked bot reads `permission-denied`.
+
+A response body read failure after success headers is `delivery-failed`.
+For writes it carries `outcomeUnknown: true`: Telegram may have applied the
+request before the connection failed. A fully received malformed success
+body is `decode-failed`. Multi-chunk failures preserve this classification
+and name the messages already delivered in `deliveredMessageIds`.

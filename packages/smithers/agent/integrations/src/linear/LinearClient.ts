@@ -386,102 +386,121 @@ export const make = (
         )
       }
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-        // One controller spans the request and its body: aborting it cancels
-        // an in-flight fetch and tears down the connection under a pending
-        // `response.json()`. Effect aborts the signal it hands each step when
-        // the fiber is interrupted, so forwarding it makes both interruptible.
+        // Finalize the exchange before backing off, failing, or returning.
         const controller = new AbortController()
         const abortWith = (signal: AbortSignal) => {
           if (signal.aborted) controller.abort(signal.reason)
           else signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true })
         }
-        const response = yield* Effect.tryPromise({
-          try: (signal) => {
-            abortWith(signal)
-            return fetch(apiBaseUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                // Personal API keys go raw; OAuth tokens arrive pre-prefixed.
-                Authorization: apiKey
-              },
-              body: JSON.stringify({ query: gql, variables: variables ?? {} }),
-              signal: controller.signal
-            })
-          },
-          catch: (cause) =>
-            new IntegrationError(
-              "delivery-failed",
-              retryServerErrors
-                ? "Linear API request failed (network error)."
-                : "Linear API request for a write failed (network error), so its outcome is unknown.",
-              // A dropped connection on a mutation is the same ambiguity a 5xx
-              // is: Linear may have applied it and lost the answer.
-              { apiBaseUrl, outcomeUnknown: !retryServerErrors },
-              { cause }
-            )
-        })
-        // A 429 was refused, so repeating it is safe for any operation. A 5xx
-        // is ambiguous: Linear may have committed the mutation and lost the
-        // answer, so a write stops here and says the outcome is unknown.
-        if (response.status >= 500 && !retryServerErrors) {
-          return yield* Effect.fail(
-            new IntegrationError(
-              "delivery-failed",
-              `Linear API responded ${response.status} to a write, so its outcome is unknown and it was not repeated.`,
-              { status: response.status, apiBaseUrl, outcomeUnknown: true }
-            )
-          )
-        }
-        if (response.status === 429 || response.status >= 500) {
-          if (attempt >= MAX_ATTEMPTS) {
+        let pendingResponse: Response | undefined
+        let consumed = false
+        const result = yield* Effect.gen(function*() {
+          const response = yield* Effect.tryPromise({
+            try: (signal) => {
+              abortWith(signal)
+              return fetch(apiBaseUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  // Personal API keys go raw; OAuth tokens arrive pre-prefixed.
+                  Authorization: apiKey
+                },
+                body: JSON.stringify({ query: gql, variables: variables ?? {} }),
+                signal: controller.signal
+              })
+            },
+            catch: (cause) =>
+              new IntegrationError(
+                "delivery-failed",
+                retryServerErrors
+                  ? "Linear API request failed (network error)."
+                  : "Linear API request for a write failed (network error), so its outcome is unknown.",
+                // A dropped connection on a mutation is the same ambiguity a 5xx
+                // is: Linear may have applied it and lost the answer.
+                { apiBaseUrl, outcomeUnknown: !retryServerErrors },
+                { cause }
+              )
+          })
+          pendingResponse = response
+          // A 429 was refused, so repeating it is safe for any operation. A 5xx
+          // is ambiguous: Linear may have committed the mutation and lost the
+          // answer, so a write stops here and says the outcome is unknown.
+          if (response.status >= 500 && !retryServerErrors) {
             return yield* Effect.fail(
               new IntegrationError(
                 "delivery-failed",
-                `Linear API responded ${response.status} after ${attempt} attempts.`,
-                { status: response.status, apiBaseUrl }
+                `Linear API responded ${response.status} to a write, so its outcome is unknown and it was not repeated.`,
+                { status: response.status, apiBaseUrl, outcomeUnknown: true }
               )
             )
           }
-          const delayMs = retryDelayMs(response.headers) ??
-            Math.min(250 * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS)
-          yield* Effect.sleep(`${delayMs} millis`)
-          continue
-        }
-        const json = yield* Effect.tryPromise({
-          try: (signal) => {
-            // The fetch step's signal settles once headers arrive, so re-link
-            // to keep an interrupt during the body read effective.
-            abortWith(signal)
-            return response.json() as Promise<Record<string, any>>
-          },
-          catch: (cause) =>
-            new IntegrationError(
-              "decode-failed",
-              `Linear API returned a non-JSON response (status ${response.status}).`,
-              { status: response.status },
-              { cause }
+          if (response.status === 429 || response.status >= 500) {
+            if (attempt >= MAX_ATTEMPTS) {
+              return yield* Effect.fail(
+                new IntegrationError(
+                  "delivery-failed",
+                  `Linear API responded ${response.status} after ${attempt} attempts.`,
+                  { status: response.status, apiBaseUrl }
+                )
+              )
+            }
+            const delayMs = retryDelayMs(response.headers) ??
+              Math.min(250 * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS)
+            return { _tag: "Retry" as const, delayMs }
+          }
+          const body = yield* Effect.tryPromise({
+            try: (signal) => {
+              abortWith(signal)
+              return response.text()
+            },
+            catch: (cause) =>
+              new IntegrationError(
+                "delivery-failed",
+                `Linear API response body could not be read (status ${response.status}).`,
+                {
+                  status: response.status,
+                  outcomeUnknown: !retryServerErrors && response.ok,
+                  cause: (cause instanceof Error ? cause.message : String(cause)).replaceAll(apiKey, "[REDACTED]")
+                },
+                { cause }
+              )
+          })
+          consumed = true
+          const json = yield* Effect.try({
+            try: () => JSON.parse(body) as Record<string, any>,
+            catch: (cause) =>
+              new IntegrationError(
+                "decode-failed",
+                `Linear API returned a non-JSON response (status ${response.status}).`,
+                { status: response.status },
+                { cause }
+              )
+          })
+          const errors = Array.isArray(json?.["errors"]) ? (json["errors"] as Array<{ message?: unknown }>) : []
+          if (!response.ok) {
+            return yield* Effect.fail(
+              new IntegrationError("delivery-failed", `Linear API responded ${response.status}.`, {
+                status: response.status,
+                errors: errors.map((error) => error?.message)
+              })
             )
-        })
-        const errors = Array.isArray(json?.["errors"]) ? (json["errors"] as Array<{ message?: unknown }>) : []
-        if (!response.ok) {
-          return yield* Effect.fail(
-            new IntegrationError("delivery-failed", `Linear API responded ${response.status}.`, {
-              status: response.status,
-              errors: errors.map((error) => error?.message)
-            })
-          )
-        }
-        if (errors.length > 0) {
-          return yield* Effect.fail(
-            new IntegrationError(
-              "delivery-failed",
-              `Linear GraphQL error: ${errors.map((error) => error?.message ?? "unknown").join("; ")}`,
-              { errors: errors.map((error) => error?.message) }
+          }
+          if (errors.length > 0) {
+            return yield* Effect.fail(
+              new IntegrationError(
+                "delivery-failed",
+                `Linear GraphQL error: ${errors.map((error) => error?.message ?? "unknown").join("; ")}`,
+                { errors: errors.map((error) => error?.message) }
+              )
             )
-          )
-        }
-        return (json?.["data"] ?? {}) as Record<string, any>
+          }
+          return { _tag: "Done" as const, data: (json?.["data"] ?? {}) as Record<string, any> }
+        }).pipe(Effect.ensuring(Effect.promise(async () => {
+          controller.abort()
+          if (!consumed) await pendingResponse?.body?.cancel().catch(() => {})
+        })))
+        if (result._tag === "Done") return result.data
+        yield* Effect.sleep(`${result.delayMs} millis`)
       }
       // Unreachable: the loop returns or fails on every path.
       return yield* Effect.fail(

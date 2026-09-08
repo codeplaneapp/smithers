@@ -58,10 +58,9 @@ export class TelegramApiError extends SmithersError {
   /**
    * The classification to use instead of the one the error code implies.
    *
-   * Set for a failure the transport did not report: an answer the Bot API
-   * called a success but this module could not read. It has no error code, and
-   * without this it would be classified the way a lost connection is, which
-   * says the outcome is in doubt when the message was in fact delivered.
+   * Success headers alone cannot classify a failed acknowledgement. A lost
+   * body is a delivery failure; a fully received but malformed body is a
+   * decode failure. Write ambiguity is carried separately in details.
    */
   readonly reason: Reason | null
 
@@ -73,13 +72,17 @@ export class TelegramApiError extends SmithersError {
     readonly deliveredMessageIds?: ReadonlyArray<number> | undefined
     readonly reason?: Reason | undefined
     readonly cause?: unknown
+    readonly causeDescription?: string | undefined
+    readonly outcomeUnknown?: boolean | undefined
   }) {
     super("TELEGRAM_API_ERROR", message, {
       method: options.method,
       errorCode: options.errorCode ?? null,
       description: options.description ?? null,
       retryAfterSeconds: options.retryAfterSeconds ?? null,
-      deliveredMessageIds: options.deliveredMessageIds ?? []
+      deliveredMessageIds: options.deliveredMessageIds ?? [],
+      ...(options.causeDescription === undefined ? {} : { cause: options.causeDescription }),
+      ...(options.outcomeUnknown === undefined ? {} : { outcomeUnknown: options.outcomeUnknown })
     }, { cause: options.cause, name: "TelegramApiError" })
     this.reason = options.reason ?? null
     this.errorCode = options.errorCode ?? null
@@ -173,12 +176,10 @@ export const toIntegrationError = (error: unknown): unknown => {
       // A 429 that outlived its retries is worth another attempt later; a chat
       // that does not exist is not.
       retryable: transient,
-      // A transport failure or a 5xx may have delivered the message anyway, and
-      // a multi-chunk send that failed partway through certainly delivered the
-      // chunks it names. Both cross to the journal. An override means the Bot API
-      // answered and this module could not read the answer, which is a known
-      // outcome with an unreadable receipt, not an ambiguous one.
-      outcomeUnknown: override === null && (code === null || (typeof code === "number" && code >= 500)),
+      // Lost bodies can make writes ambiguous even after success headers.
+      outcomeUnknown: details?.["outcomeUnknown"] === true ||
+        (override === null && (code === null || (typeof code === "number" && code >= 500))),
+      ...(typeof details?.["cause"] === "string" ? { cause: details["cause"] } : {}),
       deliveredMessageIds: [...deliveredMessageIds]
     }, { cause: error })
   } catch {
@@ -384,6 +385,9 @@ export const make = (
   ): Effect.Effect<unknown, SmithersError> =>
     Effect.suspend(() => {
       const controller = new AbortController()
+      const isWrite = !method.startsWith("get")
+      let pendingResponse: Response | undefined
+      let consumed = false
       return Effect.gen(function*() {
         const response = yield* Effect.tryPromise({
           try: (signal) => {
@@ -403,13 +407,30 @@ export const make = (
               { method }
             )
         })
-        const payload = yield* Effect.tryPromise({
+        pendingResponse = response
+        const body = yield* Effect.tryPromise({
           try: (signal) => {
-            // The fetch step's signal settles once headers arrive, so re-link
-            // to keep an interrupt during the body read effective.
             linkInterrupt(signal, controller)
-            return response.json() as Promise<unknown>
+            return response.text()
           },
+          catch: (cause) => {
+            const causeDescription = redactBotToken(cause instanceof Error ? cause.message : String(cause), botToken)
+            return new TelegramApiError(
+              `Telegram API response body could not be read for method "${method}" (status ${response.status}).`,
+              {
+                method,
+                errorCode: response.status,
+                ...(response.ok ? { reason: "delivery-failed" as const } : {}),
+                outcomeUnknown: isWrite && response.ok,
+                causeDescription,
+                cause: causeDescription
+              }
+            )
+          }
+        })
+        consumed = true
+        const payload = yield* Effect.try({
+          try: () => JSON.parse(body) as unknown,
           catch: () =>
             new TelegramApiError(
               `Telegram API returned a non-JSON response for method "${method}" (status ${response.status}).`,
@@ -468,7 +489,10 @@ export const make = (
           )
         }
         return payload["result"]
-      })
+      }).pipe(Effect.ensuring(Effect.promise(async () => {
+        controller.abort()
+        if (!consumed) await pendingResponse?.body?.cancel().catch(() => {})
+      })))
     })
 
   const call: TelegramClient["call"] = (method, params) =>
@@ -558,6 +582,9 @@ export const make = (
                 description: String(error.details?.["description"] ?? ""),
                 retryAfterSeconds: error.retryAfterSeconds,
                 deliveredMessageIds: [...messageIds],
+                ...(error.reason === null ? {} : { reason: error.reason }),
+                outcomeUnknown: error.details?.["outcomeUnknown"] === true,
+                causeDescription: typeof error.details?.["cause"] === "string" ? error.details["cause"] : undefined,
                 cause: error
               }
             )

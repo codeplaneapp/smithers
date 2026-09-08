@@ -75,11 +75,15 @@ A 429 is retried up to five attempts for every operation, waiting
 `Retry-After` or `X-RateLimit-Requests-Reset` capped at 30 seconds. A refused
 request was not performed, so repeating it is safe.
 
-A 5xx or a dropped connection is different. On a query it is retried. On
-`issueCreate`, `issueUpdate`, or `commentCreate` it is not: Linear may have
-applied the mutation and lost the answer, so repeating files a second issue.
-Those failures report `outcomeUnknown: true` in `details`. When you see it,
-check Linear for the issue before running the step again.
+Only received 429 and query 5xx responses are retried. Fetch rejections and
+response body read failures are not retried, including on queries.
+Unread response bodies are cancelled before retry backoff or failure.
+
+A 5xx is not retried on `issueCreate`, `issueUpdate`, or `commentCreate`.
+Linear may have applied the mutation and lost the answer. These failures,
+fetch rejections, and body read failures after success headers report
+`outcomeUnknown: true` in `details` for writes. Check Linear before running
+the step again. A fully received malformed JSON body is `decode-failed`.
 
 ## Receive webhooks
 
