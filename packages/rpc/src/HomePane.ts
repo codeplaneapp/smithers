@@ -1,13 +1,14 @@
 /**
- * The wire contract of a repository's home pane: `flows/home.json`.
+ * The wire contract of a repository's home pane: `.smithers/home.json`.
  *
- * A factory declares its home in the root `PACKAGE.ts` as
- * `Smithers.Factory.Home({ blocks })` (`@smthrs/targets` `Home.ts` is the
- * declaring side); the `HomePane` target projects it to `flows/home.json`,
- * and the app reads that file from the public mirror through the contents
- * route. This module is the reading side: the same block set, in Zod, so a
- * page that imports nothing from the build can still refuse a file that is
- * not a home pane and never render a string that carries HTML.
+ * A factory declares its home in `.smithers/FACTORY.ts` as
+ * `export const home = Smithers.Factory.Home({ blocks })` (`@smthrs/targets`
+ * `Home.ts` is the declaring side); the `FactoryProjection` target projects
+ * it to `.smithers/home.json` beside `.smithers/factory.json`, and the app
+ * reads that file from the public mirror through the contents route. This
+ * module is the reading side: the same block set, in Zod, so a page that
+ * imports nothing from the build can still refuse a file that is not a home
+ * pane and never render a string that carries HTML.
  *
  * Blocks are declared values, never raw HTML. Every string here is refused
  * when it contains a tag, a closing tag, a comment, or a processing
@@ -124,7 +125,7 @@ export const HomeLinksBlockSchema = z.object({
 })
 
 /**
- * The featured flows; the rows come from `flows/catalog.json`, never from this block.
+ * The featured flows; the rows come from the `flows` of `.smithers/factory.json`, never from this block.
  * @since 1.0.0
  * @category schemas
  */
@@ -163,7 +164,7 @@ export const HomeBlockSchema = z.discriminatedUnion("type", [
 export type HomeBlock = z.infer<typeof HomeBlockSchema>
 
 /**
- * The document `flows/home.json` holds.
+ * The document `.smithers/home.json` holds.
  * @since 1.0.0
  * @category schemas
  */
@@ -171,7 +172,7 @@ export const HomeDocumentSchema = z.object({
   blocks: z.array(HomeBlockSchema).min(1).max(32)
 })
 /**
- * The document `flows/home.json` holds.
+ * The document `.smithers/home.json` holds.
  * @since 1.0.0
  * @category models
  */
@@ -182,7 +183,7 @@ export type HomeDocument = z.infer<typeof HomeDocumentSchema>
  * @since 1.0.0
  * @category constants
  */
-export const HOME_PANE_PATH = "flows/home.json"
+export const HOME_PANE_PATH = ".smithers/home.json"
 
 /**
  * Reads a home pane from the file's text. The refusal names the first

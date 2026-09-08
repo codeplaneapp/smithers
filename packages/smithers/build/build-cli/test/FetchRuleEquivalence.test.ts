@@ -29,6 +29,7 @@ const fixture = async (url: string, sha256 = digest, out = "nested/payload.bin")
   const target = S.Fetch({ url, sha256, out })
   const index = PackageIndex.make({
     root,
+    factory: undefined,
     workspace: S.Workspace("fixture", {
       repository: "git+https://example.invalid/fixture.git",
       cache: S.Cache({ directory: ".flows" }),

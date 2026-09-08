@@ -64,6 +64,7 @@
     "./Exec": "./src/Exec.ts",
     "./ExecSandbox": "./src/ExecSandbox.ts",
     "./FaultSuite": "./src/FaultSuite.ts",
+    "./Factory": "./src/Factory.ts",
     "./Fetch": "./src/Fetch.ts",
     "./Filegroup": "./src/Filegroup.ts",
     "./Flow": "./src/Flow.ts",
@@ -278,6 +279,11 @@
         "types": "./dist/esm/FaultSuite.d.ts",
         "import": "./dist/esm/FaultSuite.js",
         "require": "./dist/cjs/FaultSuite.js"
+      },
+      "./Factory": {
+        "types": "./dist/esm/Factory.d.ts",
+        "import": "./dist/esm/Factory.js",
+        "require": "./dist/cjs/Factory.js"
       },
       "./Fetch": {
         "types": "./dist/esm/Fetch.d.ts",

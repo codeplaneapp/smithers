@@ -657,3 +657,67 @@ export const inputLiterals = (values: ReadonlyArray<string>): InputLiterals =>
  */
 export const inputOptional = (inner: InputString | InputLiterals): InputOptional =>
   Object.freeze(InputOptional.make({ inner }))
+
+/**
+ * Maximum length of one target label reference.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumLabelLength = 512
+
+/**
+ * The shape of an exact target label: `//pkg/path:name` or `//:name`, the
+ * one spelling that names exactly one target. Patterns (`//...`, a bare
+ * `//pkg`) are not references; a declaration that wants one target says
+ * which.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const labelPattern =
+  /^\/\/(?:(?!\.\.?(?:\/|:))[A-Za-z0-9._-]+(?:\/(?!\.\.?(?:\/|:))[A-Za-z0-9._-]+)*)?:[A-Za-z0-9._-]+$/
+
+/**
+ * Schema for an inert target label reference, `S.label("//:ci")`.
+ *
+ * A factory declaration in `.smithers/FACTORY.ts` never imports a
+ * `PACKAGE.ts`; it names the targets it needs by label, and the index
+ * resolves the reference against the registry when a field that takes one
+ * is read.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const Label = Schema.TaggedStruct("Label", {
+  label: Schema.NonEmptyString.check(Schema.isMaxLength(maximumLabelLength), Schema.isPattern(labelPattern))
+})
+
+/**
+ * An inert target label reference.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Label = typeof Label.Type
+
+/**
+ * Declares a reference to exactly one target by its label.
+ *
+ * @example
+ * ```ts
+ * import { Smithers as S } from "@smthrs/targets"
+ *
+ * const ci = S.label("//:ci")
+ * ```
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const label = (path: string): Label => {
+  if (typeof path !== "string" || !path.isWellFormed()) throw new TypeError("label must be a well-formed string")
+  if (path.length > maximumLabelLength || !labelPattern.test(path)) {
+    throw new TypeError(`label must name exactly one target as //pkg:name or //:name: ${JSON.stringify(path)}`)
+  }
+  return Object.freeze(Label.make({ label: path }))
+}

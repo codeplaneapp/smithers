@@ -1,0 +1,277 @@
+/**
+ * `Smithers.Factory`, `Smithers.Github.Policy`, `Smithers.label`, and the
+ * `FactoryProjection` target.
+ *
+ * The properties that matter: the declaration refuses the shapes RULINGS 21
+ * and 23 rule out (a second writer of `main`, an event key or flow id the
+ * vocabulary cannot spell, HTML in the summary); the `on` table flattens to
+ * rows in declaration order with the sentence each row shows; the projection
+ * round-trips; and the target checks by default, writes only when asked,
+ * never writes under the lint verb, and carries the loaded declarations the
+ * planner fills rather than anything a `PACKAGE.ts` wrote.
+ */
+import { describe, expect, it } from "vitest"
+import * as Factory from "../src/Factory.ts"
+import * as Flow from "../src/Flow.ts"
+import type * as FlowCatalog from "../src/FlowCatalog.ts"
+import * as Home from "../src/Home.ts"
+import { Smithers } from "../src/index.ts"
+import type * as Input from "../src/Input.ts"
+import * as Reference from "../src/Reference.ts"
+import * as Target from "../src/Target.ts"
+import { plannedCalls } from "./plan.ts"
+
+const describeInput = (input: Input.Declared): string =>
+  input._tag === "Glob" ? input.pattern : input._tag === "File" ? input.path : input._tag
+
+const review = Flow.Flow({ flow: "review", summary: "Review the change.", featured: true })
+const lint = Flow.Flow({ flow: "lint", summary: "Lint the named files." })
+
+const row = (declaration: Flow.Declaration): FlowCatalog.Row => ({
+  id: declaration.flow,
+  description: `Describes ${declaration.flow}.`,
+  summary: declaration.summary ?? null,
+  featured: declaration.featured,
+  kind: "mdx",
+  path: `flows/${declaration.flow}/flow.mdx`,
+  capabilities: ["fs:read:**"],
+  model: null,
+  modelInvocable: true
+})
+
+describe("Smithers.label", () => {
+  it("declares a frozen reference to exactly one target", () => {
+    const ci = Smithers.label("//:ci")
+    expect(ci).toEqual({ _tag: "Label", label: "//:ci" })
+    expect(Object.isFrozen(ci)).toBe(true)
+    expect(Reference.label("//apps/ui:dev")).toEqual({ _tag: "Label", label: "//apps/ui:dev" })
+    expect(Reference.Label.make({ label: "//packages/smithers/build:targets" }).label).toBe(
+      "//packages/smithers/build:targets"
+    )
+  })
+
+  it("refuses patterns, bare packages, and relative spellings", () => {
+    for (const bad of ["//...", "//apps", ":ci", "ci", "//:ci:twice", "//apps/..:ci", "//:", ""]) {
+      expect(() => Reference.label(bad), bad).toThrow(/exactly one target|well-formed/)
+    }
+    expect(() => Reference.label(`//:${"a".repeat(Reference.maximumLabelLength)}`)).toThrow(/exactly one target/)
+    expect(() => Reference.label(1 as never)).toThrow(/well-formed string/)
+  })
+})
+
+describe("Smithers.Github.Policy", () => {
+  it("defaults to the third-party posture and accepts ours", () => {
+    expect(Smithers.Github.Policy()).toEqual({
+      _tag: "GithubPolicy",
+      mirror: "pull",
+      issues: "read",
+      changes: "send-upstream"
+    })
+    const ours = Factory.Policy({ mirror: "push", issues: "two-way", changes: "land" })
+    expect(ours).toEqual({ _tag: "GithubPolicy", mirror: "push", issues: "two-way", changes: "land" })
+    expect(Object.isFrozen(ours)).toBe(true)
+  })
+
+  it("refuses two writers of main: changes land needs mirror push", () => {
+    expect(() => Factory.Policy({ changes: "land" })).toThrow(/changes "land" requires mirror "push"/)
+    expect(() => Factory.Policy({ mirror: "none", changes: "land" })).toThrow(/mirror "none"/)
+    expect(() => Factory.Policy({ mirror: "push", changes: "land" })).not.toThrow()
+  })
+
+  it("refuses a value outside the vocabulary and an unknown option", () => {
+    expect(() => Factory.Policy({ mirror: "push-on-land" as never })).toThrow(/Github.Policy/)
+    expect(() => Factory.Policy({ issues: "write" as never })).toThrow(/Github.Policy/)
+    expect(() => Factory.Policy({ pushOnLand: true } as never)).toThrow(/unknown option "pushOnLand"/)
+  })
+})
+
+describe("Smithers.Factory", () => {
+  const github = Factory.Policy({ mirror: "push", issues: "two-way", changes: "land" })
+  const on = {
+    "issue.opened": { flow: "issue", description: "Triage every new issue" },
+    "change.landed": ["wiki", "history.fold", "improve.mine"],
+    "schedule:0 9 * * 1-5": "review",
+    "github.push:main": "history.fold",
+    manual: { flow: ["implement", "prototype"] }
+  }
+
+  it("declares a frozen, tagged declaration and is callable from the surface with Home beside it", () => {
+    const factory = Smithers.Factory({
+      summary: "How this repository develops itself.",
+      flows: [review, lint],
+      on,
+      github
+    })
+    expect(factory._tag).toBe("FactoryDeclaration")
+    expect(factory.summary).toBe("How this repository develops itself.")
+    expect(factory.flows).toEqual([review, lint])
+    expect(factory.on).toEqual(on)
+    expect(factory.github).toEqual(github)
+    expect(Object.isFrozen(factory)).toBe(true)
+    expect(Object.isFrozen(factory.on)).toBe(true)
+    expect(Factory.isFactoryDeclaration(factory)).toBe(true)
+    expect(Factory.isFactoryDeclaration({ ...factory, _tag: "Factory" })).toBe(false)
+    expect(Smithers.Factory.Home).toBe(Home.Home)
+    expect(Smithers.isFactoryDeclaration(factory)).toBe(true)
+  })
+
+  it("defaults flows, on, and github, and needs only a summary", () => {
+    const factory = Factory.Factory({ summary: "Minimal." })
+    expect(factory.flows).toEqual([])
+    expect(factory.on).toEqual({})
+    expect(factory.github).toEqual(Factory.Policy())
+  })
+
+  it("refuses a summary that is empty, multi-line, too long, or markup", () => {
+    expect(() => Factory.Factory({ summary: "" })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "one\ntwo" })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "x".repeat(Factory.maximumSummaryLength + 1) })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "<b>bold</b>" })).toThrow(/must not contain HTML/)
+    expect(() => Factory.Factory({ summary: "a < b and b > c" })).not.toThrow()
+  })
+
+  it("refuses flows that are not Smithers.Flow values or name one flow twice", () => {
+    expect(() => Factory.Factory({ summary: "S.", flows: [{ flow: "review" }] as never })).toThrow(
+      /flows\[0\] must be a Smithers.Flow declaration/
+    )
+    expect(() => Factory.Factory({ summary: "S.", flows: "review" as never })).toThrow(/must be an array/)
+    expect(() => Factory.Factory({ summary: "S.", flows: [review, Flow.Flow({ flow: "review" })] })).toThrow(
+      /declares the flow "review" twice/
+    )
+  })
+
+  it("refuses on keys outside the event vocabulary shape and flow ids discovery could not derive", () => {
+    expect(() => Factory.Factory({ summary: "S.", on: { "Issue.Opened": "issue" } })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "S.", on: { "issue opened": "issue" } })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "S.", on: { "issue.opened": "" } })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "S.", on: { "issue.opened": [] } })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "S.", on: { "issue.opened": "../escape" } })).toThrow(/Factory/)
+    expect(() => Factory.Factory({ summary: "S.", on: { "issue.opened": { flow: "issue", description: "<i>x</i>" } } }))
+      .toThrow(/must not contain HTML/)
+    expect(() => Factory.Factory({ summary: "S.", on: ["issue.opened"] as never })).toThrow(/record of event keys/)
+    expect(() => Factory.Factory({ summary: "S.", on: { "schedule:*/15 * * * *": "repo.mirror-pull" } })).not.toThrow()
+  })
+
+  it("refuses a github value that is not a policy and unknown options", () => {
+    expect(() => Factory.Factory({ summary: "S.", github: { mirror: "push" } as never })).toThrow(
+      /must be a Smithers.Github.Policy value/
+    )
+    expect(() => Factory.Factory({ summary: "S.", workflows: {} } as never)).toThrow(/unknown option "workflows"/)
+    expect(() => Factory.Factory("S." as never)).toThrow(/plain object/)
+  })
+
+  it("flattens the on table to rows in declaration order, carrying each sentence", () => {
+    const factory = Factory.Factory({ summary: "S.", on })
+    expect(Factory.rules(factory)).toEqual([
+      { event: "issue.opened", flow: "issue", description: "Triage every new issue" },
+      { event: "change.landed", flow: ["wiki", "history.fold", "improve.mine"] },
+      { event: "schedule:0 9 * * 1-5", flow: "review" },
+      { event: "github.push:main", flow: "history.fold" },
+      { event: "manual", flow: ["implement", "prototype"] }
+    ])
+  })
+
+  it("renders a stable two-space projection that parses back", () => {
+    const factory = Factory.Factory({ summary: "S.", flows: [review, lint], on, github })
+    const catalog = [row(review), row(lint)]
+    const text = Factory.renderProjection(factory, catalog)
+    expect(text.endsWith("\n")).toBe(true)
+    const expected = {
+      summary: "S.",
+      flows: catalog,
+      on: Factory.rules(factory),
+      github: { mirror: "push", issues: "two-way", changes: "land" }
+    }
+    expect(text).toBe(`${JSON.stringify(expected, null, 2)}\n`)
+    expect(Factory.parseProjection(text)).toEqual(expected)
+    expect(Factory.parseProjection("{")).toMatch(/not JSON/)
+    expect(Factory.parseProjection(JSON.stringify({ flows: [] }))).toMatch(
+      /does not have the .smithers\/factory.json shape/
+    )
+    expect(Factory.parseProjection(JSON.stringify({ ...expected, github: { mirror: "push-on-land" } }))).toMatch(
+      /shape/
+    )
+  })
+})
+
+describe("FactoryProjection target", () => {
+  const factory = Factory.Factory({ summary: "S.", flows: [review] })
+  const home = Home.Home({ blocks: [Home.Flows()] })
+
+  it("checks by default, keys on the declaration, the entries, and both files, and plans one projection", () => {
+    const checking = Factory.FactoryProjection({})
+    const metadata = Target.metadata(checking)
+    expect(metadata.attrs).toEqual({
+      root: "flows",
+      declaration: ".smithers/FACTORY.ts",
+      output: ".smithers/factory.json",
+      homeOutput: ".smithers/home.json",
+      mode: "check"
+    })
+    expect(metadata.cacheable).toBe(true)
+    expect(metadata.outputs).toEqual({ cwd: ".", paths: [] })
+    expect(metadata.inputs.map(describeInput)).toEqual([
+      "//flows/**/flow.ts",
+      "//flows/**/flow.mdx",
+      "//flows/**/SKILL.md",
+      "//.smithers/FACTORY.ts",
+      "//.smithers/factory.json",
+      "//.smithers/home.json"
+    ])
+    expect(plannedCalls(checking)).toEqual([{
+      action: "smithers-build/factory-projection",
+      payload: {
+        root: "flows",
+        output: ".smithers/factory.json",
+        homeOutput: ".smithers/home.json",
+        mode: "check",
+        factory: null,
+        home: null
+      }
+    }])
+  })
+
+  it("writes both files when asked and carries the filled declarations into the payload", () => {
+    const writing = Factory.FactoryProjection({
+      mode: "write",
+      root: "//recipes",
+      declaration: "FACTORY.ts",
+      output: "//meta/factory.json",
+      homeOutput: "//meta/home.json",
+      factory,
+      home
+    })
+    const written = Target.metadata(writing)
+    expect(written.cacheable).toBe(false)
+    expect(written.outputs).toEqual({ cwd: ".", paths: ["meta/factory.json", "meta/home.json"] })
+    expect(written.inputs.map(describeInput)).toEqual([
+      "//recipes/**/flow.ts",
+      "//recipes/**/flow.mdx",
+      "//recipes/**/SKILL.md",
+      "//FACTORY.ts"
+    ])
+    expect(plannedCalls(writing)).toEqual([{
+      action: "smithers-build/factory-projection",
+      payload: {
+        root: "recipes",
+        output: "meta/factory.json",
+        homeOutput: "meta/home.json",
+        mode: "write",
+        factory,
+        home
+      }
+    }])
+  })
+
+  it("forces the non-writing view under the lint verb and keeps build as declared", () => {
+    const metadata = Target.metadata(Factory.FactoryProjection({ mode: "write" }))
+    expect((metadata.forKind("lint").attrs as Factory.Attrs).mode).toBe("check")
+    expect((metadata.forKind("build").attrs as Factory.Attrs).mode).toBe("write")
+    expect((Target.metadata(Factory.FactoryProjection({})).forKind("lint").attrs as Factory.Attrs).mode).toBe("check")
+  })
+
+  it("refuses declarations that are not factory or home values", () => {
+    expect(() => Factory.FactoryProjection({ factory: { summary: "S." } as never })).toThrow()
+    expect(() => Factory.FactoryProjection({ home: { blocks: [] } as never })).toThrow()
+  })
+})

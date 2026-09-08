@@ -122,80 +122,19 @@ const repoAbout = Smithers.ToolRun({
   cwd: "."
 })
 
-// --- featured flows --------------------------------------------------------
-// The flows this repository recommends first, and the one line each shows
-// under its id. A flow describes itself in flows/<id>/flow.mdx; how the
-// repository presents it is declared here and nowhere else, riding the same
-// summary and featured pair every target carries. `flowCatalog` projects
-// these declarations over the discovered flows into flows/catalog.json, the
-// file smithers.sh reads from the public mirror; a declaration naming no
-// discovered flow fails that projection by id.
-export const review = Smithers.Flow({
-  flow: "review",
-  summary: "Review the working-copy change and return a verdict with the reasons behind it.",
+// --- factory projection ----------------------------------------------------
+// The factory is declared in .smithers/FACTORY.ts beside WORKSPACE.ts: the
+// featured flows, the Dispatcher table, the GitHub policy, and the home pane.
+// This target projects that declaration into .smithers/factory.json and
+// .smithers/home.json, the files smithers.sh reads from the public mirror, so
+// a visitor signed out sees them and a workspace without node_modules never
+// evaluates FACTORY.ts for a card. The planner fills the declaration from the
+// loaded file; nothing here restates it.
+const factoryProjection = Smithers.FactoryProjection({
+  summary: "Regenerate and drift-check .smithers/factory.json and .smithers/home.json from .smithers/FACTORY.ts.",
   featured: true
 })
-export const lint = Smithers.Flow({
-  flow: "lint",
-  summary: "Lint the files you name against this repository's conventions and fix what it finds.",
-  featured: true
-})
-export const prTriage = Smithers.Flow({
-  flow: "pr-triage",
-  summary: "Triage one pull request for scope, tests, docs, and review readiness from its diff alone.",
-  featured: true
-})
-export const issueTriage = Smithers.Flow({
-  flow: "issue-triage",
-  summary: "Reproduce and triage one GitHub issue into a structured maintainer response.",
-  featured: true
-})
-export const releaseNotes = Smithers.Flow({
-  flow: "release-notes",
-  summary: "Draft release notes from the commits since the last tag, grouped by package.",
-  featured: true
-})
-
-const flowCatalog = Smithers.FlowCatalog({
-  summary: "Regenerate and drift-check flows/catalog.json from the flows/ tree and the Smithers.Flow declarations.",
-  featured: true,
-  flows: [review, lint, prTriage, issueTriage, releaseNotes]
-})
-// --- end featured flows ----------------------------------------------------
-
-// --- home pane -------------------------------------------------------------
-// The first card a visitor sees on smithers.sh/smithersai/smithers, above the
-// welcome: what this repository is, the flows to try first, and the CI
-// benchmark. Blocks are declared values, never raw HTML; the app renders each
-// from data. `homePane` projects the declaration into flows/home.json, the
-// file the app reads from the public mirror, so a visitor signed out sees it
-// and a workspace without node_modules never evaluates this file for it. The
-// benchmark numbers are not measured yet; the block names the measures and
-// the app says so until a measurement exists.
-export const home = Smithers.Factory.Home({
-  blocks: [
-    Smithers.Home.Text({
-      text:
-        "Smithers builds itself with Smithers. Every change here is landed by the flows below, and the build, the tests, and the generated files are declared in this repository's PACKAGE.ts files."
-    }),
-    Smithers.Home.Flows({ title: "Try first" }),
-    Smithers.Home.CiBenchmark({ title: "CI on Smithers" }),
-    Smithers.Home.Links({
-      title: "Read more",
-      links: [
-        { label: "Source on GitHub", url: "https://github.com/smithersai/smithers" },
-        { label: "smithers.sh", url: "https://smithers.sh" }
-      ]
-    })
-  ]
-})
-
-const homePane = Smithers.HomePane({
-  summary: "Regenerate and drift-check flows/home.json from the Smithers.Factory.Home declaration.",
-  featured: true,
-  home
-})
-// --- end home pane ---------------------------------------------------------
+// --- end factory projection ------------------------------------------------
 
 const ubuntu = "ubuntu-latest"
 
@@ -362,12 +301,11 @@ const ci = Smithers.GithubCiGen({
         // `fixtures/claimChild.ts` once called the removed `Control.pause` and
         // died at runtime in every case that spawned it.
         { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" },
-        // The featured-flow catalog smithers.sh serves from the public mirror.
-        // Declared in this file, rendered over the flows/ tree, checked in.
-        { name: "Flow catalog drift", verb: Smithers.Verb.Lint, pattern: "//:flowCatalog" },
-        // The home pane the app renders from the public mirror. Declared in
-        // this file, projected to flows/home.json, checked in.
-        { name: "Home pane drift", verb: Smithers.Verb.Lint, pattern: "//:homePane" }
+        // The factory projection smithers.sh serves from the public mirror:
+        // the featured flows, the Dispatcher table, and the home pane,
+        // declared in .smithers/FACTORY.ts, rendered over the flows/ tree,
+        // checked in.
+        { name: "Factory projection drift", verb: Smithers.Verb.Lint, pattern: "//:factoryProjection" }
       ]
     },
     {
@@ -683,8 +621,7 @@ export const Package = Smithers.Package({
   targets: {
     changelog,
     ci,
-    flowCatalog,
-    homePane,
+    factoryProjection,
     reviewDocsAgainstCode,
     jsdocRules,
     jsdocTree,

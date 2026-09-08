@@ -1,19 +1,14 @@
 /**
- * `Smithers.Factory.Home`, its blocks, and the `HomePane` projection.
+ * `Smithers.Factory.Home` and its blocks.
  *
  * The properties that matter: every block is a declared value and a string
  * carrying HTML is refused where it is written and again when the projected
- * file is read back; the projection round-trips; and the target checks by
- * default, writes only when asked, and never writes under the lint verb.
+ * file is read back, and the rendered document round-trips. The target that
+ * writes `.smithers/home.json` is `FactoryProjection`, tested in
+ * `Factory.test.ts`.
  */
 import { describe, expect, it } from "vitest"
 import * as Home from "../src/Home.ts"
-import type * as Input from "../src/Input.ts"
-import * as Target from "../src/Target.ts"
-import { plannedCalls } from "./plan.ts"
-
-const describeInput = (input: Input.Declared): string =>
-  input._tag === "Glob" ? input.pattern : input._tag === "File" ? input.path : input._tag
 
 describe("the home blocks", () => {
   it("declare frozen plain values that carry their type", () => {
@@ -104,43 +99,5 @@ describe("Smithers.Factory.Home", () => {
       /must not contain HTML/
     )
     expect(Home.parse(JSON.stringify({ blocks: [{ type: "prose", markdown: "x" }] }))).toMatch(/shape/)
-  })
-})
-
-describe("HomePane target", () => {
-  const home = Home.Home({ blocks: [Home.Flows()] })
-
-  it("checks by default, writes only when asked, and plans one generated-file action", () => {
-    const checking = Home.HomePane({ home })
-    const metadata = Target.metadata(checking)
-    expect(metadata.attrs).toEqual({ home, output: "flows/home.json", mode: "check" })
-    expect(metadata.cacheable).toBe(true)
-    expect(metadata.outputs).toEqual({ cwd: ".", paths: [] })
-    expect(metadata.inputs.map(describeInput)).toEqual(["//flows/home.json"])
-    expect(plannedCalls(checking)).toEqual([{
-      action: "smithers-build/check-file",
-      payload: { path: "flows/home.json", contents: Home.render(home) }
-    }])
-
-    const writing = Home.HomePane({ home, mode: "write", output: "//.smithers/home.json" })
-    const written = Target.metadata(writing)
-    expect(written.cacheable).toBe(false)
-    expect(written.inputs).toEqual([])
-    expect(written.outputs).toEqual({ cwd: ".", paths: [".smithers/home.json"] })
-    expect(plannedCalls(writing)).toEqual([{
-      action: "smithers-build/write-file",
-      payload: { path: ".smithers/home.json", contents: Home.render(home) }
-    }])
-  })
-
-  it("forces the non-writing view under the lint verb and keeps build as declared", () => {
-    const metadata = Target.metadata(Home.HomePane({ home, mode: "write" }))
-    expect((metadata.forKind("lint").attrs as Home.Attrs).mode).toBe("check")
-    expect((metadata.forKind("build").attrs as Home.Attrs).mode).toBe("write")
-  })
-
-  it("refuses a home that is not a Smithers.Factory.Home value", () => {
-    expect(() => Home.HomePane({ home: { blocks: [] } as never })).toThrow()
-    expect(() => Home.HomePane({ home: "<main>hi</main>" as never })).toThrow()
   })
 })

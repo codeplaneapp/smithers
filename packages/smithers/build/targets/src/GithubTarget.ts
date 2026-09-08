@@ -19,6 +19,14 @@ import * as Secret from "./Secret.ts"
 import * as Target from "./Target.ts"
 
 /**
+ * The GitHub policy a `.smithers/FACTORY.ts` declares, `S.Github.Policy({ mirror, issues, changes })`.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export { Policy } from "./Factory.ts"
+
+/**
  * Attrs for {@link Setup}.
  *
  * @category schemas

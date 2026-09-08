@@ -1268,10 +1268,14 @@ const visit = async (
   // tool identity is still keyed, and before the body runs, so the rule's own
   // argv builder is unchanged.
   const plannedMode = context.rootModes.get(label) ?? options.mode
-  const attrs = withPlannedMode(
+  const attrs = withFactory(
     rule,
-    WorkspaceToolchain.fill(metadata.workspaceAttrs, view.attrs, context.workspaceToolchain),
-    plannedMode
+    withPlannedMode(
+      rule,
+      WorkspaceToolchain.fill(metadata.workspaceAttrs, view.attrs, context.workspaceToolchain),
+      plannedMode
+    ),
+    context.index.factory
   )
 
   // Dependencies: always visited for key material; the execution edges are a
@@ -2903,11 +2907,28 @@ const dataLabelsOf = (
  * because their `build` verb writes whatever the declaration says today, and
  * the executor suite pins that.
  */
-const plannedModeRules: ReadonlySet<string> = new Set(["FlowCatalog", "HomePane"])
+const plannedModeRules: ReadonlySet<string> = new Set(["FactoryProjection"])
 
 const withPlannedMode = (rule: string, attrs: unknown, mode: Mode): unknown =>
   plannedModeRules.has(rule) && mode !== "execute" && typeof attrs === "object" && attrs !== null
     ? { ...attrs, mode }
+    : attrs
+
+/**
+ * The factory projection carries the declarations the loader read from
+ * `FACTORY.ts`, never ones a `PACKAGE.ts` wrote: the planner fills `factory`
+ * and `home` here, the way the workspace toolchain fills a rule's runtime.
+ * They ride in the attrs so the declaration's content is key material and
+ * an edit to the factory re-keys the check. A workspace without a factory
+ * leaves both unset, and the executor names the missing file.
+ */
+const withFactory = (rule: string, attrs: unknown, factory: PackageIndexModule.PackageIndex["factory"]): unknown =>
+  rule === "FactoryProjection" && typeof attrs === "object" && attrs !== null
+    ? {
+      ...attrs,
+      ...(factory === undefined ? {} : { factory: factory.factory }),
+      ...(factory?.home === undefined ? {} : { home: factory.home })
+    }
     : attrs
 
 /** The mode one root executes under, given the invocation. */

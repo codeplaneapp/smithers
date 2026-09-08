@@ -6,15 +6,16 @@ import { HOME_MEASURES, HomeDocumentSchema, parseHomeDocument } from "../src/Hom
 
 /*
  * The reading side of the home pane. The repository's own projected
- * flows/home.json (written by `//:homePane` from the root PACKAGE.ts) has to
- * parse here, block for block, so the declaring schema in @smthrs/targets and
- * this wire schema never drift apart on a real file; a string carrying HTML
- * is refused wherever it sits; and the card that carries the pane parses.
+ * .smithers/home.json (written by `//:factoryProjection` from
+ * .smithers/FACTORY.ts) has to parse here, block for block, so the declaring
+ * schema in @smthrs/targets and this wire schema never drift apart on a real
+ * file; a string carrying HTML is refused wherever it sits; and the card that
+ * carries the pane parses.
  */
 
-const repositoryHome = NodePath.resolve(import.meta.dirname, "../../../flows/home.json")
+const repositoryHome = NodePath.resolve(import.meta.dirname, "../../../.smithers/home.json")
 
-describe("the projected flows/home.json of this repository", () => {
+describe("the projected .smithers/home.json of this repository", () => {
   test("parses block for block, and names what the smithersai/smithers home shows", () => {
     const parsed = parseHomeDocument(Fs.readFileSync(repositoryHome, "utf8"))
     expect(parsed.ok).toBe(true)
@@ -48,7 +49,7 @@ describe("the home document", () => {
     expect(html).toEqual({
       ok: false,
       reason:
-        "flows/home.json is not a home pane at blocks.0.text: must not contain HTML; blocks are declared values, never markup"
+        ".smithers/home.json is not a home pane at blocks.0.text: must not contain HTML; blocks are declared values, never markup"
     })
     expect(HomeDocumentSchema.safeParse({ blocks: [{ type: "flows", title: "<!-- x -->" }] }).success).toBe(false)
     expect(
@@ -81,7 +82,7 @@ describe("the repo-home card", () => {
       kind: "repo-home",
       payload: {
         repo: "o/r",
-        path: "flows/home.json",
+        path: ".smithers/home.json",
         blocks: [{ type: "flows" }],
         featuredFlows: [{ id: "review", summary: "Review the change." }, { id: "lint", summary: null }]
       }
@@ -93,10 +94,10 @@ describe("the repo-home card", () => {
       kind: "repo-home",
       payload: {
         repo: "o/r",
-        path: "flows/home.json",
+        path: ".smithers/home.json",
         blocks: [{ type: "flows" }],
         featuredFlows: null,
-        featuredReason: "o/r has no flows/catalog.json."
+        featuredReason: "o/r has no .smithers/factory.json."
       }
     })
     if (absent.kind !== "repo-home") return
@@ -110,7 +111,7 @@ describe("the repo-home card", () => {
         kind: "repo-home",
         payload: {
           repo: "o/r",
-          path: "flows/home.json",
+          path: ".smithers/home.json",
           blocks: [{ type: "text", text: "<script>x</script>" }],
           featuredFlows: null
         }

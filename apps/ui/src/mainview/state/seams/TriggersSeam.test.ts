@@ -125,7 +125,20 @@ const projectionDocument = (projection: unknown): Response =>
 
 const DAY_ONE = {
   summary: "How will/flows develops itself.",
-  flows: ["issue", "implement", "review", "wiki", "history.fold", "improve.mine"],
+  flows: [
+    {
+      id: "review",
+      description: "Reviews the change.",
+      summary: "Review the change.",
+      featured: true,
+      kind: "mdx",
+      path: "flows/review/flow.mdx",
+      capabilities: ["fs:read:**"],
+      model: null,
+      modelInvocable: true
+    }
+  ],
+  github: { mirror: "push", issues: "two-way", changes: "land" },
   on: [
     { event: "issue.opened", flow: "issue", description: "Triage every new issue" },
     { event: "issue.labeled:smithers", flow: "implement" },
@@ -172,7 +185,7 @@ describe("triggers seam: the declaration, signed out", () => {
   })
 
   test("a projection the schema does not accept, or a mirror that does not answer, is an honest refusal, never an empty table", async () => {
-    const malformed = await ready(backend({ [PROJECTION]: projectionDocument({ flows: ["issue"] }) }))
+    const malformed = await ready(backend({ [PROJECTION]: projectionDocument({ flows: ["issue"], on: [] }) }))
     const refused = await malformed.controller.commands.run("triggers.list")
     expect(refused.status).toBe("failed")
     if (refused.status === "failed") expect(refused.error).toBe("The rules of will/flows couldn't be read: .smithers/factory.json is not a factory projection.")

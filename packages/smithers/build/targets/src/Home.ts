@@ -1,20 +1,22 @@
 /**
- * The home pane a factory declares for its repository: `flows/home.json`.
+ * The home pane a factory declares for its repository: `.smithers/home.json`.
  *
  * A repository's page on smithers.sh opens on the repository's own home
- * pane, a README on steroids the maintainer declares in the root
- * `PACKAGE.ts` as `export const home = Smithers.Factory.Home({ blocks })`.
- * Blocks are declared values, never raw HTML: a paragraph of text, a list of
- * links, the featured flows, and the CI benchmark that names which numbers
- * it wants. The app renders every block from data; a string that carries an
- * HTML tag is refused where it is written.
+ * pane, a README on steroids the maintainer declares in
+ * `.smithers/FACTORY.ts` as `export const home = Smithers.Factory.Home({ blocks })`,
+ * the second export beside the factory itself. Blocks are declared values,
+ * never raw HTML: a paragraph of text, a list of links, the featured flows,
+ * and the CI benchmark that names which numbers it wants. The app renders
+ * every block from data; a string that carries an HTML tag is refused where
+ * it is written.
  *
- * The declaration is inert, like {@link Flow.Flow}. A {@link HomePane}
- * target projects it into a checked-in JSON file beside `flows/catalog.json`
- * the same way `ci.yml` and the root `tsconfig.json` are projected: `write`
- * renders it, `check` fails on drift, and the `lint` verb never writes. The
- * file is checked in so the public mirror serves it signed out and a
- * workspace without `node_modules` never has to evaluate `PACKAGE.ts`.
+ * The declaration is inert, like {@link Flow.Flow}. The `FactoryProjection`
+ * target (`Factory.ts`) projects it into a checked-in JSON file beside
+ * `.smithers/factory.json` the same way `ci.yml` and the root `tsconfig.json`
+ * are projected: `write` renders it, `check` fails on drift, and the `lint`
+ * verb never writes. The file is checked in so the public mirror serves it
+ * signed out and a workspace without `node_modules` never has to evaluate
+ * `FACTORY.ts`.
  *
  * The benchmark numbers are not measured yet. The block declares which ones
  * it wants; the projection carries no values, and the app says "not
@@ -22,14 +24,10 @@
  *
  * @since 1.0.0
  */
-import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as NodeUtil from "node:util/types"
-import * as GeneratedFile from "./GeneratedFile.ts"
-import * as Input from "./Input.ts"
-import * as Target from "./Target.ts"
 
 /**
  * Maximum length of one block's title or one link's label.
@@ -169,9 +167,9 @@ export const LinksBlock = Schema.Struct({
 })
 
 /**
- * The repository's featured flows, read by the app from `flows/catalog.json`.
- * The block carries no rows: the catalog is the one source of the featured
- * set, and an absent catalog renders as absent.
+ * The repository's featured flows, read by the app from the `flows` rows of
+ * `.smithers/factory.json`. The block carries no rows: the projection is the
+ * one source of the featured set, and an absent projection renders as absent.
  *
  * @category schemas
  * @since 1.0.0
@@ -211,7 +209,7 @@ export const Block = Schema.Union([TextBlock, LinksBlock, FlowsBlock, CiBenchmar
 export type Block = typeof Block.Type
 
 /**
- * The home declaration a root `PACKAGE.ts` exports.
+ * The home declaration `.smithers/FACTORY.ts` exports as `home`.
  *
  * @category schemas
  * @since 1.0.0
@@ -221,7 +219,7 @@ export const Declaration = Schema.TaggedStruct("HomeDeclaration", {
 })
 
 /**
- * The home declaration a root `PACKAGE.ts` exports.
+ * The home declaration `.smithers/FACTORY.ts` exports as `home`.
  *
  * @category models
  * @since 1.0.0
@@ -229,7 +227,7 @@ export const Declaration = Schema.TaggedStruct("HomeDeclaration", {
 export type Declaration = typeof Declaration.Type
 
 /**
- * The document `flows/home.json` holds: the blocks, in declaration order.
+ * The document `.smithers/home.json` holds: the blocks, in declaration order.
  *
  * @category schemas
  * @since 1.0.0
@@ -239,7 +237,7 @@ export const Document = Schema.Struct({
 })
 
 /**
- * The document `flows/home.json` holds.
+ * The document `.smithers/home.json` holds.
  *
  * @category models
  * @since 1.0.0
@@ -258,9 +256,14 @@ const formatIssue = SchemaIssue.makeFormatterDefault()
 
 /**
  * Reads one constructor's options as a plain object of enumerable data
- * properties, exactly once, or throws the reason it is not one.
+ * properties, exactly once, or throws the reason it is not one. Shared with
+ * the factory declaration in `Factory.ts`, so every declaration constructor
+ * refuses the same shapes with the same words.
+ *
+ * @category validation
+ * @since 1.0.0
  */
-const plainOptions = (name: string, options: unknown, keys: ReadonlySet<string>): Record<string, unknown> => {
+export const plainOptions = (name: string, options: unknown, keys: ReadonlySet<string>): Record<string, unknown> => {
   if (
     typeof options !== "object" || options === null || Array.isArray(options) || NodeUtil.isProxy(options) ||
     (Object.getPrototypeOf(options) !== Object.prototype && Object.getPrototypeOf(options) !== null)
@@ -280,13 +283,31 @@ const plainOptions = (name: string, options: unknown, keys: ReadonlySet<string>)
   return plain
 }
 
-const decode = <S extends Schema.Decoder<unknown, never>>(name: string, schema: S, value: unknown): S["Type"] => {
+/**
+ * Decodes a value through a schema or throws a `TypeError` naming the
+ * constructor and the first issue.
+ *
+ * @category validation
+ * @since 1.0.0
+ */
+export const decode = <S extends Schema.Decoder<unknown, never>>(
+  name: string,
+  schema: S,
+  value: unknown
+): S["Type"] => {
   const result = Schema.decodeUnknownResult(schema)(value)
   if (Result.isFailure(result)) throw new TypeError(`${name}: ${formatIssue(result.failure.issue)}`)
   return result.success
 }
 
-const freezeDeep = <T>(value: T): T => {
+/**
+ * Freezes a value and every nested object it holds, so a declaration never
+ * changes after it is written.
+ *
+ * @category validation
+ * @since 1.0.0
+ */
+export const freezeDeep = <T>(value: T): T => {
   if (typeof value === "object" && value !== null) {
     for (const nested of Object.values(value as Record<string, unknown>)) freezeDeep(nested)
     Object.freeze(value)
@@ -295,7 +316,7 @@ const freezeDeep = <T>(value: T): T => {
 }
 
 /**
- * What a `PACKAGE.ts` writes for a text block.
+ * What a `FACTORY.ts` writes for a text block.
  *
  * @category models
  * @since 1.0.0
@@ -306,7 +327,7 @@ export interface TextOptions {
 }
 
 /**
- * What a `PACKAGE.ts` writes for a links block.
+ * What a `FACTORY.ts` writes for a links block.
  *
  * @category models
  * @since 1.0.0
@@ -317,7 +338,7 @@ export interface LinksOptions {
 }
 
 /**
- * What a `PACKAGE.ts` writes for a flows block.
+ * What a `FACTORY.ts` writes for a flows block.
  *
  * @category models
  * @since 1.0.0
@@ -327,7 +348,7 @@ export interface FlowsOptions {
 }
 
 /**
- * What a `PACKAGE.ts` writes for a CI benchmark block. `measures` defaults to
+ * What a `FACTORY.ts` writes for a CI benchmark block. `measures` defaults to
  * every measure.
  *
  * @category models
@@ -339,7 +360,7 @@ export interface CiBenchmarkOptions {
 }
 
 /**
- * What a `PACKAGE.ts` writes for the home declaration.
+ * What a `FACTORY.ts` writes for the home declaration.
  *
  * @category models
  * @since 1.0.0
@@ -463,86 +484,6 @@ export const parse = (text: string): Document | string => {
   }
   const result = Schema.decodeUnknownResult(Document)(value)
   return Result.isFailure(result)
-    ? `the home pane does not have the flows/home.json shape: ${formatIssue(result.failure.issue)}`
+    ? `the home pane does not have the .smithers/home.json shape: ${formatIssue(result.failure.issue)}`
     : result.success
 }
-
-/**
- * Output handling for the projection. `check` is the default: only a target
- * that asks to `write`, or an executor run with `--write`, touches the file.
- *
- * @category schemas
- * @since 1.0.0
- */
-export const Mode = Schema.Literals(["write", "check"]).pipe(
-  Schema.withConstructorDefault(Effect.succeed("check" as const))
-)
-
-/**
- * Output handling for the projection.
- *
- * @category models
- * @since 1.0.0
- */
-export type Mode = typeof Mode.Type
-
-/**
- * Attributes for {@link HomePane}.
- *
- * @category schemas
- * @since 1.0.0
- */
-export const Attrs = Schema.Struct({
-  /** The home declaration to project. */
-  home: Declaration,
-  /** The workspace-relative file the pane is written to. @default "flows/home.json" */
-  output: Schema.NonEmptyString.pipe(Schema.withConstructorDefault(Effect.succeed("flows/home.json"))),
-  /** Whether to write the file or verify the checked-in copy. @default "check" */
-  mode: Mode
-})
-
-/**
- * Attributes for {@link HomePane}.
- *
- * @category models
- * @since 1.0.0
- */
-export type Attrs = typeof Attrs.Type
-
-/**
- * The home pane projection target.
- *
- * `check` is cacheable and keyed on the checked-in file, so editing it by
- * hand re-keys the check. The `lint` verb maps `write` to `check`, so no lint
- * or `ci` run mutates the file; the executor's `--write` flips `check` to
- * `write`.
- *
- * @example
- * ```ts
- * import { Smithers } from "@smthrs/targets"
- *
- * export const home = Smithers.Factory.Home({ blocks: [Smithers.Home.Flows()] })
- * const homePane = Smithers.HomePane({ home })
- * ```
- *
- * @category targets
- * @since 1.0.0
- */
-export const HomePane = Target.make("HomePane", {
-  attrs: Attrs,
-  kinds: ["build", "lint"],
-  error: Schema.Union([GeneratedFile.WriteFileError, GeneratedFile.DriftError]),
-  cache: (attrs) => attrs.mode !== "write",
-  inputs: (attrs) => attrs.mode === "write" ? [] : [Input.file(`//${GeneratedFile.resolveOutputPath(attrs.output)}`)],
-  outputs: (attrs) => ({
-    cwd: ".",
-    paths: attrs.mode === "write" ? [GeneratedFile.resolveOutputPath(attrs.output)] : []
-  }),
-  attrsForKind: (kind, attrs) =>
-    kind === "lint" && attrs.mode === "write" ? { ...attrs, mode: "check" as const } : attrs,
-  implementation: (attrs) =>
-    GeneratedFile.generateFile(attrs.mode, {
-      path: GeneratedFile.resolveOutputPath(attrs.output),
-      contents: render(attrs.home)
-    })
-})

@@ -40918,28 +40918,39 @@ The markdown below the closing `---` fence is the prompt the agent is handed, an
 
 ## Featured flows
 
-Frontmatter describes the flow. It never says how the repository presents it: the one-line `summary` a listing shows under the id, and whether the flow is `featured`, one of the handful the repository recommends first. Those two keys are not frontmatter keys; a `summary` or `featured` key in `flow.mdx` earns an `unknown_frontmatter_key` warning like any other. They are declared once, in the root `PACKAGE.ts`, with `Smithers.Flow`:
+Frontmatter describes the flow. It never says how the repository presents it: the one-line `summary` a listing shows under the id, and whether the flow is `featured`, one of the handful the repository recommends first. Those two keys are not frontmatter keys; a `summary` or `featured` key in `flow.mdx` earns an `unknown_frontmatter_key` warning like any other. They are declared once, in `.smithers/FACTORY.ts`, with `Smithers.Flow` under the factory's `flows`:
 
 ```ts
-import { Smithers } from "@smthrs/targets"
+// .smithers/FACTORY.ts
+import { Smithers as S } from "@smthrs/targets"
 
-export const review = Smithers.Flow({
+export const review = S.Flow({
   flow: "review",
   summary: "Review the working-copy change and return a verdict with the reasons behind it.",
   featured: true
 })
 
-const flowCatalog = Smithers.FlowCatalog({ flows: [review] })
+export const factory = S.Factory({
+  summary: "How this repository develops itself.",
+  flows: [review]
+})
+```
+
+```ts
+// PACKAGE.ts
+import { Smithers } from "@smthrs/targets"
+
+const factoryProjection = Smithers.FactoryProjection({})
 ```
 
 `flow` is the flow id, the directory path below `flows/`. `summary` is one non-empty line. `featured` defaults to `false`.
 
-`Smithers.FlowCatalog` is the target that joins these declarations with discovery and writes `flows/catalog.json`: one row per discovered flow with `id`, `description`, `summary`, `featured`, `kind` (`ts`, `mdx`, or `skill`), `path`, `capabilities`, `model`, and `modelInvocable`, featured rows first in declaration order. The file is checked in, so smithers.sh and a workspace without `node_modules` read the featured set without running discovery.
+`Smithers.FactoryProjection` is the target that joins these declarations with discovery and writes the `flows` rows of `.smithers/factory.json`: one row per discovered flow with `id`, `description`, `summary`, `featured`, `kind` (`ts`, `mdx`, or `skill`), `path`, `capabilities`, `model`, and `modelInvocable`, featured rows first in declaration order. The file is checked in, so smithers.sh and a workspace without `node_modules` read the featured set without running discovery. The planner fills the target with the loaded `FACTORY.ts`; the `PACKAGE.ts` never restates the declaration.
 
-- `smithers-build target //:flowCatalog --write` regenerates the file.
-- `smithers-build ci //:flowCatalog` fails on drift, the same way the generated `ci.yml` does.
+- `smithers-build target //:factoryProjection --write` regenerates the file, beside `.smithers/home.json` when the factory exports a `home`.
+- `smithers-build ci //:factoryProjection` fails on drift, the same way the generated `ci.yml` does.
 - A declaration whose `flow` names no discovered flow fails the write with the id in the message. A recommendation for a flow that does not exist is never written.
-- `smthrs ls` reads the catalog when it is present and marks featured flows with a leading `*` in its human output.
+- `smthrs ls` reads the projection when it is present and marks featured flows with a leading `*` in its human output.
 
 ## See also
 
@@ -41214,10 +41225,11 @@ A Smithers workspace holds target declarations and flow sources. Runtime state l
 
 - .smithers/
   - WORKSPACE.ts
+  - FACTORY.ts
+  - factory.json
+  - home.json
 - PACKAGE.ts
 - flows/
-  - catalog.json
-  - home.json
   - review/
     - flow.mdx
   - deploy/
@@ -41236,6 +41248,8 @@ A Smithers workspace holds target declarations and flow sources. Runtime state l
 
 `.smithers/WORKSPACE.ts` declares workspace-wide runtime, package-manager, and cache settings. A root `WORKSPACE.ts` is also supported. A `PACKAGE.ts` declares targets for its directory; exported target keys become labels such as `//apps/site:build`.
 
+`.smithers/FACTORY.ts` declares the factory beside the workspace: `export const factory = Smithers.Factory({ summary, flows, on, github })` names the flows the repository features (`Smithers.Flow` declarations under `flows`), the Dispatcher table (`on`, event key to the flow or flows it starts), and the GitHub policy (`Smithers.Github.Policy({ mirror, issues, changes })`); `export const home = Smithers.Factory.Home({ blocks })` is the home pane. The file may import `WORKSPACE.ts` and never imports a `PACKAGE.ts`: a target it needs is named by label, `Smithers.label("//:ci")`. A repository without the file declares no factory.
+
 These are source files to commit. Their presence does not make `.flows/` state part of the source tree. The [CLI reference](/docs/reference/cli/) distinguishes target execution from durable flow commands.
 
 ## flows/
@@ -41247,8 +41261,8 @@ One directory per flow; discovery reads these rules.
 - An entry file directly under `flows/` is refused: path-named sources cannot contain a root-level entry.
 - `smthrs init <name>` scaffolds `flows/<name>/flow.mdx`; the name is one path segment of letters, digits, `-`, and `_`.
 - Ids that start with `system/` are reserved for the control plane: `smthrs flow plan` and `smthrs flow start` refuse them, and `smthrs flow list` does not list them.
-- `flows/catalog.json` is generated, not authored. A root `PACKAGE.ts` that declares `Smithers.FlowCatalog` renders it from the discovered flows and the `Smithers.Flow` declarations beside it: every flow's id, description, path, kind, capabilities, and model, plus the `summary` and `featured` flag the repository declares. `smithers-build target //:flowCatalog --write` regenerates it and `ci` fails on drift. See [Featured flows](/docs/reference/flow-mdx/#featured-flows).
-- `flows/home.json` is generated the same way. It is the repository's home pane, the first card smithers.sh shows for the repository, declared in the root `PACKAGE.ts` as `export const home = Smithers.Factory.Home({ blocks })` and projected by a `Smithers.HomePane({ home })` target. Blocks are declared values, never raw HTML: `Smithers.Home.Text({ text })`, `Smithers.Home.Links({ links })`, `Smithers.Home.Flows()` (the featured flows, read from `catalog.json`), and `Smithers.Home.CiBenchmark()` (the cold CI time, the one-file-change time, and the cache hit rate, each shown as not measured yet until a measurement exists). A string carrying an HTML tag fails the declaration. `smithers-build target //:homePane --write` regenerates the file and `ci` fails on drift. A repository without the file has no home pane.
+- `.smithers/factory.json` is generated, not authored. A root `PACKAGE.ts` that declares `Smithers.FactoryProjection()` renders it from `.smithers/FACTORY.ts`: `summary`; `flows`, one row per discovered flow with its id, description, path, kind, capabilities, and model, plus the `summary` and `featured` flag the factory declares, featured rows first; `on`, the Dispatcher table flattened to rows of `event`, `flow`, and the `description` the card shows; and `github`, the policy. `smithers-build target //:factoryProjection --write` regenerates it and `ci` fails on drift. See [Featured flows](/docs/reference/flow-mdx/#featured-flows).
+- `.smithers/home.json` is generated by the same target. It is the repository's home pane, the first card smithers.sh shows for the repository, declared in `.smithers/FACTORY.ts` as `export const home = Smithers.Factory.Home({ blocks })`. Blocks are declared values, never raw HTML: `Smithers.Home.Text({ text })`, `Smithers.Home.Links({ links })`, `Smithers.Home.Flows()` (the featured flows, read from the `flows` rows of `factory.json`), and `Smithers.Home.CiBenchmark()` (the cold CI time, the one-file-change time, and the cache hit rate, each shown as not measured yet until a measurement exists). A string carrying an HTML tag fails the declaration. A factory that exports no `home` has no home pane, and the projection refuses a stale `home.json` until `--write` removes it.
 
 ## .flows/
 

@@ -1,4 +1,5 @@
 {
+  "summary": "How smithersai/smithers develops itself.",
   "flows": [
     {
       "id": "review",
@@ -230,5 +231,66 @@
       "model": null,
       "modelInvocable": true
     }
-  ]
+  ],
+  "on": [
+    {
+      "event": "issue.opened",
+      "flow": "issue",
+      "description": "Triage every new issue"
+    },
+    {
+      "event": "issue.labeled:smithers",
+      "flow": "implement",
+      "description": "Implement an issue labeled smithers"
+    },
+    {
+      "event": "change.opened",
+      "flow": "review",
+      "description": "Review every Change"
+    },
+    {
+      "event": "change.updated",
+      "flow": "review",
+      "description": "Review every Change"
+    },
+    {
+      "event": "change.landed",
+      "flow": [
+        "wiki",
+        "history.fold",
+        "improve.mine"
+      ],
+      "description": "Regenerate the wiki, fold main into the mythical history, mine the landing"
+    },
+    {
+      "event": "github.push:main",
+      "flow": "history.fold",
+      "description": "Fold outside merges into the mythical history"
+    },
+    {
+      "event": "schedule:0 9 * * 1-5",
+      "flow": "review",
+      "description": "Weekday morning review of main"
+    },
+    {
+      "event": "nomination",
+      "flow": "factory.bootstrap",
+      "description": "Fork, claim, generate PACKAGE.ts from CI, bootstrap the mythical history"
+    },
+    {
+      "event": "box.session.ended",
+      "flow": "improve.mine",
+      "description": "Mine every landing and box session for a better factory"
+    },
+    {
+      "event": "schedule:0 10 * * 1",
+      "flow": "improve.suggest",
+      "description": "Suggest factory improvements once a week; every one needs your approval"
+    }
+  ],
+  "github": {
+    "mirror": "push",
+    "issues": "two-way",
+    "changes": "land"
+  }
 }

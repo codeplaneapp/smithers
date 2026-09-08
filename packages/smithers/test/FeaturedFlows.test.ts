@@ -1,5 +1,6 @@
 /**
- * The featured-flow presentation `ls` folds in from `flows/catalog.json`.
+ * The featured-flow presentation `ls` folds in from the `flows` rows of
+ * `.smithers/factory.json`.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -12,15 +13,24 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-const project = (catalog?: string): string => {
+const project = (projection?: string): string => {
   const root = mkdtempSync(join(tmpdir(), "smthrs-featured-flows-"))
   roots.push(root)
-  if (catalog !== undefined) {
-    mkdirSync(join(root, "flows"), { recursive: true })
-    writeFileSync(join(root, "flows", "catalog.json"), catalog)
+  if (projection !== undefined) {
+    mkdirSync(join(root, ".smithers"), { recursive: true })
+    writeFileSync(join(root, ".smithers", "factory.json"), projection)
   }
   return root
 }
+
+/** A projection carrying the given catalog rows and an empty Dispatcher table. */
+const projection = (flows: ReadonlyArray<unknown>): string =>
+  JSON.stringify({
+    summary: "How it develops itself.",
+    flows,
+    on: [],
+    github: { mirror: "pull", issues: "read", changes: "send-upstream" }
+  })
 
 const row = (id: string, featured: boolean, summary: string | null) => ({
   id,
@@ -41,12 +51,13 @@ const items = [
 ]
 
 describe("FeaturedFlows.read", () => {
-  it("reads a checked-in catalog and treats an absent or malformed one as none", () => {
-    const catalog = JSON.stringify({ flows: [row("review", true, "Review it.")] })
-    expect(FeaturedFlows.read(project(catalog))?.flows.map((flow) => flow.id)).toEqual(["review"])
+  it("reads a checked-in projection and treats an absent or malformed one as none", () => {
+    expect(FeaturedFlows.read(project(projection([row("review", true, "Review it.")])))?.flows.map((flow) => flow.id))
+      .toEqual(["review"])
     expect(FeaturedFlows.read(project())).toBeUndefined()
     expect(FeaturedFlows.read(project("{"))).toBeUndefined()
-    expect(FeaturedFlows.read(project(JSON.stringify({ flows: [{ id: "review" }] })))).toBeUndefined()
+    expect(FeaturedFlows.read(project(projection([{ id: "review" }])))).toBeUndefined()
+    expect(FeaturedFlows.read(project(JSON.stringify({ flows: [row("review", true, "Review it.")] })))).toBeUndefined()
   })
 })
 

@@ -1,19 +1,31 @@
 /**
- * The featured flows a project declares, read from its generated
- * `flows/catalog.json` and folded into the `ls` listing.
+ * The featured flows a project declares, read from the `flows` rows of its
+ * generated `.smithers/factory.json` and folded into the `ls` listing.
  *
- * The catalog is the projection `//:flowCatalog` writes from the root
- * `PACKAGE.ts` declarations over the discovered flows. `ls` never evaluates
- * `PACKAGE.ts`; it reads the file when it is checked in and lists the flows
- * unchanged when it is not. An unreadable or malformed catalog is treated as
- * absent here: `doctor` owns diagnostics, and a listing that refused to print
- * because a generated file drifted would hide the flows behind the drift.
+ * The projection is what `//:factoryProjection` writes from the
+ * `.smithers/FACTORY.ts` declarations over the discovered flows. `ls` never
+ * evaluates `FACTORY.ts`; it reads the file when it is checked in and lists
+ * the flows unchanged when it is not. An unreadable or malformed projection
+ * is treated as absent here: `doctor` owns diagnostics, and a listing that
+ * refused to print because a generated file drifted would hide the flows
+ * behind the drift.
  *
  * @since 1.0.0
  */
-import * as FlowCatalog from "@smthrs/targets/FlowCatalog"
+import * as Factory from "@smthrs/targets/Factory"
+import type * as FlowCatalog from "@smthrs/targets/FlowCatalog"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+
+/**
+ * The catalog a projection carries: its `flows` rows.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Catalog {
+  readonly flows: ReadonlyArray<FlowCatalog.Row>
+}
 
 /**
  * One listed flow, with the presentation the catalog declares when it does.
@@ -32,20 +44,21 @@ export interface Presented {
 }
 
 /**
- * Reads the project's catalog, or nothing when the project has none.
+ * Reads the project's projected catalog, or nothing when the project has
+ * no `.smithers/factory.json`.
  *
  * @category constructors
  * @since 1.0.0
  */
-export const read = (projectRoot: string): FlowCatalog.Document | undefined => {
+export const read = (projectRoot: string): Catalog | undefined => {
   let text: string
   try {
-    text = readFileSync(join(projectRoot, "flows", "catalog.json"), "utf8")
+    text = readFileSync(join(projectRoot, ...Factory.projectionPath.split("/")), "utf8")
   } catch {
     return undefined
   }
-  const parsed = FlowCatalog.parse(text)
-  return typeof parsed === "string" ? undefined : parsed
+  const parsed = Factory.parseProjection(text)
+  return typeof parsed === "string" ? undefined : { flows: parsed.flows }
 }
 
 /**
@@ -59,7 +72,7 @@ export const read = (projectRoot: string): FlowCatalog.Document | undefined => {
  */
 export const present = (
   items: ReadonlyArray<{ readonly flowId: string; readonly description: string }>,
-  catalog: FlowCatalog.Document | undefined
+  catalog: Catalog | undefined
 ): ReadonlyArray<Presented> => {
   if (catalog === undefined) return items
   const rows = new Map(catalog.flows.map((row) => [row.id, row] as const))

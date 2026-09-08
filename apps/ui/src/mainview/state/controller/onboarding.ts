@@ -21,12 +21,13 @@
  * contents route files.read uses.
  *
  * The home pane (repo.home) is the repository's own first card, above the
- * welcome: the blocks its root PACKAGE.ts declares with
- * `Smithers.Factory.Home`, projected to flows/home.json and read through the
- * same public contents route. A repository without the file has no home
- * card; a file that is not a home pane (raw HTML included) renders nothing
- * and the flow says why. The featured flows a flows block shows come from
- * flows/catalog.json, never from the block.
+ * welcome: the blocks its .smithers/FACTORY.ts declares with
+ * `export const home = Smithers.Factory.Home`, projected to
+ * .smithers/home.json and read through the same public contents route. A
+ * repository without the file has no home card; a file that is not a home
+ * pane (raw HTML included) renders nothing and the flow says why. The
+ * featured flows a flows block shows come from the `flows` rows of
+ * .smithers/factory.json, never from the block.
  *
  * The feature sketch (feature.prototype) is a run of kind prototype (Factory
  * design session 2026-09-07 §6b): the same launch path flow.run proves, on
@@ -35,6 +36,7 @@
  * step before anything is provisioned.
  */
 import { publicRepoActivityPath } from "@smthrs/rpc/AgentApiRoutes"
+import { FACTORY_PROJECTION_PATH, FactoryProjectionSchema, featuredFlows } from "@smthrs/rpc/FactoryProjection"
 import { HOME_PANE_PATH, parseHomeDocument } from "@smthrs/rpc/HomePane"
 import type { HomeBlock } from "@smthrs/rpc/HomePane"
 import type { Card } from "../AppState"
@@ -61,7 +63,7 @@ export interface OnboardingController {
   readonly contributeRepo: (repo?: string) => Answer
   /** `repo.explore [owner/repo]`: what the wiki is, the repository's guide documents, and the invitation to ask. */
   readonly exploreRepo: (repo?: string) => Answer
-  /** `repo.home [owner/repo]`: the repository's home pane, the blocks its PACKAGE.ts declares, read from flows/home.json. */
+  /** `repo.home [owner/repo]`: the repository's home pane, the blocks its .smithers/FACTORY.ts declares, read from .smithers/home.json. */
   readonly homeRepo: (repo?: string) => Answer
   /** `feature.prototype <request> [owner/repo]`: start a run of kind prototype on the request. */
   readonly prototypeFeature: (request: string, repo?: string) => Answer
@@ -94,10 +96,9 @@ const ROOT_GUIDES: ReadonlyArray<string> = ["README.md", "CONTRIBUTING.md", "llm
 const DOCS_INDEXES: ReadonlyArray<string> = ["README.md", "index.md"]
 
 export const ACTIVITY_UNAVAILABLE = "Recent activity is not available yet."
-/** The repository-relative catalog a flows block reads its featured rows from. */
-export const FLOW_CATALOG_PATH = "flows/catalog.json"
 export const noHomePane = (repo: string): string => `${repo} declares no home pane: it has no ${HOME_PANE_PATH}.`
-export const noFlowCatalog = (repo: string): string => `${repo} has no ${FLOW_CATALOG_PATH}, so its featured flows are not published yet.`
+export const noFlowCatalog = (repo: string): string =>
+  `${repo} has no ${FACTORY_PROJECTION_PATH}, so its featured flows are not published yet.`
 export const NO_CONTRIBUTING_GUIDE = "This repository has no CONTRIBUTING.md."
 
 /** The sentence the welcome speaks: the catalog's summary as a predicate of the repository name. */
@@ -134,7 +135,7 @@ export const fileText = (body: unknown): string | null => {
   }
 }
 
-/** The featured rows of a flows/catalog.json text, in catalog order, or null when the text is not a catalog. */
+/** The featured rows of a .smithers/factory.json text, in catalog order, or null when the text is not a factory projection. */
 export const featuredRows = (text: string): Array<{ id: string; summary: string | null }> | null => {
   let value: unknown
   try {
@@ -142,14 +143,9 @@ export const featuredRows = (text: string): Array<{ id: string; summary: string 
   } catch {
     return null
   }
-  if (!isRecord(value) || !Array.isArray(value.flows)) return null
-  const rows: Array<{ id: string; summary: string | null }> = []
-  for (const row of value.flows) {
-    if (!isRecord(row) || typeof row.id !== "string") return null
-    if (row.featured !== true) continue
-    rows.push({ id: row.id, summary: typeof row.summary === "string" ? row.summary : null })
-  }
-  return rows
+  const projection = FactoryProjectionSchema.safeParse(value)
+  if (!projection.success) return null
+  return featuredFlows(projection.data).map((flow) => ({ id: flow.id, summary: flow.summary }))
 }
 
 /** A count as the route states it: a non-negative integer, or null when the mirror could not answer. */
@@ -259,8 +255,9 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
   /**
    * The home pane as the card carries it: null when the repository declares
    * none, the refusal when the file is not a home pane or could not be read.
-   * A flows block asks the catalog for the featured rows; an absent or
-   * unreadable catalog leaves them null with the reason on the payload.
+   * A flows block asks the factory projection for the featured rows; an
+   * absent or unreadable projection leaves them null with the reason on the
+   * payload.
    */
   const readHome = async (repo: string): Promise<HomePayload | null | { readonly refusal: string }> => {
     const text = await readText(repo, HOME_PANE_PATH)
@@ -271,12 +268,12 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
     let featuredFlows: HomePayload["featuredFlows"] = null
     let featuredReason: string | undefined
     if (blocks.some((block) => block.type === "flows")) {
-      const catalog = await readText(repo, FLOW_CATALOG_PATH)
-      if (catalog === null) featuredReason = noFlowCatalog(repo)
-      else if (typeof catalog !== "string") featuredReason = catalog.refusal
+      const projection = await readText(repo, FACTORY_PROJECTION_PATH)
+      if (projection === null) featuredReason = noFlowCatalog(repo)
+      else if (typeof projection !== "string") featuredReason = projection.refusal
       else {
-        featuredFlows = featuredRows(catalog)
-        if (featuredFlows === null) featuredReason = `${FLOW_CATALOG_PATH} in ${repo} is not a flow catalog.`
+        featuredFlows = featuredRows(projection)
+        if (featuredFlows === null) featuredReason = `${FACTORY_PROJECTION_PATH} in ${repo} is not a factory projection.`
       }
     }
     return { repo, path: HOME_PANE_PATH, blocks, featuredFlows, ...(featuredReason === undefined ? {} : { featuredReason }) }
@@ -300,7 +297,7 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
           return `${block.title ?? "CI benchmark"}: ${block.measures.join(", ")} are not measured yet.`
       }
     })
-    return `The home pane of ${payload.repo}, declared in its PACKAGE.ts: ${parts.join(" ")}`
+    return `The home pane of ${payload.repo}, declared in its .smithers/FACTORY.ts: ${parts.join(" ")}`
   }
 
   const welcomeRepo: OnboardingController["welcomeRepo"] = async (explicit) => {

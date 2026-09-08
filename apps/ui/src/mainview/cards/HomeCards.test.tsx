@@ -33,7 +33,7 @@ const card = (payload: Partial<HomeCard["payload"]>): HomeCard => ({
   status: "active",
   createdAt: 0,
   ordinal: 0,
-  payload: { repo: REPO, path: "flows/home.json", blocks: [], featuredFlows: null, ...payload }
+  payload: { repo: REPO, path: ".smithers/home.json", blocks: [], featuredFlows: null, ...payload }
 })
 
 const render = (payload: Partial<HomeCard["payload"]>) => {
@@ -95,24 +95,25 @@ describe("the home card", () => {
     expect(ran).toEqual([["flow.run", `review ${REPO}`], ["flow.run", `lint ${REPO}`]])
   })
 
-  test("without a catalog the flows block says so and offers no door", () => {
+  test("without a factory projection the flows block says so and offers no door", () => {
     const { host, buttons } = render({
       blocks: [{ type: "flows", title: "Try first" }],
       featuredFlows: null,
-      featuredReason: `${REPO} has no flows/catalog.json, so its featured flows are not published yet.`
+      featuredReason: `${REPO} has no .smithers/factory.json, so its featured flows are not published yet.`
     })
     expect(host.querySelector('[data-testid="home-no-flows"]')?.textContent).toBe(
-      `${REPO} has no flows/catalog.json, so its featured flows are not published yet.`
+      `${REPO} has no .smithers/factory.json, so its featured flows are not published yet.`
     )
     expect(buttons().map((button) => button.dataset.flow)).toEqual(["files.read"])
   })
 
-  test("Open PACKAGE.ts is the files.read door onto the declaring file", () => {
+  test("Open FACTORY.ts is the files.read door onto the declaring file", () => {
     const { host, ran, buttons } = render({ blocks: [{ type: "text", text: "x" }] })
-    expect(host.querySelector('[data-testid="home-source"]')?.textContent).toContain("flows/home.json")
+    expect(host.querySelector('[data-testid="home-source"]')?.textContent).toContain(".smithers/home.json")
+    expect(host.querySelector('[data-testid="home-source"]')?.textContent).toContain(".smithers/FACTORY.ts")
     const [door] = buttons()
     expect(door?.dataset.flow).toBe("files.read")
     door?.click()
-    expect(ran).toEqual([["files.read", `PACKAGE.ts ${REPO}`]])
+    expect(ran).toEqual([["files.read", `.smithers/FACTORY.ts ${REPO}`]])
   })
 })

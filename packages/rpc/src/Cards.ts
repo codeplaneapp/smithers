@@ -1957,12 +1957,13 @@ export const CardSchema = z.discriminatedUnion("kind", [
   }),
   /*
    * The repository's home pane (apps/ui controller/onboarding.ts): the first
-   * card a repository shows, declared in its root PACKAGE.ts as
-   * `Smithers.Factory.Home` and read as `flows/home.json` from the public
-   * mirror. `blocks` are the declared blocks verbatim (HomePane.ts refuses
-   * raw HTML); `featuredFlows` is the catalog's featured set when a flows
-   * block asked for it and the catalog answered, null when it did not, with
-   * `featuredReason` saying why.
+   * card a repository shows, declared in its `.smithers/FACTORY.ts` as
+   * `export const home = Smithers.Factory.Home` and read as
+   * `.smithers/home.json` from the public mirror. `blocks` are the declared
+   * blocks verbatim (HomePane.ts refuses raw HTML); `featuredFlows` is the
+   * featured set of `.smithers/factory.json` when a flows block asked for it
+   * and the projection answered, null when it did not, with `featuredReason`
+   * saying why.
    */
   z.object({
     ...cardBaseShape,

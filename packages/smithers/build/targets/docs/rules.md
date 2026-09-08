@@ -51,9 +51,9 @@ under a bare Flow runtime fails loudly instead of doing nothing.
 | `Dprint`                 | Dprint            | lint               | no        | no               | flow body        |
 | `DtsBuild`               | DtsBuild          | build              | no        | yes              | flow body        |
 | `EsLint`                 | EsLint            | lint               | no        | no               | flow body        |
+| `FactoryProjection`      | Factory           | build, lint        | by attrs  | by attrs         | flow body        |
 | `Fetch`                  | Fetch             | build              | no        | yes              | package executor |
 | `Filegroup`              | Filegroup         | none               | yes       | no               | flow body        |
-| `FlowCatalog`            | FlowCatalog       | build, lint        | by attrs  | by attrs         | flow body        |
 | `Foundry.Build`          | Foundry           | build              | yes       | yes              | flow body        |
 | `Foundry.Fmt`            | Foundry           | lint, run          | by attrs  | no               | flow body        |
 | `Foundry.Test`           | Foundry           | test               | yes       | no               | flow body        |
@@ -77,7 +77,6 @@ under a bare Flow runtime fails loudly instead of doing nothing.
 | `Go.ModDownload`         | Go                | build              | no        | no               | package executor |
 | `Go.Packages`            | Go                | build              | no        | no               | package executor |
 | `Go.Test`                | Go                | test               | no        | no               | package executor |
-| `HomePane`               | Home              | build, lint        | by attrs  | by attrs         | flow body        |
 | `ImportClosure`          | Compose           | build              | no        | no               | flow body        |
 | `Install`                | Install           | run                | no        | no               | flow body        |
 | `JsrPublish`             | JsrPublish        | run                | no        | no               | flow body        |

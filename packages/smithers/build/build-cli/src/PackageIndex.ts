@@ -14,6 +14,7 @@ import * as Owners from "@smthrs/targets/Owners"
 import * as PackageValue from "@smthrs/targets/Package"
 import * as Target from "@smthrs/targets/Target"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
+import type { LoadedFactory } from "./FactoryLoader.ts"
 import { collectTargets } from "./internal/Attrs.ts"
 import * as Path from "./internal/Path.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
@@ -124,6 +125,8 @@ const assertLegalDataClosure = (row: IndexedTarget): void => {
 export class PackageIndex {
   readonly root: string
   readonly workspace: WorkspaceDeclaration.WorkspaceDeclaration
+  /** The factory declared in FACTORY.ts beside the workspace, when one exists. */
+  readonly factory: LoadedFactory | undefined
   /** The cwd's package path, or undefined when cwd is outside the workspace. */
   readonly currentPackage: string | undefined
   private readonly rows: ReadonlyArray<IndexedTarget>
@@ -136,6 +139,7 @@ export class PackageIndex {
   private constructor(
     root: string,
     workspace: WorkspaceDeclaration.WorkspaceDeclaration,
+    factory: LoadedFactory | undefined,
     currentPackage: string | undefined,
     rows: ReadonlyArray<IndexedTarget>,
     byLabel: ReadonlyMap<string, IndexedTarget>,
@@ -146,6 +150,7 @@ export class PackageIndex {
   ) {
     this.root = root
     this.workspace = workspace
+    this.factory = factory
     this.currentPackage = currentPackage
     // The class documents itself as immutable and used to store, and hand
     // back, the caller's live array. `ReadonlyArray` is erased at runtime, so
@@ -350,6 +355,7 @@ export class PackageIndex {
     return new PackageIndex(
       graph.root,
       graph.workspace,
+      graph.factory,
       Label.currentPackageOrUndefined(graph.root, cwd),
       rows,
       byLabel,

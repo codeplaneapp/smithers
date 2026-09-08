@@ -22,6 +22,7 @@ import * as ChangesetsTargetModule from "./ChangesetsTarget.ts"
 import * as CiToolchainModule from "./CiToolchain.ts"
 import * as DocsCheckModule from "./DocsCheck.ts"
 import * as DocsPageModule from "./DocsPage.ts"
+import * as FactoryModule from "./Factory.ts"
 import * as HomeModule from "./Home.ts"
 import * as InputModule from "./Input.ts"
 import { Mise as MiseSurface } from "./Mise.ts"
@@ -81,6 +82,14 @@ export * as PackageJsonTemplate from "./PackageJsonTemplate.ts"
  * @since 0.1.0
  */
 export const file = (path: string): InputModule.File => InputModule.file(path)
+/**
+ * Declares a reference to exactly one target by label, `S.label("//:ci")`,
+ * for a `.smithers/FACTORY.ts` that never imports a `PACKAGE.ts`.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export { label } from "./Reference.ts"
 /** @category constructors @since 0.1.0 */
 export { gitDiff, glob, pnpmWorkspace } from "./Input.ts"
 /** @category constructors @since 0.1.0 */
@@ -200,11 +209,16 @@ export { GithubCiGen } from "./GithubCiGen.ts"
 export { Flow } from "./Flow.ts"
 /** @category guards @since 1.0.0 */
 export { isFlowDeclaration } from "./Flow.ts"
+/** @category errors @since 1.0.0 */
+export { FlowCatalogError } from "./FlowCatalog.ts"
 /** @category targets @since 1.0.0 */
-export { FlowCatalog } from "./FlowCatalog.ts"
+export { FactoryProjection } from "./Factory.ts"
 /** @category actions @since 1.0.0 */
-export { FlowCatalogAction, FlowCatalogError } from "./FlowCatalog.ts"
-export { HomePane, isHomeDeclaration } from "./Home.ts"
+export { FactoryProjectionAction, FactoryProjectionError } from "./Factory.ts"
+/** @category guards @since 1.0.0 */
+export { isFactoryDeclaration } from "./Factory.ts"
+/** @category guards @since 1.0.0 */
+export { isHomeDeclaration } from "./Home.ts"
 /** @category actions @since 0.1.0 */
 /** @category parsing @since 0.1.0 */
 export * as GithubWorkflow from "./GithubWorkflow.ts"
@@ -554,12 +568,15 @@ export const Home = Object.freeze({
 })
 
 /**
- * The factory declarations a root `PACKAGE.ts` exports. `Factory.Home` is the
- * repository's home pane, projected to `flows/home.json` by `HomePane`.
+ * The factory `.smithers/FACTORY.ts` exports: `S.Factory({...})` is the
+ * declaration itself, and `S.Factory.Home({ blocks })` the home pane exported
+ * beside it. `FactoryProjection` projects both to `.smithers/factory.json`
+ * and `.smithers/home.json`.
  *
  * @category namespace exports
  * @since 1.0.0
  */
-export const Factory = Object.freeze({
-  Home: HomeModule.Home
-})
+export const Factory = Object.freeze(Object.assign(
+  (options: FactoryModule.FactoryOptions): FactoryModule.Declaration => FactoryModule.Factory(options),
+  { Home: HomeModule.Home }
+))

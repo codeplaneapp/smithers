@@ -38,6 +38,7 @@ import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
 import * as Diagnostic from "./Diagnostic.ts"
 import { importDeclarationModule } from "./effect-resolution.js"
+import { type LoadedFactory, validateFactoryModule } from "./FactoryLoader.ts"
 import { assertDeclarationDependencies } from "./internal/DeclarationDependencies.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
 import type { Discovery } from "./PackageDiscovery.ts"
@@ -68,6 +69,8 @@ export interface LoadedPackage {
 export interface LoadedGraph {
   readonly root: string
   readonly workspace: WorkspaceDeclaration.WorkspaceDeclaration
+  /** The factory declared beside the workspace, when `FACTORY.ts` exists. */
+  readonly factory: LoadedFactory | undefined
   readonly packages: ReadonlyArray<LoadedPackage>
 }
 
@@ -277,7 +280,10 @@ const scanImports = async (discovery: Discovery): Promise<StaticScan> => {
     texts.set(file, text)
     return text
   }
-  const scanPass = async (roots: ReadonlyArray<string>, enforce: boolean): Promise<void> => {
+  const scanPass = async (
+    roots: ReadonlyArray<string>,
+    rules: { readonly contained: boolean; readonly workspaceOneWay: boolean }
+  ): Promise<void> => {
     const queue = [...roots]
     while (queue.length > 0) {
       const file = queue.shift()!
@@ -295,7 +301,7 @@ const scanImports = async (discovery: Discovery): Promise<StaticScan> => {
         if (!specifier.startsWith("./") && !specifier.startsWith("../")) continue
         const resolved = resolveRelative(file, specifier)
         if (resolved.startsWith("../") || NodePath.isAbsolute(resolved)) {
-          if (!enforce) continue
+          if (!rules.contained) continue
           throw new PackageError(
             "module_outside_workspace",
             `a relative import leaves the workspace: ${JSON.stringify(specifier)}`,
@@ -304,7 +310,7 @@ const scanImports = async (discovery: Discovery): Promise<StaticScan> => {
         }
         const basename = resolved.split("/").at(-1) ?? ""
         if (basename === "WORKSPACE.ts" || basename === "WORKSPACE.js") {
-          if (!enforce) continue
+          if (!rules.workspaceOneWay) continue
           throw new PackageError(
             "unsupported_module_specifier",
             "a module reachable from a Package imports WORKSPACE.ts; the dependency is one-way — only WORKSPACE.ts may import Packages",
@@ -336,9 +342,43 @@ const scanImports = async (discovery: Discovery): Promise<StaticScan> => {
       edges.set(file, found)
     }
   }
-  await scanPass(discovery.packageFiles, true)
-  await scanPass([discovery.workspaceFile], false)
+  await scanPass(discovery.packageFiles, { contained: true, workspaceOneWay: true })
+  await scanPass([discovery.workspaceFile], { contained: false, workspaceOneWay: false })
+  if (discovery.factoryFile !== undefined) {
+    await scanPass([discovery.factoryFile], { contained: true, workspaceOneWay: false })
+    checkFactoryImports(discovery, edges)
+  }
   return { edges, files: [...scanned].sort(byCodeUnit) }
+}
+
+/**
+ * Fails when FACTORY.ts reaches a PACKAGE.ts through its own imports. The
+ * walk stops at WORKSPACE.ts, which may import Packages for git hooks: the
+ * factory names its targets by label, and the one-way rule is between the
+ * factory and every Package, not between the factory and the workspace.
+ */
+const checkFactoryImports = (discovery: Discovery, edges: ReadonlyMap<string, ReadonlyArray<string>>): void => {
+  const packageSet = new Set(discovery.packageFiles)
+  const seen = new Set<string>()
+  const stack: Array<Array<string>> = [[discovery.factoryFile!]]
+  while (stack.length > 0) {
+    const chain = stack.pop()!
+    const file = chain.at(-1)!
+    if (seen.has(file)) continue
+    seen.add(file)
+    for (const next of edges.get(file) ?? []) {
+      if (next === discovery.workspaceFile) continue
+      const nextChain = [...chain, next]
+      if (packageSet.has(next) || (next.split("/").at(-1) ?? "") === "PACKAGE.ts") {
+        throw new PackageError(
+          "factory_imports_package",
+          `FACTORY.ts imports a PACKAGE.ts; a factory names the targets it needs by label, S.label("//pkg:name"), never by import`,
+          { path: discovery.factoryFile, chain: nextChain }
+        )
+      }
+      stack.push(nextChain)
+    }
+  }
 }
 
 /**
@@ -475,6 +515,13 @@ const importGraph = async (discovery: Discovery): Promise<LoadedGraph> => {
   const bindings: Array<string> = []
   const workspaceUrl = pathToFileURL(NodePath.join(discovery.root, discovery.workspaceFile)).href
   lines.push(`import * as workspaceModule from ${JSON.stringify(workspaceUrl)}`)
+  if (discovery.factoryFile !== undefined) {
+    const factoryUrl = pathToFileURL(NodePath.join(discovery.root, discovery.factoryFile)).href
+    lines.push(`import * as factoryModule from ${JSON.stringify(factoryUrl)}`)
+    lines.push(`export const factory = factoryModule`)
+  } else {
+    lines.push(`export const factory = undefined`)
+  }
   discovery.packageFiles.forEach((file, index) => {
     const url = pathToFileURL(NodePath.join(discovery.root, file)).href
     lines.push(`import * as p${index} from ${JSON.stringify(url)}`)
@@ -486,6 +533,7 @@ const importGraph = async (discovery: Discovery): Promise<LoadedGraph> => {
   await Fs.writeFile(entryPath, `${lines.join("\n")}\n`, "utf8")
   let entry: {
     readonly workspace: unknown
+    readonly factory: unknown
     readonly packages: ReadonlyArray<readonly [string, unknown]>
   }
   try {
@@ -507,6 +555,9 @@ const importGraph = async (discovery: Discovery): Promise<LoadedGraph> => {
     await Fs.rm(entryDirectory, { recursive: true, force: true })
   }
   const workspace = validateWorkspaceModule(entry.workspace, discovery.workspaceFile)
+  const factory = discovery.factoryFile === undefined
+    ? undefined
+    : validateFactoryModule(entry.factory, discovery.factoryFile)
   const packages: Array<LoadedPackage> = []
   for (const [file, namespace] of entry.packages) {
     packages.push({
@@ -515,7 +566,7 @@ const importGraph = async (discovery: Discovery): Promise<LoadedGraph> => {
       value: validatePackageModule(namespace, file)
     })
   }
-  return { root: discovery.root, workspace, packages }
+  return { root: discovery.root, workspace, factory, packages }
 }
 
 /**

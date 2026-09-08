@@ -57,6 +57,7 @@ const planned = async (url: string, digest: string, out = "download.bin") => {
   const target = S.Fetch({ url, sha256: digest, out })
   const index = PackageIndex.make({
     root,
+    factory: undefined,
     workspace: S.Workspace("fixture", {
       repository: "git+https://example.invalid/fixture.git",
       cache: S.Cache({ directory: ".flows" }),

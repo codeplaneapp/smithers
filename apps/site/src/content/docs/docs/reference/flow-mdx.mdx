@@ -53,28 +53,39 @@ The markdown below the closing `---` fence is the prompt the agent is handed, an
 
 ## Featured flows
 
-Frontmatter describes the flow. It never says how the repository presents it: the one-line `summary` a listing shows under the id, and whether the flow is `featured`, one of the handful the repository recommends first. Those two keys are not frontmatter keys; a `summary` or `featured` key in `flow.mdx` earns an `unknown_frontmatter_key` warning like any other. They are declared once, in the root `PACKAGE.ts`, with `Smithers.Flow`:
+Frontmatter describes the flow. It never says how the repository presents it: the one-line `summary` a listing shows under the id, and whether the flow is `featured`, one of the handful the repository recommends first. Those two keys are not frontmatter keys; a `summary` or `featured` key in `flow.mdx` earns an `unknown_frontmatter_key` warning like any other. They are declared once, in `.smithers/FACTORY.ts`, with `Smithers.Flow` under the factory's `flows`:
 
 ```ts
-import { Smithers } from "@smthrs/targets"
+// .smithers/FACTORY.ts
+import { Smithers as S } from "@smthrs/targets"
 
-export const review = Smithers.Flow({
+export const review = S.Flow({
   flow: "review",
   summary: "Review the working-copy change and return a verdict with the reasons behind it.",
   featured: true
 })
 
-const flowCatalog = Smithers.FlowCatalog({ flows: [review] })
+export const factory = S.Factory({
+  summary: "How this repository develops itself.",
+  flows: [review]
+})
+```
+
+```ts
+// PACKAGE.ts
+import { Smithers } from "@smthrs/targets"
+
+const factoryProjection = Smithers.FactoryProjection({})
 ```
 
 `flow` is the flow id, the directory path below `flows/`. `summary` is one non-empty line. `featured` defaults to `false`.
 
-`Smithers.FlowCatalog` is the target that joins these declarations with discovery and writes `flows/catalog.json`: one row per discovered flow with `id`, `description`, `summary`, `featured`, `kind` (`ts`, `mdx`, or `skill`), `path`, `capabilities`, `model`, and `modelInvocable`, featured rows first in declaration order. The file is checked in, so smithers.sh and a workspace without `node_modules` read the featured set without running discovery.
+`Smithers.FactoryProjection` is the target that joins these declarations with discovery and writes the `flows` rows of `.smithers/factory.json`: one row per discovered flow with `id`, `description`, `summary`, `featured`, `kind` (`ts`, `mdx`, or `skill`), `path`, `capabilities`, `model`, and `modelInvocable`, featured rows first in declaration order. The file is checked in, so smithers.sh and a workspace without `node_modules` read the featured set without running discovery. The planner fills the target with the loaded `FACTORY.ts`; the `PACKAGE.ts` never restates the declaration.
 
-- `smithers-build target //:flowCatalog --write` regenerates the file.
-- `smithers-build ci //:flowCatalog` fails on drift, the same way the generated `ci.yml` does.
+- `smithers-build target //:factoryProjection --write` regenerates the file, beside `.smithers/home.json` when the factory exports a `home`.
+- `smithers-build ci //:factoryProjection` fails on drift, the same way the generated `ci.yml` does.
 - A declaration whose `flow` names no discovered flow fails the write with the id in the message. A recommendation for a flow that does not exist is never written.
-- `smthrs ls` reads the catalog when it is present and marks featured flows with a leading `*` in its human output.
+- `smthrs ls` reads the projection when it is present and marks featured flows with a leading `*` in its human output.
 
 ## See also
 

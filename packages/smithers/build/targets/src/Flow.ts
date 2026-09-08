@@ -1,20 +1,20 @@
 /**
- * Flow declarations for a root `PACKAGE.ts`.
+ * Flow declarations for `.smithers/FACTORY.ts`.
  *
  * A repository's flows live under `flows/` and describe themselves in their
  * own entry files: the description, the capabilities, the model. What a flow
  * cannot say about itself is how the repository presents it: the one-line
  * `summary` a listing shows under the id, and whether it is `featured`, one
- * of the handful the repository recommends first. That prose belongs beside
- * the other presentation the repository already declares, in `PACKAGE.ts`,
- * riding the same `summary` and `featured` pair every target carries.
+ * of the handful the repository recommends first. That prose belongs to the
+ * factory declaration, under `S.Factory({ flows })`, riding the same
+ * `summary` and `featured` pair every target carries.
  *
  * `Smithers.Flow` is that declaration. It is inert: it names a flow id and
- * carries its presentation, and nothing reads it until a
- * {@link FlowCatalog.FlowCatalog} target projects the declarations over the
- * discovered flows into `flows/catalog.json`. A declaration that names no
- * discovered flow fails that projection by id, so a typo is never silently
- * featured.
+ * carries its presentation, and nothing reads it until the
+ * `FactoryProjection` target projects the declarations over the discovered
+ * flows into the `flows` rows of `.smithers/factory.json`. A declaration
+ * that names no discovered flow fails that projection by id, so a typo is
+ * never silently featured.
  *
  * @since 1.0.0
  */
@@ -38,7 +38,7 @@ export const maximumIdLength = 256
  * @category constants
  * @since 1.0.0
  */
-export const idPattern = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/
+export const idPattern = /^(?!\.\.?(?:\/|$))[A-Za-z0-9_.-]+(?:\/(?!\.\.?(?:\/|$))[A-Za-z0-9_.-]+)*$/
 
 /**
  * Schema for one inert flow declaration.
@@ -68,7 +68,7 @@ export const Declaration = Schema.TaggedStruct("FlowDeclaration", {
 export type Declaration = typeof Declaration.Type
 
 /**
- * What a `PACKAGE.ts` writes to declare a flow's presentation.
+ * What a `FACTORY.ts` writes to declare a flow's presentation.
  *
  * @category models
  * @since 1.0.0

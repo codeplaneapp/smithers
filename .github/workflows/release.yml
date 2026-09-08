@@ -346,13 +346,8 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - name: Flow catalog drift
-        run: pnpm exec smthrs lint '//:flowCatalog' --verbose
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - name: Home pane drift
-        run: pnpm exec smthrs lint '//:homePane' --verbose
+      - name: Factory projection drift
+        run: pnpm exec smthrs lint '//:factoryProjection' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"

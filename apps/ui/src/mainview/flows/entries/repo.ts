@@ -59,15 +59,15 @@ export const repoStarterFlows = (actions: CommandActions): ReadonlyArray<FlowEnt
     handler: ({ repo }) => actions.exploreRepo(repo)
   }),
   /*
-   * The repository's home pane: the blocks its root PACKAGE.ts declares with
-   * Smithers.Factory.Home, projected to flows/home.json and read from the
-   * public mirror. Anonymous, like exploring; the welcome renders it above
-   * itself when the file exists.
+   * The repository's home pane: the blocks its .smithers/FACTORY.ts declares
+   * with `export const home = Smithers.Factory.Home`, projected to
+   * .smithers/home.json and read from the public mirror. Anonymous, like
+   * exploring; the welcome renders it above itself when the file exists.
    */
   flow({
     name: "repo.home",
     form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
-    summary: "Show the repository's home pane, the blocks its PACKAGE.ts declares",
+    summary: "Show the repository's home pane, the blocks its FACTORY.ts declares",
     runtime: ["cloud"],
     args: "[owner/repo]",
     input: RepoTarget,

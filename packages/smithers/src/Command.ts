@@ -933,8 +933,8 @@ const listFlows = Effect.gen(function*() {
   // warnings belong to `doctor`, so the stable `ls` document remains a plain
   // flow page even though both commands read the same paged catalog.
   // The featured set and the one-line summaries come from the project's
-  // generated flows/catalog.json when it is checked in; a project without one
-  // lists exactly the discovered page. A person at a terminal reads one line
+  // generated .smithers/factory.json when it is checked in; a project without
+  // one lists exactly the discovered page. A person at a terminal reads one line
   // per flow with the featured rows starred; `--json` keeps the document.
   const projectRoot = yield* Project.ProjectRoot
   const items = FeaturedFlows.present(

@@ -97,10 +97,15 @@ apps/observability/data/
 # to a pre-publication change would delete CAS blobs live cache rows reference.
 .flows/
 
-# `.smithers/` holds a workspace declaration (WORKSPACE.ts and its sibling
-# modules), which is source. Only run state written beside it is ignored.
+# `.smithers/` holds the workspace declaration (WORKSPACE.ts), the factory
+# declaration beside it (FACTORY.ts), and the two files `//:factoryProjection`
+# projects from it (factory.json, home.json), all of which are source. Only
+# run state written beside them is ignored.
 /.smithers/*
 !/.smithers/WORKSPACE.ts
+!/.smithers/FACTORY.ts
+!/.smithers/factory.json
+!/.smithers/home.json
 **/.smithers/*.db
 **/.smithers/*.db-*
 **/.smithers/runs/

@@ -88,8 +88,8 @@ export const RepoHomeCardBody = ({ card, onRunCommand }: { readonly card: HomeCa
       </section>
     ))}
     <p className="smithers-card-note" data-testid="home-source">
-      Declared in PACKAGE.ts as <code>export const home</code>, projected to <code>{card.payload.path}</code>.{" "}
-      <Door flow="files.read" args={`PACKAGE.ts ${card.payload.repo}`} label="Open PACKAGE.ts" onRunCommand={onRunCommand} />
+      Declared in .smithers/FACTORY.ts as <code>export const home</code>, projected to <code>{card.payload.path}</code>.{" "}
+      <Door flow="files.read" args={`.smithers/FACTORY.ts ${card.payload.repo}`} label="Open FACTORY.ts" onRunCommand={onRunCommand} />
     </p>
   </div>
 )

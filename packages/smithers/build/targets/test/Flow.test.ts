@@ -1,20 +1,15 @@
 /**
- * `Smithers.Flow` and the catalog it feeds.
+ * `Smithers.Flow` and the catalog join it feeds.
  *
  * The declaration is validated where it is written; the catalog is the join
  * of discovery and declarations, and the two properties that matter most are
  * that a declaration naming no discovered flow fails by id and that the row
- * order is featured first, in declaration order.
+ * order is featured first, in declaration order. The projection that writes
+ * the rows is `FactoryProjection`, tested in `Factory.test.ts`.
  */
 import { describe, expect, it } from "vitest"
 import * as Flow from "../src/Flow.ts"
 import * as FlowCatalog from "../src/FlowCatalog.ts"
-import type * as Input from "../src/Input.ts"
-import * as Target from "../src/Target.ts"
-import { plannedCalls } from "./plan.ts"
-
-const describeInput = (input: Input.Declared): string =>
-  input._tag === "Glob" ? input.pattern : input._tag === "File" ? input.path : input._tag
 
 const discovered = (
   id: string,
@@ -134,62 +129,5 @@ describe("FlowCatalog.rows", () => {
       .toThrow(/declares the flow "review" twice/)
     expect(() => FlowCatalog.rows([...found, discovered("alpha")], []))
       .toThrow(/reported the flow "alpha" twice/)
-  })
-
-  it("renders a stable two-space document with a trailing newline that parses back", () => {
-    const rows = FlowCatalog.rows(found.slice(0, 1), [notes])
-    const text = FlowCatalog.render(rows)
-    expect(text.endsWith("\n")).toBe(true)
-    expect(text).toBe(`${JSON.stringify({ flows: rows }, null, 2)}\n`)
-    expect(FlowCatalog.parse(text)).toEqual({ flows: rows })
-    expect(FlowCatalog.parse("{")).toMatch(/not JSON/)
-    expect(FlowCatalog.parse(JSON.stringify({ flows: [{ id: "x" }] }))).toMatch(/shape/)
-  })
-})
-
-describe("FlowCatalog target", () => {
-  const review = Flow.Flow({ flow: "review", summary: "Review the change.", featured: true })
-
-  it("checks by default, writes only when asked, and plans one catalog action", () => {
-    const checking = FlowCatalog.FlowCatalog({ flows: [review] })
-    const metadata = Target.metadata(checking)
-    expect(metadata.attrs).toEqual({ root: "flows", output: "flows/catalog.json", flows: [review], mode: "check" })
-    expect(metadata.cacheable).toBe(true)
-    expect(metadata.outputs).toEqual({ cwd: ".", paths: [] })
-    expect(metadata.inputs.map(describeInput)).toEqual([
-      "//flows/**/flow.ts",
-      "//flows/**/flow.mdx",
-      "//flows/**/SKILL.md",
-      "//flows/catalog.json"
-    ])
-    expect(plannedCalls(checking)).toEqual([{
-      action: "smithers-build/flow-catalog",
-      payload: { root: "flows", output: "flows/catalog.json", flows: [review], mode: "check" }
-    }])
-
-    const writing = FlowCatalog.FlowCatalog({ mode: "write", root: "//recipes", output: "//recipes/catalog.json" })
-    const written = Target.metadata(writing)
-    expect(written.cacheable).toBe(false)
-    expect(written.outputs).toEqual({ cwd: ".", paths: ["recipes/catalog.json"] })
-    expect(written.inputs.map(describeInput)).toEqual([
-      "//recipes/**/flow.ts",
-      "//recipes/**/flow.mdx",
-      "//recipes/**/SKILL.md"
-    ])
-    expect(plannedCalls(writing)).toEqual([{
-      action: "smithers-build/flow-catalog",
-      payload: { root: "recipes", output: "recipes/catalog.json", flows: [], mode: "write" }
-    }])
-  })
-
-  it("forces the non-writing view under the lint verb and keeps build as declared", () => {
-    const metadata = Target.metadata(FlowCatalog.FlowCatalog({ mode: "write" }))
-    expect((metadata.forKind("lint").attrs as FlowCatalog.Attrs).mode).toBe("check")
-    expect((metadata.forKind("build").attrs as FlowCatalog.Attrs).mode).toBe("write")
-    expect((Target.metadata(FlowCatalog.FlowCatalog({})).forKind("lint").attrs as FlowCatalog.Attrs).mode).toBe("check")
-  })
-
-  it("refuses declarations that are not Smithers.Flow values", () => {
-    expect(() => FlowCatalog.FlowCatalog({ flows: [{ flow: "review" }] as never })).toThrow()
   })
 })

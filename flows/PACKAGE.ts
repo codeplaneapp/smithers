@@ -6,8 +6,8 @@ const pack = Smithers.NodeTest({
   srcs: [
     Smithers.glob("//flows/**/flow.mdx"),
     Smithers.glob("//flows/**/flow.ts"),
-    Smithers.file("//flows/catalog.json"),
-    Smithers.file("//flows/home.json")
+    Smithers.file("//.smithers/factory.json"),
+    Smithers.file("//.smithers/home.json")
   ],
   deps: []
 })

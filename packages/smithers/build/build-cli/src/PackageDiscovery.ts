@@ -14,6 +14,7 @@
 import * as SafeFs from "@smthrs/targets/SafeFs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
+import { factoryFileBeside } from "./FactoryLoader.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
 import { PackageError } from "./PackageError.ts"
 
@@ -39,6 +40,8 @@ export interface Discovery {
   readonly root: string
   /** `.smithers/WORKSPACE.ts`, or the root `WORKSPACE.ts` fallback. */
   readonly workspaceFile: string
+  /** The `FACTORY.ts` beside the workspace file, when the workspace declares a factory. */
+  readonly factoryFile?: string | undefined
   /** Every exact-case `PACKAGE.ts` in the tree. */
   readonly packageFiles: ReadonlyArray<string>
   /** The cache directory the walk pruned. */
@@ -253,7 +256,11 @@ const walkDirectory = async (walk: Walk, relative: string): Promise<void> => {
 const admitDeclaration = async (root: string, relative: string): Promise<boolean> => {
   const entry = await SafeFs.resolveFile(NodePath.join(root, relative), {
     root,
-    what: relative.endsWith("WORKSPACE.ts") ? "WORKSPACE.ts" : "PACKAGE.ts",
+    what: relative.endsWith("WORKSPACE.ts")
+      ? "WORKSPACE.ts"
+      : relative.endsWith("FACTORY.ts")
+      ? "FACTORY.ts"
+      : "PACKAGE.ts",
     symlinks: "reject"
   })
   return entry !== undefined
@@ -301,6 +308,18 @@ export const discover = async (
       "the workspace root has no .smithers/WORKSPACE.ts and no WORKSPACE.ts",
       { path: posix(NodePath.relative(process.cwd(), canonical)) || "." }
     )
+  }
+  // The factory is declared beside the workspace, never anywhere else: a
+  // FACTORY.ts elsewhere in the tree is an ordinary module.
+  const factoryCandidate = factoryFileBeside(workspaceFile)
+  let factoryFile: string | undefined
+  try {
+    factoryFile = (await admitDeclaration(canonical, factoryCandidate)) ? factoryCandidate : undefined
+  } catch (cause) {
+    throw new PackageError("module_not_regular", "the factory declaration could not be admitted", {
+      path: factoryCandidate,
+      cause
+    })
   }
   for (const repository of repositories) {
     const absolute = NodePath.join(canonical, ...repository.path.split("/"))
@@ -362,5 +381,5 @@ export const discover = async (
     }
     folded.set(key, file)
   }
-  return { root: canonical, workspaceFile, packageFiles, cacheDirectory, repositories }
+  return { root: canonical, workspaceFile, factoryFile, packageFiles, cacheDirectory, repositories }
 }
