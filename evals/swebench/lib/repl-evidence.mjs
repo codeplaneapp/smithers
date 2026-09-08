@@ -751,7 +751,7 @@ export const readRun = (databasePath) => {
 export const readAll = (directory) => {
   const runs = {}
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
-    if (!entry.isDirectory()) continue
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
     const database = join(directory, entry.name, "engine.db")
     if (!existsSync(database)) continue
     runs[entry.name] = readRun(database)

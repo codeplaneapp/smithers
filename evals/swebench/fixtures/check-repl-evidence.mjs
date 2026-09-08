@@ -44,7 +44,7 @@
  * Spends nothing, needs no docker, needs no dataset.
  */
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -558,6 +558,17 @@ const completed = (output = "green") => [
   assert.equal(sum.repeats.check, 1)
   assert.equal(sum.repeats.other, 1)
   assert.equal(sum.filedState, 3, "filing is summed across the arm: two filing journals, three filings")
+}
+
+// Fullbench publishes a complete archive once, then exposes its journal by
+// symlink. The aggregate reader must include it and skip unpublished links.
+{
+  const linked = join(temporary, "linked")
+  mkdirSync(linked)
+  const database = journal("archive-source", [])
+  symlinkSync(join(database, ".."), join(linked, "archive__1"))
+  symlinkSync(join(temporary, "not-published"), join(linked, "pending__1"))
+  assert.deepEqual(Object.keys(readAll(linked)), ["archive__1"])
 }
 
 rmSync(temporary, { recursive: true, force: true })

@@ -14,13 +14,15 @@
  *   `lib/excluded.mjs` names and the two denominators that travel with them,
  *   and the append-only checkpoint log.
  *
+ * A copied worker rig also pins atomic archive publication and source recovery
+ * with failing copy, link and rename commands, without touching real artifacts.
  * `fullbench-dryrun.sh` proves the other half — real pull, real extract, real
  * delete, real kill — for one 4 MB image. This file spends nothing, needs no
  * docker, and needs no dataset.
  */
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { isDone, read } from "../lib/fullbench-manifest.mjs"
@@ -36,6 +38,124 @@ const NOW = Date.UTC(2026, 7, 21, 12, 0, 0)
 const HOUR = 3600_000
 
 try {
+  // Run the real worker in a copied rig so its shared-root paths stay isolated.
+  for (const mode of ["patch-fail", "untracked-fail", "timings-fail", "log-fail", "journal-fail", "interrupted-copy", "corrupt", "journal-corrupt", "link-fail", "publish-fail", "success"]) {
+    const rig = join(temporary, mode)
+    const bin = join(rig, "bin")
+    const fb = join(rig, "fullbench")
+    const id = "archive__1"
+    mkdirSync(bin, { recursive: true })
+    cpSync(join(root, "lib"), join(rig, "lib"), { recursive: true })
+    const script = (name, body) => writeFileSync(join(bin, name), `#!/bin/bash\nset -eu\n${body}\n`, { mode: 0o755 })
+    script("docker", "exit 0")
+    script("run", `
+S="$RIG"
+eval "$("$S/lib/run-paths.sh" flows "$1" "$4")"
+mkdir -p "$PATCH_ROOT" "$JOURNAL/nested" "$TIMINGS_ROOT" "$LOG_ROOT"
+printf 'paid patch' > "$PATCH"
+printf 'untracked' > "$PATCH.untracked"
+printf 'paid journal' > "$JOURNAL/engine.db"
+printf 'hidden' > "$JOURNAL/.metadata"
+printf 'nested' > "$JOURNAL/nested/frame"
+printf '{}' > "$TIMINGS"
+printf 'run log' > "$LOG_PREFIX.run.log"
+if [ "$ARCHIVE_MODE" = patch-fail ]; then
+  printf '{"kind":"instance","id":"torn' >> "$FB_DIR/manifest.jsonl"
+fi
+`)
+    script("grade", 'touch "$RIG/graded"')
+    script("cp", `
+case "$ARCHIVE_MODE" in
+  patch-fail) exit 1 ;;
+  interrupted-copy) kill -TERM $$ ;;
+  untracked-fail) case "$*" in *.untracked*) exit 1 ;; esac ;;
+  timings-fail) case "$*" in *timings/*) exit 1 ;; esac ;;
+  log-fail) case "$*" in *.run.log*) exit 1 ;; esac ;;
+  journal-fail) case "$*" in *journals/*) exit 1 ;; esac ;;
+esac
+/bin/cp "$@"
+if [ "$ARCHIVE_MODE" = corrupt ]; then
+  for last; do :; done
+  if [ -f "$last" ]; then printf 'fake patch' > "$last"; fi
+fi
+if [ "$ARCHIVE_MODE" = journal-corrupt ]; then
+  for last; do :; done
+  if [ -d "$last" ]; then printf 'fake journal' > "$last/engine.db"; fi
+fi
+`)
+    script("ln", 'if [ "$ARCHIVE_MODE" = link-fail ]; then exit 1; fi\n/bin/ln "$@"')
+    script("mv", `
+test ! -e "$FB_DIR/patches/archive__1.patch"
+test ! -e "$FB_DIR/journals/archive__1"
+test -f "$RIG/patches/archive__1-r90.patch"
+test -f "$RIG/journals/archive__1-r90/engine.db"
+if [ "$ARCHIVE_MODE" = publish-fail ]; then exit 1; fi
+/bin/mv "$@"
+`)
+    const env = {
+      ...process.env, PATH: `${bin}:${process.env.PATH}`, RIG: rig, ARCHIVE_MODE: mode,
+      FB_DIR: fb, SWB_RUN_CMD: join(bin, "run"), SWB_GRADE_CMD: join(bin, "grade"),
+      SWB_DISK_FREE_MIB: "999999", SWB_FULLBENCH_INDEX: "r90",
+      SWB_FULLBENCH_PINNED: id, SWB_EVAL_LOG_ROOT: join(rig, "eval-logs")
+    }
+    const worker = spawnSync("bash", [join(rig, "lib", "fullbench-instance.sh"), id], {
+      env, encoding: "utf8", timeout: 30_000
+    })
+    assert.ifError(worker.error)
+    const patch = join(rig, "patches", `${id}-r90.patch`)
+    const journal = join(rig, "journals", `${id}-r90`)
+    const state = read(join(fb, "manifest.jsonl")).states.get(id)
+    if (mode === "success") {
+      assert.equal(worker.status, 0, worker.stderr)
+      assert.equal(existsSync(patch), false)
+      assert.equal(existsSync(journal), false)
+      assert.equal(readFileSync(join(fb, "patches", `${id}.patch`), "utf8"), "paid patch")
+      assert.equal(readFileSync(join(fb, "patches", `${id}.patch.untracked`), "utf8"), "untracked")
+      assert.equal(readFileSync(join(fb, "timings", `${id}.json`), "utf8"), "{}")
+      assert.equal(readFileSync(join(fb, "logs", `${id}.run.log`), "utf8"), "run log")
+      for (const [file, content] of [["engine.db", "paid journal"], [".metadata", "hidden"], ["nested/frame", "nested"]]) {
+        assert.equal(readFileSync(join(fb, "journals", id, file), "utf8"), content)
+      }
+      assert.equal(existsSync(join(rig, "graded")), true)
+      assert.equal(state.state, "cleaned")
+    } else {
+      assert.notEqual(worker.status, 0, `${mode}: archive failure must stop the worker`)
+      assert.equal(readFileSync(patch, "utf8"), "paid patch", `${mode}: patch survives`)
+      assert.equal(readFileSync(join(journal, "engine.db"), "utf8"), "paid journal", `${mode}: journal survives`)
+      assert.equal(readFileSync(`${patch}.untracked`, "utf8"), "untracked")
+      assert.equal(readFileSync(join(rig, "timings", `${id}-r90.json`), "utf8"), "{}")
+      assert.equal(readFileSync(join(rig, "logs-agent", `${id}-r90.run.log`), "utf8"), "run log")
+      assert.equal(existsSync(join(fb, "patches", `${id}.patch`)), false)
+      assert.equal(existsSync(join(fb, "journals", id)), false)
+      assert.equal(existsSync(join(rig, "graded")), false)
+      assert.equal(state.state, "failed")
+      assert.equal(state.reason, "archive-failed")
+      assert.equal(isDone(state), false, "archive failure remains retryable")
+      assert.deepEqual(readdirSync(join(fb, "archives")), [], "no archive or staging directory is left")
+      assert.deepEqual(readdirSync(join(fb, "patches")), [], "no dangling patch link is left")
+      assert.deepEqual(readdirSync(join(fb, "journals")), [], "no dangling journal link is left")
+
+      if (mode === "patch-fail") {
+        assert.equal(read(join(fb, "manifest.jsonl")).malformed.length, 1,
+          "the failed row survives appending after a torn tail (fixed before review)")
+        // The next attempt must archive these bytes before its purge overwrites
+        // them. Different contents distinguish recovery from the fresh attempt.
+        writeFileSync(patch, "earlier paid patch")
+        writeFileSync(join(journal, "engine.db"), "earlier paid journal")
+        const retry = spawnSync("bash", [join(rig, "lib", "fullbench-instance.sh"), id], {
+          env: { ...env, ARCHIVE_MODE: "success" }, encoding: "utf8", timeout: 30_000
+        })
+        assert.ifError(retry.error)
+        assert.equal(retry.status, 0, retry.stderr)
+        const recovered = readdirSync(join(fb, "archives")).filter((name) => name.startsWith(`${id}.recovered-`))
+        assert.equal(recovered.length, 1)
+        assert.equal(readFileSync(join(fb, "archives", recovered[0], "patch"), "utf8"), "earlier paid patch")
+        assert.equal(readFileSync(join(fb, "archives", recovered[0], "journal", "engine.db"), "utf8"), "earlier paid journal")
+        assert.equal(readFileSync(join(fb, "patches", `${id}.patch`), "utf8"), "paid patch")
+      }
+    }
+  }
+
   // -----------------------------------------------------------------------
   // The Wilson interval
   // -----------------------------------------------------------------------
@@ -619,4 +739,4 @@ try {
   rmSync(temporary, { recursive: true, force: true })
 }
 
-console.log("check-fullbench.mjs: the ledger folds, the queue resumes, and the report adds up.")
+console.log("check-fullbench.mjs: 11 archive scenarios and retry recovery pass; the ledger folds, the queue resumes, and the report adds up.")

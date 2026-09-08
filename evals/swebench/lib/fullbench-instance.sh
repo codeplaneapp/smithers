@@ -114,13 +114,20 @@ for PIN in $PINNED; do
 done
 
 cleanup() {
+  if [ -n "${ARCHIVE_STAGE:-}" ]; then rm -rf -- "$ARCHIVE_STAGE"; fi
+  if [ "${ARCHIVE_LINKS_PENDING:-0}" = 1 ]; then
+    rm -f -- "$FB/patches/$ID.patch" "$FB/patches/$ID.patch.untracked" \
+      "$FB/timings/$ID.json" "$FB/logs/$ID.run.log" "$FB/journals/$ID"
+  fi
   "$S/lib/lock.sh" release "$CLAIM" --owner $$ --quiet || true
   # Whichever of the two this worker took. Releasing by owner makes the other
   # call a no-op rather than a lock someone else loses.
   "$S/lib/lock.sh" release "$S/.grade-lock" --owner $$ --quiet || true
   "$S/lib/lock.sh" release "$FB/.grade-lock" --owner $$ --quiet || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # The image and the testbed this instance pulled, gone. Called on the way out of
 # a verdict and on the way out of a failure alike: an instance that failed is
@@ -149,6 +156,54 @@ fail() {
     --image "$IMAGE" --image-state "$REMOVED" --reason "$1")"
   log "FAILED: $1 (image $REMOVED)"
   exit 1
+}
+
+# All evidence belongs to one directory, published by one same-filesystem
+# rename. The familiar paths are relative links into it, prepared while the
+# target is still absent. A failed copy, comparison, link or rename leaves the
+# sources untouched; cleanup removes only staging and unpublished links.
+copy_checked() {
+  cp "$1" "$2" && cmp -s "$1" "$2"
+}
+
+archive_evidence() {
+  local destination="$1" links="${2:-0}"
+  mkdir -p "$FB/archives" || return 1
+  [ ! -e "$destination" ] || return 1
+  ARCHIVE_STAGE="$(mktemp -d "$FB/archives/.$ID.XXXXXX")" || return 1
+  copy_checked "$PATCH" "$ARCHIVE_STAGE/patch" || return 1
+  if [ -f "$PATCH.untracked" ]; then
+    copy_checked "$PATCH.untracked" "$ARCHIVE_STAGE/untracked" || return 1
+  fi
+  if [ -f "$TIMINGS" ]; then
+    copy_checked "$TIMINGS" "$ARCHIVE_STAGE/timings.json" || return 1
+  fi
+  if [ -f "$LOG_PREFIX.run.log" ]; then
+    copy_checked "$LOG_PREFIX.run.log" "$ARCHIVE_STAGE/run.log" || return 1
+  fi
+  if [ -d "$JOURNAL" ]; then
+    cp -R "$JOURNAL" "$ARCHIVE_STAGE/journal" || return 1
+    diff -r "$JOURNAL" "$ARCHIVE_STAGE/journal" >/dev/null || return 1
+  fi
+  if [ "$links" = 1 ]; then
+    ARCHIVE_LINKS_PENDING=1
+    ln -s "../archives/$ID/patch" "$FB/patches/$ID.patch" || return 1
+    if [ -f "$PATCH.untracked" ]; then
+      ln -s "../archives/$ID/untracked" "$FB/patches/$ID.patch.untracked" || return 1
+    fi
+    if [ -f "$TIMINGS" ]; then
+      ln -s "../archives/$ID/timings.json" "$FB/timings/$ID.json" || return 1
+    fi
+    if [ -f "$LOG_PREFIX.run.log" ]; then
+      ln -s "../archives/$ID/run.log" "$FB/logs/$ID.run.log" || return 1
+    fi
+    if [ -d "$JOURNAL" ]; then
+      ln -s "../archives/$ID/journal" "$FB/journals/$ID" || return 1
+    fi
+  fi
+  mv -- "$ARCHIVE_STAGE" "$destination" || return 1
+  ARCHIVE_STAGE=""
+  ARCHIVE_LINKS_PENDING=0
 }
 
 # ---------------------------------------------------------------------------
@@ -190,10 +245,16 @@ disk_gate() {
 # ---------------------------------------------------------------------------
 RUN_PATHS="$("$S/lib/run-paths.sh" flows "$ID" "$INDEX")" || fail "run-paths refused ${ID}/${INDEX}"
 eval "$RUN_PATHS"
+# An archive-failed attempt may be the only copy of paid evidence. Preserve it
+# before the normal retry purge, using the same checked publication protocol.
+if [ -f "$PATCH" ]; then
+  archive_evidence "$FB/archives/$ID.recovered-$(now_ms)-$$" || fail "archive-failed"
+fi
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 rm -rf -- "$WORK" "$JOURNAL"
 rm -f -- "$PATCH" "$PATCH.untracked" "$TIMINGS" "$LOG_PREFIX".*
 rm -rf -- "$FB/journals/$ID"
+rm -rf -- "$FB/archives/$ID"
 rm -f -- "$FB/patches/$ID.patch" "$FB/patches/$ID.patch.untracked" \
   "$FB/timings/$ID.json" "$FB/logs/$ID.run.log" "$FB/logs/$ID.pull.log" "$FB/reports/$ID.json"
 # The official evaluator's own log directory for this instance, too. It skips
@@ -254,14 +315,7 @@ PATCH_BYTES="$(wc -c < "$PATCH" | tr -d ' ')"
 
 # Archive first, delete second. Everything downstream — the report, any later
 # forensics, the next drive — reads these and never the workspace.
-cp "$PATCH" "$FB/patches/$ID.patch"
-if [ -f "$PATCH.untracked" ]; then cp "$PATCH.untracked" "$FB/patches/$ID.patch.untracked"; fi
-if [ -f "$TIMINGS" ]; then cp "$TIMINGS" "$FB/timings/$ID.json"; fi
-if [ -f "$LOG_PREFIX.run.log" ]; then cp "$LOG_PREFIX.run.log" "$FB/logs/$ID.run.log"; fi
-if [ -d "$JOURNAL" ]; then
-  mkdir -p "$FB/journals/$ID"
-  cp "$JOURNAL"/* "$FB/journals/$ID/" 2>/dev/null || true
-fi
+archive_evidence "$FB/archives/$ID" 1 || fail "archive-failed"
 # The shared roots stay as the matrix left them: this instance's artifacts live
 # under fullbench/ now, and 500 stray `-r90` files in `patches/` would bury the
 # matrix's own.

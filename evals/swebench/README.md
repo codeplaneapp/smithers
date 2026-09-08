@@ -1272,6 +1272,17 @@ mistaken for a whole one. A `pulled` row *replaces* an instance's earlier column
 rather than merging into them, so a patch size or a verdict from the attempt that
 died cannot survive into the attempt that replaced it.
 
+The worker copies patch, journal (including hidden files and subdirectories),
+timings and run log into a temporary sibling directory. It checks each copy
+and compares its contents against the source before one rename publishes
+`fullbench/archives/<id>/`. The existing patch, journal, timing and run-log paths
+are relative links into that directory. Only then are the sources deleted.
+Copy, comparison or publication failure records `failed` with reason
+`archive-failed` and exits nonzero before grading. Sources stay in place.
+Before a retry purges leftover sources, it publishes a checked copy under
+`fullbench/archives/<id>.recovered-<timestamp>-<pid>/`. Recovery archives are kept
+for inspection and are not graded; a failed recovery stops the retry.
+
 A line torn in half by a `kill -9` is read as no line at all; every complete row
 before it keeps its meaning, and the instance that line belonged to re-runs. The
 next append closes that fragment with a newline before it writes, so the resumed
@@ -1479,7 +1490,9 @@ extrapolation, the pinned-five comparison, and that two runs over one ledger
 produce the same bytes. It also pins the two arithmetic rules a resumed
 benchmark depends on: the bill counts every attempt while the fold counts
 instances, and the observed finish divides the whole ledger's span rather than
-the current session's.
+the current session's. A copied rig with stub commands also checks archive copy
+failures, interrupted copies, content mismatches, link and publication failures,
+successful publication, and preservation of an earlier attempt before retry.
 
 `fixtures/check-lock.sh`, also inside `verify.sh`, proves the lock both drivers
 share: one lane at a time, a holder killed with `-9` recovered by the next lane
