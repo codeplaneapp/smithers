@@ -6,7 +6,7 @@
  *
  * @since 0.1.0
  */
-import { Option, Schema } from "effect"
+import { type Brand, Option, Schema } from "effect"
 
 /**
  * The maximum UTF-16 length of an exact or patterned capability resource.
@@ -28,12 +28,10 @@ export const maxResourceLength = 4096
  * The matcher is O(pattern length times resource length) in the worst case and
  * {@link matches} returns `false` when the product exceeds this budget.
  * `Permission.evaluate` returns `deny` for a rule it cannot decide, and
- * {@link withinMatchBudget} reports whether a pair is decidable. The budget is
- * the square of {@link maxResourceLength}, so an ordinary short grant such as
- * `/workspace/**` still matches a resource of well over a million units,
- * covering every realistic command line and URL, while a maximal 4096-unit
- * pattern is capped at a 4096-unit resource. A pattern ending in ` *` costs at
- * most two passes.
+ * {@link withinMatchBudget} reports whether a pair is decidable. The budget
+ * covers every supported pair up to the 4096-unit {@link maxResourceLength}
+ * limit and remains a defense for unchecked structural values. A pattern
+ * ending in ` *` costs at most two passes.
  *
  * @since 0.1.0
  * @category constants
@@ -109,7 +107,9 @@ const PatternResource = Schema.String.check(Schema.isMaxLength(maxResourceLength
  * @category models
  * @slop
  */
-export class Capability extends Schema.Class<Capability>("@smthrs/capability/Capability")({
+export class Capability extends Schema.Class<Capability, Brand.Brand<"@smthrs/capability/Capability">>(
+  "@smthrs/capability/Capability"
+)({
   action: Action,
   resource: PatternResource
 }) {}
@@ -127,14 +127,9 @@ export const make = (action: Action, resource: string): Capability => new Capabi
  * Formats a capability or a capability pattern for storage, display, and
  * durable key input.
  *
- * The one renderer for both. `Capability` and `CapabilityPattern` are
- * structurally identical `{action, resource}` records and rendered by
- * byte-identical bodies, so `format` and a separate `formatPattern` were two
- * names for one function — and a third, inline copy in
- * `@smthrs/kernel`'s `JournalGrantStore` was the one actually writing patterns
- * into durable journal payloads. Security-relevant strings get exactly one
- * renderer; folding them together is what keeps the bytes identical after the
- * next edit.
+ * `Capability` and `CapabilityPattern` have distinct nominal brands but share
+ * the encoded `{action, resource}` shape. Both use this renderer to preserve
+ * byte-identical durable identities.
  *
  * The function throws an `Error` that names an invalid action. Runtime
  * validation prevents invalid structural inputs from colliding with valid
@@ -205,7 +200,10 @@ export const parse = (input: string): Option.Option<Capability> => {
  * @category models
  * @slop
  */
-export class CapabilityPattern extends Schema.Class<CapabilityPattern>("@smthrs/capability/CapabilityPattern")({
+export class CapabilityPattern extends Schema.Class<
+  CapabilityPattern,
+  Brand.Brand<"@smthrs/capability/CapabilityPattern">
+>("@smthrs/capability/CapabilityPattern")({
   action: PatternAction,
   resource: PatternResource
 }) {}

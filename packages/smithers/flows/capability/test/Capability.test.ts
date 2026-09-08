@@ -1,8 +1,9 @@
 import { Effect, Option, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { spawnSync } from "node:child_process"
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import * as Capability from "../src/Capability.ts"
+import * as Permission from "../src/Permission.ts"
 
 const capability = (action: Capability.Action, resource: string): Capability.Capability =>
   Capability.make(action, resource)
@@ -23,6 +24,41 @@ const repeatedStarProgram = `
 `
 
 describe("Capability", () => {
+  it("requires nominal values in exact and pattern-consuming signatures", () => {
+    expectTypeOf<{ action: Capability.Action; resource: string }>().not.toExtend<Capability.Capability>()
+    expectTypeOf<Capability.Capability>().not.toExtend<Parameters<typeof Capability.matches>[0]>()
+    expectTypeOf<Capability.Capability>().not.toExtend<Parameters<typeof Capability.withinMatchBudget>[0]>()
+    expectTypeOf<Capability.Capability>().not.toExtend<Parameters<typeof Capability.subsumes>[0]>()
+    expectTypeOf<Capability.Capability>().not.toExtend<Parameters<typeof Capability.subsumes>[1]>()
+  })
+
+  it("refuses an exact capability in Rule.pattern instead of widening its query string", () => {
+    const request = capability("net:get", "https://api.test/v1?k=1")
+    const other = capability("net:get", "https://api.test/v1Xk=1")
+
+    // @ts-expect-error An exact request is not a grant pattern.
+    const invalidPattern: Permission.Rule["pattern"] = request
+    expect(() => new Permission.Rule({ effect: "allow", pattern: invalidPattern }))
+      .toThrow("Schema validation failed")
+    // @ts-expect-error The constructor must require a pattern too.
+    expect(() => new Permission.Rule({ effect: "allow", pattern: request })).toThrow("Schema validation failed")
+    expect(Capability.patternFromCapability(request)).toStrictEqual(Option.none())
+
+    // An operator may deliberately author this glob, but an exact request
+    // must never enter it through Rule's nested schema construction.
+    const authored = pattern("net:get", request.resource)
+    expect(Permission.evaluate([[new Permission.Rule({ effect: "allow", pattern: authored })]], other)).toBe("allow")
+  })
+
+  it("uses the explicit exact-pattern conversion to construct a grant", () => {
+    const request = capability("net:get", "https://api.test/v1")
+    const derived = Option.getOrThrow(Capability.patternFromCapability(request))
+    const rule = new Permission.Rule({ effect: "allow", pattern: derived })
+
+    expect(Permission.evaluate([[rule]], request)).toBe("allow")
+    expect(Permission.evaluate([[rule]], capability("net:get", "https://api.test/v1X"))).toBe("ask")
+  })
+
   it("formats and parses resources containing colons", () => {
     const value = capability("net:get", "example.test:8443/api:v1")
     expect(Capability.format(value)).toBe("net:get:example.test:8443/api:v1")

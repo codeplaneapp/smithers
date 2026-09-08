@@ -362,7 +362,9 @@ export type RuleEffect = typeof RuleEffect.Type
  */
 export class Rule extends Schema.Class<Rule>("@smthrs/capability/Rule")({
   effect: RuleEffect,
-  pattern: CapabilityPattern
+  // Require a constructed pattern at the type boundary; decoding still uses
+  // the original wire schema. Nested Class construction would coerce requests.
+  pattern: CapabilityPattern.pipe(Schema.decodeTo(Schema.declare(Schema.is(CapabilityPattern))))
 }) {}
 
 /**
