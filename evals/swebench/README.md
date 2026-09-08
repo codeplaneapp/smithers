@@ -2159,7 +2159,11 @@ instance wall ≤ 120 min, no instance over $1.00 or over 20 frames — and are
 reported `pending` until the whole population is in, rather than declared met by
 a favourable prefix. A seventh row is the standing superset rule: **an instance
 the baseline resolved and the re-run did not is a regression**, listed by name,
-however good the totals look.
+however good the totals look. Every row answers the same way, the per-instance
+ones included: pending while instances are outstanding, met only once the last
+one is in, and failed the moment a counterexample appears, because a dollar
+spent, a frame taken and a verdict lost cannot be taken back by the instances
+still to run.
 
 ### Three lanes, one population
 

@@ -16,7 +16,11 @@
  * the baseline's own totals over that same subset are printed beside them, so a
  * re-run 20 instances in is compared against the baseline's same 20 and never
  * against the baseline's 45. The full-population totals are printed too, and
- * labelled as such.
+ * labelled as such. The criteria are the one thing a prefix cannot answer, and
+ * all six answer alike: `pending` while instances are outstanding, `true` only
+ * once the last one is in, and `false` the moment a counterexample appears — a
+ * dollar spent, a frame taken and a verdict lost are permanent, so a criterion
+ * that already has one is settled and says so.
  *
  * **Money is every attempt, not the surviving one.** The fold keeps one row per
  * instance, but an attempt a crash replaced still burned tokens. Cost therefore
@@ -187,6 +191,15 @@ export const compare = ({ baselinePath, rerunPath }) => {
   const complete = pending === 0
   const overBudgetUsd = counted.filter((row) => row.after.usd > CRITERIA.instanceUsd).map((row) => row.id)
   const overFrames = counted.filter((row) => row.after.frames > CRITERIA.instanceFrames).map((row) => row.id)
+  // Every criterion is answered the same way, so no two of them can drift into
+  // different readiness semantics. A counterexample cannot be taken back — a
+  // dollar spent, a frame taken, a verdict lost — so one already witnessed
+  // settles its criterion `false` on the spot. A criterion with no
+  // counterexample yet is a statement about instances that have not run, so it
+  // is `true` only once the population is in and `undefined` — pending — until
+  // then. `holds` is given separately only where a shortfall in a prefix is not
+  // a counterexample at all: resolved counts can still climb.
+  const answered = (witnessed, holds = !witnessed) => (witnessed ? false : complete ? holds : undefined)
   // The criteria are answered over the scored set, and every one of them
   // carries the raw number beside it so the exclusion can never hide inside a
   // "met".
@@ -198,24 +211,24 @@ export const compare = ({ baselinePath, rerunPath }) => {
       raw: compared.rerun.resolved,
       of: scored.rerun.instances,
       ofRaw: compared.rerun.instances,
-      met: complete ? scored.rerun.resolved >= CRITERIA.resolved : undefined
+      met: answered(false, scored.rerun.resolved >= CRITERIA.resolved)
     },
     totalUsd: {
       target: CRITERIA.totalUsd,
       actual: scored.rerun.usd,
       raw: compared.rerun.usd,
-      met: complete ? scored.rerun.usd <= CRITERIA.totalUsd : undefined
+      met: answered(scored.rerun.usd > CRITERIA.totalUsd)
     },
     wallMinutes: {
       target: CRITERIA.wallMinutes,
       actual: scored.rerun.wallSeconds / 60,
       raw: compared.rerun.wallSeconds / 60,
-      met: complete ? scored.rerun.wallSeconds / 60 <= CRITERIA.wallMinutes : undefined
+      met: answered(scored.rerun.wallSeconds / 60 > CRITERIA.wallMinutes)
     },
-    perInstanceUsd: { target: CRITERIA.instanceUsd, over: overBudgetUsd, met: overBudgetUsd.length === 0 },
-    perInstanceFrames: { target: CRITERIA.instanceFrames, over: overFrames, met: overFrames.length === 0 },
+    perInstanceUsd: { target: CRITERIA.instanceUsd, over: overBudgetUsd, met: answered(overBudgetUsd.length > 0) },
+    perInstanceFrames: { target: CRITERIA.instanceFrames, over: overFrames, met: answered(overFrames.length > 0) },
     // The superset rule: the re-run must not lose an instance the baseline had.
-    noRegression: { lost, met: lost.length === 0 }
+    noRegression: { lost, met: answered(lost.length > 0) }
   }
 
   return {

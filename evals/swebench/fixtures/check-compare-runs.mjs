@@ -20,7 +20,9 @@
  *   marked, its documented cause is printed, and every number carries the scored
  *   denominator and the raw one together;
  * - and the program's success criteria are answered `pending` until the whole
- *   population is in, rather than declared met by a favourable prefix.
+ *   population is in, rather than declared met by a favourable prefix — all six
+ *   of them together, aggregate and per-instance alike — while a counterexample
+ *   a prefix has already witnessed is reported on the spot.
  *
  * Spends nothing, needs no docker, needs no dataset.
  */
@@ -121,15 +123,65 @@ try {
   // The whole baseline is still reported, and is still all three.
   assert.equal(partial.totals.wholeBaseline.instances, 3)
   assert.equal(partial.totals.wholeBaseline.usd, 3.5)
-  // The population-wide criteria cannot be met by a prefix.
+  // The population-wide criteria cannot be met by a prefix. Every one of them,
+  // not only the aggregates: a prefix with no instance over budget, no instance
+  // over the frame ceiling and no verdict lost has witnessed nothing about the
+  // two instances still to run, so all six are pending together.
   assert.equal(partial.criteria.complete, false)
   assert.equal(partial.criteria.resolved.met, undefined)
   assert.equal(partial.criteria.totalUsd.met, undefined)
   assert.equal(partial.criteria.wallMinutes.met, undefined)
+  assert.equal(partial.criteria.perInstanceUsd.met, undefined, "a clean prefix answered the per-instance budget")
+  assert.equal(partial.criteria.perInstanceFrames.met, undefined, "a clean prefix answered the frame ceiling")
+  assert.equal(partial.criteria.noRegression.met, undefined, "a clean prefix answered the superset rule")
   const rendered = render(partial)
   assert.match(rendered, /2 not re-run yet/)
   assert.match(rendered, /\| pending \|/)
   assert.match(rendered, /a__a-1 \| resolved \| not re-run/)
+  // Six criteria, six pending marks, no `yes` anywhere in the table.
+  assert.equal(rendered.match(/\| pending \|/g).length, 6)
+  assert.ok(!/\| yes \|/.test(rendered), "an outstanding population printed a criterion as met")
+
+  // A counterexample, though, is permanent: a dollar spent, a frame taken and a
+  // verdict lost cannot be taken back by the instances still to run, so each is
+  // reported the moment it is witnessed rather than held until the last one.
+  const witnessedPath = ledger(join(temporary, "witnessed.jsonl"), [
+    ...graded("a__a-1", "unresolved", { usd: 22, frames: 40, wallSeconds: 9000, agentSeconds: 8000 })
+  ])
+  const witnessed = compare({ baselinePath, rerunPath: witnessedPath })
+  assert.equal(witnessed.pending, 2)
+  assert.equal(witnessed.criteria.complete, false)
+  assert.equal(witnessed.criteria.totalUsd.met, false, "$22 of a $15 budget is already spent")
+  assert.equal(witnessed.criteria.wallMinutes.met, false, "150 min of a 120 min budget is already gone")
+  assert.deepEqual(witnessed.criteria.perInstanceUsd.over, ["a__a-1"])
+  assert.equal(witnessed.criteria.perInstanceUsd.met, false)
+  assert.deepEqual(witnessed.criteria.perInstanceFrames.over, ["a__a-1"])
+  assert.equal(witnessed.criteria.perInstanceFrames.met, false)
+  assert.deepEqual(witnessed.criteria.noRegression.lost, ["a__a-1"])
+  assert.equal(witnessed.criteria.noRegression.met, false)
+  // A resolved count is the one criterion a prefix cannot fail: the instances
+  // still to run can only add to it.
+  assert.equal(witnessed.criteria.resolved.met, undefined)
+  const witnessedMarkdown = render(witnessed)
+  assert.equal(witnessedMarkdown.match(/\| NO \|/g).length, 5)
+
+  // -----------------------------------------------------------------------
+  // A complete, clean population answers `true` — the same criteria, settled.
+  // -----------------------------------------------------------------------
+  const cleanPath = ledger(join(temporary, "clean.jsonl"), [
+    ...graded("a__a-1", "resolved", { usd: 0.5, frames: 4, wallSeconds: 120, agentSeconds: 110 }),
+    ...graded("b__b-2", "unresolved", { usd: 0.25, frames: 3, wallSeconds: 90, agentSeconds: 80 }),
+    ...graded("c__c-3", "resolved", { usd: 0.25, frames: 2, wallSeconds: 60, agentSeconds: 50 })
+  ])
+  const clean = compare({ baselinePath, rerunPath: cleanPath })
+  assert.equal(clean.pending, 0)
+  assert.equal(clean.criteria.complete, true)
+  assert.equal(clean.criteria.totalUsd.met, true)
+  assert.equal(clean.criteria.wallMinutes.met, true)
+  assert.equal(clean.criteria.perInstanceUsd.met, true)
+  assert.equal(clean.criteria.perInstanceFrames.met, true)
+  assert.equal(clean.criteria.noRegression.met, true)
+  assert.equal(clean.criteria.resolved.met, false, "2 resolved cannot meet a target of 33")
 
   // -----------------------------------------------------------------------
   // Cost is every attempt, not the surviving one.
