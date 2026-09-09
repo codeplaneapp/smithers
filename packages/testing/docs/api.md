@@ -1486,17 +1486,17 @@ they carry. Consumers match on codes, never on message prose. Every literal is
 const PlanAssertionCode: Schema.Literals<[...]>
 const JournalAssertionCode: Schema.Literals<[...]>
 const ScoreGateCode: Schema.Literals<[...]>
-const Code: Schema.Literals<[...]>
+const Code: Schema.Union<[...]>
 ```
 
 Each has a matching decoded type of the same name.
 
-| Union                  | Members                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PlanAssertionCode`    | `missing_node`, `node_count_mismatch`, `key_mismatch`, `placement_mismatch`, `declared_effect_mismatch`, `envelope_mismatch`, `missing_edge`, `unexpected_edge`, `coverage_mismatch`, `snapshot_mismatch`, `key_golden_mismatch`, `purity_violation`, `input_decode_failed`                                                                                                                                         |
-| `JournalAssertionCode` | `step_not_executed`, `execution_order_mismatch`, `terminal_status_mismatch`, `effect_not_executed`, `effect_kind_mismatch`, `effect_journaled_more_than_once`, `missing_idempotency_key`, `idempotency_key_mismatch`                                                                                                                                                                                                |
-| `ScoreGateCode`        | `invalid_threshold`, `invalid_score`, `mean_below_threshold`, `min_below_threshold`, `case_below_threshold`                                                                                                                                                                                                                                                                                                         |
-| `Code`                 | The three above, plus `conformance_violation`, `unscripted_model`, `fixture_not_encodable`, `replay_harness_mismatch`, `fixture_divergence`, `exactly_once_unsupported`, `capability_contract_violation`, `conformance_skipped`, `engine_unavailable`, `execution_conflict`, `capability_operation_failed`, `transaction_commit_failed`, `rewind_failed`, `flow_hash_mismatch`, `task_timeout`, `ralph_max_reached` |
+| Union                  | Members                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PlanAssertionCode`    | `missing_node`, `node_count_mismatch`, `key_mismatch`, `placement_mismatch`, `declared_effect_mismatch`, `envelope_mismatch`, `missing_edge`, `unexpected_edge`, `coverage_mismatch`, `snapshot_mismatch`, `key_golden_mismatch`, `purity_violation`, `input_decode_failed`                                                                                                                                                                                                  |
+| `JournalAssertionCode` | `step_not_executed`, `execution_order_mismatch`, `terminal_status_mismatch`, `effect_not_executed`, `effect_kind_mismatch`, `effect_journaled_more_than_once`, `missing_idempotency_key`, `idempotency_key_mismatch`                                                                                                                                                                                                                                                         |
+| `ScoreGateCode`        | `invalid_threshold`, `invalid_score`, `mean_below_threshold`, `min_below_threshold`, `case_below_threshold`                                                                                                                                                                                                                                                                                                                                                                  |
+| `Code`                 | The three above, plus `conformance_violation`, `unscripted_model`, `fixture_not_encodable`, `replay_harness_mismatch`, `fixture_divergence`, `exactly_once_unsupported`, `capability_contract_violation`, `conformance_skipped`, `engine_unavailable`, `execution_conflict`, `capability_operation_failed`, `transaction_commit_failed`, `rewind_failed`, `flow_hash_mismatch`, plus upstream `flow_cycle_detected`, `cancel_request_failed`, `unsafe_interrupt_unsupported` |
 
 ### The errors
 
@@ -1522,8 +1522,6 @@ Every error is a `Schema.TaggedError`, so it carries its `_tag`, a stable
 | `TransactionCommitError`      | `transaction_commit_failed`     | `boundary` (a `TransactionBoundary`)                                                                              |
 | `RewindFailureError`          | `rewind_failed`                 | `executionId`, `frame`, `boundary` (a `RewindBoundary`)                                                           |
 | `FlowHashMismatchError`       | `flow_hash_mismatch`            | `executionId`, `expectedFlowHash`, `actualFlowHash`, `expectedImportHash`, `actualImportHash`                     |
-| `TaskTimeoutError`            | `task_timeout`                  | `requestId`, `policy` (`fail`), `requestedAtLogicalTimeMillis`, `timedOutAtLogicalTimeMillis`                     |
-| `RalphMaxReachedError`        | `ralph_max_reached`             | `loopId`, `maxIterations`                                                                                         |
 
 `UnscriptedModelError`'s fields are a bounded identity, not the request. It is
 raised as a defect, so a runner prints it in full; carrying the whole request
@@ -1545,12 +1543,10 @@ ran the original flow on the original payload would give a caller no signal
 that its arguments were ignored, on the seam that defines engine conformance.
 `expected` and `actual` are bounded renderings, never the payloads themselves.
 
-`RalphMaxReachedError` reports a bounded loop that ran its whole iteration
-budget without its exit condition ever holding. `loopId` names the loop and
-`maxIterations` is the bound it reached. A subject whose engine has no loop
-runtime never raises it; the code stays in the union so a subject that does can
-report exhaustion as a typed failure rather than as a successful final
-iteration.
+Approval timeout and loop-limit failures are not part of this contract. The
+reserved `TaskTimeoutError` and `RalphMaxReachedError` classes and their codes
+have been removed; concrete subjects and behavioral pins must precede new
+capability-specific failures.
 
 ### The boundary unions
 
@@ -1587,8 +1583,6 @@ type EngineSubjectError =
   | TransactionCommitError
   | RewindFailureError
   | FlowHashMismatchError
-  | TaskTimeoutError
-  | RalphMaxReachedError
   | FlowCycleDetected
   | CancelRequestFailed
 ```
@@ -1599,7 +1593,9 @@ raise. The conformance seam never carries an `unknown` error channel.
 `FlowCycleDetected` and `CancelRequestFailed` come from
 [`@smthrs/flow`](/api/flow) and are re-declared here because they are part of
 the engine's typed `execute` and interrupt contracts: pins must be able to
-match on the cycle `path` rather than on a stringified dump.
+match on the cycle `path` rather than on a stringified dump. `Code` includes
+their upstream code schemas: `flow_cycle_detected`, `cancel_request_failed`,
+and `unsafe_interrupt_unsupported`.
 
 ## Faults
 

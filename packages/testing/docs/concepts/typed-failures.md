@@ -24,7 +24,15 @@ const checked = PlanAssertions.expectKeyGoldens(actual, golden).pipe(
 Codes are grouped by the family that raises them, and each family exports its
 own schema: `TestingError.PlanAssertionCode`,
 `TestingError.JournalAssertionCode`, and `TestingError.ScoreGateCode`.
-`TestingError.Code` is those three plus every standalone code, as one union.
+`TestingError.Code` combines those three families, every standalone testing
+code, and the upstream `FlowCycleDetected` and `CancelRequestFailed` code
+schemas. It accepts every `EngineSubjectError` code, including
+`flow_cycle_detected`, `cancel_request_failed`, and
+`unsafe_interrupt_unsupported`.
+
+Approval timeouts and loop limits have no concrete subject or behavioral pin.
+`TaskTimeoutError`, `RalphMaxReachedError`, and their reserved codes have been
+removed. Add capability-specific failures when those behaviors are implemented.
 
 Every literal is `snake_case`, without exception, so a consumer never has to
 remember which family spells its codes differently.

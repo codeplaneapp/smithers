@@ -99,7 +99,7 @@ const smithersRows: ReadonlyArray<ParityRow> = [
     flowsEquivalent: "—",
     status: "skipped",
     reason:
-      "The production engine has no approval-timeout scheduler; task_timeout is reserved as a typed failure rather than simulated as success."
+      "The production engine has no approval-timeout scheduler. Add a timeout failure only with a concrete subject and behavioral pin; no reserved testing error is exported."
   },
   {
     source:
@@ -130,7 +130,7 @@ const smithersRows: ReadonlyArray<ParityRow> = [
     flowsEquivalent: "—",
     status: "skipped",
     reason:
-      "The production engine has no loop runtime; ralph_max_reached is reserved as a typed failure rather than a successful max-iterations value."
+      "The production engine has no loop runtime. Add a loop-limit failure only with a concrete subject and behavioral pin; no reserved testing error is exported."
   },
   {
     source:

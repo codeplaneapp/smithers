@@ -11,7 +11,7 @@
  *
  * @since 0.0.0
  */
-import type { CancelRequestFailed, FlowCycleDetected } from "@smthrs/flow/FlowRuntime"
+import { CancelRequestFailed, FlowCycleDetected } from "@smthrs/flow/FlowRuntime"
 import { ScoreGateCode } from "@smthrs/scorers/ScoreGate"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -89,26 +89,28 @@ export type JournalAssertionCode = typeof JournalAssertionCode.Type
  * @since 0.0.0
  * @category codes
  */
-export const Code = Schema.Literals([
-  ...PlanAssertionCode.members.map((member) => member.literal),
-  ...JournalAssertionCode.members.map((member) => member.literal),
-  ...ScoreGateCode.members.map((member) => member.literal),
-  "conformance_violation",
-  "unscripted_model",
-  "fixture_not_encodable",
-  "replay_harness_mismatch",
-  "fixture_divergence",
-  "exactly_once_unsupported",
-  "capability_contract_violation",
-  "conformance_skipped",
-  "engine_unavailable",
-  "execution_conflict",
-  "capability_operation_failed",
-  "transaction_commit_failed",
-  "rewind_failed",
-  "flow_hash_mismatch",
-  "task_timeout",
-  "ralph_max_reached"
+export const Code = Schema.Union([
+  PlanAssertionCode,
+  JournalAssertionCode,
+  ScoreGateCode,
+  FlowCycleDetected.fields.code,
+  CancelRequestFailed.fields.code,
+  Schema.Literals([
+    "conformance_violation",
+    "unscripted_model",
+    "fixture_not_encodable",
+    "replay_harness_mismatch",
+    "fixture_divergence",
+    "exactly_once_unsupported",
+    "capability_contract_violation",
+    "conformance_skipped",
+    "engine_unavailable",
+    "execution_conflict",
+    "capability_operation_failed",
+    "transaction_commit_failed",
+    "rewind_failed",
+    "flow_hash_mismatch"
+  ])
 ])
 
 /**
@@ -417,33 +419,6 @@ export class FlowHashMismatchError extends Schema.TaggedError<FlowHashMismatchEr
 }) {}
 
 /**
- * An approval failed because its durable deadline elapsed under the fail
- * policy.
- *
- * @since 0.0.0
- * @category errors
- */
-export class TaskTimeoutError extends Schema.TaggedError<TaskTimeoutError>()("TaskTimeoutError", {
-  code: constantCode("task_timeout"),
-  requestId: Schema.String,
-  policy: Schema.Literal("fail"),
-  requestedAtLogicalTimeMillis: Schema.Number,
-  timedOutAtLogicalTimeMillis: Schema.Number
-}) {}
-
-/**
- * A bounded flow loop exhausted its iteration budget.
- *
- * @since 0.0.0
- * @category errors
- */
-export class RalphMaxReachedError extends Schema.TaggedError<RalphMaxReachedError>()("RalphMaxReachedError", {
-  code: constantCode("ralph_max_reached"),
-  loopId: Schema.String,
-  maxIterations: Schema.Number
-}) {}
-
-/**
  * Every typed failure an engine subject (or one of its optional capabilities)
  * may raise. The conformance seam never carries an `unknown` error channel: a
  * subject that laundered a foreign cause into `unknown` could not be matched on
@@ -467,7 +442,5 @@ export type EngineSubjectError =
   | TransactionCommitError
   | RewindFailureError
   | FlowHashMismatchError
-  | TaskTimeoutError
-  | RalphMaxReachedError
   | FlowCycleDetected
   | CancelRequestFailed
