@@ -68,6 +68,7 @@ export const NarrateReview = Flow.make("smithers-review/NarrateReview", {
       (input.quiz === "on" || (input.quiz === "auto" && shouldAutoQuiz(impact.level)));
     const story = narrating
       ? NarrateChanges.call({
+        timeout: input.timeout,
         files: changes.files,
         comments: review.comments,
         background: input.background,
@@ -77,6 +78,7 @@ export const NarrateReview = Flow.make("smithers-review/NarrateReview", {
       : Node.succeed(null);
     const quiz = quizzing
       ? QuizChanges.call({
+        timeout: input.timeout,
         files: changes.files,
         findings: review.comments,
         impact: { level: impact.level, reasons: impact.reasons },
@@ -124,7 +126,7 @@ export const VerifyReview = Flow.make("smithers-review/VerifyReview", {
     if (!verifying) {
       return NarrateReview.to({ input, target, changes, review });
     }
-    return VerifyFindings.call({ findings: review.comments, files: changes.files }).pipe(
+    return VerifyFindings.call({ findings: review.comments, files: changes.files, timeout: input.timeout }).pipe(
       Node.catch({ onFailure: () => Node.succeed(null) }),
       Node.bindPlanned((verdicts) => ApplyVerdicts.call({ review, verdicts })),
       Node.bindPlanned((verified) => NarrateReview.to({ input, target, changes, review: verified })),
@@ -172,7 +174,7 @@ export const ReviewFiles: Flow.Flow<
         // A file whose review fails is a warning, not a dead run: 0.x spelled
         // this `continueOnFail`, and `finalizeNativeReview` turns the null into
         // a `subtask_error` warning against that file.
-        members[file.id] = ReviewFile.call({ path: file.path, prompt: file.prompt }).pipe(
+        members[file.id] = ReviewFile.call({ path: file.path, prompt: file.prompt, timeout: input.timeout }).pipe(
           Node.catch({ onFailure: () => Node.succeed(null) }),
         );
       }

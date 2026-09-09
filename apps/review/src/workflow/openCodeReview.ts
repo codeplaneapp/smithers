@@ -128,7 +128,7 @@ export const OpenCodeReviewInput = Schema.Struct({
   background: withDefault(Schema.String, ""),
   rule: withDefault(Schema.String, ""),
   concurrency: withDefault(Schema.Number, 8),
-  timeout: withDefault(Schema.Number, 10),
+  timeout: withDefault(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(1)), 10),
   runReview: withDefault(Schema.Boolean, true),
 });
 

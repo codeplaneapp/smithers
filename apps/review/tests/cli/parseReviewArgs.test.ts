@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { normalizeOpenCodeReviewInput } from "../../src/workflow/openCodeReview.ts";
 import { parseReviewArgs } from "../../src/cli/parseReviewArgs.ts";
 
 describe("parseReviewArgs", () => {
@@ -110,6 +111,16 @@ describe("parseReviewArgs", () => {
   test("--timeout parses as a positive integer", () => {
     const args = parseReviewArgs(["--timeout", "30"]);
     expect(args.timeout).toBe(30);
+  });
+
+  test.each([1, 1.5, 99])("--timeout preserves %s minutes through input decoding", (timeout) => {
+    const args = parseReviewArgs(["--timeout", String(timeout)]);
+    expect(normalizeOpenCodeReviewInput(args).timeout).toBe(timeout);
+  });
+
+  test.each([0, -1, 0.5, NaN, Infinity, -Infinity])("refuses invalid timeout %s at both input boundaries", (timeout) => {
+    expect(() => parseReviewArgs(["--timeout", String(timeout)])).toThrow("--timeout");
+    expect(() => normalizeOpenCodeReviewInput({ timeout })).toThrow();
   });
 
   test("--split, --publish, --open set boolean flags", () => {

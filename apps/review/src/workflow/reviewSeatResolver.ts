@@ -189,6 +189,7 @@ const seatOf = <Body, Frame, Event, State>(
     );
     return Seat.make({
       id: seat,
+      modelId,
       model,
       route: FlowEngineLike.routeResolver(routeConfig),
       contextWindowTokens: SeatResolver.contextWindowTokensFor(modelId),

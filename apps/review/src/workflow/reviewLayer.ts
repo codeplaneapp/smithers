@@ -17,10 +17,15 @@ import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Interpreter } from "@smthrs/flow"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import { HarnessError } from "@smthrs/harness/HarnessError"
 import * as Registry from "@smthrs/registry/Registry"
+import type * as Context from "effect/Context"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import { OpenCodeReviewInput } from "./openCodeReview.ts"
 import {
   applyVerdictsLayer,
   finalizeReviewLayer,
@@ -31,6 +36,45 @@ import {
 import { NarrateChanges, QuizChanges, ReviewFile, VerifyFindings } from "./reviewAgentActions.ts"
 import { NarrateReview, Review, ReviewFiles, VerifyReview } from "./reviewFlow.ts"
 import { modelCallEnvelope, modelCallRules } from "./reviewSeatResolver.ts"
+
+/** The deadline fields shared by every model action payload. */
+const deadlineInput = Schema.Struct({
+  timeout: OpenCodeReviewInput.fields.timeout,
+  path: Schema.optional(Schema.String)
+})
+
+/**
+ * Interrupts the entire agent action, including resolution, retries and schema
+ * corrections. The typed failure follows the flow's existing recovery arms.
+ * Register after the original layer so both the requirement and the runtime
+ * implementation table resolve to the bounded call.
+ */
+const withDeadline = <I, R>(action: {
+  readonly requirement: Context.Service<I, Action.Implementation>
+  readonly layer: Layer.Layer<I, never, R>
+}) =>
+  Layer.effect(action.requirement)(Effect.gen(function*() {
+    const original = yield* action.requirement
+    const bounded: Action.Implementation = {
+      ...original,
+      action: (payload) => Effect.suspend(() => {
+        const { timeout, path } = Schema.decodeUnknownSync(deadlineInput)(payload)
+        return original.action(payload).pipe(
+          Effect.interruptible,
+          Effect.timeoutOrElse({
+            duration: Duration.minutes(timeout),
+            orElse: () => Effect.fail(new HarnessError({
+              code: "model_failed",
+              message: `${path ?? original.name} timed out after ${timeout} minute(s).`
+            }))
+          })
+        )
+      })
+    }
+    const table = yield* Effect.serviceOption(Action.Implementations)
+    if (Option.isSome(table)) yield* table.value.add(bounded, { override: true })
+    return bounded
+  })).pipe(Layer.provide(action.layer))
 
 /**
  * Every action implementation and flow registration the review workflow needs,
@@ -45,10 +89,10 @@ export const declarations = Layer.mergeAll(
   finalizeReviewLayer,
   applyVerdictsLayer,
   renderWalkthroughLayer,
-  ReviewFile.layer,
-  VerifyFindings.layer,
-  NarrateChanges.layer,
-  QuizChanges.layer,
+  withDeadline(ReviewFile),
+  withDeadline(VerifyFindings),
+  withDeadline(NarrateChanges),
+  withDeadline(QuizChanges),
   Interpreter.layer(Review),
   Interpreter.layer(ReviewFiles),
   Interpreter.layer(VerifyReview),

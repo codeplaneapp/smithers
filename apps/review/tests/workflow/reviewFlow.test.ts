@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import { Review } from "../../src/workflow/reviewFlow.ts";
 import { layerMemory } from "../../src/workflow/reviewLayer.ts";
 import { scriptedSeats } from "./scriptedSeats.ts";
@@ -181,6 +182,77 @@ describe("the review flow", () => {
       "src/file3.ts",
       "src/file4.ts",
     ]);
+  }, 120_000);
+
+  test.each([
+    ["review", undefined, 10],
+    ["review", 1, 1],
+    ["review", 2, 2],
+    ["verify", 1, 1],
+    ["narrate", 1, 1],
+    ["quiz", 1, 1],
+  ] as const)("interrupts the %s seat at timeout %s", async (seat, timeout, minutes) => {
+    const repo = tempRepo(1);
+    const marker = {
+      review: "precise code reviewer",
+      verify: "adjudicate code-review findings",
+      narrate: "explain a change set to a reader",
+      quiz: "comprehension questions",
+    }[seat];
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    let active = 0;
+    let interrupted = 0;
+    const result = await Effect.runPromise(Effect.gen(function*() {
+      const pending = yield* Review.execute({
+        repo,
+        ...(timeout === undefined ? {} : { timeout }),
+        verify: seat === "verify",
+        narrate: seat === "narrate",
+        quiz: seat === "quiz" ? "on" : "off",
+        out: join(repo, "w.html"),
+      } as Parameters<typeof Review.execute>[0], {
+        executionId: `review-timeout-${seat}-${minutes}`,
+      }).pipe(
+        Effect.provide(layerMemory(scriptedSeats((ask, signal) => {
+          if (!ask.includes(marker)) return answerFor()(ask);
+          active += 1;
+          signal.addEventListener("abort", () => { active -= 1; interrupted += 1; }, { once: true });
+          started();
+          return new Promise<never>(() => {});
+        }))),
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() => entered);
+      yield* TestClock.adjust(minutes * 60_000 - 1);
+      // The transport has its own five-minute retry budget. Even when a
+      // previous attempt was interrupted, the action must remain active until
+      // its own deadline and cancel whichever attempt is then in flight.
+      expect(active).toBe(1);
+      expect(pending.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust(1);
+      expect(active).toBe(0);
+      expect(interrupted).toBeGreaterThan(0);
+      return yield* Fiber.join(pending);
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())));
+
+    if (seat === "review") {
+      expect(result.review.status).toBe("failed");
+      expect(result.review.warnings).toContainEqual(expect.objectContaining({
+        file: "src/file0.ts", type: "subtask_error",
+      }));
+    } else {
+      expect(result.review.comments).toHaveLength(1);
+      if (seat === "verify") {
+        expect(result.review.warnings.some((warning) => warning.type === "verifier_error")).toBe(true);
+      } else if (seat === "narrate") {
+        expect(result.story.chapters.length).toBeGreaterThan(0);
+        expect(result.story.headline).not.toBe("Two bindings");
+      } else {
+        expect(result.quiz).toBeNull();
+      }
+    }
+    expect(result.walkthrough.path).toBe(join(repo, "w.html"));
   }, 120_000);
 
   test("a file review that fails becomes a warning, not a dead run", async () => {

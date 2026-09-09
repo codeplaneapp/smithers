@@ -17,7 +17,7 @@ import { buildNarratePrompt } from "../walkthrough/buildNarratePrompt.ts";
 import { ChangedFile } from "../walkthrough/changedFileSchema.ts";
 import { Story } from "../walkthrough/storySchema.ts";
 import { arrayOf } from "../schema/withDefault.ts";
-import { NativeReviewAgentOutput, ReviewComment, ReviewMode } from "./openCodeReview.ts";
+import { NativeReviewAgentOutput, OpenCodeReviewInput, ReviewComment, ReviewMode } from "./openCodeReview.ts";
 import { SEAT } from "./reviewSeats.ts";
 import { buildVerifyFindingsPrompt } from "./verifyFindings.ts";
 import { VerifyVerdicts } from "./verifyVerdictsSchema.ts";
@@ -34,7 +34,7 @@ import { VerifyVerdicts } from "./verifyVerdictsSchema.ts";
  * @category actions
  */
 export const ReviewFile = AgentAction.make("smithers-review/ReviewFile", {
-  payload: { path: Schema.String, prompt: Schema.String },
+  payload: { path: Schema.String, prompt: Schema.String, timeout: OpenCodeReviewInput.fields.timeout },
   output: NativeReviewAgentOutput,
   seat: SEAT.review,
   system: [
@@ -52,6 +52,7 @@ export const ReviewFile = AgentAction.make("smithers-review/ReviewFile", {
  */
 export const VerifyFindings = AgentAction.make("smithers-review/VerifyFindings", {
   payload: {
+    timeout: OpenCodeReviewInput.fields.timeout,
     findings: arrayOf(ReviewComment),
     files: arrayOf(ChangedFile),
   },
@@ -85,6 +86,7 @@ export const VerifyFindings = AgentAction.make("smithers-review/VerifyFindings",
  */
 export const NarrateChanges = AgentAction.make("smithers-review/NarrateChanges", {
   payload: {
+    timeout: OpenCodeReviewInput.fields.timeout,
     files: arrayOf(ChangedFile),
     comments: arrayOf(ReviewComment),
     background: Schema.String,
@@ -114,6 +116,7 @@ export const NarrateChanges = AgentAction.make("smithers-review/NarrateChanges",
  */
 export const QuizChanges = AgentAction.make("smithers-review/QuizChanges", {
   payload: {
+    timeout: OpenCodeReviewInput.fields.timeout,
     files: arrayOf(ChangedFile),
     findings: arrayOf(ReviewComment),
     impact: QuizImpact,

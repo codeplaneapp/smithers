@@ -29,7 +29,7 @@ export type Ask = string;
  * promise is still in flight while its siblings start, which is the only way
  * to see a bound take effect.
  */
-export type Answer = (ask: Ask) => unknown | Promise<unknown>;
+export type Answer = (ask: Ask, signal: AbortSignal) => unknown | Promise<unknown>;
 
 /**
  * A model that answers each call with one fenced `cell` block carrying the
@@ -41,14 +41,14 @@ export type Answer = (ask: Ask) => unknown | Promise<unknown>;
 export function scriptedModel(answer: Answer): Model.Model {
   return Model.make({
     stream: (request) =>
-      Stream.unwrap(Effect.promise(async () => {
+      Stream.unwrap(Effect.promise(async (signal) => {
         const ask = [
           ...request.system.map((part) => part.text),
           ...request.messages.flatMap((message) =>
             message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
           ),
         ].join("\n");
-        const value = await answer(ask);
+        const value = await answer(ask, signal);
         if (value === undefined) {
           // A real refusal, not a bare Error: a `ModelFailure` is what the
           // agent boundary classifies, and failing with anything else dies as
@@ -79,6 +79,7 @@ export function scriptedSeats(answer: Answer): Layer.Layer<SeatResolver.SeatReso
       Effect.succeed(
         Seat.make({
           id,
+          modelId: id,
           model,
           route: { prepare: () => Effect.succeed(prepared) } as FlowEngineLike.RouteResolver,
           contextWindowTokens: 200_000,
