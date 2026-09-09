@@ -21,16 +21,16 @@
  *    `.smithers-sandbox/bundle.mjs` under the session's workdir, together with
  *    a small main that imports the entry and hands its exports to the guest
  *    runner in `internal/SandboxedFlowGuest.ts`.
- * 2. `.smithers-sandbox/request.json` carries `{ flow, executionId, payload }`,
+ * 2. `.smithers-sandbox/request.json` carries `{ attempt, flow, executionId, payload }`,
  *    the payload encoded through `Schema.toCodecJson` of the flow's payload
- *    schema.
+ *    schema. `attempt` is a fresh nonce for each execution of the effect.
  * 3. The guest runtime, `node` unless {@link ExecuteOptions.runtime} says
  *    otherwise, runs the bundle with the workdir as its working directory and
  *    the two env variables set. The runner finds the flow by tag among the
  *    entry's exports, decodes the payload, runs the flow under an in-memory
  *    engine, and writes `.smithers-sandbox/result.json`: either
- *    `{ status: "succeeded", output }` with the success value encoded through
- *    the success schema's JSON codec, or `{ status: "failed", error }`.
+ *    `{ attempt, status: "succeeded", output }` with the success value encoded through
+ *    the success schema's JSON codec, or `{ attempt, status: "failed", error }`.
  * 4. The host reads the result back, refuses a non-zero exit, an unparseable
  *    file, or a result the limits reject, decodes `output` through the same
  *    codec, and, when {@link ExecuteOptions.collectDiff} is set, reads the
@@ -60,6 +60,7 @@ import type * as FileSystem from "effect/FileSystem"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { randomUUID } from "node:crypto"
 import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Guest from "./internal/SandboxedFlowGuest.ts"
@@ -74,7 +75,7 @@ import * as Guest from "./internal/SandboxedFlowGuest.ts"
  *   runtime the image does not contain.
  * - `flow_failed`: the child flow ran and reported a failure.
  * - `result_unreadable`: the guest exited 0 but wrote no result, or wrote one
- *   that is not the protocol's JSON.
+ *   that is not the protocol's JSON or does not match the current attempt.
  * - `result_invalid`: the result's `output` does not decode through the flow's
  *   success schema.
  * - `result_overflow`: the result file exceeds {@link Limits.resultBytes}.
@@ -446,6 +447,7 @@ const collect = (
 const readResult = (
   session: Sandbox.Session,
   resultPath: string,
+  attempt: string,
   limits: ResolvedLimits,
   run: { readonly code: number; readonly stdout: string; readonly stderr: string }
 ): Effect.Effect<typeof Guest.Result.Type, SandboxedFlowError> =>
@@ -463,11 +465,17 @@ const readResult = (
         failure("result_overflow", `the result holds ${bytes.length} bytes; the limit is ${limits.resultBytes}`)
       )
     }
-    return yield* Effect.try({
+    const result = yield* Effect.try({
       try: () => Schema.decodeUnknownSync(Guest.Result)(JSON.parse(new TextDecoder().decode(bytes))),
       catch: (cause) =>
         failure("result_unreadable", `the guest wrote a result that is not the protocol's JSON; ${outputs}`, cause)
     })
+    if (result.attempt !== attempt) {
+      return yield* Effect.fail(
+        failure("result_unreadable", `the guest wrote a result for a different attempt; ${outputs}`)
+      )
+    }
+    return result
   })
 
 /**
@@ -505,6 +513,7 @@ export const execute = <
   options: ExecuteOptions
 ): Effect.Effect<Result<Success["Type"]>, SandboxedFlowError> =>
   Effect.gen(function*() {
+    const attempt = randomUUID()
     const limits = resolveLimits(options.limits)
     const runtime = options.runtime ?? "node"
     // The wire codecs of a flow's schemas are service-free for the same reason
@@ -531,6 +540,7 @@ export const execute = <
           const resultPath = `${control}/result.json`
           const files = Sandbox.fileSystem(session)
           const request: typeof Guest.Request.Type = {
+            attempt,
             flow: flow._tag,
             executionId: options.session,
             payload: encodedPayload
@@ -540,6 +550,11 @@ export const execute = <
           )
           yield* session.writeFile(requestPath, new TextEncoder().encode(JSON.stringify(request))).pipe(
             Effect.mapError(sessionFailure("the request could not be written into the workspace"))
+          )
+          yield* files.remove(resultPath, { force: true }).pipe(
+            Effect.mapError((cause) =>
+              failure("session_failed", `the previous result could not be removed: ${cause.message}`, cause)
+            )
           )
           const before = options.collectDiff === true ? yield* snapshot(files, workdir) : new Map<string, number>()
           const command = `${CommandLine.quote(runtime)} ${CommandLine.quote(bundlePath)}`
@@ -570,7 +585,7 @@ export const execute = <
               failure("guest_failed", `${reason}; stderr: ${tail(run.stderr).trim() || "(empty)"}`)
             )
           }
-          const result = yield* readResult(session, resultPath, limits, run)
+          const result = yield* readResult(session, resultPath, attempt, limits, run)
           if (result.status === "failed") {
             return yield* Effect.fail(
               failure(

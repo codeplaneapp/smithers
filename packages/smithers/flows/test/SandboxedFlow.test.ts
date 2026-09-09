@@ -210,6 +210,56 @@ describe("SandboxedFlow.execute on a scratch machine", () => {
       expect(result.diff).toEqual([{ path: "marker.txt", bytes: new TextEncoder().encode("left by the guest") }])
     }), 60_000)
 
+  it.live("refuses a stale result when a reattached guest exits zero without writing", () =>
+    Effect.gen(function*() {
+      const directory = yield* provider
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const earlier = yield* directory.acquire("stale-result")
+          yield* earlier.writeFile(
+            `${earlier.workdir}/.smithers-sandbox/result.json`,
+            new TextEncoder().encode(JSON.stringify({ attempt: "earlier-attempt", status: "succeeded", output: 17 }))
+          )
+          const failure = yield* failureOf(SandboxedFlow.execute(Sum, { n: 99 }, {
+            provider: directory,
+            session: "stale-result",
+            entry,
+            runtime: guestRuntime("stale-no-result", "exit 0")
+          }))
+          expect(failure.code).toBe("result_unreadable")
+          expect(failure.message).toContain("without writing a result")
+        })
+      )
+    }), 60_000)
+
+  it.live("creates a fresh attempt when the same execution effect runs again", () =>
+    Effect.gen(function*() {
+      const directory = yield* provider
+      const attempts: Array<string> = []
+      const execution = SandboxedFlow.execute(Sum, { n: 31 }, {
+        provider: {
+          acquire: (key) =>
+            Effect.map(directory.acquire(key), (session) => ({
+              ...session,
+              writeFile: (path, bytes) => {
+                if (path.endsWith("/request.json")) {
+                  attempts.push(
+                    Schema.decodeUnknownSync(Guest.Request)(JSON.parse(new TextDecoder().decode(bytes))).attempt
+                  )
+                }
+                return session.writeFile(path, bytes)
+              }
+            }))
+        },
+        session: "fresh-attempt",
+        entry
+      })
+      expect((yield* execution).output).toBe(42)
+      expect((yield* execution).output).toBe(42)
+      expect(attempts).toHaveLength(2)
+      expect(attempts[0]).not.toBe(attempts[1])
+    }), 60_000)
+
   it.live("lists a directory the guest created without reading it as a file", () =>
     Effect.gen(function*() {
       const directory = yield* provider
@@ -329,7 +379,9 @@ describe("SandboxedFlow.execute failures", () => {
         const body = [
           `printf '%s' '${chatter}'`,
           `printf '%s' '${chatter}' >&2`,
-          mode === "failed" ? `printf '%s' '${result}' > "$SMITHERS_SANDBOX_RESULT_PATH"` : "",
+          mode === "failed"
+            ? `node -e 'const fs = require("node:fs"); const { attempt } = JSON.parse(fs.readFileSync(process.env.SMITHERS_SANDBOX_REQUEST_PATH, "utf8")); fs.writeFileSync(process.env.SMITHERS_SANDBOX_RESULT_PATH, JSON.stringify({ ...${result}, attempt }));'`
+            : "",
           mode === "invalid" ? `printf garbage > "$SMITHERS_SANDBOX_RESULT_PATH"` : "",
           mode === "nonzero" ? "exit 1" : ""
         ].join("\n")
@@ -365,6 +417,51 @@ describe("SandboxedFlow.execute failures", () => {
       expect(failure.code).toBe("result_unreadable")
       expect(failure.message).toContain("without writing a result")
       expect(failure.message).toContain("stderr: nothing to report")
+    }), 60_000)
+
+  for (const status of ["succeeded", "failed", "missing-attempt"] as const) {
+    it.live(`refuses a ${status} result not bound to the current attempt`, () =>
+      Effect.gen(function*() {
+        const result = status === "missing-attempt"
+          ? { status: "succeeded", output: 17 }
+          : { attempt: "earlier-attempt", status, output: 17, error: "earlier failure" }
+        const failure = yield* run(Sum, { n: 99 }, {
+          runtime: guestRuntime(
+            `replayed-${status}`,
+            `printf '%s' '${JSON.stringify(result)}' > "$SMITHERS_SANDBOX_RESULT_PATH"`
+          )
+        })
+        expect(failure.code).toBe("result_unreadable")
+        expect(failure.message).toContain(
+          status === "missing-attempt" ? "not the protocol's JSON" : "different attempt"
+        )
+      }), 60_000)
+  }
+
+  it.live("reports a workspace that refuses removal of the previous result", () =>
+    Effect.gen(function*() {
+      const directory = yield* provider
+      const failure = yield* run(Sum, { n: 1 }, {
+        provider: {
+          acquire: (key) =>
+            Effect.map(directory.acquire(key), (session) => ({
+              ...session,
+              files: {
+                ...session.files,
+                remove: () =>
+                  Effect.fail(PlatformError.systemError({
+                    _tag: "PermissionDenied",
+                    module: "FileSystem",
+                    method: "remove",
+                    description: "removal refused"
+                  }))
+              }
+            }))
+        }
+      })
+      expect(failure.code).toBe("session_failed")
+      expect(failure.message).toContain("the previous result could not be removed")
+      expect(failure.message).toContain("removal refused")
     }), 60_000)
 
   it.live("reports a result that is not the protocol's JSON, quoting the guest's stdout", () =>
@@ -661,9 +758,9 @@ describe("the guest runner in process", () => {
   const scratch = mkdtempSync(join(tmpdir(), "flows-sandboxed-guest-"))
   afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
-  const request = (name: string, body: typeof Guest.Request.Type): Guest.Environment => {
+  const request = (name: string, body: Omit<typeof Guest.Request.Type, "attempt">): Guest.Environment => {
     const requestPath = join(scratch, `${name}.request.json`)
-    writeFileSync(requestPath, JSON.stringify(body))
+    writeFileSync(requestPath, JSON.stringify({ ...body, attempt: name }))
     return {
       SMITHERS_SANDBOX_REQUEST_PATH: requestPath,
       SMITHERS_SANDBOX_RESULT_PATH: join(scratch, `${name}.result.json`)
@@ -687,7 +784,7 @@ describe("the guest runner in process", () => {
   it("writes the encoded success of the flow the request names", async () => {
     const environment = request("sum", { flow: Sum._tag, executionId: "in-process", payload: { n: 1 } })
     await Guest.run(childEntry, environment)
-    expect(resultOf(environment)).toEqual({ status: "succeeded", output: 12 })
+    expect(resultOf(environment)).toEqual({ attempt: "sum", status: "succeeded", output: 12 })
   })
 
   it("writes the failure of a flow that failed", async () => {
@@ -699,6 +796,7 @@ describe("the guest runner in process", () => {
     await Guest.run(childEntry, environment)
     const result = resultOf(environment)
     expect(result.status).toBe("failed")
+    expect(result.attempt).toBe("failing")
     expect(result.status === "failed" && result.error).toContain("refused in process")
   })
 
@@ -735,7 +833,12 @@ describe("the guest runner in process", () => {
         acquire: (key) =>
           Effect.map(directory.acquire(key), (session) => ({
             ...session,
-            readFile: (path) => path.endsWith("/result.json") ? Effect.succeed(bytes) : session.readFile(path)
+            readFile: (path) =>
+              session.readFile(path).pipe(Effect.map((current) => {
+                if (!path.endsWith("/result.json")) return current
+                const { attempt } = JSON.parse(new TextDecoder().decode(current))
+                return new TextEncoder().encode(JSON.stringify({ ...result, attempt }))
+              }))
           }))
       }
     })))
@@ -780,7 +883,7 @@ describe("the guest runner in process", () => {
       payload: { value: "still here" }
     })
     await Guest.run(pureEntry, environment)
-    expect(resultOf(environment)).toEqual({ status: "succeeded", output: "still here" })
+    expect(resultOf(environment)).toEqual({ attempt: "pure", status: "succeeded", output: "still here" })
   })
 
   it("drives a child boundary the entry registered beside its flow", async () => {
@@ -790,7 +893,7 @@ describe("the guest runner in process", () => {
       payload: { n: 4 }
     })
     await Guest.run(childEntry, environment)
-    expect(resultOf(environment)).toEqual({ status: "succeeded", output: 15 })
+    expect(resultOf(environment)).toEqual({ attempt: "nested", status: "succeeded", output: 15 })
   })
 
   it("describes a defect by its name and message", async () => {
@@ -827,7 +930,7 @@ describe("the guest runner in process", () => {
     const layer = Crash.toLayer(() => Effect.die({ count: 1n, password: "synthetic-bigint-credential" }))
     const environment = request("bigint", { flow: Child._tag, executionId: "bigint", payload: {} })
     await Guest.run({ Child, layer }, environment)
-    expect(resultOf(environment)).toEqual({ status: "failed", error: "defect failure" })
+    expect(resultOf(environment)).toEqual({ attempt: "bigint", status: "failed", error: "defect failure" })
   })
 
   it("describes a bare failure value as itself", async () => {

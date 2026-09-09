@@ -56,6 +56,7 @@ import { readFile, writeFile } from "node:fs/promises"
  * @since 1.0.0
  */
 export const Request = Schema.Struct({
+  attempt: Schema.String,
   flow: Schema.String,
   executionId: Schema.String,
   payload: Schema.Unknown
@@ -69,8 +70,8 @@ export const Request = Schema.Struct({
  * @since 1.0.0
  */
 export const Result = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("succeeded"), output: Schema.Unknown }),
-  Schema.Struct({ status: Schema.Literal("failed"), error: Schema.String })
+  Schema.Struct({ attempt: Schema.String, status: Schema.Literal("succeeded"), output: Schema.Unknown }),
+  Schema.Struct({ attempt: Schema.String, status: Schema.Literal("failed"), error: Schema.String })
 ])
 
 /**
@@ -225,6 +226,7 @@ const execute = (
     const flow = Object.values(entry).find((value) => isFlowTagged(value, request.flow))
     if (flow === undefined) {
       return {
+        attempt: request.attempt,
         status: "failed",
         error: `the entry module exports no flow tagged "${request.flow}"; export the flow the host was asked to run`
       } as const
@@ -248,6 +250,6 @@ const execute = (
       ) as Effect.Effect<unknown, unknown>
     )
     return Exit.isSuccess(exit)
-      ? { status: "succeeded", output: exit.value } as const
-      : { status: "failed", error: describeCause(exit.cause) } as const
+      ? { attempt: request.attempt, status: "succeeded", output: exit.value } as const
+      : { attempt: request.attempt, status: "failed", error: describeCause(exit.cause) } as const
   })

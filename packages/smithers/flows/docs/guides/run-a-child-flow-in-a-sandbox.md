@@ -194,6 +194,13 @@ list of refusals is in [Troubleshooting](../troubleshooting.md).
 
 ## Failure diagnostics
 
+`result_unreadable` means a zero-exit guest left no result, wrote malformed
+protocol JSON, or returned a result for another attempt. Each execution creates
+a fresh `attempt` nonce in `request.json`; the guest echoes it in both success
+and failure envelopes. The host accepts only the current nonce and removes any
+leftover `result.json` before launch. Reattaching a session preserves workspace
+files but cannot reuse a previous attempt's result.
+
 Before writing a failed `result.json`, the guest applies the engine logger's
 shared credential key and text rules to error fields, messages, and string
 failures. The host applies the same rules to `SandboxedFlowError.message` and
