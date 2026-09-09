@@ -58,6 +58,11 @@ removes its agent listener, and cancels its side turn. Disposal and late stream
 or start-request callbacks do not publish explanation card patches. Completed
 explanations need no further cancellation.
 
+Native sign-in disposal clears the polling wait, aborts start, claim and session
+requests, and prevents late responses or browser opens from changing the store.
+A repeated sign-in click while its start request is pending reports preparation;
+it reopens the browser only after the handoff URL exists.
+
 ## Collection contract
 
 `PERSISTED_COLLECTION_SPECS` in `state/AppStore.ts` is the authority for every

@@ -190,3 +190,132 @@ describe("sign-in return path", () => {
     expect(messages()).toBe(before + 1)
   })
 })
+
+describe("native sign-in handoff ownership", () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((done) => { resolve = done })
+    return { promise, resolve }
+  }
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const json = (body: unknown) => Response.json(body)
+  const setup = async (pause: "start" | "wait" | "claim" | "session" | "reopen" | "start-body" | "claim-body" | "session-body") => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const reached = deferred<void>()
+    const response = deferred<Response>()
+    const reopened = deferred<boolean>()
+    const opened: string[] = []
+    const requests: string[] = []
+    let requestSignal: AbortSignal | null | undefined
+    const ctx = createControllerContext(store, repositories, agent, {
+      baseUrl: "https://app.test",
+      handoffPollMs: pause === "wait" || pause === "reopen" ? 30 : 1,
+      openExternal: async (url) => {
+        opened.push(url)
+        if (pause === "wait") reached.resolve()
+        if (pause === "reopen" && opened.length === 2) {
+          reached.resolve()
+          return reopened.promise
+        }
+        return true
+      },
+      fetchImpl: async (input, init) => {
+        const path = new URL(String(input)).pathname
+        requests.push(path)
+        const stage = pause.replace("-body", "")
+        if (path.endsWith(`/auth/native/${stage}`) || (stage === "session" && path.endsWith("/auth/session"))) {
+          requestSignal = init?.signal
+          // Deliberately ignore abort: late answers still need continuation fences.
+          if (pause.endsWith("-body")) {
+            const result = json({})
+            result.json = async () => {
+              reached.resolve()
+              return (await response.promise).json()
+            }
+            return result
+          }
+          reached.resolve()
+          return response.promise
+        }
+        if (path.endsWith("/start")) return json({ handoffId: "handoff-1", pollSecret: "secret-1" })
+        if (path.endsWith("/claim")) return json({ status: pause.startsWith("session") ? "ready" : "failed" })
+        return json(signedIn)
+      }
+    })
+    ctx.withToast = async (_key, _title, _doneTitle, work) => work()
+    ctx.resolveToast = (key, outcome) => {
+      store.dispatch({ type: "toast.resolved", actor: "system", key, ...outcome })
+    }
+    store.dispatch({ type: "identity.session.loaded", actor: "system", ...signedIn,
+      state: "signed-out", login: null, scopesPlain: null })
+    const controller = createAuthBillingController(ctx, () => 0)
+    const transitions = () => [...store.collections.transitions.values()]
+    return { ctx, controller, store, reached, response, reopened, opened, requests, transitions,
+      signal: () => requestSignal }
+  }
+
+  test("a second click before start answers prepares sign-in without opening an empty URL", async () => {
+    const h = await setup("start")
+    try {
+      h.controller.signIn()
+      await h.reached.promise
+      h.controller.signIn()
+      await tick()
+      expect(h.opened).toEqual([])
+      expect(h.requests).toEqual(["/api/auth/native/start"])
+      const notice = h.store.collections.toasts.get("toast-auth.sign-in.handoff.reopened")
+      expect(notice?.title).toBe("Preparing sign-in…")
+      expect(notice?.detail).toBe("Sign-in is being prepared — your browser will open when it's ready.")
+      expect(notice?.status).toBe("ok")
+    } finally {
+      await h.ctx.dispose()
+      h.response.resolve(json({ handoffId: "handoff-1", pollSecret: "secret-1" }))
+      await tick()
+    }
+  })
+
+  test("disposal during the wait prevents any later claim or dispatch", async () => {
+    const h = await setup("wait")
+    h.controller.signIn()
+    await h.reached.promise
+    await tick()
+    await h.ctx.dispose()
+    const before = h.transitions()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(h.requests).toEqual(["/api/auth/native/start"])
+    expect(h.transitions()).toEqual(before)
+  })
+
+  for (const pause of ["start", "claim", "session", "start-body", "claim-body", "session-body"] as const) {
+    test(`disposal aborts the ${pause} request and fences its late answer`, async () => {
+      const h = await setup(pause)
+      h.controller.signIn()
+      await h.reached.promise
+      await h.ctx.dispose()
+      const before = h.transitions()
+      const requestsBefore = [...h.requests]
+      h.response.resolve(json(pause.startsWith("start")
+        ? { handoffId: "handoff-1", pollSecret: "secret-1" }
+        : pause.startsWith("claim") ? { status: "ready" } : signedIn))
+      await tick()
+      await tick()
+      expect(h.signal()?.aborted).toBe(true)
+      expect(h.requests).toEqual(requestsBefore)
+      expect(h.transitions()).toEqual(before)
+      if (pause.startsWith("start")) expect(h.opened).toEqual([])
+    })
+  }
+
+  test("a reopen finishing after disposal cannot dispatch its notice", async () => {
+    const h = await setup("reopen")
+    h.controller.signIn()
+    while (h.opened.length === 0) await tick()
+    h.controller.signIn()
+    await h.reached.promise
+    await h.ctx.dispose()
+    const before = h.transitions()
+    h.reopened.resolve(true)
+    await tick()
+    expect(h.transitions()).toEqual(before)
+  })
+})

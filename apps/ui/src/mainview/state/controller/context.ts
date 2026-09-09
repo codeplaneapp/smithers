@@ -272,14 +272,19 @@ export const createControllerContext = (
   ctx.boundedFetch = (url: string, init?: RequestInit): Promise<Response> =>
     Effect.runPromise(
       Effect.tryPromise({
-        try: (signal) => ctx.http(url, { ...init, signal }),
+        // Retain caller cancellation through response-body consumption too.
+        try: (signal) => ctx.http(url, {
+          ...init,
+          signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal
+        }),
         catch: (error) => (error instanceof Error ? error : new Error(String(error)))
       }).pipe(
         Effect.timeoutOrElse({
           duration: seamTimeoutMs,
           orElse: () => Effect.fail(new Error("seam timeout"))
         })
-      )
+      ),
+      { signal: init?.signal ?? undefined }
     )
   ctx.errorMessageOf = async (response: Response, fallback: string): Promise<string> => {
     const body = (await response.text().catch(() => "")).trim()

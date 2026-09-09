@@ -79,9 +79,9 @@ export const createAuthBillingController = (
    * non-allowlisted response drives the landing states; "unavailable" (seam
    * unset or unreachable) is recorded honestly but never blocks the surface.
    */
-  const fetchScopesPlain = async (): Promise<string | null> => {
+  const fetchScopesPlain = async (signal?: AbortSignal): Promise<string | null> => {
     try {
-      const response = await http(`${baseUrl}${AUTH_SCOPES_PATH}`)
+      const response = await http(`${baseUrl}${AUTH_SCOPES_PATH}`, { signal })
       if (!response.ok) {
         await response.body?.cancel()
         return null
@@ -105,9 +105,10 @@ export const createAuthBillingController = (
     }
   }
 
-  const dispatchSignedOut = async (epoch: number): Promise<void> => {
-    const scopesPlain = await fetchScopesPlain()
-    if (ctx.accountEpoch !== epoch) return
+  const dispatchSignedOut = async (epoch: number, signal?: AbortSignal): Promise<void> => {
+    if (signal?.aborted) return
+    const scopesPlain = await fetchScopesPlain(signal)
+    if (ctx.accountEpoch !== epoch || signal?.aborted) return
     store.dispatch({
       type: "identity.session.loaded",
       actor: "system",
@@ -188,39 +189,40 @@ export const createAuthBillingController = (
     })
   }
 
-  const loadSession = async (): Promise<void> => {
+  const loadSession = async (signal?: AbortSignal): Promise<void> => {
+    if (signal?.aborted) return
     const epoch = ++ctx.accountEpoch
     const previous = store.collections.identitySessions.get("identity")
     let response: Response
     try {
-      response = await http(`${baseUrl}${AUTH_SESSION_PATH}`)
+      response = await http(`${baseUrl}${AUTH_SESSION_PATH}`, { signal })
     } catch {
-      if (ctx.accountEpoch !== epoch) return
+      if (ctx.accountEpoch !== epoch || signal?.aborted) return
       dispatchUnavailable()
       return
     }
-    if (ctx.accountEpoch !== epoch) return
+    if (ctx.accountEpoch !== epoch || signal?.aborted) return
     // Signed-out is the expected resolved answer, never an error path: the
     // identity upstream states it as 401/403, the product Worker's seam
     // restates it as 200 { status: "signed-out" } so the browser never logs
     // the expected answer as a console error. Both shapes resolve the same.
     if (response.status === 401 || response.status === 403) {
       await response.body?.cancel()
-      await dispatchSignedOut(epoch)
+      await dispatchSignedOut(epoch, signal)
       return
     }
     if (!response.ok) {
       await response.body?.cancel()
-      if (ctx.accountEpoch !== epoch) return
+      if (ctx.accountEpoch !== epoch || signal?.aborted) return
       dispatchUnavailable()
       return
     }
     const body = (await response.json().catch(() => undefined)) as
       | { status?: unknown; login?: unknown; allowlisted?: unknown; admin?: unknown }
       | undefined
-    if (ctx.accountEpoch !== epoch) return
+    if (ctx.accountEpoch !== epoch || signal?.aborted) return
     if (body?.status === "signed-out") {
-      await dispatchSignedOut(epoch)
+      await dispatchSignedOut(epoch, signal)
       return
     }
     if (body === undefined || typeof body.login !== "string" || body.login === "") {
@@ -260,11 +262,22 @@ export const createAuthBillingController = (
   const nativeSignIn = async (openExternal: (url: string) => Promise<boolean>): Promise<void> => {
     const key = "auth.sign-in.handoff"
     if (pendingHandoff !== undefined) {
-      const reopened = await openExternal(pendingHandoff.url)
+      const pending = pendingHandoff
+      const noticeKey = `${key}.reopened`
+      if (pending.url === "") {
+        const title = "Preparing sign-in…"
+        store.dispatch({ type: "toast.shown", actor: "system", key: noticeKey, title })
+        ctx.resolveToast(noticeKey, {
+          status: "ok", title,
+          detail: "Sign-in is being prepared — your browser will open when it's ready."
+        })
+        return
+      }
+      const reopened = await openExternal(pending.url)
+      if (pendingHandoff?.generation !== pending.generation) return
       // The arc's own toast keeps running under `key` — the sign-in is still
       // in flight. The reopen is a notice beside it: settled ok, it leaves on
       // its own; a page that would not reopen stays until dismissed.
-      const noticeKey = `${key}.reopened`
       store.dispatch({ type: "toast.shown", actor: "system", key: noticeKey, title: "Finishing sign-in in your browser…" })
       ctx.resolveToast(noticeKey, {
         status: reopened ? "ok" : "failed",
@@ -278,6 +291,8 @@ export const createAuthBillingController = (
     const generation = ++handoffGeneration
     // A superseded loop never writes: only the newest handoff's outcome is the truth.
     const current = (): boolean => pendingHandoff?.generation === generation
+    const abort = new AbortController()
+    let wake: (() => void) | undefined
     const settle = (status: "ok" | "failed", title: string, detail: string): void => {
       if (!current()) return
       pendingHandoff = undefined
@@ -288,13 +303,23 @@ export const createAuthBillingController = (
       ctx.resolveToast(key, { status, title, detail })
     }
     const fail = (detail: string): void => settle("failed", "Sign-in didn't finish", detail)
-    store.dispatch({ type: "toast.shown", actor: "system", key, title: "Finishing sign-in in your browser…" })
     // Reserve the slot before the first await so a second click during the
     // start request joins this handoff instead of racing it.
     pendingHandoff = { generation, url: "" }
+    ctx.onDispose(() => {
+      if (current()) {
+        handoffGeneration += 1
+        pendingHandoff = undefined
+      }
+      wake?.()
+      abort.abort()
+    })
+    if (!current()) return
+    store.dispatch({ type: "toast.shown", actor: "system", key, title: "Finishing sign-in in your browser…" })
     let start: { handoffId?: unknown; pollSecret?: unknown } | undefined
     try {
-      const response = await http(`${baseUrl}${AUTH_NATIVE_START_PATH}`, { method: "POST" })
+      const response = await http(`${baseUrl}${AUTH_NATIVE_START_PATH}`, { method: "POST", signal: abort.signal })
+      if (!current()) return
       if (!response.ok) {
         fail(await errorMessageOf(response, "Sign-in couldn't start. Try again."))
         return
@@ -304,14 +329,16 @@ export const createAuthBillingController = (
       fail("Sign-in couldn't start — the identity service didn't answer.")
       return
     }
+    if (!current()) return
     if (typeof start?.handoffId !== "string" || typeof start.pollSecret !== "string") {
       fail("Sign-in couldn't start — the identity service answered in an unexpected shape.")
       return
     }
     const origin = baseUrl !== "" ? baseUrl : typeof window === "undefined" ? "" : window.location.origin
     const url = `${origin}${AUTH_SIGN_IN_PATH}?handoff=${encodeURIComponent(start.handoffId)}`
-    if (current()) pendingHandoff = { generation, url }
+    pendingHandoff = { generation, url }
     const opened = await openExternal(url)
+    if (!current()) return
     if (!opened) {
       fail("Your browser couldn't be opened. Try again.")
       return
@@ -319,8 +346,13 @@ export const createAuthBillingController = (
     // ~5 minutes of patience: OAuth in another app takes as long as it takes.
     let consecutiveErrors = 0
     for (let attempt = 0; attempt < 150 && current(); attempt += 1) {
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, handoffPollMs)
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => wake?.(), handoffPollMs)
+        wake = () => {
+          clearTimeout(timer)
+          wake = undefined
+          resolve()
+        }
         unref(timer)
       })
       if (!current()) return
@@ -334,12 +366,14 @@ export const createAuthBillingController = (
       try {
         claim = await http(`${baseUrl}${AUTH_NATIVE_CLAIM_PATH}`, {
           method: "POST",
+          signal: abort.signal,
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ handoffId: start.handoffId, pollSecret: start.pollSecret })
         })
       } catch {
         continue // A dropped poll is not a failed sign-in.
       }
+      if (!current()) return
       if (claim.status === 404) {
         fail("That sign-in expired — try again.")
         return
@@ -347,6 +381,7 @@ export const createAuthBillingController = (
       const body = (await claim.json().catch(() => undefined)) as
         | { status?: unknown; message?: unknown }
         | undefined
+      if (!current()) return
       if (!claim.ok) {
         /*
          * An erroring claim used to read as "pending" and poll for the full
@@ -368,7 +403,8 @@ export const createAuthBillingController = (
       if (body?.status === "pending") continue
       if (body?.status === "ready") {
         // The claim's Set-Cookie should now be in the jar; only the session probe can say so.
-        await loadSession()
+        await loadSession(abort.signal)
+        if (!current()) return
         const identity = store.collections.identitySessions.get("identity")
         if (identity?.state === "signed-in") {
           settle("ok", "Signed in", `Connected as ${identity.login ?? "you"}.`)
