@@ -4,9 +4,10 @@
  * corpus, each conformance pin or repository test answers for.
  *
  * This is migration bookkeeping, not a testing-library API, and it has no
- * consumer outside this package's own suite. It lives under `internal/`, which
- * is null-mapped in the export map and carries no compatibility promise, so it
- * is no longer published as part of the assertion vocabulary.
+ * consumer outside this package's own suite. It lives under `test/`, which the
+ * publish allowlist does not ship and `scripts/build.mjs` does not compile, so
+ * neither this module nor a generated copy of it reaches the tarball. Blocking
+ * `./internal/*` in the export map hid it from resolution but still packed it.
  *
  * The rows carry their own `reason` text for every claim that is not `pinned`.
  *

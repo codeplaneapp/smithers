@@ -2,7 +2,7 @@
  * Durable race conformance pins.
  *
  * Governing design: `packages/testing/docs/concepts/engine-subject.md`, "Race
- * semantics"; manifest: `packages/testing/src/internal/ParityManifest.ts`.
+ * semantics"; manifest: `packages/testing/test/support/ParityManifest.ts`.
  *
  * @since 0.0.0
  */

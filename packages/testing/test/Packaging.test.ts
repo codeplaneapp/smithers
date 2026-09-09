@@ -7,18 +7,56 @@
  * following the README's documented `@smthrs/testing/Vitest` subpath resolved
  * a file that throws from inside vitest — a third-party crash instead of a
  * resolution error naming this package.
+ *
+ * The tarball is checked here too: `files` is a pair of directory globs, so
+ * what it ships is decided by where a module lives, not by what the export map
+ * serves.
  */
-import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { readdirSync, readFileSync } from "node:fs"
+import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
+const sourceRoot = join(packageRoot, "src")
 
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
   readonly sideEffects: ReadonlyArray<string>
   readonly exports: Record<string, unknown>
   readonly publishConfig: { readonly exports: Record<string, unknown> }
+}
+
+const sourceFiles = (directory: string): ReadonlyArray<string> =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    return entry.isDirectory() ? sourceFiles(path) : entry.name.endsWith(".ts") ? [path] : []
+  })
+
+// Every `./src/...` target the development export map serves. The published
+// map names `dist/`, which this checkout need not have built, and the build
+// compiles one output per source file, so the sources are the honest roots.
+const exportedSources = (value: unknown): ReadonlyArray<string> =>
+  typeof value === "string"
+    ? value.startsWith("./src/") ? [resolve(packageRoot, value)] : []
+    : value === null || typeof value !== "object"
+    ? []
+    : Object.values(value).flatMap(exportedSources)
+
+const specifiers = /(?:from|import)\s*\(?\s*"(\.[^"]+)"/g
+
+const reachableFromExports = (): ReadonlySet<string> => {
+  const seen = new Set<string>()
+  const pending = [...exportedSources(manifest.exports)]
+  while (pending.length > 0) {
+    const file = pending.pop() as string
+    if (seen.has(file)) continue
+    seen.add(file)
+    for (const [, specifier] of readFileSync(file, "utf8").matchAll(specifiers)) {
+      const target = resolve(dirname(file), specifier as string)
+      if (target.startsWith(`${sourceRoot}/`)) pending.push(target)
+    }
+  }
+  return seen
 }
 
 describe("the export map", () => {
@@ -53,5 +91,22 @@ describe("the export map", () => {
   // exported `it`; see `src/Vitest.ts`.
   it("declares no side effects", () => {
     expect(manifest.sideEffects).toEqual([])
+  })
+})
+
+describe("the publish allowlist", () => {
+  // `files` ships `src/**/*.ts` and every `dist/**` artifact the build emits
+  // from it, so a module under `src/` is published whether or not the export
+  // map serves it. `ParityManifest.ts` was such a module: null-mapping
+  // `./internal/*` hid it from resolution and still packed the source, four
+  // generated copies and their maps. Test-only support code belongs under
+  // `test/`, which neither the allowlist nor `scripts/build.mjs` reads.
+  it("ships no source module the export map cannot reach", () => {
+    const reachable = reachableFromExports()
+    const orphans = sourceFiles(sourceRoot)
+      .filter((file) => !reachable.has(file))
+      .map((file) => relative(packageRoot, file))
+      .sort()
+    expect(orphans).toEqual([])
   })
 })

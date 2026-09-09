@@ -1,7 +1,7 @@
 /**
  * Deterministic replay and suspension conformance pins.
  *
- * Manifest: `packages/testing/src/internal/ParityManifest.ts`.
+ * Manifest: `packages/testing/test/support/ParityManifest.ts`.
  *
  * @since 0.0.0
  */

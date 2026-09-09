@@ -7,7 +7,7 @@ import {
   requiredOpenCodeBehaviors,
   requiredOpenCodeSources,
   rows
-} from "../src/internal/ParityManifest.ts"
+} from "./support/ParityManifest.ts"
 
 // Manifest rows keep their former superproject-relative `flows/` or `agent/`
 // prefix, but the files they name now live in this repository, so they resolve
@@ -17,12 +17,12 @@ import {
 // The OpenCode corpus is an unpinned external clone, so reading it is opt-in:
 // point `FLOWS_OPENCODE_CORPUS` at the directory holding the `opencode/` clone
 // to run the drift checks that compare the vendored inventory in
-// `src/ParityManifest.ts` against the live sources. Probing the filesystem for
-// it instead made one commit produce two different suites: a checkout whose
-// `reference/` held some other corpus crashed on ENOENT, and CI, which has no
-// `reference/` at all, skipped both checks without saying so. The inventory
-// those checks guard is vendored, so every checkout runs the same suite over
-// the same data whether or not a clone is present.
+// `test/support/ParityManifest.ts` against the live sources. Probing the
+// filesystem for it instead made one commit produce two different suites: a
+// checkout whose `reference/` held some other corpus crashed on ENOENT, and
+// CI, which has no `reference/` at all, skipped both checks without saying so.
+// The inventory those checks guard is vendored, so every checkout runs the
+// same suite over the same data whether or not a clone is present.
 const repositoryRoot = new URL("../../../", import.meta.url)
 const corpusSources = "opencode/packages/smithers/flows/core/test/"
 const namedCorpus = process.env["FLOWS_OPENCODE_CORPUS"]

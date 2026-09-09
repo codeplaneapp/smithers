@@ -84,8 +84,11 @@
 - Replaced the hand-written polling loops in the interrupt and race pins with
   bounded Effect schedules under a live clock, and bounded the conformance
   adapter's publication confirmation, which was an unbounded recursion.
-- Moved `ParityManifest` under `internal/`. It is 0.x migration bookkeeping, not
-  a testing-library API, and it had no consumer outside this package.
+- Moved `ParityManifest` to `test/support/`. It is 0.x migration bookkeeping,
+  not a testing-library API, and it had no consumer outside this package's own
+  suite. Under `src/internal/` the null-mapped `./internal/*` entry hid it from
+  resolution while `files` still shipped the source and the six artifacts the
+  build emitted from it; `test/` is neither packed nor built.
 - Fixed the two `Fixture` declarations that shared one name. The hand-written
   interface and the schema stated optionality two different ways, so under
   `exactOptionalPropertyTypes` a decoded fixture and the interface `decode`
