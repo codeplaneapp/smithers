@@ -255,7 +255,9 @@ describe("repositories seam", () => {
       changeId: "chg-api/repos/org/repo-299/bookmarks",
       commitId: "c0ffee1"
     })
-  })
+    // 300 reads at concurrency 6 is 50 rounds of a real timer, so the wall clock here
+    // tracks machine load. The claim under test is `peak`, not the duration.
+  }, 30000)
 
   test("when the wire answered most heads, a row it left headless is not read again", async () => {
     const headed = (index: number) => ({
