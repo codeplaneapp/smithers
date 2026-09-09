@@ -21,6 +21,7 @@ import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
 import * as VercelSandbox from "../src/VercelSandbox/index.ts"
 import type { Sdk } from "../src/VercelSandbox/Sdk.ts"
+import { stalledFinalizer } from "./stalledFinalizer.ts"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -96,6 +97,10 @@ const finishedRun = (
   )
 
 interface Faults {
+  removeWait?: Effect.Effect<void>
+  releaseWait?: Effect.Effect<void>
+  removeExitCode?: number
+
   /** The control plane refuses the acquire call. */
   acquireFailure?: unknown
   /** `extendTimeout` is refused (plan limit reached). */
@@ -145,6 +150,10 @@ const fakeSdk = (faults: Faults = {}): { readonly sdk: Sdk; readonly recorded: R
     name: machine.name,
     runCommand: async (request) => {
       recorded.commands.push(request)
+      if (request.cmd === "rm" && faults.removeWait !== undefined) await Effect.runPromise(faults.removeWait)
+      if (request.cmd === "rm" && faults.removeExitCode !== undefined) {
+        return finished({ exitCode: faults.removeExitCode, stdout: "", stderr: "" })
+      }
       if (faults.runFailure !== undefined) throw faults.runFailure
       // "A persistent sandbox still auto-resumes on the first SDK call that
       // needs a running session (such as `runCommand`)."
@@ -187,6 +196,7 @@ const fakeSdk = (faults: Faults = {}): { readonly sdk: Sdk; readonly recorded: R
     stop: async () => {
       recorded.stopped.push(machine.name)
       machine.running = false
+      if (faults.releaseWait !== undefined) await Effect.runPromise(faults.releaseWait)
       if (faults.stopFailure !== undefined) throw faults.stopFailure
     }
   })
@@ -224,6 +234,30 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("VercelSandbox", () => {
+  for (const operation of ["remove", "release"] as const) {
+    it.effect(`bounds stalled ${operation} on the platform timer`, () =>
+      stalledFinalizer((stall) => {
+        const fake = fakeSdk(operation === "remove" ? { removeWait: stall } : { releaseWait: stall })
+        return acquired(VercelSandbox.make({ sdk: fake.sdk, workdir: dir("stalled-finalizer") }), (session) =>
+          output(session, "true", operation === "remove" ? { stdin: encoder.encode("input") } : {}))
+      }, operation === "remove" ? ".smthrs-stdin/" : "smthrs-"), { timeout: 10_000 })
+  }
+
+  it.effect("reports failed staged stdin removal without claiming the file was removed", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk({ removeExitCode: 1 })
+      const provider = VercelSandbox.make({ sdk: fake.sdk, workdir: dir("remove-failure") })
+      const warnings: Array<unknown> = []
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          yield* output(session, "true", { stdin: encoder.encode("private input") })
+          expect(existsSync(fake.recorded.writes.at(-1)!.path)).toBe(true)
+          expect(warnings).toHaveLength(1)
+        })).pipe(Effect.provide(Logger.layer([Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry)
+        })])))
+    }))
+
   it.effect("omits vendor credentials from teardown warnings", () =>
     Effect.gen(function*() {
       const secret = "TEARDOWN_CANARY_CREDENTIAL"

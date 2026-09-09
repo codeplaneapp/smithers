@@ -9,6 +9,7 @@ import * as Stream from "effect/Stream"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
 import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
+import { finalizeWithin } from "../internal/finalizeWithin.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
 import { warnTeardown } from "../internal/teardownWarning.ts"
@@ -104,10 +105,13 @@ export const make = <Binding>(options: CloudflareSandboxOptions<Binding>): Provi
             catch: (cause) => failed("unavailable", `could not resolve ${remoteId}`, cause)
           }),
           (sandbox) =>
-            Effect.ignore(
-              attempt(() => sandbox.destroy(), "unknown", `could not destroy ${remoteId}`).pipe(
-                Effect.tapError((error) => warnTeardown("cloudflare", "destroy", error))
-              )
+            finalizeWithin(
+              Effect.ignore(
+                attempt(() => sandbox.destroy(), "unknown", `could not destroy ${remoteId}`).pipe(
+                  Effect.tapError((error) => warnTeardown("cloudflare", "destroy", error))
+                )
+              ),
+              `cloudflare sandbox ${remoteId}`
             )
         )
         yield* attempt(
@@ -139,8 +143,12 @@ export const make = <Binding>(options: CloudflareSandboxOptions<Binding>): Provi
           workdir,
           writeFile,
           remove: (path) =>
-            Effect.asVoid(
-              attempt(() => sandbox.exec(`rm -f ${CommandLine.quote(path)}`), "unknown", `could not remove ${path}`)
+            Effect.flatMap(
+              attempt(() => sandbox.exec(`rm -f ${CommandLine.quote(path)}`), "unknown", `could not remove ${path}`),
+              (result) =>
+                result.exitCode === 0 ? Effect.void : Effect.fail(
+                  failed("unknown", `could not remove ${path}: command exited ${result.exitCode}`, undefined)
+                )
             )
         })
         const resolveCwd = (cwd: string | undefined): string =>

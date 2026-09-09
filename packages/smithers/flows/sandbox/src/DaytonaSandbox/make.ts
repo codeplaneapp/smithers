@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
+import { finalizeWithin } from "../internal/finalizeWithin.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
@@ -34,7 +35,7 @@ export interface DaytonaSandboxOptions {
   readonly namePrefix?: string | undefined
   /** Timeout used when starting an attached sandbox, in seconds. */
   readonly startTimeoutSeconds?: number | undefined
-  /** Timeout used by the blocking deletion finalizer, in seconds. */
+  /** SDK deletion timeout in seconds; scope release still waits at most five seconds. */
   readonly deleteTimeoutSeconds?: number | undefined
 }
 
@@ -140,12 +141,15 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
           catch: providerFailure("unavailable", `daytona-sandbox: could not acquire ${name}`)
         }),
         ({ sandbox }) =>
-          Effect.ignore(
-            attempt(
-              () => options.sdk.delete(sandbox, options.deleteTimeoutSeconds ?? 60, true),
-              "unknown",
-              `could not delete ${name}`
-            ).pipe(Effect.tapError((error) => warnTeardown("daytona", "delete", error)))
+          finalizeWithin(
+            Effect.ignore(
+              attempt(
+                () => options.sdk.delete(sandbox, options.deleteTimeoutSeconds ?? 60, true),
+                "unknown",
+                `could not delete ${name}`
+              ).pipe(Effect.tapError((error) => warnTeardown("daytona", "delete", error)))
+            ),
+            `daytona sandbox ${name}`
           )
       )
       if (held.attached) {
@@ -200,7 +204,9 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
       const redirect = stdinRedirect({
         workdir,
         writeFile,
-        remove: (path) => Effect.asVoid(execute(`rm -f ${CommandLine.quote(path)}`))
+        remove: (path) =>
+          Effect.asVoid(Effect.flatMap(execute(`rm -f ${CommandLine.quote(path)}`), (result) =>
+            checked(result, "unknown", `daytona-sandbox: could not remove ${path}`)))
       })
       const resolveCwd = (cwd: string | undefined): string =>
         cwd === undefined || cwd.startsWith("/")
@@ -235,7 +241,8 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
           ),
         readFile: (path) =>
           Effect.tryPromise({
-            try: () => held.sandbox.fs.downloadFile(path).then((content) => new Uint8Array(content)),
+            try: () =>
+              held.sandbox.fs.downloadFile(path).then((content) => new Uint8Array(content)),
             catch: (cause) =>
               missingFile(cause)
                 ? new ProviderError({

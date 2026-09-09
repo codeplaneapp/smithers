@@ -18,6 +18,7 @@ import * as KubernetesSandbox from "../src/KubernetesSandbox/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "../src/Sandbox/index.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
+import { stalledFinalizer } from "./stalledFinalizer.ts"
 
 // -----------------------------------------------------------------------------
 // The kubectl CLI as a fake: real shells behind kubectl's argv contract.
@@ -67,6 +68,8 @@ interface Call {
 }
 
 interface Response {
+  readonly wait?: Effect.Effect<void>
+
   readonly stdout?: string | undefined
   readonly stderr?: string | undefined
   readonly exitCode?: number | undefined
@@ -95,7 +98,7 @@ const cluster = (fault: (args: ReadonlyArray<string>) => Response | undefined = 
         ? Effect.fail(
           PlatformError.badArgument({ module: "ChildProcess", method: "exitCode", description: "lost" })
         )
-        : Effect.succeed(ExitCode(response.exitCode ?? 0)),
+        : Effect.as(response.wait ?? Effect.void, ExitCode(response.exitCode ?? 0)),
       isRunning: Effect.succeed(false),
       kill: () => Effect.void,
       stdin: Sink.drain,
@@ -269,6 +272,19 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("KubernetesSandbox", () => {
+  it.effect("bounds stalled process signalling on the platform timer", () =>
+    stalledFinalizer((stall) => {
+      const fake = cluster((args) => args.at(-1)?.includes("kill -s TERM") === true ? { wait: stall } : undefined)
+      return acquired(KubernetesSandbox.make({ spawner: fake.spawner, image: "img", workdir }), (session) =>
+        Effect.scoped(session.spawn("true", {})))
+    }, ".pid"), { timeout: 10_000 })
+
+  it.effect("bounds stalled session removal on the platform timer", () =>
+    stalledFinalizer((stall) => {
+      const fake = cluster((args) => args[0] === "delete" ? { wait: stall } : undefined)
+      return acquired(KubernetesSandbox.make({ spawner: fake.spawner, image: "img", workdir }), Effect.succeed)
+    }, "smthrs-"), { timeout: 10_000 })
+
   it.effect("rejects missing ownership and altered live or terminal Pod specifications", () =>
     Effect.gen(function*() {
       for (

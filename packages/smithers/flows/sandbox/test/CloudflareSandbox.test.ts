@@ -1,9 +1,9 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Path, Stream } from "effect"
+import { Effect, Layer, Logger, Path, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as CloudflareSandbox from "../src/CloudflareSandbox/index.ts"
@@ -11,6 +11,7 @@ import type { RemoteProcess } from "../src/RemoteChildProcessSpawner/Provider.ts
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
+import { stalledFinalizer } from "./stalledFinalizer.ts"
 
 interface SandboxOptions {
   readonly enableDefaultSession?: boolean | undefined
@@ -295,6 +296,61 @@ const output = (
   })
 
 describe("CloudflareSandbox", () => {
+  for (const operation of ["remove", "release"] as const) {
+    it.effect(`bounds stalled ${operation} on the platform timer`, () =>
+      stalledFinalizer((stall) => {
+        const workerBinding = binding()
+        return acquired(CloudflareSandbox.make({ sdk, binding: workerBinding, workdir: root }), (session) =>
+          Effect.gen(function*() {
+            const machine = workerBinding.instances[0]!
+            if (operation === "release") {
+              machine.destroy = () =>
+                Effect.runPromise(stall)
+            } else {
+              const exec = machine.exec.bind(machine)
+              machine.exec = async (command, options) => {
+                if (command.startsWith("rm -f ")) await Effect.runPromise(stall)
+                return exec(command, options)
+              }
+            }
+            yield* Effect.scoped(Effect.flatMap(
+              session.spawn(
+                "true",
+                operation === "remove"
+                  ? { stdin: encoder.encode("input") } :
+                  {}
+              ),
+              output
+            ))
+          }))
+      }, operation === "remove" ? ".smthrs-stdin/" : "cloudflare sandbox"), { timeout: 10_000 })
+  }
+
+  it.effect("reports failed staged stdin removal without claiming the file was removed", () =>
+    Effect.gen(function*() {
+      const workerBinding = binding()
+      const warnings: Array<unknown> = []
+      yield* acquired(CloudflareSandbox.make({ sdk, binding: workerBinding, workdir: root }), (session) =>
+        Effect.gen(function*() {
+          const machine = workerBinding.instances[0]!
+          const exec = machine.exec.bind(machine)
+          machine.exec = (command, options) =>
+            command.startsWith("rm -f ")
+              ? Promise.resolve({ success: false, exitCode: 1, stdout: "", stderr: "" })
+              : exec(command, options)
+          yield* Effect.scoped(
+            Effect.flatMap(session.spawn("true", { stdin: encoder.encode("private input") }), output)
+          )
+          const staged = machine.events.find((event) =>
+            event.startsWith("write:")
+          )!.slice(6, -7)
+          expect(existsSync(staged)).toBe(true)
+          expect(warnings).toHaveLength(1)
+        })).pipe(Effect.provide(Logger.layer([Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry)
+        })])))
+    }))
+
   for (const execution of ["exec", "process"] as const) {
     it.effect(`deletes guest inherited environment in ${execution} mode`, () =>
       Effect.gen(function*() {

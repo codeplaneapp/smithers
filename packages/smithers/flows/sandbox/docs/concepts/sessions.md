@@ -68,7 +68,11 @@ Acquisition registers teardown as a finalizer of the acquiring scope. Closing
 that scope is the only lifecycle end exposed to the caller: no `destroy` method
 to forget, and no `AbortSignal` threaded through the call graph. Interrupting
 an execution closes the scope and therefore runs the provider's cancellation
-finalizer.
+finalizer. Container, Kubernetes, Vercel, Daytona, Cloudflare, and AWS provider
+cleanup operations each have a five-second wall-clock bound. A timeout logs a
+Warn naming the resource and requests cancellation without waiting for the
+transport to finish. Scope closure can therefore finish while a remote resource
+still needs operator cleanup.
 
 The same rule holds one level down. `Session.spawn` is scoped, so a spawn's
 scope is the process's lifetime. When a provider declares `kill`, the adapter
@@ -114,8 +118,11 @@ property is not:
   at the first name and could read the previous incarnation's input, which is
   where a caller puts a script, a patch, or a credential blob.
 - Removal is a finalizer of the spawn's scope, registered before the first byte
-  is written, so a killed or interrupted command still has its partial file
-  taken away. No provider writes a file atomically.
+  is written, so removal is attempted even after a killed or interrupted
+  command or a partial write. No provider writes a file atomically. The finalizer
+  checks the guest removal status, including AWS's exit sentinel, and logs a Warn
+  on failure. Removal has a five-second wall-clock bound; a failure or timeout
+  can leave staged bytes on the machine and requires operator cleanup.
 - The file's mode is the machine's umask, like any other file the session
   writes. The staging file is created through `Session.writeFile`, and the
   session contract has no mode.

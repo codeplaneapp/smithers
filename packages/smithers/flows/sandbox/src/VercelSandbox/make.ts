@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
+import { finalizeWithin } from "../internal/finalizeWithin.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
@@ -199,10 +200,13 @@ export const make = (options: VercelSandboxOptions): Provider => ({
           `could not acquire ${name}`
         ),
         (sandbox) =>
-          Effect.ignore(
-            attempt(() => sandbox.stop(), "unknown", `could not stop ${name}`).pipe(
-              Effect.tapError((error) => warnTeardown("vercel", "stop", error))
-            )
+          finalizeWithin(
+            Effect.ignore(
+              attempt(() => sandbox.stop(), "unknown", `could not stop ${name}`).pipe(
+                Effect.tapError((error) => warnTeardown("vercel", "stop", error))
+              )
+            ),
+            `vercel sandbox ${name}`
           )
       )
       if (desiredMs > createMs) {
@@ -241,7 +245,13 @@ export const make = (options: VercelSandboxOptions): Provider => ({
       const redirect = stdinRedirect({
         workdir,
         writeFile,
-        remove: (path) => Effect.asVoid(run({ cmd: "rm", args: ["-f", path] }))
+        remove: (path) =>
+          Effect.asVoid(
+            Effect.flatMap(
+              run({ cmd: "rm", args: ["-f", path] }),
+              (result) => checked(result, "unknown", `vercel-sandbox: could not remove ${path}`)
+            )
+          )
       })
       const resolveCwd = (cwd: string | undefined): string =>
         cwd === undefined || cwd.startsWith("/")

@@ -13,6 +13,7 @@ import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
 import { configurationFingerprint } from "../internal/configurationFingerprint.ts"
 import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
+import { finalizeWithin } from "../internal/finalizeWithin.ts"
 import { cancelledStatus, cancelMarker, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -116,18 +117,17 @@ const taskArnsOf = (output: RunTaskOutput): ReadonlyArray<string> =>
   (output.tasks ?? []).flatMap((task) => task.taskArn === undefined ? [] : [task.taskArn])
 
 const stopTasks = (options: AwsSandboxOptions, taskArns: ReadonlyArray<string>): Effect.Effect<void> =>
-  Effect.ignore(
-    Effect.forEach(
-      taskArns,
-      (task) =>
+  Effect.forEach(taskArns, (task) =>
+    finalizeWithin(
+      Effect.ignore(
         attempt(
           () => options.sdk.stopTask({ cluster: options.cluster, task, reason: "Smithers scope released" }),
           "unknown",
           `could not stop ${task}`
-        ),
-      { discard: true }
-    ).pipe(Effect.tapError((error) => warnTeardown("aws", "stopTasks", error)))
-  )
+        ).pipe(Effect.tapError((error) => warnTeardown("aws", "stopTasks", error)))
+      ),
+      `aws task ${task}`
+    ), { discard: true })
 
 /** A machine a previous acquire of this session key left behind. */
 interface Leftover {
@@ -227,12 +227,15 @@ const deregisterDefinition = (
   const taskDefinition = registeredArnOf(output)
   return taskDefinition === undefined
     ? Effect.void
-    : Effect.ignore(
-      attempt(
-        () => options.sdk.deregisterTaskDefinition({ taskDefinition }),
-        "unknown",
-        `could not deregister ${taskDefinition}`
-      ).pipe(Effect.tapError((error) => warnTeardown("aws", "deregisterTaskDefinition", error)))
+    : finalizeWithin(
+      Effect.ignore(
+        attempt(
+          () => options.sdk.deregisterTaskDefinition({ taskDefinition }),
+          "unknown",
+          `could not deregister ${taskDefinition}`
+        ).pipe(Effect.tapError((error) => warnTeardown("aws", "deregisterTaskDefinition", error)))
+      ),
+      `aws task definition ${taskDefinition}`
     )
 }
 
@@ -540,7 +543,7 @@ export const make = (options: AwsSandboxOptions): Provider => ({
       const container = options.container ?? (imageOptions === undefined ? undefined : generatedContainer)
       // Reattach before provisioning: the same key names the same machine
       // wherever one is still running. An adopted task is released the same
-      // way a fresh one is, so closing the scope always leaves nothing behind.
+      // way a fresh one is, so closing the scope attempts to stop either.
       const leftover = yield* leftoverTasks(options, startedBy, container, fingerprint)
       // Duplicates go before anything else: an adopter that provisioned beside
       // them would leave the key owning more machines every incarnation.
@@ -675,7 +678,14 @@ export const make = (options: AwsSandboxOptions): Provider => ({
       const redirect = stdinRedirect({
         workdir,
         writeFile,
-        remove: (path) => Effect.asVoid(run(`rm -f ${CommandLine.quote(path)}`))
+        remove: (path) =>
+          Effect.flatMap(
+            Effect.flatMap(run(`rm -f ${CommandLine.quote(path)}`), (result) => settled(`removing ${path}`, result)),
+            (result) =>
+              result.code === 0 ? Effect.void : Effect.fail(
+                failure("unknown", `could not remove ${path}: command exited ${result.code}`)
+              )
+          )
       })
       const resolveCwd = (cwd: string | undefined): string =>
         cwd === undefined || cwd.startsWith("/")
@@ -732,8 +742,11 @@ export const make = (options: AwsSandboxOptions): Provider => ({
               if (result.code !== undefined) ended = true
             }))
           yield* Effect.addFinalizer(() =>
-            ended ? Effect.void : Effect.ignore(
-              kill(pidfile, "SIGTERM").pipe(Effect.tapError((error) => warnTeardown("aws", "kill", error)))
+            ended ? Effect.void : finalizeWithin(
+              Effect.ignore(
+                kill(pidfile, "SIGTERM").pipe(Effect.tapError((error) => warnTeardown("aws", "kill", error)))
+              ),
+              `aws task ${taskArn} process ${pidfile}`
             )
           )
           const process: RemoteProcess = {

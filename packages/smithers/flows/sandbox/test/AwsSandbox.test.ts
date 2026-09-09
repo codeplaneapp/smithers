@@ -1,6 +1,6 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Layer, Path, PlatformError, Sink, Stream } from "effect"
+import { Effect, Exit, Layer, Logger, Path, PlatformError, Sink, Stream } from "effect"
 import * as Scope from "effect/Scope"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import {
@@ -9,13 +9,14 @@ import {
   make as makeSpawner,
   makeHandle
 } from "effect/unstable/process/ChildProcessSpawner"
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as AwsSandbox from "../src/AwsSandbox/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
+import { stalledFinalizer } from "./stalledFinalizer.ts"
 
 type RunTaskInput = Parameters<AwsSandbox.Sdk["runTask"]>[0]
 type RunTaskOutput = Awaited<ReturnType<AwsSandbox.Sdk["runTask"]>>
@@ -280,6 +281,9 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 interface CliFaults {
+  readonly wait?: (remote: string) => Effect.Effect<void> | undefined
+  readonly removeResult?: "failed" | "missing"
+
   /** The plugin exits with this code and prints this to standard error. */
   readonly pluginFailure?: { readonly code: number; readonly stderr: string } | undefined
   /** The session drops before the wrapper's sentinel line is printed. */
@@ -328,13 +332,34 @@ const fakeCli = (faults: CliFaults = {}) => {
         : ""
       calls.push({ file: command.command, input, args: command.args, remote })
       const sessionId = `ecs-execute-command-${calls.length}`
+      const wait = faults.wait?.(remote)
+      if (
+        wait !== undefined ||
+        (faults.removeResult !== undefined && remote.includes("rm -f ") && remote.includes(".smthrs-stdin/"))
+      ) {
+        const marker = /__smthrs_exit_\d+_/.exec(remote)![0]
+        return makeHandle({
+          pid: 0 as never,
+          exitCode: Effect.as(wait ?? Effect.void, ExitCode(0)),
+          isRunning: Effect.succeed(false),
+          kill: () =>
+            Effect.void,
+          stdin: Sink.drain,
+          stdout: faults.removeResult === "missing" ? Stream.empty : Stream.make(encoder.encode(`\n${marker}1__\n`)),
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void)
+        })
+      }
+
       if (faults.pluginFailure !== undefined) {
         return makeHandle({
           pid: 0 as never,
           exitCode: Effect.succeed(ExitCode(faults.pluginFailure.code)),
           isRunning: Effect.succeed(false),
-          kill: () =>
-            Effect.void,
+          kill: () => Effect.void,
           stdin: Sink.drain,
           stdout: Stream.empty,
           stderr: Stream.make(encoder.encode(faults.pluginFailure.stderr)),
@@ -442,6 +467,66 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("AwsSandbox", () => {
+  for (const operation of ["remove", "kill"] as const) {
+    it.effect(`bounds stalled ${operation} on the platform timer`, () =>
+      stalledFinalizer((stall) => {
+        const cli = fakeCli({
+          wait: (remote) =>
+            (operation === "remove"
+                ? remote.includes("rm -f ") && remote.includes(".smthrs-stdin/")
+                : remote.includes("kill -s TERM")) ?
+              stall :
+              undefined
+        })
+        return acquired(transportProvider(fakeEcs(), cli), (session) =>
+          operation === "remove"
+            ? Effect.asVoid(output(session, "true", { stdin: encoder.encode("input") }))
+            : Effect.asVoid(Effect.scoped(session.spawn("true", {}))))
+      }, operation === "remove" ? ".smthrs-stdin/" : ".pid"), { timeout: 10_000 })
+  }
+
+  for (const operation of ["stop", "deregister"] as const) {
+    it.effect(`bounds stalled ${operation} on the platform timer`, () =>
+      stalledFinalizer((stall) => {
+        const fake = fakeEcs()
+        const sdk = {
+          ...sdkOf(fake),
+          ...operation === "stop"
+            ? { stopTask: () => Effect.runPromise(Effect.as(stall, {})) }
+            : { deregisterTaskDefinition: () => Effect.runPromise(Effect.as(stall, {})) }
+        }
+        const provider = AwsSandbox.make({
+          sdk,
+          region: "us-west-2",
+          cluster: "cluster-arn",
+          subnets: ["subnet-a"],
+          image: "alpine",
+          taskRoleArn: "role-arn",
+          pollIntervalMs: 0
+        })
+        return acquired(provider, Effect.succeed)
+      }, operation === "stop" ? "aws task " : "aws task definition"), { timeout: 10_000 })
+  }
+
+  for (const removeResult of ["failed", "missing"] as const) {
+    it.effect(`reports ${removeResult} staged stdin removal without claiming the file was removed`, () =>
+      Effect.gen(function*() {
+        const workspace = mkdtempSync(join(root, "remove-failure-"))
+        const cli = fakeCli({ removeResult })
+        const warnings: Array<unknown> = []
+        yield* acquired(transportProvider(fakeEcs(), cli, { workdir: workspace }), (session) =>
+          Effect.gen(function*() {
+            yield* output(session, "true", { stdin: encoder.encode("private input") })
+            const files = readdirSync(join(workspace, ".smthrs-stdin"))
+            expect(files).toHaveLength(1)
+            expect(existsSync(join(workspace, ".smthrs-stdin", files[0]!))).toBe(true)
+            expect(warnings).toHaveLength(1)
+          })).pipe(Effect.provide(Logger.layer([Logger.make((entry) => {
+            if (entry.logLevel === "Warn") warnings.push(entry)
+          })])))
+      }))
+  }
+
   it.effect("verifies task tags, owner, and pinned definition before adoption or duplicate cleanup", () =>
     Effect.gen(function*() {
       for (

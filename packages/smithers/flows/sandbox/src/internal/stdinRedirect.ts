@@ -8,6 +8,7 @@ import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import type { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
+import { finalizeWithin } from "./finalizeWithin.ts"
 
 /**
  * The slice of a session the redirect needs: somewhere to put the bytes, and
@@ -20,9 +21,8 @@ export interface StdinTarget {
   readonly workdir: string
   readonly writeFile: (path: string, content: Uint8Array) => Effect.Effect<void, ProviderError>
   /**
-   * Removes one staged file. Runs as a finalizer of the spawn's scope, so a
-   * command that was killed, interrupted, or never reached its own cleanup
-   * does not leave the caller's input on the machine.
+   * Removes one staged file. Runs as a finalizer of the spawn's scope, even
+   * when the command was killed, interrupted, or never reached its own cleanup.
    */
   readonly remove: (path: string) => Effect.Effect<void, ProviderError>
 }
@@ -59,7 +59,7 @@ const staged = (): string => {
  * behavior. Removal used to be a `rm` appended to the rewritten command line,
  * which is exactly the cleanup a kill or an interruption skips: the wrapper
  * shell died with the command and the bytes stayed on the machine. It is a
- * scoped resource instead, so the removal runs on success, failure, kill, and
+ * scoped resource instead, so removal is attempted on success, failure, kill, and
  * interruption alike.
  *
  * The removal is registered BEFORE the first byte is written, not around the
@@ -72,8 +72,9 @@ const staged = (): string => {
  * away, for the life of the machine and across a reattach.
  *
  * What the staging guarantees is an unguessable name inside the workspace and
- * removal bounded by the spawn's scope. It does not set a mode or an owner on
- * the directory: the session's own writeFile is the only channel a provider
+ * a removal attempt on scope closure, bounded to five seconds and warned on
+ * failure. It does not set a mode or an owner on the directory: the session's
+ * own writeFile is the only channel a provider
  * hands this module, so the file is created under the machine's umask like
  * every other file the session writes.
  *
@@ -97,7 +98,18 @@ export const stdinRedirect = (target: StdinTarget): (
       // The name is claimed, and its removal registered, before anything is
       // written to it: a chunked write that fails partway has already put
       // bytes on the machine.
-      yield* Effect.addFinalizer(() => Effect.ignore(target.remove(file), { log: "Warn" }))
+      yield* Effect.addFinalizer(() =>
+        finalizeWithin(
+          Effect.ignore(
+            target.remove(file).pipe(
+              Effect.tapError((error) =>
+                Effect.logWarning("sandbox stdin removal failed", { resource: file, code: error.code })
+              )
+            )
+          ),
+          `stdin file ${file}`
+        )
+      )
       yield* target.writeFile(file, stdin)
       return `(\n${command}\n) < ${CommandLine.quote(file)}`
     })

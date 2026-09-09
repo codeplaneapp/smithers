@@ -1,6 +1,6 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Path, Stream } from "effect"
+import { Effect, Layer, Logger, Path, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import {
@@ -21,6 +21,7 @@ import { sessionSlug } from "../src/internal/sessionSlug.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
+import { stalledFinalizer } from "./stalledFinalizer.ts"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -106,6 +107,10 @@ interface ExecuteCall {
 }
 
 interface Faults {
+  removeWait?: Effect.Effect<void>
+  releaseWait?: Effect.Effect<void>
+  removeExitCode?: number
+
   /** `get` is refused with something other than the not-found shape. */
   getFailure?: unknown
   /** `create` is refused (quota, capacity). */
@@ -164,6 +169,10 @@ const fakeSdk = (faults: Faults = {}): {
       executeCommand: async (command, cwd, env): Promise<VendorExecuteResponse> => {
         if (!machine.running) throw new Error(`the fake was asked to execute on a stopped sandbox: ${machine.name}`)
         recorded.executes.push({ command, cwd, env })
+        if (command.startsWith("rm -f ") && faults.removeWait !== undefined) await Effect.runPromise(faults.removeWait)
+        if (command.startsWith("rm -f ") && faults.removeExitCode !== undefined) {
+          return { exitCode: faults.removeExitCode, result: "", artifacts: { stdout: "" } }
+        }
         if (faults.executeFailure !== undefined) throw faults.executeFailure
         if (faults.commandFailure !== undefined) {
           const { exitCode, result } = faults.commandFailure
@@ -218,6 +227,7 @@ const fakeSdk = (faults: Faults = {}): {
     },
     delete: async (sandbox, timeout, wait) => {
       recorded.deletes.push({ id: sandbox.id, timeout, wait })
+      if (faults.releaseWait !== undefined) await Effect.runPromise(faults.releaseWait)
       if (faults.deleteFailure !== undefined) throw faults.deleteFailure
       const machine = machines.get(sandbox.id)
       if (machine === undefined) throw vendorError("sandbox not found", { statusCode: 404 })
@@ -249,6 +259,30 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("DaytonaSandbox", () => {
+  for (const operation of ["remove", "release"] as const) {
+    it.effect(`bounds stalled ${operation} on the platform timer`, () =>
+      stalledFinalizer((stall) => {
+        const fake = fakeSdk(operation === "remove" ? { removeWait: stall } : { releaseWait: stall })
+        return acquired(DaytonaSandbox.make({ sdk: fake.sdk }), (session) =>
+          output(session, "true", operation === "remove" ? { stdin: encoder.encode("input") } : {}))
+      }, operation === "remove" ? ".smthrs-stdin/" : "smthrs-"), { timeout: 10_000 })
+  }
+
+  it.effect("reports failed staged stdin removal without claiming the file was removed", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk({ removeExitCode: 1 })
+      const provider = DaytonaSandbox.make({ sdk: fake.sdk })
+      const warnings: Array<unknown> = []
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          yield* output(session, "true", { stdin: encoder.encode("private input") })
+          expect(existsSync(fake.recorded.uploads.at(-1)!.path)).toBe(true)
+          expect(warnings).toHaveLength(1)
+        })).pipe(Effect.provide(Logger.layer([Logger.make((entry) => {
+          if (entry.logLevel === "Warn") warnings.push(entry)
+        })])))
+    }))
+
   it.effect("deletes guest inherited environment separately from command defaults", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()

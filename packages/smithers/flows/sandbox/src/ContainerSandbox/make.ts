@@ -12,6 +12,7 @@ import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSp
 import { configurationFingerprint } from "../internal/configurationFingerprint.ts"
 import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
+import { finalizeWithin } from "../internal/finalizeWithin.ts"
 import { cancelGuard, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -230,7 +231,7 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               )
             }
           }),
-          () => Effect.ignore(run(["rm", "--force", name]), { log: "Warn" })
+          () => finalizeWithin(Effect.ignore(run(["rm", "--force", name]), { log: "Warn" }), `container ${name}`)
         )
         yield* step(`the container ${name} could not be started`, ["start", name])
         yield* step(`the workspace ${workdir} could not be prepared in ${name}`, [
@@ -341,7 +342,12 @@ export const make = (options: ContainerSandboxOptions): Provider => {
             // process's lifetime, so the finalizer signals the guest side
             // too, unless the command has already been seen to end.
             yield* Effect.addFinalizer(() =>
-              ended ? Effect.void : Effect.ignore(deliver(pidfile, "SIGTERM"), { log: "Warn" })
+              ended
+                ? Effect.void
+                : finalizeWithin(
+                  Effect.ignore(deliver(pidfile, "SIGTERM"), { log: "Warn" }),
+                  `container ${name} process ${pidfile}`
+                )
             )
             pidfiles.set(process, pidfile)
             return process
