@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -16,6 +17,23 @@ interface TableInfoRow {
 }
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => effect
+
+/**
+ * The constraint a rejected write names, whitespace collapsed, so a test can
+ * pin the check it means instead of accepting any failure. Reports
+ * `"inserted"` for a row the schema admitted.
+ */
+const rejectedBy = (exit: Exit.Exit<unknown, unknown>): string => {
+  if (Exit.isSuccess(exit)) return "inserted"
+  // The driver error carrying the constraint text sits at the end of the
+  // `SqlError` cause chain; the wrappers above it all say "Failed to execute
+  // statement", which names no check at all.
+  let error = Cause.squash(exit.cause) as { readonly cause?: unknown; readonly message?: string } | undefined
+  while (typeof error === "object" && error !== null && error.cause !== undefined) {
+    error = error.cause as typeof error
+  }
+  return String(error?.message ?? error).replace(/\s+/g, " ").trim()
+}
 
 const migrated = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
   run(effect.pipe(Effect.provide(Migrations.layer), Effect.provide(TestDatabase.layer)))
@@ -235,13 +253,49 @@ describe("durable engine migrations", () => {
       ).toBe(true)
     }))
 
-  it.effect("rejects a half-populated owner tuple", () =>
+  it.effect("rejects a half-populated owner tuple on the owner check itself", () =>
     Effect.gen(function*() {
-      const exit = yield* Effect.exit(migrated(Effect.gen(function*() {
+      // Every row below is a complete `running` row apart from the single
+      // owner component it names, and the control proves the surrounding
+      // columns admit the shape. An incomplete row would let an unrelated
+      // `NOT NULL` rejection stand in for the constraint under test.
+      const columns =
+        "run_id, status, created_at_ms, started_at_ms, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms, state_json"
+      const control = "('owned', 'running', 1, 1, 'host', 7, 'nonce', 2, '{}')"
+      const partialOwners = [
+        ["null host", "('null-host', 'running', 1, 1, NULL, 7, 'nonce', 2, '{}')"],
+        ["empty host", "('empty-host', 'running', 1, 1, '', 7, 'nonce', 2, '{}')"],
+        ["null pid", "('null-pid', 'running', 1, 1, 'host', NULL, 'nonce', 2, '{}')"],
+        ["negative pid", "('negative-pid', 'running', 1, 1, 'host', -1, 'nonce', 2, '{}')"],
+        ["fractional pid", "('fractional-pid', 'running', 1, 1, 'host', 0.5, 'nonce', 2, '{}')"],
+        ["null nonce", "('null-nonce', 'running', 1, 1, 'host', 7, NULL, 2, '{}')"],
+        ["empty nonce", "('empty-nonce', 'running', 1, 1, 'host', 7, '', 2, '{}')"],
+        ["null heartbeat", "('null-heartbeat', 'running', 1, 1, 'host', 7, 'nonce', NULL, '{}')"],
+        ["owner on a settled run", "('settled-owner', 'completed', 1, 1, 'host', 7, 'nonce', 2, '{}')"],
+        ["heartbeat on a settled run", "('settled-heartbeat', 'completed', 1, 1, NULL, NULL, NULL, 2, '{}')"]
+      ] as const
+
+      const outcomes = yield* migrated(Effect.gen(function*() {
         const sql = yield* Effect.service(SqlClient.SqlClient)
-        yield* sql`INSERT INTO flows_runs (run_id, status, owner_host_id, state_json) VALUES ('run', 'running', 'host', '{}')`
-      })))
-      expect(Exit.isFailure(exit)).toBe(true)
+        const insert = (values: string) =>
+          Effect.exit(sql.unsafe(`INSERT INTO flows_runs (${columns}) VALUES ${values}`))
+        return {
+          control: yield* insert(control),
+          partial: yield* Effect.forEach(
+            partialOwners,
+            ([label, values]) => Effect.map(insert(values), (exit) => [label, rejectedBy(exit)] as const)
+          )
+        }
+      }))
+
+      expect(rejectedBy(outcomes.control)).toBe("inserted")
+      // SQLite names the failing check in its message, so this separates the
+      // owner tuple from the status, claim, and column rejections a partial
+      // row would otherwise satisfy.
+      expect(outcomes.partial).toEqual(partialOwners.map(([label]) => [
+        label,
+        expect.stringContaining("CHECK constraint failed: ( status = 'running' AND owner_host_id IS NOT NULL")
+      ]))
     }))
 
   it.effect("enforces every cache row invariant at the schema boundary", () =>

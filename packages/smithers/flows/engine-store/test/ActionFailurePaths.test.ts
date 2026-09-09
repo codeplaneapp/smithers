@@ -494,9 +494,20 @@ describe("action executor failure paths", () => {
         state: "failed",
         error: { reasons: [{ _tag: "Die", defect: null }] }
       })
-      expect(result.replayed).toBeDefined()
-      if (result.replayed === undefined || Exit.isSuccess(result.replayed)) return
-      expect(result.replayed.cause.reasons).toMatchObject([{ _tag: "Die", defect: null }])
+      // The replay is the point of the collapse: the bounded row must rethrow
+      // the persisted terminal failure. A replay that succeeded, or one that
+      // never ran because the row was not persisted as failed, hands the
+      // caller an outcome the attempt never produced, so it is reported here
+      // rather than skipped over.
+      const replayed = result.replayed
+      expect(replayed !== undefined && Exit.isFailure(replayed)).toBe(true)
+      if (replayed === undefined || !Exit.isFailure(replayed)) {
+        throw new Error("expected the replay to rethrow the persisted terminal failure")
+      }
+      // The whole collapsed cause, not merely its presence: the bound spends
+      // every interrupt reason on the single `Die(null)` it can afford.
+      expect(replayed.cause.reasons).toHaveLength(1)
+      expect(replayed.cause.reasons).toMatchObject([{ _tag: "Die", defect: null }])
     }))
 
   /**
