@@ -93,7 +93,7 @@ test("real native source, QuickJS drafting and SQLite replay retain a discarded 
   const binding = nativeLayer({ repositoryPath: root, adapterPath })
   const original = await Effect.runPromise(Effect.flatMap(NativeCoding, native => native.read()).pipe(Effect.provide(binding), Effect.provide(platform), Effect.scoped))
   assert.equal(original.head.kind, "resolved")
-  const plan: Plan = { prompt: "Prototype a new title", memoryRevision: "memory", base: original.head, changes: [{
+  const plan: Plan = { prompt: "Prototype a new title", memoryRevision: "memory", base: original.head, observedHead: original.head, changes: [{
     id: "prototype", title: "Prototype", intent: "Learn before production", implementation: "coding/implementation", implementationDigest: "digest",
     atoms: [{ changeId: null, message: "✨ feat: proposed title", intent: "Try title", reads: ["index.html", "remove.txt"], writes: ["index.html", "remove.txt", "new.txt"] }],
     checks: ["fast", "slow"].map(tier => ({ id: tier, flow: `checks/${tier}`, flowDigest: "digest", target: tier, tier: tier as "fast" | "slow", required: true }))
@@ -131,6 +131,10 @@ test("real native source, QuickJS drafting and SQLite replay retain a discarded 
       Layer.provide(Layer.succeed(NodeJj.StartupTimeoutMs, 30_000))))
   let host = make()
   close = () => host.dispose()
+  await assert.rejects(host.runPromise(Poc.execute({ plan: { ...plan, observedHead: { ...original.head, operationId: "different-observation" } },
+    source: original.head }, { executionId: "poc-wrong-observation" }), { signal: t.signal }), /observed head/)
+  assert.equal(requests.length, 0)
+  assert.equal(scratches.length, 0)
   const input = { plan, source: original.head }, executionId = "poc-cold-reconstruction"
   await host.runPromise(Poc.execute(input, { executionId, discard: true }), { signal: t.signal })
   // discard starts asynchronously. Close only after the driver has persisted
@@ -155,6 +159,7 @@ test("real native source, QuickJS drafting and SQLite replay retain a discarded 
   assert.deepEqual(result.changes.files.map(file => file.path), ["index.html", "new.txt", "remove.txt"])
   assert.equal(result.changes.files.find(file => file.path === "remove.txt")!.before, "\uFEFFOriginal file\n")
   assert.equal(requests.length, 2)
+  assert.doesNotMatch(requests[1]!, /Content-Security-Policy/)
   assert.deepEqual(seats, ["coding/poc", "coding/poc"])
   const after = await host.runPromise(Effect.flatMap(NativeCoding, native => native.read()))
   assert.deepEqual(after.head, original.head)
@@ -182,7 +187,7 @@ test("real native source, QuickJS drafting and SQLite replay retain a discarded 
   jj("status")
   const external = await host.runPromise(Effect.flatMap(NativeCoding, native => native.read()))
   assert.equal(external.head.kind, "resolved")
-  const badPlan: Plan = { ...plan, base: external.head, changes: [{ ...plan.changes[0]!, atoms: [{ ...plan.changes[0]!.atoms[0]!,
+  const badPlan: Plan = { ...plan, base: external.head, observedHead: external.head, changes: [{ ...plan.changes[0]!, atoms: [{ ...plan.changes[0]!.atoms[0]!,
     reads: ["escape.txt"], writes: ["escape.txt"] }] }] }
   await assert.rejects(host.runPromise(Poc.execute({ plan: badPlan, source: external.head }, { executionId: "poc-external-link" }),
     { signal: t.signal }), /outside its immutable export/)

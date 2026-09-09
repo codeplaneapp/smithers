@@ -23,6 +23,9 @@ const execution = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effec
 export const pocSource = (options: PocHostOptions) => Layer.mergeAll(
   CapturePocSource.toLayer(({ plan, source }) => execution(Effect.gen(function*() {
     yield* Effect.try({ try: () => validatePlan(plan), catch: error => error instanceof CodingError ? error : invalid("Invalid prototype plan") })
+    if (plan.observedHead !== undefined && !sameRevision(plan.observedHead, source)) {
+      return yield* fail("The POC source does not match the plan's observed head")
+    }
     const paths = [...new Set(plan.changes.flatMap(change => change.atoms.flatMap(atom => [...atom.reads, ...atom.writes])))].sort()
     const writable = [...new Set(plan.changes.flatMap(change => change.atoms.flatMap(atom => atom.writes)))].sort()
     if (paths.length === 0 || paths.length > 48 || writable.length === 0 || paths.some(path => !validPath(path))) {
@@ -86,7 +89,7 @@ export const pocSource = (options: PocHostOptions) => Layer.mergeAll(
   RetainPoc.toLayer(({ source, changes, review }) => execution(Effect.gen(function*() {
     const current = yield* (yield* NativeCoding).read()
     if (current.head.kind !== "resolved" || !sameRevision(current.head, source.revision)) {
-      return yield* fail("Native code changed during the discarded prototype; its findings cannot silently steer a different source")
+      return yield* fail("Native revision changed during the discarded prototype; its findings cannot silently steer a different source")
     }
     if (changes.sourceDigest !== source.digest) return yield* invalid("POC review does not identify its captured source")
     const feedback = [

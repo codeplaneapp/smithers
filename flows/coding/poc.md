@@ -1,6 +1,6 @@
 # Disposable file-level prototypes
 
-`Poc` is a private ordinary flow over existing `AgentAction`, native JJ source export and `WorkspaceSandbox`. Its input is `{ plan, source: Revision }`. The caller supplies the captured head explicitly; source collection refuses a changed head or plan base. An amended plan's older base is not silently treated as the current full source tree. The request coordinator uses the existing Jj snapshot and admission checks before dependent stages. POC collection itself never refreshes the working copy: unsnapshotted edits cannot silently become the prototype's source.
+`Poc` is a private ordinary flow over existing `AgentAction`, native JJ source export and `WorkspaceSandbox`. Its input is `{ plan, source: Revision }`. The caller supplies the captured head explicitly; source collection refuses a changed head or plan base. When the plan carries `observedHead`, the supplied source must match that exact observation. An amended plan's older base is not silently treated as the current full source tree. The request coordinator uses the existing Jj snapshot and admission checks before dependent stages. POC collection itself never refreshes the working copy: unsnapshotted edits cannot silently become the prototype's source.
 
 The steps are visible in the existing graph:
 
