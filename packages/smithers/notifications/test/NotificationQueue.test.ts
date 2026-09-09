@@ -1,6 +1,6 @@
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Layer } from "effect"
+import { Deferred, Effect, Fiber, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 import type { Notification } from "../src/Notification.ts"
 import * as NotificationQueue from "../src/NotificationQueue.ts"
@@ -70,6 +70,91 @@ const nested = (depth: number): Record<string, unknown> => {
 }
 
 describe("NotificationQueue", () => {
+  it.each(
+    [
+      { enclosing: "admit", standalone: "admit" },
+      { enclosing: "admit", standalone: "drain" },
+      { enclosing: "drain", standalone: "admit" },
+      { enclosing: "drain", standalone: "drain" }
+    ] as const
+  )("finishes enclosing $enclosing racing standalone $standalone", async ({ enclosing, standalone }) => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const outerStarted = yield* Deferred.make<void>()
+        const standaloneEntered = yield* Deferred.make<void>()
+        const enterInner = yield* Deferred.make<void>()
+        const queue = yield* NotificationQueue.NotificationQueue.pipe(
+          Effect.provide(NotificationQueue.layer.pipe(Layer.provide(Layer.succeed(Journal.Journal, {
+            ...journal,
+            transact: (body) => Effect.andThen(Deferred.succeed(standaloneEntered, undefined), journal.transact(body))
+          }))))
+        )
+        const call = (operation: "admit" | "drain", id: string) =>
+          operation === "admit"
+            ? queue.admit("run", item(id, "steer")).pipe(Effect.asVoid)
+            : queue.drain({ runId: "run", targetLineageId: "run/root", boundary: id, wouldIdle: true }).pipe(
+              Effect.asVoid
+            )
+        const outer = yield* Effect.forkChild(journal.transact(Effect.gen(function*() {
+          yield* Deferred.succeed(outerStarted, undefined)
+          yield* Deferred.await(enterInner)
+          yield* call(enclosing, "outer")
+        })))
+        yield* Deferred.await(outerStarted)
+        const other = yield* Effect.forkChild(call(standalone, "standalone"))
+        // The standalone call has reached transact while the outer transaction
+        // owns SQLite. Only now may the outer transaction call into the queue.
+        yield* Deferred.await(standaloneEntered)
+        yield* Deferred.succeed(enterInner, undefined)
+        yield* Fiber.join(outer)
+        yield* Fiber.join(other)
+        const rows = yield* journal.entries({ runId: JournalEvent.RunId.make("run"), limit: 512 })
+        expect(rows.entries).toHaveLength(2)
+        const fresh = yield* NotificationQueue.NotificationQueue.pipe(Effect.provide(NotificationQueue.layerWith()))
+        expect(yield* queue.pending("run")).toEqual(yield* fresh.pending("run"))
+      }).pipe(Effect.provide(TestJournal.layer()), Effect.scoped, Effect.timeout("5 seconds"))
+    )
+  })
+
+  it("delivers an eligible steer before queued follow-ups at idle boundaries", async () => {
+    await run(Effect.gen(function*() {
+      const queue = yield* NotificationQueue.NotificationQueue
+      yield* queue.admit("run", item("steer", "steer"))
+      yield* queue.admit("run", item("followup-1", "queue"))
+      yield* queue.admit("run", item("followup-2", "queue"))
+      for (const [index, id] of ["steer", "followup-1", "followup-2"].entries()) {
+        const receipt = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: `turn-${index}`,
+          wouldIdle: true
+        })
+        expect(receipt.notifications.map(({ id }) => id)).toEqual([id])
+        expect((yield* queue.pending("run")).map(({ id }) => id)).toEqual(
+          ["steer", "followup-1", "followup-2"].slice(index + 1)
+        )
+      }
+    }))
+  })
+
+  it.each(["above cutoff", "another lineage"])("does not let a steer %s block an idle follow-up", async (reason) => {
+    await run(Effect.gen(function*() {
+      const queue = yield* NotificationQueue.NotificationQueue
+      const opened = yield* queue.admit("run", item("followup", "queue"))
+      yield* queue.admit("run", item("steer", "steer", reason === "another lineage" ? "run/child" : "run/root"))
+      const receipt = yield* queue.drain({
+        runId: "run",
+        targetLineageId: "run/root",
+        boundary: "turn",
+        wouldIdle: true,
+        ...(reason === "above cutoff" ? { cutoffSeq: opened.seq } : {})
+      })
+      expect(receipt.notifications.map(({ id }) => id)).toEqual(["followup"])
+      expect((yield* queue.pending("run")).map(({ id }) => id)).toEqual(["steer"])
+    }))
+  })
+
   it("durably admits an id exactly once with provenance intact", async () => {
     const notification = item("n-1", "steer")
     const result = await run(
@@ -604,15 +689,51 @@ describe("NotificationQueue", () => {
     expect(refusal(observed.anonymous).notificationId).toBeUndefined()
   })
 
-  it("admits a payload that stops one level short of the bound", async () => {
-    const receipt = await run(
-      Effect.gen(function*() {
-        const queue = yield* NotificationQueue.NotificationQueue
-        return yield* queue.admit("run", untyped({ ...item("shallow", "steer"), payload: nested(8) }))
-      })
-    )
+  it.each(["objects", "arrays"])("pins adjacent payload depth limits for %s", async (shape) => {
+    const payload = (depth: number): unknown => {
+      if (shape === "objects") return nested(depth)
+      let value: Array<unknown> = []
+      for (let level = 0; level < depth; level += 1) value = [value]
+      return value
+    }
+    await run(Effect.gen(function*() {
+      const queue = yield* NotificationQueue.NotificationQueue
+      const journal = yield* Journal.Journal
+      // The notification envelope puts the payload root at depth 1. These
+      // leaves are therefore at depths 255 (legal) and 256 (refused).
+      const receipt = yield* queue.admit("run", untyped({ ...item("legal", "steer"), payload: payload(254) }))
+      expect(receipt.decision).toBe("admitted")
+      const error = refusal(
+        yield* queue.admit(
+          "run",
+          untyped({ ...item("too-deep", "steer"), payload: payload(255) })
+        ).pipe(Effect.flip)
+      )
+      expect(error).toMatchObject({ code: "notification_invalid", notificationId: "too-deep" })
+      expect(error.message).toContain("256")
+      const rows = yield* journal.entries({ runId: JournalEvent.RunId.make("run"), limit: 512 })
+      expect(rows.entries).toHaveLength(1)
+      expect(rows.entries[0]?.payload).toMatchObject({ notification: { id: "legal" } })
+      expect((yield* queue.pending("run")).map(({ id }) => id)).toEqual(["legal"])
+    }))
+  })
 
-    expect(receipt.decision).toBe("admitted")
+  it("refuses a cyclic payload with a typed error and no journal row", async () => {
+    const cycle: Record<string, unknown> = {}
+    cycle["self"] = cycle
+    await run(Effect.gen(function*() {
+      const queue = yield* NotificationQueue.NotificationQueue
+      const journal = yield* Journal.Journal
+      const error = refusal(
+        yield* queue.admit(
+          "run",
+          untyped({ ...item("cycle", "steer"), payload: cycle })
+        ).pipe(Effect.flip)
+      )
+      expect(error).toMatchObject({ code: "notification_invalid", notificationId: "cycle" })
+      expect(error.message).toContain("256")
+      expect((yield* journal.entries({ runId: JournalEvent.RunId.make("run"), limit: 512 })).entries).toEqual([])
+    }))
   })
 
   it("treats an admission written in a different key order as the same notification", async () => {

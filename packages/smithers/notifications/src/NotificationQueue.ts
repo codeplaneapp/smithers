@@ -392,7 +392,8 @@ export const layerWith = (
       // process-local by construction and is NOT what enforces capacity or
       // drain identity across processes: those are the conditional writes
       // inside `journal.transact`, decided and committed in one serialized
-      // write transaction.
+      // write transaction. Always enter the journal transaction before taking
+      // this permit, matching callers already inside an enclosing transaction.
       const operations = yield* Semaphore.make(1)
       const capacity = options.capacity ?? NotificationState.defaultCapacity
       // Only committed folds may be shared. A transaction reads its own
@@ -557,71 +558,75 @@ export const layerWith = (
           Effect.gen(function*() {
             const admitted = yield* validated(notification)
             const admittedFingerprint = yield* fingerprint(admitted)
-            return yield* operations.withPermits(1)(
-              journal.transact(admitInTransaction(JournalEvent.RunId.make(rawRunId), admitted, admittedFingerprint))
+            return yield* journal.transact(
+              operations.withPermits(1)(
+                admitInTransaction(JournalEvent.RunId.make(rawRunId), admitted, admittedFingerprint)
+              )
             )
           })
         ),
         drain: Effect.fn("NotificationQueue.drain")((input) =>
-          operations.withPermits(1)(journal.transact(Effect.gen(function*() {
-            const runId = JournalEvent.RunId.make(input.runId)
-            const key = drainKey(input.targetLineageId, input.boundary)
-            const loaded = yield* load(runId)
-            const delivered = (
-              record: NotificationEvent.Promoted,
-              admissions: ReadonlyMap<string, Committed>
-            ): ReadonlyArray<NotificationModel.Notification> =>
-              record.ids.flatMap((id) => {
-                const committed = admissions.get(id)
-                return committed === undefined ? [] : [committed.notification]
-              })
+          journal.transact(
+            operations.withPermits(1)(Effect.gen(function*() {
+              const runId = JournalEvent.RunId.make(input.runId)
+              const key = drainKey(input.targetLineageId, input.boundary)
+              const loaded = yield* load(runId)
+              const delivered = (
+                record: NotificationEvent.Promoted,
+                admissions: ReadonlyMap<string, Committed>
+              ): ReadonlyArray<NotificationModel.Notification> =>
+                record.ids.flatMap((id) => {
+                  const committed = admissions.get(id)
+                  return committed === undefined ? [] : [committed.notification]
+                })
 
-            const prior = loaded.promotions.get(key)
-            if (prior !== undefined) {
-              return {
-                notifications: delivered(prior, loaded.admissions),
-                boundary: input.boundary,
-                duplicate: true
-              }
-            }
-
-            const cutoff = input.cutoffSeq ?? loaded.cursor ?? 0
-            const steers = NotificationState.promoteSteers(loaded.state, cutoff, input.targetLineageId)
-            const queued = input.wouldIdle && steers.promoted.length === 0
-              ? NotificationState.promoteQueued(steers.state, input.targetLineageId)
-              : { state: steers.state, promoted: [] }
-            const promoted = [...steers.promoted, ...queued.promoted].map((item) => item.notification)
-            const receipt = yield* journal.emitDurableUnfenced(
-              new JournalEvent.Input({
-                runId,
-                sourceId: drainSource(input.targetLineageId, input.boundary),
-                sourceSeq: JournalEvent.SourceSeq.make(0),
-                // The identity is the drain: this lineage closing this
-                // boundary. Two processes that both reach it have observed one
-                // event, and the first record committed is the delivery.
-                dedupe: "identity",
-                eventType: NotificationEvent.PromotedEventType,
-                payload: {
+              const prior = loaded.promotions.get(key)
+              if (prior !== undefined) {
+                return {
+                  notifications: delivered(prior, loaded.admissions),
                   boundary: input.boundary,
-                  targetLineageId: input.targetLineageId,
-                  ids: promoted.map((notification) => notification.id)
+                  duplicate: true
                 }
-              })
-            )
-            const settled = yield* load(runId)
-            const record = settled.promotions.get(key)
-            if (record === undefined) {
-              return yield* new NotificationError({
-                code: "notification_unavailable",
-                message: `The journal identity for boundary ${input.boundary} holds an event this queue did not write`
-              })
-            }
-            return {
-              notifications: delivered(record, settled.admissions),
-              boundary: input.boundary,
-              duplicate: receipt._tag === "Duplicate"
-            }
-          })))
+              }
+
+              const cutoff = input.cutoffSeq ?? loaded.cursor ?? 0
+              const steers = NotificationState.promoteSteers(loaded.state, cutoff, input.targetLineageId)
+              const queued = input.wouldIdle && steers.promoted.length === 0
+                ? NotificationState.promoteQueued(steers.state, input.targetLineageId)
+                : { state: steers.state, promoted: [] }
+              const promoted = [...steers.promoted, ...queued.promoted].map((item) => item.notification)
+              const receipt = yield* journal.emitDurableUnfenced(
+                new JournalEvent.Input({
+                  runId,
+                  sourceId: drainSource(input.targetLineageId, input.boundary),
+                  sourceSeq: JournalEvent.SourceSeq.make(0),
+                  // The identity is the drain: this lineage closing this
+                  // boundary. Two processes that both reach it have observed one
+                  // event, and the first record committed is the delivery.
+                  dedupe: "identity",
+                  eventType: NotificationEvent.PromotedEventType,
+                  payload: {
+                    boundary: input.boundary,
+                    targetLineageId: input.targetLineageId,
+                    ids: promoted.map((notification) => notification.id)
+                  }
+                })
+              )
+              const settled = yield* load(runId)
+              const record = settled.promotions.get(key)
+              if (record === undefined) {
+                return yield* new NotificationError({
+                  code: "notification_unavailable",
+                  message: `The journal identity for boundary ${input.boundary} holds an event this queue did not write`
+                })
+              }
+              return {
+                notifications: delivered(record, settled.admissions),
+                boundary: input.boundary,
+                duplicate: receipt._tag === "Duplicate"
+              }
+            }))
+          )
         ),
         pending: Effect.fn("NotificationQueue.pending")((rawRunId) =>
           Effect.map(

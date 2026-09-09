@@ -57,6 +57,14 @@ payload objects and arrays, before `pending` or `drain` exposes them. Outputs
 carry the persisted, possibly redacted content. Consumer mutation cannot change
 later reads or drain receipts.
 
+`admit` and `drain` may run inside an enclosing `journal.transact` while
+standalone queue calls are pending. Both acquire the journal transaction before
+the queue permit. Shared folds are published only after the enclosing commit.
+
+Admission refuses objects or arrays at depth 256 with `notification_invalid`
+and writes no row. The notification envelope is depth 0; its payload is
+at depth 1. Cyclic payloads receive the same typed refusal.
+
 ### AdmissionReceipt
 
 ```ts
