@@ -616,42 +616,54 @@ describe("registration does not re-arm a settled run (B-03)", () => {
  */
 describe("the in-memory sweep queries skip settled runs (B-03)", () => {
   const flowName = "DeferredRestart/Memory"
-  const runs = new Map<string, DurableEngineState.MemoryRunView>()
-  const state = DurableEngineState.makeMemory({
-    runs: (runId) => Option.fromNullishOr(runs.get(runId)),
-    listRuns: () => runs.entries()
-  })
-
   const memoryOwner: Ownership.OwnerId = { hostId: "memory-host", pid: 9, nonce: "memory" }
 
   /**
-   * The rows a run leaves behind, written the way a run writes them — a clock
-   * is owner-fenced, so it is scheduled while the run is still running under
-   * its owner — and then left in `status`.
+   * A run view and a state per case, never one shared by the describe block.
+   * Both cases below assert on the same execution ids, so a shared map would
+   * let the second read rows only the first wrote: it would pass in file
+   * order and fail alone, reversed, or on a rerun.
    */
-  const seed = (runId: string, status: RunStore.RunStatus) =>
-    Effect.gen(function*() {
-      runs.set(runId, { status: "running", owner: memoryOwner, heartbeatAtMs: 0 })
-      yield* state.completeDeferred({
-        flowName,
-        executionId: runId,
-        deferredName: "gate",
-        exit: Exit.void,
-        completedAtMs: 0
-      })
-      yield* state.scheduleClock({
-        flowName,
-        executionId: runId,
-        clockName: "clock",
-        deferredName: "gate",
-        dueAtMs: 1_000,
-        completedAtMs: null
-      }, memoryOwner)
-      runs.set(runId, { status, owner: null })
+  const fixture = () => {
+    const runs = new Map<string, DurableEngineState.MemoryRunView>()
+    const state = DurableEngineState.makeMemory({
+      runs: (runId) => Option.fromNullishOr(runs.get(runId)),
+      listRuns: () => runs.entries()
     })
+
+    /**
+     * The rows a run leaves behind, written the way a run writes them — a
+     * clock is owner-fenced, so it is scheduled while the run is still running
+     * under its owner — and then left in `status`.
+     */
+    const seed = (runId: string, status: RunStore.RunStatus) =>
+      Effect.gen(function*() {
+        runs.set(runId, { status: "running", owner: memoryOwner, heartbeatAtMs: 0 })
+        yield* state.completeDeferred({
+          flowName,
+          executionId: runId,
+          deferredName: "gate",
+          exit: Exit.void,
+          completedAtMs: 0
+        })
+        yield* state.scheduleClock({
+          flowName,
+          executionId: runId,
+          clockName: "clock",
+          deferredName: "gate",
+          dueAtMs: 1_000,
+          completedAtMs: null
+        }, memoryOwner)
+        runs.set(runId, { status, owner: null })
+      })
+
+    return { runs, seed, state } as const
+  }
 
   it.effect("lists an existing run that can still make progress and skips one that cannot", () =>
     Effect.gen(function*() {
+      const { runs, seed, state } = fixture()
+
       // Every live status, every terminal one, and a row whose run was removed
       // from the supplied view. The removed run stays hidden just as it does
       // behind the SQL implementation's flows_runs join.
@@ -671,6 +683,13 @@ describe("the in-memory sweep queries skip settled runs (B-03)", () => {
 
   it.effect("completes only the named run's uncompleted clock rows", () =>
     Effect.gen(function*() {
+      const { seed, state } = fixture()
+
+      // Both rows this case reads are its own: a pending clock on the run it
+      // closes, and one on a bystander it must leave alone.
+      yield* seed("memory-running", "running")
+      yield* seed("memory-pending", "pending")
+
       yield* state.completeRunClocks("memory-running", 42)
       // A second call finds nothing left to do and leaves the first
       // completion time alone.

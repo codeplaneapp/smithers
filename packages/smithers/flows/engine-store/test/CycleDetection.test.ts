@@ -9,6 +9,7 @@ import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as DurableEngineState from "../src/DurableEngineState.ts"
 import * as RunDriver from "../src/internal/RunDriver.ts"
 import * as TestStores from "../src/test/TestStores.ts"
@@ -50,7 +51,14 @@ const provideJournal = <A, E, R>(
   ) as Effect.Effect<
     A,
     E,
-    Exclude<R, Journal.Journal | RunStore.RunStore | DurableEngineState.DurableEngineState | Scope.Scope>
+    Exclude<
+      R,
+      | Journal.Journal
+      | RunStore.RunStore
+      | DurableEngineState.DurableEngineState
+      | SqlClient.SqlClient
+      | Scope.Scope
+    >
   >
 
 const findCycleFailure = (cause: Cause.Cause<unknown>) => cause.reasons.find(Cause.isFailReason)?.error
@@ -393,35 +401,61 @@ describe("RunDriver cycle detection", () => {
     10_000
   )
 
-  it.effect("terminates on a pre-existing corrupt store cycle instead of hanging", () =>
-    Effect.gen(function*() {
-      const exit = yield* withCrypto(Effect.exit(provideJournal(Effect.gen(function*() {
-        const driver = yield* makeDriver()
-        yield* driver.register(TestFlow, () => Effect.succeed("ok"))
-        const store = yield* RunStore.RunStore
+  it.effect(
+    "terminates on a pre-existing corrupt store cycle instead of hanging",
+    () =>
+      Effect.gen(function*() {
+        const exit = yield* withCrypto(Effect.exit(provideJournal(Effect.gen(function*() {
+          const driver = yield* makeDriver()
+          yield* driver.register(TestFlow, () => Effect.succeed("ok"))
+          const store = yield* RunStore.RunStore
+          const state = yield* DurableEngineState.DurableEngineState
+          const sql = yield* Effect.service(SqlClient.SqlClient)
 
-        // A corrupt store: p -> q -> p, unrelated to the target being executed.
-        yield* store.create(
-          "p",
-          JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {}, parentExecutionId: "q" })
-        )
-        yield* store.create(
-          "q",
-          JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {}, parentExecutionId: "p" })
-        )
+          // A corrupt store: p -> q -> p, unrelated to the target being
+          // executed. `recordRunParent` refuses the edge that closes a cycle,
+          // so the pair only exists when it is written underneath that guard —
+          // a hand edit, a restore from a foreign dump, or a migration that
+          // reinstated edges out of order. The rows go in through raw SQL for
+          // the same reason, and the run rows go in first because the edge
+          // table's revision trigger reads them.
+          yield* store.create(
+            "p",
+            JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {}, parentExecutionId: "q" })
+          )
+          yield* store.create(
+            "q",
+            JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {}, parentExecutionId: "p" })
+          )
+          yield* sql`INSERT INTO flows_run_parents (child_id, parent_id, seq) VALUES ('p', 'q', 1)`.pipe(
+            Effect.orDie
+          )
+          yield* sql`INSERT INTO flows_run_parents (child_id, parent_id, seq) VALUES ('q', 'p', 2)`.pipe(
+            Effect.orDie
+          )
 
-        return yield* driver.execute(TestFlow, {
-          executionId: "unrelated-target",
-          payload: {},
-          discard: true,
-          parent: { executionId: "p" } as FlowRuntime.FlowInstance["Service"]
-        })
-      }))))
+          // The cycle is in the durable edge table the walk actually reads,
+          // not only in the run JSON it ignores. Without these two rows the
+          // case walks an acyclic graph and proves nothing.
+          expect((yield* state.runParents("p")).map((edge) => edge.parentId)).toEqual(["q"])
+          expect((yield* state.runParents("q")).map((edge) => edge.parentId)).toEqual(["p"])
 
-      // No cycle involving "unrelated-target" exists, so the walk terminates
-      // (rather than looping the p <-> q cycle forever) and the run proceeds.
-      expect(Exit.isSuccess(exit)).toBe(true)
-    }))
+          return yield* driver.execute(TestFlow, {
+            executionId: "unrelated-target",
+            payload: {},
+            discard: true,
+            parent: { executionId: "p" } as FlowRuntime.FlowInstance["Service"]
+          })
+        }))))
+
+        // No cycle involving "unrelated-target" exists, so the walk terminates
+        // on the repeated id (rather than looping the p <-> q cycle forever)
+        // and the run proceeds. The case bound is the assertion: a walk that
+        // does not stop on a repeated id never returns and fails here.
+        expect(Exit.isSuccess(exit)).toBe(true)
+      }),
+    10_000
+  )
 
   it.effect(
     "refuses the closing writer, never a legitimate chord, when both race (issue #54)",
