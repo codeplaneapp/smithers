@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { vi } from "vitest"
 import * as JournalRecords from "../src/internal/JournalRecords.ts"
 import * as PlanScheduler from "../src/PlanScheduler.ts"
 import * as Selection from "../src/Selection.ts"
@@ -812,4 +813,76 @@ describe("Selection.layerHeuristic stats", () => {
       )
       expect(verdicts).toEqual([{ nodeId: "engine-tests", verdict: { _tag: "Admit" } }])
     }))
+})
+
+describe("Selection scope matching", () => {
+  for (
+    const [scope, paths, expected] of [
+      ["src/**", ["src/a.ts", "src/nested/b.ts", "beside/a.ts", "x/src/a.ts"], ["src/a.ts", "src/nested/b.ts"]],
+      ["src/*.ts", ["src/a.ts", "src/nested/b.ts", "src/a.tsx"], ["src/a.ts"]],
+      ["src/?.ts", ["src/a.ts", "src/ab.ts", "src//.ts"], ["src/a.ts"]],
+      ["src/a[1]+(x).ts", ["src/a[1]+(x).ts", "src/a1x.ts"], ["src/a[1]+(x).ts"]]
+    ] as const
+  ) {
+    it(`preserves glob and literal semantics for ${scope}`, () => {
+      const snapshot = beliefs(edge({ scope }), edge({ scope }))
+      expect(Selection.proposeReadSet({ beliefs: snapshot, flow: "lint-docs", paths: [...paths, ...paths] }))
+        .toEqual(expected)
+      for (const path of paths) {
+        const matches = (expected as ReadonlyArray<string>).includes(path)
+        expect(Selection.risk({ beliefs: snapshot, changed: [path] }).reasons).toHaveLength(matches ? 2 : 0)
+        const selected = Effect.runSync(
+          Selection.makeHeuristic().select({
+            beliefs: snapshot,
+            changed: [path],
+            sinks: [{ nodeId: "lint-docs", planKey: "lint-key" }],
+            present: ["lint-docs"],
+            policy
+          })
+        )
+        expect(selected[0]!.verdict._tag).toBe(matches ? "Defer" : "Admit")
+      }
+    })
+  }
+
+  for (const operation of ["risk", "select", "proposeReadSet"] as const) {
+    it(`${operation} compiles each distinct eligible scope once per invocation at scale`, () => {
+      const scopes = Array.from({ length: 250 }, (_, index) => `packages/p${index}/src/**`)
+      const snapshot = beliefs(
+        ...scopes.flatMap((scope) => [edge({ scope }), edge({ scope })]),
+        edge({ scope: "future/**", validFromMs: 2_000 })
+      )
+      const paths = Array.from({ length: 500 }, (_, index) => `packages/unrelated${index}/src/index.ts`)
+      const run = () => {
+        if (operation === "risk") {
+          expect(Selection.risk({ beliefs: snapshot, changed: paths })).toEqual({ level: "low", reasons: [] })
+        } else if (operation === "proposeReadSet") {
+          expect(Selection.proposeReadSet({ beliefs: snapshot, flow: "lint-docs", paths })).toEqual([])
+        } else {
+          expect(Effect.runSync(
+            Selection.makeHeuristic().select({
+              beliefs: snapshot,
+              changed: paths,
+              sinks: [{ nodeId: "lint-docs", planKey: "lint-key" }],
+              present: ["lint-docs"],
+              policy
+            })
+          )).toEqual([{ nodeId: "lint-docs", verdict: { _tag: "Admit" } }])
+        }
+      }
+      // Each compilation starts by splitting the glob on **. Counting that
+      // work catches per-path compilation without a machine-dependent timer.
+      const split = vi.spyOn(String.prototype, "split")
+      try {
+        run()
+        expect(split.mock.calls.filter(([separator]) => (separator as unknown) === "**")).toHaveLength(scopes.length)
+        run()
+        expect(split.mock.calls.filter(([separator]) => (separator as unknown) === "**")).toHaveLength(
+          2 * scopes.length
+        )
+      } finally {
+        split.mockRestore()
+      }
+    })
+  }
 })

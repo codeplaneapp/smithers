@@ -26,6 +26,53 @@ const descriptor: FileBoundary = {
   boundaryMode: "hard"
 }
 
+describe("StepBoundary.readSetMatches", () => {
+  it("accepts any measured digest for duplicate paths and ignores incidental reads", () => {
+    const readSnapshot = [
+      { path: "input.txt", digest: "a" },
+      { path: "extra.txt", digest: "extra" },
+      { path: "input.txt", digest: "b" }
+    ]
+    expect(StepBoundary.readSetMatches({
+      descriptor: { ...descriptor, readSet: [readSnapshot[0]!, readSnapshot[2]!, readSnapshot[0]!] },
+      readSnapshot
+    })).toBe(true)
+    for (
+      const readSet of [
+        [{ path: "input.txt", digest: "missing" }],
+        [{ path: "missing.txt", digest: "a" }],
+        [{ path: "INPUT.txt", digest: "a" }]
+      ]
+    ) {
+      expect(StepBoundary.readSetMatches({ descriptor: { ...descriptor, readSet }, readSnapshot })).toBe(false)
+    }
+    expect(StepBoundary.readSetMatches({ descriptor: { ...descriptor, readSet: [] }, readSnapshot })).toBe(true)
+    expect(StepBoundary.readSetMatches({ descriptor, readSnapshot: [] })).toBe(false)
+    expect(StepBoundary.readSetMatches({
+      descriptor: { ...descriptor, readSet: [{ _tag: "Glob", include: ["*.txt"] }] },
+      readSnapshot
+    })).toBe(false)
+  })
+
+  it("validates 5,000 measured files with a linear number of path reads", () => {
+    const reads = Array.from({ length: 5_000 }, (_, index) => ({
+      path: `packages/p${index}/src/index.ts`,
+      digest: "a".repeat(64)
+    }))
+    let pathReads = 0
+    const readSnapshot = reads.map((read) => ({
+      get path() {
+        pathReads++
+        return read.path
+      },
+      digest: read.digest
+    }))
+    expect(StepBoundary.readSetMatches({ descriptor: { ...descriptor, readSet: reads }, readSnapshot })).toBe(true)
+    // Count work instead of elapsed time on a contended test host.
+    expect(pathReads).toBeLessThanOrEqual(3 * reads.length)
+  })
+})
+
 describe("StepBoundary", () => {
   it.effect("captures outputs and re-materializes them on replay", () =>
     Effect.gen(function*() {

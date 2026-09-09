@@ -288,12 +288,12 @@ export const makeNoop = (): Service => ({
 export const layerNoop: Layer.Layer<Selection> = Layer.sync(Selection, makeNoop)
 
 /**
- * Compiles a path glob and tests one path against it: `**` crosses path
+ * Compiles a path glob: `**` crosses path
  * separators, `*` and `?` stay within a segment, everything else is literal.
  * The whole path must match, so `packages/smithers/flows/engine/src/**` selects everything
  * under that directory and nothing beside it.
  */
-const matchesScope = (scope: string, path: string): boolean => {
+const compileScope = (scope: string): RegExp => {
   const expression = scope
     .split("**")
     .map((segment) =>
@@ -303,14 +303,28 @@ const matchesScope = (scope: string, path: string): boolean => {
         .join("[^/]*")
     )
     .join(".*")
-  return new RegExp(`^${expression}$`).test(path)
+  return new RegExp(`^${expression}$`)
 }
 
-const liveEdges = (beliefs: BeliefSnapshot, paths: ReadonlyArray<string>): ReadonlyArray<SuspectedEdge> =>
-  beliefs.edges.filter((edge) =>
+const makeScopeMatcher = () => {
+  const matchers = new Map<string, RegExp>()
+  return (scope: string, path: string): boolean => {
+    let matcher = matchers.get(scope)
+    if (matcher === undefined) {
+      matcher = compileScope(scope)
+      matchers.set(scope, matcher)
+    }
+    return matcher.test(path)
+  }
+}
+
+const liveEdges = (beliefs: BeliefSnapshot, paths: ReadonlyArray<string>): ReadonlyArray<SuspectedEdge> => {
+  const matchesScope = makeScopeMatcher()
+  return beliefs.edges.filter((edge) =>
     edge.validFromMs <= beliefs.pinnedAtMs
     && paths.some((path) => matchesScope(edge.scope, path))
   )
+}
 
 /**
  * The deterministic default heuristics: pure, no IO, no model calls, a
@@ -609,6 +623,7 @@ export const proposeReadSet = (input: {
   const edges = input.beliefs.edges.filter((edge) =>
     edge.validFromMs <= input.beliefs.pinnedAtMs && edge.affects === input.flow
   )
+  const matchesScope = makeScopeMatcher()
   const seen = new Set<string>()
   const selected: Array<string> = []
   for (const path of input.paths) {

@@ -73,11 +73,18 @@ export const exactReads = (descriptor: FileBoundary): ReadonlyArray<FileInput> =
  * @since 0.1.0
  * @category predicates
  */
-export const readSetMatches = (prepared: PreparedBoundary): boolean =>
-  prepared.descriptor.readSet.every((entry) =>
+export const readSetMatches = (prepared: PreparedBoundary): boolean => {
+  const digestsByPath = new Map<string, Set<string>>()
+  for (const measured of prepared.readSnapshot) {
+    const digests = digestsByPath.get(measured.path)
+    if (digests === undefined) digestsByPath.set(measured.path, new Set([measured.digest]))
+    else digests.add(measured.digest)
+  }
+  return prepared.descriptor.readSet.every((entry) =>
     !FileSet.isGlob(entry) &&
-    prepared.readSnapshot.some((measured) => measured.path === entry.path && measured.digest === entry.digest)
+    digestsByPath.get(entry.path)?.has(entry.digest) === true
   )
+}
 
 /**
  * The paths a step wrote that its `expected` write set did not name, together
