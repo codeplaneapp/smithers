@@ -22,6 +22,7 @@
  * @since 0.1.0
  */
 import * as JournalEvent from "@smthrs/journal/JournalEvent"
+import * as HashSet from "effect/HashSet"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import {
@@ -163,9 +164,33 @@ const insertBySeq = <Item extends { readonly seq: JournalEvent.Seq }>(
   items: ReadonlyArray<Item>,
   item: Item
 ): Array<Item> => {
-  const index = items.findIndex((existing) => existing.seq > item.seq)
-  return index === -1 ? [...items, item] : [...items.slice(0, index), item, ...items.slice(index)]
+  const last = items[items.length - 1]
+  if (last === undefined || last.seq <= item.seq) return [...items, item]
+  let low = 0
+  let high = items.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (items[middle]!.seq <= item.seq) low = middle + 1
+    else high = middle
+  }
+  const result = items.slice()
+  result.splice(low, 0, item)
+  return result
 }
+
+// Cache by the immutable command array so cursor-only updates share the index.
+// Persistent sets let independent continuations share history without changing
+// an older state's deduplication. Restored states build their index on first use.
+const commandIds = new WeakMap<ReadonlyArray<AppliedCommand>, HashSet.HashSet<CommandId>>()
+const indexCommands = (commands: ReadonlyArray<AppliedCommand>): HashSet.HashSet<CommandId> => {
+  const cached = commandIds.get(commands)
+  if (cached !== undefined) return cached
+  const index = HashSet.fromIterable(commands.map((command) => command.commandId))
+  commandIds.set(commands, index)
+  return index
+}
+
+const decodeCommand = Schema.decodeUnknownOption(CommandEventPayload)
 
 /**
  * Folds one journal entry into a branch projection.
@@ -183,10 +208,11 @@ export const apply = (state: State, entry: JournalEvent.Entry): State => {
   if (entry.runId !== branchRunId(state.branchId) || entry.seq === state.seq) return state
   const advanced = entry.seq < state.seq ? state : { ...state, seq: entry.seq }
   if (entry.eventType !== CommandEvent) return advanced
-  const decoded = Schema.decodeUnknownOption(CommandEventPayload)(entry.payload)
+  const decoded = decodeCommand(entry.payload)
   if (Option.isNone(decoded)) return advanced
   const commandSubmission = decoded.value
-  if (state.commands.some((command) => command.commandId === commandSubmission.commandId)) return advanced
+  const ids = indexCommands(state.commands)
+  if (HashSet.has(ids, commandSubmission.commandId)) return advanced
   const command: AppliedCommand = { ...commandSubmission, seq: entry.seq }
   const messages = commandSubmission.name === SayCommand
     ? insertBySeq(state.messages, {
@@ -212,7 +238,9 @@ export const apply = (state: State, entry: JournalEvent.Entry): State => {
       return [...state.fields.filter((field) => field.target !== commandSubmission.target), winner]
         .sort((left, right) => left.target < right.target ? -1 : 1)
     })()
-  return { ...advanced, messages, commands: insertBySeq(state.commands, command), fields }
+  const commands = insertBySeq(state.commands, command)
+  commandIds.set(commands, HashSet.add(ids, command.commandId))
+  return { ...advanced, messages, commands, fields }
 }
 
 /**
@@ -222,7 +250,48 @@ export const apply = (state: State, entry: JournalEvent.Entry): State => {
  * @since 0.1.0
  */
 export const project = (branchId: BranchId, entries: Iterable<JournalEvent.Entry>): State => {
-  let state = empty(branchId)
-  for (const entry of entries) state = apply(state, entry)
-  return state
+  const runId = branchRunId(branchId)
+  let seq = -1
+  const ids = new Set<CommandId>()
+  const commands: Array<AppliedCommand> = []
+  const messages: Array<Message> = []
+  const fields = new Map<string, Field>()
+  for (const entry of entries) {
+    if (entry.runId !== runId || entry.seq === seq) continue
+    seq = Math.max(seq, entry.seq)
+    if (entry.eventType !== CommandEvent) continue
+    const decoded = decodeCommand(entry.payload)
+    if (Option.isNone(decoded)) continue
+    const submission = decoded.value
+    if (ids.has(submission.commandId)) continue
+    ids.add(submission.commandId)
+    commands.push({ ...submission, seq: entry.seq })
+    if (submission.name === SayCommand) {
+      messages.push({
+        seq: entry.seq,
+        commandId: submission.commandId,
+        participantId: submission.participantId,
+        text: submission.args
+      })
+    }
+    if (submission.target !== "") {
+      const candidate: Field = {
+        target: submission.target,
+        value: submission.args,
+        seq: entry.seq,
+        participantId: submission.participantId
+      }
+      fields.set(submission.target, resolveField(fields.get(submission.target), candidate))
+    }
+  }
+  commands.sort((left, right) => left.seq - right.seq)
+  messages.sort((left, right) => left.seq - right.seq)
+  commandIds.set(commands, HashSet.fromIterable(ids))
+  return {
+    branchId,
+    seq,
+    commands,
+    messages,
+    fields: Array.from(fields.values()).sort((left, right) => left.target < right.target ? -1 : 1)
+  }
 }

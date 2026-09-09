@@ -1,4 +1,5 @@
 import { JournalEvent } from "@smthrs/journal"
+import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import * as BranchProjection from "../src/BranchProjection.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -57,6 +58,83 @@ const field = (fields: { readonly seq: number; readonly participantId: string })
 })
 
 describe("BranchProjection", () => {
+  it("rebuilds 10,000 ordered chat commands within 500 ms", () => {
+    const entries = Array.from(
+      { length: 10_000 },
+      (_, seq) => command({ seq, commandId: `c-${seq}`, args: `message ${seq}` })
+    )
+    // Warm schema decoding before measuring only the projection rebuild.
+    BranchProjection.project(branchId, entries.slice(0, 100))
+    const started = performance.now()
+    const state = BranchProjection.project(branchId, entries)
+    const elapsed = performance.now() - started
+
+    expect(state.seq).toBe(9_999)
+    expect(state.commands).toHaveLength(10_000)
+    expect(state.messages).toHaveLength(10_000)
+    expect(state.messages[9_999]?.text).toBe("message 9999")
+    expect(elapsed).toBeLessThan(500)
+  })
+
+  it("matches incremental folding for shuffled, repeated, and uninterpretable entries", () => {
+    const entries = Array.from({ length: 64 }, (_, seq) =>
+      command({
+        seq,
+        commandId: `c-${seq}`,
+        participantId: seq % 2 === 0 ? "alice" : "bob",
+        name: seq % 3 === 0 ? "branch.edit" : BranchProtocol.SayCommand,
+        args: `value ${seq}`,
+        target: seq % 3 === 0 ? `field-${seq % 5}` : ""
+      }))
+    const expected = BranchProjection.project(branchId, entries)
+    // Multiplication by an odd number permutes all 64 indices.
+    const shuffled = entries.map((_, index) => entries[(index * 37) % entries.length]!)
+    const delivered = [...shuffled, ...shuffled].flatMap((item) => [item, item])
+    expect(BranchProjection.project(branchId, delivered)).toEqual(expected)
+    expect(delivered.reduce(BranchProjection.apply, BranchProjection.empty(branchId))).toEqual(expected)
+
+    const mixed = [
+      ...delivered,
+      entry({ seq: 64, payload: null }),
+      entry({ seq: 65, eventType: "engine/step", payload: null }),
+      entry({ seq: 90, runId: BranchProtocol.branchRunId("foreign" as BranchProtocol.BranchId), payload: null }),
+      command({ seq: 66, commandId: "c-0" }),
+      command({ seq: 66, commandId: "cursor-tip" })
+    ]
+    const projected = BranchProjection.project(branchId, mixed)
+    expect(projected).toEqual(mixed.reduce(BranchProjection.apply, BranchProjection.empty(branchId)))
+    expect(projected).toEqual({ ...expected, seq: 66 })
+  })
+
+  it("keeps prior states and independent continuations immutable, including restored states", () => {
+    const first = command({ seq: 3, commandId: "first", args: "original", target: "title" })
+    const last = command({ seq: 9, commandId: "last", args: "newest", target: "title" })
+    const projected = BranchProjection.project(branchId, [first, last])
+    const restored = Schema.decodeUnknownSync(BranchProjection.State)(JSON.parse(JSON.stringify(projected)))
+
+    for (const base of [projected, restored]) {
+      Object.freeze(base.commands)
+      Object.freeze(base.messages)
+      Object.freeze(base.fields)
+      Object.freeze(base)
+      const snapshot = JSON.stringify(base)
+      const early = command({ seq: 1, commandId: "early", target: "title", args: "oldest" })
+      const middle = command({ seq: 6, commandId: "middle", args: "middle" })
+      const append = command({ seq: 10, commandId: "append", name: "goal" })
+      const left = BranchProjection.apply(base, early)
+      const right = BranchProjection.apply(base, middle)
+      const advanced = BranchProjection.apply(base, append)
+
+      expect(left).toEqual(BranchProjection.project(branchId, [early, first, last]))
+      expect(right).toEqual(BranchProjection.project(branchId, [first, middle, last]))
+      expect(advanced).toEqual(BranchProjection.project(branchId, [first, last, append]))
+      expect(BranchProjection.apply(right, early)).toEqual(BranchProjection.apply(left, middle))
+      expect(BranchProjection.apply(advanced, command({ seq: 11, commandId: "first" })))
+        .toEqual({ ...advanced, seq: 11 })
+      expect(JSON.stringify(base)).toBe(snapshot)
+    }
+  })
+
   it("folds commands into an ordered chat projection", () => {
     const state = BranchProjection.project(branchId, [
       command({ seq: 0, commandId: "c1", args: "hello" }),
