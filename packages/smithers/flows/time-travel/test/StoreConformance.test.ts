@@ -3,10 +3,12 @@ import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as EngineMigrations from "@smthrs/engine-store/Migrations"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { forkCreatedEventType, type LineageEdge } from "../src/Frame.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
+import { TimeTravelError } from "../src/TimeTravelError.ts"
 import type * as TimeTravelStore from "../src/TimeTravelStore.ts"
 
 const owner = { hostId: "owner-host", pid: 10, nonce: "owner-nonce" } as const
@@ -426,9 +428,16 @@ describe("TimeTravelStore conformance", () => {
           const invalid = yield* Effect.flip(
             store.updateAudit("audit", { id: "moved" } as never)
           )
+          const marker = "SECRET-HANDLER-RECEIPT-DATA"
           const invalidStatus = yield* Effect.flip(
-            store.updateAudit("audit", { status: "bogus" } as never)
+            store.updateAudit("audit", {
+              status: "bogus",
+              detail: { compensation: { handlerReceipts: [{ id: "receipt", data: { token: marker } }] } }
+            } as never)
           )
+          expect(invalidStatus.message).not.toContain(marker)
+          expect(JSON.stringify(Schema.encodeSync(TimeTravelError)(invalidStatus))).not.toContain(marker)
+          expect(invalidStatus.cause).toBeDefined()
           const updated = yield* store.pendingAudits()
           return {
             first: firstDetail,
@@ -455,7 +464,7 @@ describe("TimeTravelStore conformance", () => {
       expect(memory.invalid).toEqual({ code: "invalid", message: "audit patch contains unknown key id" })
       expect(memory.invalidStatus).toMatchObject({
         code: "invalid",
-        message: "invalid audit patch {\"status\":\"bogus\"}"
+        message: "invalid audit patch: status \"bogus\" is not one of in_progress|completed|failed"
       })
       expect(memory.updated).toMatchObject({
         id: "audit",

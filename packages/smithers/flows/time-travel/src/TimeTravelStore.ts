@@ -167,7 +167,13 @@ export const validateAuditPatch = (patch: AuditPatch): Effect.Effect<AuditPatch,
     return Effect.fail(error("invalid", `audit patch contains unknown key ${unknown}`))
   }
   return Schema.decodeUnknownEffect(AuditPatch)(patch).pipe(
-    Effect.mapError((cause) => error("invalid", `invalid audit patch ${JSON.stringify(patch)}`, cause))
+    Effect.mapError((cause) =>
+      error(
+        "invalid",
+        `invalid audit patch: status ${JSON.stringify(patch.status)} is not one of in_progress|completed|failed`,
+        cause
+      )
+    )
   )
 }
 /**

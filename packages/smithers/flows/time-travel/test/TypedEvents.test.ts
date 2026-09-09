@@ -8,6 +8,7 @@ import * as Replay from "../src/internal/Replay.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
 import { ReadOnlyTimeTravel, TimeTravel } from "../src/TimeTravel.ts"
+import { TimeTravelError } from "../src/TimeTravelError.ts"
 
 const database = Layer.provideMerge(EngineMigrations.layer, TestDatabase.layer)
 const stack = SqlJournal.layer({ capacity: 16, overflow: "reject" }).pipe(
@@ -103,6 +104,59 @@ describe("typed history admission", () => {
       )
       expect(foreign.cause).toMatchObject({ code: "foreign" })
     }).pipe(Effect.provide(stack)))
+
+  for (
+    const engineEvents of [undefined, { ...scope, runId: JournalEvent.RunId.make("foreign") }, {
+      ...scope,
+      lineageId: JournalEvent.LineageId.make("foreign")
+    }]
+  ) {
+    it.effect(`keeps payloads out of scope refusals for ${JSON.stringify(engineEvents)}`, () =>
+      Effect.gen(function*() {
+        const payloadMarker = "SECRET-V2-STEP-RESULT-PAYLOAD"
+        const metaMarker = "SECRET-JOURNAL-METADATA"
+        const journal = yield* Journal.Journal
+        yield* journal.emitDurableUnfenced({
+          ...EngineEvent.attempt(
+            Schema.decodeUnknownSync(EngineEvent.AttemptPayload)({
+              version: 2,
+              lineage,
+              executionId: runId,
+              stepKeyDigest: "step",
+              attempt: 1,
+              lifecycle: {
+                state: "succeeded",
+                startedAtMs: 5,
+                finishedAtMs: 6,
+                result: { _tag: "Success", value: { marker: payloadMarker } }
+              }
+            }),
+            sourceId,
+            JournalEvent.SourceSeq.make(0)
+          ),
+          meta: { lineageId, marker: metaMarker }
+        })
+        const entry = (yield* journal.entries({ runId, limit: 1 })).entries[0]!
+        expect(JSON.stringify(entry.payload)).toContain(payloadMarker)
+        expect(JSON.stringify(entry.meta)).toContain(metaMarker)
+        const failure = yield* Effect.gen(function*() {
+          const reader = yield* ReadOnlyTimeTravel
+          return yield* Effect.flip(reader.replay({ runId, frame }, projection, { engineEvents }))
+        }).pipe(Effect.provide(TimeTravel.readOnly))
+
+        expect(failure.code).toBe("invalid")
+        const encoded = JSON.stringify(Schema.encodeSync(TimeTravelError)(failure))
+        expect(encoded).not.toContain(payloadMarker)
+        expect(encoded).not.toContain(metaMarker)
+        expect(failure.cause).toEqual({
+          runId: entry.runId,
+          seq: entry.seq,
+          eventId: entry.eventId,
+          eventType: entry.eventType,
+          expected: { runId, lineageId }
+        })
+      }).pipe(Effect.provide(stack)))
+  }
 
   it.effect("fails before folding malformed or unsupported known v2 events", () =>
     Effect.gen(function*() {

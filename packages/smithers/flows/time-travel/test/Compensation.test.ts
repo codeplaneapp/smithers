@@ -5,10 +5,11 @@ import * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import type { EffectRecord } from "../src/EffectBoundary.ts"
 import * as Compensation from "../src/internal/Compensation.ts"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
-import { error } from "../src/TimeTravelError.ts"
+import { error, TimeTravelError } from "../src/TimeTravelError.ts"
 
 /**
  * Rewind preflight decides, before a single effect is undone, whether the
@@ -174,8 +175,17 @@ describe("Compensation.compensate", () => {
 
   it.effect("refuses to execute a plan that carries any blocking assessment", () =>
     Effect.gen(function*() {
+      const marker = "SECRET-RAW-EFFECT-PAYLOAD"
       const plan = yield* (
-        Compensation.assess([record({ id: "seal", kind: "read", tier: "sealed", seq: 1 })]).pipe(
+        Compensation.assess([record({
+          id: "seal",
+          kind: "read",
+          tier: "sealed",
+          seq: 1,
+          input: { marker },
+          output: { marker },
+          residue: marker
+        })]).pipe(
           Effect.provide(cache()),
           Effect.provide(registryOf([]))
         )
@@ -188,6 +198,15 @@ describe("Compensation.compensate", () => {
         code: "irreversible",
         message: "rewind is blocked by 1 crossed effect(s)"
       })
+      expect(JSON.stringify(Schema.encodeSync(TimeTravelError)(failure))).not.toContain(marker)
+      expect(failure.cause).toEqual([{
+        id: "seal",
+        kind: "read",
+        tier: "sealed",
+        seq: 1,
+        classification: "blocking",
+        reason: "The sealed effect has no content-addressed cache key."
+      }])
     }))
 
   it.effect("reverts in reverse journal order", () =>

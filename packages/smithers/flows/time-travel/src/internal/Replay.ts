@@ -147,7 +147,13 @@ export const rederive = <S>(
             const consumer = options.engineEvents
             if (consumer === undefined || consumer.runId !== options.runId || consumer.lineageId !== frame.lineageId) {
               return yield* Effect.fail(
-                error("invalid", "versioned engine replay requires the matching lineage and source contract", entry)
+                error("invalid", "versioned engine replay requires the matching lineage and source contract", {
+                  runId: entry.runId,
+                  seq: entry.seq,
+                  eventId: entry.eventId,
+                  eventType: entry.eventType,
+                  expected: { runId: options.runId, lineageId: frame.lineageId }
+                })
               )
             }
             yield* EngineEvent.decodeEntry(entry, consumer).pipe(

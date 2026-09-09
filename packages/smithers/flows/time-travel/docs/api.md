@@ -322,9 +322,12 @@ const forkFrameMessage: (parentRunId: string, frame: Frame) => string
 ```
 
 `validateAuditPatch` refuses a patch carrying a key `AuditPatch` does not admit,
-because the offending caller is an untyped one. `forkFrameMessage` is the one
-refusal message both stores raise for a fork whose frame addresses no record,
-so a caller that branches on it gets the same answer from either.
+because the offending caller is an untyped one. An invalid status reports
+`invalid audit patch: status <json> is not one of in_progress|completed|failed`.
+The message omits the patch's detail and handler receipts.
+`forkFrameMessage` is the one refusal message both stores raise for a fork whose
+frame addresses no record, so a caller that branches on it gets the same answer
+from either.
 
 ### Service
 
@@ -484,7 +487,9 @@ so a caller's branch stays exhaustive.
 
 An error's `cause` is encoded with the error, so the package never attaches a
 whole effect record or a whole parse issue to one: a blocking assessment travels
-as its identity and classification, never as the effect's `input` or `output`.
+as its identity, classification, and reason, never as the effect's `input`,
+`output`, or residue. Replay scope refusals carry only `runId`, `seq`, `eventId`,
+`eventType`, and the expected run and lineage, without journal payload or metadata.
 
 ## Limits
 

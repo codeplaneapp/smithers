@@ -31,6 +31,21 @@ export const Assessment = Schema.Struct({ ...HandlerAssessment.fields, effect: E
 export type Assessment = typeof Assessment.Type
 
 /**
+ * Identity and verdict for an encoded refusal, without effect input or output.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const blockingSummary = (assessment: Assessment) => ({
+  id: assessment.effect.id,
+  kind: assessment.effect.kind,
+  tier: assessment.effect.tier,
+  seq: assessment.effect.seq,
+  classification: assessment.classification,
+  reason: assessment.reason
+})
+
+/**
  * Immutable compensation plan. All cache reads and handler resolution have
  * completed before this value is produced.
  *
@@ -212,7 +227,7 @@ const assertExecutable = (plan: Plan): Effect.Effect<void, TimeTravelError> => {
       error(
         "irreversible",
         `rewind is blocked by ${blocking.length} crossed effect(s)`,
-        blocking
+        blocking.map(blockingSummary)
       )
     )
 }
