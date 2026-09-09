@@ -26,7 +26,7 @@
     "CONTRIBUTING.md"
   ],
   "scripts": {
-    "start": "bun ./src/cli/main.ts",
+    "start": "node ./bin/smithers-review.mjs",
     "test": "bun test tests",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",

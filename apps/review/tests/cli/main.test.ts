@@ -106,6 +106,41 @@ describe("main (CLI entrypoint, subprocess)", () => {
   });
 });
 
+/**
+ * `pnpm start` has to start something.
+ *
+ * `src/cli/main.ts` exports `runReviewCli` and calls nothing at its top level,
+ * on purpose: that is what lets the rest of this suite import it without
+ * running a review. The invocation lives in `bin/smithers-review.mjs`. A start
+ * script naming the module instead of the bin therefore evaluates a few helper
+ * declarations and exits 0 having parsed no arguments, which reads as a review
+ * that found nothing.
+ */
+describe("the start script", () => {
+  const manifest = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8")) as {
+    bin: Record<string, string>;
+    scripts: Record<string, string>;
+  };
+
+  test("start runs the bin under the runtime its shebang names", () => {
+    // Both entry points are pinned to one string so they cannot drift apart:
+    // whatever an install puts on the PATH is what a workspace script runs.
+    expect(manifest.scripts.start).toBe(`node ${manifest.bin["smithers-review"]}`);
+  });
+
+  test("the start command parses arguments instead of exiting silently", () => {
+    const [command, ...args] = manifest.scripts.start.split(" ");
+    const result = Bun.spawnSync([command!, ...args, "--help"], {
+      cwd: PKG_ROOT,
+      env: process.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain("Usage: smithers-review");
+  }, 60_000);
+});
+
 describe("parseQuizColumn", () => {
   test("non-string values return null", () => {
     expect(parseQuizColumn(null)).toBeNull();
