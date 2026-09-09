@@ -46,8 +46,8 @@ export interface Backoff {
  * @category models
  * @since 0.1.0
  */
-export interface Options<Attempts extends number = number> {
-  readonly attempts: Attempts
+export interface Options {
+  readonly attempts: number
   readonly backoff?: Backoff | undefined
   readonly nonRetryable?: ReadonlyArray<string> | undefined
 }
@@ -89,7 +89,7 @@ const tags = (nonRetryable: ReadonlyArray<string>): ReadonlyArray<string> => [..
 // Own fields only: a decorator is applied later than `make`, and a retried
 // effect reads its ladder later than `retryEffect`, so neither may read the
 // caller's option object or its backoff record again.
-const copied = <const Attempts extends number>(options: Options<Attempts>): Options<Attempts> => ({
+const copied = (options: Options): Options => ({
   attempts: options.attempts,
   backoff: options.backoff === undefined ? undefined : {
     initialMs: options.backoff.initialMs,
@@ -120,10 +120,7 @@ const label = (options: Options): string => {
   return parts.join(", ")
 }
 
-const declaration = <const Attempts extends number>(
-  inner: Flow.Any,
-  options: Options<Attempts>
-): Flow.Any => {
+const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
   validate(options)
   const details = Compose.details(inner)
   return Flow.make({
@@ -151,7 +148,7 @@ const declaration = <const Attempts extends number>(
  * @category constructors
  * @since 0.1.0
  */
-export const make = <const Attempts extends number>(options: Options<Attempts>): Pattern.Decorator => {
+export const make = (options: Options): Pattern.Decorator => {
   const snapshot = copied(options)
   return (inner) => declaration(inner, snapshot)
 }
@@ -162,10 +159,7 @@ export const make = <const Attempts extends number>(options: Options<Attempts>):
  * @category combinators
  * @since 0.1.0
  */
-export const withRetry = <const Attempts extends number>(
-  inner: Flow.Any,
-  options: Options<Attempts>
-): Flow.Any => Pattern.decorate(inner, make(options))
+export const withRetry = (inner: Flow.Any, options: Options): Flow.Any => Pattern.decorate(inner, make(options))
 
 const ladder = (backoff: Backoff): Schedule.Schedule<Duration.Duration> =>
   Schedule.modifyDelay(

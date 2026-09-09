@@ -6,7 +6,8 @@ import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
-import { expect } from "vitest"
+import { expect, expectTypeOf } from "vitest"
+import type * as Pattern from "../src/Pattern.ts"
 import { PatternError } from "../src/PatternError.ts"
 import * as WithRetry from "../src/WithRetry.ts"
 
@@ -287,4 +288,12 @@ describe("WithRetry", () => {
       expect(value).toBe("ok")
       expect(attempts).toBe(2)
     }))
+
+  it("declares the retry surface without an attempt-count type parameter", () => {
+    // An attempt literal cannot reach a caller: every constructor erases it to
+    // `Pattern.Decorator` or `Flow.Any`. These identities fail to compile if a
+    // type parameter is threaded back through the public signatures.
+    expectTypeOf(WithRetry.make).toEqualTypeOf<(options: WithRetry.Options) => Pattern.Decorator>()
+    expectTypeOf(WithRetry.withRetry).toEqualTypeOf<(inner: Flow.Any, options: WithRetry.Options) => Flow.Any>()
+  })
 })
