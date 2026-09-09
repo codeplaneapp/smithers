@@ -54,6 +54,7 @@
     "@types/node": "26.4.1",
     "alchemy": "2.0.0-beta.76",
     "bun-types": "^1.4.0",
+    "happy-dom": "^20.13.2",
     "typescript": "~5.9.3",
     "yaml": "^2.9.0"
   }

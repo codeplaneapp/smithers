@@ -21,6 +21,14 @@ export const walkthroughScript = `
   function storedTheme() {
     try { var t = localStorage.getItem(THEME_KEY); return THEMES.indexOf(t) >= 0 ? t : "auto"; } catch (_) { return "auto"; }
   }
+  /* The applied theme, read back from the page. The hosted copy is served
+     under "sandbox allow-scripts", so it runs on an opaque origin where
+     storedTheme() answers "auto" forever; cycling off it would never reach
+     dark. The document always knows what applyTheme last set. */
+  function activeTheme() {
+    var applied = root.getAttribute("data-theme");
+    return THEMES.indexOf(applied) >= 0 ? applied : "auto";
+  }
   function applyTheme(theme) {
     if (theme === "auto") root.removeAttribute("data-theme");
     else root.setAttribute("data-theme", theme);
@@ -33,7 +41,7 @@ export const walkthroughScript = `
   }
   applyTheme(storedTheme());
   if (themeBtn) themeBtn.addEventListener("click", function () {
-    var next = THEMES[(THEMES.indexOf(storedTheme()) + 1) % THEMES.length];
+    var next = THEMES[(THEMES.indexOf(activeTheme()) + 1) % THEMES.length];
     try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
     applyTheme(next);
   });
