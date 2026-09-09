@@ -79,7 +79,7 @@ const storeError = (operation: string, sourceId: string, cause: unknown): Integr
  * A store over the control database's `smithers_integration_cursors` table, so
  * a polling source resumes where it stopped after a restart.
  *
- * Requires the migration in `core/migrations` to have run.
+ * Requires the migration in `core/Migrations` to have run.
  *
  * @category constructors
  * @since 1.0.0

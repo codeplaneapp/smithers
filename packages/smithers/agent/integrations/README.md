@@ -31,7 +31,8 @@ import { Core, GitHub, Linear, Telegram } from "@smthrs/integrations"
 import * as GitHub from "@smthrs/integrations/github"
 ```
 
-`./internal/*` is null-mapped in the export map and carries no promise.
+The export map is the allowlist. A source module it does not name carries
+no promise, and `./internal/*` stays null-mapped.
 
 ## The shortest real example
 

@@ -2,8 +2,7 @@
 
 ## [1.0.0-rc.0] - 2026-09-01
 
-The package is private at this version. `package.json` `files` has always
-listed a changelog; this is it.
+The first public release candidate. Everything below is the surface it ships.
 
 ### Added
 
@@ -91,12 +90,14 @@ listed a changelog; this is it.
 ### Fixed
 
 - Fixed the CommonJS build of the migration set.
-  `core/migrations/0001_integration_cursors` now exports `integrationCursors`
-  as a named binding and `core/migrations/index` imports it by name, because
+  `src/core/IntegrationCursorMigration.ts` exports `integrationCursors` as a
+  named binding and `src/core/Migrations.ts` imports it by name, because
   esbuild's Node interop for a default import of a sibling module resolved to
   the whole exports object instead of the Effect, so `Core.Migrations.set` in
   `dist/cjs` held a value with no `pipe` and the migrator failed for every
-  `require` consumer.
+  `require` consumer. Neither module is an export map entry: `Core.Migrations`
+  is the only way in, and `./core/migrations/0001_integration_cursors` stays
+  denied for anyone who imported the schema installation directly.
 - Fixed the typed-failure channels that died as defects instead: a missing or
   unparseable listener registry, an ownership-state write, a Linear priority
   outside the scale, a caller-supplied webhook verifier that throws, a request

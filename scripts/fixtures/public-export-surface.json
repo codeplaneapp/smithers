@@ -182,7 +182,7 @@
     {
       "name": "@smthrs/integrations",
       "subpath": "./core/migrations/0001_integration_cursors",
-      "reason": "Schema-install implementation moved under the already blocked internal directory; Core.Migrations remains public."
+      "reason": "Schema-install implementation lives at src/core/IntegrationCursorMigration.ts, which the export map does not name; Core.Migrations remains public."
     },
     {
       "name": "@smthrs/build-cli",

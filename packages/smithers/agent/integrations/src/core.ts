@@ -50,7 +50,7 @@ export * as JsonPath from "./core/JsonPath.ts"
  * @category migrations
  * @since 1.0.0
  */
-export * as Migrations from "./core/migrations/index.ts"
+export * as Migrations from "./core/Migrations.ts"
 
 /**
  * @category constructors

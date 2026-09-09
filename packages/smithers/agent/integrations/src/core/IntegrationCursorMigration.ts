@@ -5,6 +5,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 /**
  * Creates the `smithers_integration_cursors` table.
  *
+ * The manifest is the allowlist, so this module stays out of `package.json`
+ * `exports` and out of `core.ts`: consumers reach the migration through
+ * `Core.Migrations.set`, never by importing the schema installation directly.
+ *
  * Exported by name, never as a default: `scripts/build.mjs` converts every
  * module to CommonJS with esbuild under `"type": "module"`, and esbuild reads a
  * default import of a sibling as the whole interop wrapper rather than the

@@ -222,13 +222,18 @@ process.stdout.write(JSON.stringify(output));
 
   it("keeps the migrated integration schema implementation outside public paths", () => {
     const entry = current.get("@smthrs/integrations")
-    const parent = join(repoRoot, entry.dir, "src/core/migrations/index.ts")
+    const parent = join(repoRoot, entry.dir, "src/core/Migrations.ts")
     const source = readFileSync(parent, "utf8")
-    assert.match(source, /\.\.\/\.\.\/internal\/IntegrationCursorMigration\.ts/)
+    assert.match(source, /\.\/IntegrationCursorMigration\.ts/)
     assert.match(source, /"0001_integration_cursors": integrationCursors/)
     for (const map of [entry.manifest.exports, entry.manifest.publishConfig.exports]) {
       assert.equal(exportTarget(map, "./core/migrations/0001_integration_cursors"), null)
+      assert.equal(exportTarget(map, "./core/migrations/index"), null)
       assert.equal(exportTarget(map, "./internal/IntegrationCursorMigration"), null)
     }
+    // The implementation left `src/internal/`, so the manifest allowlist, not
+    // a blocked directory, is what keeps its new path off the public surface.
+    assert.equal(exportTarget(entry.manifest.exports, "./core/IntegrationCursorMigration"), undefined)
+    assert.equal(exportTarget(entry.manifest.publishConfig.exports, "./core/IntegrationCursorMigration"), undefined)
   })
 })

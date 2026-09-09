@@ -2,12 +2,13 @@ import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { Effect, Layer } from "effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { CursorStore, layerMemory, layerSql } from "../src/core/CursorStore.ts"
-import * as Migrations from "../src/core/migrations/index.ts"
+import * as Migrations from "../src/core/Migrations.ts"
 
 const sqlLayer = Layer.provideMerge(layerSql, Layer.provideMerge(Migrations.layer, TestDatabase.layer))
 
@@ -66,32 +67,40 @@ contract("CursorStore (SQLite)", sqlLayer as Layer.Layer<CursorStore, never, nev
 // the same memoized service over the same open connection and would pass even
 // if nothing were ever written to the file.
 describe("CursorStore (SQLite) durability", () => {
-  const directory = mkdtempSync(join(tmpdir(), "integrations-cursor-"))
-  const filename = join(directory, "cursors.db")
+  const directories: Array<string> = []
 
   afterAll(() => {
-    rmSync(directory, { recursive: true, force: true })
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true })
   })
 
+  /** A database file no other case writes, so each case seeds its own state. */
+  const database = () => {
+    const directory = mkdtempSync(join(tmpdir(), "integrations-cursor-"))
+    directories.push(directory)
+    return join(directory, "cursors.db")
+  }
+
   /** One process's whole stack: its own connection, its own CursorStore. */
-  const process = <A>(effect: Effect.Effect<A, unknown, CursorStore>): Promise<A> =>
-    Effect.runPromise(
-      effect.pipe(
-        Effect.provide(
-          Layer.provideMerge(
-            layerSql,
+  const open =
+    (filename: string) => <A>(effect: Effect.Effect<A, unknown, CursorStore | SqlClient.SqlClient>): Promise<A> =>
+      Effect.runPromise(
+        effect.pipe(
+          Effect.provide(
             Layer.provideMerge(
-              Migrations.layer,
-              Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))
+              layerSql,
+              Layer.provideMerge(
+                Migrations.layer,
+                Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))
+              )
             )
-          )
-        ),
-        Effect.scoped,
-        Effect.orDie
-      ) as Effect.Effect<A>
-    )
+          ),
+          Effect.scoped,
+          Effect.orDie
+        ) as Effect.Effect<A>
+      )
 
   it("keeps the cursor across a second store opened on the same file", async () => {
+    const process = open(database())
     await process(Effect.flatMap(CursorStore, (store) => store.set("telegram", "99")))
     // A second stack over the same file is what a restarted process sees.
     const cursor = await process(Effect.flatMap(CursorStore, (store) => store.get("telegram")))
@@ -99,8 +108,20 @@ describe("CursorStore (SQLite) durability", () => {
   })
 
   it("re-runs the migration against the existing file without losing the row", async () => {
-    const cursor = await process(Effect.flatMap(CursorStore, (store) => store.get("telegram")))
+    // Seeded here rather than inherited from the case above, so running this
+    // case alone still exercises a file the migration has already installed.
+    const process = open(database())
+    await process(Effect.flatMap(CursorStore, (store) => store.set("telegram", "99")))
+    const [cursor, applied] = await process(Effect.gen(function*() {
+      const store = yield* CursorStore
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<{ readonly name: string }>`SELECT name FROM flows_migrations`
+      return [yield* store.get("telegram"), rows.map((row) => row.name)] as const
+    }))
     expect(cursor).toBe("99")
+    // The second open re-ran the set against an installed file: the migration
+    // is recorded once, not applied again.
+    expect(applied.filter((name) => name.includes("integration_cursors"))).toHaveLength(1)
   })
 })
 
