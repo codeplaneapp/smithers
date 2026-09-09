@@ -10,8 +10,9 @@ else. Three builders exist for the cases it does not cover: existing
 OpenTelemetry instrumentation you must feed, a vendor exporter that is not
 OTLP/HTTP JSON, and a provider a framework hands you already constructed.
 
-All three attach the same validated `Resource`, so `service.name` means the
-same thing whichever one you pick.
+All three validate `Resource.Configuration`. `NodeOtel` and `BrowserOtel`
+construct providers with that resource. `Otel` supplies it to provider factories
+and metrics; already-created providers retain their own resource.
 
 ## Node: build the SDK for me
 
@@ -73,23 +74,58 @@ processors for one signal.
 If all you need in a browser is OTLP delivery, use `Otlp.layerFetch` instead.
 It is smaller, needs no SDK, and is browser-safe by construction.
 
-## Bridge providers you already hold
+## Bridge providers you control
 
 `Otel.layerOtel` allocates no exporter at all. It takes an OpenTelemetry
-`TracerProvider`, `LoggerProvider`, and metric readers you already have, and
-bridges Effect's tracer, logger, and metrics onto them:
+`TracerProvider`, `LoggerProvider`, and metric readers, and bridges Effect's
+tracer, logger, and metrics onto them. Provider fields also accept synchronous
+factories. Each factory runs during layer acquisition, after resource validation,
+and receives the same resource as the metric producer. Pass it to the SDK
+constructor to export all signals with the configured service identity:
 
 ```ts
+import { LoggerProvider } from "@opentelemetry/sdk-logs"
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base"
 import * as Otel from "@smthrs/observability/Otel"
+import * as Effect from "effect/Effect"
 
+let tracerProvider: BasicTracerProvider | undefined
+let loggerProvider: LoggerProvider | undefined
 const telemetry = Otel.layerOtel({
-  resource: { serviceName: "deploy-status" },
-  tracerProvider,
-  loggerProvider,
+  resource: {
+    serviceName: "deploy-status",
+    serviceVersion: "2.4.1",
+    attributes: { region: "us-west" }
+  },
+  tracerProvider: (resource) => tracerProvider = new BasicTracerProvider({
+    resource,
+    spanProcessors: [spanProcessor]
+  }),
+  loggerProvider: (resource) => loggerProvider = new LoggerProvider({
+    resource,
+    processors: [logRecordProcessor]
+  }),
   metricReader,
   metricTemporality: "cumulative"
 })
+
+try {
+  await Effect.runPromise(program.pipe(Effect.provide(telemetry), Effect.scoped))
+} finally {
+  await Promise.all([tracerProvider?.shutdown(), loggerProvider?.shutdown()])
+}
 ```
+
+Construct `spanProcessor`, `logRecordProcessor`, and `metricReader` with your
+exporters before building the layer. The application owns provider flushing and
+shutdown, including providers returned by factories. The metric bridge manages
+its supplied readers through the layer scope.
+
+You can still pass existing providers directly. The layer cannot change the
+resource they captured at construction. In that form, the resource option
+controls only metrics and tracer instrumentation scope, not log or span resource
+attributes. Construct both providers with the intended resource before injection,
+or use the factories above to receive the validated resource.
 
 Each of the three is optional and each is bridged only when supplied, so a
 composition with a tracer and no meter installs only the tracer bridge. An
