@@ -5,6 +5,8 @@
 	flex: 1;
 	/* The sidebar on the left, everything else (.app-main) to its right. */
 	flex-direction: row;
+	/* Keep repository controls clear of the conversation, including bubble tails. */
+	column-gap: 16px;
 	/*
 	 * The sidebar's width, owned here because two other things measure from
 	 * it: chrome.css draws the bar, and a maximized card (cards.css) starts
@@ -883,6 +885,10 @@
 }
 
 @media (max-width: 640px) {
+	.app-shell {
+		column-gap: 12px;
+	}
+
 	.app-shell .smithers-transcript .sui-chat-messages,
 	.composer-wrap {
 		padding-right: 14px;
