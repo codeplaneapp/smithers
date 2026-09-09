@@ -58,7 +58,10 @@ describe("parseWorkflow", () => {
     expect(() => parseStrictWorkflow("on: {}\njobs:\n")).toThrow(/declares no trigger/)
     expect(() => parseStrictWorkflow("on: push\njobs:\n")).toThrow(/declares no jobs/)
     expect(() => parseStrictWorkflow("on: push\njobs: not-a-mapping\n")).toThrow(/inline `jobs` mappings/)
-    expect(() => parseStrictWorkflow("on:\n  not-a-mapping\njobs:\n")).toThrow(/expected a "key: value"/)
+    // A more-indented plain line under `on:` is that key's scalar value, so
+    // it is refused as an event name rather than as a stray structural line.
+    expect(() => parseStrictWorkflow("on:\n  not-a-mapping\njobs:\n"))
+      .toThrow(/"not-a-mapping" is not a supported workflow event name shape/)
   })
 
   /**
@@ -70,7 +73,7 @@ describe("parseWorkflow", () => {
   it("refuses a trigger block whose events do not share one indentation", () => {
     const job = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm run check\n"
     expect(() => parseStrictWorkflow(`on:\n    push:\n  pull_request:\n${job}`))
-      .toThrow(/inconsistent indentation in the workflow trigger block/)
+      .toThrow(/line 2: invalid YAML: All mapping items must start at the same column/)
     // The same events at one indentation are the accepted form.
     expect(parseStrictWorkflow(`on:\n  push:\n  pull_request:\n${job}`).jobs).toHaveLength(1)
   })
@@ -113,7 +116,7 @@ describe("parseWorkflow", () => {
       parseWorkflow(
         "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        - one\n"
       )
-    ).toThrow(/line 7: expected a "key: value" mapping entry, found "one"/)
+    ).toThrow(/line 7: invalid YAML: A block sequence may not be used as an implicit map key/)
     // A sequence nested *below* the field indent is a field's own value and is
     // skipped with the rest of that field's block.
     expect(
@@ -141,10 +144,18 @@ describe("parseWorkflow", () => {
 
   it("skips deeper unknown step metadata without losing the executable field", () => {
     const workflow = parseWorkflow(
-      "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ready\n          nested: ignored\n"
+      "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ready\n        with:\n          nested: ignored\n"
     )
 
     expect(workflow.jobs[0]?.steps[0]?.run).toBe("echo ready")
+    // The same metadata indented past its own key is not a nested block, it is
+    // a broken document. The hand-written scanner skipped it and kept reading;
+    // YAML refuses it, which is the safer answer for a gate contract.
+    expect(() =>
+      parseWorkflow(
+        "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ready\n          nested: ignored\n"
+      )
+    ).toThrow(/line 6: invalid YAML: Nested mappings are not allowed in compact mappings/)
   })
 
   it("accepts an unconditional reusable-workflow job as executable", () => {
@@ -158,17 +169,20 @@ describe("parseWorkflow", () => {
     expect(missingRequiredJobs(workflow, ["delegated"])).toEqual([])
   })
 
-  it("refuses ambiguous block scalar indentation and unsupported explicit indentation", () => {
+  it("refuses ambiguous block scalar indentation and reads an explicit indentation indicator", () => {
     expect(() =>
       parseWorkflow(
         "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |\n          echo safe\n         pnpm run check\n"
       )
-    ).toThrow(/block scalar content is indented less/)
-    expect(() =>
-      parseWorkflow(
-        "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |2\n          pnpm run check\n"
-      )
-    ).toThrow(/explicit block-scalar indentation is not supported/)
+    ).toThrow(/line 8: invalid YAML: All mapping items must start at the same column/)
+    // `|2` sets the block's indentation explicitly. The hand-written scanner
+    // did not implement it and refused every workflow that used it; the YAML
+    // parser reads it, so the gate in that script is now visible.
+    const explicit = parseWorkflow(
+      "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |2\n          pnpm run check\n"
+    )
+    expect(explicit.jobs[0]!.steps[0]!.run).toBe("pnpm run check")
+    expect(missingGates(explicit, [{ name: "typecheck", command: "pnpm run check" }])).toEqual([])
   })
 
   it("does not reinterpret scalar-looking shell text as nested YAML", () => {
@@ -303,13 +317,15 @@ describe("parseWorkflow", () => {
         { name: "lint", command: "pnpm run lint" }
       ]).map((gate) => gate.name)
     ).toEqual(["typecheck", "lint"])
-    // YAML-only escape forms are refused rather than decoded as a different
-    // shell program by this intentionally smaller scalar decoder.
-    expect(() =>
-      parseWorkflow(
-        "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: \"echo \\x22; pnpm run check\\x22\"\n"
-      )
-    ).toThrow(/unsupported double-quoted scalar/)
+    // `\\x22` is a YAML escape with no JSON spelling. The hand-written decoder
+    // refused it; the YAML parser decodes it to the same double quote `\\u0022`
+    // gives, so the gate hidden behind it is scanned rather than skipped.
+    const hex = parseWorkflow(
+      "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: \"echo \\x22; pnpm run check\\x22\"\n"
+    )
+    expect(hex.jobs[0]!.steps[0]!.run).toBe("echo \"; pnpm run check\"")
+    expect(missingGates(hex, [{ name: "typecheck", command: "pnpm run check" }]).map((gate) => gate.name))
+      .toEqual(["typecheck"])
   })
 
   it("keeps a `#` that is not a comment and drops one that is", () => {
@@ -499,15 +515,17 @@ describe("parseWorkflow", () => {
       .toThrow(WorkflowParseError)
   })
 
-  it("refuses quoted scalars and keys it cannot decode exactly", () => {
+  it("refuses quoted scalars and keys it cannot close", () => {
     const job = "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
-    expect(() => parseStrictWorkflow(`name: \"unterminated\n${job}`)).toThrow(/unterminated quoted scalar/)
-    expect(() => parseStrictWorkflow(`name: 'can'not'\n${job}`)).toThrow(/unsupported single-quoted scalar/)
+    expect(() => parseStrictWorkflow(`name: \"unterminated\n${job}`))
+      .toThrow(/invalid YAML: Missing closing "quote/)
+    expect(() => parseStrictWorkflow(`name: 'can'not'\n${job}`))
+      .toThrow(/line 1: invalid YAML: Unexpected scalar at node end/)
     expect(() =>
       parseStrictWorkflow(
         "on: push\njobs:\n  \"test:\n    runs-on: ubuntu-latest\n"
       )
-    ).toThrow(/unterminated quoted key/)
+    ).toThrow(/line 5: invalid YAML: Missing closing "quote/)
 
     const escaped = parseStrictWorkflow(
       "on: push\njobs:\n  \"te\\u0073t\":\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
@@ -523,18 +541,53 @@ describe("parseWorkflow", () => {
   it("refuses ambiguous or empty workflow trigger forms", () => {
     const jobs = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
     const cases: ReadonlyArray<readonly [string, RegExp]> = [
-      [` on: push\n${jobs}`, /unexpected indentation at the top level/],
-      [`- on: push\n${jobs}`, /mapping entry at the top level, not a sequence item/],
+      [` on: push\n${jobs}`, /line 2: invalid YAML: Unexpected scalar at node end/],
+      [`- on: push\n${jobs}`, /line 2: invalid YAML: Unexpected scalar at node end/],
       [`on: push-event\n${jobs}`, /not a supported workflow event name shape/],
-      [`on: push\n  pull_request:\n${jobs}`, /cannot have both an inline value and a block/],
-      [`on:\n  push:\n  - pull_request\n${jobs}`, /mixes a mapping and a sequence/],
+      [`on: push\n  pull_request:\n${jobs}`, /invalid YAML: Nested mappings are not allowed in compact mappings/],
       [`on:\n  push:\n  push:\n${jobs}`, /duplicate workflow event "push"/],
-      [`on: [push\n${jobs}`, /unterminated inline workflow event sequence/],
-      [`on: [push, ]\n${jobs}`, /declares no trigger/],
+      [`on: [push\n${jobs}`, /invalid YAML: Flow sequence in block collection must be sufficiently indented/],
       [`on: [push, push]\n${jobs}`, /contains a duplicate event/],
-      [`on: {push: {}}\n${jobs}`, /inline workflow event mappings are not supported/]
+      [`on: {}\n${jobs}`, /declares no trigger/],
+      [`on: []\n${jobs}`, /declares no trigger/],
+      [`on:\n${jobs}`, /declares no trigger/]
     ]
     for (const [source, message] of cases) expect(() => parseStrictWorkflow(source)).toThrow(message)
+  })
+
+  /**
+   * Three trigger spellings the hand-written scanner refused because it did
+   * not implement them, not because GitHub rejects them: a flow mapping, a
+   * trailing comma in a flow sequence, and an event whose value is a block
+   * sequence. Each is ordinary YAML, so each is now read as the trigger it is.
+   */
+  it("reads flow and block trigger spellings the hand scanner could not", () => {
+    const jobs = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm run check\n"
+    for (
+      const trigger of [
+        "on: {push: {}}",
+        "on: [push, ]",
+        "on:\n  push:\n  - pull_request"
+      ]
+    ) {
+      const workflow = parseStrictWorkflow(`${trigger}\n${jobs}`)
+      expect(workflow.jobs.map((job) => job.id)).toEqual(["test"])
+      expect(missingGates(workflow, [{ name: "typecheck", command: "pnpm run check" }])).toEqual([])
+    }
+  })
+
+  /**
+   * An alias resolves to a node written somewhere else, so a gate could match
+   * a script the job it is pinned to never spells out. The reader refuses one
+   * rather than following it.
+   */
+  it("refuses a YAML alias, which would lend a gate a script from another node", () => {
+    expect(() =>
+      parseStrictWorkflow(
+        "on: push\njobs:\n  a:\n    runs-on: &runner ubuntu-latest\n    steps:\n      - run: pnpm run check\n" +
+          "  b:\n    runs-on: *runner\n    steps:\n      - run: echo b\n"
+      )
+    ).toThrow(/line 8: a YAML alias is not supported by the gate scanner/)
   })
 
   it("carries an empty block condition and a step advisory value without losing later fields", () => {

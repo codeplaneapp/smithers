@@ -15,20 +15,22 @@
  * reader, so the rendered pipeline can be checked against the gates the
  * repository declared before a single byte is written.
  *
- * The reader is a targeted GitHub-workflow scanner, not a general YAML
- * implementation. It handles exactly the constructs a workflow uses — nested
- * block maps, block sequences at their own or their key's indentation,
- * `run: |` and conservatively folded `run: >` block scalars, flow maps
- * (`with: { node-version: 22 }`), quoted scalars, and comments — and REFUSES
- * anything it does not understand rather than guessing. Failing closed is the
- * point: a gate this module could not see is reported missing, never assumed
- * present. Taking a YAML dependency was rejected because the workspace
- * dependency policy is closed and `js-yaml` is only present transitively.
+ * The reader is two layers. YAML lexing and structure come from `yaml`, the
+ * parser this package already depends on and already reads workspace data
+ * with; a hand-written scanner used to do that job and carried its own
+ * quoting, indentation, and block-scalar rules, which is where its bugs lived.
+ * On top of it sits the part that is this module's own: a workflow validator
+ * that refuses anything the gate contract cannot verify — a YAML alias or
+ * merge key, an inherited `defaults:` shell, a duplicate top-level key, job
+ * id, job field, or step field, a job with no runner or no steps, a step that
+ * declares neither or both of `uses` and `run`. Failing closed is the point: a
+ * gate this module could not see is reported missing, never assumed present.
  *
  * @since 0.1.0
  */
 
 import { Buffer } from "node:buffer"
+import * as Yaml from "yaml"
 
 /**
  * Maximum encoded workflow size accepted by the structural parser.
@@ -102,178 +104,281 @@ export class WorkflowParseError extends Error {
   }
 }
 
-interface Line {
-  readonly number: number
-  readonly indent: number
-  readonly text: string
+/** One mapping entry, with the source line of its key. */
+interface Entry {
+  readonly key: string
+  readonly value: unknown
+  readonly line: number
 }
 
-/** Strips a trailing comment that is not inside a quoted scalar. */
-const stripComment = (text: string): string => {
-  let quote: string | undefined
-  for (let index = 0; index < text.length; index++) {
-    const character = text[index]!
-    if (quote !== undefined) {
-      if (quote === "\"" && character === "\\") {
-        index += 1
-        continue
-      }
-      if (quote === "'" && character === "'" && text[index + 1] === "'") {
-        index += 1
-        continue
-      }
-      if (character === quote) quote = undefined
-      continue
+/** The 1-based source line a node starts on, or line 1 when it has no range. */
+const nodeLine = (counter: Yaml.LineCounter, node: unknown): number => {
+  const range = (node as { readonly range?: readonly [number, number, number] } | null | undefined)?.range
+  return range === undefined ? 1 : counter.linePos(range[0]).line
+}
+
+/** Whether a mapping entry was written with no value at all (`steps:`). */
+const isEmptyNode = (node: unknown): boolean =>
+  node === null || node === undefined || (Yaml.isScalar(node) && node.value === null)
+
+/**
+ * A field's text.
+ *
+ * Every field this reader carries is compared as source text: a gate matches a
+ * command string and `alwaysRuns` matches the `true` literal, so a value YAML
+ * decoded to a boolean or a number is rendered back to the spelling GitHub
+ * reads. A field that is not a scalar — a mapping under `if:`, a sequence
+ * under `run:` — reads as the empty string, which matches no gate and no
+ * always-true literal, so a value this reader cannot verify fails closed.
+ */
+const scalarText = (node: unknown): string => {
+  if (!Yaml.isScalar(node)) return ""
+  const value = node.value
+  if (value === null || value === undefined) return ""
+  const text = typeof value === "string" ? value : String(value)
+  // A block scalar keeps the break that closed it. Nothing this module reads
+  // is sensitive to a trailing blank line -- a gate matches commands, not
+  // whitespace -- and dropping it keeps a one-line script exactly one line.
+  return node.type === Yaml.Scalar.BLOCK_LITERAL || node.type === Yaml.Scalar.BLOCK_FOLDED
+    ? text.replace(/\n+$/, "")
+    : text
+}
+
+/**
+ * The entries of a block mapping, in source order.
+ *
+ * A duplicate mapping key is invalid YAML and the LAST occurrence wins, so a
+ * gate matched against the shadowed `jobs:` mapping, job, `steps:` block, or
+ * `run:` script would be reported present while GitHub runs none of it. Each
+ * caller supplies the refusal for its own level, because "duplicate key" alone
+ * does not say which job or step lost its script.
+ */
+const entriesOf = (
+  map: Yaml.YAMLMap,
+  counter: Yaml.LineCounter,
+  duplicate: (key: string, line: number) => WorkflowParseError
+): ReadonlyArray<Entry> => {
+  const seen = new Set<string>()
+  const entries: Array<Entry> = []
+  for (const item of map.items) {
+    const line = nodeLine(counter, item.key)
+    if (!Yaml.isScalar(item.key)) {
+      throw new WorkflowParseError(line, "a mapping key that is not a scalar is not supported by the gate scanner")
     }
-    if (character === "'" || character === "\"") {
-      quote = character
-      continue
-    }
-    // A `#` only opens a comment at the start of the line or after a space,
-    // which is YAML's own target and keeps `${{ ... }}` and URLs intact.
-    if (character === "#" && (index === 0 || text[index - 1] === " ")) {
-      return text.slice(0, index)
-    }
+    // The key is its decoded text, because `"test":` and `test:` are the same
+    // key. A gate or a required job pinned to `test` must see the job either
+    // way, and the duplicate check must see the two spellings as one key.
+    const key = scalarText(item.key)
+    if (seen.has(key)) throw duplicate(key, line)
+    seen.add(key)
+    entries.push({ key, value: item.value, line })
+  }
+  return entries
+}
+
+/** Indexes a level's entries so a field can be read by name. */
+const byKey = (entries: ReadonlyArray<Entry>): ReadonlyMap<string, Entry> =>
+  new Map(entries.map((entry) => [entry.key, entry] as const))
+
+/** Refuses the keys whose effect on a gate this module cannot verify. */
+const refuseInherited = (fields: ReadonlyMap<string, Entry>, describe: (key: string) => string): void => {
+  for (const key of ["defaults", "<<"]) {
+    const field = fields.get(key)
+    if (field !== undefined) throw new WorkflowParseError(field.line, describe(key))
+  }
+}
+
+const eventNameShape = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** Holds a workflow event to the identifier shape GitHub documents. */
+const eventName = (text: string, line: number): string => {
+  if (!eventNameShape.test(text)) {
+    throw new WorkflowParseError(line, `${JSON.stringify(text)} is not a supported workflow event name shape`)
   }
   return text
 }
 
-/** Decodes the quoted scalar forms the scanner deliberately supports. */
-const decodeScalar = (value: string, line: number): string => {
-  const trimmed = value.trim()
-  if (!trimmed.startsWith("\"") && !trimmed.startsWith("'")) return trimmed
-  const quote = trimmed[0]!
-  if (trimmed.length < 2 || !trimmed.endsWith(quote)) {
-    throw new WorkflowParseError(line, `unterminated quoted scalar ${JSON.stringify(trimmed)}`)
+/** Refuses a workflow that declares no trigger, so it can never run its gates. */
+const checkTrigger = (trigger: Entry, counter: Yaml.LineCounter): void => {
+  const node = trigger.value
+  if (Yaml.isMap(node)) {
+    const events = entriesOf(
+      node,
+      counter,
+      (key, line) => new WorkflowParseError(line, `duplicate workflow event ${JSON.stringify(key)}`)
+    )
+    if (events.length === 0) throw new WorkflowParseError(trigger.line, "workflow declares no trigger")
+    for (const event of events) eventName(event.key, event.line)
+    return
   }
-  if (quote === "\"") {
-    try {
-      const decoded: unknown = JSON.parse(trimmed)
-      if (typeof decoded === "string") return decoded
-    } catch {
-      // YAML has more double-quoted escapes than JSON. Refusing those is
-      // conservative: decoding only a subset can change shell quoting and
-      // invent a command boundary that GitHub never receives.
+  if (Yaml.isSeq(node)) {
+    const events = node.items.map((item) => eventName(scalarText(item), nodeLine(counter, item)))
+    if (events.length === 0) throw new WorkflowParseError(trigger.line, "workflow declares no trigger")
+    if (new Set(events).size !== events.length) {
+      throw new WorkflowParseError(trigger.line, "workflow event sequence contains a duplicate event")
     }
-    throw new WorkflowParseError(line, `unsupported double-quoted scalar ${JSON.stringify(trimmed)}`)
+    return
   }
-  const inner = trimmed.slice(1, -1)
-  let decoded = ""
-  for (let index = 0; index < inner.length; index++) {
-    const character = inner[index]!
-    if (character !== "'") {
-      decoded += character
-      continue
-    }
-    if (inner[index + 1] !== "'") {
-      throw new WorkflowParseError(line, `unsupported single-quoted scalar ${JSON.stringify(trimmed)}`)
-    }
-    decoded += "'"
-    index += 1
+  const value = scalarText(node)
+  if (value === "") throw new WorkflowParseError(trigger.line, "workflow declares no trigger")
+  eventName(value, trigger.line)
+}
+
+/** Reads one item of a job's `steps:` sequence. */
+const readStep = (node: unknown, job: string, counter: Yaml.LineCounter): WorkflowStep => {
+  const line = nodeLine(counter, node)
+  if (!Yaml.isMap(node)) {
+    throw new WorkflowParseError(line, `expected a mapping in a step of job ${JSON.stringify(job)}`)
   }
-  return decoded
+  const fields = byKey(entriesOf(
+    node,
+    counter,
+    (key, keyLine) =>
+      new WorkflowParseError(keyLine, `duplicate key ${JSON.stringify(key)} in a step of job ${JSON.stringify(job)}`)
+  ))
+  if (fields.has("<<")) {
+    throw new WorkflowParseError(
+      line,
+      `a YAML merge in a step of job ${JSON.stringify(job)} is not supported by the gate scanner`
+    )
+  }
+  const field = (key: string): string | undefined => {
+    const entry = fields.get(key)
+    return entry === undefined ? undefined : scalarText(entry.value)
+  }
+  const uses = field("uses")
+  const run = field("run")
+  if ((uses === undefined) === (run === undefined)) {
+    throw new WorkflowParseError(
+      line,
+      `a step of job ${JSON.stringify(job)} must declare exactly one of \`uses\` or \`run\``
+    )
+  }
+  if ((uses ?? run)!.trim() === "") {
+    throw new WorkflowParseError(
+      line,
+      `a step of job ${JSON.stringify(job)} has an empty ${uses === undefined ? "run" : "uses"} value`
+    )
+  }
+  const shell = field("shell")
+  if (shell !== undefined && shell.trim() === "") {
+    throw new WorkflowParseError(line, `a step of job ${JSON.stringify(job)} has an empty shell`)
+  }
+  return {
+    name: field("name"),
+    uses,
+    run,
+    shell,
+    // A conditional step is not proof that a gate still runs, so the condition
+    // is carried out of the scan rather than dropped. An `if:` this reader
+    // cannot read as a scalar is the empty string, which is not the always-true
+    // literal and therefore fails closed.
+    condition: field("if"),
+    continueOnError: field("continue-on-error")
+  }
+}
+
+const jobIdShape = /^[A-Za-z_][A-Za-z0-9_-]*$/
+
+/** Reads one entry of the top-level `jobs:` mapping. */
+const readJob = (job: Entry, counter: Yaml.LineCounter): WorkflowJob => {
+  const node = job.value
+  if (Yaml.isSeq(node)) {
+    throw new WorkflowParseError(
+      nodeLine(counter, node.items[0] ?? node),
+      `expected a mapping entry in job ${JSON.stringify(job.key)}, not a sequence item`
+    )
+  }
+  if (!Yaml.isMap(node)) {
+    throw new WorkflowParseError(job.line, `job ${JSON.stringify(job.key)} must be a block mapping`)
+  }
+  if (!jobIdShape.test(job.key)) {
+    throw new WorkflowParseError(job.line, `${JSON.stringify(job.key)} is not a valid GitHub Actions job id`)
+  }
+  const fields = byKey(entriesOf(
+    node,
+    counter,
+    (key, line) =>
+      new WorkflowParseError(line, `duplicate key ${JSON.stringify(key)} in job ${JSON.stringify(job.key)}`)
+  ))
+  refuseInherited(
+    fields,
+    (key) => `${JSON.stringify(key)} in job ${JSON.stringify(job.key)} is not supported by the gate scanner`
+  )
+  const field = (key: string): string | undefined => {
+    const entry = fields.get(key)
+    return entry === undefined ? undefined : scalarText(entry.value)
+  }
+  const steps: Array<WorkflowStep> = []
+  const declared = fields.get("steps")
+  if (declared !== undefined && !isEmptyNode(declared.value)) {
+    if (!Yaml.isSeq(declared.value)) {
+      throw new WorkflowParseError(declared.line, "`steps` must be a block sequence")
+    }
+    for (const item of declared.value.items) steps.push(readStep(item, job.key, counter))
+  }
+  const runsOn = field("runs-on")
+  const uses = field("uses")
+  if (uses !== undefined) {
+    if (uses.trim() === "") {
+      throw new WorkflowParseError(job.line, `reusable job ${JSON.stringify(job.key)} has an empty uses value`)
+    }
+    if (runsOn !== undefined || declared !== undefined) {
+      throw new WorkflowParseError(
+        job.line,
+        `reusable job ${JSON.stringify(job.key)} cannot also declare runs-on or steps`
+      )
+    }
+  } else {
+    if (runsOn === undefined || runsOn.trim() === "") {
+      throw new WorkflowParseError(job.line, `job ${JSON.stringify(job.key)} declares no runner`)
+    }
+    if (declared === undefined || steps.length === 0) {
+      throw new WorkflowParseError(job.line, `job ${JSON.stringify(job.key)} declares no steps`)
+    }
+  }
+  return {
+    id: job.key,
+    name: field("name"),
+    runsOn,
+    uses,
+    condition: field("if"),
+    continueOnError: field("continue-on-error"),
+    steps
+  }
+}
+
+/** Reports the first structural YAML error against the line it sits on. */
+const refuseYamlErrors = (document: Yaml.Document.Parsed, counter: Yaml.LineCounter): void => {
+  const failure = document.errors[0]
+  if (failure === undefined) return
+  const summary = failure.message.split("\n")[0]!.replace(/ at line \d+, column \d+:?$/, "")
+  const line = failure.linePos?.[0].line ?? counter.linePos(failure.pos[0]).line
+  throw new WorkflowParseError(line, `invalid YAML: ${summary}`)
 }
 
 /**
- * Splits the source into significant lines, rejecting tab indentation, which
- * YAML forbids and which would silently shift the structure this scanner
- * derives from indentation.
+ * An alias resolves to a node declared elsewhere, which would let a gate match
+ * a `run:` body that no step in that job spells out. The gate contract reports
+ * what it can read, so an alias is refused rather than followed.
  */
-const significantLines = (source: string): ReadonlyArray<Line> => {
-  const lines: Array<Line> = []
-  const raw = source.split("\n")
-  for (let index = 0; index < raw.length; index++) {
-    const original = raw[index]!
-    if (original.includes("\t") && original.slice(0, original.search(/\S|$/)).includes("\t")) {
-      throw new WorkflowParseError(index + 1, "tab indentation is not valid YAML")
+const refuseAliases = (document: Yaml.Document.Parsed, counter: Yaml.LineCounter): void => {
+  Yaml.visit(document, {
+    Alias: (_key, node) => {
+      throw new WorkflowParseError(nodeLine(counter, node), "a YAML alias is not supported by the gate scanner")
     }
-    const withoutComment = stripComment(original)
-    if (withoutComment.trim() === "") continue
-    lines.push({
-      number: index + 1,
-      indent: withoutComment.length - withoutComment.trimStart().length,
-      text: withoutComment.trimEnd()
-    })
-  }
-  return lines
+  })
 }
-
-/**
- * Reads a block scalar (`|`, `>`, and their chomping variants). Explicit
- * indentation indicators are refused because this scanner does not implement
- * their distinct indentation targets.
- * Literal scalars preserve line breaks. Folded scalars join every physical
- * line with a space: YAML preserves a few breaks around blank or more-indented
- * lines, but treating those as spaces is deliberately conservative for a gate
- * scanner. It may cost a match; it can never invent a command boundary that
- * the shell does not receive.
- */
-const readBlockScalar = (
-  source: ReadonlyArray<string>,
-  startLine: number,
-  parentIndent: number,
-  folded: boolean
-): { readonly text: string; readonly next: number } => {
-  const body: Array<string> = []
-  let index = startLine
-  // YAML takes a block scalar's indentation from its first non-empty line,
-  // not from the key's indentation plus one.
-  let contentIndent: number | undefined
-  while (index < source.length) {
-    const line = source[index]!
-    if (line.trim() === "") {
-      body.push("")
-      index += 1
-      continue
-    }
-    const indent = line.length - line.trimStart().length
-    if (indent <= parentIndent) break
-    if (contentIndent === undefined) contentIndent = indent
-    if (indent < contentIndent) {
-      throw new WorkflowParseError(index + 1, "block scalar content is indented less than its first content line")
-    }
-    body.push(line.slice(contentIndent))
-    index += 1
-  }
-  while (body.length > 0 && body[body.length - 1] === "") body.pop()
-  return { text: body.join(folded ? " " : "\n"), next: index }
-}
-
-/**
- * A `key: |` line that opens a block scalar. The key may be quoted, because a
- * quoted key is still a key: missing one would leave the scalar's body to the
- * structural walk, which reads it as YAML and refuses the workflow.
- */
-const blockScalarLine = /^\s*(?:-\s+)?(?:"[^"]*"|'[^']*'|[A-Za-z0-9_.-]+):\s*([|>][+-]?\d*)\s*$/
-
-/**
- * Whether a line opens a block-sequence item.
- *
- * YAML lets a block sequence sit at its key's own indentation, which is how
- * `needs:` and `steps:` are most often written:
- *
- * ```yaml
- *     needs:
- *     - build
- * ```
- *
- * A scanner that took indentation alone would leave those items outside the
- * block they belong to and then refuse the workflow for a shape that is
- * ordinary YAML.
- */
-const sequenceItem = (line: Line): boolean => line.text.trimStart().startsWith("- ") || line.text.trim() === "-"
-
-/** Whether a line still belongs to the block opened at `indent`. */
-const inBlock = (line: Line, indent: number): boolean =>
-  line.indent > indent || (line.indent === indent && sequenceItem(line))
 
 /**
  * Parses a GitHub Actions workflow.
  *
- * A duplicate mapping key — a repeated top-level key, job id, job field, or
- * step field — is refused at every level this scanner reads. YAML forbids one
- * and the last occurrence wins, so accepting it would let a gate match a job,
- * a `steps:` block, or a `run:` script that GitHub never executes.
+ * Structure comes from `yaml`; everything this function adds is the part a
+ * general YAML decoder cannot supply. It refuses a workflow whose gates it
+ * could not verify: an alias or a `<<` merge, an inherited `defaults:` shell,
+ * a duplicate top-level key, job id, job field, or step field, a job with no
+ * runner or no steps, a step declaring neither or both of `uses` and `run`,
+ * and a workflow with no trigger. Every refusal names the source line.
  *
  * @category parsing
  * @since 0.1.0
@@ -282,390 +387,68 @@ export const parseWorkflow = (source: string): Workflow => {
   if (Buffer.byteLength(source, "utf8") > maximumWorkflowBytes) {
     throw new WorkflowParseError(1, `workflow source is larger than ${maximumWorkflowBytes} bytes`)
   }
-  const raw = source.split("\n")
-  const lines = significantLines(source)
-  // Block scalars are consumed from the RAW lines (blank and comment lines
-  // inside a script are content, not structure), so the structural walk skips
-  // every line a scalar swallowed.
-  const consumed = new Set<number>()
-  const scalars = new Map<number, string>()
-  for (const line of lines) {
-    // A script line that happens to look like `key: |2` is shell text, not a
-    // nested YAML scalar. Its enclosing scalar has already claimed the line.
-    if (consumed.has(line.number)) continue
-    const scalar = blockScalarLine.exec(line.text)
-    if (scalar === null) continue
-    if (/\d/.test(scalar[1]!)) {
-      throw new WorkflowParseError(line.number, "explicit block-scalar indentation is not supported")
-    }
-    const block = readBlockScalar(raw, line.number, line.indent, scalar[1]!.startsWith(">"))
-    scalars.set(line.number, block.text)
-    for (let number = line.number + 1; number <= block.next; number++) consumed.add(number)
+  const counter = new Yaml.LineCounter()
+  const document = Yaml.parseDocument(source, {
+    lineCounter: counter,
+    // `<<` stays an ordinary key, so a merge is refused by name below instead
+    // of being folded into the mapping it would shadow.
+    merge: false,
+    // Duplicates are refused per level below, because "duplicate key" alone
+    // does not name the job or step whose script GitHub will not run.
+    uniqueKeys: false
+  })
+  refuseYamlErrors(document, counter)
+  refuseAliases(document, counter)
+
+  const contents = document.contents
+  if (Yaml.isSeq(contents)) {
+    throw new WorkflowParseError(
+      nodeLine(counter, contents.items[0] ?? contents),
+      "expected a mapping entry at the top level, not a sequence item"
+    )
   }
-  const structural = lines.filter((line) => !consumed.has(line.number))
-
-  let name: string | undefined
-  const jobs: Array<WorkflowJob> = []
-  const jobIds = new Set<string>()
-  const topKeys = new Set<string>()
-  let index = 0
-
-  const entry = (line: Line): { readonly key: string; readonly value: string; readonly item: boolean } => {
-    const item = sequenceItem(line)
-    const body = item ? line.text.trimStart().replace(/^-\s*/, "") : line.text.trim()
-    // A key may be quoted, and a quoted key may carry a `:` of its own, so the
-    // separator is looked for past the closing quote. Reading `"a: b": c` as
-    // the key `"a` would invent a job id and a step field that do not exist.
-    const quote = body[0]
-    let from = 0
-    if (quote === "\"" || quote === "'") {
-      let close = -1
-      for (let cursor = 1; cursor < body.length; cursor++) {
-        if (quote === "\"" && body[cursor] === "\\") {
-          cursor += 1
-          continue
-        }
-        if (quote === "'" && body[cursor] === "'" && body[cursor + 1] === "'") {
-          cursor += 1
-          continue
-        }
-        if (body[cursor] === quote) {
-          close = cursor
-          break
-        }
-      }
-      if (close === -1) {
-        throw new WorkflowParseError(line.number, `unterminated quoted key in ${JSON.stringify(body)}`)
-      }
-      from = close + 1
-    }
-    const separator = body.indexOf(":", from)
-    if (separator === -1) {
-      throw new WorkflowParseError(line.number, `expected a "key: value" mapping entry, found ${JSON.stringify(body)}`)
-    }
-    // The key is unquoted, because `"test":` and `test:` are the same key. A
-    // gate or a required job pinned to `test` must see the job either way, and
-    // the duplicate-key check must see the two spellings as one key.
-    return { key: decodeScalar(body.slice(0, separator), line.number), value: body.slice(separator + 1).trim(), item }
+  if (contents !== null && !Yaml.isMap(contents)) {
+    throw new WorkflowParseError(nodeLine(counter, contents), "expected a mapping at the top level")
   }
-
-  const eventName = (value: string, line: number): string => {
-    const decoded = decodeScalar(value, line)
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(decoded)) {
-      throw new WorkflowParseError(line, `${JSON.stringify(decoded)} is not a supported workflow event name shape`)
-    }
-    return decoded
-  }
-
-  while (index < structural.length) {
-    const line = structural[index]!
-    if (line.indent !== 0) {
-      throw new WorkflowParseError(line.number, "unexpected indentation at the top level")
-    }
-    const top = entry(line)
-    if (top.item) {
-      throw new WorkflowParseError(line.number, "expected a mapping entry at the top level, not a sequence item")
-    }
-    // A repeated top-level key is the same defect as a repeated job id, one
-    // level up: YAML keeps the LAST `jobs:` mapping, so gates matched against
-    // the shadowed one would be reported present while GitHub runs none of it.
-    if (topKeys.has(top.key)) {
-      throw new WorkflowParseError(line.number, `duplicate top-level key ${JSON.stringify(top.key)}`)
-    }
-    topKeys.add(top.key)
-    if (top.key === "name" && top.value !== "") {
-      name = decodeScalar(top.value, line.number)
-      index += 1
-      continue
-    }
-    if (top.key === "on") {
-      const scalar = scalars.get(line.number)
-      index += 1
-      const block: Array<Line> = []
-      while (index < structural.length && inBlock(structural[index]!, 0)) {
-        block.push(structural[index]!)
-        index += 1
-      }
-      const value = scalar ?? decodeScalar(top.value, line.number)
-      if (block.length === 0 && (value === "" || value === "{}" || value === "[]")) {
-        throw new WorkflowParseError(line.number, "workflow declares no trigger")
-      }
-      if (block.length > 0) {
-        if (value !== "") {
-          throw new WorkflowParseError(line.number, "a workflow trigger cannot have both an inline value and a block")
-        }
-        const indent = block[0]!.indent
-        const events = new Set<string>()
-        let sequence: boolean | undefined
-        for (const eventLine of block) {
-          if (eventLine.indent < indent) {
-            throw new WorkflowParseError(eventLine.number, "inconsistent indentation in the workflow trigger block")
-          }
-          if (eventLine.indent !== indent) continue
-          const item = sequenceItem(eventLine)
-          if (sequence !== undefined && sequence !== item) {
-            throw new WorkflowParseError(eventLine.number, "workflow trigger block mixes a mapping and a sequence")
-          }
-          sequence = item
-          const event = item
-            ? eventName(eventLine.text.trimStart().replace(/^-\s*/, ""), eventLine.number)
-            : eventName(entry(eventLine).key, eventLine.number)
-          if (events.has(event)) {
-            throw new WorkflowParseError(eventLine.number, `duplicate workflow event ${JSON.stringify(event)}`)
-          }
-          events.add(event)
-        }
-        if (events.size === 0) throw new WorkflowParseError(line.number, "workflow declares no trigger")
-      } else if (value.startsWith("[")) {
-        if (!value.endsWith("]")) {
-          throw new WorkflowParseError(line.number, "unterminated inline workflow event sequence")
-        }
-        const events = value.slice(1, -1).split(",").map((event) => event.trim())
-        if (events.length === 0 || events.some((event) => event === "")) {
-          throw new WorkflowParseError(line.number, "workflow declares no trigger")
-        }
-        const decoded = events.map((event) => eventName(event, line.number))
-        if (new Set(decoded).size !== decoded.length) {
-          throw new WorkflowParseError(line.number, "workflow event sequence contains a duplicate event")
-        }
-      } else if (value.startsWith("{") || value.endsWith("}")) {
-        throw new WorkflowParseError(line.number, "inline workflow event mappings are not supported")
-      } else {
-        eventName(value, line.number)
-      }
-      continue
-    }
-    if (top.key === "defaults" || top.key === "<<") {
-      throw new WorkflowParseError(
-        line.number,
-        `top-level ${JSON.stringify(top.key)} is not supported by the gate scanner`
+  const top = byKey(
+    contents === null
+      ? []
+      : entriesOf(
+        contents,
+        counter,
+        (key, line) => new WorkflowParseError(line, `duplicate top-level key ${JSON.stringify(key)}`)
       )
-    }
-    if (top.key !== "jobs") {
-      // Skip the whole block of any top-level key that is not `jobs`.
-      index += 1
-      while (index < structural.length && inBlock(structural[index]!, 0)) index += 1
-      continue
-    }
-    if (top.value !== "") {
-      throw new WorkflowParseError(line.number, "inline `jobs` mappings are not supported")
-    }
-    index += 1
-    while (index < structural.length && structural[index]!.indent > 0) {
-      const jobLine = structural[index]!
-      const jobIndent = jobLine.indent
-      const job = entry(jobLine)
-      if (job.item) {
-        throw new WorkflowParseError(jobLine.number, "expected a job mapping entry, not a sequence item")
-      }
-      if (job.value !== "") {
-        throw new WorkflowParseError(jobLine.number, `job ${JSON.stringify(job.key)} must be a block mapping`)
-      }
-      if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(job.key)) {
-        throw new WorkflowParseError(jobLine.number, `${JSON.stringify(job.key)} is not a valid GitHub Actions job id`)
-      }
-      let jobName: string | undefined
-      let runsOn: string | undefined
-      let jobUses: string | undefined
-      let jobCondition: string | undefined
-      let jobContinueOnError: string | undefined
-      const steps: Array<WorkflowStep> = []
-      const jobKeys = new Set<string>()
-      index += 1
-      while (index < structural.length && structural[index]!.indent > jobIndent) {
-        const bodyLine = structural[index]!
-        const bodyIndent = bodyLine.indent
-        const field = entry(bodyLine)
-        if (field.item) {
-          throw new WorkflowParseError(
-            bodyLine.number,
-            `expected a mapping entry in job ${JSON.stringify(job.key)}, not a sequence item`
-          )
-        }
-        // A second `steps:` in one job shadows the first, so its steps never
-        // run. Concatenating them would report a gate present that GitHub
-        // never executes.
-        if (jobKeys.has(field.key)) {
-          throw new WorkflowParseError(
-            bodyLine.number,
-            `duplicate key ${JSON.stringify(field.key)} in job ${JSON.stringify(job.key)}`
-          )
-        }
-        jobKeys.add(field.key)
-        if (field.key === "defaults" || field.key === "<<") {
-          throw new WorkflowParseError(
-            bodyLine.number,
-            `${JSON.stringify(field.key)} in job ${JSON.stringify(job.key)} is not supported by the gate scanner`
-          )
-        }
-        if (field.key === "name") {
-          jobName = decodeScalar(field.value, bodyLine.number)
-          index += 1
-          continue
-        }
-        if (field.key === "runs-on") {
-          runsOn = decodeScalar(field.value, bodyLine.number)
-          index += 1
-          continue
-        }
-        if (field.key === "uses") {
-          jobUses = decodeScalar(field.value, bodyLine.number)
-          index += 1
-          continue
-        }
-        // A conditional job is not proof that a gate still runs, so the
-        // condition is carried out of the scan rather than dropped. An `if:`
-        // whose value is not on the key's own line reads as the empty string,
-        // which is not the always-true literal and therefore fails closed.
-        if (field.key === "if") {
-          jobCondition = scalars.get(bodyLine.number) ?? decodeScalar(field.value, bodyLine.number)
-          index += 1
-          while (index < structural.length && inBlock(structural[index]!, bodyIndent)) index += 1
-          continue
-        }
-        if (field.key === "continue-on-error") {
-          jobContinueOnError = decodeScalar(field.value, bodyLine.number)
-          index += 1
-          continue
-        }
-        if (field.key !== "steps") {
-          index += 1
-          while (index < structural.length && inBlock(structural[index]!, bodyIndent)) index += 1
-          continue
-        }
-        if (field.value !== "") {
-          throw new WorkflowParseError(bodyLine.number, "`steps` must be a block sequence")
-        }
-        index += 1
-        while (index < structural.length && inBlock(structural[index]!, bodyIndent)) {
-          const stepLine = structural[index]!
-          const first = entry(stepLine)
-          if (!first.item) {
-            throw new WorkflowParseError(stepLine.number, "expected a `-` sequence item inside `steps`")
-          }
-          // A sequence item's own fields are indented to where its first key
-          // starts, which is two past the `-`.
-          const fieldIndent = stepLine.indent + stepLine.text.trimStart().indexOf("- ") + 2
-          let stepName: string | undefined
-          let uses: string | undefined
-          let run: string | undefined
-          let shell: string | undefined
-          let stepCondition: string | undefined
-          let stepContinueOnError: string | undefined
-          const stepKeys = new Set<string>()
-          const take = (
-            key: string,
-            value: string,
-            lineNumber: number,
-            lineIndent: number
-          ): void => {
-            // Same target again: the last duplicate wins, so a step whose first
-            // `run:` is shadowed would lend its text to a gate for nothing.
-            if (stepKeys.has(key)) {
-              throw new WorkflowParseError(
-                lineNumber,
-                `duplicate key ${JSON.stringify(key)} in a step of job ${JSON.stringify(job.key)}`
-              )
-            }
-            stepKeys.add(key)
-            const scalar = scalars.get(lineNumber)
-            const resolved = scalar ?? decodeScalar(value, lineNumber)
-            if (key === "name") stepName = resolved
-            else if (key === "uses") uses = resolved
-            else if (key === "run") run = resolved
-            else if (key === "shell") shell = resolved
-            else if (key === "if") stepCondition = resolved
-            else if (key === "continue-on-error") stepContinueOnError = resolved
-            void lineIndent
-          }
-          take(first.key, first.value, stepLine.number, stepLine.indent)
-          index += 1
-          while (index < structural.length && structural[index]!.indent >= fieldIndent) {
-            const nested = structural[index]!
-            const nestedEntry = entry(nested)
-            if (nestedEntry.item) break
-            if (nested.indent === fieldIndent) {
-              take(nestedEntry.key, nestedEntry.value, nested.number, nested.indent)
-              index += 1
-              while (index < structural.length && structural[index]!.indent > fieldIndent) index += 1
-              continue
-            }
-            index += 1
-          }
-          if ((uses === undefined) === (run === undefined)) {
-            throw new WorkflowParseError(
-              stepLine.number,
-              `a step of job ${JSON.stringify(job.key)} must declare exactly one of \`uses\` or \`run\``
-            )
-          }
-          if ((uses ?? run)!.trim() === "") {
-            throw new WorkflowParseError(
-              stepLine.number,
-              `a step of job ${JSON.stringify(job.key)} has an empty ${uses === undefined ? "run" : "uses"} value`
-            )
-          }
-          if (stepKeys.has("<<")) {
-            throw new WorkflowParseError(
-              stepLine.number,
-              `a YAML merge in a step of job ${JSON.stringify(job.key)} is not supported by the gate scanner`
-            )
-          }
-          if (shell !== undefined && shell.trim() === "") {
-            throw new WorkflowParseError(stepLine.number, `a step of job ${JSON.stringify(job.key)} has an empty shell`)
-          }
-          steps.push({
-            name: stepName,
-            uses,
-            run,
-            shell,
-            condition: stepCondition,
-            continueOnError: stepContinueOnError
-          })
-        }
-      }
-      if (jobUses !== undefined) {
-        if (jobUses.trim() === "") {
-          throw new WorkflowParseError(
-            jobLine.number,
-            `reusable job ${JSON.stringify(job.key)} has an empty uses value`
-          )
-        }
-        if (runsOn !== undefined || jobKeys.has("steps")) {
-          throw new WorkflowParseError(
-            jobLine.number,
-            `reusable job ${JSON.stringify(job.key)} cannot also declare runs-on or steps`
-          )
-        }
-      } else {
-        if (runsOn === undefined || runsOn.trim() === "") {
-          throw new WorkflowParseError(jobLine.number, `job ${JSON.stringify(job.key)} declares no runner`)
-        }
-        if (!jobKeys.has("steps") || steps.length === 0) {
-          throw new WorkflowParseError(jobLine.number, `job ${JSON.stringify(job.key)} declares no steps`)
-        }
-      }
-      // A duplicate mapping key is invalid YAML, and GitHub keeps the LAST
-      // one: a gate matched against the shadowed job would be reported present
-      // while the pipeline never runs it. Refuse instead of choosing.
-      if (jobIds.has(job.key)) {
-        throw new WorkflowParseError(jobLine.number, `duplicate job id ${JSON.stringify(job.key)}`)
-      }
-      jobIds.add(job.key)
-      jobs.push({
-        id: job.key,
-        name: jobName,
-        runsOn,
-        uses: jobUses,
-        condition: jobCondition,
-        continueOnError: jobContinueOnError,
-        steps
-      })
-    }
+  )
+  refuseInherited(top, (key) => `top-level ${JSON.stringify(key)} is not supported by the gate scanner`)
+  const trigger = top.get("on")
+  if (trigger === undefined) {
+    throw new WorkflowParseError(1, "workflow is missing the required top-level `on` trigger")
   }
-  if (!topKeys.has("on")) throw new WorkflowParseError(1, "workflow is missing the required top-level `on` trigger")
-  if (!topKeys.has("jobs")) throw new WorkflowParseError(1, "workflow is missing the required top-level `jobs` mapping")
+  const declared = top.get("jobs")
+  if (declared === undefined) {
+    throw new WorkflowParseError(1, "workflow is missing the required top-level `jobs` mapping")
+  }
+  checkTrigger(trigger, counter)
+
+  if (Yaml.isSeq(declared.value)) {
+    throw new WorkflowParseError(
+      nodeLine(counter, declared.value.items[0] ?? declared.value),
+      "expected a job mapping entry, not a sequence item"
+    )
+  }
+  if (isEmptyNode(declared.value)) throw new WorkflowParseError(1, "workflow declares no jobs")
+  if (!Yaml.isMap(declared.value)) {
+    throw new WorkflowParseError(declared.line, "inline `jobs` mappings are not supported")
+  }
+  const jobs = entriesOf(
+    declared.value,
+    counter,
+    (key, line) => new WorkflowParseError(line, `duplicate job id ${JSON.stringify(key)}`)
+  ).map((job) => readJob(job, counter))
   if (jobs.length === 0) throw new WorkflowParseError(1, "workflow declares no jobs")
-  return { name, jobs }
+
+  const name = top.get("name")
+  return { name: name === undefined ? undefined : scalarText(name.value) || undefined, jobs }
 }
 
 /**
