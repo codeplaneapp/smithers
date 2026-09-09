@@ -14,11 +14,11 @@
  * what makes a checkpoint reachable from inside the container.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Layer } from "effect"
+import { Deferred, Effect, Fiber, Layer } from "effect"
 import { execFileSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as Bash from "../src/Bash.ts"
 import * as Checkpoints from "../src/Checkpoints.ts"
@@ -81,6 +81,42 @@ const store = (root: string, options: Partial<Checkpoints.GitOptions> = {}) =>
   Effect.provide(Checkpoints.makeGit({ root, ...options }), NodeServices.layer)
 
 describe("Checkpoints over a real repository", () => {
+  it("keeps overlapping materializations of the same id intact", async () => {
+    const root = repository()
+    const paths: Array<string> = []
+    await Effect.runPromise(Effect.gen(function*() {
+      const checkpoints = yield* store(root)
+      yield* checkpoints.capture("cp-overlap")
+      const entered = yield* Deferred.make<void>()
+      const released = yield* Deferred.make<void>()
+      const first = yield* checkpoints.materialize("cp-overlap", (found) =>
+        Effect.gen(function*() {
+          paths.push(found.host)
+          writeFileSync(join(found.host, "lease.txt"), "first")
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(released)
+          expect(readFileSync(join(found.host, "mod.py"), "utf8")).toBe("value = 'pristine'\n")
+          expect(readFileSync(join(found.host, "lease.txt"), "utf8")).toBe("first")
+        })).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      yield* checkpoints.materialize("cp-overlap", (found) =>
+        Effect.sync(() => {
+          paths.push(found.host)
+          expect(readFileSync(join(found.host, "mod.py"), "utf8")).toBe("value = 'pristine'\n")
+          expect(readFileSync(join(paths[0]!, "lease.txt"), "utf8")).toBe("first")
+          const relocated = Checkpoints.relocate("read", { path: "mod.py" }, found)
+          expect(relocated).toEqual({
+            _tag: "Relocated",
+            input: { path: `${found.host.slice(root.length + 1)}/mod.py` }
+          })
+        }))
+      yield* Deferred.succeed(released, undefined)
+      yield* Fiber.join(first)
+    }))
+    expect(new Set(paths).size).toBe(2)
+    for (const path of paths) expect(existsSync(path)).toBe(false)
+  }, 60_000)
+
   it("hands back the tree as it stood, while the live tree keeps the edit", async () => {
     const root = repository()
     // The tree the run opened on, recorded the way `snapshot-base.sh` records
@@ -232,10 +268,10 @@ describe("Checkpoints over a real repository", () => {
       writeFileSync(join(root, "mod.py"), "value = 'later still'\n")
       return yield* checkpoints.materialize("cp-1-0", (found) =>
         Effect.sync(() => {
-          const blind = `${Checkpoints.scratchDirectory}/${found.id}/../../mod.py`
+          const blind = `${found.host}/../../mod.py`
           return [
             Checkpoints.relocate("read", { path: "../../mod.py" }, found),
-            readFileSync(join(root, blind), "utf8")
+            readFileSync(blind, "utf8")
           ] as const
         }))
     }))
@@ -247,10 +283,8 @@ describe("Checkpoints over a real repository", () => {
   }, 60_000)
 
   it("keeps a handle resolving after a kill left the checkout standing", async () => {
-    // A `SIGKILL` runs no release. The checkout survives, `worktree add` refuses
-    // a path that exists, and without clearing it on the way in every later call
-    // at that id would answer `checkpoint_unavailable` for a handle the journal
-    // still says is good.
+    // A killed run can leave a checkout behind. A later call must use a new
+    // path, since a standing checkout may also belong to a still-active call.
     const root = repository()
     writeFileSync(join(root, "mod.py"), "value = 'fixed'\n")
     const scratch = join(root, Checkpoints.scratchDirectory, "cp-1-0")
@@ -269,7 +303,9 @@ describe("Checkpoints over a real repository", () => {
     }))
 
     expect(read).toBe("value = 'fixed'\n")
-    expect(existsSync(scratch)).toBe(false)
+    expect(readFileSync(join(scratch, "mod.py"), "utf8")).toBe("value = 'fixed'\n")
+    git(root, ["worktree", "remove", "--force", scratch])
+    expect(git(root, ["worktree", "list"])).not.toContain(Checkpoints.scratchDirectory)
   }, 60_000)
 
   it("points the checkout at the repository by a relative path, so a container can run git in it", async () => {
@@ -280,14 +316,15 @@ describe("Checkpoints over a real repository", () => {
     // collection fails for that and not for the code under test.
     const root = repository()
 
-    const [pointer, backPointer] = await Effect.runPromise(Effect.gen(function*() {
+    const [pointer, backPointer, directory] = await Effect.runPromise(Effect.gen(function*() {
       const checkpoints = yield* store(root, { cwd: "/testbed" })
       yield* checkpoints.capture("cp-1-0")
       return yield* checkpoints.materialize("cp-1-0", (found) =>
         Effect.sync(() =>
           [
             readFileSync(join(found.host, ".git"), "utf8").trim(),
-            readFileSync(join(root, ".git", "worktrees", "cp-1-0", "gitdir"), "utf8").trim()
+            readFileSync(join(root, ".git", "worktrees", basename(found.host), "gitdir"), "utf8").trim(),
+            basename(found.host)
           ] as const
         ))
     }))
@@ -297,7 +334,7 @@ describe("Checkpoints over a real repository", () => {
     // that host exactly what it had before — so the assertion is on what this
     // machine's git can do, not on which git this machine has.
     if (relativePathsAvailable()) {
-      expect(pointer).toBe("gitdir: ../../.git/worktrees/cp-1-0")
+      expect(pointer).toBe(`gitdir: ../../.git/worktrees/${directory}`)
       expect(pointer).not.toContain(root)
       expect(backPointer).not.toContain(root)
     } else {
@@ -347,13 +384,14 @@ describe("Checkpoints over a real repository", () => {
 
   it("removes the checkout however the call ends", async () => {
     const root = repository()
-    const scratch = join(root, Checkpoints.scratchDirectory, "cp-0-0")
+    let scratch = ""
 
     const exit = await Effect.runPromise(Effect.exit(Effect.gen(function*() {
       const checkpoints = yield* store(root)
       yield* checkpoints.capture("cp-0-0")
       return yield* checkpoints.materialize("cp-0-0", (found) =>
         Effect.sync(() => {
+          scratch = found.host
           expect(existsSync(join(found.host, "mod.py"))).toBe(true)
         }).pipe(Effect.andThen(Effect.fail("the call failed"))))
     })))
@@ -378,7 +416,7 @@ describe("Checkpoints over a real repository", () => {
           // The container's name for the scratch checkout, which is the workspace
           // path with the mount's prefix on it.
           expect(relocated._tag === "Relocated" && relocated.input).toMatchObject({
-            cwd: `/testbed/${Checkpoints.scratchDirectory}/${Checkpoints.baseId}`
+            cwd: `/testbed${found.host.slice(root.length)}`
           })
           return Bash.run(
             (relocated._tag === "Relocated" ? relocated.input : call) as Bash.Input

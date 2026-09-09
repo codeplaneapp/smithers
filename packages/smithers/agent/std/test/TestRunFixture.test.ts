@@ -14,9 +14,11 @@
  * `bash` is assumed.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Layer } from "effect"
+import { ChildProcessSpawner } from "@smthrs/kernel/ChildProcessSpawner"
+import { Deferred, Effect, Fiber, Layer } from "effect"
+import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -61,6 +63,94 @@ const run = (input: typeof TestRun.Input.Type, runner: TestRunner.Runner) =>
   )
 
 describe("TestRun over a real repository", () => {
+  it("keeps overlapping baseline runs intact", async () => {
+    const root = repository()
+    const paths: Array<string> = []
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const native = yield* ChildProcessSpawner
+        const entered = yield* Deferred.make<void>()
+        const released = yield* Deferred.make<void>()
+        const run = TestRun.run({ against: "base" }).pipe(
+          Effect.provide(TestRunner.layer({ command: "bash ./runtests.sh", cwd: root, root })),
+          Effect.provideService(ChildProcessSpawner, {
+            ...native,
+            spawn: (command) => {
+              const standard = command as ChildProcess.StandardCommand
+              const cwd = standard.options.cwd ?? ""
+              if (standard.command === "bash" && cwd !== root) {
+                paths.push(cwd)
+                if (paths.length === 1) {
+                  return Deferred.succeed(entered, undefined).pipe(
+                    Effect.andThen(Deferred.await(released)),
+                    Effect.andThen(Effect.sync(() => {
+                      expect(readFileSync(join(cwd, "mod.py"), "utf8")).toBe("x = 1\n")
+                    })),
+                    Effect.andThen(native.spawn(command))
+                  )
+                }
+                expect(readFileSync(join(cwd, "mod.py"), "utf8")).toBe("x = 1\n")
+              }
+              return native.spawn(command)
+            }
+          })
+        )
+        const first = yield* run.pipe(Effect.forkChild)
+        yield* Deferred.await(entered)
+        const second = yield* run
+        yield* Deferred.succeed(released, undefined)
+        const initial = yield* Fiber.join(first)
+        expect(initial.base?.parsed).toBe(true)
+        expect(second.base?.parsed).toBe(true)
+      }).pipe(Effect.provide(NodeServices.layer))
+    )
+    expect(new Set(paths).size).toBe(2)
+    for (const path of paths) expect(existsSync(path)).toBe(false)
+  }, 60_000)
+
+  it.each(["failure", "interruption"] as const)("removes the real baseline checkout after %s", async (ending) => {
+    const root = repository()
+    const commands: Array<string> = []
+    let scratch = ""
+    const exit = await Effect.runPromise(
+      Effect.gen(function*() {
+        const native = yield* ChildProcessSpawner
+        const entered = yield* Deferred.make<void>()
+        const run = TestRun.run({ against: "base" }).pipe(
+          Effect.provide(TestRunner.layer({ command: "bash ./runtests.sh", cwd: root, root })),
+          Effect.provideService(ChildProcessSpawner, {
+            ...native,
+            spawn: (command) => {
+              const standard = command as ChildProcess.StandardCommand
+              const cwd = standard.options.cwd ?? ""
+              commands.push([standard.command, ...standard.args, cwd].join(" "))
+              if (standard.command === "bash" && cwd !== root) {
+                scratch = cwd
+                expect(existsSync(join(scratch, "mod.py"))).toBe(true)
+                return ending === "failure"
+                  ? Effect.fail(new Error("spawn refused") as never)
+                  : Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+              }
+              return native.spawn(command)
+            }
+          })
+        )
+        if (ending === "failure") return yield* Effect.exit(run)
+        const fiber = yield* run.pipe(Effect.forkChild)
+        yield* Deferred.await(entered)
+        yield* Fiber.interrupt(fiber)
+        return yield* Fiber.await(fiber)
+      }).pipe(Effect.provide(NodeServices.layer))
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(scratch).not.toBe("")
+    expect(existsSync(scratch)).toBe(false)
+    const launched = commands.findIndex((line) => line.startsWith("bash ") && line.endsWith(scratch))
+    expect(launched).toBeGreaterThan(-1)
+    expect(commands.slice(launched + 1)).toContain(`git -C ${root} worktree remove --force ${scratch} `)
+    expect(git(root, ["worktree", "list"])).not.toContain(TestRun.scratchDirectory)
+  }, 60_000)
+
   it("runs the base commit beside the working tree and attributes the difference", async () => {
     const root = repository()
     // The ref `evals/swebench/lib/snapshot-base.sh` writes, which is also the
@@ -101,7 +191,7 @@ describe("TestRun over a real repository", () => {
     expect(output.fixed).toEqual(["tests/test_a.py::test_a"])
   }, 60_000)
 
-  it("replaces a stale baseline worktree left by an interrupted run", async () => {
+  it("uses a fresh baseline without deleting a standing worktree", async () => {
     const root = repository()
     const scratch = join(root, TestRun.scratchDirectory)
     git(root, ["worktree", "add", "--detach", scratch, "HEAD"])
@@ -111,6 +201,8 @@ describe("TestRun over a real repository", () => {
 
     expect(output.base?.parsed).toBe(true)
     expect(output.fixed).toEqual(["tests/test_a.py::test_a"])
+    expect(readFileSync(join(scratch, "mod.py"), "utf8")).toBe("x = 1\n")
+    git(root, ["worktree", "remove", "--force", scratch])
     expect(git(root, ["worktree", "list"])).not.toContain(TestRun.scratchDirectory)
   }, 60_000)
 

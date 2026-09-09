@@ -38,7 +38,7 @@
  * captures a patch: `capture-patch.sh` drops paths that did not exist when the
  * agent started, so a checkpoint holds what a patch would hold.
  *
- * The materialization is a detached worktree at `<root>/.flows-checkpoints/<id>`
+ * The materialization is a detached worktree at `<root>/.flows-checkpoints/<id>-<lease>`
  * — **inside** the workspace, which looks wrong and is the only thing that
  * works. A benchmark check runs through `docker exec` inside `/testbed`, and
  * `/testbed` is a bind mount of the live workspace. A scratch checkout anywhere
@@ -76,6 +76,7 @@
 import { ChildProcessSpawner } from "@smthrs/kernel/ChildProcessSpawner"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as Exec from "./internal/Exec.ts"
+import { GitWorktree } from "./internal/GitWorktree.ts"
 import * as StdError from "./StdError.ts"
 import * as TestRunner from "./TestRunner.ts"
 
@@ -293,24 +294,6 @@ const git = (
     Effect.mapError((error) => failed(`git could not run: ${error.message}`))
   )
 
-const resolved = (
-  root: string,
-  refs: ReadonlyArray<string>
-): Effect.Effect<{ readonly ref: string; readonly commit: string }, StdError.StdError, ChildProcessSpawner> =>
-  Effect.gen(function*() {
-    for (const ref of refs) {
-      const answer = yield* git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])
-      const commit = answer.stdout.trim()
-      if (answer.exitCode === 0 && commit !== "") return { ref, commit }
-    }
-    return yield* Effect.fail(
-      failed(
-        `No checkpoint is stored under ${refs.join(" or ")} in ${root}. Take the reading on the live tree instead.`,
-        "not_found"
-      )
-    )
-  })
-
 /**
  * Builds the git-backed store.
  *
@@ -357,7 +340,7 @@ const gitStore = (options: GitOptions, spawner: ChildProcessSpawner["Service"]):
    */
   const commitOf = (id: string) =>
     Effect.gen(function*() {
-      if (id === baseId) return (yield* resolved(root, baseRefs)).commit
+      if (id === baseId) return (yield* GitWorktree.resolveCommit(root, baseRefs)).commit
       const found = yield* git(root, ["config", "--local", "--get", keyOf(id)])
       const commit = found.stdout.trim()
       if (found.exitCode !== 0 || commit === "") {
@@ -386,7 +369,7 @@ const gitStore = (options: GitOptions, spawner: ChildProcessSpawner["Service"]):
       // that commit is the checkpoint. `stash create` says so by printing
       // nothing, which is not an error and must not be read as one.
       const commit = recorded.stdout.trim() === ""
-        ? (yield* resolved(root, ["HEAD"])).commit
+        ? (yield* GitWorktree.resolveCommit(root, ["HEAD"])).commit
         : recorded.stdout.trim()
       const named = yield* git(root, ["config", "--local", keyOf(id), commit])
       if (named.exitCode !== 0) {
@@ -394,56 +377,6 @@ const gitStore = (options: GitOptions, spawner: ChildProcessSpawner["Service"]):
       }
       return new Snapshot({ id, ref: commit })
     }))
-
-  /**
-   * The repository-format keys a relative `worktree add` rewrites, read before
-   * the checkout so {@link restoreFormat} can put back exactly what stood.
-   */
-  const formatState = Effect.gen(function*() {
-    const version = yield* git(root, ["config", "--local", "--get", "core.repositoryformatversion"])
-    const marker = yield* git(root, ["config", "--local", "--get", "extensions.relativeWorktrees"])
-    return {
-      version: version.exitCode === 0 ? version.stdout.trim() : undefined,
-      marked: marker.exitCode === 0
-    }
-  })
-
-  /**
-   * Removes the format stamp {@link materialize}'s `worktree add` wrote, when
-   * it wrote one.
-   *
-   * Git 2.48 and later record the first relative checkout in the repository
-   * itself: `extensions.relativeWorktrees = true`, and
-   * `core.repositoryformatversion` raised to 1 so older git honours the
-   * extensions section. Removing the worktree takes neither back — and a git
-   * before 2.48 that opens a repository carrying an extension it does not know
-   * refuses the whole repository, not the worktree. The benchmark containers
-   * run exactly such a git against this same directory through a bind mount,
-   * so the stamp must not outlive the one command that needed it. See the
-   * comment inside {@link materialize} for the measured damage.
-   *
-   * Restores only what this checkout introduced: a marker that predates the
-   * checkout belongs to the repository and is left standing, and a pre-2.48
-   * git writes nothing, so there is nothing to remove.
-   */
-  const restoreFormat = (before: { readonly version: string | undefined; readonly marked: boolean }) =>
-    Effect.gen(function*() {
-      if (before.marked) return
-      const marker = yield* git(root, ["config", "--local", "--get", "extensions.relativeWorktrees"])
-      if (marker.exitCode !== 0) return
-      const unset = yield* git(root, ["config", "--local", "--unset", "extensions.relativeWorktrees"])
-      if (unset.exitCode !== 0) {
-        return yield* Effect.fail(
-          failed(`Could not restore the repository format after checking out a checkpoint: ${unset.stderr.trim()}`)
-        )
-      }
-      const version = yield* git(root, ["config", "--local", "core.repositoryformatversion", before.version ?? "0"])
-      if (version.exitCode !== 0) {
-        return yield* Effect.fail(
-          failed(`Could not restore the repository format after checking out a checkpoint: ${version.stderr.trim()}`)
-        )
-      }
-    })
 
   const materialize = <A, E, R>(
     id: string,
@@ -456,66 +389,16 @@ const gitStore = (options: GitOptions, spawner: ChildProcessSpawner["Service"]):
         )
       }
       const commit = yield* spawn(commitOf(id))
-      const host = `${root}/${scratchDirectory}/${id}`
-      const discard = Effect.ignore(spawn(git(root, ["worktree", "remove", "--force", host])))
-      const before = yield* spawn(formatState)
-      // The worktree is removed however the call ends: a run killed at its
-      // wall-clock budget would otherwise leave a second checkout of the whole
-      // repository inside the tree whose diff is the run's answer.
-      //
-      // It is removed on the way *in* as well, and that is not belt and braces.
-      // A release runs for an interruption and not for a `SIGKILL`, so a run
-      // killed outright leaves the checkout standing — and `worktree add`
-      // refuses a path that exists, so every later call at that id would answer
-      // `checkpoint_unavailable` for a handle the journal still says is good. A
-      // checkpoint has to survive the kill that its own scoping cannot catch.
-      //
-      // `worktree.useRelativePaths` makes the checkout's `.git` file point at
-      // the repository by a relative path. Without it that pointer is this
-      // machine's absolute path, which does not exist inside a container, and
-      // `git` run at the checkpoint through the mount answers "not a git
-      // repository" — for a directory that is one. Git before 2.48 does not
-      // know the key and ignores it, which costs that host nothing it had.
-      //
-      // A git that does know it also stamps the repository itself: the first
-      // relative checkout writes `extensions.relativeWorktrees = true` and
-      // raises `core.repositoryformatversion` to 1 in the workspace's own
-      // config, and removing the worktree takes neither back. A pre-2.48 git
-      // that then opens the repository refuses it whole — "unknown repository
-      // extension found: relativeworktrees" — and the benchmark containers run
-      // exactly such a git against this directory through the bind mount.
-      // Measured on the r97 wave: 15 of 45 runs lost every in-container `git
-      // status` and `git diff` at /testbed (exit 128 or 129) from the first
-      // `{ at: ctx.base }` call onward. `restoreFormat` therefore runs before
-      // `use`, so the repository the call reads — and every in-container git
-      // after it — carries the format it had before the checkout. The relative
-      // pointers keep working without the stamp: git resolves them regardless,
-      // and the marker's only job is to warn older worktree *tooling*, which
-      // no benchmark container runs.
-      return yield* Effect.acquireUseRelease(
-        discard.pipe(
-          Effect.andThen(spawn(git(root, [
-            "-c",
-            "worktree.useRelativePaths=true",
-            "worktree",
-            "add",
-            "--detach",
-            "--force",
-            host,
-            commit
-          ]))),
-          Effect.flatMap((added) =>
-            added.exitCode === 0
-              ? Effect.void
-              : Effect.fail(failed(`Could not check out checkpoint ${id}: ${added.stderr.trim()}`))
+      const context = yield* Effect.context<R>()
+      return yield* GitWorktree.withDetachedWorktree(
+        root,
+        `${scratchDirectory}/${id}`,
+        commit,
+        (host) =>
+          use({ id, host, guest: `${guestRoot}${host.slice(root.length)}`, root, guestRoot }).pipe(
+            Effect.provideContext(context)
           )
-        ),
-        () =>
-          spawn(restoreFormat(before)).pipe(
-            Effect.andThen(use({ id, host, guest: `${guestRoot}/${scratchDirectory}/${id}`, root, guestRoot }))
-          ),
-        () => discard
-      )
+      ).pipe(Effect.provideService(ChildProcessSpawner, spawner))
     })
 
   return make({ capture, materialize })
@@ -657,7 +540,7 @@ export const relocate = (
       input: { ...record, cwd: kept === undefined || kept === "" ? base : `${base}/${kept}` }
     }
   }
-  const relative = `${scratchDirectory}/${materialized.id}`
+  const relative = materialized.host.slice(trimmed(materialized.root).length + 1)
   if (declared === undefined) return { _tag: "Relocated", input: { ...record, [rule.field]: relative } }
   if (typeof declared !== "string") return { _tag: "UnsupportedFlow" }
   if (declared.startsWith("/")) return { _tag: "AbsolutePath", path: declared }

@@ -10,6 +10,7 @@ import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import { Cause, Effect, Exit, Layer, Option, Sink, Stream } from "effect"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as Checkpoints from "../src/Checkpoints.ts"
 
@@ -70,10 +71,15 @@ const materialized: Checkpoints.Materialized = {
   guestRoot: "/testbed"
 }
 
-/** The checkout of one id, as this store spells it. */
-const checkout = (id: string, commit: string) => [
-  `git -C /work/repo worktree remove --force /work/repo/.flows-checkpoints/${id}`,
-  `git -C /work/repo -c worktree.useRelativePaths=true worktree add --detach --force /work/repo/.flows-checkpoints/${id} ${commit}`
+/** The exact allocated path must be used for checkout, relocation and removal. */
+const checkoutPath = (spawns: ReadonlyArray<ReadonlyArray<string>>) => {
+  const path = spawns.find((argv) => argv.includes("add"))?.at(-2)
+  expect(path).toMatch(/^\/work\/repo\/\.flows-checkpoints\/[a-z0-9-]+-[0-9a-f-]{36}$/)
+  return path!
+}
+
+const checkout = (path: string, commit: string) => [
+  `git -C /work/repo -c worktree.useRelativePaths=true worktree add --detach --force ${path} ${commit}`
 ]
 
 /**
@@ -174,6 +180,12 @@ describe("Checkpoints.makeGit capture", () => {
 })
 
 describe("Checkpoints.makeGit materialize", () => {
+  it("documents that a declared baseRef is authoritative", () => {
+    const guide = readFileSync(new URL("../docs/guides/pin-a-checkpoint.md", import.meta.url), "utf8")
+    expect(guide).toMatch(/A declared ref that\s+does not resolve is `not_found`/)
+    expect(guide).toMatch(/Otherwise it tries `TestRunner.captureBase`\s+and then `HEAD`/)
+  })
+
   it("checks the tree out beside the repository and removes it however the call ends", async () => {
     const spawns: Array<ReadonlyArray<string>> = []
     const seen = await Effect.runPromise(Effect.gen(function*() {
@@ -183,10 +195,10 @@ describe("Checkpoints.makeGit materialize", () => {
 
     expect(seen).toEqual({
       id: "cp-0-1",
-      host: "/work/repo/.flows-checkpoints/cp-0-1",
+      host: checkoutPath(spawns),
       // No container declared, so the two names of the one directory are the
       // same name.
-      guest: "/work/repo/.flows-checkpoints/cp-0-1",
+      guest: checkoutPath(spawns),
       root: "/work/repo",
       guestRoot: "/work/repo"
     })
@@ -197,8 +209,8 @@ describe("Checkpoints.makeGit materialize", () => {
     expect(spawns.map((argv) => argv.join(" "))).toEqual([
       "git -C /work/repo config --local --get flows-checkpoint.cp-0-1",
       ...formatRead,
-      ...checkout("cp-0-1", "abc123"),
-      "git -C /work/repo worktree remove --force /work/repo/.flows-checkpoints/cp-0-1"
+      ...checkout(checkoutPath(spawns), "abc123"),
+      `git -C /work/repo worktree remove --force ${checkoutPath(spawns)}`
     ])
   })
 
@@ -229,54 +241,40 @@ describe("Checkpoints.makeGit materialize", () => {
     expect(spawns.map((argv) => argv.join(" "))).toEqual([
       "git -C /work/repo config --local --get flows-checkpoint.cp-0-1",
       ...formatRead,
-      ...checkout("cp-0-1", "abc123"),
+      ...checkout(checkoutPath(spawns), "abc123"),
       "git -C /work/repo config --local --get extensions.relativeWorktrees",
       "git -C /work/repo config --local --unset extensions.relativeWorktrees",
       "git -C /work/repo config --local core.repositoryformatversion 0",
       "<the relocated call runs here>",
-      "git -C /work/repo worktree remove --force /work/repo/.flows-checkpoints/cp-0-1"
+      `git -C /work/repo worktree remove --force ${checkoutPath(spawns)}`
     ])
   })
 
-  it("clears a checkout a killed run left behind, so a handle keeps resolving", async () => {
-    // The release runs for an interruption and not for a `SIGKILL`. A run killed
-    // outright leaves the scratch checkout standing, `worktree add` refuses a
-    // path that exists, and every later call at that id would then answer
-    // `checkpoint_unavailable` for a handle the journal still says is good. So
-    // the checkout is cleared on the way in as well as on the way out.
+  it("allocates a new path each time the same materialization effect runs", async () => {
     const spawns: Array<ReadonlyArray<string>> = []
-    const read = await Effect.runPromise(Effect.gen(function*() {
-      const checkpoints = yield* store(spawns, [
-        ["config --local --get", { stdout: "abc123\n" }],
-        // What git says about the leftover: it removes it, and the add that
-        // would have failed against it succeeds.
-        ["worktree remove", { exitCode: 0 }]
-      ])
-      return yield* checkpoints.materialize("cp-0-1", (found) => Effect.succeed(found.host))
+    const paths = await Effect.runPromise(Effect.gen(function*() {
+      const checkpoints = yield* store(spawns, [["config --local --get", { stdout: "abc123\n" }]])
+      const read = checkpoints.materialize("cp-0-1", (found) => Effect.succeed(found.host))
+      return [yield* read, yield* read]
     }))
-
-    expect(read).toBe("/work/repo/.flows-checkpoints/cp-0-1")
-    expect(spawns.map((argv) => argv.join(" ")).filter((line) => line.includes("worktree"))).toEqual([
-      ...checkout("cp-0-1", "abc123"),
-      "git -C /work/repo worktree remove --force /work/repo/.flows-checkpoints/cp-0-1"
-    ])
+    expect(paths[0]).not.toBe(paths[1])
+    const worktrees = spawns.filter((argv) => argv.includes("worktree")).map((argv) => argv.join(" "))
+    expect(worktrees).toEqual(paths.flatMap((path) => [
+      ...checkout(path, "abc123"),
+      `git -C /work/repo worktree remove --force ${path}`
+    ]))
   })
 
-  it("keeps clearing on the way in when nothing is there to clear", async () => {
-    // The common case: `worktree remove` fails because the path is not a
-    // worktree, and that failure is not the run's problem.
+  it("keeps the caller's process service inside the callback", async () => {
     const spawns: Array<ReadonlyArray<string>> = []
-    const read = await Effect.runPromise(Effect.gen(function*() {
-      const checkpoints = yield* store(spawns, [
-        ["config --local --get", { stdout: "abc123\n" }],
-        // git's answer when the path is not a worktree, which is not the run's
-        // problem: the checkout it was going to clear was never there.
-        ["worktree remove", { exitCode: 128 }]
-      ])
-      return yield* checkpoints.materialize("cp-0-1", (found) => Effect.succeed(found.id))
+    const caller = ChildProcessSpawner.makeNoop()
+    const seen = await Effect.runPromise(Effect.gen(function*() {
+      const checkpoints = yield* store(spawns, [["config --local --get", { stdout: "abc123\n" }]])
+      return yield* checkpoints.materialize("cp-0-1", () => ChildProcessSpawner.ChildProcessSpawner).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, caller)
+      )
     }))
-
-    expect(read).toBe("cp-0-1")
+    expect(seen).toBe(caller)
   })
 
   it("removes the checkout when the call inside it fails", async () => {
@@ -305,8 +303,8 @@ describe("Checkpoints.makeGit materialize", () => {
     // One directory, two names: the host checks it out under the workspace, and
     // the container sees it at the same subpath under its bind mount. That is
     // the whole reason the scratch lives inside the workspace.
-    expect(seen.host).toBe("/work/repo/.flows-checkpoints/cp-0-1")
-    expect(seen.guest).toBe("/testbed/.flows-checkpoints/cp-0-1")
+    expect(seen.host).toBe(checkoutPath(spawns))
+    expect(seen.guest).toBe(checkoutPath(spawns).replace("/work/repo", "/testbed"))
   })
 
   it("resolves the base id against the capture base, then HEAD", async () => {
@@ -330,8 +328,8 @@ describe("Checkpoints.makeGit materialize", () => {
       "git -C /work/repo rev-parse --verify --quiet refs/flows/capture-base^{commit}",
       "git -C /work/repo rev-parse --verify --quiet HEAD^{commit}",
       ...formatRead,
-      ...checkout("base", "head999"),
-      "git -C /work/repo worktree remove --force /work/repo/.flows-checkpoints/base"
+      ...checkout(checkoutPath(spawns), "head999"),
+      `git -C /work/repo worktree remove --force ${checkoutPath(spawns)}`
     ])
   })
 
@@ -372,7 +370,7 @@ describe("Checkpoints.makeGit materialize", () => {
       return yield* checkpoints.materialize("cp-0-1", () => Effect.void)
     })))
 
-    expect(failureOf(exit)?.message).toContain("Could not check out checkpoint cp-0-1")
+    expect(failureOf(exit)?.message).toContain("Could not check out abc123")
   })
 })
 

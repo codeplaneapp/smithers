@@ -25,6 +25,7 @@ import * as Schema from "effect/Schema"
 import * as Container from "./Container.ts"
 import { capability, envelope } from "./internal/Declaration.ts"
 import * as Exec from "./internal/Exec.ts"
+import { GitWorktree } from "./internal/GitWorktree.ts"
 import * as TestReport from "./internal/TestReport.ts"
 import { MAX_SHELL_OUTPUT_BYTES, truncateBytes } from "./internal/Text.ts"
 import * as Probe from "./Probe.ts"
@@ -49,7 +50,7 @@ export const description =
   "Run this repository's declared test runner and get {passed, failed[ids]}, not raw output. against:'base' also runs it on the pristine base commit, so a pre-existing failure is named, not investigated."
 
 /**
- * The directory a baseline worktree is checked out into, relative to the
+ * The parent directory baseline worktrees are checked out into, relative to the
  * repository root, and therefore also relative to the runner's own directory.
  *
  * @category constants
@@ -266,89 +267,6 @@ const execute = (
     }
   })
 
-const git = (
-  root: string,
-  args: ReadonlyArray<string>
-): Effect.Effect<Exec.ExecResult, StdError.StdError, ChildProcessSpawner.ChildProcessSpawner> =>
-  Exec.exec("git", { args: ["-C", root, ...args] }).pipe(
-    Effect.mapError((error) => failed(`git could not run: ${error.message}`))
-  )
-
-interface RepositoryFormat {
-  readonly version: string | undefined
-  readonly marked: boolean
-}
-
-/** Repository format keys a relative worktree checkout can rewrite. */
-const formatState = (
-  root: string
-): Effect.Effect<RepositoryFormat, StdError.StdError, ChildProcessSpawner.ChildProcessSpawner> =>
-  Effect.gen(function*() {
-    const version = yield* git(root, ["config", "--local", "--get", "core.repositoryformatversion"])
-    const marker = yield* git(root, ["config", "--local", "--get", "extensions.relativeWorktrees"])
-    return {
-      version: version.exitCode === 0 ? version.stdout.trim() : undefined,
-      marked: marker.exitCode === 0
-    }
-  })
-
-/** Restores only the repository format keys the relative checkout introduced. */
-const restoreFormat = (
-  root: string,
-  before: RepositoryFormat
-): Effect.Effect<void, StdError.StdError, ChildProcessSpawner.ChildProcessSpawner> =>
-  Effect.gen(function*() {
-    if (before.marked) return
-    const marker = yield* git(root, ["config", "--local", "--get", "extensions.relativeWorktrees"])
-    if (marker.exitCode !== 0) return
-    const unset = yield* git(root, ["config", "--local", "--unset", "extensions.relativeWorktrees"])
-    if (unset.exitCode !== 0) {
-      return yield* Effect.fail(
-        failed(`Could not restore the repository format after checking out a baseline: ${unset.stderr.trim()}`)
-      )
-    }
-    const version = yield* git(root, [
-      "config",
-      "--local",
-      "core.repositoryformatversion",
-      before.version ?? "0"
-    ])
-    if (version.exitCode !== 0) {
-      return yield* Effect.fail(
-        failed(`Could not restore the repository format after checking out a baseline: ${version.stderr.trim()}`)
-      )
-    }
-  })
-
-/** The commit a baseline runs against, and the ref it was named by. */
-const baseCommit = (
-  root: string,
-  declared: string | undefined
-): Effect.Effect<
-  { readonly ref: string; readonly commit: string },
-  StdError.StdError,
-  ChildProcessSpawner.ChildProcessSpawner
-> =>
-  Effect.gen(function*() {
-    // A declared ref that does not resolve is an error rather than a fallback:
-    // a baseline against the wrong tree answers the attribution question wrong,
-    // which is worse than not answering it.
-    const candidates = declared === undefined ? [TestRunner.captureBase, "HEAD"] : [declared]
-    for (const ref of candidates) {
-      const resolved = yield* git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])
-      const commit = resolved.stdout.trim()
-      if (resolved.exitCode === 0 && commit !== "") return { ref, commit }
-    }
-    return yield* Effect.fail(
-      failed(
-        `No pristine base to compare against: ${candidates.join(" and ")} ${
-          candidates.length === 1 ? "does" : "do"
-        } not resolve in ${root}. Run against the workspace instead.`,
-        "not_found"
-      )
-    )
-  })
-
 /**
  * Runs the declared suite, and on request the same suite on the pristine base.
  *
@@ -387,39 +305,26 @@ export const run = Effect.fn("TestRun.run")(function*(
       )
     )
   }
-  const base = yield* baseCommit(root, runner.baseRef)
-  const scratch = `${root.replace(/\/+$/, "")}/${scratchDirectory}`
-  const discard = Effect.ignore(git(root, ["worktree", "remove", "--force", scratch]))
-  const before = yield* formatState(root)
-  const baseline = yield* Effect.acquireUseRelease(
-    discard.pipe(
-      // Keep this checkout aligned with Checkpoints.materialize: stale
-      // worktrees survive SIGKILL, and containers need a relative .git pointer.
-      Effect.andThen(git(root, [
-        "-c",
-        "worktree.useRelativePaths=true",
-        "worktree",
-        "add",
-        "--detach",
-        "--force",
-        scratch,
-        base.commit
-      ])),
-      Effect.flatMap((added) =>
-        added.exitCode === 0
-          ? Effect.void
-          : Effect.fail(failed(`Could not check out ${base.commit} for a baseline run: ${added.stderr.trim()}`))
-      )
-    ),
-    () =>
-      restoreFormat(root, before).pipe(
-        Effect.andThen(execute(runner, transport, {
-          selection,
-          cwd: runner.cwd === undefined ? scratch : `${runner.cwd.replace(/\/+$/, "")}/${scratchDirectory}`,
-          timeoutMs
-        }))
-      ),
-    () => discard
+  const base = yield* GitWorktree.resolveCommit(
+    root,
+    runner.baseRef === undefined ? [TestRunner.captureBase, "HEAD"] : [runner.baseRef]
+  ).pipe(Effect.mapError((error) =>
+    error.code === "not_found"
+      ? failed(`No pristine base to compare against: ${error.message} Run against the workspace instead.`, "not_found")
+      : error
+  ))
+  const baseline = yield* GitWorktree.withDetachedWorktree(
+    root,
+    `${scratchDirectory}/run`,
+    base.commit,
+    (scratch) =>
+      execute(runner, transport, {
+        selection,
+        cwd: runner.cwd === undefined
+          ? scratch
+          : `${runner.cwd.replace(/\/+$/, "")}${scratch.slice(root.replace(/\/+$/, "").length)}`,
+        timeoutMs
+      })
   )
   const difference = TestReport.attribute(current.report, baseline.report)
   return {

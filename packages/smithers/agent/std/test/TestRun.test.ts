@@ -187,12 +187,13 @@ describe("TestRun", () => {
     expect(lines[1]).toBe(`git -C /repo rev-parse --verify --quiet ${TestRunner.captureBase}^{commit}`)
     expect(lines[2]).toBe("git -C /repo config --local --get core.repositoryformatversion")
     expect(lines[3]).toBe("git -C /repo config --local --get extensions.relativeWorktrees")
-    expect(lines[4]).toBe(`git -C /repo worktree remove --force /repo/${TestRun.scratchDirectory}`)
-    expect(lines[5]).toBe(
-      `git -C /repo -c worktree.useRelativePaths=true worktree add --detach --force /repo/${TestRun.scratchDirectory} abc123`
+    const scratch = spawns[4]?.at(-2)
+    expect(scratch).toMatch(/^\/repo\/\.flows-test-base\/run-[0-9a-f-]{36}$/)
+    expect(lines[4]).toBe(
+      `git -C /repo -c worktree.useRelativePaths=true worktree add --detach --force ${scratch} abc123`
     )
-    expect(lines[6]).toBe(lines[0])
-    expect(lines[7]).toBe(`git -C /repo worktree remove --force /repo/${TestRun.scratchDirectory}`)
+    expect(lines[5]).toBe(lines[0])
+    expect(lines[6]).toBe(`git -C /repo worktree remove --force ${scratch}`)
   })
 
   it("omits attribution when either side has an incomplete failure reading", async () => {
@@ -250,6 +251,7 @@ describe("TestRun", () => {
 
   it("removes the scratch worktree even when the baseline run fails to start", async () => {
     const spawns: Array<ReadonlyArray<string>> = []
+    let failedAt = -1
     const stalled = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(ChildProcessSpawner.makeNoop({
       spawn: (command) => {
         const standard = command as ChildProcess.StandardCommand
@@ -257,6 +259,7 @@ describe("TestRun", () => {
         spawns.push(argv)
         const line = argv.join(" ")
         if ((standard.options.cwd ?? "").includes(TestRun.scratchDirectory)) {
+          failedAt = spawns.length - 1
           return Effect.fail(new Error("spawn refused") as never)
         }
         const stdout = Stream.make(new TextEncoder().encode(line.includes("rev-parse") ? "abc123\n" : "3 passed\n"))
@@ -279,7 +282,8 @@ describe("TestRun", () => {
       Effect.provide(Effect.exit(TestRun.run({ against: "base" })), Layer.merge(stalled, runner))
     )
     expect(Exit.isFailure(exit)).toBe(true)
-    expect(spawns.some((argv) => argv.join(" ").includes("worktree remove"))).toBe(true)
+    expect(failedAt).toBeGreaterThan(-1)
+    expect(spawns.slice(failedAt + 1).some((argv) => argv.join(" ").includes("worktree remove"))).toBe(true)
   })
 
   it("routes the run through the container transport when the declaration names one", async () => {
