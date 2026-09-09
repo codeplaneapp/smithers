@@ -2,7 +2,7 @@ import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it, vi } from "vitest"
 import * as GitHooks from "../src/GitHooks.ts"
 import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import { PackageIndex } from "../src/PackageIndex.ts"
@@ -181,7 +181,7 @@ describe("script behavior", () => {
 describe("check and install", () => {
   it("reports missing before install, clean after, stale on drift", async () => {
     const root = await temporaryRoot()
-    await Fs.mkdir(NodePath.join(root, ".git"))
+    NodeChildProcess.execFileSync("git", ["init", "-q", root])
     const rendered = GitHooks.render({ preCommit: "//:preCommit", postMerge: "//:postMerge" })
     const before = await GitHooks.check(root, rendered)
     expect(before.clean).toBe(false)
@@ -198,6 +198,101 @@ describe("check and install", () => {
     expect(drifted.entries).toContainEqual({ file: "pre-commit", status: "stale" })
     await GitHooks.install(root, rendered)
     expect((await GitHooks.check(root, rendered)).clean).toBe(true)
+  })
+
+  it("installs into the shared hooks directory from a linked worktree", async () => {
+    const root = await temporaryRoot()
+    const repository = NodePath.join(root, "repository")
+    const worktree = NodePath.join(root, "worktree")
+    NodeChildProcess.execFileSync("git", ["init", "-q", repository])
+    NodeChildProcess.execFileSync("git", [
+      "-C",
+      repository,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "init"
+    ])
+    NodeChildProcess.execFileSync("git", ["-C", repository, "worktree", "add", "--detach", worktree])
+    expect((await Fs.stat(NodePath.join(worktree, ".git"))).isFile()).toBe(true)
+    const rendered = GitHooks.render({ preCommit: "//:preCommit" })
+    expect((await GitHooks.check(worktree, rendered)).clean).toBe(false)
+    await GitHooks.install(worktree, rendered)
+    expect(await Fs.readFile(NodePath.join(repository, ".git", "hooks", "pre-commit"), "utf8"))
+      .toBe(rendered[0]!.content)
+    expect((await GitHooks.check(worktree, rendered)).clean).toBe(true)
+    await Fs.appendFile(NodePath.join(repository, ".git", "hooks", "pre-commit"), "# drift\n")
+    expect((await GitHooks.check(worktree, rendered)).entries)
+      .toEqual([{ file: "pre-commit", status: "stale" }])
+  })
+
+  it.each(["relative", "absolute"])("honors a %s core.hooksPath for install and check", async (kind) => {
+    const root = await temporaryRoot()
+    NodeChildProcess.execFileSync("git", ["init", "-q", root])
+    const hooksDirectory = NodePath.join(root, "custom hooks")
+    NodeChildProcess.execFileSync("git", [
+      "-C",
+      root,
+      "config",
+      "core.hooksPath",
+      kind === "relative" ? "custom hooks" : hooksDirectory
+    ])
+    const rendered = GitHooks.render({ preCommit: "//:preCommit" })
+    // A matching file in the default directory must not conceal a missing active hook.
+    await Fs.writeFile(NodePath.join(root, ".git", "hooks", "pre-commit"), rendered[0]!.content)
+    expect((await GitHooks.check(root, rendered)).entries)
+      .toEqual([{ file: "pre-commit", status: "missing" }])
+    await GitHooks.install(root, rendered)
+    expect(await Fs.readFile(NodePath.join(hooksDirectory, "pre-commit"), "utf8"))
+      .toBe(rendered[0]!.content)
+    expect((await Fs.stat(NodePath.join(hooksDirectory, "pre-commit"))).mode & 0o111).not.toBe(0)
+    expect((await GitHooks.check(root, rendered)).clean).toBe(true)
+    await Fs.appendFile(NodePath.join(hooksDirectory, "pre-commit"), "# drift\n")
+    expect((await GitHooks.check(root, rendered)).entries)
+      .toEqual([{ file: "pre-commit", status: "stale" }])
+  })
+
+  it("falls back to .git/hooks only when git is unavailable", async () => {
+    const root = await temporaryRoot()
+    await Fs.mkdir(NodePath.join(root, ".git"))
+    const emptyPath = NodePath.join(root, "empty-path")
+    await Fs.mkdir(emptyPath)
+    const rendered = GitHooks.render({ preCommit: "//:preCommit" })
+    vi.stubEnv("PATH", emptyPath)
+    try {
+      expect((await GitHooks.check(root, rendered)).clean).toBe(false)
+      await GitHooks.install(root, rendered)
+      expect(await Fs.readFile(NodePath.join(root, ".git", "hooks", "pre-commit"), "utf8"))
+        .toBe(rendered[0]!.content)
+      expect((await GitHooks.check(root, rendered)).clean).toBe(true)
+      await expect(GitHooks.install(emptyPath, rendered)).rejects.toMatchObject({
+        name: "GitHooksError",
+        code: "not_a_git_repository"
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("does not fall back when git rejects an invalid .git directory", async () => {
+    const root = await temporaryRoot()
+    await Fs.mkdir(NodePath.join(root, ".git"))
+    const rendered = GitHooks.render({ preCommit: "//:preCommit" })
+    await expect(GitHooks.install(root, rendered)).rejects.toMatchObject({
+      name: "GitHooksError",
+      code: "not_a_git_repository"
+    })
+    await expect(GitHooks.check(root, rendered)).rejects.toMatchObject({
+      name: "GitHooksError",
+      code: "not_a_git_repository"
+    })
+    await expect(Fs.stat(NodePath.join(root, ".git", "hooks"))).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   it("refuses to install outside a git repository", async () => {

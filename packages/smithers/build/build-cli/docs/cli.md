@@ -309,7 +309,10 @@ argument list or from `--diff`.
 `gitHooks` remains an alias for `git-hooks`.
 
 Renders the hook scripts the workspace declaration binds and compares them
-byte for byte against `.git/hooks`.
+byte for byte against the directory returned by `git rev-parse --git-path hooks`.
+This supports linked worktrees and relative or absolute `core.hooksPath` settings.
+If Git is unavailable, the command falls back to `.git/hooks` under the workspace
+root; that fallback requires a `.git` directory.
 
 ```bash
 pnpm exec smithers-build git-hooks

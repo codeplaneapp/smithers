@@ -912,6 +912,23 @@ describe("toolchain variants", () => {
     expect(action!.content).toContain("node-version-file: package.json")
   })
 
+  it.each(["//:test'quote", "//pack'age:test", "//:test;echo", "//:test\n"])(
+    "refuses the invalid run label %j before rendering a shell command",
+    (label) => {
+      const run = anyTarget()
+      const workflow = S.Github.Workflow({ name: "ci", on: { pullRequest: true }, run: [run] })
+      const ciGen = S.Github.CiGen({ workflows: [workflow] })
+      expect(thrownCode(() =>
+        GithubRender.render({
+          ciGen,
+          workspace: unitWorkspace,
+          resolve: resolver([[ciGen, "//.github:github"], [run, label]]),
+          packageDir: ".github"
+        })
+      )).toBe("invalid_label")
+    }
+  )
+
   it("renders a pnpm run step through pnpm exec", () => {
     const run = anyTarget()
     const workflow = S.Github.Workflow({ name: "ci", on: { pullRequest: true }, run: [run] })

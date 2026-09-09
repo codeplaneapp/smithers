@@ -3,7 +3,7 @@
  *
  * `S.Workspace(name, { gitHooks })` binds git hook events to ordinary
  * labeled targets. This module turns those bindings into
- * `.git/hooks/{pre-commit,post-commit,pre-push,post-merge}` scripts that
+ * `{pre-commit,post-commit,pre-push,post-merge}` scripts in Git's hooks directory that
  * invoke the bound label through the public `smthrs` CLI. Hook installation is
  * generated, drift-checked output exactly like CI generation: `check`
  * byte-compares, `install` publishes atomically, and nothing else writes
@@ -18,6 +18,7 @@
  */
 import * as Target from "@smthrs/targets/Target"
 import type * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
+import * as NodeChildProcess from "node:child_process"
 import * as NodeCrypto from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
@@ -97,8 +98,13 @@ export const hookFiles: Readonly<Record<HookName, string>> = Object.freeze({
   postMerge: "post-merge"
 })
 
-/** The exact label grammar a rendered script may carry: one shell word. */
-const labelPattern = /^\/\/[A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$/
+/**
+ * The exact label grammar a rendered script may carry: one shell word.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const labelPattern = /^\/\/[A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$/
 
 /**
  * Resolves the workspace `gitHooks` bindings to labels through the index.
@@ -186,8 +192,40 @@ export interface CheckEntry {
   readonly status: "clean" | "stale" | "missing"
 }
 
+/** Resolves the active hooks directory, including worktrees and core.hooksPath. */
+const resolveHooksDirectory = async (root: string): Promise<string> => {
+  try {
+    const path = await new Promise<string>((resolve, reject) => {
+      NodeChildProcess.execFile(
+        "git",
+        ["rev-parse", "--git-path", "hooks"],
+        { cwd: root, timeout: 10_000, maxBuffer: 64 * 1024 },
+        (error, stdout) => {
+          if (error !== null) reject(error)
+          else resolve(stdout.replace(/\r?\n$/, ""))
+        }
+      )
+    })
+    return NodePath.resolve(root, path)
+  } catch (cause) {
+    if (!(cause instanceof Error && "code" in cause && cause.code === "ENOENT")) {
+      throw new GitHooksError(
+        "not_a_git_repository",
+        `could not resolve the hooks directory for ${root}: ${cause instanceof Error ? cause.message : String(cause)}`
+      )
+    }
+  }
+  // Without Git, only the ordinary .git directory layout can be resolved locally.
+  const gitDirectory = NodePath.join(root, ".git")
+  const stats = await Fs.stat(gitDirectory).catch(() => undefined)
+  if (!stats?.isDirectory()) {
+    throw new GitHooksError("not_a_git_repository", `${root} has no .git directory and git is unavailable`)
+  }
+  return NodePath.join(gitDirectory, "hooks")
+}
+
 /**
- * Byte-compares the rendered hook scripts against `.git/hooks` under `root`.
+ * Byte-compares the rendered hook scripts against Git's active hooks directory.
  *
  * @category checking
  * @since 0.1.0
@@ -196,7 +234,7 @@ export const check = async (
   root: string,
   rendered: ReadonlyArray<{ readonly file: string; readonly content: string }>
 ): Promise<{ readonly clean: boolean; readonly entries: ReadonlyArray<CheckEntry> }> => {
-  const hooksDirectory = NodePath.join(root, ".git", "hooks")
+  const hooksDirectory = await resolveHooksDirectory(root)
   const entries: Array<CheckEntry> = []
   for (const hook of rendered) {
     let status: CheckEntry["status"]
@@ -212,7 +250,7 @@ export const check = async (
 }
 
 /**
- * Installs the rendered hook scripts into `.git/hooks` under `root`.
+ * Installs the rendered hook scripts into Git's active hooks directory.
  *
  * Each script lands executable via a same-directory temporary name and
  * rename. A root that is not a git repository is a typed refusal.
@@ -224,17 +262,7 @@ export const install = async (
   root: string,
   rendered: ReadonlyArray<{ readonly file: string; readonly content: string }>
 ): Promise<{ readonly wrote: ReadonlyArray<string> }> => {
-  const gitDirectory = NodePath.join(root, ".git")
-  let stats
-  try {
-    stats = await Fs.stat(gitDirectory)
-  } catch {
-    throw new GitHooksError("not_a_git_repository", `${root} has no .git directory`)
-  }
-  if (!stats.isDirectory()) {
-    throw new GitHooksError("not_a_git_repository", `${root} has no .git directory`)
-  }
-  const hooksDirectory = NodePath.join(gitDirectory, "hooks")
+  const hooksDirectory = await resolveHooksDirectory(root)
   const wrote: Array<string> = []
   for (const hook of rendered) {
     const absolute = NodePath.join(hooksDirectory, hook.file)

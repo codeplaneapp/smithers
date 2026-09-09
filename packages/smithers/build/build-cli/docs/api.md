@@ -578,13 +578,19 @@ scope refuses with `unrelated_changes` and names the paths it does not own.
 
 The `git-hooks` implementation. From `@smthrs/build-cli/GitHooks`.
 
+`check` and `install` resolve the hooks directory with `git rev-parse --git-path hooks`,
+including linked worktrees and `core.hooksPath`. They fall back to `.git/hooks`
+only when Git is unavailable and the root has a `.git` directory. A Git failure
+raises `not_a_git_repository` without falling back.
+
 | Export              | Signature                                                                             | What it is                                                                        |
 | ------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | `resolveHookLabels` | `(workspace, resolve: LabelResolver) => Readonly<Partial<Record<HookName, string>>>`  | Resolves the workspace bindings to labels.                                        |
 | `render`            | `(bindings) => ReadonlyArray<{ file: string; content: string }>`                      | The deterministic hook script set.                                                |
-| `check`             | `(root, rendered) => Promise<{ clean: boolean; entries: ReadonlyArray<CheckEntry> }>` | Byte-compares against `.git/hooks`.                                               |
+| `check`             | `(root, rendered) => Promise<{ clean: boolean; entries: ReadonlyArray<CheckEntry> }>` | Byte-compares against the hooks directory resolved by Git.                        |
 | `install`           | `(root, rendered) => Promise<{ wrote: ReadonlyArray<string> }>`                       | Installs the rendered scripts.                                                    |
 | `CheckEntry`        | `{ file: string; status: "clean" \| "stale" \| "missing" }`                           | One hook file's classification.                                                   |
+| `labelPattern`      | `RegExp`                                                                              | The shell-safe label grammar shared with `GithubRender`.                          |
 | `hookNames`         | `readonly ["preCommit", "postCommit", "prePush", "postMerge"]`                        | The workspace hook events, in render order.                                       |
 | `HookName`          | `(typeof hookNames)[number]`                                                          | One hook event.                                                                   |
 | `hookFiles`         | `Readonly<Record<HookName, string>>`                                                  | The git hook file each event installs to.                                         |
@@ -596,6 +602,11 @@ The `git-hooks` implementation. From `@smthrs/build-cli/GitHooks`.
 ## GithubRender
 
 The `Github.CiGen` implementation. From `@smthrs/build-cli/GithubRender`.
+
+Run labels must match `GitHooks.labelPattern`: `//`, a package path using
+ASCII letters, digits, `.`, `_`, `/`, or `-`, then `:` and a nonempty target name
+using ASCII letters, digits, `.`, `_`, or `-`. Invalid run labels raise
+`GithubRenderError` with code `invalid_label` before shell command rendering.
 
 | Export                | Signature                                                          | What it is                                                                                    |
 | --------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
@@ -611,7 +622,7 @@ The `Github.CiGen` implementation. From `@smthrs/build-cli/GithubRender`.
 | `LabelResolver`       | `{ labelOf(target); targets?() }`                                  | What the renderer needs from the index.                                                       |
 | `GithubRenderError`   | class carrying `code`                                              | One typed refusal.                                                                            |
 | `isGithubRenderError` | `(value: unknown) => value is GithubRenderError`                   | Guard.                                                                                        |
-| `ErrorCode`           | union of fifteen codes                                             | From `unlabeled_cigen` and `duplicate_job_id` through `outside_write_set` and `write_failed`. |
+| `ErrorCode`           | union of refusal codes                                             | From `unlabeled_cigen` and `duplicate_job_id` through `outside_write_set` and `write_failed`. |
 
 ## MemoryBackend
 

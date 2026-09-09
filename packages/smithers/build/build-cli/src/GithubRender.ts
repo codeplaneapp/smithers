@@ -28,6 +28,7 @@ import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
 import * as NodeCrypto from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
+import * as GitHooks from "./GitHooks.ts"
 
 /**
  * The refusal codes one render, check, or write can fail with.
@@ -43,6 +44,7 @@ export type ErrorCode =
   | "duplicate_workflow_name"
   | "multiple_setups"
   | "unlabeled_run_target"
+  | "invalid_label"
   | "duplicate_job_id"
   | "invalid_event_name"
   | "invalid_schedule"
@@ -671,6 +673,9 @@ const renderWorkflow = (
   }
   for (const run of runs) {
     const runLabel = run.label
+    if (!GitHooks.labelPattern.test(runLabel)) {
+      throw new GithubRenderError("invalid_label", `${JSON.stringify(runLabel)} is not a renderable target label`)
+    }
     const shards = shardCountOf(run.target)
     const jobId = jobIdOf(runLabel)
     if (seen.has(jobId)) {
