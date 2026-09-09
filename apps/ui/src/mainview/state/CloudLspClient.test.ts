@@ -40,6 +40,7 @@ interface Harness {
 interface ServeOptions {
   /** What the server does to each socket as it opens (before any message); returns true to leave the LSP unanswered. */
   readonly onOpen?: (socket: ServerSocket, generation: number) => boolean | void
+  readonly silentInitialize?: boolean
   /** Answers the hover as fragments of this many characters instead of one frame. */
   readonly fragmentHover?: number
   /** A publication for every didOpen; default one error. */
@@ -84,6 +85,7 @@ const serve = (options: ServeOptions = {}): Harness => {
         switch (message.method) {
           case "initialize": {
             initializes += 1
+            if (options.silentInitialize) return
             reply({
               capabilities: { textDocumentSync: 1, hoverProvider: true, definitionProvider: true },
               serverInfo: { name: "typescript-language-server", version: "5.3.0" }
@@ -489,13 +491,14 @@ test("a 1011 on the first generation only: the retry answers, and the open docum
 
 test("an abnormal drop mid-request reconnects: a fresh initialize, the document opened again, the request re-issued", async () => {
   const server = serve({ dropOnHover: [1] })
-  const { lsp } = client(server)
+  const { lsp, events } = client(server)
   const answer = await lsp.hover(DOC, { line: 3, character: 7 })
   expect("ok" in answer && answer.ok.hover?.contents).toBe(HOVER_MARKDOWN)
   expect(server.initializes()).toBe(2)
   const opens = server.received.filter((message) => message.method === "textDocument/didOpen")
   expect(opens).toHaveLength(2)
   expect(server.received.filter((message) => message.method === "textDocument/hover")).toHaveLength(2)
+  expect(events.filter((event) => event.type === "closed")).toEqual([])
 })
 
 test.each([
@@ -539,6 +542,116 @@ test("dispose closes every socket and answers nothing after", async () => {
   lsp.dispose()
   await until(() => server.live() === 0)
   expect(await lsp.hover(DOC, { line: 3, character: 7 })).toEqual({ refusal: { code: "disposed", message: "The app is closing." } })
+})
+
+const closing = { refusal: { code: "disposed", message: "The app is closing." } }
+
+/** Bound settlement checks without leaving a timer behind on success. */
+const promptly = async <T>(promise: Promise<T>): Promise<T | "still pending"> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([promise, new Promise<"still pending">((resolve) => {
+      timer = setTimeout(() => resolve("still pending"), 300)
+    })])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+test("dispose settles an in-flight hover and diagnostic waiters", async () => {
+  const server = serve({ silentHoverUris: [cloudDocumentUri(DOC.path)], publish: false })
+  const { lsp } = client(server)
+  const hover = lsp.hover(DOC, { line: 1, character: 1 })
+  const diagnostics = lsp.diagnostics(DOC)
+  await until(() => server.received.some((message) => message.method === "textDocument/hover"))
+  lsp.dispose()
+  expect(await promptly(hover)).toEqual(closing)
+  expect(await promptly(diagnostics)).toEqual({ ok: { items: null, total: null } })
+  await until(() => server.live() === 0)
+})
+
+test("dispose during initialize settles every act sharing the dial", async () => {
+  const server = serve({ silentInitialize: true })
+  const { lsp } = client(server)
+  const hover = lsp.hover(DOC, { line: 1, character: 1 })
+  const definition = lsp.definition(DOC, { line: 1, character: 1 })
+  await until(() => server.initializes() === 1)
+  lsp.dispose()
+  expect(await promptly(Promise.all([hover, definition]))).toEqual([closing, closing])
+  await until(() => server.live() === 0)
+})
+
+test("dispose during session acquisition settles immediately and a late session opens no socket", async () => {
+  const server = serve()
+  const route = sessionRoute()
+  const response = Promise.withResolvers<Response>()
+  let signal: AbortSignal | null | undefined
+  const { lsp, dials } = client(server, { http: async (_input, init) => {
+    signal = init?.signal
+    return response.promise
+  } })
+  const hover = lsp.hover(DOC, { line: 1, character: 1 })
+  lsp.dispose()
+  const result = await promptly(hover)
+  response.resolve(await route.http("session"))
+  await Bun.sleep(30)
+  expect(dials).toHaveLength(0)
+  expect(result).toEqual(closing)
+  expect(signal?.aborted).toBe(true)
+})
+
+test("dispose cancels the session retry wait", async () => {
+  const server = serve()
+  const route = sessionRoute([new Response(JSON.stringify({ code: "guest_not_ready", message: "activating" }), {
+    status: 503, headers: { "retry-after": "1" }
+  })])
+  const { lsp, events, dials } = client(server, { http: route.http })
+  const hover = lsp.hover(DOC, { line: 1, character: 1 })
+  await until(() => events.some((event) => event.type === "waiting"))
+  lsp.dispose()
+  expect(await promptly(hover)).toEqual(closing)
+  await Bun.sleep(1_050)
+  expect(route.posts).toHaveLength(1)
+  expect(dials).toHaveLength(0)
+})
+
+test("each unanswered initialize releases its socket before the next attempt", async () => {
+  const server = serve({ silentInitialize: true })
+  const { lsp } = client(server, { requestTimeoutMs: 100 })
+  const liveAfterFailure: Array<number> = []
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    expect(await lsp.hover(DOC, { line: 1, character: 1 })).toEqual({
+      refusal: { code: "close_0", message: "the workspace language server did not answer initialize (0)" }
+    })
+    await Bun.sleep(30)
+    liveAfterFailure.push(server.live())
+  }
+  expect(server.initializes()).toBe(3)
+  expect(liveAfterFailure).toEqual([0, 0, 0])
+})
+
+test("a request that times out after reissue is absent from the next reconnect", async () => {
+  const other = { ...DOC, path: "src/other.ts" }
+  const server = serve({ silentHoverUris: [cloudDocumentUri(DOC.path), cloudDocumentUri(other.path)] })
+  const { lsp } = client(server, { requestTimeoutMs: 500 })
+  const hovers = () => server.received.filter((message) => message.method === "textDocument/hover")
+  const expired = lsp.hover(DOC, { line: 1, character: 1 })
+  await until(() => hovers().length === 1)
+  server.sockets()[0]!.terminate()
+  await until(() => hovers().length === 2)
+  expect(await expired).toMatchObject({ refusal: { code: "language_server_timeout" } })
+  const pending = lsp.hover(other, { line: 1, character: 1 })
+  await until(() => hovers().length === 3)
+  server.sockets()[0]!.terminate()
+  await until(() => server.initializes() === 3 && hovers().length >= 4)
+  expect(hovers().filter((message) =>
+    (message.params as { textDocument: { uri: string } }).textDocument.uri === cloudDocumentUri(DOC.path)
+  )).toHaveLength(2)
+  const current = hovers().filter((message) =>
+    (message.params as { textDocument: { uri: string } }).textDocument.uri === cloudDocumentUri(other.path)
+  ).at(-1)!
+  server.sockets()[0]!.send(JSON.stringify({ jsonrpc: "2.0", id: current.id, result: null }))
+  expect(await pending).toEqual({ ok: { hover: null } })
 })
 
 test("the page URL, the document URI and the languageId follow plue's route and typescript-language-server's vocabulary", () => {

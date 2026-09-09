@@ -16,9 +16,9 @@
  * 1008/1002/1003/1009 and every 44xx refusal are final — except 4425
  * `workspace_session_pending` and 4503 `guest_not_ready`, which the server
  * asked to be retried on its own `Retry-After` (bounded, the server's words
- * shown meanwhile). Every close reason reaches the listeners verbatim, never a
- * silent close; a socket that closed is redialed by the NEXT act, never on
- * its own without one.
+ * shown meanwhile). Pending requests receive bounded automatic reconnects.
+ * Terminal and idle closes reach listeners with the reason verbatim; an
+ * idle closed connection is redialed by the next act.
  */
 import {
   CLOUD_LSP_REASSEMBLY_CAP_BYTES,
@@ -196,6 +196,7 @@ const closeRefusal = (code: number, reason: string): LspRefusal => {
 }
 
 interface Pending {
+  id: number
   readonly method: string
   readonly params: unknown
   readonly resolve: (value: unknown) => void
@@ -221,6 +222,7 @@ interface Connection extends EventScope {
   ready: boolean
   /** The dial in flight, shared by every act that arrives during it. */
   opening: Promise<void> | undefined
+  failDial: ((code: number, reason: string) => void) | undefined
   nextId: number
   readonly pending: Map<number, Pending>
   readonly documents: Map<string, OpenDocument>
@@ -241,6 +243,22 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
   const sockets = new Set<WebSocket>()
   const listeners = new Set<(event: CloudLspEvent) => void>()
   let disposed = false
+  const lifetime = new AbortController()
+  const closing: LspRefusal = { code: "disposed", message: "The app is closing." }
+  const assertActive = (): void => {
+    if (disposed) throw new Refused(closing)
+  }
+
+  /** Settle owned waits even when the injected HTTP implementation ignores abort. */
+  const whileActive = <T>(work: Promise<T>): Promise<T> => new Promise((resolve, reject) => {
+    const abort = (): void => {
+      lifetime.signal.removeEventListener("abort", abort)
+      reject(new Refused(closing))
+    }
+    lifetime.signal.addEventListener("abort", abort, { once: true })
+    if (disposed) abort()
+    void work.then(resolve, reject).finally(() => lifetime.signal.removeEventListener("abort", abort))
+  })
 
   const emit = (event: CloudLspEvent): void => {
     for (const listener of listeners) listener(event)
@@ -263,6 +281,7 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
         socket: undefined,
         ready: false,
         opening: undefined,
+        failDial: undefined,
         nextId: 1,
         pending: new Map(),
         documents: new Map(),
@@ -276,7 +295,16 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
     return conn
   }
 
-  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+  const sleep = async (ms: number): Promise<void> => {
+    assertActive()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await whileActive(new Promise<void>((resolve) => { timer = setTimeout(resolve, ms) }))
+      assertActive()
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
   /*
    * `POST …/workspace/sessions { workspace_id, kind: "lsp", language }` through
@@ -289,17 +317,22 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
     const [owner = "", name = ""] = conn.repo.split("/")
     const url = `${options.baseUrl}${CLOUD_ROUTE_PREFIX}api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/workspace/sessions`
     for (;;) {
+      assertActive()
       let response: Response
       try {
-        response = await options.http(url, {
+        response = await whileActive(options.http(url, {
+          signal: lifetime.signal,
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ workspace_id: conn.workspaceId, kind: "lsp", language: conn.language })
-        })
+        }))
+        assertActive()
       } catch (error) {
+        assertActive()
         throw new Refused({ code: "unreachable", message: `Could not reach Smithers Cloud: ${errorText(error)}` })
       }
-      const body: unknown = await response.json().catch(() => null)
+      const body: unknown = await whileActive(response.json().catch(() => null))
+      assertActive()
       if (response.ok) {
         const session = CloudLspSessionSchema.safeParse(body)
         if (!session.success) throw new Refused({ code: "unreadable", message: "Smithers Cloud's answer for the language-server session was malformed." })
@@ -322,6 +355,7 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
   }
 
   const send = (conn: Connection, message: Record<string, unknown>): void => {
+    assertActive()
     conn.socket?.send(JSON.stringify({ jsonrpc: "2.0", ...message }))
   }
 
@@ -335,11 +369,12 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
     conn.nextId += 1
     const answer = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
-        conn.pending.delete(id)
+        conn.pending.delete(entry.id)
         reject(new Refused({ code: "language_server_timeout", message: `The workspace language server did not answer ${method} within ${requestTimeoutMs / 1000} s.` }))
       }, requestTimeoutMs)
       ;(timer as { unref?: () => void }).unref?.()
-      conn.pending.set(id, { method, params, resolve, reject, timer })
+      const entry: Pending = { id, method, params, resolve, reject, timer }
+      conn.pending.set(id, entry)
       send(conn, { id, method, params })
     })
     return { id, answer }
@@ -347,13 +382,14 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
 
   const request = (conn: Connection, method: string, params: unknown): Promise<unknown> => enqueue(conn, method, params).answer
 
-  /** Every request still waiting goes out again on a fresh socket, under a new id and its old timer. */
+  /** Reissue under the current id while keeping the original timer and absolute deadline. */
   const reissue = (conn: Connection): void => {
     const waiting = [...conn.pending.values()]
     conn.pending.clear()
     for (const entry of waiting) {
       const id = conn.nextId
       conn.nextId += 1
+      entry.id = id
       conn.pending.set(id, entry)
       send(conn, { id, method: entry.method, params: entry.params })
     }
@@ -485,6 +521,20 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
     }
   }
 
+  const releaseSocket = (conn: Connection, socket: WebSocket): void => {
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onerror = null
+    socket.onclose = null
+    sockets.delete(socket)
+    if (conn.socket === socket) {
+      conn.socket = undefined
+      conn.ready = false
+      conn.fragments = null
+    }
+    socket.close()
+  }
+
   /**
    * Dial one socket and run `initialize` on it. Settles `{ ok }` once the
    * server answered and `initialized` went out; `{ close }` with the code and
@@ -493,6 +543,7 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
    */
   const openSocket = (conn: Connection, sessionId: string): Promise<{ readonly ok: true } | { readonly close: { readonly code: number; readonly reason: string } }> =>
     new Promise((resolve) => {
+      assertActive()
       const url = options.socketUrl(conn.repo, sessionId, conn.language)
       const protocol = options.socketProtocol()
       if (url === undefined || protocol === undefined) {
@@ -506,6 +557,22 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
       sockets.add(socket)
       let settled = false
       let initializeId: number | undefined
+      const failDial = (code: number, reason: string): void => {
+        if (settled) return
+        settled = true
+        conn.failDial = undefined
+        releaseSocket(conn, socket)
+        if (initializeId !== undefined) {
+          const entry = conn.pending.get(initializeId)
+          if (entry !== undefined) {
+            clearTimeout(entry.timer)
+            conn.pending.delete(initializeId)
+            entry.reject(new Refused(disposed ? closing : closeRefusal(code, reason)))
+          }
+        }
+        resolve({ close: { code, reason } })
+      }
+      conn.failDial = failDial
       socket.onopen = () => {
         if (conn.socket !== socket) return
         const initialize = enqueue(conn, "initialize", {
@@ -522,12 +589,11 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
           conn.ready = true
           reopenAll(conn)
           settled = true
+          conn.failDial = undefined
           resolve({ ok: true })
         }, () => {
-          // The close handler settles the dial; a timeout on a socket still open is the request's own refusal.
           if (conn.socket !== socket || settled) return
-          settled = true
-          resolve({ close: { code: 0, reason: "the workspace language server did not answer initialize" } })
+          failDial(0, "the workspace language server did not answer initialize")
         })
       }
       socket.onmessage = (event: MessageEvent) => {
@@ -539,21 +605,12 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
         // onclose follows; the policy lives there.
       }
       socket.onclose = (event: CloseEvent) => {
-        sockets.delete(socket)
         if (conn.socket !== socket) return
-        conn.socket = undefined
-        conn.ready = false
         if (!settled) {
-          settled = true
-          // The initialize this socket carried is over; the acts waiting on the dial keep their own requests for the next socket.
-          if (initializeId !== undefined) {
-            const entry = conn.pending.get(initializeId)
-            if (entry !== undefined) clearTimeout(entry.timer)
-            conn.pending.delete(initializeId)
-          }
-          resolve({ close: { code: event.code, reason: event.reason } })
+          failDial(event.code, event.reason)
           return
         }
+        releaseSocket(conn, socket)
         if (disposed) return
         onClosed(conn, event.code, event.reason)
       }
@@ -599,15 +656,21 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
    * refusal, verbatim. Concurrent acts share one dial.
    */
   const ensureReady = (conn: Connection): Promise<void> => {
+    if (disposed) return Promise.reject(new Refused(closing))
     if (conn.socket !== undefined && conn.ready && conn.socket.readyState === WebSocket.OPEN) return Promise.resolve()
     if (conn.opening !== undefined) return conn.opening
     const dial = (async () => {
       const attempt = { count: 0 }
       let lastNote = ""
       for (;;) {
-        if (disposed) throw new Refused({ code: "disposed", message: "The app is closing." })
-        conn.sessionId ??= await createSession(conn, attempt)
+        assertActive()
+        if (conn.sessionId === undefined) {
+          const sessionId = await createSession(conn, attempt)
+          assertActive()
+          conn.sessionId = sessionId
+        }
         const outcome = await openSocket(conn, conn.sessionId)
+        assertActive()
         if ("ok" in outcome) return
         const { code, reason } = outcome.close
         // A session plue asked to wait for still stands; any other refusal drops it, and the next dial asks plue again (the same id when it still exists).
@@ -658,6 +721,7 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
   const positioned = async <T>(document: CloudLspDocument, position: CloudLspPosition, method: string): Promise<T> => {
     const conn = connection(document)
     await ensureReady(conn)
+    assertActive()
     const opened = sync(conn, document)
     const answer = await request(conn, method, { textDocument: { uri: opened.uri }, position: { line: position.line - 1, character: position.character - 1 } })
     // A healthy answer earns a fresh redial budget.
@@ -707,6 +771,7 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
     answer(async () => {
       const conn = connection(document)
       await ensureReady(conn)
+      assertActive()
       const opened = sync(conn, document)
       if (!opened.awaiting && opened.latest !== null) return opened.latest
       return new Promise<CloudLspDiagnosticsAnswer>((resolve) => {
@@ -732,18 +797,17 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
 
   const dispose = (): void => {
     disposed = true
+    lifetime.abort()
     for (const conn of connections.values()) {
       if (conn.reconnect !== undefined) clearTimeout(conn.reconnect)
-      for (const entry of conn.pending.values()) clearTimeout(entry.timer)
-      conn.pending.clear()
-      conn.socket = undefined
+      conn.reconnect = undefined
+      conn.failDial?.(0, closing.message)
+      rejectPending(conn, closing)
+      if (conn.socket !== undefined) releaseSocket(conn, conn.socket)
+      conn.sessionId = undefined
     }
     connections.clear()
     listeners.clear()
-    for (const socket of sockets) {
-      socket.onclose = null
-      socket.close()
-    }
     sockets.clear()
   }
 

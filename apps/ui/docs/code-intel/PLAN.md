@@ -485,5 +485,10 @@ with a recorded hover transcript:
   row is durable and deduplicated; idle 10 min; ends on suspend, delete,
   revocation. Guest cwd `/home/developer/workspace`, `rootUri`
   `file:///home/developer/workspace`.
+- Client lifecycle: pending requests receive bounded automatic reconnects
+  and keep their original deadlines. Terminal and idle closes reach listeners;
+  the next act reconnects an idle closed session. Failed initialization closes
+  its socket. Disposal rejects pending requests, settles diagnostic waits,
+  aborts session acquisition and retry waits, and closes owned sockets.
 - DTO: `WorkspaceSessionResponse.kind` (`terminal` | `lsp`) and `language`;
   `WorkspaceResponse.lsp: { languages: ["typescript"] }`.
