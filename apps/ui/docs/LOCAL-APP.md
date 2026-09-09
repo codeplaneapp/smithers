@@ -547,6 +547,18 @@ It covers the stable renderer, bridge security, native repository picker and
 authorization, repository failure recovery, real target execution, chat and
 repository persistence, card tabs, and a real PTY/WebSocket lifecycle.
 
+`PackagedApp.quit()` drains only the detached process group recorded at launch,
+including descendants remaining after the launcher exits. It never discovers
+cleanup targets by executable path, so another instance of the same bundle
+keeps running. Bridge deadlines cover headers, the complete response body,
+and decoding, including error responses and screenshots.
+
+`PackagedApp.eval(script)` sends potentially mutating scripts once. A failed
+reply reports an unknown outcome and does not retry, because renderer execution
+may already have completed. Use `evalReadOnly(script)` only for repeatable reads;
+it retries bridge timeouts within its deadline. `waitFor` also requires a
+read-only expression because it polls repeatedly.
+
 The runner holds an atomic lease plus a per-test cleanup marker. If a prior
 process died before cleanup, the next run removes its isolated state, writes a
 stale-fixture report, and fails before launching a test. Rerun normally after

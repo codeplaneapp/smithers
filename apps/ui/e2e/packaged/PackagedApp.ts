@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { constants, existsSync } from "node:fs"
-import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -48,7 +48,7 @@ interface ProcessExit {
   readonly signal: NodeJS.Signals | null
 }
 
-interface ExecutableProcess {
+interface OwnedProcess {
   readonly pid: number
   readonly group: number
 }
@@ -73,11 +73,6 @@ const availableLoopbackPort = (): Promise<number> =>
       server.close((error) => error === undefined ? resolvePort(address.port) : reject(error))
     })
   })
-
-const responseText = async (response: Response): Promise<string> => {
-  const text = await response.text().catch(() => "")
-  return text === "" ? response.statusText : text
-}
 
 const normalizeEvalScript = (script: string): string => {
   const trimmed = script.trim()
@@ -229,12 +224,19 @@ export class PackagedApp {
     })
   }
 
-  private async request(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+  private async request<T>(
+    path: string,
+    decode: (body: Uint8Array) => T,
+    init: RequestInit = {},
+    timeoutMs = REQUEST_TIMEOUT_MS
+  ): Promise<T> {
     if (this.bridgeToken === undefined) throw new Error("The E2E bridge token is unavailable.")
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    const cancelBody = (): void => { void reader?.cancel().catch(() => undefined) }
     try {
-      return await fetch(`${this.bridgeOrigin}${path}`, {
+      const response = await fetch(`${this.bridgeOrigin}${path}`, {
         ...init,
         headers: {
           authorization: `Bearer ${this.bridgeToken}`,
@@ -242,6 +244,31 @@ export class PackagedApp {
         },
         signal: controller.signal
       })
+      reader = response.body?.getReader()
+      controller.signal.addEventListener("abort", cancelBody, { once: true })
+      controller.signal.throwIfAborted()
+      const chunks: Array<Uint8Array> = []
+      let size = 0
+      if (reader !== undefined) {
+        while (true) {
+          const { done, value } = await reader.read()
+          controller.signal.throwIfAborted()
+          if (done) break
+          chunks.push(value)
+          size += value.byteLength
+        }
+      }
+      const body = new Uint8Array(size)
+      let offset = 0
+      for (const chunk of chunks) {
+        body.set(chunk, offset)
+        offset += chunk.byteLength
+      }
+      if (!response.ok) {
+        const message = new TextDecoder().decode(body) || response.statusText
+        throw new Error(`${init.method ?? "GET"} ${path} returned ${response.status}: ${message}`)
+      }
+      return decode(body)
     } catch (error) {
       if (controller.signal.aborted) {
         throw new Error(`${init.method ?? "GET"} ${path} timed out after ${timeoutMs}ms.`)
@@ -249,15 +276,14 @@ export class PackagedApp {
       throw error
     } finally {
       clearTimeout(timeout)
+      controller.signal.removeEventListener("abort", cancelBody)
+      cancelBody()
+      reader?.releaseLock()
     }
   }
 
   private async json<T>(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
-    const response = await this.request(path, init, timeoutMs)
-    if (!response.ok) {
-      throw new Error(`${init.method ?? "GET"} ${path} returned ${response.status}: ${await responseText(response)}`)
-    }
-    return response.json() as Promise<T>
+    return this.request(path, (body) => JSON.parse(new TextDecoder().decode(body)) as T, init, timeoutMs)
   }
 
   async ready(): Promise<void> {
@@ -279,9 +305,9 @@ export class PackagedApp {
         if (health.ok !== true) throw new Error("The E2E bridge reported unhealthy.")
         const state = await this.state()
         if (state.window === null) throw new Error("The main window has not been created.")
-        const documentState = await this.eval<{ readonly readyState: string; readonly bodyPresent: boolean }>(`
+        const documentState = await this.evalReadOnly<{ readonly readyState: string; readonly bodyPresent: boolean }>(`
           ({ readyState: document.readyState, bodyPresent: document.body !== null })
-        `)
+        `, Math.max(1, deadline - Date.now()))
         if (documentState.bodyPresent && documentState.readyState !== "loading") return
       } catch (error) {
         lastError = error
@@ -297,30 +323,45 @@ export class PackagedApp {
     return this.json<PackagedAppState>("/state")
   }
 
+  private async evaluateOnce<T>(script: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+    const response = await this.json<BridgeEvalResponse<T>>("/window/eval", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ script: normalizeEvalScript(script) })
+    }, timeoutMs)
+    return (response.valueUndefined === true ? undefined : response.result) as T
+  }
+
+  /** Runs a potentially mutating script once. A failed reply does not prove non-execution. */
   async eval<T = unknown>(script: string): Promise<T> {
-    const deadline = Date.now() + EVAL_RETRY_TIMEOUT_MS
+    try {
+      return await this.evaluateOnce<T>(script)
+    } catch (error) {
+      throw new Error(`Renderer evaluation outcome is unknown; the script was not retried: ${String(error)}`, {
+        cause: error
+      })
+    }
+  }
+
+  /** Only use for reads that are safe to execute again after a lost reply. */
+  async evalReadOnly<T = unknown>(script: string, timeoutMs = EVAL_RETRY_TIMEOUT_MS): Promise<T> {
+    const deadline = Date.now() + timeoutMs
     let lastError: unknown
     while (Date.now() < deadline) {
       try {
-        const response = await this.json<BridgeEvalResponse<T>>("/window/eval", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ script: normalizeEvalScript(script) })
-        })
-        return (response.valueUndefined === true ? undefined : response.result) as T
+        return await this.evaluateOnce<T>(script, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()))
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        // Native WKWebView evaluation occasionally misses one RPC response.
-        // ElizaOS's packaged harness treats only this transport timeout as
-        // transient; renderer-thrown errors remain immediate test failures.
+        // Native WKWebView can lose an RPC reply after executing the script.
+        // Only explicitly read-only evaluations may repeat that execution.
         const transient = message.includes("POST /window/eval timed out") ||
           message.includes("\"message\":\"RPC request timed out.")
         if (!transient) throw error
         lastError = error
-        await delay(250)
+        await delay(Math.min(250, Math.max(0, deadline - Date.now())))
       }
     }
-    throw new Error(`Renderer evaluation did not recover within ${EVAL_RETRY_TIMEOUT_MS}ms: ${String(lastError)}`)
+    throw new Error(`Renderer evaluation did not recover within ${timeoutMs}ms: ${String(lastError)}`)
   }
 
   /** Answers the next real native folder-picker RPC; null exercises cancel. */
@@ -332,6 +373,7 @@ export class PackagedApp {
     })
   }
 
+  /** Polls a read-only expression; the script must be safe to repeat. */
   async waitFor<T>(
     script: string,
     predicate: (value: T) => boolean = (value) => Boolean(value),
@@ -342,7 +384,7 @@ export class PackagedApp {
     let lastError: unknown
     while (Date.now() < deadline) {
       try {
-        lastValue = await this.eval<T>(script)
+        lastValue = await this.evalReadOnly<T>(script, Math.max(1, deadline - Date.now()))
         if (predicate(lastValue)) return lastValue
       } catch (error) {
         lastError = error
@@ -367,12 +409,9 @@ export class PackagedApp {
   }
 
   async screenshot(name = `launch-${this.launchNumber}.png`): Promise<string> {
-    const response = await this.request("/window/screenshot")
-    if (!response.ok) {
-      throw new Error(`GET /window/screenshot returned ${response.status}: ${await responseText(response)}`)
-    }
+    const bytes = await this.request("/window/screenshot", (body) => body)
     const path = join(this.artifactsDirectory, safeLabel(name.endsWith(".png") ? name : `${name}.png`))
-    await writeFile(path, new Uint8Array(await response.arrayBuffer()))
+    await writeFile(path, bytes)
     return path
   }
 
@@ -385,7 +424,7 @@ export class PackagedApp {
         writeFile(join(this.artifactsDirectory, `${stem}-state.json`), `${JSON.stringify(value, null, 2)}\n`)
       )
       .catch(() => undefined)
-    await this.eval(`
+    await this.evalReadOnly(`
       ({
         title: document.title,
         url: location.href,
@@ -428,7 +467,7 @@ export class PackagedApp {
     }
   }
 
-  private async processGroupMembers(): Promise<Array<ExecutableProcess>> {
+  private async processGroupMembers(): Promise<Array<OwnedProcess>> {
     const group = this.processGroup
     if (group === undefined || group <= 1) return []
     const child = Bun.spawn(["/bin/ps", "-axo", "pid=,pgid=,command="], {
@@ -495,69 +534,9 @@ export class PackagedApp {
     )
   }
 
-  private async executableProcesses(): Promise<Array<ExecutableProcess>> {
-    if (process.platform === "win32") return []
-    const identities = new Set([this.executable, await realpath(this.executable).catch(() => this.executable)])
-    const child = Bun.spawn(["/bin/ps", "-axo", "pid=,pgid=,command="], {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe"
-    })
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text()
-    ])
-    if (exitCode !== 0) throw new Error(`Could not inspect packaged app processes: ${stderr.trim()}`)
-    return stdout.split("\n").flatMap((line) => {
-      const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line)
-      if (match === null) return []
-      const command = match[3]!
-      if (![...identities].some((identity) => command === identity || command.startsWith(`${identity} `))) return []
-      const pid = Number(match[1])
-      const group = Number(match[2])
-      return pid === process.pid || !Number.isSafeInteger(pid) || !Number.isSafeInteger(group) ? [] : [{ pid, group }]
-    })
-  }
-
-  private signalExecutableProcesses(processes: ReadonlyArray<ExecutableProcess>, signal: NodeJS.Signals): void {
-    const groups = new Set<number>()
-    for (const candidate of processes) {
-      try {
-        if (candidate.group > 1 && !groups.has(candidate.group)) {
-          groups.add(candidate.group)
-          process.kill(-candidate.group, signal)
-        } else {
-          process.kill(candidate.pid, signal)
-        }
-      } catch {
-        // It exited between inspection and the signal.
-      }
-    }
-  }
-
-  private async terminateExecutableProcesses(): Promise<void> {
-    let remaining = await this.executableProcesses()
-    if (remaining.length === 0) return
-    this.appendLog("runner", `terminating residual launcher pid(s): ${remaining.map(({ pid }) => pid).join(", ")}\n`)
-    this.signalExecutableProcesses(remaining, "SIGTERM")
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await delay(100)
-      remaining = await this.executableProcesses()
-      if (remaining.length === 0) return
-    }
-    this.signalExecutableProcesses(remaining, "SIGKILL")
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await delay(100)
-      remaining = await this.executableProcesses()
-      if (remaining.length === 0) return
-    }
-    throw new Error(`Packaged app launcher process(es) survived cleanup: ${remaining.map(({ pid }) => pid).join(", ")}`)
-  }
-
   async quit(): Promise<void> {
     if (this.child !== undefined && !processExited(this.child)) {
-      await this.request("/app/quit", { method: "POST" }).catch(() => undefined)
+      await this.request("/app/quit", () => undefined, { method: "POST" }).catch(() => undefined)
       if (!await this.waitForExit(EXIT_TIMEOUT_MS)) {
         this.signalProcess("SIGTERM")
         if (!await this.waitForExit(EXIT_TIMEOUT_MS)) {
@@ -571,7 +550,6 @@ export class PackagedApp {
     // Electrobun's launcher can exit before probes or PTYs inherited from the
     // backend. Drain the detached launch group before deleting isolated HOME.
     await this.terminateProcessGroup()
-    await this.terminateExecutableProcesses()
   }
 
   async relaunch(): Promise<void> {
