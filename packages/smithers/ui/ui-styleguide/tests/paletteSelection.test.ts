@@ -17,6 +17,7 @@
  * `serializeThemeVariant` of the registry variant that state must select.
  */
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_THEME_KEY,
   findTheme,
@@ -109,6 +110,7 @@ function declarations(block: string): Map<string, string> {
 /** Every property `css` resolves to for `state`, by specificity then source order. */
 function resolveTokens(css: string, state: State): Map<string, string> {
   const applicable = tokenRules(css)
+    .flatMap((rule) => rule.selector.split(",").map((selector) => ({ ...rule, selector: selector.trim() })))
     .filter((rule) => (rule.media ?? state.system) === state.system && matchesSelector(rule.selector, state))
     .map((rule) => ({ rule, score: specificity(rule.selector) }))
     .sort((left, right) => left.score - right.score || left.rule.order - right.rule.order);
@@ -166,6 +168,29 @@ const ENTRY_POINTS = [
   { name: "workflowUiThemeCss", css: workflowUiThemeCss },
   { name: "standaloneThemeCss", css: standaloneThemeCss() },
 ] as const;
+
+describe("documented per-axis bridge", () => {
+  const guide = readFileSync(new URL("../docs/guides/override-a-token.md", import.meta.url), "utf8");
+  const bridge = /export const houseBridgeCss = `([^`]+)`/.exec(guide)?.[1];
+  if (bridge === undefined) throw new Error("missing documented houseBridgeCss example");
+  // The guide uses multiline blocks; the emitter and resolver use one rule per line.
+  const css = `${themeCss()}\n${bridge.trim().replace(/\s+/g, " ").replace(/}\s*(?=@media|:root)/g, "}\n")}`;
+  const expected = {
+    "--bg": "var(--house-background)",
+    "--text": "var(--house-foreground)",
+    "--surface": "var(--house-surface-raised)",
+    "--brand": "var(--house-accent)",
+    "--font-sans": "var(--house-font-ui)",
+    "--r-2": "var(--house-radius-md)",
+  };
+
+  for (const state of statesFor(undefined)) {
+    test(`keeps the bridge values with ${describeState(state)}`, () => {
+      const resolved = resolveTokens(css, state);
+      expect(Object.fromEntries(Object.keys(expected).map((key) => [key, resolved.get(key)]))).toEqual(expected);
+    });
+  }
+});
 
 for (const entry of ENTRY_POINTS) {
   describe(`${entry.name} palette selection`, () => {

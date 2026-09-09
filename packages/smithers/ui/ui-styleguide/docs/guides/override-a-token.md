@@ -56,10 +56,9 @@ import { SmithersUiStyles } from "@smthrs/ui"
 
 ## Recipe: re-declare per axis
 
-A host that never stamps `data-palette`, or pins exactly one, can name the
-shapes it actually uses. This is what the application template in
-[`@smthrs/create-app`](/api/create-app) does to bridge a generated brand onto
-the house names, abbreviated here to six of its 33 declarations:
+A host that never stamps `data-palette` can name the shapes it actually uses.
+This bridges a generated brand onto the house names used by
+[`@smthrs/create-app`](/api/create-app), abbreviated here to six declarations:
 
 ```ts
 export const houseBridgeCss = `:root, :root[data-theme='light'], :root[data-theme='dark'] {
@@ -70,16 +69,25 @@ export const houseBridgeCss = `:root, :root[data-theme='light'], :root[data-them
   --brand: var(--house-accent);
   --r-2: var(--house-radius-md);
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: var(--house-background);
+    --text: var(--house-foreground);
+    --surface: var(--house-surface-raised);
+    --brand: var(--house-accent);
+  }
+}
 `
 ```
 
 Every value is a `var()` reference, so no color is spelled here and the bridge
 cannot drift from the brand.
 
-The limit is the specificity: this tops out at (0,2,0), which covers the default
-palette in both modes. Stamp a `data-palette` and the palette's own rules
-out-rank it in every case except an explicit `data-theme='light'`. Reach for the
-previous recipe if your app has a palette picker.
+Place the bridge after the house sheet. The dark media rule reaches (0,2,0)
+even when `data-theme` is absent, so the bridge covers the default palette in
+both modes. Pinning a non-default palette also requires overrides at or above
+that palette's dark selectors, (0,3,0). Use the previous recipe for a pinned
+non-default palette or a palette picker.
 
 ## Override the seed, not the derivation
 
