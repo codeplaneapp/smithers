@@ -558,7 +558,7 @@ Turns structured data into a stable content key, and validates keys read back fr
 import { deriveKey } from "@smthrs/keys"
 
 const key = await Effect.runPromise(
-  deriveKey({ domain: "cache/compile", version: 1, target: "web" }).pipe(Effect.provide(NodeCrypto.layer))
+  deriveKey({ domain: "example/compile", version: 1, source: "main.ts" }).pipe(Effect.provide(NodeCrypto.layer))
 )
 // key1_74a286a394e4b0619c05801dd4e7315deeb83b8203cd3c3ee7cd6033ec55c683
 ```
