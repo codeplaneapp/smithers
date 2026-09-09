@@ -43,8 +43,7 @@ import {
   isGatewayWorkspaceId,
   fetchCloudToken,
   GatewaySessionRegistry,
-  isRelayRepoName,
-  upstreamTimeoutMs
+  isRelayRepoName
 } from "./gateway"
 import {
   decodeGatewayResponse,
@@ -69,7 +68,10 @@ import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
 import { createPublicRepoActivityHandler, parsePublicRepoActivityPath } from "./publicRepoActivity"
 import { isPublicRepositoryRead, readPublicRepository } from "./publicRepositoryReads"
+import { upstreamDeadline } from "./upstreamDeadline"
 import { LIST_TRIGGERS_PAYLOAD, noLiveTriggers, workflowTriggersFromFrame } from "./workflowTriggers"
+
+const { run: withDeadline, timeoutMs: upstreamTimeoutMs, TimeoutError: UpstreamTimeoutError } = upstreamDeadline
 
 /* The per-user gateway session registry (Wave 11) — wrangler binds this DO. */
 export { GatewaySessionRegistry }
@@ -97,44 +99,6 @@ const DEFAULT_APP_ORIGIN = "https://smithers.sh"
  * conversation that passes in dev passes here.
  */
 const MAX_BODY_BYTES = 1024 * 1024
-
-/**
- * Every upstream this Worker calls is bounded. Without a deadline a sibling
- * that accepts the connection and never answers hangs the browser request for
- * as long as the tab is open: `POST /api/workflow/provision` stood past 70s on
- * canary with no answer, no timeout and no error (repro
- * apps/ui/canary-repros/honesty/22.6), which is a spinner that never ends —
- * the silent-failure family in its worst shape. The deadline bounds the wait
- * for the upstream's HEADERS; a response that has begun streaming is not cut
- * off by it.
- */
-const UPSTREAM_TIMEOUT_MS = 20_000
-
-/** A deadline expiring, distinguishable from the client hanging up. */
-class UpstreamTimeoutError extends Error {
-  constructor(readonly seam: string) {
-    super(`${seam} did not answer within ${Math.round(UPSTREAM_TIMEOUT_MS / 1000)}s.`)
-  }
-}
-
-/**
- * Run one upstream call under a deadline. The timer is disarmed as soon as the
- * headers land, so a streaming body (billing, identity, the gateway)
- * keeps flowing for as long as it needs.
- */
-const withDeadline = async (
-  seam: string,
-  run: (signal: AbortSignal) => Promise<Response>,
-  timeoutMs: number = UPSTREAM_TIMEOUT_MS
-): Promise<Response> => {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(new UpstreamTimeoutError(seam)), timeoutMs)
-  try {
-    return await run(controller.signal)
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 /**
  * The prose inside an upstream error body, or undefined when the body was
@@ -361,8 +325,8 @@ export interface WorkerEnv extends RecommendEnv, CloudRoleEnv {
    */
   readonly CHAT_PRODUCT_SERVICE_TOKEN?: string
   /**
-   * How long any one upstream gets to answer, in milliseconds. Unset uses
-   * UPSTREAM_TIMEOUT_MS; a deployment behind a slow sibling can raise it
+   * How long any one upstream gets to return headers, in milliseconds.
+   * Unset uses 20,000ms; a deployment behind a slow sibling can raise it
    * without a code change, and the tests shorten it to stay fast.
    */
   readonly UPSTREAM_TIMEOUT_MS?: string
@@ -837,14 +801,15 @@ const handleTurn = async (
   activeTurns.set(body.runId, { controller: upstream, owner: turnSession?.login })
   // The client going away cancels the upstream turn exactly like the native
   // CloudAgent's cancel does.
-  request.signal.addEventListener("abort", () => upstream.abort())
+  if (request.signal.aborted) upstream.abort(request.signal.reason)
+  else request.signal.addEventListener("abort", () => upstream.abort(request.signal.reason), { once: true })
 
   const upstreamRunId = crypto.randomUUID()
   let response: Response
   try {
-    response = await fetch(chatUpstreamUrl(env), {
+    response = await withDeadline("The model service", (signal) => fetch(chatUpstreamUrl(env), {
       method: "POST",
-      signal: upstream.signal,
+      signal,
       // The caller's id correlates frames and cancellation only. Every
       // inference request needs a server-owned charge id, including retries:
       // reusing a client id must never hide a second provider invocation.
@@ -864,9 +829,10 @@ const handleTurn = async (
         ...(body.purpose === undefined ? {} : { purpose: body.purpose }),
         ...(body.role === undefined ? {} : { role: body.role })
       })
-    })
+    }), upstreamTimeoutMs(env), upstream.signal)
   } catch (error) {
     await settle()
+    if (error instanceof UpstreamTimeoutError) return upstreamUnreachable("The model service", error)
     if (upstream.signal.aborted) {
       return json(499, { status: "error", message: "The client disconnected." })
     }
@@ -977,16 +943,18 @@ const handleModelStream = async (
    */
   const runId = crypto.randomUUID()
   const upstream = new AbortController()
-  request.signal.addEventListener("abort", () => upstream.abort())
+  if (request.signal.aborted) upstream.abort(request.signal.reason)
+  else request.signal.addEventListener("abort", () => upstream.abort(request.signal.reason), { once: true })
   let response: Response
   try {
-    response = await fetch(chatUpstreamUrl(env), {
+    response = await withDeadline("The model service", (signal) => fetch(chatUpstreamUrl(env), {
       method: "POST",
-      signal: upstream.signal,
+      signal,
       headers: chatUpstreamHeaders(env, runId, session),
       body: JSON.stringify(body)
-    })
+    }), upstreamTimeoutMs(env), upstream.signal)
   } catch (error) {
+    if (error instanceof UpstreamTimeoutError) return upstreamUnreachable("The model service", error)
     if (upstream.signal.aborted) {
       return json(499, { status: "error", message: "The client disconnected." })
     }
@@ -1093,13 +1061,13 @@ const upstreamUnreachable = (seam: string, error: unknown): Response =>
   json(error instanceof UpstreamTimeoutError ? 504 : 502, {
     status: "error",
     message: error instanceof UpstreamTimeoutError
-      ? `${seam} did not answer in time, so nothing was read. Try again in a moment.`
+      ? `${error.message} Try again in a moment.`
       : `${seam} is unreachable right now: ${error instanceof Error ? error.message : "unknown error"}`
   })
 
 /** Forward one already-built request under the seam's deadline, never throwing. */
 const forwardUnderDeadline = (seam: string, target: Request, timeoutMs: number): Promise<Response> =>
-  withDeadline(seam, (signal) => fetch(target, { signal }), timeoutMs).catch((error: unknown) =>
+  withDeadline(seam, (signal) => fetch(target, { signal }), timeoutMs, target.signal).catch((error: unknown) =>
     upstreamUnreachable(seam, error)
   )
 
@@ -1631,7 +1599,7 @@ const validateSession = async (request: Request, env: WorkerEnv): Promise<Sessio
       response: json(error instanceof UpstreamTimeoutError ? 504 : 502, {
         status: "error",
         message: error instanceof UpstreamTimeoutError
-          ? `The identity service did not answer within ${Math.round(upstreamTimeoutMs(env) / 1000)}s.`
+          ? error.message
           : "The identity service is unreachable."
       })
     }
@@ -1755,7 +1723,8 @@ const forwardAdminCall = async (
   upstream: string,
   path: string,
   adminToken: string,
-  init: { method: string; body?: unknown }
+  init: { method: string; body?: unknown },
+  timeoutMs: number
 ): Promise<Response> => {
   const headers: Record<string, string> = { "x-smithers-admin-token": adminToken }
   if (init.body !== undefined) headers["content-type"] = "application/json"
@@ -1767,7 +1736,7 @@ const forwardAdminCall = async (
         headers,
         signal,
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
-      }))
+      }), timeoutMs)
   } catch (error) {
     return upstreamUnreachable("The admin upstream", error)
   }
@@ -1792,7 +1761,8 @@ const readServiceHealth = async (
   name: string,
   upstream: string | undefined,
   envName: string,
-  summarize: (body: Record<string, unknown>) => string
+  summarize: (body: Record<string, unknown>) => string,
+  timeoutMs: number
 ): Promise<AdminServiceHealth> => {
   const base = upstream?.trim()
   if (base === undefined || base === "") {
@@ -1800,13 +1770,13 @@ const readServiceHealth = async (
   }
   let response: Response
   try {
-    response = await withDeadline(name, (signal) => fetch(new URL("/healthz", base).toString(), { signal }))
+    response = await withDeadline(name, (signal) => fetch(new URL("/healthz", base).toString(), { signal }), timeoutMs)
   } catch (error) {
     return {
       name,
       status: "failed",
       detail: error instanceof UpstreamTimeoutError
-        ? `healthz did not answer within ${Math.round(UPSTREAM_TIMEOUT_MS / 1000)}s.`
+        ? error.message
         : `unreachable: ${error instanceof Error ? error.message : "unknown error"}`
     }
   }
@@ -1838,13 +1808,15 @@ const handleAdminHealth = async (env: WorkerEnv, proxyOrigin: string): Promise<R
       "billing",
       env.BILLING_UPSTREAM_URL,
       "BILLING_UPSTREAM_URL",
-      summarize("rateCardVersion", "resources", "unpricedActiveResources")
+      summarize("rateCardVersion", "resources", "unpricedActiveResources"),
+      upstreamTimeoutMs(env)
     ),
     readServiceHealth(
       "identity",
       env.IDENTITY_UPSTREAM_URL,
       "IDENTITY_UPSTREAM_URL",
-      summarize("requestedScopes", "admin", "serviceToken")
+      summarize("requestedScopes", "admin", "serviceToken"),
+      upstreamTimeoutMs(env)
     )
   ])
 
@@ -1876,7 +1848,8 @@ const handleAdminHealth = async (env: WorkerEnv, proxyOrigin: string): Promise<R
           fetch(new URL("/api/billing/balance", billingBase).toString(), {
             headers: { authorization: `Bearer ${bearer}`, origin: proxyOrigin },
             signal
-          })
+          }),
+        upstreamTimeoutMs(env)
       )
       if (balance.ok) {
         const body = (await balance.json()) as {
@@ -1912,7 +1885,7 @@ const handleAdminHealth = async (env: WorkerEnv, proxyOrigin: string): Promise<R
         fetch(new URL("/api/identity/admin/requests", identityBase).toString(), {
           headers: { "x-smithers-admin-token": identityAdmin },
           signal
-        }))
+        }), upstreamTimeoutMs(env))
       if (queue.ok) {
         const body = (await queue.json()) as { requests?: unknown }
         if (Array.isArray(body.requests)) queueDepth = body.requests.length
@@ -2007,7 +1980,7 @@ const handleAdmin = async (request: Request, env: WorkerEnv, url: URL): Promise<
     return forwardAdminCall(upstream, "/api/identity/admin/allowlist", token, {
       method: "POST",
       body: { login, action, requester: session.login, timestamp: new Date().toISOString() }
-    })
+    }, upstreamTimeoutMs(env))
   }
 
   if (url.pathname === ADMIN_GRANT_PATH && request.method === "POST") {
@@ -2038,7 +2011,7 @@ const handleAdmin = async (request: Request, env: WorkerEnv, url: URL): Promise<
         requester: session.login,
         timestamp: new Date().toISOString()
       }
-    })
+    }, upstreamTimeoutMs(env))
   }
 
   if (url.pathname === ADMIN_REQUESTS_PATH && request.method === "GET") {
@@ -2050,7 +2023,7 @@ const handleAdmin = async (request: Request, env: WorkerEnv, url: URL): Promise<
     if (token === undefined || token === "") {
       return adminTokenNotConfigured("The identity admin surface", "IDENTITY_ADMIN_TOKEN")
     }
-    return forwardAdminCall(upstream, "/api/identity/admin/requests", token, { method: "GET" })
+    return forwardAdminCall(upstream, "/api/identity/admin/requests", token, { method: "GET" }, upstreamTimeoutMs(env))
   }
 
   if (url.pathname === ADMIN_HEALTH_PATH && request.method === "GET") {

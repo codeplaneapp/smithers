@@ -16,6 +16,7 @@ import {
   clearMemoryGatewayRecords,
   GatewaySessionRegistry,
   ensureGateway,
+  fetchCloudToken,
   seedMemoryGatewayRecord
 } from "./gateway"
 import { ALLOWED_GATEWAY_PROCEDURES } from "./gatewayRpc"
@@ -273,6 +274,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       if (outcome.status === "provisioning") {
         expect(outcome.detail).toContain("codeplanesmithers/canary-sandbox")
         expect(outcome.detail).toContain("longer than")
+        expect(outcome.detail).toContain("150ms")
       }
     } finally {
       globalThis.fetch = originalFetch
@@ -1018,5 +1020,23 @@ test("durable gateway cache keeps owning workspace records separate across worke
     if (restored.status === "ready") expect(restored.record.workspaceId).toBe(workspaceId)
     expect(stored.size).toBe(2)
     expect(calls.filter((call) => call.url.endsWith("/gateway"))).toHaveLength(2)
+  })
+})
+
+
+describe("configured gateway headers deadlines", () => {
+  test("the Cloud token deadline names the actual 20 ms duration", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+      })) as typeof fetch
+    try {
+      const outcome = await fetchCloudToken(env({ UPSTREAM_TIMEOUT_MS: "20" }), "deadline-user")
+      expect(outcome.status).toBe("unavailable")
+      if (outcome.status === "unavailable") expect(outcome.detail).toContain("20ms")
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

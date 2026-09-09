@@ -1,5 +1,8 @@
 import { isGatewayWorkspaceId } from "@smthrs/rpc/GatewayWorkspace"
+import { upstreamDeadline } from "./upstreamDeadline"
 export { isGatewayWorkspaceId } from "@smthrs/rpc/GatewayWorkspace"
+
+const { run: withDeadline, timeoutMs: upstreamTimeoutMs, TimeoutError: UpstreamTimeoutError } = upstreamDeadline
 
 /*
  * Wave 11 — the per-user gateway seam. The product Worker provisions (or
@@ -22,43 +25,6 @@ export { isGatewayWorkspaceId } from "@smthrs/rpc/GatewayWorkspace"
  * browser response body. The browser talks to /api/workflow/*; the Worker
  * holds the token and sets the Authorization header the relay requires.
  */
-
-/**
- * Every call out of this seam is bounded. Smithers Cloud accepts the provision
- * POST and can then take an unbounded time to build a sandbox: on canary the
- * route never answered at all, so `POST /api/workflow/provision` hung past 70s
- * and the product left "Preparing your <repo> workspace…" standing with no
- * timeout, no run card and no error (repro
- * apps/ui/canary-repros/honesty/22.6). A deadline turns that into one of the
- * seam's own honest states.
- */
-export const GATEWAY_UPSTREAM_TIMEOUT_MS = 20_000
-
-/** A deadline expiring, told apart from a connection that failed outright. */
-export class GatewayTimeoutError extends Error {
-  constructor(seam: string) {
-    super(`${seam} did not answer within ${Math.round(GATEWAY_UPSTREAM_TIMEOUT_MS / 1000)}s.`)
-  }
-}
-
-/**
- * `fetch` under a deadline. The timer is disarmed once the headers land, so a
- * streaming relay answer is never cut off mid-body.
- */
-const fetchWithDeadline = async (
-  seam: string,
-  url: string,
-  init: RequestInit,
-  timeoutMs: number = GATEWAY_UPSTREAM_TIMEOUT_MS
-): Promise<Response> => {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(new GatewayTimeoutError(seam)), timeoutMs)
-  try {
-    return await fetch(url, { ...init, signal: controller.signal })
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 export interface GatewayRecord {
   readonly gatewayId: string
@@ -150,14 +116,8 @@ export interface GatewayEnv {
   readonly IDENTITY_SERVICE_TOKEN?: string
   readonly SMITHERS_CLOUD_API_BASE_URL?: string
   readonly GATEWAY_SESSIONS?: GatewaySessionNamespace
-  /** Override for GATEWAY_UPSTREAM_TIMEOUT_MS, in milliseconds. */
+  /** Headers deadline in milliseconds; defaults to 20,000. */
   readonly UPSTREAM_TIMEOUT_MS?: string
-}
-
-/** The deadline this deployment uses, defaulted when unset or unparseable. */
-export const upstreamTimeoutMs = (env: { readonly UPSTREAM_TIMEOUT_MS?: string }): number => {
-  const configured = Number(env.UPSTREAM_TIMEOUT_MS ?? "")
-  return Number.isFinite(configured) && configured > 0 ? configured : GATEWAY_UPSTREAM_TIMEOUT_MS
 }
 
 export const DEFAULT_CLOUD_API_BASE_URL = "https://api.jjhub.tech"
@@ -284,14 +244,14 @@ export const fetchCloudToken = async (env: GatewayEnv, login: string): Promise<C
   }
   let response: Response
   try {
-    response = await fetchWithDeadline(
+    response = await withDeadline(
       "The Cloud token door",
-      new URL("/api/identity/cloud-token", upstream).toString(),
-      {
+      (signal) => fetch(new URL("/api/identity/cloud-token", upstream).toString(), {
+        signal,
         method: "POST",
         headers: { "content-type": "application/json", "x-smithers-service-token": serviceToken },
         body: JSON.stringify({ login })
-      },
+      }),
       upstreamTimeoutMs(env)
     )
   } catch (error) {
@@ -358,17 +318,17 @@ const provisionGateway = async (
   const base = env.SMITHERS_CLOUD_API_BASE_URL?.trim() || DEFAULT_CLOUD_API_BASE_URL
   let response: Response
   try {
-    response = await fetchWithDeadline(
+    response = await withDeadline(
       "Smithers Cloud",
-      new URL(`/api/repos/${repo}/gateway`, base).toString(),
-      {
+      (signal) => fetch(new URL(`/api/repos/${repo}/gateway`, base).toString(), {
+        signal,
         method: "POST",
         headers: {
           authorization: `Bearer ${cloudToken}`,
           ...(workspaceId === undefined ? {} : { "content-type": "application/json" })
         },
         ...(workspaceId === undefined ? {} : { body: JSON.stringify({ workspace_id: workspaceId }) })
-      },
+      }),
       upstreamTimeoutMs(env)
     )
   } catch (error) {
@@ -380,12 +340,12 @@ const provisionGateway = async (
      * only a real connection failure is reported as unreachable. Either way
      * the request ANSWERS, which is the whole point.
      */
-    if (error instanceof GatewayTimeoutError) {
+    if (error instanceof UpstreamTimeoutError) {
       return {
         status: "provisioning",
         detail: `Smithers Cloud hasn't finished preparing the workspace for ${repo} yet — it took longer than ${
-          Math.round(upstreamTimeoutMs(env) / 1000)
-        }s to answer.`
+          error.timeoutMs
+        }ms to answer.`
       }
     }
     return {
@@ -605,10 +565,10 @@ export const callGateway = async (
     try {
       // The relay base_url is a PATH base (…/api/gateways/<id>): URL-joining
       // an absolute path would drop it, so concatenate instead.
-      return await fetchWithDeadline(
+      return await withDeadline(
         "The workspace gateway",
-        `${record.baseUrl.replace(/\/+$/, "")}${path}`,
-        {
+        (signal) => fetch(`${record.baseUrl.replace(/\/+$/, "")}${path}`, {
+          signal,
           method: init.method,
           headers: {
             authorization: `Bearer ${record.token}`,
@@ -618,7 +578,7 @@ export const callGateway = async (
           ...(init.text === undefined
             ? init.body === undefined ? {} : { body: JSON.stringify(init.body) }
             : { body: init.text })
-        },
+        }),
         upstreamTimeoutMs(env)
       )
     } catch (error) {

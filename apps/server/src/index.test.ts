@@ -3418,3 +3418,93 @@ describe("Durable Object rejections and the Worker error boundary", () => {
     })
   }
 })
+
+describe("configured upstream headers deadlines", () => {
+  const deadlineEnv = (): WorkerEnv => ({
+    ...assetsEnv(),
+    IDENTITY_UPSTREAM_URL: "https://identity.test",
+    IDENTITY_SERVICE_TOKEN: "service-token",
+    IDENTITY_ADMIN_TOKEN: "identity-admin",
+    BILLING_UPSTREAM_URL: "https://billing.test",
+    BILLING_ADMIN_TOKEN: "billing-admin",
+    BILLING_AUTH_TOKEN: "billing-bearer",
+    SMITHERS_CHAT_URL: "https://chat.test/chat",
+    UPSTREAM_TIMEOUT_MS: "20"
+  })
+
+  // The watchdog releases a broken implementation so the regression fails
+  // without leaving a fetch or its default 20-second timer behind.
+  const stalledHeaders = (request: Request, aborted: string[]): Promise<Response> =>
+    new Promise((resolve, reject) => {
+      const watchdog = setTimeout(() => resolve(new Response("watchdog", { status: 598 })), 1_000)
+      const abort = () => {
+        clearTimeout(watchdog)
+        aborted.push(new URL(request.url).pathname)
+        reject(request.signal.reason)
+      }
+      if (request.signal.aborted) abort()
+      else request.signal.addEventListener("abort", abort, { once: true })
+    })
+
+  const validate = (request: Request): Response | undefined =>
+    new URL(request.url).pathname === "/api/identity/validate"
+      ? Response.json({ login: "deadline-admin", allowlisted: true, admin: true })
+      : undefined
+
+  test.each([
+    ["/api/agent/turn", turnBody],
+    ["/api/model/stream", { messages: turnBody.messages, instructions: turnBody.instructions }],
+    ["/api/admin/allowlist", { login: "octocat", action: "add" }],
+    ["/api/admin/grant", { login: "octocat", amountUsd: 1 }],
+    ["/api/admin/requests", undefined]
+  ] as const)("%s returns 504 naming its configured 20 ms deadline", async (path, body) => {
+    const aborted: string[] = []
+    const cancels = memoryCancels()
+    await withMockedFetch(
+      (request) => validate(request) ?? stalledHeaders(request, aborted),
+      async () => {
+        const response = await worker.fetch(
+          body === undefined ? new Request(`https://mvp.test${path}`) : post(path, body),
+          { ...deadlineEnv(), TURN_CANCELS: cancels }
+        )
+        expect(response.status).toBe(504)
+        expect(await response.json()).toEqual({
+          status: "error",
+          message: expect.stringContaining("20ms")
+        })
+        expect(aborted).toHaveLength(1)
+        if (path === "/api/agent/turn") {
+          const registry = cancels.get(cancels.idFromName(turnBody.runId))
+          expect(await (await registry.fetch(new Request("https://turn-cancel.internal/state"))).json())
+            .toEqual({ state: "settled" })
+          expect(await (await worker.fetch(post("/api/agent/turn/cancel", { runId: turnBody.runId }), deadlineEnv())).json())
+            .toEqual({ status: "not-found" })
+        }
+      }
+    )
+  })
+
+  test("admin health bounds both healthz reads, balance and queue with the configured deadline", async () => {
+    const aborted: string[] = []
+    await withMockedFetch(
+      (request) => validate(request) ?? stalledHeaders(request, aborted),
+      async () => {
+        const response = await worker.fetch(new Request("https://mvp.test/api/admin/health"), deadlineEnv())
+        expect(response.status).toBe(200)
+        const body = await response.json() as {
+          services: Array<{ status: string; detail: string }>
+          charges: unknown
+          queueDepth: unknown
+        }
+        expect(aborted.sort()).toEqual(["/api/billing/balance", "/api/identity/admin/requests", "/healthz", "/healthz"])
+        expect(body.services).toHaveLength(2)
+        for (const service of body.services) {
+          expect(service.status).toBe("failed")
+          expect(service.detail).toContain("20ms")
+        }
+        expect(body.charges).toBeNull()
+        expect(body.queueDepth).toBeNull()
+      }
+    )
+  })
+})
