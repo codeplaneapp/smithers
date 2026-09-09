@@ -36,6 +36,17 @@ describe("TestHost memory filesystem operations", () => {
       expect(contents).toEqual({ text: "gamma", exists: true, missing: false })
     }))
 
+  it.effect("creates exclusively and refuses existing normalized paths", () =>
+    Effect.gen(function*() {
+      const fs = fileSystem()
+      yield* fs.writeFile("/w/exclusive.txt", encoder.encode("owned"), { flag: "wx" })
+      const refused = yield* Effect.flip(
+        fs.writeFile("/w/./exclusive.txt", encoder.encode("clobbered"), { flag: "wx" })
+      )
+      expect(refused).toMatchObject({ reason: { _tag: "AlreadyExists" } })
+      expect(yield* fs.readFileString("/w/exclusive.txt")).toBe("owned")
+    }))
+
   it.effect("copies write inputs and read outputs", () =>
     Effect.gen(function*() {
       const fs = fileSystem()

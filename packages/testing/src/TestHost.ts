@@ -97,7 +97,12 @@ export const makeMemoryFs = (
       if (entry.type !== "file") throw enoent(path)
       return entry.data.slice()
     },
-    writeFile: async (path, data) => put(path, data),
+    writeFile: async (path, data, options) => {
+      if (options?.flag === "wx" && entries.has(normalize(path))) {
+        throw Object.assign(new Error(`EEXIST: ${path}`), { code: "EEXIST" })
+      }
+      put(path, data)
+    },
     mkdir: async (path, options) => {
       if (options?.recursive === true) mkdirp(path)
       else entries.set(normalize(path), { type: "directory", data: new Uint8Array() })

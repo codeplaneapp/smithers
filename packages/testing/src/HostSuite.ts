@@ -9,7 +9,7 @@
  */
 import type { Jj, JjFailure } from "@smthrs/jj"
 import { Jj as JjTag } from "@smthrs/jj"
-import { Clock, Effect, Fiber, FileSystem, Path, Random, Ref, Stream } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Path, Random, Stream } from "effect"
 import type { Layer } from "effect"
 import type * as PlatformError from "effect/PlatformError"
 import * as HttpClient from "effect/unstable/http/HttpClient"
@@ -55,22 +55,27 @@ export type HttpTransportExpectation =
  */
 export interface HostProfile {
   /**
-   * Scratch file used by the round-trip probe; removed even when the assertion
-   * fails. It must not already exist: the suite refuses to write over a file
-   * it did not create, and removes only the file it did.
+   * Scratch file used by the round-trip probe. Exclusive creation (`flag:
+   * "wx"`) atomically refuses an existing path, including a dangling symlink,
+   * with `FileSystem/scratchPath`. Removal is registered only after successful
+   * creation and runs even when the read-back assertion fails.
    *
-   * When omitted, the suite builds a unique absolute path under `/tmp` from
-   * the bundle's own `Path` and `Random`. It used to default to
-   * `.flows-host-suite-value.txt`, a **relative** path resolved against the
-   * caller's working directory, so a real host bundle wrote into — and
-   * force-deleted from — the repository working tree, and two suites in one
-   * directory raced on the same fixed name. A bundle whose platform has no
-   * `/tmp` must declare a path of its own.
+   * When omitted, the suite builds a randomized absolute path under `/tmp`
+   * from the bundle's own `Path` and `Random`. A bundle whose platform has no
+   * `/tmp` must declare a path of its own. Collisions fail without overwriting.
    */
   readonly fileSystemScratchPath?: string | undefined
   readonly fileSystem: CapabilityExpectation
   readonly path: CapabilityExpectation
-  readonly shell: CapabilityExpectation
+  /**
+   * A supported shell supplies a command that stays running until cancelled.
+   * The cleanup case acquires its Host process handle, verifies it is running,
+   * interrupts its scoped consumer, and verifies it stopped. An unsupported
+   * shell is checked for its refusal code and makes no cleanup claim.
+   */
+  readonly shell:
+    | { readonly supported: true; readonly interruptCommand: ChildProcess.Command }
+    | { readonly supported: false; readonly code: string }
   readonly jj: CapabilityExpectation
   readonly httpTransport: HttpTransportExpectation
   readonly clock: CapabilityExpectation
@@ -80,7 +85,7 @@ export interface HostProfile {
 /**
  * Every failure a host suite case may raise: the typed contract violation, and
  * the incidental host failures a supported capability's own probe can produce
- * (the scratch write and existence check, a jj command, an HTTP request).
+ * (a filesystem or process probe, a jj command, an HTTP request).
  *
  * The channel used to be `unknown`, so a runner could not tell "this host
  * violates the contract" from "the scratch write failed because the disk is
@@ -186,9 +191,8 @@ const capabilityCode = (
  *
  * The declared path wins. Otherwise the path is absolute, under `/tmp`, and
  * carries a random suffix drawn from the bundle's own `Random`, so two suites
- * over the same bundle — the CI matrix runs three operating systems and vitest
- * runs files in parallel — never collide, and nothing is ever written into the
- * caller's working directory.
+ * are less likely to collide. Exclusive creation rejects any collision, and
+ * nothing is written into the caller's working directory.
  */
 const scratchTarget = (
   profile: HostProfile
@@ -230,20 +234,23 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
         const encoder = new TextEncoder()
         const decoder = new TextDecoder()
         const scratchPath = yield* scratchTarget(profile)
-        // Never write over a file this invocation did not create, and never
-        // remove one either: the removal below runs only after the write
-        // succeeded on a path that did not exist.
-        if (yield* fs.exists(scratchPath)) {
-          yield* failure("FileSystem", "scratchPath")
-        }
-        yield* Effect.gen(function*() {
-          yield* fs.writeFile(scratchPath, encoder.encode("host-suite"))
-          const value = decoder.decode(yield* fs.readFile(scratchPath))
-          yield* assertEqual(value, "host-suite", "FileSystem", "readFile")
-        }).pipe(
-          Effect.ensuring(
-            fs.remove(scratchPath, { force: true }).pipe(Effect.orDie)
-          )
+        // Acquire atomically and register removal only after creation succeeds.
+        // acquireRelease also closes the interruption gap before registration.
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            yield* Effect.acquireRelease(
+              fs.writeFile(scratchPath, encoder.encode("host-suite"), { flag: "wx" }).pipe(
+                Effect.mapError((error) =>
+                  error.reason._tag === "AlreadyExists"
+                    ? new CapabilityContractError({ capability: "FileSystem", operation: "scratchPath" })
+                    : error
+                )
+              ),
+              () => fs.remove(scratchPath, { force: true }).pipe(Effect.orDie)
+            )
+            const value = decoder.decode(yield* fs.readFile(scratchPath))
+            yield* assertEqual(value, "host-suite", "FileSystem", "readFile")
+          })
         )
       }),
       bundle
@@ -404,17 +411,44 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
     )
     : provideNoAmbient(assertCapabilityError(Random.next, "Random", "next", capabilityCode(randomExpectation)), bundle)
 
-  const cleanup = provide(
-    Effect.gen(function*() {
-      const released = yield* Ref.make(false)
-      const fiber = yield* Effect.scoped(
-        Effect.acquireRelease(Effect.void, () => Ref.set(released, true)).pipe(Effect.andThen(Effect.never))
-      ).pipe(Effect.forkChild({ startImmediately: true }))
-      yield* Fiber.interrupt(fiber)
-      yield* assertEqual(yield* Ref.get(released), true, "Scope", "interrupt_cleanup")
-    }),
-    bundle
-  )
+  const cleanup = shellExpectation.supported
+    ? provide(
+      Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const ready = yield* Deferred.make<ChildProcessSpawner.ChildProcessHandle, PlatformError.PlatformError>()
+        const fiber = yield* Effect.scoped(
+          spawner.spawn(shellExpectation.interruptCommand).pipe(
+            Effect.tap((handle) => Deferred.succeed(ready, handle)),
+            Effect.andThen(Effect.never)
+          )
+        ).pipe(
+          // Acquisition can fail before a handle is published. Wake the waiter
+          // with that cause instead of leaving it blocked on the handshake.
+          Effect.onError((cause) => Deferred.failCause(ready, cause)),
+          Effect.forkChild({ startImmediately: true })
+        )
+        const handle = yield* Deferred.await(ready)
+        yield* Effect.gen(function*() {
+          yield* assertEqual(yield* handle.isRunning, true, "Scope", "interrupt_running")
+          yield* Fiber.interrupt(fiber)
+          yield* assertEqual(yield* handle.isRunning, false, "Scope", "interrupt_cleanup")
+        }).pipe(
+          // A nonconforming bundle must fail the assertion before we attempt
+          // recovery, so killing here cannot hide a leaked resource.
+          Effect.ensuring(
+            Effect.gen(function*() {
+              yield* Fiber.interrupt(fiber)
+              if (yield* handle.isRunning) yield* handle.kill()
+            }).pipe(Effect.orDie)
+          )
+        )
+      }),
+      bundle
+    )
+    : provide(
+      assertCapabilityError(runUnlisted, "ChildProcessSpawner", "spawn", capabilityCode(shellExpectation)),
+      bundle
+    )
 
   return [
     { name: "FileSystem round-trips", run: fileSystem },

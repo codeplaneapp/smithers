@@ -11,6 +11,7 @@ import { Clock, Effect, Layer, Random } from "effect"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { describe, expect, it } from "vitest"
 import * as HostSuite from "../../src/HostSuite.ts"
 import { CapabilityContractError } from "../../src/TestingError.ts"
@@ -18,7 +19,7 @@ import { CapabilityContractError } from "../../src/TestingError.ts"
 const profile: HostSuite.HostProfile = {
   fileSystem: { supported: true },
   path: { supported: true },
-  shell: { supported: true },
+  shell: { supported: true, interruptCommand: ChildProcess.make("host-suite-pending") },
   jj: { supported: false, code: "not_installed" },
   httpTransport: { supported: false, code: "TransportError" },
   clock: { supported: true },

@@ -867,7 +867,9 @@ interface HostProfile {
   readonly fileSystemScratchPath?: string | undefined
   readonly fileSystem: CapabilityExpectation
   readonly path: CapabilityExpectation
-  readonly shell: CapabilityExpectation
+  readonly shell:
+    | { readonly supported: true; readonly interruptCommand: ChildProcess.Command }
+    | { readonly supported: false; readonly code: string }
   readonly jj: CapabilityExpectation
   readonly httpTransport: HttpTransportExpectation
   readonly clock: CapabilityExpectation
@@ -879,11 +881,18 @@ Every closed-list capability must be declared; omission is not an admission
 mechanism.
 
 `fileSystemScratchPath` is the scratch file the round-trip probe writes, removed
-even when the assertion fails. It must not already exist: the suite refuses to
-write over a file it did not create, and removes only the file it did. When
-omitted, the suite builds a unique absolute path under `/tmp` from the bundle's
-own `Path` and `Random`. A bundle whose platform has no `/tmp` must declare a
-path of its own.
+even when the assertion fails. Exclusive creation (`flag: "wx"`) atomically
+refuses an existing path, including dangling symlinks and concurrent creations,
+with `FileSystem/scratchPath`. Removal is registered only after successful
+creation. When omitted, the suite builds a randomized absolute path under
+`/tmp` from the bundle's own `Path` and `Random`. A bundle whose platform has
+no `/tmp` must declare a path of its own.
+
+A supported `shell` supplies `interruptCommand`, which must stay running until
+cancelled. The cleanup case acquires its Host process handle, checks
+`isRunning`, interrupts its scoped consumer, and verifies that the handle is
+no longer running. An unsupported shell is checked for its refusal code and
+does not certify cleanup.
 
 ### HostSuite.CapabilityExpectation and HttpTransportExpectation
 
