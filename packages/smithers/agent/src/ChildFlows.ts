@@ -45,7 +45,7 @@ export const SpawnInput = Schema.Struct({
   input: Schema.optional(Schema.Json).annotate({ description: "The child's input" }),
   label: Schema.optional(Schema.String).annotate({
     description:
-      "Identifies this child within the run and is part of its id; two concurrent children of one flow need two labels. Defaults to the flow name."
+      "Identifies this child within the run; treat the returned child id as opaque; two concurrent children of one flow need two labels. Defaults to the flow name."
   })
 })
 

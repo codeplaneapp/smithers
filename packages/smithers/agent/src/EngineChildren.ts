@@ -56,7 +56,7 @@ import * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import type * as Fiber from "effect/Fiber"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -96,6 +96,12 @@ export interface Options {
    * on a run that was never created. Defaults to 30 seconds.
    */
   readonly startTimeout?: Duration.Input | undefined
+  /**
+   * Replay existing children written with the old `/child/` concatenation.
+   * Refuses to create new legacy rows. Use only for parents persisted before
+   * the length-delimited id format; new parents use the default format.
+   */
+  readonly legacyChildIds?: boolean | undefined
 }
 
 /**
@@ -113,27 +119,27 @@ export interface Options {
 export const childExecutionId = (
   parentExecutionId: string,
   label: string
-): string => `${parentExecutionId}/child/${label}`
+): string => `child-v2:${parentExecutionId.length}:${parentExecutionId}${label.length}:${label}`
 
 /**
- * Whether `child` names a run inside `parentExecutionId`'s own child namespace.
- *
- * The derived id IS the parent/child edge, and it is the durable one: a child's
- * execution id is the primary key of its run row, minted by
- * {@link childExecutionId} out of the id of the run that spawned it, so a run
- * can only name a child of its own by naming its own execution id. Nothing a
- * cell writes reaches outside that namespace, which is what makes an id a
- * capability rather than a selector — `await` and `send` take a caller-supplied
- * string, and without this the string chose any run on the host.
- *
- * A descendant passes too: a grandchild is `parent/child/a/child/b`, still
- * inside `parent`'s namespace. Ancestry is the relation being checked, and an
- * ancestor reaching a run started underneath it reaches nothing it did not
- * cause. A run that is NOT an ancestor cannot match, because matching requires
- * the target id to begin with the caller's own id.
+ * Checks ancestry through the length-delimited parent component. Legacy ids
+ * remain readable so hosts can collect or steer already-persisted children.
  */
-const ownsChild = (parentExecutionId: string, child: string): boolean =>
-  child.startsWith(childExecutionId(parentExecutionId, ""))
+const ownsChild = (parentExecutionId: string, child: string): boolean => {
+  let current = child
+  while (true) {
+    if (current.startsWith(`${parentExecutionId}/child/`)) return true
+    const prefix = /^child-v2:(\d+):/.exec(current)
+    if (prefix === null) return false
+    const start = prefix[0].length
+    const length = Number(prefix[1])
+    const parent = current.slice(start, start + length)
+    const label = /^(\d+):([\s\S]*)$/.exec(current.slice(start + length))
+    if (label === null || childExecutionId(parent, label[2]!) !== current) return false
+    if (parent === parentExecutionId) return true
+    current = parent
+  }
+}
 
 const notFound = (message: string): ChildError => new ChildError({ code: "not_found", message })
 
@@ -361,7 +367,13 @@ export const make = (
       Effect.gen(function*() {
         const parent = yield* parentInstance("agent/spawn")
         const flow = yield* declarationOf(input.flow, "agent/spawn")
-        const child = childExecutionId(parent.executionId, input.label ?? input.flow)
+        const label = input.label ?? input.flow
+        const child = options.legacyChildIds
+          ? `${parent.executionId}/child/${label}`
+          : childExecutionId(parent.executionId, label)
+        if (options.legacyChildIds && Option.isNone(yield* rowOf(child))) {
+          return yield* Effect.fail(failed(`Legacy child run ${child} does not exist; new children require v2 ids.`))
+        }
         // Detached on purpose, and detached in the durable sense: `discard`
         // is what the engine records as the child's `onParentExit` policy, so
         // this child survives its parent's completion instead of being
@@ -371,22 +383,28 @@ export const make = (
         // parked, and a spawn that waited for that would leave `await` with
         // nothing to do. The fork is not what makes the child durable — the
         // run row is — so the id is only answered once the row exists.
-        const fiber = yield* Effect.forkDetach(
-          // `Flow.Any` erases the payload and result schemas the typed
-          // signature reads its requirements from, so the declaration is
-          // passed opaquely: this port addresses flows by NAME, and the name
-          // is all a cell ever has. What the schemas would have given is
-          // checked where it matters — the engine encodes the payload against
-          // the real declaration it registered.
-          (runtime.execute(flow as never, {
-            executionId: child,
-            payload: input.input ?? {},
-            discard: true
-          }) as Effect.Effect<unknown, unknown>).pipe(
-            Effect.tapCause((cause) => Effect.logWarning(`agent: detached child ${child} ended abnormally`, cause))
-          )
+        // Acquire the fiber with an atomic cleanup registration. It belongs
+        // to this start attempt until admission succeeds; every failed exit,
+        // including defects and interruption, interrupts and joins it.
+        yield* Effect.acquireUseRelease(
+          Effect.forkDetach(
+            // `Flow.Any` erases the payload and result schemas the typed
+            // signature reads its requirements from, so the declaration is
+            // passed opaquely: this port addresses flows by NAME, and the name
+            // is all a cell ever has. What the schemas would have given is
+            // checked where it matters — the engine encodes the payload against
+            // the real declaration it registered.
+            (runtime.execute(flow as never, {
+              executionId: child,
+              payload: input.input ?? {},
+              discard: true
+            }) as Effect.Effect<unknown, unknown>).pipe(
+              Effect.tapCause((cause) => Effect.logWarning(`agent: detached child ${child} ended abnormally`, cause))
+            )
+          ),
+          (fiber) => awaitStarted(child, input.flow, fiber, startTimeout),
+          (fiber, exit) => Exit.isFailure(exit) ? Fiber.interrupt(fiber) : Effect.void
         )
-        yield* awaitStarted(child, input.flow, fiber, startTimeout)
         return { child }
       })
 

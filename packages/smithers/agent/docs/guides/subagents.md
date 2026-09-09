@@ -72,14 +72,25 @@ parent-edge table. It is spawned with the result discarded, which records
 started it instead of being cancelled with it.
 
 The child's execution id is derived, not minted:
-`${parentExecutionId}/child/${label}`, where the label defaults to the flow
-name. A parent that is re-driven, by a resume, a reclaim, or a replayed cell,
+`child-v2:<parent length>:<parent><label length>:<label>`, with lengths in
+JavaScript UTF-16 code units. The label defaults to the flow name. Both
+components are length-delimited, so a label containing `/child/` cannot alias
+a nested child. A parent that is re-driven, by a resume, a reclaim, or a replayed cell,
 spawns the same child rather than a second one, because the engine's create is
 idempotent on the execution id. The label is therefore the child's identity
 within its parent: two concurrent children of one flow need two labels.
 
+Keep returned ids opaque. `await` and `send` accept already-persisted legacy
+ids. To re-drive parents whose children used `${parentExecutionId}/child/${label}`,
+compose their port with `legacyChildIds: true`. This mode starts only existing
+rows and refuses new legacy children. Use the default port for new parents.
+Legacy rows retain their original identities, including any pre-existing label
+ambiguity; they are not automatically migrated.
+
 `spawn` answers once the child's run row exists, within `startTimeout`
-(default 30 seconds). A start that produces no row is
+(default 30 seconds). Until admission succeeds, failure, a store defect, or
+cancellation interrupts and joins the startup fiber before returning. After
+admission the child continues independently. A start that produces no row is
 `ChildError { code: "failed" }`, never `not_found`: the flow is declared, so
 the refusal is the runtime's, and a cell reading `not_found` would wrongly
 decide never to ask again.

@@ -1312,13 +1312,25 @@ holds, and is not restricted.
 | `pollInterval` | `Duration.Input`          | How long `await` waits before re-reading an unsettled child, and how long `spawn` waits between checks for the child's run row. Defaults to 250 ms.              |
 | `startTimeout` | `Duration.Input`          | How long `spawn` waits for the child's run row before reporting the child never started. Defaults to 30 seconds.                                                 |
 
+`spawn` owns its startup fiber until the row is confirmed. Timeout, store
+failure, and cancellation interrupt and join it before returning failure.
+
+`legacyChildIds?: boolean` selects the old `${parentExecutionId}/child/${label}`
+format for replaying existing children only. It refuses to create missing legacy
+rows. Configure it only for parents persisted before the new format; use the
+default for new parents. `await` and `send` accept both formats. Existing legacy
+ambiguities are retained; no rows are automatically renamed.
+
 ### EngineChildren.childExecutionId
 
 ```ts
 const childExecutionId: (parentExecutionId: string, label: string) => string
 ```
 
-The execution id a labelled child runs under, `${parentExecutionId}/child/${label}`.
+The execution id a labelled child runs under:
+`child-v2:<parent length>:<parent><label length>:<label>`. Lengths count JavaScript
+UTF-16 code units. Both components are delimited, including labels containing
+`/child/`. Treat the returned id as opaque.
 Derived rather than minted, so a parent that is re-driven spawns the same child
 rather than a second one.
 

@@ -40,7 +40,7 @@ import { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
 import { Registry } from "@smthrs/registry"
 import { RunStore } from "@smthrs/run-store"
-import { Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect"
 import type * as Scope from "effect/Scope"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -305,6 +305,59 @@ const childErrorOf = (exit: Exit.Exit<unknown, unknown>): ChildFlows.ChildError 
 }
 
 describe("EngineChildren.spawn", () => {
+  it("distinguishes a delimiter-bearing direct child from a nested child", () => {
+    const direct = EngineChildren.childExecutionId("root", "review/child/check")
+    const nested = EngineChildren.childExecutionId(EngineChildren.childExecutionId("root", "review"), "check")
+    expect(direct).not.toBe(nested)
+    expect(EngineChildren.childExecutionId("root", "review/check")).not.toBe(direct)
+  })
+
+  it("keeps direct and nested children independent and lets their ancestor collect both", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-nested-identity")
+      const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, runtime))
+      yield* registerChildren(runtime)
+      yield* runtime.register(Worker, () =>
+        port.spawn({
+          flow: Counted._tag,
+          label: "check",
+          input: { count: 2 }
+        }).pipe(Effect.map(({ child }) => child), Effect.orDie))
+      yield* runtime.register(Parent, () =>
+        Effect.gen(function*() {
+          const direct = yield* port.spawn({ flow: Counted._tag, label: "review/child/check", input: { count: 1 } })
+          const reviewer = yield* port.spawn({ flow: Worker._tag, label: "review" })
+          const nested = (yield* port.await(reviewer)).output
+          expect(direct.child).not.toBe(nested)
+          expect((yield* port.await(direct)).output).toBe("counted 1")
+          expect((yield* port.await({ child: nested })).output).toBe("counted 2")
+          return "independent"
+        }).pipe(Effect.orDie))
+      expect(yield* runtime.execute(Parent, { executionId: "nested-parent", payload: {} })).toBe("independent")
+    })))
+
+  it("replays persisted legacy ids without creating new legacy children", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-legacy")
+      const port = yield* children({ legacyChildIds: true }).pipe(
+        Effect.provideService(FlowRuntime.FlowRuntime, runtime)
+      )
+      yield* registerChildren(runtime)
+      const legacyId = "legacy-parent/child/review/check"
+      yield* runtime.execute(Worker, { executionId: legacyId, payload: {} })
+      yield* runtime.register(Parent, () =>
+        Effect.gen(function*() {
+          const replayed = yield* port.spawn({ flow: Worker._tag, label: "review/check" })
+          expect(replayed.child).toBe(legacyId)
+          expect((yield* port.await(replayed)).output).toBe("worker finished")
+          const missing = yield* Effect.exit(port.spawn({ flow: Worker._tag, label: "new" }))
+          expect(childErrorOf(missing)?.code).toBe("failed")
+          expect(childErrorOf(missing)?.message).toContain("new children require v2 ids")
+          return "replayed"
+        }).pipe(Effect.orDie))
+      expect(yield* runtime.execute(Parent, { executionId: "legacy-parent", payload: {} })).toBe("replayed")
+    })))
+
   it("starts a durable child that outlives the run that spawned it", () =>
     run(Effect.gen(function*() {
       const runtime = yield* engine("children-spawn")
@@ -331,6 +384,43 @@ describe("EngineChildren.spawn", () => {
       // this policy off the child's own row and left it alone.
       expect((JSON.parse(childRow.stateJson) as { readonly onParentExit?: string }).onParentExit).toBe("detach")
       expect(childRow.cancelRequestedAtMs).toBeNull()
+    })))
+
+  it("releases an admitted startup fiber from its parent's lifetime", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-admitted")
+      const store = yield* RunStore.RunStore
+      const finish = yield* Deferred.make<void>()
+      const completed = yield* Deferred.make<void>()
+      let cleaned = false
+      const admitted: FlowRuntime.FlowRuntime["Service"] = {
+        ...runtime,
+        execute: (_flow, options) =>
+          store.create(
+            options.executionId,
+            JSON.stringify({ flowName: Worker._tag })
+          ).pipe(
+            Effect.andThen(Deferred.await(finish)),
+            Effect.ensuring(Effect.sync(() => {
+              cleaned = true
+            })),
+            Effect.ensuring(Deferred.succeed(completed, undefined)),
+            Effect.as(options.executionId),
+            Effect.orDie
+          )
+      }
+      const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, admitted))
+      yield* runtime.register(Parent, () =>
+        port.spawn({ flow: Worker._tag }).pipe(
+          Effect.map(({ child }) => child),
+          Effect.orDie
+        ))
+      const child = yield* runtime.execute(Parent, { executionId: "admitted-parent", payload: {} })
+      expect((yield* store.get(child)).runId).toBe(child)
+      expect(cleaned).toBe(false)
+      yield* Deferred.succeed(finish, undefined)
+      yield* Deferred.await(completed)
+      expect(cleaned).toBe(true)
     })))
 
   it("refuses a flow this host does not run", () =>
@@ -446,9 +536,13 @@ describe("EngineChildren.spawn", () => {
       // coordinator, a lock nobody releases. The start attempt has not ended,
       // so the not-registered answer does not apply, and no run row will ever
       // appear — the budget is the only thing that can end the wait.
+      let cleaned = false
       const stalled: FlowRuntime.FlowRuntime["Service"] = {
         ...runtime,
-        execute: () => Effect.never
+        execute: () =>
+          Effect.never.pipe(Effect.ensuring(Effect.sync(() => {
+            cleaned = true
+          })))
       }
       const port = yield* children({ startTimeout: "10 millis" }).pipe(
         Effect.provideService(FlowRuntime.FlowRuntime, stalled)
@@ -459,10 +553,89 @@ describe("EngineChildren.spawn", () => {
           Effect.catch((error) => Effect.succeed(`${(error as ChildFlows.ChildError).code}`))
         ))
 
-      return expect(
+      expect(
         yield* runtime.execute(Parent, { executionId: "spawn-stalled", payload: {} })
       ).toBe("failed")
+      expect(cleaned).toBe(true)
     })))
+
+  it("does not start abandoned work when a dependency recovers after timeout", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-recovering")
+      const dependency = yield* Deferred.make<void>()
+      let executions = 0
+      let cleaned = 0
+      const recovering: FlowRuntime.FlowRuntime["Service"] = {
+        ...runtime,
+        execute: (flow, options) =>
+          Deferred.await(dependency).pipe(
+            Effect.andThen(Effect.sync(() => {
+              executions++
+            })),
+            Effect.andThen(runtime.execute(flow, options)),
+            Effect.ensuring(Effect.sync(() => {
+              cleaned++
+            }))
+          )
+      }
+      const port = yield* children({ startTimeout: "20 millis" }).pipe(
+        Effect.provideService(FlowRuntime.FlowRuntime, recovering)
+      )
+      yield* registerChildren(runtime)
+      yield* runtime.register(Parent, () =>
+        Effect.gen(function*() {
+          const first = yield* Effect.exit(port.spawn({ flow: Worker._tag, label: "retry" }))
+          expect(childErrorOf(first)?.code).toBe("failed")
+          expect(cleaned).toBe(1)
+          yield* Deferred.succeed(dependency, undefined)
+          const second = yield* port.spawn({ flow: Worker._tag, label: "retry" })
+          return (yield* port.await(second)).output
+        }).pipe(Effect.orDie))
+      expect(yield* runtime.execute(Parent, { executionId: "recovering-parent", payload: {} }))
+        .toBe("worker finished")
+      expect(executions).toBe(1)
+    })))
+
+  it.each(["store failure", "interruption"] as const)(
+    "cleans up startup on %s",
+    (failure) =>
+      run(Effect.gen(function*() {
+        const runtime = yield* engine(`children-cleanup-${failure}`)
+        const store = yield* RunStore.RunStore
+        const entered = yield* Deferred.make<void>()
+        let cleaned = false
+        const stalled: FlowRuntime.FlowRuntime["Service"] = {
+          ...runtime,
+          execute: () =>
+            Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(Effect.sync(() => {
+                cleaned = true
+              }))
+            )
+        }
+        const port = yield* children().pipe(
+          Effect.provideService(FlowRuntime.FlowRuntime, stalled),
+          Effect.provideService(RunStore.RunStore, {
+            ...store,
+            get: (id) =>
+              failure === "store failure"
+                ? Deferred.await(entered).pipe(Effect.andThen(Effect.die("store unavailable")))
+                : store.get(id)
+          })
+        )
+        yield* runtime.register(Parent, () =>
+          Effect.gen(function*() {
+            const spawning = yield* Effect.forkChild(port.spawn({ flow: Worker._tag }))
+            yield* Deferred.await(entered)
+            if (failure === "interruption") yield* Fiber.interrupt(spawning)
+            expect(Exit.isFailure(yield* Fiber.await(spawning))).toBe(true)
+            expect(cleaned).toBe(true)
+            return "cleaned"
+          }))
+        expect(yield* runtime.execute(Parent, { executionId: `cleanup-${failure}`, payload: {} })).toBe("cleaned")
+      }))
+  )
 
   it("refuses to spawn outside a running flow", () =>
     run(Effect.gen(function*() {
@@ -1293,9 +1466,29 @@ describe("EngineChildren ownership", () => {
       const answer = yield* runtime.execute(Intruder, { executionId: "intruder-parent", payload: {} })
 
       expect(answer).toContain("not_found")
-      expect(answer).toContain("intruder-parent/child/<label>")
+      expect(answer).toContain(EngineChildren.childExecutionId("intruder-parent", "<label>"))
       // The victim's own value never crossed into the intruder's answer.
       expect(answer).not.toContain("worker finished")
+    })))
+
+  it("rejects malformed v2 ancestry and round-trips Unicode and delimiter-bearing components", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-id-parsing")
+      const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, runtime))
+      const parent = "parent:😀/child/embedded"
+      yield* registerChildren(runtime)
+      yield* runtime.register(Parent, () =>
+        Effect.gen(function*() {
+          for (const label of ["", "😀\n/child/check", "child-v2:0:0:"]) {
+            const child = yield* port.spawn({ flow: Worker._tag, label })
+            expect((yield* port.await(child)).output).toBe("worker finished")
+          }
+          for (const child of ["child-v2:999:short", "child-v2:0:01:x", "child-v2:0:1:x"]) {
+            expect(childErrorOf(yield* Effect.exit(port.await({ child })))?.code).toBe("not_found")
+          }
+          return "checked"
+        }).pipe(Effect.orDie))
+      expect(yield* runtime.execute(Parent, { executionId: parent, payload: {} })).toBe("checked")
     })))
 
   it("collects its own child from inside its own body", () =>
@@ -1347,7 +1540,7 @@ describe("EngineChildren ownership", () => {
       const answer = yield* runtime.execute(Intruder, { executionId: "intruder-send-parent", payload: {} })
 
       expect(answer).toContain("not_found")
-      expect(answer).toContain("intruder-send-parent/child/<label>")
+      expect(answer).toContain(EngineChildren.childExecutionId("intruder-send-parent", "<label>"))
       // Refused before the control plane was asked, so nothing was admitted.
       expect(receipts).toEqual([])
     })))
