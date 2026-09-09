@@ -188,7 +188,11 @@ interface PlanNodeLike {
 
 `mode` is the node's declared effect mode (`hermetic` or `expected`), `tier` is
 its declared effect tier (`sealed`, `compensable`, or `irreversible`), and
-`onConflict` is its conflict strategy (`serialize`, `lane`, or `fail`).
+`onConflict` is its declared conflict strategy (`serialize`, `lane`, or `fail`).
+`Plan.fromGraph` and `Plan.planOf` source all three fields from the node's own
+declaration and omit them when it has none. Their `effects` entries are declared
+`read:<path>` and `write:<path>` strings, or an empty list when undeclared.
+The node's `envelope` contains effective effects, including inherited admission.
 
 ### PlanLike.PlanPlacementLike
 
@@ -252,7 +256,7 @@ the keys the persisted plan records.
 ### Plan.make
 
 ```ts
-const make: (plan: PlanLike) => Plan
+const make: (plan: PlanLike) => PlanLike
 ```
 
 Copies a built plan into a stable presentation order: nodes sorted by id,
@@ -287,8 +291,9 @@ Renders one edge as `from -> to`.
 
 ### Plan.Plan, Plan.Node
 
-`Plan` and `Node` are `PlanLike` and `PlanNodeLike` with their
-presentation-only collections in canonical order. They are what `make` returns.
+Deprecated compatibility aliases for `PlanLike` and `PlanNodeLike`. Use the
+shapes exported by `@smthrs/testing/PlanLike`. `make` returns `PlanLike` with
+sorted presentation collections; the types do not encode ordering.
 
 ### Plan.KeysOptions, Plan.FromGraphOptions, Plan.PlanOfOptions
 
@@ -340,6 +345,10 @@ interface PlanAssertions {
 edge outside them. `declaresEffects` sorts both sides. `matchesSnapshot`
 compares `Plan.render` output and reports a line diff on a mismatch. A missing
 node id fails with `missing_node` and lists the ids the plan does have.
+Value comparisons run when the returned Effect executes. Envelope and placement
+mismatch diagnostics use the shared structural renderer: cycles and depth limits
+produce markers, and record accessors are described without invoking getters.
+These mismatches remain typed `PlanAssertionError` failures.
 
 ### PlanAssertions.NodeAssertions
 

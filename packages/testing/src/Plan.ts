@@ -20,25 +20,24 @@ import { compare } from "./internal/Structural.ts"
 import type { PlanLike, PlanNodeLike, PlanPlacementLike } from "./PlanLike.ts"
 
 /**
- * A plan node with presentation-only collections in canonical order.
+ * Compatibility alias for the plan assertion node shape.
+ *
+ * @deprecated Use PlanNodeLike from `@smthrs/testing/PlanLike`.
  *
  * @category models
  * @since 0.0.0
  */
-export interface Node extends PlanNodeLike {
-  readonly effects: ReadonlyArray<string>
-}
+export type Node = PlanNodeLike
 
 /**
- * A built plan with presentation-only collections in canonical order.
+ * Compatibility alias for the plan assertion shape.
+ *
+ * @deprecated Use PlanLike from `@smthrs/testing/PlanLike`.
  *
  * @category models
  * @since 0.0.0
  */
-export interface Plan extends Omit<PlanLike, "nodes" | "edges"> {
-  readonly nodes: ReadonlyArray<Node>
-  readonly edges: ReadonlyArray<PlanLike["edges"][number]>
-}
+export type Plan = PlanLike
 
 /**
  * Options for graph-local key derivation.
@@ -190,7 +189,7 @@ export const fromGraph = (graph: CoreGraph.Graph, options: FromGraphOptions = {}
   const derived = options.key === undefined ? keys(graph, { runId: options.runId }) : undefined
   return {
     nodes: CoreGraph.nodes(graph).map((node): PlanNodeLike => {
-      const declaration = node.declaredEffects ?? node.effectiveEffects
+      const declaration = node.declaredEffects
       return {
         id: node.id,
         key: options.key === undefined ? derived![node.id]! : options.key(node),
@@ -244,7 +243,7 @@ export const planOf = <F extends Flow.Any>(
  * @category constructors
  * @since 0.0.0
  */
-export const make = (plan: PlanLike): Plan => ({
+export const make = (plan: PlanLike): PlanLike => ({
   ...plan,
   nodes: plan.nodes
     .map((node) => ({ ...node, effects: [...node.effects].sort() }))

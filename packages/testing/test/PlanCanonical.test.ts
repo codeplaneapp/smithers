@@ -7,8 +7,11 @@
  * distinct inputs.
  */
 import * as Core from "@smthrs/core"
+import * as Effect from "effect/Effect"
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as Plan from "../src/Plan.ts"
+import { expectPlan } from "../src/PlanAssertions.ts"
 import type { PlanLike } from "../src/PlanLike.ts"
 
 const emptyPlan = (envelope: Record<string, unknown>): PlanLike => ({
@@ -76,6 +79,55 @@ describe("Plan canonical rendering", () => {
     })
     const anotherRun = Plan.fromGraph(graph, { runId: "another-run" })
     expect(projected.nodes[0]!.key).not.toBe(anotherRun.nodes[0]!.key)
+  })
+
+  it("keeps inherited effects in the envelope of an undeclared node", () => {
+    const envelope = Core.Effects.make({
+      reads: ["workspace/input"],
+      writes: ["workspace/output"],
+      mode: "hermetic",
+      onConflict: "serialize",
+      tier: "compensable"
+    })
+    const graph = Core.Graph.build(Core.Flow.make({
+      effects: envelope,
+      body: () => Core.Node.dynamic({})
+    }))
+    expect(Core.Graph.nodes(graph)[0]!.declaredEffects).toBeUndefined()
+    expect(Core.Graph.nodes(graph)[0]!.effectiveEffects).toEqual(envelope)
+    const projected = Plan.fromGraph(graph, { key: () => "synthetic-key" })
+    const node = projected.nodes[0]!
+    expect(node.effects).toEqual([])
+    expect(node.envelope).toEqual(envelope)
+    expect(node).not.toHaveProperty("mode")
+    expect(node).not.toHaveProperty("tier")
+    expect(node).not.toHaveProperty("onConflict")
+    Effect.runSync(Effect.gen(function*() {
+      const assertions = expectPlan(projected).node(node.id)
+      yield* assertions.mode(undefined)
+      yield* assertions.tier(undefined)
+      yield* assertions.onConflict(undefined)
+      yield* assertions.declaresEffects([])
+      yield* assertions.envelope({ ...envelope })
+    }))
+  })
+
+  it("accepts the guide's effect assertion for declared paths", () => {
+    const graph = Core.Graph.build(Core.Node.withEffects(
+      Core.Node.dynamic({}),
+      Core.Effects.make({
+        reads: ["workspace/input"],
+        writes: ["workspace/output"],
+        mode: "hermetic",
+        onConflict: "serialize"
+      })
+    ))
+    const projected = Plan.fromGraph(graph, { key: () => "synthetic-key" })
+    const guide = readFileSync(new URL("../docs/guides/assert-a-plan.md", import.meta.url), "utf8")
+    const sample = guide.match(/planned\.declaresEffects\("test", (\[[^\]]*\])/)
+    expect(sample).not.toBeNull()
+    const effects = JSON.parse(sample![1]!) as Array<string>
+    Effect.runSync(expectPlan(projected).node(projected.nodes[0]!.id).declaresEffects(effects))
   })
 
   it("omits an undeclared effect tier", () => {

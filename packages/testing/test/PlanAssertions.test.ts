@@ -75,6 +75,60 @@ const assertFailure = (assertion: Effect.Effect<void, { readonly code: string }>
   )
 
 describe("PlanAssertions", () => {
+  it.effect("reports cyclic envelope mismatches through the typed channel", () =>
+    Effect.gen(function*() {
+      const cyclic: Record<string, unknown> = {}
+      cyclic.self = cyclic
+      const assertion = expectPlan(plan).envelope(cyclic)
+      const error = yield* assertion.pipe(Effect.flip)
+      expect(error.code).toBe("envelope_mismatch")
+      expect(error.expected).toBe(cyclic)
+      expect(error.message).toContain("Circular")
+      const nodeError = yield* expectPlan(plan).node("review").envelope(cyclic).pipe(Effect.flip)
+      expect(nodeError.code).toBe("envelope_mismatch")
+      expect(nodeError.message).toContain("Circular")
+    }))
+
+  it.effect("renders throwing getters without invoking them", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const payload = {
+        get profile() {
+          reads++
+          throw new Error("must not read")
+        }
+      }
+      const error = yield* expectPlan(plan).envelope(payload).pipe(Effect.flip)
+      expect(error.code).toBe("envelope_mismatch")
+      expect(error.message).toContain("Accessor")
+      const placement = yield* expectPlan(plan).node("review").placement({ tag: "remote", options: payload })
+        .pipe(Effect.flip)
+      expect(placement.code).toBe("placement_mismatch")
+      expect(placement.message).toContain("Accessor")
+      expect(reads).toBe(0)
+    }))
+
+  it.effect("defers comparison and bounds deeply nested diagnostics", () =>
+    Effect.gen(function*() {
+      let inspections = 0
+      const payload = new Proxy({}, {
+        ownKeys() {
+          inspections++
+          return []
+        }
+      })
+      const assertion = expectPlan(plan).envelope(payload)
+      expect(inspections).toBe(0)
+      yield* assertFailure(assertion, "envelope_mismatch")
+      expect(inspections).toBeGreaterThan(0)
+      let deep: Record<string, unknown> = {}
+      for (let index = 0; index < 1000; index++) deep = { child: deep }
+      const error = yield* expectPlan(plan).envelope(deep).pipe(Effect.flip)
+      expect(error.code).toBe("envelope_mismatch")
+      expect(error.message).toContain("TooDeep")
+      expect(error.message.length).toBeLessThan(5000)
+    }))
+
   it.effect("asserts node counts and node membership", () =>
     Effect.gen(function*() {
       yield* expectPlan(plan).nodeCount(4)

@@ -27,14 +27,16 @@ export interface PlanNodeLike {
   readonly key: string
   readonly kind: string
   readonly placement?: PlanPlacementLike
+  /** Declared `read:<path>` / `write:<path>` entries from fromGraph; empty when undeclared. */
   readonly effects: ReadonlyArray<string>
-  /** Effect mode from the node's declaration (`hermetic` | `expected`). */
+  /** Effect mode from the node's own declaration, absent when undeclared (`hermetic` | `expected`). */
   readonly mode?: string
-  /** Effect tier from the node's declaration (`sealed` | `compensable` | `irreversible`). */
+  /** Effect tier from the node's own declaration, absent when undeclared (`sealed` | `compensable` | `irreversible`). */
   readonly tier?: string
-  /** Conflict strategy from the node's declaration (`serialize` | `lane` | `fail`). */
+  /** Conflict strategy from the node's own declaration, absent when undeclared (`serialize` | `lane` | `fail`). */
   readonly onConflict?: string
   readonly sealed: boolean
+  /** Effective effects, including inherited admission, when projected by fromGraph. */
   readonly envelope?: Record<string, unknown>
 }
 

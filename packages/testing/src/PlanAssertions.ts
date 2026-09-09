@@ -5,7 +5,7 @@
  */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import { compare, same } from "./internal/Structural.ts"
+import { canonical, compare, same } from "./internal/Structural.ts"
 import * as Plan from "./Plan.ts"
 import type { PlanLike, PlanNodeLike } from "./PlanLike.ts"
 import { type PlanAssertionCode, PlanAssertionError } from "./TestingError.ts"
@@ -113,17 +113,9 @@ export interface PlansAssertions {
   readonly covers: (ids: ReadonlyArray<string>, options?: CoverageOptions) => Effect.Effect<void, PlanAssertionError>
 }
 
-const inspect = (value: unknown): string => {
-  if (value === undefined) return "undefined"
-  if (value === null || typeof value !== "object") return String(value)
-  if (Array.isArray(value)) return `[${value.map(inspect).join(", ")}]`
-  return `{ ${
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => compare(left, right))
-      .map(([key, item]) => `${key}: ${inspect(item)}`)
-      .join(", ")
-  } }`
-}
+// Preserve the concise absence diagnostic while sharing bounded, accessor-safe
+// rendering for arbitrary envelope and placement payloads.
+const inspect = (value: unknown): string => value === undefined ? "undefined" : canonical(value)
 
 const fail = (
   code: PlanAssertionCode,
@@ -160,9 +152,11 @@ const assertValue = (
   expected: unknown,
   actual: unknown
 ): Effect.Effect<void, PlanAssertionError> =>
-  same(expected, actual)
-    ? Effect.void
-    : fail(code, `${label} differs. Expected ${inspect(expected)}; actual ${inspect(actual)}.`, expected, actual)
+  Effect.suspend(() =>
+    same(expected, actual)
+      ? Effect.void
+      : fail(code, `${label} differs. Expected ${inspect(expected)}; actual ${inspect(actual)}.`, expected, actual)
+  )
 
 const placementView = (
   expected: PlacementExpectation,
