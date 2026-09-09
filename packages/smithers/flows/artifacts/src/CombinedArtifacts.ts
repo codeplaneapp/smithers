@@ -46,6 +46,12 @@ export interface Options {
    */
   readonly uploadTimeout?: Duration.Input | undefined
   /**
+   * How long a `get` waits for opportunistic local write-back before
+   * interrupting it and returning the verified remote bytes. Defaults to
+   * 60 seconds, matching the default upload deadline.
+   */
+  readonly writeBackTimeout?: Duration.Input | undefined
+  /**
    * How eagerly a read materializes a blob into the local tier. Defaults to
    * the policy the remote tier declares (`RemoteArtifacts.Options.downloadPolicy`),
    * and to `all` for a remote tier that declares none.
@@ -106,6 +112,20 @@ export const make = (
       )
     }
     const uploadTimeout = parsedUploadTimeout.value
+    const parsedWriteBackTimeout = Duration.fromInput(options.writeBackTimeout ?? defaultUploadTimeout)
+    if (
+      Option.isNone(parsedWriteBackTimeout) ||
+      !Number.isFinite(Duration.toMillis(parsedWriteBackTimeout.value)) ||
+      Duration.toMillis(parsedWriteBackTimeout.value) <= 0
+    ) {
+      return yield* Effect.fail(
+        new ArtifactStore.ArtifactStoreError({
+          code: "invalid_configuration",
+          message: "invalid combined artifact option: writeBackTimeout"
+        })
+      )
+    }
+    const writeBackTimeout = parsedWriteBackTimeout.value
     const downloadPolicy = options.downloadPolicy ?? RemoteArtifacts.downloadPolicyOf(remote) ?? "all"
     if (!Schema.is(RemoteArtifacts.DownloadPolicy)(downloadPolicy)) {
       return yield* Effect.fail(
@@ -219,8 +239,12 @@ export const make = (
             // Opportunistic, exactly like `put`'s upload: the answer is already
             // in hand, so a full disk, a read-only mount, or a refused sync must
             // cost the next read a round trip rather than fail this one. A
-            // caller cannot even tell such a failure apart from a remote one.
-            yield* Effect.ignore(local.put(fetched))
+            // stalled write is interrupted at the deadline so it cannot hold
+            // the verified remote answer indefinitely.
+            yield* local.put(fetched).pipe(
+              Effect.timeout(writeBackTimeout),
+              Effect.ignore
+            )
           }
           return fetched
         }))
@@ -285,6 +309,7 @@ export interface LayerOptions<EL, RL, ER, RR> {
   readonly local: Effect.Effect<ArtifactStore.Service, EL, RL>
   readonly remote: Effect.Effect<ArtifactStore.Service, ER, RR>
   readonly uploadTimeout?: Duration.Input | undefined
+  readonly writeBackTimeout?: Duration.Input | undefined
   readonly downloadPolicy?: RemoteArtifacts.DownloadPolicy | undefined
 }
 
@@ -306,6 +331,7 @@ export const layer = <EL, RL, ER, RR>(
           local,
           remote,
           uploadTimeout: options.uploadTimeout,
+          writeBackTimeout: options.writeBackTimeout,
           downloadPolicy: options.downloadPolicy
         })
     )

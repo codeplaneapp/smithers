@@ -242,6 +242,7 @@ declare const layer: <EL, RL, ER, RR>(
 | `local`          | required                        | The fast, machine-local tier, as a `Service`. Every read tries this one first.                                                       |
 | `remote`         | required                        | The shared tier, as a `Service`. Consulted only on a local miss or corruption.                                                       |
 | `uploadTimeout`  | 60 seconds                      | How long a `put` waits for its opportunistic upload before abandoning it. An abandoned upload is dropped exactly like a refused one. |
+| `writeBackTimeout` | 60 seconds                    | How long a `get` waits for opportunistic local write-back before interrupting it and returning the verified remote bytes. |
 | `downloadPolicy` | the remote tier's, else `"all"` | Overrides the shared tier's declared policy for this composition.                                                                    |
 
 `LayerOptions` is the same shape with `local` and `remote` as `Effect`s. Both
@@ -250,12 +251,18 @@ tag: composing two `Layer<ArtifactStore>` would shadow one with the other. Pair
 `Effect.map(FileSystem.FileSystem, (fs) => ArtifactStore.makeFileSystem(fs))`
 with `RemoteArtifacts.make`.
 
+Both timeout options must be finite, positive durations. Invalid values fail
+construction with `ArtifactStoreError` code `invalid_configuration`.
+
 **Reads.** The local tier answers first. A hit returns. `ArtifactMissing` and
 `ArtifactCorruption` both fall through to the shared tier, and they are kept
 apart because only corruption earns a write-back that `minimal` would otherwise
 skip. A local `ArtifactStoreError` fails the read rather than falling through:
 a host that refused has not answered the question, and paying for the network
 instead would hide a broken local tier behind a working shared one.
+Local write-back after a remote read is opportunistic. A typed failure or
+`writeBackTimeout` expiry returns the verified remote bytes. Timeout interrupts
+the write-back and waits for its interruption cleanup before returning.
 
 **Writes.** `put` publishes locally first and returns the local digest. The
 remote upload is opportunistic, deduplicated in flight by digest, and bounded by

@@ -7,6 +7,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import { TestClock } from "effect/testing"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import * as CombinedArtifacts from "../src/CombinedArtifacts.ts"
 import * as RemoteArtifacts from "../src/RemoteArtifacts.ts"
@@ -89,6 +90,66 @@ describe("reads", () => {
       const combined = yield* CombinedArtifacts.make({ local, remote: remote.store })
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
     }))
+
+  it.effect.each(["default", "configured", "layer"] as const)(
+    "interrupts a stalled local write-back and serves the remote bytes after the %s deadline",
+    (mode) =>
+      Effect.gen(function*() {
+        const remote = countingMemory()
+        yield* withCrypto(remote.store.put(bytes(artifact)))
+        const started = yield* Deferred.make<void>()
+        let interrupted = false
+        const local = ArtifactStore.makeNoop({
+          get: () => Effect.fail(new ArtifactStore.ArtifactMissing({ code: "artifact_missing", digest })),
+          put: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() =>
+                Effect.sync(() => {
+                  interrupted = true
+                })
+              )
+            )
+        })
+        const writeBackTimeout = mode === "default" ? undefined : "50 millis"
+        const read = mode === "layer"
+          ? Effect.flatMap(ArtifactStore.ArtifactStore, (store) => store.get(digest)).pipe(
+            Effect.provide(CombinedArtifacts.layer({
+              local: Effect.succeed(local),
+              remote: Effect.succeed(remote.store),
+              writeBackTimeout
+            }))
+          )
+          : Effect.flatMap(
+            CombinedArtifacts.make({ local, remote: remote.store, writeBackTimeout }),
+            (store) => store.get(digest)
+          )
+        const running = yield* withCrypto(read).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(started)
+        yield* TestClock.adjust(mode === "default" ? "59999 millis" : "49 millis")
+        expect(interrupted).toBe(false)
+        expect(running.pollUnsafe()).toBeUndefined()
+        yield* TestClock.adjust("1 milli")
+        expect(interrupted).toBe(true)
+        expect(text(yield* Fiber.join(running))).toBe(artifact)
+      })
+  )
+
+  it.effect.each(["not a duration", "Infinity", "0 millis", "-1 millis", Symbol("invalid")])(
+    "rejects invalid writeBackTimeout %s during construction",
+    (writeBackTimeout) =>
+      Effect.gen(function*() {
+        const exit = yield* CombinedArtifacts.make({
+          local: ArtifactStore.makeMemory(),
+          remote: ArtifactStore.makeMemory(),
+          writeBackTimeout: writeBackTimeout as never
+        }).pipe(Effect.exit)
+        expect(exit).toMatchObject({
+          _tag: "Failure",
+          cause: { reasons: [{ error: { code: "invalid_configuration" } }] }
+        })
+      })
+  )
 
   it.effect("refuses a read the local tier refused, instead of paying the network for it", () =>
     Effect.gen(function*() {
