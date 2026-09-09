@@ -57,6 +57,17 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
 
 const payload = (input: unknown, role: string | undefined): unknown => role === undefined ? input : { input, role }
 
+// The refusal is minted once, as a value. `make` throws it, because a
+// declaration is built eagerly and a broken one is a programming error. `run`
+// FAILS with it, because `PatternError` is in its declared error channel and a
+// caller composing it must be able to claim the refusal with `Effect.catchTag`.
+// A thrown refusal inside `Effect.suspend` would be a defect no handler claims.
+const widthRefusal = (concurrency: number | undefined): PatternError | undefined =>
+  concurrency === undefined || (Number.isSafeInteger(concurrency) && concurrency >= 1) ? undefined : new PatternError({
+    code: "invalid_decorator",
+    message: `Panel concurrency must be a positive safe integer, received ${concurrency}`
+  })
+
 /**
  * Fans out every independent panelist call and then invokes the moderator.
  *
@@ -84,6 +95,8 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   const roles = options.roles === undefined ? undefined : new Map(Object.entries(options.roles))
   const moderator = options.moderator
   const concurrency = options.concurrency
+  const width = widthRefusal(concurrency)
+  if (width !== undefined) throw width
   for (const name of roles?.keys() ?? []) {
     if (!Object.hasOwn(options.panelists, name)) {
       throw new PatternError({
@@ -144,14 +157,8 @@ export const run = <I, A, E, R, B, E2, R2>(
         new PatternError({ code: "invalid_decorator", message: "Panel requires at least one panelist" })
       )
     }
-    if (concurrency !== undefined && (!Number.isSafeInteger(concurrency) || concurrency < 1)) {
-      return Effect.fail(
-        new PatternError({
-          code: "invalid_decorator",
-          message: `Panel concurrency must be a positive safe integer, received ${concurrency}`
-        })
-      )
-    }
+    const width = widthRefusal(concurrency)
+    if (width !== undefined) return Effect.fail(width)
     return Effect.flatMap(
       Effect.forEach(
         panelists,

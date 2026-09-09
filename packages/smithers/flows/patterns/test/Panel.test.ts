@@ -63,6 +63,19 @@ describe("Panel", () => {
     }
   })
 
+  it("rejects an invalid concurrency at declaration", () => {
+    // `make` is the declaration half, so a width the panel can never honour is
+    // refused here rather than by whatever container the body later builds.
+    for (const concurrency of [0, 1.5, -2]) {
+      expect(() => Panel.make({ panelists: { a: participant }, moderator: participant, concurrency })).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: `Panel concurrency must be a positive safe integer, received ${concurrency}`
+        })
+      )
+    }
+  })
+
   it.effect("fails run for an invalid concurrency", () =>
     Effect.gen(function*() {
       // A bare `Failure` assertion also passes when the run dies for an
