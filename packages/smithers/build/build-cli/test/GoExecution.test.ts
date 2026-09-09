@@ -35,19 +35,31 @@ const hasGo = await (async () => {
   }
 })()
 
-/** Plans against only the named host tools, regardless of optional tools installed on the host. */
-const withBarePath = async <A>(tools: ReadonlyArray<string>, body: () => Promise<A>): Promise<A> => {
-  const bin = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-go-bin-"))
+/**
+ * Plans against only the named host tools, regardless of optional tools
+ * installed on the host. `stubs` writes extra executables into the same
+ * directory, so a refusal case and its positive control differ by the presence
+ * of one optional tool and nothing else.
+ */
+const withBarePath = async <A>(
+  tools: ReadonlyArray<string>,
+  body: (bin: string) => Promise<A>,
+  stubs: Readonly<Record<string, string>> = {}
+): Promise<A> => {
+  const bin = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-go-bin-")))
   temporaryDirectories.push(bin)
   for (const tool of tools) {
     const found = PackageTree.findOnPath(tool)
     if (found === undefined) throw new Error(`Missing fixture tool: ${tool}`)
     await Fs.symlink(found, NodePath.join(bin, tool))
   }
+  for (const [name, script] of Object.entries(stubs)) {
+    await Fs.writeFile(NodePath.join(bin, name), script, { mode: 0o755 })
+  }
   const previous = process.env["PATH"]
   process.env["PATH"] = bin
   try {
-    return await body()
+    return await body(bin)
   } finally {
     if (previous === undefined) delete process.env["PATH"]
     else process.env["PATH"] = previous
@@ -168,6 +180,26 @@ describe.runIf(hasGo)("Go package execution", () => {
     expect((await serve(root, ["//:fuzz"])).exitCode).toBe(0)
     const nix = await withBarePath(["go", "git", "sh", "node"], () => serve(root, ["//:nixRefusal", "--plan"]))
     expect(nix.output).toContain("host binary \\\"nix\\\" is not present on PATH")
+  }, 120_000)
+
+  // The positive control for the refusal above: the same fixture and the same
+  // bare PATH, differing only by a `nix` on it, resolves the bin through
+  // `nix develop` instead of refusing. Without it the refusal assertion would
+  // still hold for a rule that always refused.
+  it("resolves a Nix bin through the dev shell when nix is present", async () => {
+    const root = await fixture()
+    const planned = await withBarePath(
+      ["go", "git", "sh", "node"],
+      async (bin) => ({ bin, ...await serve(root, ["//:nixRefusal", "--plan"]) }),
+      {
+        nix:
+          // `nix develop --command which hurl` answers with a real executable.
+          // The bare PATH holds no `dirname`, so the stub trims $0 in the shell.
+          "#!/bin/sh\nprintf '%s\\n' \"${0%/*}/sh\"\n"
+      }
+    )
+    expect(planned.output).not.toContain("is not present on PATH")
+    expect(planned.output).toContain(`${planned.bin}/sh`)
   }, 120_000)
 
   it("resolves a Go.Generate generator tool, so an absent one refuses by name", async () => {
@@ -390,6 +422,20 @@ describe.runIf(hasGo)("Go toolchain environment", () => {
     const plan = await withBarePath(["go", "git", "sh", "node"], () => serve(root, ["//:viaGotestsum", "--plan"]))
     expect(plan.output).toContain("host binary \\\"gotestsum\\\" is not present on PATH")
     expect(plan.output).not.toContain("go,test")
+  }, 180_000)
+
+  // The positive control for the refusal above: with `gotestsum` on the same
+  // bare PATH the runner reaches the argv, so the refusal reports the tool's
+  // absence rather than a rule that never runs one.
+  it("runs the declared runner when it is present on PATH", async () => {
+    const root = await experimentFixture()
+    const planned = await withBarePath(
+      ["go", "git", "sh", "node"],
+      async (bin) => ({ bin, ...await serve(root, ["//:viaGotestsum", "--plan"]) }),
+      { gotestsum: "#!/bin/sh\nexec go test \"$@\"\n" }
+    )
+    expect(planned.output).not.toContain("is not present on PATH")
+    expect(planned.output).toContain(`${planned.bin}/gotestsum`)
   }, 180_000)
 
   it("probes the toolchain with `go version`, so GOTOOLCHAIN's resolved version is identity", async () => {
