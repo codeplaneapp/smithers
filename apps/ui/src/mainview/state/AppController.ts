@@ -136,6 +136,7 @@ export interface AppController {
   readonly slashTree: (needle: string) => Array<SlashRow<CatalogItem>>
   readonly changeDraft: (draft: string) => void
   readonly reset: () => void
+  readonly debugReset: () => Promise<string | void>
   readonly stop: () => void
   readonly send: (text: string) => void
   readonly showChat: () => void
@@ -1224,6 +1225,28 @@ export const createAppController = (
     removeConnector
   } = actors.pair(ctx, (context) => createConnectorController(context))
 
+  // A fresh-user reset closes producers only after the durable clear succeeds.
+  const debugReset = async (): Promise<string | void> => {
+    if (store.collections.identitySessions.get("identity")?.state === "signed-in") {
+      const error = await signOut()
+      if (typeof error === "string") return error
+    }
+    if (store.collections.cloudSessions.get("cloud")?.state === "signed-in") {
+      const error = await cloudSeam.signOut()
+      if (typeof error === "string") return error
+    }
+    if (ctx.activeTurn !== undefined) await agent.cancelTurn(ctx.activeTurn.id)
+    ctx.activeTurn = undefined
+    ctx.stopWorkflowPumps()
+    await store.dispatch({ type: "app.reset", actor: "user" }).isPersisted.promise
+    await ctx.dispose()
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname.startsWith("/w/") ? "/" : window.location.pathname
+      window.history.replaceState(null, "", path)
+      window.location.reload()
+    }
+  }
+
   /*
    * The agent's entry point uses fixed smithers bindings — whether it
    * arrives through the streaming tool
@@ -1238,6 +1261,7 @@ export const createAppController = (
     changeDraft,
     withAgentActor: <T>(work: () => Promise<T>): Promise<T> => work(),
     reset,
+    debugReset,
     askReset,
     cancelReset,
     stop,
@@ -1597,6 +1621,7 @@ export const createAppController = (
     slashTree: (needle) => commands.slashTree(needle),
     changeDraft,
     reset,
+    debugReset,
     askReset,
     cancelReset,
     stop,

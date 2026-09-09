@@ -130,3 +130,14 @@ describe("every listed flow is a tool call", () => {
     expect(messages.some((message) => message.text.toLowerCase().includes("reverted"))).toBe(false)
   })
 })
+
+test("debug.reset requested by the agent asks before clearing local data", async () => {
+  const { controller, store } = await freshController(EVERYTHING)
+  controller.changeDraft("keep this draft")
+  const outcome = await controller.commands.runForAgent("debug.reset")
+  expect(outcome.status).toBe("executed")
+  expect(outcome.status === "executed" && outcome.value).toContain("confirm")
+  expect(store.session().draft).toBe("keep this draft")
+  expect([...store.collections.messages.values()].some(message => message.action?.flow === "debug.reset")).toBe(true)
+  await controller.dispose()
+})

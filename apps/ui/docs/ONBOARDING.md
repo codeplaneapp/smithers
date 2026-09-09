@@ -69,3 +69,9 @@ The wordmark still settles in about one second. The rest is deliberately slower:
 ## Practice review
 
 The PR lesson shows the original and proposed headings, offers a return to editing, and requires an explicit “Accept practice change” action. Enter/Right invoke that same action. Acceptance records the exact practice heading in the existing session row; editing or replaying clears it. The final workspace acknowledges the accepted direction. This is a local review rehearsal, not a GitHub approval or publication.
+
+## Replay and fresh-user testing
+
+Onboarding runs automatically when this app has no saved guide progress. At any step, press Command K / Control K and type `/tut` to replay from the opening animation. The conversation input remains available during the Library introduction too.
+
+Use `/debug.reset` for a fresh-user test: sign out of active app sessions, clear all local app collections (including messages, optional answers, plugin activation, frames, workspace selections, cards and guide progress), restore the initial appearance, and reload into onboarding. The reset waits for persistence, fences late writes from the old session, and closes its subscriptions before reloading. Repository files and remote work are not deleted. Agent-triggered resets require confirmation; typing the command yourself performs the requested reset.

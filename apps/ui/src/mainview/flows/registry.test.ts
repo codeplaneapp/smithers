@@ -242,7 +242,7 @@ describe("command registry pure model", () => {
     const { controller } = await freshController()
     const orphans = visibleItems(controller.commands)
       .map((command) => command.name)
-      .filter((name) => namespaceOf(name) === undefined && !SURFACE_FLOWS.includes(name))
+      .filter((name) => namespaceOf(name) === undefined && !SURFACE_FLOWS.includes(name) && name !== "tut")
     expect(orphans).toEqual([])
   })
 
@@ -552,6 +552,12 @@ describe("command registry bindings", () => {
       "connector.remove.ask",
       "connector.remove",
       "connector.remove.cancel",
+      "wiki.cloud",
+      "wiki.cloud.open",
+      "wiki.sync",
+      "wiki.edit",
+      "wiki.card.select",
+      "wiki.card.view",
       "wiki.new-note",
       "wiki.select",
       "wiki.open",
@@ -752,6 +758,8 @@ describe("command registry bindings", () => {
       "palette.open",
       "palette.actions",
       "palette.recent",
+      "tut",
+      "debug.reset",
       "onboarding.act"
     ])
 

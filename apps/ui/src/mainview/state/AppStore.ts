@@ -1108,7 +1108,10 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     return isApprovalRequest(request) ? freezeRequest(structuredClone(CardSchema.parse(request)) as ApprovalRequest) : undefined
   }
 
+  // Reset fences late streams and command-settlement writes until the new boot.
+  let resetTransaction: Transaction | undefined
   const dispatch = (transition: AppTransition): Transaction => {
+    if (resetTransaction !== undefined) return resetTransaction
     // The transition journal persists its input as well as the card collection.
     // Redact before either writer or the verbose trace can observe env values.
     if (transition.type === "card.upsert" && transition.card.kind === "env") {
@@ -1126,6 +1129,7 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
       mutationFn: ({ transaction }) => persist(transaction)
     })
 
+    if (transition.type === "app.reset") resetTransaction = transaction
     transaction.mutate(() => {
       const activeWorkspaceId = current.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID
       const activeBranchId = current.activeBranchId ?? DEFAULT_BRANCH_ID
@@ -1393,6 +1397,23 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
             draft.phase = "idle"
             draft.revision = revision
           })
+          break
+        }
+
+        case "app.reset": {
+          for (const [name, collection] of Object.entries(collections)) {
+            if (name === "sessions") continue
+            const keys = [...collection.keys()]
+            if (keys.length > 0) collection.delete(keys)
+          }
+          collections.sessions.update(SESSION_ID, draft => {
+            const target = draft as unknown as Record<string, unknown>
+            // Updates merge fields; explicit undefined clears optional persisted values.
+            for (const key of Object.keys(target)) target[key] = undefined
+            Object.assign(target, initialSession("light"), { revision })
+          })
+          applyTheme("light")
+          applyPalette(DEFAULT_PALETTE)
           break
         }
 
@@ -3047,7 +3068,7 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
        * same record to the console. Read from `current` (the session before
        * this dispatch) so the switch-off dispatch itself is not traced.
        */
-      const traced = current.verbose === true && (transition.type === "verbose.toggled" ? transition.on : true)
+      const traced = transition.type !== "app.reset" && current.verbose === true && (transition.type === "verbose.toggled" ? transition.on : true)
         ? verboseTrace(transition)
         : undefined
       if (traced !== undefined) {
@@ -3093,6 +3114,9 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
       // Retain it until an explicit archive/tombstone protocol exists.
     })
 
+    if (transition.type === "app.reset") {
+      void transaction.isPersisted.promise.catch(() => { resetTransaction = undefined })
+    }
     return transaction
   }
 

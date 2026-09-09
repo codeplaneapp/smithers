@@ -15,10 +15,12 @@ export function createGuideController(ctx: ControllerContext) {
       case "back":
         guide.step = Math.max(0, guide.step - 1)
         break
-      case "restart":
+      case "restart": {
+        const playthrough = (guide.playthrough ?? 0) + 1
         delete guide.acceptedPracticeTitle
-        Object.assign(guide, initialGuide())
+        Object.assign(guide, initialGuide(), { playthrough })
         break
+      }
       case "open":
         guide.conversationOpen = true
         if (guide.step === 7) guide.step = 8

@@ -1,6 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { Card } from "./AppState"
+import { initialGuide, type Card } from "./AppState"
 import { createAppStore } from "./AppStore"
 import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import { createControllerContext } from "./controller/context"
@@ -496,4 +496,26 @@ test("card updates merge partial payloads, refuse kind changes, and persist reda
   expect(JSON.stringify([...store.collections.transitions.values()])).not.toContain("updated-secret-value")
   const reloaded = await createAppStore({ kind: "localStorage", storage })
   expect(reloaded.collections.cards.get("patch-env")?.payload).toMatchObject({ vars: [{ name: "TOKEN", value: "upd…" }] })
+})
+
+test("app.reset durably clears all collections and fences late writes before reboot", async () => {
+  const storage = memoryStorage()
+  const store = await createAppStore({ kind: "localStorage", storage })
+  await store.dispatch({ type: "composer.changed", actor: "user", draft: "private draft" }).isPersisted.promise
+  await store.dispatch({ type: "theme.changed", actor: "user", theme: "dark" }).isPersisted.promise
+  await store.dispatch({ type: "guide.changed", actor: "user", guide: { ...initialGuide(), step: 10, library: true, librarian: true } }).isPersisted.promise
+  await store.dispatch({ type: "app.reset", actor: "user" }).isPersisted.promise
+  await store.dispatch({ type: "composer.changed", actor: "user", draft: "late writer" }).isPersisted.promise
+  expect(store.session().draft).toBe("")
+  expect(store.session().theme).toBe("light")
+  for (const [name, collection] of Object.entries(store.collections)) {
+    if (name === "sessions" || name === "transitions") continue
+    expect(collection.size).toBe(0)
+  }
+  const reopened = await createAppStore({ kind: "localStorage", storage })
+  expect(reopened.session().draft).toBe("")
+  expect(reopened.session().guide).toBeUndefined()
+  expect(reopened.collections.messages.size).toBe(0)
+  expect(reopened.collections.tabs.size).toBe(1)
+  expect(reopened.collections.worldDocuments.size).toBeGreaterThan(0)
 })

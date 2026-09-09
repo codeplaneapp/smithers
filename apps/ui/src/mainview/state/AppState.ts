@@ -654,6 +654,7 @@ export const isPalette = (value: string): value is Palette => (PALETTES as Reado
 
 export const GuideSchema = z.object({
   version: z.literal(1),
+  playthrough: z.number().int().nonnegative().optional(),
   step: z.number().int().min(0).max(15),
   conversationOpen: z.boolean(),
   library: z.boolean(),
@@ -1139,6 +1140,7 @@ export type AppTransition =
     notes: ReadonlyArray<{ readonly title: string; readonly body: string; readonly confidence: number }>
     interruptedTurnId?: string
   }
+  | { type: "app.reset"; actor: Actor }
   | { type: "guide.changed"; actor: Actor; guide: GuideState }
   | { type: "theme.changed"; actor: "user" | "system"; theme: Session["theme"] }
   /* The color theme (/theme) — the axis orthogonal to light/dark. */

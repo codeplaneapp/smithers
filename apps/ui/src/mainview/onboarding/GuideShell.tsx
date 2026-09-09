@@ -202,6 +202,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
   )
   return (
     <div
+      key={guide.playthrough ?? 0}
       className="guide-shell"
       data-flows={controller.commands
         .all()
@@ -686,7 +687,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 <X size={16} />
               </button>
             </div>
-            {stage === 8 ? (
+            {stage === 8 && (
               <div className="guide-summoned">
                 <p>There you are. This is where we’ll talk.</p>
                 <p>
@@ -698,9 +699,8 @@ export function GuideShell({ children }: { children: ReactNode }) {
                   <ArrowRight size={15} />
                 </button>
               </div>
-            ) : (
-              children
             )}
+            {children}
           </section>
         </div>
       )}
