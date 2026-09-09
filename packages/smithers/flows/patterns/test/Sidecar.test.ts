@@ -135,6 +135,28 @@ describe("Sidecar", () => {
       }
     }))
 
+  it.effect("quarantines a shadow callback that throws before it returns an effect", () =>
+    Effect.gen(function*() {
+      let primaryRan = false
+      const result = yield* Sidecar.run("prompt", {
+        primary: () =>
+          Effect.sync(() => {
+            primaryRan = true
+            return "answer"
+          }),
+        shadow: (): Effect.Effect<never> => {
+          throw new Error("shadow factory blew up")
+        }
+      })
+
+      expect(primaryRan).toBe(true)
+      expect(result.primary).toBe("answer")
+      expect(result.shadow.quarantined).toBe(true)
+      if (result.shadow.quarantined) {
+        expect(Cause.hasDies(result.shadow.cause)).toBe(true)
+      }
+    }))
+
   it.effect("propagates a shadow interruption instead of quarantining it", () =>
     Effect.gen(function*() {
       const exit = yield* Effect.exit(

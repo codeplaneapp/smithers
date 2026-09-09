@@ -250,8 +250,11 @@ export const run = <I, P, S, E, R, E2, R2, E3 = never, R3 = never>(
   // edit to the option object in between must not reach it.
   const declared = { primary: options.primary, shadow: options.shadow, score: options.score }
   return Effect.gen(function*() {
+    // The shadow callback is invoked inside `Effect.suspend` so that a factory
+    // that throws before it returns an effect is a defect the quarantine
+    // claims, not one that fails the run before the primary ever starts.
     const quarantine: Effect.Effect<Shadow<S>, never, R2> = Effect.flatMap(
-      Effect.exit(declared.shadow(input)),
+      Effect.exit(Effect.suspend(() => declared.shadow(input))),
       (exit) =>
         Exit.isSuccess(exit)
           ? Effect.succeed<Shadow<S>>({ quarantined: false, value: exit.value })
