@@ -155,10 +155,20 @@ appears in the same messages.
 **What happened.** A row in the database did not decode back into a
 `CacheEntry`. Something other than this store wrote it, or the file is damaged.
 
-**What to change.** Evict the digest, which removes the head row and lets the
-next execution record a fresh one. A whole file that fails this way is faster
-to delete than to repair: it is a cache, and losing it costs recomputation
-rather than correctness.
+**What to change.** Back up the shared database before recovery. Evict or
+repair only the affected reusable head rows in `flows_step_cache`. Evicting a
+digest lets the next execution record a fresh head. Only reusable head rows
+are disposable.
+
+Do not delete the database file. Preserve or restore the immutable
+`flows_step_cache_recorded` provenance ledger and any colocated durable state
+from a backup. The file may hold other services, including the journal and run
+store in the [engine composition](./guides/compose-a-store.md#prefer-the-engines-composition).
+Recomputation cannot reconstruct the exact result a past event recorded. If
+the ledger or other durable state is damaged, restore it from a backup rather
+than replacing it with recomputed results. See
+[ledger retention](#flows_step_cache_recorded-grows-and-nothing-reclaims-it)
+for coordinated ledger cleanup.
 
 ## persistence_failed: the shared tier
 
