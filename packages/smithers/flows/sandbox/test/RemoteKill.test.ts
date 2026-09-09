@@ -8,7 +8,7 @@
  * the signal, and a provider that does not keeps the old, honest refusal.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, PlatformError, Ref } from "effect"
+import { Deferred, Effect, Fiber, PlatformError, Ref, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { spawn as spawnNode } from "node:child_process"
@@ -40,6 +40,56 @@ describe("RemoteChildProcessSpawner kill", () => {
       expect(provider.state.kills).toEqual([{ command: "serve", signal: "SIGTERM" }])
       expect(provider.state.cancellations).toBe(1)
     }))
+
+  for (const exits of [true, false]) {
+    it.live(
+      exits
+        ? "returns string promptly when exit is observed during a hung closing-scope kill"
+        : "bounds string cleanup to five seconds when both kill and exit observation hang",
+      () =>
+        Effect.gen(function*() {
+          const exited = yield* Deferred.make<number>()
+          const signalling = yield* Deferred.make<void>()
+          const provider: RemoteChildProcessSpawner.Provider = {
+            session: "hung-kill",
+            open: () => Effect.void,
+            spawn: () => Effect.succeed({
+              stdout: Stream.make(new TextEncoder().encode("hi")),
+              stderr: Stream.empty,
+              exitCode: Deferred.await(exited)
+            }),
+            kill: () => Effect.andThen(Deferred.succeed(signalling, undefined), Effect.never)
+          }
+          const reading = yield* Effect.flatMap(
+            ChildProcessSpawner,
+            (spawner) => spawner.string(ChildProcess.make("greet"))
+          ).pipe(
+            Effect.provide(RemoteChildProcessSpawner.layer(provider)),
+            Effect.forkScoped
+          )
+
+          // Kill is entered only once stdout has ended and the process scope
+          // is closing. Keep exit pending until after that point, so the test
+          // exercises the finalizer's race rather than its already-exited path.
+          yield* Deferred.await(signalling)
+          expect(yield* Deferred.isDone(exited)).toBe(false)
+          const started = performance.now()
+          if (exits) {
+            yield* Effect.sleep("100 millis")
+            yield* Deferred.succeed(exited, 0)
+          }
+          expect(yield* Fiber.join(reading)).toBe("hi")
+          const took = performance.now() - started
+          if (exits) {
+            expect(took).toBeLessThan(2_000)
+          } else {
+            expect(took).toBeGreaterThanOrEqual(4_500)
+            expect(took).toBeLessThan(8_000)
+          }
+        }).pipe(Effect.scoped),
+      12_000
+    )
+  }
 
   it.effect("signals with the kill signal the command configured", () =>
     Effect.gen(function*() {

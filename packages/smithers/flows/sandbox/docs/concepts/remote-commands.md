@@ -20,6 +20,9 @@ input as bytes in `RemoteOptions.stdin`. Collection is bounded at 16 MiB and
 the count runs as the bytes arrive, so an oversized or endless producer is
 stopped at the bound rather than after it finishes.
 
+Each accepted chunk is copied on arrival, including Node `Buffer` chunks.
+Producers may reuse their input buffer after each chunk has been consumed.
+
 The handle's own `stdin` sink always fails: there is no interactive channel
 either way. A command that pipes input into a long-running process and reads
 its answers cannot work here, and no arrangement of options makes it work.

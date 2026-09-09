@@ -151,7 +151,7 @@ const collectStdin = (
               )
             )
           }
-          chunks.push(part.slice())
+          chunks.push(new Uint8Array(part))
           length += part.length
           return Effect.void
         })

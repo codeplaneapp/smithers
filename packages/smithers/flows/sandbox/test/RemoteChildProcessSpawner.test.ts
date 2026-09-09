@@ -3,6 +3,7 @@ import { Deferred, Effect, Exit, Fiber, PlatformError, Ref, Sink, Stream } from 
 import * as Scope from "effect/Scope"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { Buffer } from "node:buffer"
 import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
 
 const reason = (error: unknown): string =>
@@ -567,24 +568,26 @@ describe("RemoteChildProcessSpawner", () => {
   // `[1, 2]` reached the provider as `[2, 2]`. The copy has to happen when the
   // chunk arrives, because that is the only moment its contents are the
   // caller's.
-  it.effect("copies each chunk as it arrives, so a reused producer buffer is not corrupted", () =>
-    Effect.gen(function*() {
-      const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })
-      const scratch = new Uint8Array(1)
-      function* reused(): Generator<Uint8Array> {
-        scratch[0] = 1
-        yield scratch
-        scratch[0] = 2
-        yield scratch
-      }
+  for (const kind of ["Uint8Array", "Buffer"] as const) {
+    it.effect(`copies each chunk as it arrives, so a reused ${kind} producer buffer is not corrupted`, () =>
+      Effect.gen(function*() {
+        const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })
+        const scratch = kind === "Buffer" ? Buffer.alloc(1) : new Uint8Array(1)
+        function* reused(): Generator<Uint8Array> {
+          scratch[0] = 1
+          yield scratch
+          scratch[0] = 2
+          yield scratch
+        }
 
-      yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
-        spawner.string(
-          ChildProcess.make("cat", [], { stdin: Stream.fromIterable(reused(), { chunkSize: 1 }) })
-        )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+        yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
+          spawner.string(
+            ChildProcess.make("cat", [], { stdin: Stream.fromIterable(reused(), { chunkSize: 1 }) })
+          )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
 
-      expect(Array.from(provider.state.inputs[0]!)).toEqual([1, 2])
-    }))
+        expect(Array.from(provider.state.inputs[0]!)).toEqual([1, 2])
+      }))
+  }
 
   it.effect("accepts standard input of exactly the bound and refuses one byte more", () =>
     Effect.gen(function*() {
