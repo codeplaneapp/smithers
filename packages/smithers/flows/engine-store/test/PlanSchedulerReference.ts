@@ -1,7 +1,8 @@
 /**
  * Frozen pre-index Lane E scheduler oracle (2026-09-04).
- * Keep control flow independent of RuntimeGraph. Only relative imports and
- * test-irrelevant coverage annotations differ from the captured source.
+ * Keep control flow independent of RuntimeGraph. Relative imports,
+ * test-irrelevant coverage annotations, and the corrected stop-merge
+ * settlement identity differ from the captured source.
  */
 /**
  * Drives a persisted plan: the node scheduler.
@@ -1006,10 +1007,10 @@ export const make = (options: Options): Service => {
         state.outcome = outcome
       }
 
-      const emitSettlement = (node: Plan.PlanNode) =>
+      const emitSettlement = (node: Plan.PlanNode, sourceSeq?: number) =>
         Effect.gen(function*() {
           const state = stateOf(node)
-          yield* emit(JournalRecords.nodeSettled(source(`node/${node.id}/settled`), {
+          yield* emit(JournalRecords.nodeSettled({ ...source(`node/${node.id}/settled`), sourceSeq }, {
             planId: plan.planId,
             nodeId: node.id,
             planKey: node.key,
@@ -1599,7 +1600,8 @@ export const make = (options: Options): Service => {
               }
             })
 
-          for (const { intent } of recoveredMerges) yield* emitSettlement(nodesById.get(intent.nodeId)!)
+          // Match the corrected stop-merge journal contract without changing the reference readiness algorithm.
+          for (const { intent } of recoveredMerges) yield* emitSettlement(nodesById.get(intent.nodeId)!, 0)
           yield* Effect.flatMap(advance, admit)
           while (plan.nodes.some((node) => stateOf(node).status !== "settled")) {
             if (inFlightSteps === 0) break
@@ -1640,15 +1642,6 @@ export const make = (options: Options): Service => {
                           .filter((peer) => states.get(peer)?.status === "running" || results.has(peer))
                       }, options.owner).pipe(Effect.catch(mergeFailure))
                       yield* PlanMerges.validateIntent(plan, intent).pipe(Effect.catch(mergeFailure))
-                      yield* emit(JournalRecords.nodeSettled(source(`node/${node.id}/settled`), {
-                        planId: plan.planId,
-                        nodeId: node.id,
-                        planKey: node.key,
-                        dispatchKey: intent.dispatchKey,
-                        outcome: "skipped",
-                        attempts: intent.attempts,
-                        rebases: intent.rebases
-                      }))
                       return intent
                     })
                   )

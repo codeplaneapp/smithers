@@ -1394,7 +1394,7 @@ describe("PlanScheduler conflict strategies", () => {
           ? Effect.succeed({ merged: node.material.body })
           : Effect.succeed(node.id)
     }
-    const { persisted, report } = await runPromise(
+    const { persisted, report, settled } = await runPromise(
       Effect.gen(function*() {
         yield* activate("run-merge")
         const service = scheduler({ runId: "run-merge", executor })
@@ -1403,9 +1403,16 @@ describe("PlanScheduler conflict strategies", () => {
         yield* service.record(plan)
         const report = yield* Effect.provide(service.run(plan), harness({ runId: "run-merge", executor }))
         const store = yield* PlanStore.PlanStore
-        return { persisted: yield* store.get("plan-1"), report }
+        const page = yield* JournalRecords.entries("run-merge", undefined, 512)
+        const settled = page.entries.filter((entry) => entry.eventType === "flows.engine.node-settled")
+        return { persisted: yield* store.get("plan-1"), report, settled }
       }).pipe(Effect.provide(TestStores.layer()))
     )
+    expect(settled.map((entry) => (entry.payload as { nodeId: string }).nodeId).sort()).toEqual([
+      "lane-a",
+      "lane-b",
+      "lane-b+merge"
+    ])
     expect(report.appended).toEqual(["lane-b+merge"])
     expect(outcomes(report)).toEqual({ "lane-a": "built", "lane-b": "skipped", "lane-b+merge": "built" })
     expect(report.results["lane-b+merge"]).toEqual({ merged: { merge: { stopped: "lane-b", winners: ["lane-a"] } } })
@@ -1466,7 +1473,9 @@ describe("PlanScheduler conflict strategies", () => {
                 const loaded = Option.getOrThrow(yield* store.get(plan.planId))
                 const report = yield* scheduler({ runId, executor }).run(resumeFrom === "base" ? plan : loaded)
                   .pipe(Effect.provide(harness({ runId, executor })))
-                return { report, persisted: Option.getOrThrow(yield* store.get(plan.planId)) }
+                const page = yield* JournalRecords.entries(runId, undefined, 512)
+                const settled = page.entries.filter((entry) => entry.eventType === "flows.engine.node-settled")
+                return { report, persisted: Option.getOrThrow(yield* store.get(plan.planId)), settled }
               }).pipe(Effect.provide(TestStores.layerAt(filename)), Effect.scoped)
             )
             expect(outcomes(reopened.report)).toEqual({
@@ -1475,6 +1484,20 @@ describe("PlanScheduler conflict strategies", () => {
               ...(collision ? { "lane-b+merge": "clean" } : {}),
               [mergeId]: "clean"
             })
+            for (const node of reopened.persisted.nodes) {
+              const records = reopened.settled.filter((entry) =>
+                (entry.payload as { nodeId: string }).nodeId === node.id
+              )
+              // Replayed work settles clean on each invocation; the durable
+              // stopped decision remains the same fact across reopenings.
+              expect(records).toHaveLength(node.id === "lane-b" ? 1 : restart + 2)
+              if (node.id === "lane-b") {
+                expect(records[0]).toMatchObject({
+                  sourceSeq: 0,
+                  payload: { outcome: "skipped", attempts: 1, rebases: 0 }
+                })
+              }
+            }
             expect(reopened.report.results).toEqual(first.results)
             expect(reopened.report.appended).toEqual([])
             expect(reopened.persisted.generation).toBe(1)
@@ -1577,7 +1600,9 @@ describe("PlanScheduler conflict strategies", () => {
                 const loaded = Option.getOrThrow(yield* store.get(plan.planId))
                 const report = yield* scheduler({ runId, executor }).run(resumeFrom === "base" ? plan : loaded)
                   .pipe(Effect.provide(harness({ runId, executor })))
-                return { report, persisted: Option.getOrThrow(yield* store.get(plan.planId)) }
+                const page = yield* JournalRecords.entries(runId, undefined, 512)
+                const settled = page.entries.filter((entry) => entry.eventType === "flows.engine.node-settled")
+                return { report, persisted: Option.getOrThrow(yield* store.get(plan.planId)), settled }
               }).pipe(Effect.provide(TestStores.layerAt(filename)), Effect.scoped)
             )
             expect(outcomes(reopened.report)).toEqual({
@@ -1586,6 +1611,20 @@ describe("PlanScheduler conflict strategies", () => {
               ...(collision ? { "lane-b+merge": "clean" } : {}),
               [mergeId]: "clean"
             })
+            for (const node of reopened.persisted.nodes) {
+              const records = reopened.settled.filter((entry) =>
+                (entry.payload as { nodeId: string }).nodeId === node.id
+              )
+              // Replayed work settles clean on each invocation; the durable
+              // stopped decision remains the same fact across reopenings.
+              expect(records).toHaveLength(node.id === "lane-b" ? 1 : restart + 2)
+              if (node.id === "lane-b") {
+                expect(records[0]).toMatchObject({
+                  sourceSeq: 0,
+                  payload: { outcome: "skipped", attempts: 1, rebases: 0 }
+                })
+              }
+            }
             expect(reopened.report.results).toEqual(first.results)
             expect(reopened.report.appended).toEqual([])
             expect(reopened.persisted.generation).toBe(1)

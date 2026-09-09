@@ -958,10 +958,10 @@ export const make = (options: Options): Service => {
         graph.stage(node.id, outcome)
       }
 
-      const emitSettlement = (node: Plan.PlanNode) =>
+      const emitSettlement = (node: Plan.PlanNode, sourceSeq?: number) =>
         Effect.gen(function*() {
           const state = stateOf(node)
-          yield* emit(JournalRecords.nodeSettled(source(`node/${node.id}/settled`), {
+          yield* emit(JournalRecords.nodeSettled({ ...source(`node/${node.id}/settled`), sourceSeq }, {
             planId: plan.planId,
             nodeId: node.id,
             planKey: node.key,
@@ -1533,7 +1533,9 @@ export const make = (options: Options): Service => {
               }
             })
 
-          for (const { intent } of recoveredMerges) yield* emitSettlement(nodesById.get(intent.nodeId)!)
+          // Repair a settlement missing after a crash without appending the
+          // same stopped decision again when its original record survived.
+          for (const { intent } of recoveredMerges) yield* emitSettlement(nodesById.get(intent.nodeId)!, 0)
           yield* Effect.flatMap(advance, admit)
           while (graph.remaining > 0) {
             /* v8 ignore next -- compiled plans are acyclic, inferred edges refuse cycle closure, and discovered edges point only from undispatched nodes to the already-settled node whose verdict added them; pending work with no in-flight producer therefore cannot have an empty ready set */
@@ -1575,15 +1577,6 @@ export const make = (options: Options): Service => {
                           .filter((peer) => states.get(peer)?.status === "running" || results.has(peer))
                       }, options.owner).pipe(Effect.catch(mergeFailure))
                       yield* PlanMerges.validateIntent(plan, intent).pipe(Effect.catch(mergeFailure))
-                      yield* emit(JournalRecords.nodeSettled(source(`node/${node.id}/settled`), {
-                        planId: plan.planId,
-                        nodeId: node.id,
-                        planKey: node.key,
-                        dispatchKey: intent.dispatchKey,
-                        outcome: "skipped",
-                        attempts: intent.attempts,
-                        rebases: intent.rebases
-                      }))
                       return intent
                     })
                   )
