@@ -20,7 +20,6 @@
  */
 import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
-import type { Path } from "effect/Path"
 import * as EffectPath from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -35,7 +34,7 @@ import * as BrowserFileSystem from "./BrowserFileSystem/index.ts"
  * @since 0.1.0
  * @slop
  */
-export type BrowserServices = ChildProcessSpawner | FileSystem | Path
+export type BrowserServices = ChildProcessSpawner | FileSystem | EffectPath.Path
 
 /**
  * Provides the browser implementations of child process spawning, filesystem,

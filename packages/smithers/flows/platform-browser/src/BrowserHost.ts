@@ -34,14 +34,16 @@
  */
 import type { Jj } from "@smthrs/jj"
 import * as BrowserJj from "@smthrs/jj/browser/BrowserJj"
-import { Layer, Path } from "effect"
-import type { FileSystem } from "effect"
+import type { FileSystem } from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import type { Path } from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import type { HttpClient } from "effect/unstable/http/HttpClient"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import * as BrowserChildProcessSpawner from "./BrowserChildProcessSpawner/index.ts"
-import * as BrowserFileSystem from "./BrowserFileSystem/index.ts"
+import type * as BrowserChildProcessSpawner from "./BrowserChildProcessSpawner/index.ts"
+import type * as BrowserFileSystem from "./BrowserFileSystem/index.ts"
+import * as BrowserServices from "./BrowserServices.ts"
 
 /**
  * The complete closed Host service union provided by a browser tab.
@@ -51,8 +53,8 @@ import * as BrowserFileSystem from "./BrowserFileSystem/index.ts"
  * @slop
  */
 export type BrowserHost =
-  | FileSystem.FileSystem
-  | Path.Path
+  | FileSystem
+  | Path
   | ChildProcessSpawner
   | Jj
   | HttpClient
@@ -89,15 +91,9 @@ export const layer = (options: {
    * FileSystem isolation root remains the whole mount at `/`.
    */
   readonly jj: BrowserJj.BrowserJjOptions
-}): Layer.Layer<BrowserHost, PlatformError.PlatformError> => {
-  const platform = Layer.mergeAll(
-    BrowserFileSystem.layer(options.fs, { workspaceRoot: "/" }),
-    Path.layer
-  )
-  return Layer.mergeAll(
-    platform,
-    Layer.provide(BrowserChildProcessSpawner.layer(options.bash), platform),
+}): Layer.Layer<BrowserHost, PlatformError.PlatformError> =>
+  Layer.mergeAll(
+    BrowserServices.layer({ bash: options.bash, fs: options.fs, workspaceRoot: "/" }),
     layerHttpClient,
     BrowserJj.layer(options.jj)
   )
-}
