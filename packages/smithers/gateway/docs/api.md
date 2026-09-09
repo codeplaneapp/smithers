@@ -247,11 +247,11 @@ The gateway's own remote procedures. Control mutations are not re-declared here:
 it unchanged on `/rpc`. The group shares `ControlRpcs.ControlAuth`, so one
 bearer credential authenticates both mounts.
 
-| Procedure              | Payload                           | Success                | Error                                                                                                                                         |
-| ---------------------- | --------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Projection.Snapshot`  | `{ selector }`                    | `ProjectionSnapshot`   | `GatewayError`                                                                                                                                |
-| `Projection.Subscribe` | `{ selector, after? }`, streaming | `GatewayFrame`         | `GatewayError`                                                                                                                                |
-| `Approval.Submit`      | `SubmitApprovalInput`             | `SubmitApprovalOutput` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable` |
+| Procedure              | Payload                           | Success                | Error                                                                                                                                                                           |
+| ---------------------- | --------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Projection.Snapshot`  | `{ selector }`                    | `ProjectionSnapshot`   | `GatewayError`                                                                                                                                                                  |
+| `Projection.Subscribe` | `{ selector, after? }`, streaming | `GatewayFrame`         | `GatewayError`                                                                                                                                                                  |
+| `Approval.Submit`      | `SubmitApprovalInput`             | `SubmitApprovalOutput` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `InvalidInput`, `Unauthorized`, `PersistenceError`, `Unavailable`, `TransportError` |
 
 | Export                 | Shape                                                     |
 | ---------------------- | --------------------------------------------------------- |

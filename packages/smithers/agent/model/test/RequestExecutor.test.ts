@@ -1092,7 +1092,7 @@ describe("RequestExecutor", () => {
     })
   })
 
-  it("preserves the complete typed permission suspension request", async () => {
+  it("reconstructs the complete typed permission suspension from a transported payload", async () => {
     const required = new Permission.PermissionRequired({
       requestId: "permission-model-1",
       runId: "run-7",
@@ -1101,7 +1101,11 @@ describe("RequestExecutor", () => {
       meta: { provider: "provider.test", attempt: 1 }
     })
     const permissionClient = HttpClient.make((request) =>
-      Effect.fail(KernelHttpClient.toHttpClientError({ request, error: required }))
+      Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, cause: JSON.parse(JSON.stringify(required)) })
+        })
+      )
     )
     const layer = RequestExecutor.layer.pipe(
       Layer.provide(Layer.succeed(KernelHttpClient.HttpClient)(permissionClient))
@@ -1115,7 +1119,7 @@ describe("RequestExecutor", () => {
       layer
     )
 
-    expect(error).toBe(required)
+    expect(error).toBeInstanceOf(Permission.PermissionRequired)
     expect(error).toMatchObject({
       code: "permission_required",
       requestId: "permission-model-1",

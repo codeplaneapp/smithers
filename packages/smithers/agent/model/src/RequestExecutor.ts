@@ -11,6 +11,7 @@
  * @since 0.1.0
  */
 import { isRecord } from "@smthrs/canonical/Record"
+import { decodePermissionError } from "@smthrs/capability"
 import type * as Permission from "@smthrs/capability/Permission"
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
 import * as Clock from "effect/Clock"
@@ -676,7 +677,7 @@ const mapHttpError = (
   // The kernel projects permission failures into the error channel Effect's
   // `HttpClient` tag fixes, keeping the structured failure on the cause; this
   // recovers it so suspension metadata survives the model boundary.
-  const permission = KernelHttpClient.fromHttpClientError(error)
+  const permission = Option.flatMap(KernelHttpClient.fromHttpClientError(error), decodePermissionError)
   return Option.isSome(permission) ? permission.value : transportError(error, redactedNames)
 }
 

@@ -307,6 +307,12 @@ credential-safe diagnostics.
 | `make`                | constructor               | `Effect<RequestExecutor, never, HttpClient>` around the kernel HTTP client in context.                                                                                                                                                                 |
 | `layer`               | layer                     | `Layer<RequestExecutor, never, HttpClient>`: provides the executor, requiring the kernel HTTP client.                                                                                                                                                  |
 
+The kernel HTTP boundary returns structural permission data. The executor uses
+`@smthrs/capability`’s `decodePermissionError` to reconstruct the yieldable error
+class with its capability, request identity and suspension metadata. Callers
+receive the existing `RequestError` union; transport payload object identity is
+not preserved.
+
 The retry ladder: one call makes at most three attempts (the first plus two
 retries), starting at 500 ms, doubling, jittered, capped at 10 s per wait and
 60 s in total. Only a retryable error is retried. A `Retry-After` or

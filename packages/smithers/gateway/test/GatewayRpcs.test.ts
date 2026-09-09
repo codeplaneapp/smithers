@@ -16,6 +16,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ApprovalAuthority from "@smthrs/control/ApprovalAuthority"
 import { Control } from "@smthrs/control/Control"
+import { TransportError } from "@smthrs/control/ControlError"
 import { layerNoopAuth } from "@smthrs/control/ControlRpcs"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { ApprovalPayload, ApprovalTarget, PlanCard } from "@smthrs/control/ControlSchema"
@@ -73,6 +74,19 @@ const test = <E>(title: string, body: () => Effect.Effect<void, E, Scope.Scope>)
   it(title, () => Effect.runPromise(Effect.scoped(body())))
 
 describe("Approval.Submit", () => {
+  it("round-trips the transport failure raised by a remote approval adapter", () => {
+    const rpc = GatewayRpcs.requests.get("Approval.Submit")!
+    const error = new TransportError({ message: "Approval transport unavailable", retryable: true })
+    const encoded = Schema.encodeSync(rpc.errorSchema)(error)
+    expect(Schema.decodeUnknownSync(rpc.errorSchema)(JSON.parse(JSON.stringify(encoded))))
+      .toMatchObject({
+        _tag: "/control/TransportError",
+        code: "transport_error",
+        retryable: true,
+        message: error.message
+      })
+  })
+
   test("delegates one durable resume when a parked node is approved", () =>
     Effect.gen(function*() {
       const rpc = yield* RpcTest.makeClient(GatewayRpcs)
