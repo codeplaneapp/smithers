@@ -7,14 +7,15 @@ const notification = (
   id: string,
   _tag: "human-steer" | "human-followup" | "system-event",
   payload = id,
-  coalescingKey?: string
+  coalescingKey?: string,
+  targetLineageId = "run/root"
 ): Notification => ({
   id,
   _tag,
   payload,
   coalescingKey,
   delivery: _tag === "human-steer" ? "steer" : "queue",
-  targetLineageId: "run/root",
+  targetLineageId,
   provenance: {
     sourceRunId: "source",
     sourceLineageId: "source/root",
@@ -65,6 +66,61 @@ describe("NotificationState", () => {
     expect(state.items).toHaveLength(1)
     expect(state.items[0]).toMatchObject({ seq: 1, notification: { id: "system-5", payload: "payload-5" } })
     expect(decision).toBe("coalesced")
+  })
+
+  it("coalesces within one lineage and never across two", () => {
+    let state = NotificationState.empty(5)
+    const root = NotificationState.admit(
+      state,
+      notification("root-event", "system-event", "root-1", "progress", "run/root"),
+      1
+    )
+    const child = NotificationState.admit(
+      root.state,
+      notification("child-event", "system-event", "child-1", "progress", "run/root/child"),
+      2
+    )
+    const laterRoot = NotificationState.admit(
+      child.state,
+      notification("root-event-2", "system-event", "root-2", "progress", "run/root"),
+      3
+    )
+    state = laterRoot.state
+
+    // The child's pending event shares the key, and an unscoped match would
+    // have replaced it, addressing the root's update to a branch that never
+    // reported the condition.
+    expect([root.decision, child.decision, laterRoot.decision]).toEqual(["admitted", "admitted", "coalesced"])
+    expect(state.items.map((item) => [item.seq, item.notification.id])).toEqual([[1, "root-event-2"], [
+      2,
+      "child-event"
+    ]])
+    expect(NotificationState.promoteQueued(state, "run/root").promoted.map((item) => item.notification.id))
+      .toEqual(["root-event-2"])
+    expect(NotificationState.promoteQueued(state, "run/root/child").promoted.map((item) => item.notification.id))
+      .toEqual(["child-event"])
+  })
+
+  it("replays a coalesced record into the lineage it was recorded for", () => {
+    let state = NotificationState.empty(5)
+    for (
+      const [notified, seq, decision] of [
+        [notification("child-event", "system-event", "child-1", "progress", "run/root/child"), 1, "admitted"],
+        [notification("root-event", "system-event", "root-1", "progress", "run/root"), 2, "admitted"],
+        [notification("root-event-2", "system-event", "root-2", "progress", "run/root"), 3, "coalesced"]
+      ] as const
+    ) {
+      state = NotificationState.applyAdmission(state, notified, seq, decision)
+    }
+
+    // The child's event is the first pending one under the key, so a replay
+    // that matched on the key alone would spend the root's coalesce on it.
+    expect(state.items.map((item) => [item.seq, item.notification.id])).toEqual([[1, "child-event"], [
+      2,
+      "root-event-2"
+    ]])
+    expect(NotificationState.pending(state, "queue", "run/root/child").map((item) => item.notification.id))
+      .toEqual(["child-event"])
   })
 
   it("never coalesces human follow-ups", () => {

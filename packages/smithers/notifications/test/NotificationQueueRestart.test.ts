@@ -41,6 +41,21 @@ const item = (id: string, targetLineageId: string): Notification => ({
   payload: { body: id }
 })
 
+const event = (id: string, targetLineageId: string, coalescingKey: string): Notification => ({
+  _tag: "system-event",
+  id,
+  delivery: "queue",
+  targetLineageId,
+  coalescingKey,
+  provenance: {
+    sourceRunId: "supervisor",
+    sourceLineageId: "supervisor/root",
+    sourceTurn: 0,
+    sourceActor: "system"
+  },
+  payload: { body: id }
+})
+
 /** A queue over the SQLite file at `filename`, at the capacity a case chooses. */
 const over = (filename: string, capacity: number) =>
   NotificationQueue.layerWith({ capacity }).pipe(
@@ -111,6 +126,48 @@ describe("a notification queue rebuilt over the rows it left on disk", () => {
     // two processes never disagree about what a boundary delivered.
     expect(second.repeated.duplicate).toBe(true)
     expect(second.repeated.notifications.map(({ id }) => id)).toEqual(["root-steer"])
+    expect(second.pending).toEqual([])
+  })
+
+  it("keeps each lineage's event under a shared coalescing key across a restart", async () => {
+    const filename = join(directory, "coalescing-lineages.sqlite")
+    const first = await run(
+      filename,
+      128,
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        const root = yield* queue.admit(runId, event("root-event", "run/root", "progress"))
+        const child = yield* queue.admit(runId, event("child-event", "run/root/child", "progress"))
+        const laterRoot = yield* queue.admit(runId, event("root-event-2", "run/root", "progress"))
+        return { root, child, laterRoot }
+      })
+    )
+
+    const second = await run(
+      filename,
+      128,
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        // The replacement process folds the journal from nothing, so a
+        // key-only match here would drop one branch's event a second time.
+        const root = yield* queue.drain({ runId, targetLineageId: "run/root", boundary: "turn-1", wouldIdle: true })
+        const child = yield* queue.drain({
+          runId,
+          targetLineageId: "run/root/child",
+          boundary: "turn-1",
+          wouldIdle: true
+        })
+        return { root, child, pending: yield* queue.pending(runId) }
+      })
+    )
+
+    expect([first.root.decision, first.child.decision, first.laterRoot.decision]).toEqual([
+      "admitted",
+      "admitted",
+      "coalesced"
+    ])
+    expect(second.root.notifications.map(({ id }) => id)).toEqual(["root-event-2"])
+    expect(second.child.notifications.map(({ id }) => id)).toEqual(["child-event"])
     expect(second.pending).toEqual([])
   })
 

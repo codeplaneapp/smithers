@@ -115,8 +115,26 @@ const immutablePromotion = (state: State, promoted: ReadonlyArray<Pending>): Pro
 export const empty = (capacity: number): State => immutable(normalizedCapacity(capacity), [])
 
 /**
- * Admits a notification, coalescing only pending system events with the same
- * key. Coalescing retains the first sequence so replay order remains stable.
+ * The pending item a notification coalesces into, or `-1` when it coalesces
+ * with nothing.
+ *
+ * A coalescing key is scoped to one lineage. `targetLineageId` is the reader's
+ * address, so two branches reporting the same condition under one ordinary key
+ * are two pending notifications, and neither erases the other's.
+ */
+const coalesceIndex = (state: State, notification: Notification): number => {
+  const key = coalesceKey(notification)
+  if (key === null) return -1
+  return state.items.findIndex((item) =>
+    item.notification.targetLineageId === notification.targetLineageId &&
+    coalesceKey(item.notification) === key
+  )
+}
+
+/**
+ * Admits a notification, coalescing only pending system events that share both
+ * a key and a target lineage. Coalescing retains the first sequence so replay
+ * order remains stable.
  *
  * A queue already at capacity decides `rejected-full` and retains nothing. The
  * caller owns what happens next: `NotificationQueue.admit` writes no journal
@@ -130,17 +148,12 @@ export const empty = (capacity: number): State => immutable(normalizedCapacity(c
  * @since 0.1.0
  */
 export const admit = (state: State, notification: Notification, seq: number): Admission => {
-  const key = notification._tag === "system-event" ? coalesceKey(notification) : null
-  if (key !== null) {
-    const index = state.items.findIndex(
-      (item) => item.notification._tag === "system-event" && coalesceKey(item.notification) === key
-    )
-    if (index !== -1) {
-      const existing = state.items[index]!
-      const items = [...state.items]
-      items[index] = { notification, seq: existing.seq }
-      return Object.freeze({ state: immutable(state.capacity, items), decision: "coalesced" })
-    }
+  const coalesced = coalesceIndex(state, notification)
+  if (coalesced !== -1) {
+    const existing = state.items[coalesced]!
+    const items = [...state.items]
+    items[coalesced] = { notification, seq: existing.seq }
+    return Object.freeze({ state: immutable(state.capacity, items), decision: "coalesced" })
   }
 
   if (state.items.length >= state.capacity) {
@@ -178,10 +191,10 @@ export const applyAdmission = (
   if (decision === "admitted") {
     return immutable(state.capacity, [...state.items, { notification, seq }])
   }
-  const key = notification._tag === "system-event" ? coalesceKey(notification) : null
-  const index = key === null ? -1 : state.items.findIndex(
-    (item) => item.notification._tag === "system-event" && coalesceKey(item.notification) === key
-  )
+  const index = coalesceIndex(state, notification)
+  // A record whose lineage holds nothing under the key is retained rather than
+  // dropped, which is also what keeps a decision recorded before coalescing
+  // was lineage-scoped replayable: it applies to the item it named, or to none.
   if (index === -1) return immutable(state.capacity, [...state.items, { notification, seq }])
   const items = [...state.items]
   items[index] = { notification, seq: items[index]!.seq }

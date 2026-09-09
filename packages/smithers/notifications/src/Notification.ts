@@ -87,12 +87,14 @@ export const HumanFollowup = Schema.TaggedStruct("human-followup", {
 export type HumanFollowup = typeof HumanFollowup.Type
 
 /**
- * A machine-originated event. Consecutive events sharing a coalescing key
- * collapse to the most recent payload while pending.
+ * A machine-originated event. Events sharing a coalescing key and a target
+ * lineage collapse to the most recent one while pending.
  *
  * Coalescing is what keeps a chatty producer from filling the queue: ten
  * updates about one condition are one pending notification carrying the latest
- * of them. An event with no key never coalesces.
+ * of them. The key is scoped to `targetLineageId`, so two branches reporting
+ * one condition under the same ordinary key each keep their own event. An
+ * event with no key never coalesces.
  *
  * @category models
  * @since 0.1.0
