@@ -32,7 +32,8 @@ import { CardSink, makeCollecting, makePanes, PaneNames, uiSource } from "../../
  *
  * `fullscreen` lives in the pane component, and reading it would mean
  * importing `routes.ui.gen.ts` and with it React and every page of the app.
- * The flag only rides along on the emitted card, so a test reports `false`.
+ * Tests report `false` as wire metadata, just like the Worker. PaneHost uses
+ * the registered component's flag, so this does not disable maximize.
  */
 const panes = paneNames.map((name) => ({ name, fullscreen: false }))
 

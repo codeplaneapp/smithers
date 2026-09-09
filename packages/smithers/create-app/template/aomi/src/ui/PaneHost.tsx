@@ -4,7 +4,8 @@
  * EMBED LAW: a pane is always shown embedded in the transcript first. When the
  * pane declares `fullscreen`, the card header offers a maximize control, and
  * the maximized presentation is the same component in a fixed overlay with a
- * restore control. Nothing renders twice.
+ * restore control. The host and pane stay mounted; context updates may render
+ * the pane again without creating another instance.
  *
  * Props arrive over the wire as `unknown` and are decoded with the pane's own
  * schema. A decode failure renders the message instead of throwing through the
@@ -17,7 +18,7 @@ import type { ReactNode } from "react"
 export interface PaneHostProps {
   readonly card: PaneCard
   readonly panes: PaneRegistry
-  /** True when this host is the fullscreen overlay. */
+  /** Present this mounted host as a fullscreen overlay. */
   readonly maximized?: boolean
   readonly onMaximize?: (cardId: string) => void
   readonly onRestore?: () => void
@@ -87,7 +88,7 @@ export function PaneHost({ card, panes, maximized = false, onMaximize, onRestore
     )
   }
   const title = card.title ?? definition.title ?? card.name
-  const canMaximize = definition.fullscreen && card.fullscreen
+  const canMaximize = definition.fullscreen
   const context: PaneContext = {
     fullscreen: maximized,
     maximize: () => onMaximize?.(card.id),
@@ -110,10 +111,14 @@ export function PaneHost({ card, panes, maximized = false, onMaximize, onRestore
       {body}
     </Frame>
   )
-  if (!maximized) return frame
   return (
-    <div className="aomi-pane-overlay" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="aomi-pane-overlay-inner">{frame}</div>
+    <div
+      className={maximized ? "aomi-pane-overlay" : undefined}
+      role={maximized ? "dialog" : undefined}
+      aria-modal={maximized ? true : undefined}
+      aria-label={maximized ? title : undefined}
+    >
+      <div className={maximized ? "aomi-pane-overlay-inner" : undefined}>{frame}</div>
     </div>
   )
 }

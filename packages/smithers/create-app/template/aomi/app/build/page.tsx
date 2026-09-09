@@ -107,12 +107,21 @@ function RecentColumn() {
 // Transcript
 // ---------------------------------------------------------------------------
 
-/** Always embedded. The maximized presentation is owned by the page. */
+/** One mounted host per card; maximizing changes its presentation in place. */
 function CardEntry({ card }: { readonly card: AppCard }) {
   const { panes } = useRegistry()
+  const { maximizedCardId } = useAppState()
   switch (card.kind) {
     case "pane":
-      return <PaneHost card={card} panes={panes} onMaximize={actions.maximizeCard} />
+      return (
+        <PaneHost
+          card={card}
+          panes={panes}
+          maximized={maximizedCardId === card.id}
+          onMaximize={actions.maximizeCard}
+          onRestore={actions.restoreCard}
+        />
+      )
 
     case "html":
       return (
@@ -345,10 +354,8 @@ function TemplateGallery() {
 // ---------------------------------------------------------------------------
 
 export default function BuildPage() {
-  const { entries, cards, maximizedCardId, error } = useAppState()
-  const { panes } = useRegistry()
+  const { entries, error } = useAppState()
   const started = entries.length > 0
-  const maximized = maximizedCardId === undefined ? undefined : cards[maximizedCardId]
   return (
     <div className="aomi-build">
       <RecentColumn />
@@ -371,9 +378,6 @@ export default function BuildPage() {
           {started ? null : <TemplateGallery />}
         </div>
       </main>
-      {maximized !== undefined && maximized.kind === "pane" ? (
-        <PaneHost card={maximized} panes={panes} maximized onRestore={actions.restoreCard} />
-      ) : null}
     </div>
   )
 }

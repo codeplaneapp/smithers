@@ -64,11 +64,16 @@ props: Schema.Struct({
 export const Pane = definePane({ props, title: "Plan", fullscreen: true, render })
 ```
 
-`fullscreen` defaults to `false`. When it is set, the shell offers a maximize
-control on the card. A pane is always embedded first, and the maximized
-presentation is the same component in an overlay rather than a second render,
-so the component sees `PaneContext` with `fullscreen`, `maximize`, and
-`restore` and decides what to change.
+`fullscreen` defaults to `false`. Set it on the pane definition to offer a
+maximize control. Aomi's `PaneHost` reads this capability from the registered
+component, even when the Worker emits `fullscreen: false` on the wire card.
+The wire flag is metadata for hosts without a pane registry.
+
+A pane starts embedded in the transcript. Maximizing changes the same mounted
+host to a fixed overlay; restoring changes it back. Local component state is
+preserved. The pane receives `PaneContext` with `fullscreen`, `maximize`, and
+`restore`. Context changes can render it again without mounting another
+instance.
 
 ## Register the name with the tool
 

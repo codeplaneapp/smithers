@@ -291,13 +291,9 @@ const TurnPayload = Schema.Struct({ message: Schema.String })
  *
  * `fullscreen` lives in the pane component and reading it would mean importing
  * `routes.ui.gen.ts`, and with it React and every page of the app, into the
- * Worker bundle. The flag only rides along on the emitted card, so the Worker
- * reports `false` and the shell resolves the real value from the component it
- * already has.
- *
- * TODO(upstream): `routes.gen.ts` records pane names but not their `fullscreen`
- * flag. Emitting it from the generator would remove this compromise
- * (@smthrs/create-app/router).
+ * Worker bundle. The Worker reports `false` as wire metadata. PaneHost uses
+ * the registered component's flag as the fullscreen capability; the wire flag
+ * does not restrict it.
  */
 const panes = paneNames.map((name) => ({ name, fullscreen: false }))
 

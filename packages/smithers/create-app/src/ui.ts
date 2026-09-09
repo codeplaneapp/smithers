@@ -5,8 +5,9 @@
  * exports `Pane`, built by {@link definePane}. The agent renders one with
  * `ctx.call("ui/pane", { name, props })` and the shell embeds it as a card in
  * the transcript, offering a maximize control only when the pane declares
- * `fullscreen`. A pane is always embedded first; the maximized presentation is
- * the same component in an overlay, never a second render.
+ * `fullscreen`; the wire card's flag does not restrict that capability. A pane
+ * is always embedded first. Maximizing presents the same mounted component in
+ * an overlay, preserving local state. Context changes may render it again.
  *
  * Cards are the transcript's data model. Every kind here is app-owned.
  *
@@ -119,6 +120,7 @@ export const PaneCard = Schema.Struct({
   name: Schema.String,
   title: Schema.optionalKey(Schema.String),
   props: Schema.Unknown,
+  /** Wire metadata for hosts without a pane registry; the definition owns capability. */
   fullscreen: Schema.Boolean
 })
 

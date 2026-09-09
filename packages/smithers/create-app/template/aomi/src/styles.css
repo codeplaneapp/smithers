@@ -720,6 +720,12 @@ body {
   gap: 1.25rem;
 }
 
+/* A scroll fade would clip the fixed overlay to the transcript viewport. */
+.aomi-build .aomi-transcript .sui-scroll-fade:has(.aomi-pane-overlay) {
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
 .aomi-pane-overlay {
   position: fixed;
   inset: 0;
