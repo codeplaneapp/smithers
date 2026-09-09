@@ -58,6 +58,10 @@ per-process entropy and could never answer a cross-process hit.
 names a file every node's key material is appended to when a hit you expected
 did not happen.
 
+Go test and fuzz keys include compiler inputs from dependencies imported only
+by internal or external test files, including local replacement modules.
+Workspace files in that closure also enter the sandbox read set.
+
 ## Executable identity
 
 The package executor includes the resolved path and SHA-256 content digest of

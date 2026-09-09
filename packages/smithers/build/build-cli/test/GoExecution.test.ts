@@ -1,9 +1,11 @@
+import { Smithers as S } from "@smthrs/targets"
 import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import * as GoExec from "../src/GoExec.ts"
 import * as PackageTree from "../src/PackageTree.ts"
 import { executionPresentation } from "./fixtures/presentation.ts"
 
@@ -16,6 +18,42 @@ const write = async (root: string, relative: string, text: string): Promise<void
   await Fs.mkdir(NodePath.dirname(path), { recursive: true })
   await Fs.writeFile(path, text, "utf8")
 }
+// Probe from a module with the fixture's minimum version so an older launcher
+// can still select a compatible toolchain through GOTOOLCHAIN.
+const goPath = PackageTree.findOnPath("go")
+const hasGo = await (async () => {
+  if (goPath === undefined) return false
+  const root = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-go-probe-"))
+  try {
+    await write(root, "go.mod", "module example.test/probe\n\ngo 1.26.0\n")
+    const probe = await PackageTree.probeVersion(goPath, { args: ["version"], cwd: root })
+    const version = /go version go(\d+)\.(\d+)/.exec(probe.output)
+    return probe.exitCode === 0 && version !== null &&
+      (Number(version[1]) > 1 || (Number(version[1]) === 1 && Number(version[2]) >= 26))
+  } finally {
+    await Fs.rm(root, { recursive: true, force: true })
+  }
+})()
+
+/** Plans against only the named host tools, regardless of optional tools installed on the host. */
+const withBarePath = async <A>(tools: ReadonlyArray<string>, body: () => Promise<A>): Promise<A> => {
+  const bin = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-go-bin-"))
+  temporaryDirectories.push(bin)
+  for (const tool of tools) {
+    const found = PackageTree.findOnPath(tool)
+    if (found === undefined) throw new Error(`Missing fixture tool: ${tool}`)
+    await Fs.symlink(found, NodePath.join(bin, tool))
+  }
+  const previous = process.env["PATH"]
+  process.env["PATH"] = bin
+  try {
+    return await body()
+  } finally {
+    if (previous === undefined) delete process.env["PATH"]
+    else process.env["PATH"] = previous
+  }
+}
+
 const serve = async (root: string, args: ReadonlyArray<string>) => {
   let exitCode = 0, output = "", logs = ""
   const original = process.stderr.write.bind(process.stderr)
@@ -102,7 +140,7 @@ export const Package = S.Package({ targets: { all, binary, fetch, fuzz, generate
   return root
 }
 
-describe("Go package execution", () => {
+describe.runIf(hasGo)("Go package execution", () => {
   it("loads, plans without NotImplemented, executes tests/build/tool edge/stamps, and hits", async () => {
     const root = await fixture()
     const query = await serve(root, ["query", "//..."])
@@ -128,7 +166,7 @@ describe("Go package execution", () => {
     expect(generated.exitCode).toBe(0)
     expect(await Fs.readFile(NodePath.join(root, "gen/generated.go"), "utf8")).toContain("Generated")
     expect((await serve(root, ["//:fuzz"])).exitCode).toBe(0)
-    const nix = await serve(root, ["//:nixRefusal", "--plan"])
+    const nix = await withBarePath(["go", "git", "sh", "node"], () => serve(root, ["//:nixRefusal", "--plan"]))
     expect(nix.output).toContain("host binary \\\"nix\\\" is not present on PATH")
   }, 120_000)
 
@@ -151,6 +189,61 @@ describe("Go package execution", () => {
     )
     const changed = await serve(root, ["//:test"])
     expect(changed.logs).toContain("//:test  ran")
+  }, 120_000)
+
+  it.each(["Go.Test", "Go.Fuzz"])("%s keys and admits test-only import dependencies", async (rule) => {
+    const root = await fixture()
+    await write(
+      root,
+      "go.mod",
+      "module example.test/fixture\n\ngo 1.26.0\n\nrequire example.test/helper v0.0.0\nreplace example.test/helper => ./replacement\n"
+    )
+    await write(root, "internalhelper/helper.go", "package internalhelper\nconst Want = 1\n")
+    await write(root, "externalhelper/helper.go", "package externalhelper\nconst Want = 1\n")
+    await write(root, "replacement/go.mod", "module example.test/helper\n\ngo 1.26.0\n")
+    await write(root, "replacement/helper.go", "package helper\nconst Want = 1\n")
+    await write(
+      root,
+      "lib/imports_test.go",
+      `package lib
+import ("testing"; "example.test/fixture/internalhelper")
+func TestInternalImport(t *testing.T) { if internalhelper.Want < 1 { t.Fatal(internalhelper.Want) } }
+`
+    )
+    await write(
+      root,
+      "lib/external_test.go",
+      `package lib_test
+import ("testing"; "example.test/fixture/externalhelper"; "example.test/helper")
+func TestExternalImport(t *testing.T) { if externalhelper.Want < 1 || helper.Want < 1 { t.Fatal("invalid helper") } }
+`
+    )
+    const workspace = S.Workspace("closure", {
+      repository: "git+https://example.test/fixture.git",
+      cache: S.Cache({ directory: ".flows" }),
+      toolchains: [S.Go.Toolchain({
+        mod: S.file("//go.mod"),
+        sum: S.file("//go.sum"),
+        versions: S.Nix.DevShell({ flake: S.file("//flake.nix"), lock: S.file("//flake.lock") }),
+        cgo: false
+      })]
+    })
+    const attrs = rule === "Go.Test" ? { pkgs: ["./lib"] } : { pkg: "./lib", fuzz: "FuzzValue", time: "1x" }
+    const plan = () => GoExec.planRule(rule, attrs, { root, packagePath: "", workspace }, PackageTree.findOnPath("go")!)
+    let previous = await plan()
+    const helpers = ["internalhelper/helper.go", "externalhelper/helper.go", "replacement/helper.go"]
+    expect(previous.readSet).toEqual(expect.arrayContaining(helpers))
+    expect(previous.closureIdentity).toMatchObject({
+      files: expect.arrayContaining(helpers.map((path) => [path, expect.any(String)]))
+    })
+    // Test variants repeat source rows; only one digest and read permission belongs to each file.
+    expect(previous.readSet.filter((path) => path === "lib/lib.go")).toHaveLength(1)
+    for (const helper of helpers) {
+      await Fs.appendFile(NodePath.join(root, helper), "// changed test-only input\n")
+      const changed = await plan()
+      expect(changed.closureIdentity).not.toEqual(previous.closureIdentity)
+      previous = changed
+    }
   }, 120_000)
 
   it("captures the module cache as one tar blob and restores it on a hit", async () => {
@@ -246,7 +339,7 @@ export const Package = S.Package({ targets: { test } })
 /** cgo needs a host C compiler; a runner without one cannot build the fixture at all. */
 const hasCCompiler = PackageTree.findOnPath("cc") !== undefined || PackageTree.findOnPath("clang") !== undefined
 
-describe("Go native compiler inputs", () => {
+describe.runIf(hasGo)("Go native compiler inputs", () => {
   /**
    * `GoListRow` stopped at the Go and embed collections, so a `.c`, `.h`, or
    * `.s` file a cgo package compiles was absent from the closure. Editing one
@@ -275,7 +368,7 @@ describe("Go native compiler inputs", () => {
   }, 180_000)
 })
 
-describe("Go toolchain environment", () => {
+describe.runIf(hasGo)("Go toolchain environment", () => {
   it("gives the toolchain's GOEXPERIMENT to plan-time go list, so a jsonv2 module plans and runs", async () => {
     const root = await experimentFixture()
     const plan = await serve(root, ["//:test", "--plan"])
@@ -294,7 +387,7 @@ describe("Go toolchain environment", () => {
 
   it("refuses by name when the declared runner is absent instead of running plain go test", async () => {
     const root = await experimentFixture()
-    const plan = await serve(root, ["//:viaGotestsum", "--plan"])
+    const plan = await withBarePath(["go", "git", "sh", "node"], () => serve(root, ["//:viaGotestsum", "--plan"]))
     expect(plan.output).toContain("host binary \\\"gotestsum\\\" is not present on PATH")
     expect(plan.output).not.toContain("go,test")
   }, 180_000)

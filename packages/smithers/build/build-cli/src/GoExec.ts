@@ -375,9 +375,17 @@ const listed = async (
   cwd: string,
   patterns: ReadonlyArray<string>,
   deps: boolean,
-  env: Readonly<Record<string, string>>
+  env: Readonly<Record<string, string>>,
+  tests = false
 ): Promise<ReadonlyArray<GoListRow>> =>
-  jsonRows(await execFile(goPath, ["list", ...(deps ? ["-deps"] : []), "-json", ...patterns], cwd, env))
+  jsonRows(
+    await execFile(
+      goPath,
+      ["list", ...(deps ? ["-deps"] : []), ...(tests ? ["-test"] : []), "-json", ...patterns],
+      cwd,
+      env
+    )
+  )
 
 const selectedPackages = async (
   selection: unknown,
@@ -421,9 +429,11 @@ const closure = async (
   packages: ReadonlyArray<string>,
   context: Context,
   goPath: string,
-  env: Readonly<Record<string, string>>
+  env: Readonly<Record<string, string>>,
+  tests = false
 ): Promise<Closure> => {
-  const rows = await listed(goPath, moduleDirectory(context), packages, true, env)
+  // Test variants add imports that only internal or external _test.go files use.
+  const rows = await listed(goPath, moduleDirectory(context), packages, true, env, tests)
   // Key → absolute path. In-workspace files key on their workspace-relative
   // path. A module a `replace` directive points at a local directory outside
   // the workspace is neither pinned by go.sum nor covered by that path, so its
@@ -438,7 +448,8 @@ const closure = async (
     const replacementPath = row.Module?.Replace?.Path ?? row.Module?.Path
     for (const collection of compilerInputCollections) {
       for (const name of row[collection] ?? []) {
-        const absolute = NodePath.join(row.Dir, name)
+        // The generated test main uses an absolute path in Go's build cache.
+        const absolute = NodePath.resolve(row.Dir, name)
         const inside = Path.containedRelative(context.root, absolute)
         if (inside !== undefined && inside !== "") {
           files.set(Text.posix(inside), absolute)
@@ -632,7 +643,7 @@ export const planRule = async (
     const argv = gotestsum === undefined
       ? [goPath, "test", ...testFlags]
       : [gotestsum, "--", ...testFlags]
-    const graph = await closure(packages, context, goPath, listEnv)
+    const graph = await closure(packages, context, goPath, listEnv, true)
     return {
       argv,
       env,
@@ -682,7 +693,7 @@ export const planRule = async (
   if (rule === "Go.Fuzz") {
     const pkg = anchor(String(attrs["pkg"]), context.packagePath)
     const packages = await selectedPackages([pkg], { ...context, packagePath: "" }, goPath, listEnv)
-    const graph = await closure(packages, context, goPath, listEnv)
+    const graph = await closure(packages, context, goPath, listEnv, true)
     return {
       argv: [
         goPath,
