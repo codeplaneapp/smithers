@@ -42,7 +42,7 @@ export interface AppTargets {
   readonly routes: ReturnType<typeof S.Generate>
   /** `vite` with workerd in the loop. */
   readonly dev: ReturnType<typeof S.Shell.Serve>
-  /** `vite build`, producing the Worker bundle and the static assets. */
+  /** `vite build`, writing `dist` and the `.wrangler/deploy/config.json` redirect. */
   readonly build: ReturnType<typeof S.Shell.Build>
   /** `wrangler deploy`: approval required, network on, credentials as named secrets. */
   readonly deploy: ReturnType<typeof S.Shell.Run>
@@ -53,6 +53,9 @@ const defaultWranglerConfig = "worker/wrangler.jsonc"
 
 /** The port `dev` serves on and waits for. */
 const devPort = 5173
+
+/** Where the vite plugin writes the file `wrangler deploy` follows to the built Worker. */
+const wranglerDeployRedirect = ".wrangler/deploy/config.json"
 
 /**
  * Declares a Smithers app.
@@ -100,7 +103,22 @@ export const CreateApp = (options: CreateAppOptions): AppTargets => {
     "**/SANDBOX.ts",
     "**/TOOLS.ts"
   ])
-  const sources = S.glob([`${dirs.app}/**`, `${dirs.flows}/**`, `${dirs.tools}/**`, "worker/**", "src/**"])
+  // Everything Vite reads. The two entries after the source trees are the
+  // inputs Vite takes by convention rather than by import: `index.html` is the
+  // entry it builds the browser bundle from, and `public/` is copied into
+  // `dist` verbatim. Without them, editing the title or an entry script leaves
+  // the declared inputs of `dev` and `build` unchanged. Both templates take
+  // Vite's defaults for `root` and `publicDir`; an app that moves either in
+  // its `vite.config.ts` declares the new path itself.
+  const sources = S.glob([
+    `${dirs.app}/**`,
+    `${dirs.flows}/**`,
+    `${dirs.tools}/**`,
+    "worker/**",
+    "src/**",
+    "index.html",
+    "public/**"
+  ])
   const wrangler = S.file(`//${cloudflare.config}`)
 
   // The generator is the package's own `smithers-routes` bin, resolved from the
@@ -125,13 +143,17 @@ export const CreateApp = (options: CreateAppOptions): AppTargets => {
     bin: S.NodeModule.Bin("vite"),
     args: ["build"],
     data: [sources, wrangler, S.file("//vite.config.ts"), routes],
-    outDirs: ["dist"]
+    outDirs: ["dist"],
+    // `deploy` reads the redirect the vite plugin writes outside `dist`, so a
+    // build restored from cache has to bring it back with the bundle.
+    outFiles: [wranglerDeployRedirect]
   })
 
   // No `--config`: wrangler follows the vite plugin's
   // `.wrangler/deploy/config.json` redirect only when the flag is absent, and
   // that redirect points at the built Worker bundle. The source
-  // `wrangler.jsonc` is the vite plugin's input, not wrangler's.
+  // `wrangler.jsonc` is the vite plugin's input, not wrangler's. The redirect
+  // is a declared output of `build`, so gating on `build` restores it too.
   const deploy = S.Shell.Run({
     bin: S.NodeModule.Bin("wrangler"),
     args: ["deploy"],

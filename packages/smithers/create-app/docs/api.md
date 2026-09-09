@@ -79,10 +79,22 @@ export const App = CreateApp({
 | `manifest` | The `AppManifest` the Vite plugin serves as `virtual:smthrs-app/manifest`                                          |
 | `routes`   | Regenerates the two route tables. Keyed on every file the router reads                                             |
 | `dev`      | `vite` on port 5173, with the network on                                                                           |
-| `build`    | `vite build`, writing `dist`                                                                                       |
+| `build`    | `vite build`, writing `dist` and the wrangler deploy redirect                                                      |
 | `deploy`   | `wrangler deploy`, gated on `build`, approval required, with the Cloudflare credentials declared as scoped secrets |
 
 `CloudflareDeploy.config` defaults to `worker/wrangler.jsonc`.
+
+`dev` and `build` declare the same inputs: the `app`, `flows` and `tools` trees,
+`worker/`, `src/`, `index.html`, `public/**`, the wrangler config,
+`vite.config.ts`, and the `routes` target. `index.html` is Vite's entry and
+`public/` is copied into `dist` verbatim, so both are named; no import reaches
+either, and nothing infers them from the source trees.
+
+`build` declares two outputs: `dist` and `.wrangler/deploy/config.json`. The
+second is the redirect the Cloudflare Vite plugin writes to point
+`wrangler deploy` at the built Worker. It sits outside `dist`, so a build
+restored from cache into a clean checkout supplies it only because the target
+names it.
 
 ## @smthrs/create-app/app
 

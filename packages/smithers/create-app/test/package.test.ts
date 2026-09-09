@@ -6,12 +6,15 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Target from "@smthrs/targets/Target"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { type Brand, CreateApp } from "../src/index.ts"
 import { runRoutesBin } from "../src/routesBin.ts"
 import { createApp } from "../src/vite.ts"
+
+const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 
 const brand: Brand = { name: "Ledger", tokens: { accent: "#5288c2" } }
 
@@ -146,9 +149,46 @@ describe("targets", () => {
     expect(attrs.sandbox.network).toBe(true)
   })
 
-  it("builds into dist", () => {
-    const attrs = Target.metadata(app().build).attrs as { readonly outDirs: ReadonlyArray<string> }
+  // Vite reads `index.html` and `public/` by convention rather than through an
+  // import, so nothing infers them from the source trees. Until this case the
+  // declaration named neither, and editing the entry document left the
+  // declared inputs of `dev` and `build` byte-identical.
+  it.each([["dev"], ["build"]] as const)("keys %s on the HTML entry and the public assets", (target) => {
+    const attrs = Target.metadata(app({ dirs: { app: "site", flows: "pipelines" } })[target]).attrs as {
+      readonly data: readonly [ReadonlyArray<{ readonly pattern: string }>, ...Array<unknown>]
+    }
+    expect(attrs.data[0].map((glob) => glob.pattern)).toEqual([
+      "site/**",
+      "pipelines/**",
+      "tools/**",
+      "worker/**",
+      "src/**",
+      "index.html",
+      "public/**"
+    ])
+  })
+
+  it("declares the HTML entry every template ships as a build input", () => {
+    const patterns = (Target.metadata(app().build).attrs as {
+      readonly data: readonly [ReadonlyArray<{ readonly pattern: string }>, ...Array<unknown>]
+    }).data[0].map((glob) => glob.pattern)
+    for (const template of readdirSync(join(packageRoot, "template"))) {
+      expect([template, existsSync(join(packageRoot, "template", template, "index.html"))]).toEqual([template, true])
+    }
+    expect(patterns).toContain("index.html")
+  })
+
+  // `deploy` runs wrangler without `--config`, so the artifact it needs is the
+  // redirect the vite plugin writes outside `dist`. Until this case the build
+  // declared only `dist`, and a cache restore into a clean checkout could not
+  // supply deploy's prerequisite.
+  it("builds into dist and the wrangler deploy redirect", () => {
+    const attrs = Target.metadata(app().build).attrs as {
+      readonly outDirs: ReadonlyArray<string>
+      readonly outFiles: ReadonlyArray<string>
+    }
     expect(attrs.outDirs).toEqual(["dist"])
+    expect(attrs.outFiles).toEqual([".wrangler/deploy/config.json"])
   })
 
   it("gates deploy on the build and requires approval and both credentials", () => {
