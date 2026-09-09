@@ -42,6 +42,29 @@ describe("the target-graph dev fixtures", () => {
     expect(createTargetGraphDevFixtures()).toBeUndefined()
   })
 
+  /*
+   * The defect this guards: the seam also read
+   * `import.meta.env.SMITHERS_TARGET_GRAPH_FIXTURES`, a name no build ever
+   * populates (vite.config.ts sets no `envPrefix`, so Vite copies only
+   * `VITE_` names onto `import.meta.env`). The switch was dead in the app and
+   * live only under a runtime that aliases `import.meta.env` to
+   * `process.env`, where a stray variable turned the fixtures on. The
+   * localStorage flag is the one opt-in.
+   */
+  test("no environment variable can turn the seam on", () => {
+    process.env.SMITHERS_TARGET_GRAPH_FIXTURES = "1"
+    process.env.VITE_SMITHERS_TARGET_GRAPH_FIXTURES = "1"
+    try {
+      /* The control: this runtime really does expose the variable to the module. */
+      expect(import.meta.env?.SMITHERS_TARGET_GRAPH_FIXTURES).toBe("1")
+      expect(targetGraphFixturesEnabled()).toBe(false)
+      expect(createTargetGraphDevFixtures()).toBeUndefined()
+    } finally {
+      delete process.env.SMITHERS_TARGET_GRAPH_FIXTURES
+      delete process.env.VITE_SMITHERS_TARGET_GRAPH_FIXTURES
+    }
+  })
+
   test("the graph is the captured force workspace: 82 nodes, 94 edges", () => {
     expect(enabled().graph("force").nodes.length).toBe(82)
     expect(fixtureTargetGraph("force").edges.length).toBe(94)

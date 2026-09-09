@@ -4,10 +4,11 @@
  * captured force fixtures (packages/rpc/fixtures/force/) plus a scripted run
  * stream — `started` → `node` (pending → running → settled, with timings)
  * → `summary` frames on a timer. This is EXPLICIT dev tooling: it activates
- * only when the `smithers.dev.targetGraphFixtures` localStorage flag is "1"
- * (or the SMITHERS_TARGET_GRAPH_FIXTURES env is "1" at build time), and the
- * product path never sees it — `createTargetGraphDevFixtures` answers
- * undefined unless the flag is on.
+ * only when the `smithers.dev.targetGraphFixtures` localStorage flag is "1",
+ * and the product path never sees it — `createTargetGraphDevFixtures` answers
+ * undefined unless the flag is on. There is deliberately no build-time env
+ * switch: vite.config.ts sets no `envPrefix`, so only `VITE_` names reach
+ * `import.meta.env` and any other name reads as undefined in every build.
  */
 import graphFixture from "../../../../../packages/rpc/fixtures/force/graph.json"
 import planFixture from "../../../../../packages/rpc/fixtures/force/plan-typeCheck.json"
@@ -31,16 +32,12 @@ import {
 
 export const TARGET_GRAPH_FIXTURE_FLAG = "smithers.dev.targetGraphFixtures"
 
-/** The explicit opt-in: a localStorage flag, or the build-time env. Never default. */
+/** The one explicit opt-in: the localStorage flag. Never an env, never a default. */
 export const targetGraphFixturesEnabled = (): boolean => {
   try {
-    if (typeof localStorage !== "undefined" && localStorage.getItem(TARGET_GRAPH_FIXTURE_FLAG) === "1") return true
+    return typeof localStorage !== "undefined" && localStorage.getItem(TARGET_GRAPH_FIXTURE_FLAG) === "1"
   } catch {
     // Storage the webview refuses is the flag off.
-  }
-  try {
-    return (import.meta.env?.SMITHERS_TARGET_GRAPH_FIXTURES as string | undefined) === "1"
-  } catch {
     return false
   }
 }
