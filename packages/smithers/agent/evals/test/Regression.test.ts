@@ -55,6 +55,84 @@ describe("Regression", () => {
     expect(jitter.nondeterminism).toEqual([])
   })
 
+  // A move is reported only when it exceeds both tolerances, so a move landing
+  // exactly on one is silenced. 1, 0.5, 0.75 and the tolerances below are
+  // exactly representable, so the moves sit on the boundary with no float
+  // slack and relaxing either strict comparison to `>=` flips an expectation.
+  const unitBaseline = {
+    version: 1 as const,
+    suite: "s",
+    records: [{ suite: "s", case: "c", scorer: "x", stepKey: "old", score: 1 }]
+  }
+  const compareUnit = (stepKey: string, score: number, tolerances: Regression.Tolerances) =>
+    Effect.runPromise(Regression.compare(unitBaseline, run(stepKey, score), tolerances))
+
+  it("silences a changed-key drop that sits exactly on the absolute tolerance", async () => {
+    const under = await compareUnit("new", 0.75, { absolute: 0.1875, relative: 0 })
+    expect(under.regressions.map((item) => item.drop)).toEqual([0.25])
+
+    const at = await compareUnit("new", 0.75, { absolute: 0.25, relative: 0 })
+    expect(at.regressions).toEqual([])
+
+    const over = await compareUnit("new", 0.75, { absolute: 0.3125, relative: 0 })
+    expect(over.regressions).toEqual([])
+  })
+
+  it("silences a changed-key drop that sits exactly on the relative tolerance", async () => {
+    const under = await compareUnit("new", 0.75, { absolute: 0, relative: 0.1875 })
+    expect(under.regressions.map((item) => item.drop)).toEqual([0.25])
+
+    const at = await compareUnit("new", 0.75, { absolute: 0, relative: 0.25 })
+    expect(at.regressions).toEqual([])
+
+    const over = await compareUnit("new", 0.75, { absolute: 0, relative: 0.3125 })
+    expect(over.regressions).toEqual([])
+  })
+
+  it("silences same-key jitter that sits exactly on either tolerance", async () => {
+    const underAbsolute = await compareUnit("old", 0.75, { absolute: 0.1875, relative: 0 })
+    expect(underAbsolute.nondeterminism.map((item) => item.delta)).toEqual([-0.25])
+
+    const atAbsolute = await compareUnit("old", 0.75, { absolute: 0.25, relative: 0 })
+    expect(atAbsolute.nondeterminism).toEqual([])
+
+    const overAbsolute = await compareUnit("old", 0.75, { absolute: 0.3125, relative: 0 })
+    expect(overAbsolute.nondeterminism).toEqual([])
+
+    const underRelative = await compareUnit("old", 0.75, { absolute: 0, relative: 0.1875 })
+    expect(underRelative.nondeterminism.map((item) => item.delta)).toEqual([-0.25])
+
+    const atRelative = await compareUnit("old", 0.75, { absolute: 0, relative: 0.25 })
+    expect(atRelative.nondeterminism).toEqual([])
+
+    const overRelative = await compareUnit("old", 0.75, { absolute: 0, relative: 0.3125 })
+    expect(overRelative.nondeterminism).toEqual([])
+  })
+
+  // Same-key movement is reported in either direction, so the boundary holds
+  // for a rise too. A rise from 0.5 to 0.75 is 0.25 absolute and 0.5 relative.
+  it("silences a same-key rise that sits exactly on either tolerance", async () => {
+    const halfBaseline = {
+      version: 1 as const,
+      suite: "s",
+      records: [{ suite: "s", case: "c", scorer: "x", stepKey: "old", score: 0.5 }]
+    }
+    const rise = (tolerances: Regression.Tolerances) =>
+      Effect.runPromise(Regression.compare(halfBaseline, run("old", 0.75), tolerances))
+
+    const underAbsolute = await rise({ absolute: 0.1875, relative: 0 })
+    expect(underAbsolute.nondeterminism.map((item) => item.delta)).toEqual([0.25])
+
+    const atAbsolute = await rise({ absolute: 0.25, relative: 0 })
+    expect(atAbsolute.nondeterminism).toEqual([])
+
+    const underRelative = await rise({ absolute: 0, relative: 0.375 })
+    expect(underRelative.nondeterminism.map((item) => item.delta)).toEqual([0.25])
+
+    const atRelative = await rise({ absolute: 0, relative: 0.5 })
+    expect(atRelative.nondeterminism).toEqual([])
+  })
+
   it("reports any drop from a zero baseline score whatever the relative tolerance", async () => {
     const zero = {
       version: 1 as const,
