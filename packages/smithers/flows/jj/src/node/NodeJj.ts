@@ -620,16 +620,21 @@ const operations = (run: Run, repositoryRoot?: string) => {
    */
   const workspaceAdd = (name: string, path: string, revision?: string) =>
     Effect.asVoid(
-      revision === undefined
-        ? inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, "--", path])
-        : Effect.flatMap(requireRevision("workspaceAdd", "jj workspace add", revision), (pinned) =>
-          inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, `--revision=${pinned}`, "--", path]))
+      repositoryCritical(
+        "workspaceAdd",
+        revision === undefined
+          ? inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, "--", path])
+          : Effect.flatMap(requireRevision("workspaceAdd", "jj workspace add", revision), (pinned) =>
+            inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, `--revision=${pinned}`, "--", path]))
+      )
     )
 
   const workspaceForget = (name: string) =>
-    Effect.asVoid(inRepository("workspaceForget", ["workspace", "forget", "--", name]))
+    Effect.asVoid(
+      repositoryCritical("workspaceForget", inRepository("workspaceForget", ["workspace", "forget", "--", name]))
+    )
 
-  const status = () => inRepository("status", ["status"])
+  const status = () => repositoryCritical("status", inRepository("status", ["status"]))
 
   /**
    * `jj root` prints the workspace root for whatever directory it runs in,
@@ -666,17 +671,20 @@ const operations = (run: Run, repositoryRoot?: string) => {
     Effect.flatMap(
       requireRevision("revert", "jj revert", changeId),
       (revision) =>
-        inRepository("revert", ["diff", "-r", revision, "--name-only"]).pipe(
-          Effect.flatMap((names) =>
-            Effect.as(
-              inRepository("revert", ["revert", "-r", revision, "--insert-before", "@"]),
-              {
-                // Split on line endings only. `jj diff --name-only` emits raw
-                // unquoted bytes, so a tracked file named " lead.txt" or
-                // "trail .txt" comes back with its spaces, and trimming each
-                // line would report paths that do not exist.
-                reverted: names.split(/\r?\n/).filter((line) => line.length > 0)
-              }
+        repositoryCritical(
+          "revert",
+          inRepository("revert", ["diff", "-r", revision, "--name-only"]).pipe(
+            Effect.flatMap((names) =>
+              Effect.as(
+                inRepository("revert", ["revert", "-r", revision, "--insert-before", "@"]),
+                {
+                  // Split on line endings only. `jj diff --name-only` emits raw
+                  // unquoted bytes, so a tracked file named " lead.txt" or
+                  // "trail .txt" comes back with its spaces, and trimming each
+                  // line would report paths that do not exist.
+                  reverted: names.split(/\r?\n/).filter((line) => line.length > 0)
+                }
+              )
             )
           )
         )

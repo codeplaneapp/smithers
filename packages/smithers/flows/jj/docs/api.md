@@ -196,10 +196,14 @@ preserved; the fresh working copy remains unnamed. Without a message, no
 `describe` or editor runs. The browser's frozen WASM ABI still replaces the
 closed change's description when a message is supplied.
 
-Repository state operations are fenced as a unit. `snapshot`, `restore`, and
-`diff` share one single-permit semaphore per repository inside a process and an
-exclusive `.jj/smithers.lock` owner directory across processes. The snapshot's
-CLI calls therefore cannot interleave with another state operation. A caller
+Repository state operations are fenced as a unit. `snapshot`, `restore`,
+`diff`, `revert`, `workspaceAdd`, `workspaceForget`, and `status` share one
+single-permit semaphore per workspace inside a process and an exclusive
+`.jj/smithers.lock` owner directory across processes. This includes separately
+constructed services. The snapshot's CLI calls cannot interleave with another
+state operation. Revert holds the same lock while reading changed paths and
+applying the reverse change. Workspace commands and status also take the lock
+because jj can snapshot the working copy during those commands. A caller
 records lock owners as `hostname-pid-random` and reclaims only an owner on the
 same host whose process is dead. Permission-denied probes count as alive;
 foreign-host and legacy owner markers require operator cleanup.

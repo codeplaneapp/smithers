@@ -1,5 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Layer, Sink, Stream } from "effect"
+import type * as EffectChildProcess from "effect/unstable/process/ChildProcess"
+import {
+  ChildProcessSpawner,
+  ExitCode,
+  make as makeSpawner,
+  makeHandle,
+  ProcessId
+} from "effect/unstable/process/ChildProcessSpawner"
 import { execFile, execFileSync } from "node:child_process"
 import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
@@ -564,4 +572,99 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       expect(existsSync(lead)).toBe(false)
       expect(existsSync(trail)).toBe(false)
     }))
+})
+
+describe("NodeJj repository fencing", () => {
+  const operations = [
+    { name: "revert", run: (jj: Jj) => jj.revert!("earlier-change"), commands: ["diff", "revert"] },
+    { name: "workspaceAdd", run: (jj: Jj) => jj.workspaceAdd("lane", "lane-path"), commands: ["workspace"] },
+    {
+      name: "workspaceAdd with revision",
+      run: (jj: Jj) => jj.workspaceAdd("lane", "lane-path", "earlier-change"),
+      commands: ["workspace"]
+    },
+    { name: "workspaceForget", run: (jj: Jj) => jj.workspaceForget("lane"), commands: ["workspace"] },
+    { name: "status", run: (jj: Jj) => jj.status(), commands: ["status"] }
+  ]
+
+  for (const separateServices of [false, true]) {
+    for (const operation of operations) {
+      it(`${operation.name} waits for snapshot through ${separateServices ? "separate services" : "one service"}`, async () => {
+        const target = await mkdtemp(join(tmpdir(), "flows-node-jj-fence-"))
+        const previousBinary = process.env.SMITHERS_JJ_PATH
+        // The spawner supplies every response; resolution only needs an existing executable.
+        process.env.SMITHERS_JJ_PATH = process.execPath
+        const commands: Array<string> = []
+        let release!: () => void
+        let entered!: () => void
+        const gate = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        const began = new Promise<void>((resolve) => {
+          entered = resolve
+        })
+        const spawner = Layer.succeed(ChildProcessSpawner)(makeSpawner((command) =>
+          Effect.sync(() => {
+            const name = (command as EffectChildProcess.StandardCommand).args[0]!
+            const version = name === "--version"
+            if (!version) commands.push(name)
+            if (name === "log") entered()
+            const done = name === "log" ? Effect.promise(() => gate) : Effect.void
+            const output = version
+              ? "jj 0.39.0"
+              : name === "log"
+              ? "saved-change\n"
+              : name === "diff"
+              ? "file.txt\n"
+              : ""
+            return makeHandle({
+              pid: ProcessId(0),
+              exitCode: Effect.as(done, ExitCode(0)),
+              isRunning: Effect.succeed(false),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.unwrap(Effect.as(done, Stream.make(new TextEncoder().encode(output)))),
+              stderr: Stream.empty,
+              all: Stream.empty,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void)
+            })
+          })
+        ))
+        let snapshot: Promise<unknown> | undefined
+        let pending: Promise<unknown> | undefined
+        try {
+          await mkdir(join(target, ".jj"))
+          const service = () =>
+            Effect.runPromise(Jj.pipe(Effect.provide(
+              Layer.provide(NodeJj.layerSpawnerAt(target), spawner)
+            )))
+          const first = await service()
+          const second = separateServices ? await service() : first
+          if (separateServices) expect(second).not.toBe(first)
+          snapshot = Effect.runPromise(first.snapshot("checkpoint"))
+          await began
+          expect(existsSync(join(target, ".jj", "smithers.lock"))).toBe(true)
+          pending = Effect.runPromise(operation.run(second))
+          // Snapshot cannot progress until release; give the contender time to
+          // issue commands if it bypasses the fence, including filesystem I/O.
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          expect([...commands]).toEqual(["log"])
+          release()
+          await snapshot
+          const result = await pending
+          expect(commands).toEqual(["log", "new", "describe", ...operation.commands])
+          if (operation.name === "revert") expect(result).toEqual({ reverted: ["file.txt"] })
+          expect(existsSync(join(target, ".jj", "smithers.lock"))).toBe(false)
+        } finally {
+          release()
+          await Promise.allSettled([snapshot, pending])
+          if (previousBinary === undefined) delete process.env.SMITHERS_JJ_PATH
+          else process.env.SMITHERS_JJ_PATH = previousBinary
+          await rm(target, { recursive: true, force: true })
+        }
+      })
+    }
+  }
 })
