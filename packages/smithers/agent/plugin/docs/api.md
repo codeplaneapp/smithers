@@ -218,8 +218,16 @@ Dispatch semantics, one row per kind:
 | `first`      | Handlers in order until one returns `Option.some`.        | That `Option`, or `Option.none()`.                                     | Fails with `hook_failed`; a non-`Option` value fails with `invalid_hook_result`. |
 | `waterfall`  | Every handler, threading the merged value.                | The final value.                                                       | Fails with `hook_failed` and stops.                                              |
 
-A waterfall handler that returns `undefined` leaves the value unchanged: the
-merge function is not called. A merge that throws a `PluginError` keeps that
+Handlers must return an Effect. Synchronous throws, Effect failures and defects,
+and non-Effect results (including `undefined`, scalars, and Promises) become
+`hook_failed` with the plugin and hook names. Non-Effect error messages include
+the result's JavaScript `typeof`. Parallel dispatch collects these errors and
+continues running sibling observers, including with `parallelConcurrency: 1`.
+`Kernel.make` succeeds and reports them in `observerErrors`. Sequential dispatch
+fails with the attributed error and skips later handlers.
+
+A waterfall handler whose Effect succeeds with `undefined` leaves the value
+unchanged: the merge function is not called. A merge that throws a `PluginError` keeps that
 error's code and path and gains the handler's attribution; a merge that throws
 anything else becomes `config_invalid` attributed to the handler.
 

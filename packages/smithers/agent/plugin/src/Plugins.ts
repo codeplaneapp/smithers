@@ -14,6 +14,7 @@
  *
  * @since 1.0.0-rc.0
  */
+import type * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -29,20 +30,34 @@ const empty: ReadonlyArray<HandlerRecord> = Object.freeze([])
 const runHandler = (
   record: HandlerRecord,
   args: ReadonlyArray<unknown>
-): Effect.Effect<unknown, PluginError, any> =>
-  Effect.suspend(() => record.handler(...args) as Effect.Effect<unknown, unknown, any>).pipe(
-    Effect.catchCause((cause) =>
-      Effect.fail(
-        new PluginError({
-          code: "hook_failed",
-          message: `hook "${record.hook}" failed in plugin "${record.plugin}"`,
-          plugin: record.plugin,
-          hook: record.hook,
-          cause
-        })
-      )
+): Effect.Effect<unknown, PluginError, any> => {
+  const onCause = (cause: Cause.Cause<unknown>) =>
+    Effect.fail(
+      new PluginError({
+        code: "hook_failed",
+        message: `hook "${record.hook}" failed in plugin "${record.plugin}"`,
+        plugin: record.plugin,
+        hook: record.hook,
+        cause
+      })
+    )
+
+  return Effect.sync(() => record.handler(...args)).pipe(
+    Effect.catchCause(onCause),
+    Effect.flatMap((result) =>
+      Effect.isEffect(result)
+        ? result.pipe(Effect.catchCause(onCause))
+        : Effect.fail(
+          new PluginError({
+            code: "hook_failed",
+            message: `hook "${record.hook}" in plugin "${record.plugin}" returned a non-Effect (${typeof result})`,
+            plugin: record.plugin,
+            hook: record.hook
+          })
+        )
     )
   )
+}
 
 /**
  * The dispatch surface.
