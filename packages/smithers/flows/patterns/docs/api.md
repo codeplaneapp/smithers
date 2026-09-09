@@ -411,15 +411,20 @@ fallback belong to model routing, before a flow is selected.
 protected call, the recovery arm `catchErrors` selects, and a finalizer call on
 the settled arm and on the arm no handler claimed. The unhandled arm ends in
 `Node.fail`, so the plan states that the finalizer cleans up and hands the
-failure back rather than absorbing it. Both arms are wrapped in `Node.capture`,
-so the boundary keys the same way on every build.
+failure back rather than absorbing it. A finalizer that fails on that arm is
+caught there, so the body failure the arm re-raises is still the one the
+boundary reports; the failed finalizer call remains a step of its own. Both
+arms are wrapped in `Node.capture`, so the boundary keys the same way on every
+build.
 
 `TryCatchFinally.run(input, options)` takes `catchErrors` as a predicate,
 because the runtime form already holds the decoded typed error. The finalizer
 runs after success, after recovery, after an unclaimed failure, and after
 interruption. A finalizer that fails on its own becomes `finalizer_failed`; a
 body failure outranks it, so cleanup trouble never hides the reason the body
-failed.
+failed. When both fail, the `finalizer_failed` error rides behind the body
+failure on the same cause rather than being dropped, so a lock left held is
+still on the record.
 
 ## `Saga`
 

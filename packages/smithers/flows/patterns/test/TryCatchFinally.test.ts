@@ -1,8 +1,10 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as TestRuntime from "@smthrs/core/TestRuntime"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import { PatternError } from "../src/PatternError.ts"
@@ -19,6 +21,22 @@ const named = (name: string) =>
     output: Schema.Unknown,
     body: Node.capture({ name }, () => Node.succeed({ from: name }))
   })
+
+// A flow that fails with its own name, so a declaration run can name which arm
+// produced the failure it reports.
+const failing = (error: string) =>
+  Flow.make({
+    input: Schema.Unknown,
+    output: Schema.Unknown,
+    body: Node.capture({ error }, () => Node.fail(error))
+  })
+
+// Executes a declaration's in-memory body, entering every flow it calls.
+const declared = (flow: Flow.Any, input: unknown): Result.Result<unknown, unknown> => {
+  const body = (flow as Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown>).body
+  if (body === undefined) throw new Error("declaration has no body")
+  return TestRuntime.evaluateInline(body(input))
+}
 
 const flowName = (graph: Graph.Graph, callId: string): string => {
   const body = Graph.nodes(graph).find((node) => node.id === `${callId}.flow`)?.keyMaterial.body
@@ -46,10 +64,13 @@ describe("TryCatchFinally", () => {
     )
     const catches = Graph.nodes(graph).filter((node) => node.kind === "Catch")
 
+    // Three boundaries: the unhandled-failure arm, the filtered recovery arm,
+    // and the arm that absorbs a finalizer failure on the unhandled path.
     expect(calledFlows(graph)).toEqual(["try", "catch", "finally", "finally"])
-    expect(catches).toHaveLength(2)
+    expect(catches).toHaveLength(3)
     expect((catches[0]?.keyMaterial.body as { readonly error?: unknown }).error).toBeUndefined()
     expect((catches[1]?.keyMaterial.body as { readonly error?: unknown }).error).toBeDefined()
+    expect((catches[2]?.keyMaterial.body as { readonly error?: unknown }).error).toBeUndefined()
   })
 
   // The outer boundary exists to catch what the BODY raised. The success-arm
@@ -76,11 +97,15 @@ describe("TryCatchFinally", () => {
     expect(kinds["root.andThen"]).toBe("Catch")
     // What the outer boundary protects is the try/catch node itself.
     expect(kinds["root.andThen.catch"]).toBe("Catch")
-    expect(boundary).toEqual(["root.andThen", "root.andThen.catch"])
+    expect(boundary).toEqual(["root.andThen", "root.andThen.catch", "root.andThen.recover.andThen"])
     // The success-arm finalizer is the root's continuation, outside the catch.
     expect(flowName(graph, "root.then.map")).toBe("finally")
-    // The unhandled arm still calls the finalizer and re-raises.
-    expect(flowName(graph, "root.andThen.recover.andThen")).toBe("finally")
+    // The unhandled arm still calls the finalizer and re-raises. Its finalizer
+    // call sits under a catch that recovers, so a cleanup failure cannot take
+    // the place of the body failure the arm re-raises.
+    expect(kinds["root.andThen.recover.andThen"]).toBe("Catch")
+    expect(flowName(graph, "root.andThen.recover.andThen.catch")).toBe("finally")
+    expect(kinds["root.andThen.recover.andThen.recover"]).toBe("Succeed")
     expect(kinds["root.andThen.recover.then"]).toBe("Fail")
   })
 
@@ -92,6 +117,20 @@ describe("TryCatchFinally", () => {
 
     expect(calledFlows(graph)).toEqual(["try", "finally", "finally"])
     expect(Graph.nodes(graph).filter((node) => node.kind === "Fail")).toHaveLength(1)
+  })
+
+  // The declared plan and `run` must agree on which failure wins when both the
+  // body and the finalizer fail. Sequencing the finalizer ahead of the re-raise
+  // without catching it loses the body failure, and the boundary reports the
+  // cleanup error the caller never asked about.
+  it("declares the body failure as the one the unhandled arm reports when cleanup fails too", () => {
+    const result = declared(
+      TryCatchFinally.make({ try: failing("body failed"), finally: failing("cleanup failed") }),
+      "request"
+    )
+
+    expect(Result.isFailure(result)).toBe(true)
+    expect(Result.isFailure(result) ? result.failure : undefined).toBe("body failed")
   })
 
   it("declares nothing extra without a catch or a finalizer", () => {
@@ -139,7 +178,13 @@ describe("TryCatchFinally", () => {
       .map((node) => (node.keyMaterial.body as { readonly handler: { readonly algorithm: string } }).handler.algorithm)
 
     expect(material()).toEqual(material())
-    expect(handlers).toEqual(["sha256-source-captures/v4", "sha256-source-captures/v4"])
+    // One entry per `Catch` the boundary declares: the unhandled-failure arm,
+    // the filtered recovery arm, and the arm absorbing a finalizer failure.
+    expect(handlers).toEqual([
+      "sha256-source-captures/v4",
+      "sha256-source-captures/v4",
+      "sha256-source-captures/v4"
+    ])
   })
 
   it.effect("runs the finalizer once after a successful body", () =>
@@ -295,6 +340,35 @@ describe("TryCatchFinally", () => {
       )
 
       expect(error).toBeInstanceOf(Denied)
+    }))
+
+  // Dropping the cleanup failure leaves a lock still held or a directory still
+  // there with no record anywhere: not a log line, not a cause reason. It rides
+  // behind the body failure instead, which keeps the precedence above.
+  it.effect("keeps the finalizer failure on the cause behind the body failure", () =>
+    Effect.gen(function*() {
+      const cleanup = new Timeout({ seconds: 1 })
+      const exit = yield* Effect.exit(
+        TryCatchFinally.run("request", {
+          try: () => Effect.fail(new Denied({ who: "root" })),
+          finally: () => Effect.fail(cleanup)
+        })
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const errors = exit.cause.reasons
+          .filter((reason) => reason._tag === "Fail")
+          .map((reason) => (reason as { readonly error: unknown }).error)
+
+        expect(errors[0]).toBeInstanceOf(Denied)
+        expect(errors[1]).toBeInstanceOf(PatternError)
+        expect((errors[1] as PatternError).code).toBe("finalizer_failed")
+        expect((errors[1] as PatternError).message).toBe(
+          "The TryCatchFinally finalizer failed after the protected body failed"
+        )
+        expect((errors[1] as PatternError).cause).toEqual(cleanup)
+      }
     }))
 
   it.effect("runs the finalizer when the body is interrupted", () =>

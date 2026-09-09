@@ -59,10 +59,12 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  * finalizer call on the settled arm and on the unhandled-failure arm.
  *
  * The unhandled arm ends in `Node.fail`, so the plan states that the finalizer
- * cleans up and hands the failure back rather than absorbing it. That boundary
- * protects the body alone; the settled arm's finalizer is sequenced after it,
- * so a finalizer that fails on the success path is not re-run by the arm meant
- * for the body's failures.
+ * cleans up and hands the failure back rather than absorbing it. A finalizer
+ * that fails on that arm is absorbed rather than raised, so the body failure
+ * the arm exists to re-raise stays the one the boundary reports, matching the
+ * precedence {@link run} applies. That boundary protects the body alone; the
+ * settled arm's finalizer is sequenced after it, so a finalizer that fails on
+ * the success path is not re-run by the arm meant for the body's failures.
  *
  * Both recovery arms are wrapped in `Node.capture`, so every node this
  * declaration builds keys the same way on every build. An uncaptured arm would
@@ -120,7 +122,15 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
             { rethrow: true },
             (error: unknown) =>
               Node.andThen(
-                call(finalize, { input }),
+                // The body failure is what this arm re-raises, so a finalizer
+                // that fails here must not take its place: without this catch
+                // the re-raise never runs and the boundary reports the cleanup
+                // error instead, which is the opposite of what `run` does. The
+                // finalizer call is its own step, so the absorbed failure still
+                // stands in the journal.
+                Node.catch(call(finalize, { input }), {
+                  onFailure: Node.capture({ cleanupFailed: true }, () => Node.succeed(null))
+                }),
                 Node.capture({ rethrow: true }, () => Node.fail(error))
               )
           )
@@ -137,7 +147,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  * The finalizer runs after success, after recovery, after an unclaimed
  * failure, and after interruption. A finalizer that fails on its own becomes
  * `PatternError { code: "finalizer_failed" }`; a body failure outranks it, so
- * cleanup trouble never hides the reason the body failed.
+ * cleanup trouble never hides the reason the body failed. When both fail the
+ * cleanup failure is kept behind the body failure on the same cause rather
+ * than dropped, so a lock left held still has a record.
  *
  * @category combinators
  * @since 0.1.0
@@ -168,18 +180,21 @@ export const run = <I, A, E, R, B = A, E2 = never, R2 = never, E3 = never, R3 = 
     )
   const finalize = arms.finally
   if (finalize === undefined) return guarded
+  // `Effect.onExit` combines a failing finalizer's cause behind the body's own,
+  // so raising here keeps the body failure first and still leaves the cleanup
+  // failure on the cause instead of discarding it.
   return Effect.onExit(guarded, (exit) =>
     Effect.matchEffect(finalize(input), {
       onFailure: (error) =>
-        Exit.isSuccess(exit)
-          ? Effect.fail(
-            new PatternError({
-              code: "finalizer_failed",
-              message: "The TryCatchFinally finalizer failed after the protected body succeeded",
-              cause: error
-            })
-          )
-          : Effect.void,
+        Effect.fail(
+          new PatternError({
+            code: "finalizer_failed",
+            message: Exit.isSuccess(exit)
+              ? "The TryCatchFinally finalizer failed after the protected body succeeded"
+              : "The TryCatchFinally finalizer failed after the protected body failed",
+            cause: error
+          })
+        ),
       onSuccess: () => Effect.void
     }))
 }
