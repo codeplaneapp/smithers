@@ -1036,7 +1036,11 @@ describe("docs/LOCAL-APP.md's Cards section", () => {
         "no revision history",
         "a rev → rev interdiff refuses",
         "carries no kind, no uptime, no workspace head",
-        "The ops feed, the per-op retry, and the sync runs do not exist"
+        "Files and Services (empty with the ADR's wording",
+        "The ops feed, the per-op retry, and the sync runs do not exist",
+        "`/sync.retry` refuses with the wording",
+        "no `/ops` or run route is ever called",
+        "the flow refuses with the wording and nothing is called"
       ]
     ) {
       expect(text).not.toContain(retired)
@@ -1059,5 +1063,28 @@ describe("docs/LOCAL-APP.md's Cards section", () => {
     expect(text).toContain("Walkthrough joins the strip only when an artifact exists")
     expect(text).toContain("Owners closes the strip only when the change GET carried ownership")
     host.remove()
+  })
+
+  test("the sync and workspace claims name routes their seams call", async () => {
+    const text = await contract()
+    const seam = async (name: string): Promise<string> =>
+      (await readFile(new URL(`../state/seams/${name}.ts`, import.meta.url), "utf8")).replace(/\s+/g, " ")
+    const linear = await seam("LinearSeam")
+    const workspace = await seam("WorkspaceSeam")
+    /* The card's Retry is documented on its own backend's route, and the seam POSTs that route. */
+    expect(text).toContain("`/sync.retry <opId>` for a Linear op")
+    expect(linear).toContain("/ops/${encodeURIComponent(trimmed)}/retry`)")
+    /* The ops feed the doc describes is read rather than degraded. */
+    expect(text).toContain("then the durable ops newest first")
+    expect(linear).toContain("/ops?${params.toString()}`")
+    /* Files and Services are documented as bound facets, and the seam GETs both. */
+    expect(text).toContain("Files (the repository file card's own listing, bound to the workspace's routes)")
+    expect(workspace).toContain('workspacePath(repoId, workspaceId, "/files")')
+    expect(workspace).toContain('workspacePath(repoId, workspaceId, "/services")')
+    /* The issue card's link act is documented as a call, and the seam POSTs and DELETEs it. */
+    const issues = await seam("IssuesSeam")
+    expect(text).toContain("The act POSTs that identifier to the issue's own `linear-link` route")
+    expect(issues).toContain("`${issuesPath(repo)}/${number}/linear-link`, { method: \"DELETE\" }")
+    expect(issues).toContain('`${issuesPath(repo)}/${number}/linear-link`, { method: "POST",')
   })
 })
