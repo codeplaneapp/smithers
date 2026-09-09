@@ -370,7 +370,12 @@ export interface Service {
   // TODO(piece-6): fold into @smthrs/journal — needs ClockStore.get(flowName, executionId, clockName).
   readonly clock: (address: ClockAddress) => Effect.Effect<Option.Option<ClockRow>>
   // TODO(piece-6): fold into @smthrs/journal — needs ClockStore.scheduleFirstWriterWins(rowWithAbsoluteDueAtMs).
-  readonly scheduleClock: (row: ClockRow, owner?: OwnerId) => Effect.Effect<ScheduleClockOutcome>
+  /**
+   * Schedules a clock while the execution is running under the supplied owner.
+   * An existing clock wins unchanged, even after ownership is lost. If no
+   * clock exists and the ownership fence fails, the effect self-interrupts.
+   */
+  readonly scheduleClock: (row: ClockRow, owner: OwnerId) => Effect.Effect<ScheduleClockOutcome>
   // TODO(piece-6): fold into @smthrs/journal — needs ClockStore.completeOnce(address, completedAtMs).
   readonly completeClock: (
     address: ClockAddress,
@@ -932,60 +937,58 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
   )
 
   const scheduleClock: Service["scheduleClock"] = Effect.fn("DurableEngineState.scheduleClock")((row, owner) =>
-    owner === undefined
-      ? Effect.interrupt
-      : writer.write(
-        Effect.gen(function*() {
-          const inserted = yield* sql<ClockDatabaseRow>`
-            INSERT INTO flows_clock_deadlines (
-              flow_name,
-              execution_id,
-              clock_name,
-              deferred_name,
-              due_at_ms,
-              completed_at_ms
-            )
-            SELECT
-              ${row.flowName},
-              ${row.executionId},
-              ${row.clockName},
-              ${row.deferredName},
-              ${row.dueAtMs},
-              ${row.completedAtMs}
-            WHERE EXISTS (
-              SELECT 1
-              FROM flows_runs
-              WHERE run_id = ${row.executionId}
-                AND status = 'running'
-                AND owner_host_id = ${owner.hostId}
-                AND owner_pid = ${owner.pid}
-                AND owner_nonce = ${owner.nonce}
-            )
-            ON CONFLICT (flow_name, execution_id, clock_name) DO NOTHING
-            RETURNING
-              flow_name AS "flowName",
-              execution_id AS "executionId",
-              clock_name AS "clockName",
-              deferred_name AS "deferredName",
-              due_at_ms AS "dueAtMs",
-              completed_at_ms AS "completedAtMs"
-          `
-          if (inserted[0] !== undefined) {
-            return {
-              _tag: "Scheduled" as const,
-              row: yield* decodeClockRow(inserted[0])
-            }
+    writer.write(
+      Effect.gen(function*() {
+        const inserted = yield* sql<ClockDatabaseRow>`
+          INSERT INTO flows_clock_deadlines (
+            flow_name,
+            execution_id,
+            clock_name,
+            deferred_name,
+            due_at_ms,
+            completed_at_ms
+          )
+          SELECT
+            ${row.flowName},
+            ${row.executionId},
+            ${row.clockName},
+            ${row.deferredName},
+            ${row.dueAtMs},
+            ${row.completedAtMs}
+          WHERE EXISTS (
+            SELECT 1
+            FROM flows_runs
+            WHERE run_id = ${row.executionId}
+              AND status = 'running'
+              AND owner_host_id = ${owner.hostId}
+              AND owner_pid = ${owner.pid}
+              AND owner_nonce = ${owner.nonce}
+          )
+          ON CONFLICT (flow_name, execution_id, clock_name) DO NOTHING
+          RETURNING
+            flow_name AS "flowName",
+            execution_id AS "executionId",
+            clock_name AS "clockName",
+            deferred_name AS "deferredName",
+            due_at_ms AS "dueAtMs",
+            completed_at_ms AS "completedAtMs"
+        `
+        if (inserted[0] !== undefined) {
+          return {
+            _tag: "Scheduled" as const,
+            row: yield* decodeClockRow(inserted[0])
           }
-          const existing = yield* selectClock(row)
-          if (existing[0] !== undefined) {
-            return {
-              _tag: "Existing" as const,
-              row: yield* decodeClockRow(existing[0])
-            }
+        }
+        const existing = yield* selectClock(row)
+        if (existing[0] !== undefined) {
+          return {
+            _tag: "Existing" as const,
+            row: yield* decodeClockRow(existing[0])
           }
-          return yield* Effect.interrupt
-        })
-      ).pipe(Effect.orDie)
+        }
+        return yield* Effect.interrupt
+      })
+    ).pipe(Effect.orDie)
   )
 
   const completeClock: Service["completeClock"] = Effect.fn("DurableEngineState.completeClock")((
@@ -1719,7 +1722,6 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
         // Mirrors the SQL fence: creation requires the presented owner to
         // currently run the execution; a lost fence surfaces as
         // self-interruption, an existing row wins regardless.
-        if (owner === undefined) return yield* Effect.interrupt
         const stored = yield* snapshotClock(row)
         const key = clockKey(stored)
         const existing = clocks.get(key)

@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import { expectTypeOf } from "vitest"
 import type * as DurableEngineState from "../../src/DurableEngineState.ts"
 
 export interface HarnessContext {
@@ -362,6 +363,11 @@ export const describeContract = (harness: Harness): void => {
         expect(result).toEqual({ clocks: [], deferreds: [], waiting: [] })
       }))
 
+    it("requires an owner to schedule a clock", () => {
+      expectTypeOf<Parameters<DurableEngineState.Service["scheduleClock"]>>()
+        .toEqualTypeOf<[row: DurableEngineState.ClockRow, owner: Ownership.OwnerId]>()
+    })
+
     it.effect("fences clock creation to the current owner of a running run", () =>
       Effect.gen(function*() {
         const clockRow: DurableEngineState.ClockRow = {
@@ -376,20 +382,20 @@ export const describeContract = (harness: Harness): void => {
           Effect.gen(function*() {
             yield* context.seedRun("clock-run", owner, "running")
             const fenced = yield* awaitExit(context.state.scheduleClock(clockRow, otherOwner))
-            const missingOwner = yield* awaitExit(context.state.scheduleClock(clockRow))
             const afterFenced = yield* context.state.clock(clockRow)
             const scheduled = yield* context.state.scheduleClock(clockRow, owner)
             const duplicate = yield* context.state.scheduleClock({ ...clockRow, dueAtMs: 9_999 }, owner)
-            return { fenced, missingOwner, afterFenced, scheduled, duplicate }
+            const staleDuplicate = yield* context.state.scheduleClock({ ...clockRow, dueAtMs: 9_999 }, otherOwner)
+            return { fenced, afterFenced, scheduled, duplicate, staleDuplicate }
           })
         )
 
         expect(Exit.isFailure(result.fenced) && Cause.hasInterruptsOnly(result.fenced.cause)).toBe(true)
-        expect(Exit.isFailure(result.missingOwner) && Cause.hasInterruptsOnly(result.missingOwner.cause)).toBe(true)
         expect(Option.isNone(result.afterFenced)).toBe(true)
         expect(result.scheduled).toEqual({ _tag: "Scheduled", row: clockRow })
         // First-writer-wins: a duplicate schedule returns the existing row.
         expect(result.duplicate).toEqual({ _tag: "Existing", row: clockRow })
+        expect(result.staleDuplicate).toEqual({ _tag: "Existing", row: clockRow })
       }))
 
     it.effect("completes a clock exactly once and lists only due, uncompleted clocks", () =>

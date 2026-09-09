@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database"
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { type Ownership } from "@smthrs/run-store"
 import * as Cause from "effect/Cause"
@@ -47,6 +48,32 @@ const insertOwnedRun = (runId: string) =>
   })
 
 describe("SQL DurableEngineState", () => {
+  it.effect("allocates parent sequences using the global sequence index", () =>
+    Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      const previous = Migrations.sets.map((set) => ({
+        ...set,
+        migrations: Object.fromEntries(
+          Object.entries(set.migrations).filter(([key]) =>
+            !(set.namespace === "engine-store" && key === "0007_run_parent_sequence")
+          )
+        )
+      }))
+      yield* DatabaseMigrations.run(previous)
+      const state = yield* DurableEngineState.make
+      yield* state.recordRunParent("unrelated-child", "unrelated-parent")
+      yield* Migrations.run
+      expect(yield* Migrations.run).toEqual([])
+      yield* state.recordRunParent("child", "parent")
+      const plan = yield* sql<{ detail: string }>`
+        EXPLAIN QUERY PLAN SELECT COALESCE(MAX(seq), 0) + 1 FROM flows_run_parents WHERE TRUE
+      `
+      expect(plan.map((row) => row.detail)).toEqual([
+        "SEARCH flows_run_parents USING COVERING INDEX flows_run_parents_seq_idx"
+      ])
+      expect(yield* state.runParents("child")).toEqual([{ childId: "child", parentId: "parent", seq: 2 }])
+    }).pipe(Effect.provide(TestDatabase.layer)))
+
   it.effect("preserves the first deferred completion across competing services", () =>
     Effect.gen(function*() {
       const result = yield* withCrypto(

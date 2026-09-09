@@ -27,6 +27,7 @@ import { planInputs } from "./migrations/0003_plan_inputs.ts"
 import { planEnvironment } from "./migrations/0004_plan_environment.ts"
 import { planMerges } from "./migrations/0005_plan_merges.ts"
 import { executionListing } from "./migrations/0006_execution_listing.ts"
+import { runParentSequence } from "./migrations/0007_run_parent_sequence.ts"
 
 /**
  * Engine-store's own namespaced migration set.
@@ -43,7 +44,8 @@ export const set: DatabaseMigrations.MigrationSet = {
     "0003_plan_inputs": planInputs,
     "0004_plan_environment": planEnvironment,
     "0005_plan_merges": planMerges,
-    "0006_execution_listing": executionListing
+    "0006_execution_listing": executionListing,
+    "0007_run_parent_sequence": runParentSequence
   }
 }
 

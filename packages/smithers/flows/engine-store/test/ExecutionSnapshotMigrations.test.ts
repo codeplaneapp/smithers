@@ -20,7 +20,7 @@ describe("execution snapshot migration ladder", () => {
         migrations: Object.fromEntries(
           Object.entries(set.migrations).filter(([key]) =>
             !(set.namespace === "run-store" && key === "0003_execution_revisions") &&
-            !(set.namespace === "engine-store" && key === "0006_execution_listing")
+            !(set.namespace === "engine-store" && key >= "0006_execution_listing")
           )
         )
       }))
@@ -62,7 +62,7 @@ describe("execution snapshot migration ladder", () => {
             const heads = yield* sql<
               { migration_id: number }
             >`SELECT migration_id FROM flows_migrations WHERE migration_id BETWEEN 3000 AND 3999 ORDER BY migration_id`
-            expect(heads.map((row) => row.migration_id)).toEqual([3001, 3002, 3003, 3004, 3005, 3006])
+            expect(heads.map((row) => row.migration_id)).toEqual([3001, 3002, 3003, 3004, 3005, 3006, 3007])
           })
         )
         yield* onFile(

@@ -168,7 +168,7 @@ only after the mutation returns.
 | `deferred`               | `(address: DeferredAddress) => Effect<Option<DeferredRow>>`                                  |
 | `completeDeferred`       | `(row: DeferredRow) => Effect<CompleteDeferredOutcome>`                                      |
 | `clock`                  | `(address: ClockAddress) => Effect<Option<ClockRow>>`                                        |
-| `scheduleClock`          | `(row: ClockRow, owner?: OwnerId) => Effect<ScheduleClockOutcome>`                           |
+| `scheduleClock`          | `(row: ClockRow, owner: OwnerId) => Effect<ScheduleClockOutcome>`                           |
 | `completeClock`          | `(address: ClockAddress, completedAtMs: number) => Effect<CompleteClockOutcome>`             |
 | `dueClocks`              | `(nowMs: number) => Effect<ReadonlyArray<ClockRow>>`                                         |
 | `completeRunClocks`      | `(executionId: string, completedAtMs: number) => Effect<void>`                               |
@@ -185,6 +185,14 @@ only after the mutation returns.
 | `runParents`             | `(childId: string) => Effect<ReadonlyArray<RunParentEdge>>`                                  |
 | `runChildren`            | `(parentId: string) => Effect<ReadonlyArray<RunParentEdge>>`                                 |
 | `transaction`            | `<A, E, R>(effect: Effect<A, E, R>) => Effect<A, E, R>`                                      |
+
+`scheduleClock` requires the execution's ownership token. Creation succeeds
+only while the run is running under that owner. An existing clock wins unchanged,
+even after ownership is lost. If no clock exists and the ownership fence fails,
+the effect self-interrupts.
+
+`recordRunParent` allocates `MAX(seq) + 1` in the serialized write transaction.
+Migration 0007 indexes `seq` so allocation does not scan retained parent history.
 
 `completeRunClocks` closes every uncompleted clock row of one run in a single
 statement, which a terminal transition does in its own transaction.
