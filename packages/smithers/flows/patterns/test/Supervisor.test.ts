@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
 import * as TestRuntime from "@smthrs/core/TestRuntime"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
@@ -383,6 +384,29 @@ describe("Supervisor", () => {
       expect(result).toEqual({ exhausted: false, rounds: 1, final: "done" })
       expect(entered).toEqual(["a", "b", "c", "d", "e", "f"])
       expect(peak).toBe(2)
+    }))
+
+  it.effect("propagates a worker defect instead of capturing it as a Failed outcome", () =>
+    Effect.gen(function*() {
+      const defect = new Error("the worker threw")
+      const exit = yield* Effect.exit(
+        Supervisor.run("goal", {
+          maxRounds: 1,
+          concurrency: 2,
+          plan: () => Effect.succeed({ tasks: [{ id: "a", workerType: "coder" }, { id: "b", workerType: "coder" }] }),
+          worker: ({ task }) => task.id === "b" ? Effect.die(defect) : Effect.succeed(`${task.id}-done`),
+          review: () => Effect.succeed({ allDone: true }),
+          finalize: ({ results }) => Effect.succeed(results)
+        })
+      )
+
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        // Only a typed failure is an outcome the review can read. A defect is a
+        // broken worker, so it fails the supervision as it would any other join.
+        expect(Cause.hasDies(exit.cause)).toBe(true)
+        expect(Result.getOrThrow(Cause.findDefect(exit.cause))).toBe(defect)
+      }
     }))
 
   it.effect("rejects a plan whose task ids repeat instead of reviewing one outcome twice", () =>

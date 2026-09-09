@@ -318,8 +318,10 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  * with bounded concurrency, review every task's latest outcome, and either
  * finalize or re-delegate the tasks the review named retriable.
  *
- * A worker failure is captured as a `Failed` outcome instead of failing the
- * supervision, so the review decides whether the task is worth another round.
+ * A typed worker failure is captured as a `Failed` outcome instead of failing
+ * the supervision, so the review decides whether the task is worth another
+ * round. Only a typed failure is an outcome: a worker defect, like an
+ * interruption, fails the supervision and cancels the workers still in flight.
  * The supervision ends as {@link Exhausted} when the round bound is reached or
  * when an unaccepted review names no retriable task, because nothing is left
  * to re-delegate.

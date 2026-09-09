@@ -270,6 +270,10 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  * returns a failure row is always listed in `failed`; it does not fail the
  * suite, because the row is the check's answer, not an error.
  *
+ * `continueOnFail` tolerates a typed check failure. A check that throws
+ * raises a defect, which fails the suite under either setting and cancels
+ * the checks still in flight.
+ *
  * `run` rejects the same suites `make` rejects, and it rejects them before any
  * check runs: an empty record, an empty check id, and a `concurrency` that is
  * not a positive safe integer each fail with a `PatternError`. An empty record

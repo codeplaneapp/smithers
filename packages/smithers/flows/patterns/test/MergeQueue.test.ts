@@ -1,8 +1,10 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import * as MergeQueue from "../src/MergeQueue.ts"
@@ -93,7 +95,7 @@ describe("MergeQueue", () => {
     expect(Graph.diagnostics(batched)).toEqual([])
   })
 
-  it("settles a declared quarantine with the runtime result shape", () => {
+  it("settles a declared quarantine with a tagged wire marker", () => {
     const graph = Graph.build(
       MergeQueue.make([{ id: "docs", flow: land }], { failurePolicy: "quarantine" }),
       "land"
@@ -327,6 +329,41 @@ describe("MergeQueue", () => {
       expect(ran).toEqual(["first", "second", "third"])
       expect(result.landed).toEqual([{ id: "first", output: "first" }, { id: "third", output: "third" }])
       expect(result.quarantined).toEqual([{ id: "second", error: "second conflicts" }])
+    }))
+
+  it.effect("quarantines a runtime failure as an untagged entry", () =>
+    Effect.gen(function*() {
+      const result = yield* MergeQueue.run("main", {
+        members: [{ id: "docs", run: () => Effect.fail("docs conflicts") }],
+        failurePolicy: "quarantine"
+      })
+
+      // The declaration tags its marker because a plan carries it beside
+      // arbitrary successful values. `run` returns landed and quarantined
+      // members in separate arrays, so the entry needs no tag to be read.
+      expect(result.quarantined).toEqual([{ id: "docs", error: "docs conflicts" }])
+      expect(Object.hasOwn(result.quarantined[0]!, "_tag")).toBe(false)
+    }))
+
+  it.effect("propagates a member defect instead of quarantining it", () =>
+    Effect.gen(function*() {
+      const defect = new Error("the landing threw")
+      const exit = yield* Effect.exit(
+        MergeQueue.run("main", {
+          members: [
+            { id: "first", run: () => Effect.succeed("first") },
+            { id: "second", run: () => Effect.die(defect) }
+          ],
+          failurePolicy: "quarantine"
+        })
+      )
+
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        // `quarantine` holds back a member that fails, not one that is broken.
+        expect(Cause.hasDies(exit.cause)).toBe(true)
+        expect(Result.getOrThrow(Cause.findDefect(exit.cause))).toBe(defect)
+      }
     }))
 
   it.effect("never lands more than the concurrency bound at once", () =>

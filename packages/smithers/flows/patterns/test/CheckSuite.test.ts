@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
 import * as TestRuntime from "@smthrs/core/TestRuntime"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
@@ -358,6 +359,27 @@ describe("CheckSuite", () => {
         strategy: "majority",
         verdict: true
       })
+    }))
+
+  it.effect("propagates a check defect even when continueOnFail is true", () =>
+    Effect.gen(function*() {
+      const defect = new Error("the check threw")
+      const exit = yield* Effect.exit(
+        CheckSuite.run("head", {
+          strategy: "all-pass",
+          concurrency: 2,
+          continueOnFail: true,
+          checks: { lint: () => Effect.succeed({ ok: true }), typecheck: () => Effect.die(defect) }
+        })
+      )
+
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        // `continueOnFail` tolerates a check that fails, not one that is broken:
+        // a defect has no row to list in the verdict.
+        expect(Cause.hasDies(exit.cause)).toBe(true)
+        expect(Result.getOrThrow(Cause.findDefect(exit.cause))).toBe(defect)
+      }
     }))
 
   it.effect("fails a check whose row reports a failure", () =>

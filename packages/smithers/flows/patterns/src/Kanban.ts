@@ -374,7 +374,9 @@ const pass = <It extends Item, Out, E, R>(
  * `concurrency` items are in flight in that column, and a column starts only
  * after the preceding column has settled for every item. An item a column
  * rejects is dropped from the board and listed in `failed`; the other items
- * keep moving.
+ * keep moving. A column rejects an item by failing on the typed channel: a
+ * card that throws raises a defect, which fails the pass and cancels the
+ * cards beside it.
  *
  * The board runs `maxIterations` passes over the same items, one when the
  * option is absent. The old `<Kanban>` component defaulted that bound to five,

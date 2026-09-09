@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
 import * as TestRuntime from "@smthrs/core/TestRuntime"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
@@ -319,6 +320,28 @@ describe("Kanban", () => {
       expect(result.failed).toEqual([{ id: "b", column: "triage", error: "b is blocked" }])
       expect(seen).toEqual(["triage:a", "triage:b", "triage:c", "build:a", "build:c"])
       expect(result.board.b).toEqual(undefined)
+    }))
+
+  it.effect("propagates a card defect instead of dropping the item from the board", () =>
+    Effect.gen(function*() {
+      const defect = new Error("the card threw")
+      const exit = yield* Effect.exit(
+        Kanban.run([{ id: "a" }, { id: "b" }], {
+          concurrency: 2,
+          columns: [{
+            name: "triage",
+            run: ({ item }) => item.id === "b" ? Effect.die(defect) : Effect.succeed("ok")
+          }]
+        })
+      )
+
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        // A column rejects an item by failing. A defect is not a rejection, so
+        // it fails the pass rather than listing the card in `failed`.
+        expect(Cause.hasDies(exit.cause)).toBe(true)
+        expect(Result.getOrThrow(Cause.findDefect(exit.cause))).toBe(defect)
+      }
     }))
 
   it.effect("does not admit a column appended while a pass is in flight", () =>

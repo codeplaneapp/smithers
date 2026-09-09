@@ -18,6 +18,8 @@ Options that change behavior are declared through `Node.capture`, so two plans t
 
 A declared flow joins its members with `Node.andThen`, `Node.all`, and `Node.catch`. The first two do not continue past a failed member; `Node.catch` is the recovery arm that lets a declaration continue anyway. `CheckSuite`'s `continueOnFail`, `Kanban`'s per-item continuation, and `MergeQueue`'s `failurePolicy: "quarantine"` are declared through that arm, so the plan tolerates what `run` tolerates. `Runbook`'s `onDeny: "skip"` stays a `run` option and `make` refuses it: a denial and a step failure share one error channel, so an arm around the gated step would also declare that a runbook continues past a failed critical step. Each section below repeats this where it applies.
 
+Every arm on this page isolates typed failures only, the rule [`Quarantine`](./api.md#quarantine) states. A member that throws raises a defect, and a defect is not a tolerated outcome: it fails the run and cancels the members beside it. Interruption propagates for the same reason. [`Sidecar`](./loops.md#sidecar) quarantines a shadow defect, because a shadow is an experiment rather than a member of the result.
+
 ## `Supervisor`
 
 A boss plans the work, workers execute it in parallel, the boss reviews every outcome, and only the tasks the review names retriable run again.
@@ -55,7 +57,7 @@ Task ids such as `"__proto__"`, `"constructor"`, and `"toString"` are supported.
 
 `run` plans once, then per round:
 
-1. Runs the pending tasks through `worker` with `Effect.forEach` at `concurrency`. A worker failure is captured as a `Failed` outcome rather than failing the supervision, so the review sees it.
+1. Runs the pending tasks through `worker` with `Effect.forEach` at `concurrency`. A typed worker failure is captured as a `Failed` outcome rather than failing the supervision, so the review sees it. A worker defect is not an outcome: it fails the supervision and cancels the workers still in flight.
 2. Calls `review` with every task's latest outcome.
 3. Finalizes and returns `{ exhausted: false, rounds, final }` when the review is done, which means the review carries `allDone: true` or is the value `true`.
 4. Otherwise re-delegates only the task ids listed in the review's `retriable` array.
@@ -150,6 +152,8 @@ const verdict = CheckSuite.verdict(results, "all-pass")
 
 With `continueOnFail: false` the first failing check fails the suite and the remaining checks do not run. With `continueOnFail: true` every check runs and a failed one is listed in the verdict's `failed`. Its original error is retained in `errors[checkId]`, including falsy error values.
 
+`continueOnFail` tolerates a typed check failure. A check that throws raises a defect, which fails the suite under either setting and cancels the checks still in flight.
+
 A check that succeeds but returns a failure row is always listed in `failed`. It does not fail the suite, because the row is the check's answer, not an error. A row's `error` is retained when it is other than `undefined`, `null`, or `false`.
 
 `CheckResult.error` is optional. `Verdict.errors` is a record keyed by check id, empty when no errors were retained. A failed check without an error has no entry. Errors do not change the verdict decision; a majority or any-pass verdict can pass while retaining failed checks' errors.
@@ -196,7 +200,7 @@ A column joins its batch with `Quarantine.all` under the `quarantine` policy: ev
 | `failed`     | `{ id, column, error }` for each item a column rejected                              |
 | `iterations` | Passes the board ran                                                                 |
 
-A column rejects an item by failing. The item is dropped from the board and listed in `failed`; the other items keep moving, and the column that rejected it is named. A rejected item never reaches a later column, so `board` has no row for an item the first column rejected.
+A column rejects an item by failing on the typed channel. The item is dropped from the board and listed in `failed`; the other items keep moving, and the column that rejected it is named. A rejected item never reaches a later column, so `board` has no row for an item the first column rejected. A card that throws is not a rejection: the defect fails the pass and cancels the cards beside it.
 
 `maxIterations` is the number of passes the board runs over the same items, and defaults to one. `until` stops the board early, after the pass whose result satisfies the predicate, and requires `maxIterations`, because a predicate that never holds would otherwise run forever. Each pass starts from an empty board, and the returned board is the last pass's.
 
@@ -276,7 +280,7 @@ A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1
 
 `concurrency` defaults to 1: a merge queue serializes landings unless a caller widens it deliberately. At concurrency 1 the queue is a plain `Node.andThen` chain with no `Node.all` at all, so the declared plan admits exactly one landing at a time. Above 1, members are batched into `Node.all` groups of `concurrency` and the batches are sequenced. Only a `quarantine` queue may widen it: `halt` promises that no member behind a failure lands, and a batch starts its members before any of them has failed, so `make` and `run` refuse `halt` above concurrency 1 with a `PatternError`.
 
-Each call carries `{ id, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue. Under the quarantine policy, a failed declaration settles to MergeQueue's structural wire marker `{ _tag: "Quarantined", id, error }`, the same shape as the runtime `Quarantined` result, and MergeQueue keeps landed and quarantined results in separate arrays so the marker never classifies an arbitrary successful value.
+Each call carries `{ id, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue. Under the quarantine policy, a failed declaration settles to MergeQueue's structural wire marker `{ _tag: "Quarantined", id, error }`. The tag is the declaration's alone: a plan carries a settled member beside arbitrary successful values, so the marker has to say what it is. A runtime `Quarantined` entry is `{ id, error }` and carries no tag, because `run` returns landed and quarantined members in separate arrays.
 
 `failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as MergeQueue's `Quarantined` result, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and it is always the serial chain, because a halting queue is refused above concurrency 1.
 
@@ -284,12 +288,14 @@ Each call carries `{ id, position, input }`, so a built graph names each member'
 
 ### Execution
 
-`run(input, options)` returns `{ landed, quarantined, order }`.
+`run(input, options)` returns `{ landed, quarantined, order }`. A landed entry is `{ id, output }` and a quarantined entry is `{ id, error }`; neither is tagged, because the arrays already separate them.
 
 | `failurePolicy` | A failing member                                                                 |
 | --------------- | -------------------------------------------------------------------------------- |
 | `"halt"`        | Fails the queue. No member behind it has started, so none lands                  |
 | `"quarantine"`  | Is recorded in `quarantined` and does not land. The members behind it still land |
+
+Both policies read the typed failure channel. A member that throws raises a defect, which fails the queue under either policy and cancels the landings still in flight.
 
 ## Worked example
 

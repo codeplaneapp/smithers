@@ -244,10 +244,11 @@ const validate = (
  * above concurrency 1, because a batch would start a member behind a failure
  * before the failure is known.
  *
- * The wire marker is `{ _tag: "Quarantined", id, error }`, the same shape as
- * the runtime {@link Quarantined} result, and MergeQueue keeps landed and
- * quarantined results in separate arrays so the marker never classifies an
- * arbitrary successful value.
+ * The wire marker is `{ _tag: "Quarantined", id, error }`. The tag is the
+ * declaration's alone: a plan carries a settled member beside arbitrary
+ * successful values, so the marker has to say what it is. A runtime
+ * {@link Quarantined} entry is `{ id, error }` and carries no tag, because
+ * {@link run} returns landed and quarantined members in separate arrays.
  *
  * `make` throws a `PatternError` when there are no members, when two members
  * share an id, when `concurrency` is not a positive safe integer, when
@@ -359,7 +360,13 @@ export const make = (
  * queue would have started the next member before the failure was known.
  * `run` fails with a `PatternError` for `halt` above concurrency 1, before
  * any member starts. Under `"quarantine"` the failure is recorded, the member
- * does not land, and the members behind it still do.
+ * does not land, and the members behind it still do. A quarantined entry is
+ * `{ id, error }`, untagged, because `landed` and `quarantined` are separate
+ * arrays.
+ *
+ * Both policies read the typed failure channel. A member that throws raises a
+ * defect, which fails the queue under either policy and cancels the landings
+ * still in flight.
  *
  * `run` snapshots `members`, each member's `id`, `priority`, and `run`, and
  * every option at the call, so a later edit to the caller's array, records,
