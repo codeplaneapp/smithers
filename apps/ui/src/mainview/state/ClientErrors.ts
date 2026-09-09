@@ -94,10 +94,20 @@ export interface ClientErrorReporter {
  * A stack is the part worth reading, so it wins over the message when the
  * thrown value carries one. A rejection reason is frequently not an Error at
  * all — a string, a Response, undefined — and String() keeps those legible
- * rather than dropping them.
+ * rather than dropping them. Values with throwing conversion hooks fall back
+ * to an object label, or a fixed label if even that conversion fails.
  */
-export const errorMessage = (error: unknown): string =>
-  error instanceof Error ? (error.stack ?? error.message) : String(error)
+export const errorMessage = (error: unknown): string => {
+  try {
+    return error instanceof Error ? (error.stack ?? error.message) : String(error)
+  } catch {
+    try {
+      return Object.prototype.toString.call(error)
+    } catch {
+      return "Unknown error"
+    }
+  }
+}
 
 const encoder = new TextEncoder()
 
@@ -171,12 +181,12 @@ export const createClientErrorReporter = (
   let sent = 0
 
   const report = (kind: ClientErrorKind, error: unknown): void => {
-    if (sent >= limit) return
-    // Counted before the send, not after: the cap bounds attempts, so a
-    // route that is failing cannot be retried into a storm.
-    sent += 1
-    const body = clientErrorBody(kind, error, now(), pathname())
     try {
+      if (sent >= limit) return
+      // Counted before construction and sending: the cap bounds attempts,
+      // so any failure cannot be retried into a storm.
+      sent += 1
+      const body = clientErrorBody(kind, error, now(), pathname())
       // keepalive so a report survives the navigation that a crash often
       // triggers. The browser allows 64 KiB of keepalive bodies in flight
       // at once, which is four reports at this cap, and a crashing page
@@ -190,9 +200,8 @@ export const createClientErrorReporter = (
       })
       void Promise.resolve(sending).catch(() => undefined)
     } catch {
-      // A fetch that throws synchronously (no global fetch, a blocked
-      // origin) must not become a second uncaught error on top of the
-      // first one.
+      // Construction, metadata callbacks, and synchronous fetch failures
+      // must not become a second uncaught error on top of the first one.
     }
   }
 

@@ -560,6 +560,13 @@ explicit refresh. Nothing re-reads on its own. `/files.list` and
 `/files.read` accept a global path (`/files.read /org/repo/README.md`) when
 the two-segment prefix is a repository the app knows.
 
+## Client error reporting
+
+`ClientErrors.report` never throws or awaits delivery. Non-stringifiable
+rejection reasons use an object label, then `Unknown error` if that also fails.
+Report construction, clock/pathname callbacks, and transport failures are
+contained. Failed construction and sends count toward the per-page attempt cap.
+
 ## Build and verification
 
 ```sh

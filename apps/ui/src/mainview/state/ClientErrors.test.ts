@@ -224,6 +224,36 @@ describe("the client-error reporter", () => {
     expect(String(bodyOf(sends[0] as Sent)["message"]).startsWith("yyy")).toBe(true)
   })
 
+  test.each([
+    ["null-prototype object", Object.create(null), "[object Object]"],
+    ["symbol", Symbol("rejected"), "Symbol(rejected)"],
+    ["throwing conversion hooks", {
+      [Symbol.toPrimitive]() { throw new Error("cannot stringify") },
+      get [Symbol.toStringTag]() { throw new Error("cannot label") }
+    }, "Unknown error"]
+  ] as const)("delivers a report for a %s rejection reason without throwing", (_name, reason, message) => {
+    const { sends, fetchImpl } = recordingFetch()
+    const reporter = createClientErrorReporter({ fetchImpl, pathname: () => "/" })
+    expect(() => reporter.report("unhandledrejection", reason)).not.toThrow()
+    expect(sends).toHaveLength(1)
+    expect(bodyOf(sends[0] as Sent)).toMatchObject({ kind: "unhandledrejection", message })
+    expect(reporter.reported()).toBe(1)
+  })
+
+  test.each([
+    ["clock callback", { now: () => { throw new Error("clock failed") } }],
+    ["pathname callback", { pathname: () => { throw new Error("location failed") } }],
+    ["date serialization", { now: () => new Date(NaN) }]
+  ] as const)("contains failures in %s and still caps attempts", (_name, options) => {
+    const { sends, fetchImpl } = recordingFetch()
+    const reporter = createClientErrorReporter({ fetchImpl, pathname: () => "/", limit: 2, ...options })
+    for (let index = 0; index < 3; index += 1) {
+      expect(() => reporter.report("error", new Error("boom"))).not.toThrow()
+    }
+    expect(sends).toHaveLength(0)
+    expect(reporter.reported()).toBe(2)
+  })
+
   test("stops after the per-page cap however many times it is called", () => {
     const { sends, fetchImpl } = recordingFetch()
     const reporter = createClientErrorReporter({ fetchImpl, pathname: () => "/" })
