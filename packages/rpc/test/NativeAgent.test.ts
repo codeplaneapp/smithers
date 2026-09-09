@@ -1,19 +1,121 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, test } from "vitest"
-import { AgentTurnFrameSchema, isAgentTurnFrame } from "../src/NativeAgent.ts"
+import { AgentTurnFrameSchema, decodeAgentTurnFrame } from "../src/NativeAgent.ts"
 import type { AgentTurnFrame } from "../src/NativeAgent.ts"
 
 const parses = (value: unknown): boolean => AgentTurnFrameSchema.safeParse(value).success
 
+/*
+ * A card whose nested run omits `labels` — `RunRecordSchema` defaults it. The
+ * frame type declares the field required, so only the decoded frame carries
+ * what a subscriber reads.
+ */
+const runHistoryCard = {
+  id: "history",
+  kind: "run-history",
+  title: "Runs",
+  status: "active",
+  createdAt: 0,
+  ordinal: 0,
+  payload: {
+    repoId: "repo",
+    status: "done",
+    runs: [{ runId: "run-1", repoId: "repo", label: "//:test", status: "done", startedAt: 0 }]
+  }
+}
+
 describe("AgentTurnFrame — proxy family", () => {
-  test("delta and done frames parse as before", () => {
-    expect(parses({ runId: "r1", type: "delta", kind: "text", text: "hi" })).toBe(true)
-    expect(parses({ runId: "r1", type: "done", reason: "stop" })).toBe(true)
+  /* The frames the client store acts on, one valid instance each. */
+  const accepted: ReadonlyArray<readonly [string, unknown]> = [
+    ["delta", { runId: "r1", type: "delta", kind: "text", text: "hi" }],
+    ["done", { runId: "r1", type: "done", reason: "stop" }],
+    ["done, cancelled with an error", {
+      runId: "r1",
+      type: "done",
+      reason: "cancelled",
+      error: "the user stopped the turn"
+    }],
+    ["card", { runId: "r1", type: "card", card: runHistoryCard }],
+    ["card.update", {
+      runId: "r1",
+      type: "card.update",
+      id: "history",
+      patch: { kind: "run-history", title: "Runs (3)" }
+    }],
+    ["tool_call", {
+      runId: "r1",
+      type: "tool_call",
+      call_id: "c1",
+      name: "files.read",
+      arguments: JSON.stringify({ path: "README.md" })
+    }],
+    ["park carrying a card", { runId: "r1", type: "park", code: "approval", card: runHistoryCard }]
+  ]
+
+  const rejected: ReadonlyArray<readonly [string, unknown]> = [
+    ["a frame without runId", { type: "delta", kind: "text", text: "hi" }],
+    ["done with an unknown reason", { runId: "r1", type: "done", reason: "abandoned" }],
+    ["a card of an unknown kind", { runId: "r1", type: "card", card: { ...runHistoryCard, kind: "runs" } }],
+    ["a card whose payload misses a required field", {
+      runId: "r1",
+      type: "card",
+      card: { ...runHistoryCard, payload: { repoId: "repo", status: "done" } }
+    }],
+    ["card.update without a kind", { runId: "r1", type: "card.update", id: "history", patch: { title: "Runs (3)" } }],
+    ["card.update whose payload contradicts its kind", {
+      runId: "r1",
+      type: "card.update",
+      id: "history",
+      patch: { kind: "run-history", payload: { repoId: 5 } }
+    }],
+    ["tool_call without arguments", { runId: "r1", type: "tool_call", call_id: "c1", name: "files.read" }],
+    ["tool_call whose arguments are not a string", {
+      runId: "r1",
+      type: "tool_call",
+      call_id: "c1",
+      name: "files.read",
+      arguments: { path: "README.md" }
+    }],
+    ["park carrying a malformed card", {
+      runId: "r1",
+      type: "park",
+      code: "approval",
+      card: { ...runHistoryCard, payload: {} }
+    }]
+  ]
+
+  test("every frame the client store acts on parses", () => {
+    expect(accepted.map(([name, value]) => [name, parses(value)])).toEqual(accepted.map(([name]) => [name, true]))
   })
 
-  test("a frame without runId is rejected", () => {
-    expect(parses({ type: "delta", kind: "text", text: "hi" })).toBe(false)
+  test("the decoder answers a frame for each of them", () => {
+    expect(accepted.map(([name, value]) => [name, decodeAgentTurnFrame(value) !== null]))
+      .toEqual(accepted.map(([name]) => [name, true]))
+  })
+
+  test("a malformed instance of each frame is rejected", () => {
+    expect(rejected.map(([name, value]) => [name, parses(value)])).toEqual(rejected.map(([name]) => [name, false]))
+  })
+
+  test("the decoder answers null for each of them", () => {
+    expect(rejected.map(([name, value]) => [name, decodeAgentTurnFrame(value)]))
+      .toEqual(rejected.map(([name]) => [name, null]))
+  })
+
+  test("the decoder applies nested card defaults the input omitted", () => {
+    // The wire value never carried the field the frame type declares required.
+    expect(Object.hasOwn(runHistoryCard.payload.runs[0]!, "labels")).toBe(false)
+    const frame = decodeAgentTurnFrame({ runId: "r1", type: "card", card: runHistoryCard })
+    if (frame === null || frame.type !== "card" || frame.card.kind !== "run-history") {
+      throw new Error("expected a decoded run-history card frame")
+    }
+    expect(frame.card.payload.runs[0]!.labels).toEqual([])
+  })
+
+  test("the decoder answers null for a value that is not an object", () => {
+    expect(decodeAgentTurnFrame("{}")).toBe(null)
+    expect(decodeAgentTurnFrame(null)).toBe(null)
   })
 })
 
@@ -45,8 +147,8 @@ describe("AgentTurnFrame — chain family (DESIGN.md §14)", () => {
     }
   })
 
-  test("isAgentTurnFrame guards the chain family too", () => {
-    for (const frame of frames) expect(isAgentTurnFrame(frame)).toBe(true)
+  test("the decoder answers the chain family too", () => {
+    for (const frame of frames) expect(decodeAgentTurnFrame(frame)).toEqual(frame)
   })
 
   test("verdict, gate kind, outcome, and park code are closed vocabularies", () => {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { localCapabilities } from "@smthrs/rpc/HostCapabilities"
 import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "@smthrs/rpc/LocalApp"
-import { isAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import { decodeAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "@smthrs/rpc/LocalSession"
 import { createPtyManager } from "./Pty"
@@ -69,8 +69,9 @@ const readFrames = async (response: Response): Promise<Array<AgentTurnFrame>> =>
   const text = await response.text()
   return text.split("\n").filter((line) => line.trim() !== "").map((line) => {
     const parsed: unknown = JSON.parse(line)
-    if (!isAgentTurnFrame(parsed)) throw new Error(`not a frame: ${line}`)
-    return parsed
+    const frame = decodeAgentTurnFrame(parsed)
+    if (frame === null) throw new Error(`not a frame: ${line}`)
+    return frame
   })
 }
 

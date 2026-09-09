@@ -1,5 +1,5 @@
 import { CANCEL_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
-import { isAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import { decodeAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { AgentTurnFrame, FetchLike, StartAgentTurnResult, TurnRefusal } from "@smthrs/rpc/NativeAgent"
 import type { AgentPort } from "../runtime/AgentPort"
 
@@ -122,8 +122,12 @@ const streamFrames = async (
       } catch {
         continue
       }
-      if (!isAgentTurnFrame(parsed) || parsed.runId !== expectedRunId) continue
-      if (parsed.type === "done") {
+      // Publish the decoded frame, never the raw JSON: the card schemas
+      // default nested fields (`RunRecord.labels`) that subscribers read
+      // through the frame type.
+      const frame = decodeAgentTurnFrame(parsed)
+      if (frame === null || frame.runId !== expectedRunId) continue
+      if (frame.type === "done") {
         settled = true
         // Release the turn's cancel handle BEFORE the terminal frame is
         // published: a tool-loop continuation leg re-POSTs this runId from
@@ -132,7 +136,7 @@ const streamFrames = async (
         // outright.
         onTerminal?.()
       }
-      publish(parsed)
+      publish(frame)
     }
     if (done || settled) break
   }
