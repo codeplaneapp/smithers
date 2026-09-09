@@ -7,7 +7,8 @@
  * caller's graph. Re-driving the parent reuses the children's recorded results.
  *
  * The final scenario exposes a flow as an agent tool. That handler chooses an
- * explicit execution ID so repeated calls refer to the intended child work.
+ * execution ID from the call identity and target so replay reuses the intended
+ * child work and distinct calls or targets open separate runs.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Agent from "@smthrs/agent/Agent"
@@ -16,6 +17,7 @@ import * as Budget from "@smthrs/agent/Budget"
 import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import * as Digest from "@smthrs/core/Digest"
 import * as Effects from "@smthrs/core/Effects"
 import * as CoreFlow from "@smthrs/core/Flow"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
@@ -104,21 +106,14 @@ export const CompileTool = CoreFlow.make({
 })
 
 /**
- * The execution id the tool's handler runs `examples/Compile` under.
- *
- * A constant, because the handler owns this decision. A `.child()` boundary
- * derives the id from the parent and the node address; a tool call has no
- * boundary to derive it from, so a handler that wants at-most-once has to name
- * an id that is stable for the same work.
- */
-export const toolRunId = "compile-by-tool"
-
-/**
  * The tool source a host binds so a cell can reach the flow.
  *
  * The handler needs whatever the flow needs: the engine, the crypto the
  * execution id is derived with, and the action implementations the body calls.
  * The host hands it exactly that context and nothing else.
+ *
+ * The execution id hashes the complete replay-stable call identity and target.
+ * Replaying that work reuses its result; another call or target gets its own run.
  */
 export const compileSource = (
   services: Context.Context<
@@ -129,9 +124,11 @@ export const compileSource = (
     FlowBinding.provide(
       FlowBinding.make({
         flow: CompileTool,
-        handler: ({ target }) =>
+        handler: ({ target }, call) =>
           Effect.map(
-            Compile.execute({ target }, { executionId: toolRunId }),
+            Compile.execute({ target }, {
+              executionId: `compile-by-tool/${Digest.digest(Digest.canonical({ identity: { ...call.identity }, target }))}`
+            }),
             (bundle) => ({ bundle })
           )
       }),
@@ -346,8 +343,10 @@ export const main = (filename: string): Effect.Effect<Summary> =>
 
         // The tool call opened a run of its own, linked to the run the step
         // was executing in.
-        const toolRun = yield* runs.get(toolRunId)
-        const toolParents = yield* state.runParents(toolRunId)
+        const [toolEdge] = yield* state.runChildren(builderRunId)
+        if (toolEdge === undefined) return yield* Effect.die(new Error("The compile tool did not open a child run"))
+        const toolRun = yield* runs.get(toolEdge.childId)
+        const toolParents = yield* state.runParents(toolRun.runId)
 
         return {
           report: first,
