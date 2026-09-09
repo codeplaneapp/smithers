@@ -1413,7 +1413,7 @@ export const unit = Flow.make(unitTag, {
               }
             ))
 
-        return Node.catch(
+        const settled = Node.catch(
           Node.bindPlanned(
             Transform.captureAction.call({ outline, checkpoint }),
             (brief) => round(0, Transform.action.call({ unit: brief }))
@@ -1423,6 +1423,16 @@ export const unit = Flow.make(unitTag, {
             onFailure: (failure) => settleUnrun(failure.message)
           }
         )
+        // A schema-filtered catch conservatively retains its input errors:
+        // refinements can reject values without narrowing their TypeScript type.
+        // AgentFailure is the same complete union declared by Transform and
+        // Repair, so this catch handles every member of that union. Exclude
+        // only those errors; migration errors still propagate to the parent.
+        return settled as Node.Node<
+          UnitOutcome,
+          Exclude<Node.Error<typeof settled>, AgentAction.AgentFailure>,
+          UnitRequires
+        >
       }
     )
   }
