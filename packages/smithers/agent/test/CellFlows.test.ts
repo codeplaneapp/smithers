@@ -149,6 +149,23 @@ const awaitParked = (
     return yield* awaitParked(engine, flow, attempts - 1)
   })
 
+/**
+ * The host decision a compensable flow needs.
+ *
+ * `edit` and `apply_patch` declare the `compensable` tier, and the engine
+ * refuses to run a compensable action against a host that has named no
+ * boundary to snapshot. Nothing here rolls back, so the boundary is inert; what
+ * it stands for is a host having made that decision at all, which is what a
+ * production composition offering the editing flows has to do.
+ */
+const snapshotBoundary = Layer.succeed(FlowEngine.SnapshotBoundary)(
+  FlowEngine.SnapshotBoundary.of({
+    snapshot: () => Effect.succeed(undefined),
+    restore: () => Effect.void,
+    diff: () => Effect.succeed(Option.none())
+  })
+)
+
 /** Runs one body as the whole of one real durable flow execution. */
 const drive = <A, E>(
   body: Effect.Effect<A, E, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
@@ -172,7 +189,11 @@ const drive = <A, E>(
     settled = Deferred.makeUnsafe<Outcome>()
     yield* engine.resume(flow, "exec-1")
     return yield* Deferred.await(settled)
-  }).pipe(Effect.provide(Layer.merge(FlowEngine.layerMemory, NodeCrypto.layer)), Effect.scoped, Effect.runPromise)
+  }).pipe(
+    Effect.provide(Layer.mergeAll(FlowEngine.layerMemory, NodeCrypto.layer, snapshotBoundary)),
+    Effect.scoped,
+    Effect.runPromise
+  )
 
 const eventsOf = (outcome: Outcome): ReadonlyArray<AgentEvent.AgentEvent> =>
   outcome._tag === "completed" ? outcome.value as ReadonlyArray<AgentEvent.AgentEvent> : []
@@ -202,18 +223,49 @@ const fileInfo = (size: number): FileSystem.File.Info => ({
   blocks: Option.none()
 })
 
-/** An in-memory kernel filesystem, enough for the standard read and write flows. */
+const directoryInfo: FileSystem.File.Info = { ...fileInfo(0), type: "Directory" }
+
+/** An in-memory kernel filesystem, enough for the standard filesystem flows. */
 const files = (initial: Readonly<Record<string, string>>) => {
   const contents = new Map(Object.entries(initial))
   const missing = FileSystem.makeNoop({})
+  // `ls`, `glob` and `grep` walk the tree instead of reading one named path, so
+  // the fixture answers for the directories its file paths imply.
+  const directories = (): ReadonlySet<string> => {
+    const found = new Set(["/"])
+    for (const path of contents.keys()) {
+      let current = ""
+      for (const part of path.split("/").slice(1, -1)) {
+        current = `${current}/${part}`
+        found.add(current)
+      }
+    }
+    return found
+  }
   const fileSystem = FileSystem.makeNoop({
     stat: (path) => {
       const found = contents.get(path)
-      return found === undefined ? missing.stat(path) : Effect.succeed(fileInfo(found.length))
+      if (found !== undefined) return Effect.succeed(fileInfo(found.length))
+      return directories().has(path) ? Effect.succeed(directoryInfo) : missing.stat(path)
+    },
+    readDirectory: (path) => {
+      if (!directories().has(path)) return missing.readDirectory(path)
+      const prefix = path === "/" ? "/" : `${path}/`
+      const names = new Set<string>()
+      for (const entry of [...contents.keys(), ...directories()]) {
+        if (entry === path || !entry.startsWith(prefix)) continue
+        const name = entry.slice(prefix.length).split("/")[0]
+        if (name !== undefined && name !== "") names.add(name)
+      }
+      return Effect.succeed([...names].sort())
     },
     readFile: (path) => Effect.succeed(new TextEncoder().encode(contents.get(path) ?? "")),
     exists: (path) => Effect.succeed(contents.has(path)),
     makeDirectory: () => Effect.void,
+    writeFile: (path, data) =>
+      Effect.sync(() => {
+        contents.set(path, new TextDecoder().decode(data))
+      }),
     writeFileString: (path, content) =>
       Effect.sync(() => {
         contents.set(path, content)
@@ -340,6 +392,83 @@ ctx.done(page.content + "|" + ran.stdout + "|" + kept.key)`
     expect(requests[0]).toContain("read")
     expect(requests[0]).toContain("bash")
     expect(requests[0]).toContain("remember")
+  })
+
+  it("edits, patches, lists, searches, and recalls through the same one call boundary", async () => {
+    // The five filesystem flows beyond `read` and `write` and the second memory
+    // flow are the ones a composition can lose silently: a binding array is
+    // fixed, nothing counts it, and the loss only shows up when a run reaches
+    // for the capability. That is the failure this composition was written to
+    // end — with only `read` and `write` bound, the harness emitted
+    // `apply_patch` heredocs into `bash` and finished claiming fixes it never
+    // applied — so this cell calls every one of them for real.
+    const filesystem = files({
+      "/repo/alpha.md": "first line\nsecond line",
+      "/repo/notes/beta.txt": "beta"
+    })
+    const asked: Array<string> = []
+
+    const outcome = await drive(
+      collect({
+        flows: [
+          StandardFlows.filesystem(filesystem.services),
+          StandardFlows.memory(
+            Context.make(MemoryStore.MemoryStore, MemoryStore.makeNoop()).pipe(
+              Context.add(
+                Recall.Recall,
+                Recall.Recall.of({
+                  recall: (input) =>
+                    Effect.sync(() => {
+                      asked.push(`${input.banks.join(",")}:${input.query}`)
+                      return [{ bank: "notes", key: "k1", text: "alpha is the file", score: 1 }]
+                    })
+                })
+              )
+            )
+          )
+        ],
+        cells: [
+          `const listed = await ctx.call("ls", { path: "/repo" })
+const globbed = await ctx.call("glob", { pattern: "*.md", root: "/repo" })
+const grepped = await ctx.call("grep", { pattern: "second", root: "/repo" })
+const edited = await ctx.call("edit", { path: "/repo/alpha.md", oldString: "second line", newString: "edited line" })
+const patched = await ctx.call("apply_patch", { input: "*** Begin Patch\\n*** Add File: /repo/gamma.md\\n+gamma\\n*** End Patch" })
+const recalled = await ctx.call("recall", { banks: ["notes"], query: "alpha" })
+ctx.done([
+  listed.entries.length,
+  globbed.paths.join(","),
+  grepped.matches.length,
+  edited.replacements,
+  patched.added.join(","),
+  recalled[0].text
+].join("|"))`
+        ]
+      })
+    )
+
+    expect(outcome._tag).toBe("completed")
+    const collected = eventsOf(outcome)
+    const settled = settledCalls(collected)
+    expect(settled.map((event) => event.flowName)).toEqual([
+      "ls",
+      "glob",
+      "grep",
+      "edit",
+      "apply_patch",
+      "recall"
+    ])
+    expect(settled.every((event) => event.result.outcome === "success")).toBe(true)
+
+    // Each call reached the host service behind its binding, not a stub of it:
+    // the search flows walked the fixture tree, the editing flows wrote to it,
+    // and recall reached the supplied `Recall`.
+    const resolved = collected.find((event) => event._tag === "resolved")
+    expect(resolved?._tag === "resolved" ? resolved.message.content : []).toEqual([
+      { type: "text", text: "2|/repo/alpha.md|1|1|/repo/gamma.md|alpha is the file" }
+    ])
+    expect(filesystem.contents.get("/repo/alpha.md")).toBe("first line\nedited line")
+    expect(filesystem.contents.get("/repo/gamma.md")).toBe("gamma\n")
+    expect(asked).toEqual(["notes:alpha"])
   })
 
   it("routes a containerised bash call through the transport the shell binding supplies", async () => {
