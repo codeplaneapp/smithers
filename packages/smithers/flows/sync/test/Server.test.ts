@@ -64,6 +64,47 @@ describe("SyncServer", () => {
       ])
     }))
 
+  for (const budget of ["count", "bytes"] as const) {
+    it.effect(`serves every backlogged run across ${budget}-limited pages`, () =>
+      Effect.gen(function*() {
+        const ids = ["a", "b", "c"] as Array<JournalEvent.RunId>
+        const makeEntry = (id: JournalEvent.RunId, value: number) =>
+          new JournalEvent.Entry({ ...entry(value), runId: id })
+        const server = yield* SyncServer.makeLiveWith({
+          maxFrameBytes: budget === "bytes" ? SyncProtocol.encodedByteLength(makeEntry(ids[0]!, 10_000)) : 4096
+        }).pipe(Effect.provide(Layer.mergeAll(
+          Journal.layerNoop({
+            entries: ({ runId, after, limit }) =>
+              Effect.succeed({
+                entries: Array.from({ length: limit }, (_, i) => makeEntry(runId, (after ?? -1) + (i + 1) * 100)),
+                hasMore: true
+              })
+          }),
+          RunCatalog.layerStatic(ids)
+        )))
+        let cursors: SyncProtocol.WorkspaceCursor = []
+        const seen = new Set<JournalEvent.RunId>()
+        for (let page = 0; page < 6; page++) {
+          const response = yield* asWorkspace(server.read({
+            protocolVersion: 1,
+            scope: { _tag: "Workspace" },
+            cursors,
+            limit: budget === "count" ? 2 : 6
+          }))
+          expect(response.done).toBe(false)
+          expect(response.entries.length).toBeGreaterThan(0)
+          expect(response.entries.length).toBeLessThanOrEqual(budget === "count" ? 2 : 1)
+          for (const value of response.entries) {
+            expect(value.seq).toBeGreaterThan(cursors.find((cursor) => cursor.runId === value.runId)?.afterSeq ?? -1)
+            seen.add(value.runId)
+          }
+          cursors = response.cursors
+        }
+        expect([...seen].sort()).toEqual(ids)
+        expect(cursors.every((cursor) => cursor.afterSeq >= 199)).toBe(true)
+      }))
+  }
+
   // A zero credit has two readings that are indistinguishable on the wire —
   // "open a window of nothing" and "a caller computed its window wrong" — and
   // the second busy-loops a follow that replenishes by resubscribing. It is
@@ -104,21 +145,27 @@ describe("SyncServer", () => {
   // path can pin one server-side fan-out for an unbounded number of frames.
   it.effect("bounds credit above as well as below", () =>
     Effect.gen(function*() {
-      const frames = yield* asWorkspace(
+      const windows = yield* asWorkspace(
         Effect.gen(function*() {
-          const server = yield* makeServer([entry(0), entry(1)])
-          return yield* Stream.runCollect(
-            server.subscribe({
-              protocolVersion: 1,
-              scope: { _tag: "Run", runId },
-              cursors: [],
-              credit: SyncProtocol.maxSubscribeCredit * 10
-            })
+          const server = yield* makeServer(
+            Array.from({ length: SyncProtocol.maxSubscribeCredit + 1 }, (_, i) => entry(i))
+          )
+          return yield* Effect.forEach(
+            [SyncProtocol.maxSubscribeCredit, SyncProtocol.maxSubscribeCredit + 1],
+            (credit) =>
+              Stream.runCollect(
+                server.subscribe({
+                  protocolVersion: 1,
+                  scope: { _tag: "Run", runId },
+                  cursors: [],
+                  credit
+                })
+              )
           )
         })
       )
 
-      expect(Array.from(frames)).toHaveLength(2)
+      for (const frames of windows) expect(Array.from(frames)).toHaveLength(SyncProtocol.maxSubscribeCredit)
       expect(
         Result.isFailure(
           Schema.decodeUnknownResult(SyncProtocol.SubscribeRequest)({

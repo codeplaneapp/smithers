@@ -513,9 +513,12 @@ const makeWith = (
         }
         const supplied = yield* Effect.suspend(() => snapshots.value.read({ ...request })).pipe(
           Effect.catchCause((cause) =>
-            Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.fail(
+            Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.logWarning(
+              "The public snapshot provider failed",
+              cause
+            ).pipe(Effect.andThen(Effect.fail(
               new SyncError({ code: "not_found", message: "Public snapshot is unavailable" })
-            )
+            )))
           )
         )
         // A slow provider may finish after the credential that admitted it expires.
@@ -603,15 +606,16 @@ const makeWith = (
             return page.hasMore
           })
 
-        // Each covered run gets a SHARE of the page before any run gets a
-        // second helping. Filling in run order let a producer that stays one
-        // page ahead take every slot of every page: `done` never became true,
-        // so a bootstrapping follower never reached the runs behind it and
-        // never reached the live follow either. It is still a catch-up read
-        // and a busy run still takes the larger part of the budget, but the
-        // part it cannot take is all of it.
+        // Serve the least advanced cursors first, with stable run-id ties.
+        // A page may have fewer slots than runs, or exhaust its byte budget
+        // mid-share. Restarting in catalog order then starved later runs on
+        // EVERY page. Served cursors strictly advance; pending ones keep
+        // their priority until reached. Empty runs spend no budget. This is
+        // scheduling only, not a comparison of events across runs, and works
+        // even when clients reorder cursors or requests hit another server.
+        const pending = [...runIds].sort((left, right) => (cursors.get(left) ?? -1) - (cursors.get(right) ?? -1))
         const share = Math.max(1, Math.floor(limit / Math.max(runIds.length, 1)))
-        for (const runId of runIds) {
+        for (const runId of pending) {
           if (oversized !== undefined || truncated || entries.length >= limit) break
           if (yield* serve(runId, Math.min(share, limit - entries.length))) behind.push(runId)
         }

@@ -372,12 +372,15 @@ describe("workspace tail catalog reconciliation", () => {
   // them were never attached at all.
   it.live("serves a cold run behind a run that is permanently a page behind", () =>
     Effect.gen(function*() {
-      const hot = "reconcile-hot" as JournalEvent.RunId
-      const cold = "reconcile-cold" as JournalEvent.RunId
+      const hot = "reconcile-a-hot" as JournalEvent.RunId
+      const cold = "reconcile-z-cold" as JournalEvent.RunId
+      const hotStarted = yield* Deferred.make<void>()
+      let hotReads = 0
+      let coldReadAfterHot = false
       const served = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLiveWith({ concurrency: 1, tailIntervalMs: 10 })
-          return yield* Stream.runCollect(
+          const following = yield* Stream.runCollect(
             Stream.take(
               Stream.filter(
                 server.subscribe({ protocolVersion: 1, credit: 4096, cursors: [], scope: { _tag: "Workspace" } }),
@@ -385,7 +388,9 @@ describe("workspace tail catalog reconciliation", () => {
               ),
               1
             )
-          )
+          ).pipe(Effect.forkChild)
+          yield* Deferred.await(hotStarted)
+          return yield* Fiber.join(following)
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -394,13 +399,17 @@ describe("workspace tail catalog reconciliation", () => {
                   runId === hot
                     // Always progressing, always more: the shape that pinned a
                     // slot forever.
-                    ? Effect.succeed({ entries: [entry(hot, (after ?? -1) + 1)], hasMore: true })
-                    : Effect.succeed({
-                      entries: after === undefined ? [entry(cold, 0)] : [],
-                      hasMore: false
+                    ? Effect.gen(function*() {
+                      hotReads++
+                      yield* Deferred.succeed(hotStarted, undefined)
+                      return { entries: [entry(hot, (after ?? -1) + 1)], hasMore: true }
+                    })
+                    : Effect.sync(() => {
+                      coldReadAfterHot = hotReads > 0
+                      return { entries: after === undefined ? [entry(cold, 0)] : [], hasMore: false }
                     })
               }),
-              RunCatalog.layerStatic([cold, hot]),
+              RunCatalog.layerStatic([hot, cold]),
               SyncPrincipal.layerWorkspace("reconcile-suite")
             )
           ),
@@ -410,5 +419,17 @@ describe("workspace tail catalog reconciliation", () => {
       )
 
       expect(served._tag).toBe("Some")
+      expect(hotReads).toBeGreaterThan(0)
+      expect(coldReadAfterHot).toBe(true)
+      if (served._tag === "Some") {
+        expect(Array.from(served.value)).toEqual([{
+          _tag: "Entries",
+          generation: 0,
+          runId: cold,
+          fromSeq: 0,
+          toSeq: 0,
+          entries: [entry(cold, 0)]
+        }])
+      }
     }))
 })

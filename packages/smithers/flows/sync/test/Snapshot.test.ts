@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Cause, Deferred, Effect, Fiber, Layer, Redacted, Schema } from "effect"
+import { Cause, Deferred, Effect, Fiber, Layer, Logger, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -168,8 +168,12 @@ describe("public snapshot admission", () => {
       }
     }))
 
-  it.effect("does not leak provider failures or defects into remote error messages", () =>
+  it.effect("logs provider causes without leaking failures or defects into remote error messages", () =>
     Effect.gen(function*() {
+      const logs: Array<{ level: string; cause: Cause.Cause<unknown> }> = []
+      const capture = Logger.make((options) => {
+        logs.push({ level: options.logLevel, cause: options.cause })
+      })
       for (
         const read of [
           () => Effect.fail(new SyncError({ code: "unknown", message: "provider-secret" })),
@@ -177,10 +181,16 @@ describe("public snapshot admission", () => {
         ]
       ) {
         const service = yield* server(read)
-        const failure = yield* Effect.flip(asOwner(service.snapshot(request)))
+        const failure = yield* Effect.flip(asOwner(service.snapshot(request))).pipe(
+          Effect.provide(Logger.layer([capture]))
+        )
         expect(failure).toMatchObject({ code: "not_found", message: "Public snapshot is unavailable" })
         expect(JSON.stringify(failure)).not.toContain("provider-secret")
       }
+      expect(logs.map((log) => log.level)).toEqual(["Warn", "Warn"])
+      expect(logs[0]!.cause.reasons.map((reason) => reason._tag)).toEqual(["Fail"])
+      expect(logs[1]!.cause.reasons.map((reason) => reason._tag)).toEqual(["Die"])
+      for (const log of logs) expect(Cause.pretty(log.cause)).toContain("provider-secret")
     }))
 
   it.effect("retains interruption while a provider is active", () =>
