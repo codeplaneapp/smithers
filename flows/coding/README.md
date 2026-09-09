@@ -5,6 +5,46 @@ This repository recipe expresses the coding policy as ordinary `Flow.make`,
 action outcomes, child execution relationships, and replay state through its
 injected database. There is no coding database, queue, lease, or event store.
 
+`native.ts` is the private Effect adapter to the Plue-owned program installed by
+the existing sandbox head-reporter provisioning. The host merges `nativeActions`
+into its current action table and provides
+`nativeLayer({ repositoryPath: executionRoot })` through its existing injected
+`ChildProcessSpawner`. Both Node and Bun run that composition. The TypeScript
+file contains no JJ command implementation, HTTP credential, or native receipt
+store. A host without the installed adapter fails clearly when it calls it.
+
+The new **internal** `NativeCoding` Effect service exposes `read(changeIds?)` and
+`apply(operation)`; ordinary `ReadNative` and `ApplyNative` actions record those
+requests/results in the existing flow. For example, after reading an exact
+resolved revision in a recorded planning step:
+
+```ts
+ApplyNative.call({ operation: {
+  operation: "create",
+  requestId: requestIdFor(executionId, "create/database"),
+  expectedOperationId: parent.operationId,
+  target: parent,
+  description: "✨ feat(database): add the schema"
+}})
+```
+
+`requestIdFor` derives a stable invocation UUID from the existing execution ID
+and action key. It never identifies an atom. On an unknown outcome, replay the
+**original** request, including its exact parent and operation IDs; rereading
+`@` to manufacture a new request could duplicate an already committed mutation.
+Plue reconstructs native receipts at their historical operation view even after
+later edits. A conflicted revision has native `treeTerms`, no `treeId`, and must
+not pass fast acceptance. `unchanged` is not a durable mutation receipt.
+
+Local accepted results carry `provenance: "pending"`: the existing head reporter
+asynchronously projects native operation metadata into Plue's `jj_operations`.
+This service cannot assert that the cloud acknowledged it or that all rewritten
+descendants were published. The publisher exports only `@`; after an older edit
+the workflow must explicitly `edit` back to its known mythical tip. The installed
+identity names the effective workspace execution principal. The initiating user
+of a shared run remains separately attributed by the control journal, and is not
+overridden by arbitrary flow input.
+
 `ImplementPlan` predicts one linear sequence of product Changes. A Change groups
 native JJ changes; an atom's `changeId` is the JJ ID and remains stable when its
 commit is rewritten. A planned new atom has `changeId: null` until JJ creates it.
