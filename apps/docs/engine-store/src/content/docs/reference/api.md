@@ -113,10 +113,12 @@ journal record proves the opposite verdict only when an exact retry of that
 opposite record returns `Duplicate`. An incompatible TTL or copied history
 with different lineage metadata instead fails with `JournalError` code
 `idempotency_conflict`, before output replay, cache eviction, or body dispatch.
-Restore the original policy and history identity, or choose a new action
-identity. No persisted keys or journal producer identities are rewritten.
-Changing TTL before a decision exists remains allowed; removing `ttlMs`
-retains the existing unbounded path and is not covered by this conflict check.
+Changing TTL before a decision exists remains allowed. Omitting `ttlMs` is
+unbounded only before a durable age verdict exists for this run and step.
+Removing `ttlMs` after a recorded verdict fails with `idempotency_conflict`,
+even if the cache head was evicted or replaced. Recovery must retain the
+original TTL and history identity, or use a new action or run identity as
+appropriate. No persisted keys or journal producer identities are rewritten.
 
 Durable cancellation is observed, not just recorded: while a run executes, the
 driver polls `cancel_requested_at_ms` on the heartbeat cadence and cancels the

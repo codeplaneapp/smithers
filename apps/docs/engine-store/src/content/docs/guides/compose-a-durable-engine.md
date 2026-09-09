@@ -46,7 +46,7 @@ captured when the store is built and re-provided onto that fiber.
 | `WakeBus`          | The composition builds a private bus.                               | Your own wake sources share one bus with the engine.                                       |
 | `ArtifactSync`     | `makeLocal()`: publish is a no-op, hydrate reports nothing arrived. | Referenced blobs reach a shared tier before their cache entry does.                        |
 | `CacheSync`        | `makeLocal()`: a recorded entry is already everywhere it will be.   | Durable local entries are published to a shared step-result tier.                          |
-| `Inconsistency`    | Conflicts are not journaled.                                        | Cache conflicts and corrupt evidence get a verdict. Use `layerStrict(owner)`.              |
+| `Inconsistency` | Conflicts are journaled and fail the dispatch (the strict default); provide `layerTolerant(owner)` to continue past them. | Cache conflicts and corrupt evidence are journaled. `layerStrict(owner)` fails; `layerTolerant(owner)` continues. |
 | `Reconciliation`   | Deviations and conflicts have no reader.                            | `layerDefault` answers them deterministically.                                             |
 | `Selection`        | Everything is admitted.                                             | Sinks may be deferred to a guess-free pass.                                                |
 

@@ -26,7 +26,7 @@ Create `quickstart.ts`. The action is `sealed`, which is what makes its result
 addressable and therefore replayable:
 
 ```ts
-import { Action, Flow } from "@smthrs/flow"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as Schema from "effect/Schema"
 
 export const Measure = Action.make("quickstart/Measure", {
@@ -143,8 +143,6 @@ driven by two independently built engines over one file. Count the executions
 to see the replay:
 
 ```ts
-import { Action, Interpreter } from "@smthrs/flow"
-
 export const main = (filename: string, root: string): Effect.Effect<{
   readonly first: string
   readonly second: string
