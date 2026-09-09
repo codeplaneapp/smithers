@@ -225,4 +225,74 @@ describe("SqlJournal durable fencing", () => {
       expect(failure).toBeInstanceOf(JournalError)
       expect((failure as JournalError).code).toBe("fence_lost")
     }))
+
+  // All non-running statuses allowed by the run-store migration. Keep the
+  // owner tuple intact so only the status predicate can reject these calls.
+  const lostFences = [
+    ...["pending", "suspended", "completed", "failed", "cancelled"].map((status) => ({
+      label: `${status} status`,
+      status,
+      pid: owner.pid
+    })),
+    { label: "PID-only mismatch", status: "running", pid: 7 }
+  ]
+
+  for (const { label, pid, status } of lostFences) {
+    for (const operation of ["fresh append", "duplicate append", "checkpoint", "compact"] as const) {
+      it.effect(`rejects ${operation} with ${label} without changing durable state`, () =>
+        withStack(Effect.gen(function*() {
+          const journal = yield* Journal
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          const run = runId("fenced-boundary")
+          const source = sourceId("driver")
+          yield* claim(sql, run, owner)
+          for (const sequence of [0, 1, 2]) {
+            yield* journal.emitDurable(input(run, source, sequence), owner)
+          }
+          yield* journal.checkpoint({ runId: run, seq: 0 as Seq, state: { version: 0 } }, owner)
+          yield* journal.compact({ runId: run }, owner)
+          yield* journal.checkpoint({ runId: run, seq: 2 as Seq, state: { version: 1 } }, owner)
+
+          const durableState = Effect.gen(function*() {
+            const events = yield* sql`
+              SELECT * FROM flows_journal_events WHERE run_id = ${run} ORDER BY seq
+            `
+            const checkpoints = yield* sql`
+              SELECT * FROM flows_journal_checkpoints WHERE run_id = ${run} ORDER BY seq
+            `
+            const floors = yield* sql<{ readonly floor: number | null }>`
+              SELECT MAX(seq) AS floor FROM flows_journal_checkpoints
+              WHERE run_id = ${run} AND compacted_at_ms IS NOT NULL
+            `
+            return { events, checkpoints, floor: floors[0]!.floor }
+          })
+          const before = yield* durableState
+          expect(before.events).toHaveLength(3)
+          expect(before.checkpoints).toHaveLength(2)
+          expect(before.floor).toBe(0)
+
+          yield* sql`UPDATE flows_runs SET status = ${status}, owner_pid = ${pid} WHERE run_id = ${run}`
+          // The fresh identity exercises the fenced INSERT; the duplicate
+          // must pass fenceGuard before it can be classified as idempotent.
+          // Replacing the uncompacted checkpoint is otherwise valid, and
+          // compaction would delete two events and advance the existing floor.
+          const attempted = operation === "checkpoint"
+            ? journal.checkpoint({ runId: run, seq: 2 as Seq, state: { version: 2 } }, owner).pipe(Effect.asVoid)
+            : operation === "compact"
+            ? journal.compact({ runId: run }, owner).pipe(Effect.asVoid)
+            : journal.emitDurable(input(run, source, operation === "fresh append" ? 3 : 2), owner).pipe(Effect.asVoid)
+          const failure = yield* attempted.pipe(Effect.match({
+            onFailure: (error) => error,
+            onSuccess: () => undefined
+          }))
+          const after = yield* durableState
+
+          expect(failure).toBeInstanceOf(JournalError)
+          expect(failure?.code).toBe("fence_lost")
+          expect(after.events).toEqual(before.events)
+          expect(after.checkpoints).toEqual(before.checkpoints)
+          expect(after.floor).toBe(before.floor)
+        })))
+    }
+  }
 })
