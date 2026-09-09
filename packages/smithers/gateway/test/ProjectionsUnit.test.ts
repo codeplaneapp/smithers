@@ -12,7 +12,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type { Service as ControlService } from "@smthrs/control/Control"
 import { PersistenceError, Unavailable } from "@smthrs/control/ControlError"
 import type { ControlEvent, ListResponse, RunSummary } from "@smthrs/control/ControlSchema"
-import { Effect, Schema, Stream } from "effect"
+import { Effect, Logger, Schema, Stream } from "effect"
 import { GatewayError } from "../src/GatewayError.ts"
 import * as GatewaySchema from "../src/GatewaySchema.ts"
 import * as Projections from "../src/Projections.ts"
@@ -97,7 +97,13 @@ describe("Projections run-list pagination", () => {
       const second = [numberedRun(101)]
       let listCalls = 0
       const projections = make(control({
-        list: () => {
+        list: (request) => {
+          if (request._tag === "runs" && request.filters?.runId) {
+            return Effect.succeed({
+              _tag: "runs",
+              items: [...first, ...second].filter((run) => run.runId === request.filters?.runId)
+            })
+          }
           listCalls += 1
           return Effect.succeed(
             listCalls === 1
@@ -118,7 +124,13 @@ describe("Projections run-list pagination", () => {
     Effect.gen(function*() {
       let listCalls = 0
       const projections = make(control({
-        list: () => {
+        list: (request) => {
+          if (request._tag === "runs" && request.filters?.runId) {
+            return Effect.succeed({
+              _tag: "runs",
+              items: [numberedRun(Number(request.filters.runId.slice(4)))]
+            })
+          }
           const page = listCalls
           listCalls += 1
           return Effect.succeed(
@@ -142,6 +154,7 @@ describe("Projections run-list pagination", () => {
       const limits: Array<number | undefined> = []
       const projections = make(control({
         list: (request) => {
+          if (request._tag === "runs" && request.filters?.runId) return Effect.succeed({ _tag: "runs", items: [run] })
           limits.push(request.limit)
           return Effect.succeed(
             limits.length === 1
@@ -169,8 +182,8 @@ describe("Projections run-list pagination", () => {
 
       const snapshot = yield* projections.snapshot({ _tag: "run-summary", runId: run.runId })
       expect(snapshot.rows).toHaveLength(1)
-      expect(listCalls).toBe(1)
-      expect(limits).toEqual([1])
+      expect(listCalls).toBe(2)
+      expect(limits).toEqual([1, 1])
     }))
 
   it.effect("maps and redacts a failure from a later run-list page", () =>
@@ -319,7 +332,17 @@ describe("Projections resource bounds", () => {
           const history = [event(1, "control.test", prefix), event(2, "control.test", "")]
           history[1] = event(2, "control.test", "x".repeat(target - bytes(history)))
           const rows = [{ ...run, waitingReason: prefix }, { ...run, runId: "run-2", waitingReason: "" }]
-          const baseline = yield* make(control({ list: () => Effect.succeed({ _tag: "runs", items: rows }) }))
+          const baseline = yield* make(
+            control({
+              list: (request) =>
+                Effect.succeed({
+                  _tag: "runs",
+                  items: request._tag === "runs" && request.filters?.runId
+                    ? rows.filter((run) => run.runId === request.filters?.runId)
+                    : rows
+                })
+            })
+          )
             .snapshot({ _tag: "workspace-runs" })
           const padding = "x".repeat(target - bytes(baseline.rows))
           rows[1] = { ...rows[1]!, waitingReason: padding }
@@ -330,7 +353,17 @@ describe("Projections resource bounds", () => {
             list: () => Effect.succeed({ _tag: "runs", items: [run] }),
             watch: () => Stream.fromIterable(history)
           }))
-          const rowsProjection = make(control({ list: () => Effect.succeed({ _tag: "runs", items: rows }) }))
+          const rowsProjection = make(
+            control({
+              list: (request) =>
+                Effect.succeed({
+                  _tag: "runs",
+                  items: request._tag === "runs" && request.filters?.runId
+                    ? rows.filter((run) => run.runId === request.filters?.runId)
+                    : rows
+                })
+            })
+          )
           if (offset <= 0) {
             expect((yield* eventsProjection.snapshot({ _tag: "run-events", runId: run.runId })).rows).toEqual(history)
             expect((yield* rowsProjection.snapshot({ _tag: "workspace-runs" })).rows).toEqual(expectedRows)
@@ -458,11 +491,11 @@ describe("Projections subscriptions", () => {
       watch: (filter) => {
         if (filter.follow !== true) {
           nonFollowingReads += 1
-          log = [...log, event(log.length + 1, "control.run.accepted", { runId: "run-1" })]
+          log = [...log, event(log.length, "control.run.accepted", { runId: "run-1" })]
           return Stream.fromIterable(log)
         }
-        log = [...log, event(log.length + 1, "control.run.completed", { runId: "run-1" })]
-        return Stream.fromIterable(log.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+        log = [...log, event(log.length, "control.run.completed", { runId: "run-1" })]
+        return Stream.fromIterable(log.filter((item) => item.sequence > (filter.afterSequence ?? -1)))
       }
     })
     return { reads: () => nonFollowingReads, service }
@@ -561,7 +594,7 @@ describe("Projections subscriptions", () => {
         frame._tag === "delta"
       )
       expect(nonFollowingReads).toBe(1)
-      expect(listCalls).toBe(51)
+      expect(listCalls).toBe(52)
       expect(deltas).toHaveLength(50)
 
       const fresh = yield* projections.snapshot({ _tag: "run-tree", runId: "run-1" })
@@ -712,7 +745,11 @@ describe("Projections subscriptions", () => {
             const named = request._tag === "runs" ? request.filters?.runId : undefined
             return Effect.succeed({
               _tag: "runs",
-              items: named === extra.runId ? [extra] : named === undefined ? initial : []
+              items: named === extra.runId
+                ? [extra]
+                : named === undefined
+                ? initial
+                : initial.filter((run) => run.runId === named)
             })
           },
           watch: (filter) =>
@@ -878,7 +915,11 @@ describe("Projections subscriptions", () => {
             const named = request._tag === "runs" ? request.filters?.runId : undefined
             return Effect.succeed({
               _tag: "runs",
-              items: named === extra.runId ? [extra] : named === undefined ? initial : []
+              items: named === extra.runId
+                ? [extra]
+                : named === undefined
+                ? initial
+                : initial.filter((run) => run.runId === named)
             })
           },
           watch: (filter) =>
@@ -897,16 +938,16 @@ describe("Projections subscriptions", () => {
   it.effect("resumes after a run cursor without emitting snapshot frames", () =>
     Effect.gen(function*() {
       const history = [
-        event(1, "control.run.accepted", { runId: "run-1" }),
-        event(2, "control.run.running", { runId: "run-1" }),
-        event(3, "control.run.completed", { runId: "run-1" })
+        event(0, "control.run.accepted", { runId: "run-1" }),
+        event(1, "control.run.running", { runId: "run-1" }),
+        event(2, "control.run.completed", { runId: "run-1" })
       ]
       const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) =>
             filter.follow === true
-              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? -1)))
               : Stream.fromIterable(history)
         }),
         { heartbeatMillis: 60_000 }
@@ -914,10 +955,10 @@ describe("Projections subscriptions", () => {
 
       const frames = yield* Stream.runCollect(projections.subscribe(
         { _tag: "run-events", runId: "run-1" },
-        issuedCursor({ _tag: "run-events", runId: "run-1" }, 1)
+        issuedCursor({ _tag: "run-events", runId: "run-1" }, 0)
       ))
       expect(frames.map((frame) => frame._tag)).toEqual(["delta", "delta"])
-      expect(frames.flatMap((frame) => frame._tag === "delta" ? [frame.cursor.value] : [])).toEqual([2, 3])
+      expect(frames.flatMap((frame) => frame._tag === "delta" ? [frame.cursor.value] : [])).toEqual([1, 2])
       // The fold is seeded with the events up to the cursor, so a resumed
       // subscription is not a projection of the tail alone.
       expect(frames.flatMap((frame) => frame._tag === "delta" ? [frame.delta] : [])).toEqual([
@@ -929,9 +970,9 @@ describe("Projections subscriptions", () => {
   it.effect("resumes within one journal sequence without dropping derived events", () =>
     Effect.gen(function*() {
       const history = [
-        event(1, "control.run.accepted", { runId: "run-1" }),
-        event(1, "control.lineage.disclosed", { runId: "run-1" }),
-        event(2, "control.run.running", { runId: "run-1" })
+        event(0, "control.run.accepted", { runId: "run-1" }),
+        event(0, "control.lineage.disclosed", { runId: "run-1" }),
+        event(1, "control.run.running", { runId: "run-1" })
       ]
       const selector = { _tag: "run-events" as const, runId: "run-1" }
       const projections = make(
@@ -939,15 +980,15 @@ describe("Projections subscriptions", () => {
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) =>
             filter.follow === true
-              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? -1)))
               : Stream.fromIterable(history)
         }),
         { heartbeatMillis: 60_000 }
       )
 
-      const frames = yield* Stream.runCollect(projections.subscribe(selector, issuedCursor(selector, 1, 0)))
+      const frames = yield* Stream.runCollect(projections.subscribe(selector, issuedCursor(selector, 0, 0)))
       expect(frames.flatMap((frame) => frame._tag === "delta" ? [[frame.cursor.value, frame.cursor.offset]] : []))
-        .toEqual([[1, 1], [2, 0]])
+        .toEqual([[0, 1], [1, 0]])
       expect(frames.flatMap((frame) => frame._tag === "delta" ? frame.delta as ReadonlyArray<ControlEvent> : []))
         .toEqual([
           history[1],
@@ -991,7 +1032,7 @@ describe("Projections subscriptions", () => {
           watch: (filter) => {
             if (filter.follow !== true) return Stream.fromIterable(history)
             follows += 1
-            return Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+            return Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? -1)))
           }
         }),
         { heartbeatMillis: 60_000 }
@@ -1044,7 +1085,7 @@ describe("Projections subscriptions", () => {
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) =>
             filter.follow === true
-              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? -1)))
               : Stream.fromIterable(history)
         }),
         { heartbeatMillis: 60_000 }
@@ -1293,4 +1334,189 @@ describe("Projections keepalive cadence", () => {
     // the deployed relay behavior: the relay drops an idle tunnel at 600 s.
     expect(Projections.heartbeatIntervalMillis).toBeLessThan(600_000 / 2)
   })
+})
+
+describe("snapshot read regressions", () => {
+  for (
+    const selector of [
+      { _tag: "run-summary" as const, runId: "run-1" },
+      { _tag: "workspace-runs" as const }
+    ]
+  ) {
+    it.effect(`reconciles a completion during the ${selector._tag} history read`, () =>
+      Effect.gen(function*() {
+        let current: RunSummary = { ...run, status: "running" }
+        const projections = make(control({
+          list: () => Effect.succeed({ _tag: "runs", items: [current] }),
+          watch: () =>
+            Stream.unwrap(Effect.sync(() => {
+              current = { ...current, status: "completed", updatedAt: 3 }
+              return Stream.fromIterable([
+                event(0, "control.run.running", { status: "running" }),
+                event(1, "control.run.completed", { status: "completed" })
+              ])
+            }))
+        }))
+        const snapshot = yield* projections.snapshot(selector)
+        expect(snapshot.rows[0]).toMatchObject({ status: "completed" })
+        expect(snapshot.cursor.value).toBe(selector._tag === "run-summary" ? 1 : 0)
+      }))
+  }
+
+  for (const resume of [false, true]) {
+    it.effect(`delivers sequence zero from an empty seed (resume=${resume})`, () =>
+      Effect.gen(function*() {
+        const history = [event(0, "control.run.accepted", null), event(1, "control.run.running", null)]
+        const selector = { _tag: "run-events" as const, runId: run.runId }
+        const projections = make(control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) =>
+            filter.follow
+              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? -1)))
+              : Stream.empty
+        }))
+        const frames = yield* Stream.runCollect(
+          projections.subscribe(selector, resume ? issuedCursor(selector, 0) : undefined)
+        )
+        expect(frames.flatMap<unknown>((frame) => frame._tag === "delta" ? frame.delta : [])).toEqual(history)
+      }))
+  }
+
+  for (const mode of ["empty", "repeated", "cycle", "duplicate"] as const) {
+    it.effect(`stops ${mode} list pagination`, () =>
+      Effect.gen(function*() {
+        let calls = 0
+        const projections = make(control({
+          list: (request) => {
+            if (request._tag === "runs" && request.filters?.runId) {
+              return Effect.succeed({
+                _tag: "runs",
+                items: [numberedRun(Number(request.filters.runId.slice(4)))]
+              })
+            }
+            calls += 1
+            return Effect.succeed({
+              _tag: "runs",
+              items: mode === "empty" ? [] : [numberedRun(mode === "duplicate" ? 1 : calls)],
+              ...(calls >= 4
+                ? {}
+                : { nextCursor: (mode === "cycle" || mode === "duplicate") && calls === 2 ? "b" : "a" })
+            })
+          }
+        }))
+        yield* projections.snapshot({ _tag: "workspace-runs" })
+        expect(calls).toBe(mode === "empty" ? 1 : mode === "repeated" || mode === "duplicate" ? 2 : 3)
+      }))
+  }
+
+  it.effect("reads workspace journals with concurrency bounded at eight", () =>
+    Effect.gen(function*() {
+      const runs = Array.from({ length: 12 }, (_, index) => numberedRun(index + 1))
+      let active = 0
+      let peak = 0
+      const projections = make(control({
+        list: (request) =>
+          Effect.succeed({
+            _tag: "runs",
+            items: request._tag === "runs" && request.filters?.runId
+              ? runs.filter((run) => run.runId === request.filters?.runId) :
+              runs
+          }),
+        watch: () =>
+          Stream.unwrap(Effect.gen(function*() {
+            active += 1
+            peak = Math.max(peak, active)
+            yield* Effect.yieldNow
+            active -= 1
+            return Stream.empty
+          }))
+      }))
+      const snapshot = yield* projections.snapshot({ _tag: "workspace-runs" })
+      expect(snapshot.rows).toHaveLength(12)
+      expect(peak).toBe(8)
+    }))
+
+  for (const operation of ["list", "history", "run-follow", "workspace-follow"] as const) {
+    it.effect(`redacts ${operation} logger output`, () =>
+      Effect.gen(function*() {
+        const secret = "synthetic-private-credential"
+        const failure = new PersistenceError({ operation: secret, message: secret, cause: { password: secret } })
+        const messages: Array<unknown> = []
+        const projections = make(control({
+          list: () => operation === "list" ? Effect.fail(failure) : Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) => operation === "history" || filter.follow ? Stream.fail(failure) : Stream.empty
+        }))
+        const selector = operation === "workspace-follow" ?
+          { _tag: "workspace-runs" as const }
+          : { _tag: "run-events" as const, runId: run.runId }
+        const result = yield* Effect.flip(
+          operation.endsWith("follow")
+            ? Stream.runCollect(projections.subscribe(selector)).pipe(Effect.asVoid) :
+            projections.snapshot(selector).pipe(Effect.asVoid)
+        ).pipe(
+          Effect.provide(Logger.layer([Logger.make(({ message }) => {
+            messages.push(message)
+          })]))
+        )
+        expect(result.code).toBe("run_unavailable")
+        expect(messages).toHaveLength(1)
+        expect(JSON.stringify(messages)).not.toContain(secret)
+        expect(JSON.stringify(messages)).toContain("persistence_failed")
+      }))
+  }
+})
+
+describe("snapshot reconciliation bounds", () => {
+  it.effect("refuses a run summary that changes throughout all eight attempts", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const projections = make(control({
+        list: () => Effect.sync(() => ({ _tag: "runs" as const, items: [{ ...run, updatedAt: reads++ }] }))
+      }))
+      const failure = yield* Effect.flip(projections.snapshot({ _tag: "run-summary", runId: run.runId }))
+      expect(failure.code).toBe("run_unavailable")
+      expect(failure.message).toContain("changed throughout")
+      expect(reads).toBe(9)
+    }))
+
+  it.effect("does not log arbitrary backend tags or codes", () =>
+    Effect.gen(function*() {
+      const messages: Array<unknown> = []
+      for (
+        const failure of [
+          { _tag: "private-tag", code: "private-code" },
+          { _tag: "/control/PersistenceError", code: "private-code" },
+          { _tag: "/control/Unavailable", code: "private-code" },
+          "private-string"
+        ]
+      ) {
+        yield* Effect.flip(
+          make(control({ list: () => Effect.fail(failure as unknown as Unavailable) }))
+            .snapshot({ _tag: "workspace-runs" })
+        ).pipe(
+          Effect.provide(Logger.layer([Logger.make(({ message }) => {
+            messages.push(message)
+          })]))
+        )
+      }
+      expect(messages).toHaveLength(4)
+      expect(JSON.stringify(messages)).not.toContain("private-")
+    }))
+
+  for (const listed of [false, true]) {
+    it.effect(`admits sequence zero to an empty workspace journal (listed=${listed})`, () =>
+      Effect.gen(function*() {
+        const projections = make(control({
+          list: (request) =>
+            Effect.succeed({
+              _tag: "runs",
+              items: listed || request._tag === "runs" && request.filters?.runId ? [run] : []
+            }),
+          watch: (filter) =>
+            filter.follow ? Stream.fromIterable([event(0, "control.run.accepted", null)]) : Stream.empty
+        }))
+        const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+        expect(frames.filter((frame) => frame._tag === "delta")).toHaveLength(1)
+      }))
+  }
 })

@@ -312,9 +312,9 @@ the set those paths produce.
 | `run_not_found`     | none   | the read path, for a run the control plane does not have, identically for every run-scoped selector                                                      |
 
 `GatewayError.cause` carries only a redacted summary of an internal failure: its
-tag and its stable code. The whole cause is logged server-side instead, because
-this error is the RPC error schema, so anything left on it is serialized to
-every bearer holder and forwarded to a browser by a relay.
+tag and its stable code. Projection warnings log an allowlisted operation
+identifier and known control error tag/code pairs. Backend messages, nested
+causes, SQL, and file paths are omitted from projection logs.
 
 ## `SuperviseRuntime`
 

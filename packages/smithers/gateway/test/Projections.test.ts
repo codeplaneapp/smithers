@@ -16,10 +16,11 @@ import { describe, expect, it } from "@effect/vitest"
 import { Control } from "@smthrs/control/Control"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { ApprovalPayload, ApprovalTarget, PlanCard } from "@smthrs/control/ControlSchema"
-import { Effect, Fiber, Schema, type Scope, Stream } from "effect"
+import { RunStore } from "@smthrs/run-store/RunStore"
+import { Deferred, Effect, Fiber, Schema, type Scope, Stream } from "effect"
 import type * as GatewayProjection from "../src/GatewayProjection.ts"
 import * as GatewaySchema from "../src/GatewaySchema.ts"
-import { Projections } from "../src/Projections.ts"
+import { make, Projections } from "../src/Projections.ts"
 import { defaultCadenceStack, driverFence, emit, stack } from "./GatewayStack.ts"
 
 const approvalOf = (card: PlanCard): ApprovalPayload => ({
@@ -373,7 +374,12 @@ describe("gateway projections over a real SQLite control plane", () => {
 
   test("sends one arrived event per run-events delta, never the log again", () =>
     Effect.gen(function*() {
-      const projections = yield* Projections
+      const control = yield* Control
+      // Force snapshot I/O past the old 100 ms producer delay.
+      const projections = yield* make({
+        ...control,
+        list: (request) => control.list(request).pipe(Effect.delay("200 millis"))
+      })
       const runId = yield* launch
       yield* emit(runId, "control.agent.turn-opened", { seat: "opus", contextDigest: "ctx" })
       yield* emit(runId, "control.agent.model-settled", { text: "done", usage: {} })
@@ -381,18 +387,25 @@ describe("gateway projections over a real SQLite control plane", () => {
       // A follower asked for what is new. Recomputing `run-events` re-read the
       // whole history and re-sent it on every frame, which is quadratic in run
       // length and is the opposite of following.
+      const snapshotEnded = yield* Deferred.make<void>()
       const following = yield* Effect.forkChild(
         Stream.runCollect(
           Stream.take(
             Stream.filter(
-              projections.subscribe({ _tag: "run-events", runId }),
+              projections.subscribe({ _tag: "run-events", runId }).pipe(
+                Stream.tap((frame) =>
+                  frame._tag === "snapshot-end"
+                    ? Deferred.succeed(snapshotEnded, undefined) :
+                    Effect.void
+                )
+              ),
               (frame) => frame._tag === "delta"
             ),
             1
           )
         )
       )
-      yield* Effect.sleep("100 millis")
+      yield* Deferred.await(snapshotEnded)
       yield* emit(runId, "control.run.completed", { runId, status: "completed" })
       const frames = yield* Fiber.join(following)
 
@@ -419,4 +432,34 @@ describe("gateway projections over a real SQLite control plane", () => {
       const rows = (yield* projections.snapshot({ _tag: "run-summary", runId })).rows
       expect(rows).toHaveLength(1)
     }).pipe(Effect.provide(defaultCadenceStack)))
+})
+
+describe("empty journal follow", () => {
+  test("delivers the first two committed events after snapshot-end", () =>
+    Effect.gen(function*() {
+      const projections = yield* Projections
+      const runs = yield* RunStore
+      const runId = "empty-journal-run"
+      yield* runs.create(runId, JSON.stringify({ flowName: "system/test" }))
+      const snapshotEnded = yield* Deferred.make<void>()
+      const following = yield* Effect.forkChild(
+        projections.subscribe({ _tag: "run-events", runId }).pipe(
+          Stream.tap((frame) =>
+            frame._tag === "snapshot-end" ? Deferred.succeed(snapshotEnded, undefined) : Effect.void
+          ),
+          Stream.filter((frame) => frame._tag === "delta"),
+          Stream.take(2),
+          Stream.runCollect
+        )
+      )
+      yield* Deferred.await(snapshotEnded)
+      yield* emit(runId, "control.run.accepted", { runId })
+      yield* emit(runId, "control.run.running", { runId })
+      const frames = yield* Fiber.join(following).pipe(Effect.timeout("5 seconds"))
+      expect(frames.map((frame) => frame.cursor.value)).toEqual([0, 1])
+      expect(frames.flatMap<unknown>((frame) => frame.delta)).toMatchObject([
+        { sequence: 0, kind: "control.run.accepted" },
+        { sequence: 1, kind: "control.run.running" }
+      ])
+    }).pipe(Effect.provide(stack())))
 })

@@ -39,20 +39,26 @@ ordered events, so the rows after one change are the rows before it plus the
 event that arrived. Its delta carries that one event.
 
 Recomputing is cheap because nothing re-reads the journal. The events are
-accumulated in the stream, so following a run costs one journal read no matter
-how many deltas arrive. Only `run-summary` and `run-tree` re-read anything, and
+accumulated in the stream, so following a run never re-reads the journal after the snapshot
+cutoff is reconciled. Only `run-summary` and `run-tree` re-read anything, and
 only the run row, because their status comes from the row rather than from the
 journal.
 
-## One subscription reads once
+## A reconciled snapshot cutoff
 
-The rows, the cursor the snapshot advertises, and the sequence its deltas start
-after all come from a single read of the control plane. A client that follows
-the same selector from the advertised cursor sees each later change exactly
-once.
+The gateway reads each run summary before and after its journal snapshot. If
+the summary changed, it retries with the new summary, up to eight journal
+reads. A row that keeps changing is refused with `run_unavailable`. This keeps
+a terminal event from being acknowledged with the preceding run status.
 
-Reading twice would break that: an event landing between the two reads would
-arrive both as a snapshot row and again as a delta.
+Snapshot rows and the follow seed share the same final event buffer. Workspace
+snapshots reconcile up to eight runs concurrently. Listing stops at 500 runs,
+an empty page, or a repeated cursor; each continued page adds a run, so at most
+500 pages are read.
+
+An empty event buffer follows from the beginning, including journal sequence
+zero. A buffer that already contains sequence zero suppresses those seeded
+events, including their derived offsets.
 
 ## What a cursor is
 

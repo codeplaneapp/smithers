@@ -56,7 +56,7 @@ Three rules make the tail easy to consume:
 - **A delta is the whole row set**, recomputed rather than patched. Replace
   what you hold; do not merge. `run-events` is the exception, because its rows
   are the events themselves, so its delta is the one event that arrived.
-- **The snapshot and the tail come from one read**, so a client that follows
+- **The snapshot and the tail share one reconciled event buffer**, so a client that follows
   from the advertised cursor sees each later change exactly once.
 - **Every frame but the heartbeat carries its selector**, so several
   subscriptions can share one socket.

@@ -8,19 +8,16 @@
  * local reader computes, and a projection cannot drift from the control plane
  * by reading a column the control plane does not expose.
  *
- * One snapshot reads the control plane exactly once. The rows, the cursor the
- * snapshot advertises, and the sequence its deltas start after all come from
- * that single read, so a client that follows the same selector from the
- * advertised cursor sees each later change exactly once. Reading twice let an
- * event that landed between the reads arrive both as a snapshot row and as a
- * delta.
+ * A snapshot brackets its journal read with run-summary reads and retries
+ * when the summary changes. Rows and cursor share the resulting event buffer,
+ * so a completion cannot be acknowledged with the preceding run status.
  *
  * A subscription is a snapshot followed by deltas. A delta recomputes the
  * selector's rows from the accumulated events rather than patching them: a
  * projection is a reproducible fold (`@smthrs/journal` `Projection`), and
  * recomputation is the only delta that cannot disagree with a fresh snapshot.
  * The events are accumulated in the stream rather than re-read, so following a
- * run costs one journal read no matter how many deltas arrive.
+ * run never re-reads history after reconciling the initial cutoff.
  *
  * A workspace subscription follows every journal partition without a cursor.
  * Control replays each partition's history before tailing it, so the follower
@@ -115,8 +112,9 @@ export class Projections extends Context.Service<Projections, Service>()("@smthr
  * tag and its stable code, never its message, its nested cause, or the SQL and
  * file paths a `PersistenceError` carries.
  *
- * The whole cause is logged server-side instead. `GatewayError` is the RPC
- * error schema, so anything left on it is serialized to every bearer holder and
+ * Server logs carry only an operation identifier and an allowlisted summary.
+ * `GatewayError` is the RPC error schema, so anything left on it is serialized
+ * to every bearer holder and
  * forwarded to the browser by the product relay, and a cause JSON cannot encode
  * would make the error frame itself fail to encode.
  */
@@ -126,7 +124,18 @@ const summarize = (cause: unknown): { readonly _tag: string; readonly code?: str
   return typeof record.code === "string" ? { _tag: record._tag, code: record.code } : { _tag: record._tag }
 }
 
-/** The read failed. The client learns that much; the log learns the rest. */
+/** Log only known control-plane identifiers, never arbitrary backend text. */
+const logReadFailure = (
+  operation: "list-runs" | "read-events" | "follow-run" | "follow-workspace",
+  cause: unknown
+) => {
+  const summary = summarize(cause)
+  const known = summary?._tag === "/control/PersistenceError" && summary.code === "persistence_failed" ||
+    summary?._tag === "/control/Unavailable" && summary.code === "unavailable"
+  return Effect.logWarning({ operation, ...(known ? summary : {}) })
+}
+
+/** The read failed, with only a public error summary. */
 const unavailable = (message: string, cause: unknown): GatewayError => {
   const summary = summarize(cause)
   return new GatewayError({
@@ -391,7 +400,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
     const message = `Reading the events of ${runId} failed`
     return Stream.runFoldEffect(
       control.watch({ runId, follow: false }).pipe(
-        Stream.tapError((cause) => Effect.logWarning(message, cause)),
+        Stream.tapError((cause) => logReadFailure("read-events", cause)),
         Stream.mapError((cause) => unavailable(message, cause))
       ),
       emptyEventBuffer,
@@ -406,6 +415,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
     const ceiling = singleRun ? 1 : maxWorkspaceRuns
     const page = (
       accumulated: ReadonlyArray<ControlSchema.RunSummary>,
+      seen: Set<string>,
       cursor?: string | undefined
     ): Effect.Effect<ReadonlyArray<ControlSchema.RunSummary>, GatewayError> => {
       const remaining = ceiling - accumulated.length
@@ -415,18 +425,29 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
         limit: remaining,
         ...(cursor === undefined ? {} : { cursor })
       }).pipe(
-        Effect.tapError((cause) => Effect.logWarning("Listing runs failed", cause)),
+        Effect.tapError((cause) => logReadFailure("list-runs", cause)),
         Effect.mapError((cause) => unavailable("Listing runs failed", cause)),
         Effect.flatMap((response) => {
           if (response._tag !== "runs") return Effect.succeed(accumulated)
-          const runs = [...accumulated, ...response.items.slice(0, remaining)]
-          return singleRun || response.nextCursor === undefined || runs.length >= ceiling
-            ? Effect.succeed(runs)
-            : page(runs, response.nextCursor)
+          const ids = new Set(accumulated.map((run) => run.runId))
+          const added = response.items.filter((run) => {
+            if (ids.has(run.runId)) return false
+            ids.add(run.runId)
+            return true
+          }).slice(0, remaining)
+          const runs = [...accumulated, ...added]
+          if (
+            singleRun || added.length === 0 || response.nextCursor === undefined ||
+            runs.length >= ceiling || seen.has(response.nextCursor)
+          ) return Effect.succeed(runs)
+          seen.add(response.nextCursor)
+          // Each continued page adds at least one run, so the run ceiling
+          // also caps the number of pages at maxWorkspaceRuns.
+          return page(runs, seen, response.nextCursor)
         })
       )
     }
-    return Effect.suspend(() => page([]))
+    return Effect.suspend(() => page([], new Set()))
   }
 
   /**
@@ -447,9 +468,22 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
       })
     )
 
-  /** One run and its journal. */
+  /** Pin the journal between equal summaries; refuse a continuously moving row. */
+  const consistentRunSource = (
+    before: ControlSchema.RunSummary,
+    attempts = 8
+  ): Effect.Effect<RunSource, GatewayError> =>
+    Effect.gen(function*() {
+      const buffer = yield* eventsOf(before.runId)
+      const run = yield* runOf(before.runId)
+      if (JSON.stringify(before) === JSON.stringify(run)) return { run, ...buffer }
+      if (attempts === 1) return yield* Effect.fail(unavailable("Run changed throughout the snapshot read", undefined))
+      return yield* consistentRunSource(run, attempts - 1)
+    })
+
+  /** One run and its journal at a reconciled cutoff. */
   const runSourceOf = (runId: string): Effect.Effect<RunSource, GatewayError> =>
-    Effect.map(Effect.all([runOf(runId), eventsOf(runId)]), ([run, buffer]) => ({ run, ...buffer }))
+    Effect.flatMap(runOf(runId), (run) => consistentRunSource(run))
 
   /** Every run a workspace selector folds, and each one's journal. */
   const workspaceSourceOf = (
@@ -461,7 +495,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
       runsMatching(selector._tag === "approvals" ? { status: "waiting-approval" } : {}),
       (runs) =>
         Effect.map(
-          Effect.forEach(runs, (run) => Effect.map(eventsOf(run.runId), (buffer) => ({ run, ...buffer }))),
+          Effect.forEach(runs, (run) => consistentRunSource(run), { concurrency: 8 }),
           (sources) =>
             selector._tag === "approvals"
               ? sources.filter((source) => rowsOfWorkspace(selector, [source]).length > 0)
@@ -469,7 +503,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
         )
     )
 
-  /** The one read a snapshot performs. */
+  /** The reconciled source a snapshot folds. */
   const sourceOf = (selector: GatewaySchema.ProjectionSelector): Effect.Effect<Source, GatewayError> => {
     const runId = scopeOf(selector)
     return runId === undefined
@@ -571,10 +605,11 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
     return Stream.unwrap(Effect.map(seed, (initial) =>
       control.watch({
         runId,
-        afterSequence: from.value === 0 ? 0 : from.value - 1,
+        // Sequence zero also needs replay for empty seeds and derived offsets.
+        ...(from.value === 0 ? {} : { afterSequence: from.value - 1 }),
         follow: true
       }).pipe(
-        Stream.tapError((cause) => Effect.logWarning(message, cause)),
+        Stream.tapError((cause) => logReadFailure("follow-run", cause)),
         Stream.mapError((cause) => unavailable(message, cause)),
         Stream.mapAccumEffect(
           (): RunFollowState => ({ buffer: initial, observed: undefined }),
@@ -593,7 +628,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
                   offset: state.observed?.value === event.sequence ? state.observed.offset + 1 : 0
                 }
                 const nextState: RunFollowState = { ...state, observed: position }
-                if (comparePosition(position, from) <= 0) {
+                if (seedEvents.length > 0 && comparePosition(position, from) <= 0) {
                   return Effect.succeed([nextState, [] as ReadonlyArray<RunDelta>] as const)
                 }
                 return Effect.map(
@@ -650,7 +685,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
           ))
       const message = "Following the workspace failed"
       return control.watch({ follow: true }).pipe(
-        Stream.tapError((cause) => Effect.logWarning(message, cause)),
+        Stream.tapError((cause) => logReadFailure("follow-workspace", cause)),
         Stream.mapError((cause) => unavailable(message, cause)),
         Stream.mapAccumEffect(
           () => new Map<string, CursorPosition>(),
@@ -688,7 +723,9 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
           const runId = event.runId
           const current = sources.get(runId)
           if (current !== undefined) {
-            if (comparePosition(position, lastPositionOf(current.events)) <= 0) return Effect.succeed(noFrames)
+            if (
+              current.events.length > 0 && comparePosition(position, lastPositionOf(current.events)) <= 0
+            ) return Effect.succeed(noFrames)
             return Effect.flatMap(
               appendEvent(current, event, `${message}: event history is invalid`),
               (buffer) =>
@@ -709,7 +746,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
           }
           return runSourceOf(runId).pipe(
             Effect.flatMap((source) => {
-              const admitted = comparePosition(position, lastPositionOf(source.events)) <= 0
+              const admitted = source.events.length > 0 && comparePosition(position, lastPositionOf(source.events)) <= 0
                 ? Effect.succeed(source)
                 : Effect.map(
                   appendEvent(source, event, `${message}: event history is invalid`),
@@ -805,7 +842,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
     return runId
   }
 
-  /** The snapshot and the deltas that follow it, off one read. */
+  /** Snapshot and follow share the reconciled event buffer. */
   const fromSnapshot = (
     selector: GatewaySchema.ProjectionSelector
   ): Effect.Effect<Stream.Stream<GatewaySchema.GatewayFrame, GatewayError>, GatewayError> =>

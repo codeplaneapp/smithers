@@ -199,10 +199,9 @@ or corrupt stream, so this is a refusal to read, not a partial answer.
 **Cause** A control-plane read failed. The cause carries only the failure's tag
 and stable code.
 
-**Fix** Read the server log, which has the whole cause. The redaction is
-deliberate: this error is the RPC error schema, so anything left on it is
-serialized to every bearer holder and forwarded to a browser by the relay, and
-a `PersistenceError` carries SQL and file paths.
+**Fix** Use the projection log operation identifier and known control error
+tag/code to locate the failing backend operation. Projection logs omit backend
+messages and nested causes, including SQL, credentials, and file paths.
 
 ## A subscription misbehaves
 
