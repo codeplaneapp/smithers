@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { appendFile, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import { appendFile, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir, userInfo } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -27,7 +27,9 @@ test("configured coding host runs the real AgentAction, guarded file tool and na
   const { platform } = process.versions.bun
     ? await import("../../packages/smithers/src/internal/BunControl.ts")
     : await import("../../packages/smithers/src/internal/NodeControlHost.ts")
-  const temporary = await realpath(await mkdtemp(join(tmpdir(), "coding-host-native-")))
+  // Keep the OS spelling: macOS /var resolves through /private/var. Existing
+  // Write/Edit/ApplyPatch must work across Preserve's canonical sibling paths.
+  const temporary = await mkdtemp(join(tmpdir(), "coding-host-native-"))
   let passed = false
   t.diagnostic(`Native host evidence: ${temporary}`)
   t.after(() => passed ? rm(temporary, { recursive: true, force: true }) : Promise.resolve())

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { hostname, tmpdir, userInfo } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -19,7 +19,7 @@ test("native coding file policy refuses ignored sources, destinations and unboun
   const { platform } = process.versions.bun
     ? await import("../../packages/smithers/src/internal/BunControl.ts")
     : await import("../../packages/smithers/src/internal/NodeControlHost.ts")
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "coding-file-policy-")))
+  const directory = await mkdtemp(join(tmpdir(), "coding-file-policy-"))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const root = join(directory, "repo")
   execFileSync("jj", ["git", "init", root], {stdio:"pipe"})
@@ -44,7 +44,7 @@ test("native coding file policy refuses ignored sources, destinations and unboun
       Layer.provide(ProcessLedger.layer({hostId:hostname(),ownerPid:process.pid}).pipe(Layer.provide(engine.journal))))
     const spawner = Context.get(yield* Layer.build(contained), ChildProcessSpawner.ChildProcessSpawner)
     const fs = Context.get(yield* Layer.build(native.layerGuardedPlatform(root)), FileSystem.FileSystem)
-    const coding = CodingFileSystem.make({repositoryPath:root,adapterPath:wrapper},fs,spawner)
+    const coding = CodingFileSystem.make({repositoryPath:root,adapterPath:wrapper},fs,spawner,yield* fs.realPath(root))
     const refuses = <A, R>(effect: Effect.Effect<A, unknown, R>) => effect.pipe(Effect.result,Effect.tap(result => Effect.sync(() => assert.equal(result._tag,"Failure"))))
     yield* refuses(coding.remove(join(root,"source.ignore")))
     yield* refuses(coding.rename(join(root,"source.ignore"),join(root,"moved.txt")))

@@ -17,17 +17,26 @@ const refusal = (method: string) => Effect.fail(denied(method, "This file mutati
  * The latter can invoke only the provisioned adapter's fixed native operation.
  */
 export const make = (options: NativeOptions, fs: FileSystem.FileSystem,
-  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]): FileSystem.FileSystem => {
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"], canonicalRoot: string): FileSystem.FileSystem => {
   const root = resolve(options.repositoryPath)
+  const pinnedRoot = resolve(canonicalRoot)
+  const inside = (path: string) => path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path)
   // Preserve owns exclusive sibling files only until rename/cleanup. This is
   // transient process state, not another durable source of file ownership.
   const temporaries = new Set<string>()
-  const key = (path: string) => resolve(root, path)
+  // The already-guarded filesystem supplies its pinned real root. Preserve can
+  // return that spelling; normalize only the root alias, never child symlinks.
+  // Native requests still carry the exact provisioned repositoryPath.
+  const key = (path: string) => {
+    const absolute = resolve(root, path)
+    const suffix = relative(root, absolute)
+    return inside(suffix) ? resolve(pinnedRoot, suffix) : absolute
+  }
   const temporary = (path: string, flag: FileSystem.OpenFlag | undefined) =>
     flag === "wx" && /^\.smithers-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/.test(basename(path))
   const eligible = (method: string, path: string, byteLength: number) => Effect.gen(function*() {
-    const target = relative(root, key(path))
-    if (target === "" || target === ".." || target.startsWith(`..${sep}`) || isAbsolute(target) ||
+    const target = relative(pinnedRoot, key(path))
+    if (target === "" || !inside(target) ||
       !Number.isSafeInteger(byteLength) || byteLength < 0) return yield* refusal(method)
     const request = JSON.stringify({ repositoryPath: root, operation: "eligible", path: target.split(sep).join("/"), byteLength })
     const child = yield* spawner.spawn(ChildProcess.make(options.python ?? "python3", [

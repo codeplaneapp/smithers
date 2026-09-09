@@ -56,8 +56,11 @@ process death can leave an operational sibling; this never makes an ignored user
 file an accepted output. Direct streaming/writable handles, recursive mutations,
 links and independent permission/timestamp changes are explicitly unsupported in
 this coding configuration. Shell commands remain irreversible and are never
-advertised as fully compensated file tools. Provisioned repository roots must be
-canonical; this recipe does not relax the existing filesystem boundary for aliases.
+advertised as fully compensated file tools. The guard recognizes the provisioned
+root and the canonical root returned by the existing guarded filesystem, allowing
+Preserve's atomic replacements under OS aliases such as `/var` to `/private/var`.
+It never resolves child symlinks independently or relaxes the filesystem boundary.
+Native eligibility requests retain the exact provisioned repository path.
 
 The native acceptance test rejects an ignored Write, writes through a `*.tmp`
 ignore rule, edits the resulting file, verifies both immutable check tiers, and

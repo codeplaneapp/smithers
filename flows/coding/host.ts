@@ -43,7 +43,10 @@ export const layer = (platform: NativeControl.Platform, options: Options, suppli
   configured(options)
   const native = NativeControl.make({ ...platform,
     jj: root => Snapshots.layerAt({ ...options, repositoryPath: root }),
-    filesystem: (root, fs, spawner) => Effect.succeed(CodingFileSystem.make({ ...options, repositoryPath: root }, fs, spawner))
+    filesystem: (root, fs, spawner) => fs.realPath(root).pipe(
+      Effect.map(canonicalRoot => CodingFileSystem.make({ ...options, repositoryPath: root }, fs, spawner, canonicalRoot)),
+      Effect.orDie
+    )
   }, environment => Layer.effect(SeatResolver.SeatResolver)(
     Effect.map(SeatResolver.SeatResolver, base => roleResolver(base, options.implementationModel))
   ).pipe(Layer.provide(suppliedSeats === undefined ? NativeEquipment.layerSeatResolver(environment) : SeatResolver.layer(suppliedSeats))))
