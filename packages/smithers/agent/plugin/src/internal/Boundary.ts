@@ -102,6 +102,28 @@ const childPath = (path: string, key: string): string =>
 
 const encodedStringBytes = (value: string): number => encoder.encode(JSON.stringify(value)).byteLength
 
+// Paths contain only well-formed text and JSON-escaped keys. Count their JSON
+// bytes without encoding the whole path, reserving quotes and a truncation marker.
+const boundedPath = (path: string): string => {
+  let bytes = 2 + 3
+  let prefix = ""
+  for (const character of path) {
+    const point = character.codePointAt(0)!
+    bytes += character === "\"" || character === "\\"
+      ? 2
+      : point <= 0x7f
+      ? 1
+      : point <= 0x7ff
+      ? 2
+      : point <= 0xffff
+      ? 3
+      : 4
+    if (bytes > 192) return `${prefix}...`
+    prefix += character
+  }
+  return path
+}
+
 interface Frame {
   readonly input: unknown
   readonly path: string
@@ -124,7 +146,11 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
   const containers: Array<ReadonlyArray<Json> | { readonly [key: string]: Json }> = []
   const frames: Array<Frame> = [{ input, path: "$", depth: 0, assign: (value) => root = value }]
   let activePath = "$"
-  const fail = (path: string, complaint: string): AdmissionFailure => ({ ok: false, path, complaint })
+  const fail = (path: string, complaint: string): AdmissionFailure => ({
+    ok: false,
+    path: boundedPath(path),
+    complaint
+  })
   const addBytes = (count: number, path: string): AdmissionFailure | undefined => {
     bytes += count
     return bytes > limits.maxBytes ? fail(path, `exceeds the ${limits.maxBytes}-byte limit`) : undefined
@@ -158,6 +184,10 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
         continue
       }
       if (typeof value === "string") {
+        // Every UTF-16 unit requires at least one encoded byte.
+        if (value.length > limits.maxStringBytes) {
+          return fail(frame.path, `exceeds the ${limits.maxStringBytes}-byte string limit`)
+        }
         if (!isWellFormedText(value)) return fail(frame.path, "contains an unpaired UTF-16 surrogate")
         const stringBytes = encodedStringBytes(value)
         if (stringBytes > limits.maxStringBytes) {
@@ -216,12 +246,18 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
       containers.push(output)
       let structuralBytes = 2 + Math.max(0, stringKeys.length - 1)
       const children: Array<{ readonly key: string; readonly value: unknown; readonly path: string }> = []
-      for (const key of stringKeys) {
-        const path = childPath(frame.path, key)
-        if (!isWellFormedText(key)) return fail(path, "has an ill-formed property name")
-        if (dangerousKeys.has(key)) return fail(path, "uses a reserved property name")
+      for (let index = 0; index < stringKeys.length; index++) {
+        const key = stringKeys[index]!
+        if (key.length > limits.maxKeyBytes) {
+          return fail(`${frame.path}[key:${index}]`, `exceeds the ${limits.maxKeyBytes}-byte key limit`)
+        }
+        if (!isWellFormedText(key)) return fail(`${frame.path}[key:${index}]`, "has an ill-formed property name")
         const keyBytes = encodedStringBytes(key)
-        if (keyBytes > limits.maxKeyBytes) return fail(path, `exceeds the ${limits.maxKeyBytes}-byte key limit`)
+        if (keyBytes > limits.maxKeyBytes) {
+          return fail(`${frame.path}[key:${index}]`, `exceeds the ${limits.maxKeyBytes}-byte key limit`)
+        }
+        const path = childPath(frame.path, key)
+        if (dangerousKeys.has(key)) return fail(path, "uses a reserved property name")
         structuralBytes += keyBytes + 1
         const descriptor = Object.getOwnPropertyDescriptor(value, key)
         if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {

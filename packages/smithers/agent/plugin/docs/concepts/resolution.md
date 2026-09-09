@@ -106,3 +106,17 @@ One kernel accepts:
 Exceeding one fails with `resource_limit` and the path of the offending entry.
 The handler bound counts the handlers the kernel dispatches, so a plugin whose
 hooks were filtered out costs nothing against it.
+
+Configuration and cache-identity JSON admission also bounds strings and diagnostic paths:
+
+| Limit                                                        | Value             |
+| ------------------------------------------------------------ | ----------------- |
+| One JSON-encoded string, including quotes and escapes        | 64 KiB            |
+| One JSON-encoded property name, including quotes and escapes | 1 KiB             |
+| Refusal path, as a JSON-encoded string                       | At most 192 bytes |
+
+String and key lengths are checked before scanning or encoding oversized text.
+Oversized or ill-formed property names use the parent path plus `[key:N]`, where
+`N` is the zero-based index in the record's own-key order. Longer refusal paths
+retain a prefix ending in `...`; truncation preserves Unicode characters and
+accounts for JSON escaping. Short paths for admitted keys keep their usual shape.

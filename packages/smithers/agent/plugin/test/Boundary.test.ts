@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
+import * as Config from "../src/Config.ts"
 import * as Boundary from "../src/internal/Boundary.ts"
+import { PluginError } from "../src/PluginError.ts"
 
 const limits = (overrides: Partial<Boundary.Limits> = {}): Boundary.Limits => ({
   maxBytes: 1_024,
@@ -14,6 +16,86 @@ const limits = (overrides: Partial<Boundary.Limits> = {}): Boundary.Limits => ({
 const admit = (value: unknown, overrides?: Partial<Boundary.Limits>) => Boundary.admit(value, limits(overrides))
 
 describe("the inert plugin JSON boundary", () => {
+  it.each(["string", "key"] as const)(
+    "refuses an oversized %s before scanning, serializing, or encoding it",
+    (kind) => {
+      const oversized = "x".repeat(1024 * 1024)
+      const input = kind === "string" ? oversized : { [oversized]: null }
+      const encode = vi.spyOn(TextEncoder.prototype, "encode")
+      const stringify = vi.spyOn(JSON, "stringify")
+      const charCodeAt = vi.spyOn(String.prototype, "charCodeAt")
+      let result: Boundary.Admission
+      let calls: Array<number>
+      try {
+        result = Boundary.admit(input)
+        calls = [encode.mock.calls.length, stringify.mock.calls.length, charCodeAt.mock.calls.length]
+      } finally {
+        encode.mockRestore()
+        stringify.mockRestore()
+        charCodeAt.mockRestore()
+      }
+      expect(result).toMatchObject({
+        ok: false,
+        complaint: `exceeds the ${kind === "string" ? 65536 : 1024}-byte ${kind} limit`
+      })
+      expect(calls).toEqual([0, 0, 0])
+    }
+  )
+
+  it("locates oversized keys by index without retaining the key", () => {
+    for (const key of ["x".repeat(1024 * 1024), "\"".repeat(1024 * 1024), "é".repeat(512), "\"".repeat(512)]) {
+      const result = Boundary.admit({ safe: { first: null, [key]: null } })
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.path.length).toBeLessThan(192)
+      expect(result).toEqual({
+        ok: false,
+        path: "$.safe[key:1]",
+        complaint: "exceeds the 1024-byte key limit"
+      })
+    }
+  })
+
+  it("still measures JSON quotes, escapes, and UTF-8 below the length prechecks", () => {
+    for (const value of ["abc", "é", "中", "😀", "\"", "\n"]) {
+      const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength
+      expect(admit(value, { maxStringBytes: bytes })).toEqual({ ok: true, value })
+      expect(admit(value, { maxStringBytes: bytes - 1 })).toMatchObject({
+        ok: false,
+        complaint: `exceeds the ${bytes - 1}-byte string limit`
+      })
+      expect(admit({ [value]: null }, { maxKeyBytes: bytes })).toEqual({ ok: true, value: { [value]: null } })
+      expect(admit({ [value]: null }, { maxKeyBytes: bytes - 1 })).toEqual({
+        ok: false,
+        path: "$[key:0]",
+        complaint: `exceeds the ${bytes - 1}-byte key limit`
+      })
+    }
+  })
+
+  it("keeps oversized-key and nested-path PluginErrors below the journal byte bound", () => {
+    const inputs: Array<unknown> = [{ ["x".repeat(1024 * 1024)]: null }]
+    for (const character of ["a", "é", "中", "😀", "\"", "\\", "\u0000"]) {
+      let nested: unknown = undefined
+      for (let depth = 0; depth < 10; depth++) nested = { [character.repeat(100)]: nested }
+      inputs.push(nested)
+    }
+    for (const input of inputs) {
+      let error: unknown
+      try {
+        Config.merge({}, input)
+      } catch (cause) {
+        error = cause
+      }
+      expect(error).toBeInstanceOf(PluginError)
+      const failure = error as PluginError
+      expect(failure.code).toBe("config_invalid")
+      expect(new TextEncoder().encode(JSON.stringify(failure.path)).byteLength).toBeLessThanOrEqual(192)
+      expect(new TextEncoder().encode(JSON.stringify(failure)).byteLength).toBeLessThan(512)
+      expect(Boundary.isWellFormedText(failure.path!)).toBe(true)
+    }
+  })
+
   it("refuses a proxy reporting an invalid array length", () => {
     const input = new Proxy([], {
       get: (target, key, receiver) => key === "length" ? Number.NaN : Reflect.get(target, key, receiver)
