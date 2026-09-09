@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { cn } from "../cn";
+import { stepFence, type Fence } from "./fence";
 import { useVaultCss } from "./useVaultCss";
 
 /** One heading in a markdown document, 1-based line numbered. */
@@ -15,19 +16,19 @@ export type OutlineHeading = {
 
 /**
  * Parse markdown ATX headings into an outline. Fence-safe: `#` lines inside
- * fenced code blocks are not headings.
+ * fenced code blocks are not headings. Fence state comes from the shared
+ * {@link stepFence} tracker, so a ``` ``` ``` example inside a ```` ```` ````
+ * block no longer ends it and turns the code inside into headings.
  */
 export function parseOutline(markdown: string): OutlineHeading[] {
   const headings: OutlineHeading[] = [];
-  let inFence = false;
+  let fence: Fence | null = null;
   const lines = markdown.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    if (/^\s*(```|~~~)/.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
+    const step = stepFence(line, fence);
+    fence = step.fence;
+    if (step.fenced) continue;
     const match = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
     if (match) {
       headings.push({ depth: match[1]!.length, text: match[2]!, line: i + 1 });

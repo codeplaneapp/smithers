@@ -6,6 +6,8 @@
  * link logic without pulling a browser-shaped dependency tree.
  */
 
+import { stepFence, type Fence } from "./fence";
+
 /** Href prefix for a wikilink rendered into markdown. Scheme-less on purpose:
  *  href sanitizers drop unknown schemes, which would swallow the click. */
 export const NOTE_HREF = "#note/";
@@ -50,8 +52,6 @@ export function noteLabel(path: string): string {
 
 /** One run of markdown text, tagged with whether it is code. */
 type Segment = { readonly text: string; readonly code: boolean };
-
-const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
 
 /**
  * Split a line into inline-code and non-code runs, CommonMark style.
@@ -116,32 +116,17 @@ function splitInlineCode(line: string): Segment[] {
  * used to carry independent copies of the same flawed logic, so fixing one
  * would have left the other wrong.
  *
- * Fence state tracks the opening fence's CHARACTER and LENGTH. A boolean
- * toggle, which is what this replaced, let a `~~~` line inside an open
- * ``` ``` ``` fence close it, after which every link in the still-open block was
- * rewritten. Only a fence of the same character, at least as long, with nothing
- * after it, closes one; an unterminated fence runs to the end of the document.
+ * Fence state comes from the shared {@link stepFence} tracker, which the
+ * outline parser reads too: a fence closes only on its own character, at least
+ * as long, with nothing after it.
  */
 function scanMarkdown(markdown: string): Segment[][] {
   const rows: Segment[][] = [];
-  let fence: { marker: string; length: number } | null = null;
+  let fence: Fence | null = null;
   for (const line of markdown.split("\n")) {
-    const match = FENCE_RE.exec(line);
-    const run = match?.[1];
-    if (fence) {
-      if (run && run[0] === fence.marker && run.length >= fence.length && (match?.[2] ?? "").trim() === "") {
-        fence = null;
-      }
-      rows.push([{ text: line, code: true }]);
-      continue;
-    }
-    // A backtick fence's info string may not itself contain a backtick.
-    if (run && !(run[0] === "`" && (match?.[2] ?? "").includes("`"))) {
-      fence = { marker: run[0]!, length: run.length };
-      rows.push([{ text: line, code: true }]);
-      continue;
-    }
-    rows.push(splitInlineCode(line));
+    const step = stepFence(line, fence);
+    fence = step.fence;
+    rows.push(step.fenced ? [{ text: line, code: true }] : splitInlineCode(line));
   }
   return rows;
 }

@@ -37,6 +37,51 @@ describe("parseOutline", () => {
   });
 });
 
+/**
+ * The parser used to carry a boolean it toggled on any ``` or ~~~ line, so a
+ * shorter or differently-marked run closed a block it never opened and the real
+ * closer reopened one. Every heading after that point was inverted: code became
+ * outline entries and the document's own headings vanished. It now reads the
+ * same fence tracker the wikilink scanner does (`src/vault/fence.ts`).
+ */
+describe("outline fences close only on their own marker", () => {
+  test("a shorter backtick run inside a longer fence does not end it", () => {
+    const markdown = ["````markdown", "```", "# inside code", "````", "# real heading"].join("\n");
+    expect(parseOutline(markdown)).toEqual([{ depth: 1, text: "real heading", line: 5 }]);
+  });
+
+  test("a tilde line inside a backtick fence does not end it", () => {
+    const markdown = ["```", "~~~", "# inside code", "```", "# real heading"].join("\n");
+    expect(parseOutline(markdown)).toEqual([{ depth: 1, text: "real heading", line: 5 }]);
+  });
+
+  test("a backtick line inside a tilde fence does not end it", () => {
+    const markdown = ["~~~", "```", "# inside code", "~~~", "# real heading"].join("\n");
+    expect(parseOutline(markdown)).toEqual([{ depth: 1, text: "real heading", line: 5 }]);
+  });
+
+  test("a closing fence may be longer than the opener but not shorter", () => {
+    expect(parseOutline(["```", "# inside code", "````", "# real heading"].join("\n"))).toEqual([
+      { depth: 1, text: "real heading", line: 4 },
+    ]);
+  });
+
+  test("an info string keeps a fence open and is not a closer", () => {
+    const markdown = ["```ts", "# inside code", "```ts", "# still inside", "```", "# real heading"].join("\n");
+    expect(parseOutline(markdown)).toEqual([{ depth: 1, text: "real heading", line: 6 }]);
+  });
+
+  test("an unterminated fence runs to the end of the document", () => {
+    const markdown = ["# Title", "```", "# inside code", "# also inside"].join("\n");
+    expect(parseOutline(markdown)).toEqual([{ depth: 1, text: "Title", line: 1 }]);
+  });
+
+  test("an indented fence still opens and closes a block", () => {
+    const markdown = ["  ```", "  # inside code", "  ```", "# real heading"].join("\n");
+    expect(parseOutline(markdown)).toEqual([{ depth: 1, text: "real heading", line: 4 }]);
+  });
+});
+
 describe("OutlineView", () => {
   test("renders an aria tree with indented treeitems", () => {
     const html = renderToStaticMarkup(<OutlineView markdown={MD} />);
