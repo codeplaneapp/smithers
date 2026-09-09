@@ -1087,7 +1087,7 @@ export const payloadFor = (
   if (parse === undefined) return NONE
   if (takesRunSource(name)) {
     const source = splitRunSource(args)
-    const parsed = parse(source.args)
+    const parsed = parse(source.args, known)
     return "payload" in parsed && source.sourceCard !== undefined ? ok({ ...parsed.payload, sourceCard: source.sourceCard }) : parsed
   }
   return parse(args, known)

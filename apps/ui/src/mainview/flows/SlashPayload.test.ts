@@ -273,3 +273,13 @@ describe("structured flow input", () => {
     }
   })
 })
+
+test("run source parsing preserves repository context for slash-shaped run IDs", () => {
+  const known = new Set(["will/flows"])
+  expect(payloadFor("runs.open", "sourceCard=list-a jobs/run-1", undefined, known)).toEqual({
+    payload: { runId: "jobs/run-1", sourceCard: "list-a" }
+  })
+  expect(payloadFor("runs.open", "sourceCard=list-a jobs/run-1 will/flows", undefined, known)).toEqual({
+    payload: { runId: "jobs/run-1", repo: "will/flows", sourceCard: "list-a" }
+  })
+})
