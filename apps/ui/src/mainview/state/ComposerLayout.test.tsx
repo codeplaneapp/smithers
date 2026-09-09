@@ -5,6 +5,7 @@ import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import App from "../App"
+import { SidebarRepositoryPicker } from "../Composer"
 import { ControllerTestProvider } from "../ControllerContext"
 import type { NativeRepositories } from "../native/NativeBridge"
 import type { AgentPort } from "../runtime/AgentPort"
@@ -86,14 +87,14 @@ interface View {
   readonly act: (change: () => void) => Promise<void>
 }
 
-const mount = (controller: AppControllerType): View => {
+const mount = (controller: AppControllerType, sidebar = false): View => {
   const host = document.createElement("div")
   document.body.append(host)
   const root = createRoot(host)
   flushSync(() =>
     root.render(
       <ControllerTestProvider controller={controller}>
-        <App />
+        {sidebar ? <SidebarRepositoryPicker /> : <App />}
       </ControllerTestProvider>
     )
   )
@@ -512,4 +513,34 @@ describe("the composer's + menu and surface pill", () => {
     expect(text(rows[0])).toContain("Review an open PR")
     expect(rows.map((row) => row.querySelector("button")?.dataset.flow)).toEqual(["flow.run", "flow.run"])
   })
+})
+
+
+test("signed-out sidebar loads public repositories and selects one without connection setup", async () => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const controller = createAppController(store, { ...nativeRepositories, available: false }, silentAgent, {
+    bootstrap: { ...localBootstrap, host: "cloud", capabilities: ["cloud"], authFlow: "redirect" },
+    ...backend({ "/api/public/repos": json(200, { repos: [{ name: "smithersai/smithers" }] }) })
+  })
+  const view = mount(controller, true)
+  await view.act(() => byTestId(view.host, "composer-repo-trigger")?.click())
+  await settled()
+  const menu = view.host.querySelector('[role="menu"]')
+  expect(text(menu)).toContain("smithers")
+  expect(text(menu)).not.toContain("Connect GitHub")
+  expect(text(menu)).not.toContain("Sign in to Smithers Cloud")
+  const choice = menu?.querySelector<HTMLButtonElement>('[data-flow="repo.select"]')
+  expect(choice).not.toBeNull()
+  await view.act(() => {
+    choice?.focus()
+    choice?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+  })
+  expect(view.host.querySelector('[role="menu"]')).toBeNull()
+  expect(document.activeElement).toBe(byTestId(view.host, "composer-repo-trigger"))
+  await view.act(() => byTestId(view.host, "composer-repo-trigger")?.click())
+  await view.act(() => view.host.querySelector<HTMLButtonElement>('[data-flow="repo.select"]')?.click())
+  expect(store.session().activeRepoKey).toBe("smithersai/smithers")
+  expect(view.host.querySelector('[role="menu"]')).toBeNull()
+  expect(text(byTestId(view.host, "composer-repo-trigger"))).toBe("smithersai/smithers")
+  await controller.dispose()
 })

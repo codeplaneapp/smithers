@@ -451,9 +451,11 @@ function ComposerAdd({
  */
 function ComposerConnect({
   open,
-  triggerRef
+  triggerRef,
+  repositoriesOnly = false
 }: {
   /* C-1 mirror: the open state is the session's, not this component's. */
+  readonly repositoriesOnly?: boolean
   readonly open: boolean
   /* The shell closes this session menu too, so it owns the focus handle. */
   readonly triggerRef: RefObject<HTMLButtonElement | null>
@@ -522,8 +524,8 @@ function ComposerConnect({
         content: (
           <>
             <Cloud size={14} aria-hidden="true" />
-            <span className="composer-connect-name">{repository.name}</span>
-            <span className="composer-connect-branch">{repository.org}/</span>
+            <span className="composer-connect-name">{repositoriesOnly ? repository.id : repository.name}</span>
+            {!repositoriesOnly && <span className="composer-connect-branch">{repository.org}/</span>}
           </>
         )
       },
@@ -544,7 +546,7 @@ function ComposerConnect({
         }))
     ])
 
-  const entries: ReadonlyArray<MenuEntry> = [
+  const connectionEntries: ReadonlyArray<MenuEntry> = [
     ...repos.map((repo) => ({
       key: `repo:${repo.id}`,
       // Choosing an open repository makes it the active one: the sidebar row, the origin, and where tabs start.
@@ -655,7 +657,9 @@ function ComposerConnect({
       : [])
   ]
 
-  if (entries.length === 0) return null
+  const entries = repositoriesOnly
+    ? connectionEntries.filter((entry) => entry.flow === "repo.select" || entry.flow === "repo.open")
+    : connectionEntries
 
   /* The entry indices a keyboard can land on; a disabled entry is skipped. */
   const enabledEntries = entries.flatMap((entry, index) => (entry.disabled === true ? [] : [index]))
@@ -690,7 +694,9 @@ function ComposerConnect({
   }
 
   return (
-    <div className="composer-menu composer-connect">
+    <div className="composer-menu composer-connect" onBlur={(event) => {
+      if (repositoriesOnly && !event.currentTarget.contains(event.relatedTarget as Node | null)) controller.closeConnectMenu()
+    }}>
       <Button
         ref={triggerRef}
         variant="ghost"
@@ -713,9 +719,10 @@ function ComposerConnect({
           <div
             className="composer-menu-list composer-connect-list"
             role="menu"
-            aria-label="Repository connections"
+            aria-label={repositoriesOnly ? "Repositories" : "Repository connections"}
             onKeyDown={onMenuKeyDown}
           >
+            {entries.length === 0 && <div className="composer-menu-item" role="status">No repositories available.</div>}
             {entries.map((entry, index) => (
               <button
                 type="button"
@@ -731,6 +738,7 @@ function ComposerConnect({
                 disabled={entry.disabled}
                 onClick={() => {
                   controller.closeConnectMenu()
+                  triggerRef.current?.focus()
                   if (entry.args === undefined) controller.runCommand(entry.flow)
                   else controller.runCommandArgs(entry.flow, entry.args)
                 }}
@@ -1162,5 +1170,5 @@ export function SidebarRepositoryPicker() {
   const controller = useController()
   const { data: sessions } = useLiveQuery(controller.store.collections.sessions)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  return <ComposerConnect open={sessions[0]?.connectMenuOpen === true} triggerRef={triggerRef} />
+  return <ComposerConnect repositoriesOnly open={sessions[0]?.connectMenuOpen === true} triggerRef={triggerRef} />
 }

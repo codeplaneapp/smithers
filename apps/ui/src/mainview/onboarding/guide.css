@@ -413,7 +413,7 @@
   gap: 8px;
   animation: guide-rise 0.6s both;
 }
-.guide-sidebar button {
+.guide-sidebar nav button {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -425,7 +425,7 @@
   border-radius: 7px;
   font-size: 12px;
 }
-.guide-sidebar button:hover {
+.guide-sidebar nav button:hover {
   background: var(--g-panel);
 }
 .guide-sidebar p {
@@ -904,7 +904,7 @@
   .guide-section-label {
     display: none;
   }
-  .guide-sidebar button {
+  .guide-sidebar nav button {
     font-size: 10px;
   }
   .guide-sidebar .guide-plugin-dot {
@@ -1120,3 +1120,28 @@
   animation: guide-rise .45s ease both;
 }
 .guide-transcript .guide-dialogue[data-current="false"] .guide-word { animation: none; opacity: 1; }
+
+/* Repository controls keep their own sizing; navigation styles must not wrap menu rows. */
+.guide-sidebar .composer-connect { min-width: 0; width: 100%; }
+.guide-sidebar .composer-connect-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  gap: 8px;
+  border: 1px solid var(--g-line);
+  border-radius: 8px;
+  background: var(--g-panel);
+  color: var(--g-ink);
+  font-size: 12px;
+  text-align: left;
+}
+.guide-sidebar .composer-connect-label { flex: 1; min-width: 0; max-width: none; }
+.guide-sidebar .composer-connect-trigger svg { flex-shrink: 0; }
+.guide-sidebar .composer-connect-list {
+  width: min(320px, calc(100vw - 60px));
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+}
+.guide-sidebar .composer-menu-item { flex-wrap: nowrap; font-size: 12px; }
+.guide-sidebar .composer-connect-trigger:focus-visible { outline: 2px solid var(--g-accent); outline-offset: 2px; }

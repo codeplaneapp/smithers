@@ -81,7 +81,7 @@ export const repoFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repo.select",
     summary: "Make a pinned repository the active one",
-    runtime: ["local.repositories"],
+    runtimeAny: ["local.repositories", "cloud"],
     hidden: true,
     userOnly: true,
     userOnlyReason:
