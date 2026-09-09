@@ -1,5 +1,5 @@
 import type { StorageApi } from "@tanstack/db"
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -23,6 +23,8 @@ import type { AppController, AppServices } from "../AppController"
 import type { Card } from "../AppState"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
+import { createLspClient } from "../LspClient"
+import { createCodeIntelSeam } from "./CodeIntelSeam"
 
 /*
  * The code-intel seam (CodeIntelSeam.ts, LspClient.ts) through the real
@@ -208,6 +210,36 @@ describe("code-intel seam — refusals that need no language server", () => {
     expect(fileCard(store, `file-${repo.id}-README.md`)?.payload.intel).toEqual({
       state: "unavailable",
       note: "No language server handles .md files."
+    })
+  }, 30_000)
+
+  test("a definition keeps its location and reports the target file read refusal", async () => {
+    const { repo, store, controller } = await app()
+    valueOf(await controller.commands.run("files.read", "src/index.ts"))
+    const http = async () => Response.json({
+      locations: [{ path: "src/greet.ts", line: 6, character: 14, endLine: 6, endCharacter: 19 }],
+      total: 1,
+      omitted: 0,
+      digest: "fixture-digest"
+    })
+    const lsp = createLspClient({ http, baseUrl: "", socketUrl: () => undefined })
+    const refusal = "Could not read src/greet.ts: the local app is unreachable."
+    const readFile = mock(async () => refusal)
+    const seam = createCodeIntelSeam({
+      http,
+      baseUrl: "",
+      store,
+      dispatch: store.dispatch,
+      actor: () => "user",
+      nextOrdinal: () => 2
+    }, { lsp, readFile })
+    disposers.push(() => lsp.dispose(), () => seam.dispose())
+
+    const result = await seam.definition("src/index.ts", 3, 17, repo.id)
+    expect(readFile).toHaveBeenCalledWith("src/greet.ts", repo.id, { line: 6, column: 14 })
+    expect(fileCard(store, `file-${repo.id}-src/greet.ts`)).toBeUndefined()
+    expect(result).toEqual({
+      value: `src/index.ts:3:17 in ${repo.name} is defined at:\nsrc/greet.ts:6:14; the target could not be opened: ${refusal}`
     })
   }, 30_000)
 
@@ -398,12 +430,13 @@ describe("code-intel seam — a cloud repository (lane L6)", () => {
     await until(() => (fileCard(store, "file-will/flows-src/x.ts")?.payload.diagnostics ?? []).length === 1, "the published diagnostics")
     const diagnostics = await controller.commands.run("code.diagnostics", "src/x.ts will/flows")
     expect(diagnostics).toEqual({ status: "executed", value: "src/x.ts in will/flows: 1 diagnostic\n1:14 warning 'greet' is declared but its value is never read. (typescript 6133)" })
-    // The definition names the checkout-relative target; the agent door reads the same.
+    // The definition names the checkout-relative target and reports that this fixture's contents route is offline.
     const definition = await controller.commands.executeForAgent({
       name: "commands",
       arguments: JSON.stringify({ action: "execute", name: "code.definition", args: "src/x.ts:1:10 will/flows" })
     })
-    expect(definition).toBe("src/x.ts:1:10 in will/flows is defined at:\nsrc/greet.ts:6:14")
+    expect(definition).toBe("src/x.ts:1:10 in will/flows is defined at:\nsrc/greet.ts:6:14; the target could not be opened: Smithers Cloud is not reachable from this build (offline mode).")
+    expect(fileCard(store, "file-will/flows-src/greet.ts")).toBeUndefined()
     // A close plue sends afterwards is stated on the card, verbatim — never a silent close.
     plue.closeAll(1000, "language_server_idle")
     await until(() => fileCard(store, "file-will/flows-src/x.ts")?.payload.intel?.state === "unavailable", "the close on the card")

@@ -424,15 +424,16 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
        * The card effect (§4): the first target opens at its line through
        * files.read's anchor — the same card id, the same dedupe, the same
        * scroll. The read's own value stays out of this answer: the model
-       * asked where, not what; it reads the target with files.read.
+       * asked where, not what; it reads the target with files.read. A
+       * refusal still belongs in the answer because the target did not open.
        */
-      await options.readFile(first.path, prepared.kind === "local" ? prepared.repo.id : repo, { line: first.line, column: first.character })
+      const opened = await options.readFile(first.path, prepared.kind === "local" ? prepared.repo.id : repo, { line: first.line, column: first.character })
       const more = total - omitted - locations.length
       const trailer = [
         ...(more > 0 ? [`… and ${more} more`] : []),
         ...(omitted > 0 ? [`(${plural(omitted, "more location")} outside the repository, not openable here)`] : [])
       ]
-      return { value: `${at} is defined at:\n${[first, ...rest].map(locationRow).join("\n")}${trailer.length === 0 ? "" : `\n${trailer.join("\n")}`}` }
+      return { value: `${at} is defined at:\n${[first, ...rest].map(locationRow).join("\n")}${trailer.length === 0 ? "" : `\n${trailer.join("\n")}`}${typeof opened === "string" ? `; the target could not be opened: ${opened}` : ""}` }
     },
 
     diagnostics: async (pathArg, repoArg) => {

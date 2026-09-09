@@ -241,6 +241,10 @@ rule) and updates the FILE card for the human: no new card kind.
 | `code.diagnostics` | `<path> [owner/repo]` | `local.lsp` | `line:col severity message` rows, ≤50 | `payload.diagnostics` → annotations + count |
 | v1.1 `code.references`, `code.symbols` | as above | `local.lsp` | bounded lists | annotations / a listing in the card |
 
+If `files.read` refuses the first definition target, `code.definition` keeps
+the location list and appends `; the target could not be opened: <refusal>`
+to its value.
+
 Budget: three stage-0 lines at ~95 bytes ≈ 290 bytes against a 14 KiB prompt
 budget (`Instructions.ts:240`); `InstructionsBudget.test.ts:69` stays the
 gate and lane 3 reports the stage the catalog lands in. `Instructions.ts:65`
