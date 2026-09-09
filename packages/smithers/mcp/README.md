@@ -30,6 +30,22 @@ pnpm add @smthrs/mcp@next @effect/platform-node@4.0.0-rc.112
 
 ## Connect a server and read its flows
 
+Install a reviewed server version and its dependencies before supplying any
+credentials. This example pins the deprecated GitHub server to `2025.4.8`;
+review it for your use before running it. Use a dedicated directory, review and
+retain `package.json` and `package-lock.json`, then install from that lockfile:
+
+```bash
+mkdir -p /path/to/mcp-servers
+env -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN npm install --prefix /path/to/mcp-servers --package-lock-only --ignore-scripts --save-exact @modelcontextprotocol/server-github@2025.4.8
+# Review the pinned package and lockfile before installing.
+env -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN npm ci --prefix /path/to/mcp-servers --ignore-scripts
+```
+
+Both npm commands remove the GitHub credential variables from their environment.
+Launch the installed executable directly and supply the token only in the
+server's `env`. This server reads `GITHUB_PERSONAL_ACCESS_TOKEN`.
+
 ```typescript
 import { NodeServices } from "@effect/platform-node"
 import * as McpFlows from "@smthrs/mcp/McpFlows"
@@ -38,9 +54,9 @@ import { Effect } from "effect"
 const program = Effect.scoped(Effect.gen(function*() {
   const source = yield* McpFlows.connected({
     server: "github",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-github"],
-    env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN },
+    command: "/path/to/mcp-servers/node_modules/.bin/mcp-server-github",
+    args: [],
+    env: { GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN },
     include: ["create_issue", "get_issue", "list_issues"]
   })
   const bindings = yield* source.bindings()
@@ -62,8 +78,9 @@ are enforced for the supported keyword subset.
 
 Session errors withhold raw child stderr, remote error text/data, and property
 paths. An optional host-only [Diagnostics observer](https://mcp.smithers.sh/reference/api/#diagnostics)
-provides bounded `Redacted` details for explicit local inspection. Successful
-tool outputs, including `isError: true`, are returned unchanged.
+provides credential-redacted `Redacted` details for explicit local inspection,
+with child stderr bounded by `maxStderrBytes` (2048 by default). Successful tool
+outputs, including `isError: true`, are returned unchanged.
 
 Every projected flow declares the widest authority the capability vocabulary
 can express, because an MCP tool is opaque code this package does not control.
@@ -96,5 +113,3 @@ Full documentation is at [mcp.smithers.sh](https://mcp.smithers.sh):
 ## License
 
 MIT. See [LICENSE](./LICENSE).
-
-Trusted local diagnostics redact credentials and bound child stderr by `maxStderrBytes` (2048 by default). Model-facing connection errors withhold the child output.

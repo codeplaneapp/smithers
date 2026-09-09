@@ -12,6 +12,24 @@ projects into a run's flow catalog, so a flow can call them.
 `SMITHERS_MCP_CONFIG` sets the same path. The flag wins when both are present,
 and omitting both configures no MCP servers.
 
+## Install the server
+
+Install a reviewed server version and its dependencies before supplying any
+credentials. This example pins the deprecated GitHub server to `2025.4.8`;
+review it for your use before running it. Use a dedicated directory, review and
+retain `package.json` and `package-lock.json`, then install from that lockfile:
+
+```bash
+mkdir -p /path/to/mcp-servers
+env -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN npm install --prefix /path/to/mcp-servers --package-lock-only --ignore-scripts --save-exact @modelcontextprotocol/server-github@2025.4.8
+# Review the pinned package and lockfile before installing.
+env -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN npm ci --prefix /path/to/mcp-servers --ignore-scripts
+```
+
+Both npm commands remove the GitHub credential variables from their environment.
+Launch the installed executable directly and supply the token only in the
+server's `env`. This server reads `GITHUB_PERSONAL_ACCESS_TOKEN`.
+
 ## The file
 
 A JSON array. Each entry is structurally an `McpClient.ConnectOptions`:
@@ -20,9 +38,9 @@ A JSON array. Each entry is structurally an `McpClient.ConnectOptions`:
 [
   {
     "server": "github",
-    "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-github"],
-    "env": { "GITHUB_TOKEN": "ghp_..." }
+    "command": "/path/to/mcp-servers/node_modules/.bin/mcp-server-github",
+    "args": [],
+    "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
   },
   {
     "server": "reports",

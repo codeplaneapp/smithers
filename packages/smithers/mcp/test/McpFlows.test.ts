@@ -336,6 +336,41 @@ describe("McpClient.connect", () => {
     for (const path of [new URL("../LICENSE", import.meta.url)]) {
       expect(existsSync(path)).toBe(true)
     }
+
+    expect(readme.match(/^## .+$/gm)?.at(-1)).toBe("## License")
+    expect(readme.trim().split("## License\n").at(-1)?.trim()).toBe("MIT. See [LICENSE](./LICENSE).")
+    expect(readme.slice(0, readme.indexOf("## License"))).toContain("`maxStderrBytes` (2048 by default)")
+  })
+
+  it.each([
+    "../README.md",
+    "../docs/guides/connect-a-server.md",
+    "../docs/guides/configure-servers-for-the-cli.md"
+  ])("separates locked server installation from credentials in %s", (path) => {
+    const document = readFileSync(new URL(path, import.meta.url), "utf8")
+    expect(document).not.toMatch(/npx(?: -y|["']\s*,)/)
+
+    const installRecipe = (text: string) =>
+      [...text.matchAll(/```bash\n([\s\S]*?)```/g)].find((match) =>
+        match[1]?.includes("@modelcontextprotocol/server-github")
+      )?.[1]
+    const recipe = installRecipe(document)
+    expect(recipe).toBeDefined()
+    expect(recipe).toContain(
+      "--package-lock-only --ignore-scripts --save-exact @modelcontextprotocol/server-github@2025.4.8"
+    )
+    expect(recipe).toContain("npm ci --prefix /path/to/mcp-servers --ignore-scripts")
+    const commands = recipe?.split("\n").filter((line) => line.includes("npm ")) ?? []
+    expect(commands).toHaveLength(2)
+    for (const command of commands) {
+      expect(command).toMatch(/^env -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN npm /)
+    }
+    expect(recipe).toBe(installRecipe(readFileSync(new URL("../README.md", import.meta.url), "utf8")))
+    expect(document).toMatch(/command"?: "\/path\/to\/mcp-servers\/node_modules\/\.bin\/mcp-server-github"/)
+    expect(document).toMatch(/args"?: \[\]/)
+    expect(document).toMatch(
+      /env"?: \{ GITHUB_PERSONAL_ACCESS_TOKEN: process\.env\.GITHUB_TOKEN \}|env": \{ "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_\.\.\." \}/
+    )
   })
 
   it("keeps the source tree's docs out of the published tarball", () => {
