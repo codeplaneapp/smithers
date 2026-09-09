@@ -574,10 +574,11 @@ export const layer: Layer.Layer<
      * longer recognized the row: the run stayed suspended with its waiting
      * reason set and its execution never returned (control-plane example 38).
      *
-     * The journal entry is the delegation. It is written either way, and the
-     * owning driver's resume bridge follows it, so the intent reaches the run
-     * without this plane taking the row away from the process that can act on
-     * it. A run a live peer is HOLDING — `running`, or the `accepted` a claim
+     * Both public resume spellings journal `control.run.resume`. The caller
+     * or a host-supplied journal subscriber must drive the execution. This
+     * path neither calls `requestResume` nor offers `executor.resumeRun`;
+     * the durable pending-resume queue belongs to node-approval decisions.
+     * A run a live peer is HOLDING — `running`, or the `accepted` a claim
      * writes and only a settlement rewrites — is still `ClaimLost`: there is
      * nothing to restart, and pretending otherwise would hide the peer.
      */

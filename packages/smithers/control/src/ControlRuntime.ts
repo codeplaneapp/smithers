@@ -460,12 +460,12 @@ export interface Service {
   /**
    * Joins or claims a suspended run.
    *
-   * `scope: "launched"` restricts the claim to runs this plane launched.
-   * The steer wake passes it, because claiming a run another driver created
-   * would strand the row under this plane's fence where that driver's own
-   * resume path gives up. An explicit `Control.resume` — an operator or a
-   * monitor remedy acting on a run nobody is driving — omits it and may
-   * claim any suspended run.
+   * `scope: "launched"` restricts claims to runs this plane launched.
+   * Both `Control.resume` and `Control.run` with a Resume input, plus steer
+   * wakes, pass it to preserve an engine-created run's continuation and fence.
+   * `scope: "any"` (also the default) is a trusted low-level runtime
+   * capability for hosts that can drive the claimed execution. Node approval
+   * uses `requestResume` delegation instead of claiming here.
    */
   readonly resume: (
     runId: RunId,
@@ -1086,18 +1086,19 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         }),
         resume: Effect.fn("ControlRuntime.resume")(function*(runId) {
           const run = yield* requireRun(runId)
-          if (run.summary.status === "running") {
+          if (
+            run.summary.status === "cancelled" ||
+            run.summary.status === "completed" ||
+            run.summary.status === "failed"
+          ) return snapshot(run.summary)
+          // Accepted claims are owned too; releasePending clears both fences.
+          if (run.fence !== undefined) {
             /* v8 ignore next 3 -- one process holds this whole runtime, and it writes `fence` and `localFence` together; the peer this refuses exists only over a shared database, which is `SqlControlRuntime`'s fence */
             if (run.localFence === undefined || run.fence !== run.localFence) {
               return yield* new ClaimLost({ runId })
             }
             return snapshot(run.summary)
           }
-          if (
-            run.summary.status === "cancelled" ||
-            run.summary.status === "completed" ||
-            run.summary.status === "failed"
-          ) return snapshot(run.summary)
           const fence = `fence-${++fenceSequence}`
           run.fence = fence
           run.localFence = fence

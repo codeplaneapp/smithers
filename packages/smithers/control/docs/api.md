@@ -267,9 +267,20 @@ runs only after the fiber's finalizers finish and wraps the fenced status
 reconciliation. `ControlLive` uses it to commit the terminal event alongside
 the status. Direct callers may omit it.
 
-`resume` takes `{ scope?: "launched" \| "any" }`. `"launched"` restricts the
-claim to runs this plane launched, which every steer wake and every
-approval-driven restart passes. An explicit `Control.resume` omits it.
+`resume` takes `{ scope?: "launched" \| "any" }`. `scope: "launched"`
+restricts claims to the shared `control_runs` launch index. Both public
+spellings, `Control.resume` and `Control.run` with a Resume input, and every
+steer wake pass it. `scope: "any"`, also the default, is a trusted low-level
+runtime capability for hosts that can drive the claimed execution.
+An owned non-terminal run is joined without replacing its fence, including
+`accepted`; a run released by `releasePending` can be claimed again.
+
+Explicit resume journals `control.run.resume` and does not call `requestResume`
+or `ControlExecutor.resumeRun`. A caller or journal subscriber must drive the
+execution; polling `pendingResumes` does not take up explicit resumes.
+A suspended engine-created run stays unclaimed and receives an `Accepted`
+receipt for the journal intent. A live peer's owned run fails with `ClaimLost`.
+Node-approval decisions use the durable resume delegation instead.
 
 `registerApproval` is idempotent and returns the token with its current
 tagged decision. `Pending` parks, `Approved` opens a gate, and `Denied` fails it.

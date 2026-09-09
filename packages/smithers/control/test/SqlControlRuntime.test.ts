@@ -11,8 +11,11 @@ import * as Journal from "@smthrs/journal/Journal"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Registry } from "@smthrs/registry"
 import { Migrations as RunStoreMigrations, Ownership, RunStore } from "@smthrs/run-store"
-import { Context, type Crypto, Deferred, Effect, Fiber, Layer, Stream } from "effect"
+import { Context, type Crypto, Deferred, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { Control, type Service as ControlService } from "../src/Control.ts"
 import { ClaimLost, PersistenceError, PlanDigestMismatch, RunNotFound } from "../src/ControlError.ts"
@@ -22,6 +25,7 @@ import { ControlRuntime, type Service as ControlRuntimeService } from "../src/Co
 import * as SqlControlRuntime from "../src/SqlControlRuntime.ts"
 import { delegateApproval } from "./ApprovalFixtures.ts"
 import { contract, type Stack } from "./ControlContract.ts"
+import { fileBundle } from "./DurableStack.ts"
 import { park } from "./Park.ts"
 
 /**
@@ -74,8 +78,8 @@ const durable = (
 contract("durable", (executor) => durable(executor === undefined ? {} : { executor }))
 
 /**
- * One database shared by two runtimes, which is what "two processes" means to
- * the store: distinct owner identities racing over the same rows.
+ * Two owner identities sharing one connection for sequential handoff cases.
+ * The concurrent-resume case below opens independent connections instead.
  */
 const twoOwners = <A, E>(
   use: (
@@ -483,22 +487,151 @@ describe("SqlControlRuntime", () => {
   })
 
   it("lets exactly one of two concurrent resumes claim a parked run", async () => {
-    const observed = await twoOwners((first, second, control) =>
-      Effect.gen(function*() {
-        const { runId } = yield* started
-        yield* park(first, runId)
-        const results = yield* Effect.all(
-          [Effect.exit(first.resume(runId)), Effect.exit(second.resume(runId))],
-          { concurrency: 2 }
-        )
-        return results.filter((exit) => exit._tag === "Success").length
-      })
-    )
-
-    // One claims; the loser either loses the CAS or joins the winner's run.
-    // Both are legal — what is not legal is two owners.
-    expect(observed).toBeGreaterThanOrEqual(1)
+    const directory = mkdtempSync(join(tmpdir(), "control-resume-race-"))
+    try {
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const filename = join(directory, "race.sqlite")
+          const owners = [
+            { hostId: "first", pid: 1, nonce: "first" },
+            { hostId: "second", pid: 2, nonce: "second" }
+          ] as const
+          // Each build opens its own connection and writer over the same file.
+          const firstServices = yield* Layer.build(durable({ database: fileBundle(filename), owner: owners[0] }))
+          const secondServices = yield* Layer.build(durable({ database: fileBundle(filename), owner: owners[1] }))
+          expect(Context.get(firstServices, SqlClient.SqlClient)).not.toBe(
+            Context.get(secondServices, SqlClient.SqlClient)
+          )
+          const runtimes = [Context.get(firstServices, ControlRuntime), Context.get(secondServices, ControlRuntime)]
+          const first = runtimes[0]!
+          const second = runtimes[1]!
+          const { runId } = yield* started.pipe(Effect.provide(firstServices))
+          const firstFence = yield* first.claimFence(runId)
+          yield* park(first, runId)
+          yield* second.resume(runId)
+          const secondFence = yield* second.claimFence(runId)
+          yield* park(second, runId)
+          const spentFences = [firstFence, secondFence]
+          const ready = yield* Deferred.make<void>()
+          let arrivals = 0
+          const resumes = yield* Effect.all(
+            runtimes.map((runtime) =>
+              Effect.gen(function*() {
+                if (++arrivals === 2) yield* Deferred.succeed(ready, undefined)
+                yield* Deferred.await(ready)
+                return yield* Effect.exit(runtime.resume(runId))
+              })
+            ),
+            { concurrency: 2 }
+          )
+          const persisted = yield* Context.get(firstServices, RunStore.RunStore).get(runId)
+          expect(persisted.status).toBe("running")
+          expect(persisted.owner).not.toBeNull()
+          const fences = yield* Effect.all(runtimes.map((runtime) => Effect.exit(runtime.claimFence(runId))))
+          expect(resumes.filter(Exit.isSuccess)).toHaveLength(1)
+          expect(fences.filter(Exit.isSuccess)).toHaveLength(1)
+          const writes = yield* Effect.all(runtimes.map((runtime, index) => {
+            const fence = fences[index]!
+            return Effect.exit(runtime.writeStatus(
+              runId,
+              Exit.isSuccess(fence) ? fence.value : spentFences[index]!,
+              "running"
+            ))
+          }))
+          expect(writes.filter(Exit.isSuccess)).toHaveLength(1)
+          for (let index = 0; index < runtimes.length; index++) {
+            const resumed = resumes[index]!
+            const fence = fences[index]!
+            const written = writes[index]!
+            if (owners[index]!.hostId === persisted.owner!.hostId) {
+              expect(Exit.isSuccess(resumed)).toBe(true)
+              expect(Exit.isSuccess(fence)).toBe(true)
+              expect(Exit.isSuccess(written)).toBe(true)
+              if (Exit.isSuccess(fence)) expect(JSON.parse(fence.value)).toEqual(persisted.owner)
+            } else {
+              expect(yield* Effect.flip(resumed)).toBeInstanceOf(ClaimLost)
+              expect(yield* Effect.flip(fence)).toBeInstanceOf(ClaimLost)
+              expect(yield* Effect.flip(written)).toBeInstanceOf(ClaimLost)
+            }
+          }
+          expect((yield* Context.get(secondServices, RunStore.RunStore).get(runId)).owner).toEqual(persisted.owner)
+        }).pipe(Effect.scoped, Effect.orDie)
+      )
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
+
+  it.each([
+    { spelling: "resume", launched: true },
+    { spelling: "run", launched: true },
+    { spelling: "resume", launched: false },
+    { spelling: "run", launched: false }
+  ])("journals explicit $spelling without approval delegation (launched=$launched)", async ({ spelling, launched }) => {
+    const offered: string[] = []
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        const sql = yield* SqlClient.SqlClient
+        const store = yield* RunStore.RunStore
+        const { runId } = yield* started
+        yield* park(runtime, runId)
+        // An engine-created row has no entry in the control launch index.
+        if (!launched) yield* sql`DELETE FROM control_runs WHERE run_id = ${runId}`
+        const before = yield* store.get(runId)
+        const input = { runId, idempotencyKey: "resume:explicit" }
+        const receipt = yield* spelling === "resume"
+          ? control.resume(input)
+          : control.run({ _tag: "Resume", ...input })
+        expect(receipt._tag).toBe("Accepted")
+        expect(yield* runtime.pendingResumes).toEqual([])
+        expect(offered).toEqual([])
+        const after = yield* store.get(runId)
+        if (launched) {
+          expect(after.status).toBe("running")
+          expect((yield* runtime.getRun(runId)).status).toBe("accepted")
+        } else {
+          expect(after).toEqual(before)
+          expect(yield* Effect.flip(runtime.claimFence(runId))).toBeInstanceOf(ClaimLost)
+        }
+        const events = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
+        expect(events.filter((event) => event.kind === "control.run.resume")).toHaveLength(2)
+        expect(events.some((event) => event.kind === "control.run.resumed")).toBe(false)
+      }).pipe(
+        Effect.provide(durable({
+          executor: {
+            ...ControlExecutor.makeNoop(),
+            resumeRun: ({ runId }) =>
+              Effect.sync(() => {
+                offered.push(runId)
+                return "unknown" as const
+              })
+          }
+        })),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+  })
+
+  it.each(["accepted", "running"] as const)(
+    "joins its own %s run and keeps the original fence usable",
+    async (status) => {
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const runtime = yield* ControlRuntime
+          const { runId } = yield* started
+          const fence = yield* runtime.claimFence(runId)
+          if (status === "running") yield* runtime.writeStatus(runId, fence, status)
+          const before = yield* runtime.getRun(runId)
+          expect(yield* runtime.resume(runId)).toEqual(before)
+          expect(yield* runtime.claimFence(runId)).toBe(fence)
+          expect((yield* runtime.writeStatus(runId, fence, "completed")).status).toBe("completed")
+        }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+      )
+    }
+  )
 
   it("refuses to interrupt a live run this process does not own", async () => {
     const observed = await twoOwners((first, second) =>

@@ -357,23 +357,28 @@ describe("ControlRuntime.layerMemory", () => {
     expect(observed.evicted).toBeInstanceOf(ClaimLost)
   })
 
-  it("rejoins a run it is already driving instead of taking a second fence", async () => {
-    const observed = await withRuntime((runtime) =>
-      Effect.gen(function*() {
-        const { run } = yield* start(runtime)
-        const fence = yield* runtime.claimFence(run.runId)
-        const running = yield* runtime.writeStatus(run.runId, fence, "running")
-        const rejoined = yield* runtime.resume(run.runId)
-        const afterResume = yield* runtime.claimFence(run.runId)
-        return { running, rejoined, fence, afterResume }
-      })
-    )
-
-    expect(observed.running.status).toBe("running")
-    expect(observed.rejoined).toEqual(observed.running)
-    // Rejoining is a read, so the fence the caller already holds still writes.
-    expect(observed.afterResume).toBe(observed.fence)
-  })
+  it.each(["launched", "resumed", "running"] as const)(
+    "rejoins an owned %s run without replacing the worker's fence",
+    async (state) => {
+      await withRuntime((runtime) =>
+        Effect.gen(function*() {
+          const { run } = yield* start(runtime)
+          if (state === "resumed") {
+            yield* runtime.releasePending(run.runId, yield* runtime.claimFence(run.runId))
+            yield* runtime.resume(run.runId)
+          }
+          const fence = yield* runtime.claimFence(run.runId)
+          if (state === "running") yield* runtime.writeStatus(run.runId, fence, "running")
+          const before = yield* runtime.getRun(run.runId)
+          const rejoined = yield* runtime.resume(run.runId)
+          expect(rejoined).toEqual(before)
+          expect(yield* runtime.claimFence(run.runId)).toBe(fence)
+          // The original worker can settle even if another caller resumed.
+          expect((yield* runtime.writeStatus(run.runId, fence, "completed")).status).toBe("completed")
+        })
+      )
+    }
+  )
 
   it("reports a key reused for a different mutation as a conflict, not a replay", async () => {
     const observed = await withRuntime((runtime) =>

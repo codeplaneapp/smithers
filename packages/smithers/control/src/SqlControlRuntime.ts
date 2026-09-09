@@ -1656,15 +1656,10 @@ const makeRuntime = (
         if (row.status === "running") {
           return ownedByUs(row) ? summary : yield* new ClaimLost({ runId })
         }
-        // `scope: "launched"` is the steer wake's request: only a run this
-        // plane launched is this plane's to claim there. An engine-created
-        // run — a child, a fork, a trampoline round — has its own driver, and
-        // a wake that claimed it would move the row under this plane's fence
-        // where that driver's `scheduleResume` gives up, orphaning the run.
-        // The wake intent is already durable (the notification queue admitted
-        // the message), so the owning driver's next poll or sweep delivers
-        // it. An explicit operator or monitor resume omits the scope and may
-        // claim any suspended run — a wedged run is one nobody is driving.
+        // Every public Control resume and steer wake uses launched scope.
+        // Engine-created runs keep their continuation and driver. Unrestricted
+        // claims are a trusted low-level capability for hosts that can drive
+        // the execution; node approval delegates through requestResume instead.
         if (options?.scope === "launched") {
           const indexed = yield* sql`SELECT run_id FROM control_runs WHERE run_id = ${runId}`.pipe(
             Effect.mapError(persistence("read the launch index"))
