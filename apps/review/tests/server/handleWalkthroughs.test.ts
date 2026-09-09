@@ -133,6 +133,7 @@ describe("walkthrough publish and serve", () => {
       pr: 7,
       bytes: new TextEncoder().encode(html).byteLength,
       url: `https://review.example/w/${published.id}`,
+      status: "complete",
     });
     expect(typeof historyBody.walkthroughs[0].createdAt).toBe("number");
 
@@ -179,6 +180,169 @@ describe("walkthrough publish and serve", () => {
       .bind(published.id)
       .first<{ id: string }>();
     expect(row).toBeNull();
+  });
+
+  test("reserves the last session slot before awaiting R2", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    const session = await seedSession(env);
+    for (let i = 0; i < MAX_PUBLISHES_PER_SESSION - 1; i++) {
+      await env.DB.prepare(
+        "INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).bind(`seed${i}`, session.repo, session.pr, 1, session.hash, Date.now()).run();
+    }
+
+    const firstPut = Promise.withResolvers<void>();
+    const secondPut = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const put = env.WALKTHROUGHS.put.bind(env.WALKTHROUGHS);
+    let puts = 0;
+    env.WALKTHROUGHS.put = async (...args) => {
+      (++puts === 1 ? firstPut : secondPut).resolve();
+      await release.promise;
+      return put(...args);
+    };
+    const first = publishWithToken(worker, env, session.token, "first");
+    await firstPut.promise;
+    const second = publishWithToken(worker, env, session.token, "second");
+    // Old code reaches both puts; a reservation rejects the second request
+    // before R2. Release either way, without relying on timing sleeps.
+    try {
+      await Promise.race([secondPut.promise, second]);
+    } finally {
+      release.resolve();
+    }
+    const responses = await Promise.all([first, second]);
+    expect(responses.map((response) => response.status)).toEqual([201, 429]);
+    expect(puts).toBe(1);
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM walkthroughs WHERE session_hash = ?")
+      .bind(session.hash).first<{ count: number }>();
+    expect(count?.count).toBe(MAX_PUBLISHES_PER_SESSION);
+  });
+
+  test("does not write R2 when reserving metadata fails", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    await env.DB.exec(`CREATE TRIGGER reject_walkthrough BEFORE INSERT ON walkthroughs
+      BEGIN SELECT RAISE(ABORT, 'metadata unavailable'); END`);
+    const put = env.WALKTHROUGHS.put.bind(env.WALKTHROUGHS);
+    const keys: string[] = [];
+    env.WALKTHROUGHS.put = async (key, ...args) => {
+      keys.push(key);
+      return put(key, ...args);
+    };
+
+    await expect(publishWithToken(worker, env, "test-publish", "html")).rejects.toThrow("metadata unavailable");
+    expect(keys).toEqual([]);
+    expect(await env.DB.prepare("SELECT id FROM walkthroughs").first()).toBeNull();
+  });
+
+  test.each([false, true])("cleans up a failed upload (object stored: %s)", async (stored) => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    const put = env.WALKTHROUGHS.put.bind(env.WALKTHROUGHS);
+    let objectKey = "";
+    env.WALKTHROUGHS.put = async (key, ...args) => {
+      objectKey = key;
+      if (stored) await put(key, ...args);
+      throw new Error("upload failed");
+    };
+
+    await expect(publishWithToken(worker, env, "test-publish", "html")).rejects.toThrow("upload failed");
+    expect(await env.WALKTHROUGHS.get(objectKey)).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM walkthroughs").first()).toBeNull();
+  });
+
+  test("cleans up the object and reservation when finalization fails", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    await env.DB.exec(`CREATE TRIGGER reject_finalize BEFORE UPDATE ON walkthroughs
+      BEGIN SELECT RAISE(ABORT, 'finalization failed'); END`);
+    const put = env.WALKTHROUGHS.put.bind(env.WALKTHROUGHS);
+    let objectKey = "";
+    env.WALKTHROUGHS.put = async (key, ...args) => {
+      objectKey = key;
+      return put(key, ...args);
+    };
+
+    await expect(publishWithToken(worker, env, "test-publish", "html")).rejects.toThrow("finalization failed");
+    expect(objectKey).not.toBe("");
+    expect(await env.WALKTHROUGHS.get(objectKey)).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM walkthroughs").first()).toBeNull();
+  });
+
+  test("retains a discoverable pending row if cleanup fails, allowing DELETE to retry", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    const session = await seedSession(env);
+    const put = env.WALKTHROUGHS.put.bind(env.WALKTHROUGHS);
+    const remove = env.WALKTHROUGHS.delete.bind(env.WALKTHROUGHS);
+    env.WALKTHROUGHS.put = async (...args) => {
+      await put(...args);
+      throw new Error("upload failed");
+    };
+    env.WALKTHROUGHS.delete = async () => { throw new Error("cleanup failed"); };
+
+    await expect(publishWithToken(worker, env, session.token, "html")).rejects.toThrow("cleanup failed");
+    const history = await worker.fetch(new Request("https://worker.test/api/walkthroughs?repo=octo/widgets", {
+      headers: { authorization: `Bearer ${session.token}` },
+    }), env);
+    const body = await history.json() as { walkthroughs: Array<{ id: string; status: string }> };
+    expect(body.walkthroughs).toHaveLength(1);
+    const pending = body.walkthroughs[0];
+    expect(pending.status).toBe("pending");
+    expect(await env.WALKTHROUGHS.get(`walkthroughs/${pending.id}.html`)).not.toBeNull();
+
+    const deleteRequest = (token: string) => new Request(`https://worker.test/api/walkthroughs/${pending.id}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${token}` },
+    });
+    const other = await seedSession(env, { token: "srs_other", repo: "octo/other" });
+    expect((await worker.fetch(deleteRequest(other.token), env)).status).toBe(403);
+    env.WALKTHROUGHS.delete = remove;
+    expect((await worker.fetch(deleteRequest(session.token), env)).status).toBe(200);
+    expect(await env.WALKTHROUGHS.get(`walkthroughs/${pending.id}.html`)).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM walkthroughs").first()).toBeNull();
+  });
+
+  test("removes an in-flight upload if DELETE removes its pending reservation", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    const entered = Promise.withResolvers<string>();
+    const release = Promise.withResolvers<void>();
+    const put = env.WALKTHROUGHS.put.bind(env.WALKTHROUGHS);
+    env.WALKTHROUGHS.put = async (key, ...args) => {
+      entered.resolve(key);
+      await release.promise;
+      return put(key, ...args);
+    };
+    const publish = publishWithToken(worker, env, "test-publish", "html");
+    const key = await entered.promise;
+    const id = key.slice("walkthroughs/".length, -".html".length);
+    try {
+      expect(await env.DB.prepare("SELECT status FROM walkthroughs WHERE id = ?").bind(id).first<{ status: string }>())
+        .toEqual({ status: "pending" });
+      const deleted = await worker.fetch(new Request(`https://worker.test/api/walkthroughs/${id}`, {
+        method: "DELETE", headers: { authorization: "Bearer test-publish" },
+      }), env);
+      expect(deleted.status).toBe(200);
+    } finally {
+      release.resolve();
+    }
+    expect((await publish).status).toBe(409);
+    expect(await env.WALKTHROUGHS.get(key)).toBeNull();
+    expect(await env.DB.prepare("SELECT id FROM walkthroughs").first()).toBeNull();
+  });
+
+  test.each(["existing-session", "new-session"])("indexes the publish count for %s", async (hash) => {
+    const env = await buildTestEnv();
+    await env.DB.prepare(
+      "INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind("existingid", "octo/widgets", 7, 1, "existing-session", Date.now()).run();
+    const plan = await env.DB.prepare(
+      "EXPLAIN QUERY PLAN SELECT COUNT(*) AS count FROM walkthroughs WHERE session_hash = ?",
+    ).bind(hash).all<{ detail: string }>();
+    expect(plan.results.map((row) => row.detail).join("\n"))
+      .toContain("SEARCH walkthroughs USING COVERING INDEX walkthroughs_session_hash_idx (session_hash=?)");
   });
 
   test("enforces a per-session publish limit", async () => {

@@ -67,6 +67,7 @@ const SCHEMA_STATEMENTS = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS walkthroughs_repo_idx ON walkthroughs(repo, created_at)`,
+  `CREATE INDEX IF NOT EXISTS walkthroughs_session_hash_idx ON walkthroughs(session_hash)`,
 ];
 
 const ensured = new WeakSet<D1Database>();
@@ -92,6 +93,7 @@ export async function ensureSchema(db: D1Database): Promise<void> {
   await addColumnIfMissing(db, `ALTER TABLE api_keys ADD COLUMN spend_cap_usd REAL`);
   await addColumnIfMissing(db, `ALTER TABLE usage_events ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`);
   await addColumnIfMissing(db, `ALTER TABLE usage_events ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`);
+  await addColumnIfMissing(db, `ALTER TABLE walkthroughs ADD COLUMN status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('pending', 'complete'))`);
   ensured.add(db);
 }
 

@@ -21,14 +21,11 @@ interface WalkthroughRow {
   pr: number;
   bytes: number;
   created_at: number;
+  status: "pending" | "complete";
 }
 
 interface WalkthroughRepoRow {
   repo: string;
-}
-
-interface CountRow {
-  count: number;
 }
 
 interface PublishAttribution {
@@ -76,25 +73,41 @@ async function handlePublish(request: Request, env: ReviewWorkerEnv, url: URL, n
   if (html.byteLength > MAX_WALKTHROUGH_BYTES) return jsonError(413, "walkthrough exceeds 25MB");
 
   const attribution = publishAttribution(publishTokenOk ? null : credential);
-  if (attribution.sessionHash) {
-    const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM walkthroughs WHERE session_hash = ?")
-      .bind(attribution.sessionHash)
-      .first<CountRow>();
-    const count = Number(countRow?.count ?? 0);
-    if (count >= MAX_PUBLISHES_PER_SESSION) {
-      return jsonError(429, "publish limit reached for this session");
-    }
+  const id = newWalkthroughId();
+  // Count and reserve in one statement so concurrent uploads cannot share a
+  // session's last slot. Pending uploads count toward the limit too.
+  const reservation = await env.DB.prepare(
+    `INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at, status)
+     SELECT ?, ?, ?, ?, ?, ?, 'pending'
+     WHERE ? IS NULL OR (SELECT COUNT(*) FROM walkthroughs WHERE session_hash = ?) < ?`,
+  )
+    .bind(id, attribution.repo, attribution.pr, html.byteLength, attribution.sessionHash, now,
+      attribution.sessionHash, attribution.sessionHash, MAX_PUBLISHES_PER_SESSION)
+    .run();
+  if (reservation.meta.changes === 0) {
+    return jsonError(429, "publish limit reached for this session");
   }
 
-  const id = newWalkthroughId();
-  await env.WALKTHROUGHS.put(`walkthroughs/${id}.html`, html, {
-    httpMetadata: { contentType: "text/html; charset=utf-8" },
-  });
-  await env.DB.prepare(
-    "INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-  )
-    .bind(id, attribution.repo, attribution.pr, html.byteLength, attribution.sessionHash, now)
-    .run();
+  const key = `walkthroughs/${id}.html`;
+  try {
+    await env.WALKTHROUGHS.put(key, html, {
+      httpMetadata: { contentType: "text/html; charset=utf-8" },
+    });
+    const finalized = await env.DB.prepare("UPDATE walkthroughs SET status = 'complete' WHERE id = ?")
+      .bind(id)
+      .run();
+    // DELETE may have removed the reservation while the upload was in flight.
+    if (finalized.meta.changes === 0) {
+      await env.WALKTHROUGHS.delete(key);
+      return jsonError(409, "walkthrough deleted during upload");
+    }
+  } catch (error) {
+    // Remove the object first. If cleanup fails, retain the durable row so an
+    // authorized DELETE can retry instead of leaving an untracked R2 object.
+    await env.WALKTHROUGHS.delete(key);
+    await env.DB.prepare("DELETE FROM walkthroughs WHERE id = ?").bind(id).run();
+    throw error;
+  }
   const base = walkthroughBase(env, url);
   return Response.json({ id, url: `${base}/w/${id}` }, { status: 201 });
 }
@@ -108,7 +121,7 @@ async function handleHistory(request: Request, env: ReviewWorkerEnv, url: URL, n
   if (!canAccessRepo(credential, repo)) return jsonError(403, "forbidden");
 
   const rows = await env.DB.prepare(
-    "SELECT id, repo, pr, bytes, created_at FROM walkthroughs WHERE repo = ? ORDER BY created_at DESC LIMIT 50",
+    "SELECT id, repo, pr, bytes, created_at, status FROM walkthroughs WHERE repo = ? ORDER BY created_at DESC LIMIT 50",
   )
     .bind(repo)
     .all<WalkthroughRow>();
@@ -120,6 +133,7 @@ async function handleHistory(request: Request, env: ReviewWorkerEnv, url: URL, n
       pr: row.pr,
       bytes: row.bytes,
       createdAt: row.created_at,
+      status: row.status,
       url: `${base}/w/${row.id}`,
     })),
   });

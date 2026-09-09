@@ -26,6 +26,31 @@ function alterFailingD1(message: string): D1Database {
 }
 
 describe("ensureSchema", () => {
+  test("upgrades existing walkthroughs to complete and indexes session counts idempotently", async () => {
+    const db = sqliteD1();
+    await db.exec(`CREATE TABLE walkthroughs (
+      id TEXT PRIMARY KEY, repo TEXT NOT NULL, pr INTEGER NOT NULL,
+      bytes INTEGER NOT NULL, session_hash TEXT, created_at INTEGER NOT NULL
+    )`);
+    await db.prepare("INSERT INTO walkthroughs VALUES (?, ?, ?, ?, ?, ?)")
+      .bind("existingid", "octo/widgets", 7, 1, "existing-session", 1).run();
+    await ensureSchema(db);
+    await ensureSchema({
+      prepare: (q) => db.prepare(q),
+      exec: (q) => db.exec(q),
+      batch: (s) => db.batch(s),
+    });
+    expect(await db.prepare("SELECT status FROM walkthroughs WHERE id = 'existingid'").first<{ status: string }>())
+      .toEqual({ status: "complete" });
+    for (const hash of ["existing-session", "new-session"]) {
+      const plan = await db.prepare("EXPLAIN QUERY PLAN SELECT COUNT(*) FROM walkthroughs WHERE session_hash = ?")
+        .bind(hash).all<{ detail: string }>();
+      expect(plan.results.map((row) => row.detail).join("\n"))
+        .toContain("SEARCH walkthroughs USING COVERING INDEX walkthroughs_session_hash_idx (session_hash=?)");
+    }
+    await expect(db.prepare("UPDATE walkthroughs SET status = 'invalid'").run()).rejects.toThrow("CHECK constraint failed");
+  });
+
   test("is idempotent and creates the cache-token columns on usage_events", async () => {
     const db = sqliteD1();
     // First run creates everything; a second run (fresh wrapper, so the
