@@ -2637,8 +2637,11 @@
       },
       "devDependencies": {
         "@effect/language-service": "0.87.2",
+        "@effect/platform-node": "4.0.0-rc.112",
         "@effect/vitest": "4.0.0-rc.112",
         "@eslint/js": "9.39.5",
+        "@smthrs/database": "1.0.0-rc.0",
+        "@smthrs/engine-store": "1.0.0-rc.0",
         "@smthrs/time-travel": "1.0.0-rc.0",
         "@types/node": "26.4.1",
         "@vitest/coverage-v8": "4.1.9",
