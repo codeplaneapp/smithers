@@ -4,15 +4,18 @@
  * (`remote/CombinedCache.java` in bazelbuild/bazel).
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
+import { TestClock } from "effect/testing"
 import * as CacheStore from "../src/CacheStore.ts"
 import * as CacheStoreMetrics from "../src/CacheStoreMetrics.ts"
 import * as CombinedCacheStore from "../src/CombinedCacheStore.ts"
+import * as Migrations from "../src/Migrations.ts"
 
 const count = (metric: Metric.Metric<number, Metric.CounterState<number>>) =>
   Effect.map(Metric.value(metric), (state) => state.count)
@@ -292,6 +295,83 @@ describe("lookups", () => {
     }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())))
 })
 
+const withSqlStore = <A, E>(effect: Effect.Effect<A, E, CacheStore.CacheStore>) =>
+  effect.pipe(
+    Effect.provide(CacheStore.layer),
+    Effect.provide(Migrations.layer),
+    Effect.provide(TestDatabase.layer)
+  )
+
+describe("age-bounded SQL composition", () => {
+  const recordedBy = { runId: entry.recordedRunId, eventSeq: entry.recordedEventSeq }
+  const expired = { ...entry, createdAtMs: 0 }
+  const fresh = { ...entry, result: "fresh-remote", createdAtMs: 5000, recordedRunId: "remote-run" }
+  const options = { recordedBy, maxAgeMs: 1000 }
+
+  it.effect.each(["retained", "evicted", "replaced"] as const)(
+    "stops at an expired exact ledger row with the local head %s",
+    (head) =>
+      withSqlStore(Effect.gen(function*() {
+        const local = yield* CacheStore.CacheStore
+        yield* local.put(expired)
+        if (head !== "retained") yield* local.evict(entry.keyDigest)
+        yield* TestClock.adjust("5 seconds")
+        if (head === "replaced") yield* local.put(fresh)
+        const remote = tier()
+        remote.rows.set(entry.keyDigest, fresh)
+        const combined = CombinedCacheStore.make({ local, remote: remote.store })
+
+        expect(Option.isNone(yield* local.get(entry.keyDigest, options))).toBe(true)
+        expect(yield* combined.get(entry.keyDigest, options)).toEqual(Option.none())
+        expect(remote.calls).toEqual([])
+        expect(Option.getOrThrow(yield* local.get(entry.keyDigest, { recordedBy }))).toEqual(expired)
+      }))
+  )
+
+  it.effect("serves the exact local row at the age boundary without a remote read", () =>
+    withSqlStore(Effect.gen(function*() {
+      const local = yield* CacheStore.CacheStore
+      yield* local.put(expired)
+      yield* TestClock.adjust("1 second")
+      const remote = tier()
+      const combined = CombinedCacheStore.make({ local, remote: remote.store })
+      expect(Option.getOrThrow(yield* combined.get(entry.keyDigest, options))).toEqual(expired)
+      expect(remote.calls).toEqual([])
+    })))
+
+  it.effect.each([
+    { runId: "other-run", eventSeq: recordedBy.eventSeq },
+    { runId: recordedBy.runId, eventSeq: recordedBy.eventSeq + 1 }
+  ])(
+    "allows remote fallback when the local head has different provenance: %j",
+    (other) =>
+      withSqlStore(Effect.gen(function*() {
+        const local = yield* CacheStore.CacheStore
+        yield* local.put({ ...expired, recordedRunId: other.runId, recordedEventSeq: other.eventSeq })
+        yield* TestClock.adjust("5 seconds")
+        const remote = tier()
+        remote.rows.set(entry.keyDigest, fresh)
+        const combined = CombinedCacheStore.make({ local, remote: remote.store })
+        expect(Option.getOrThrow(yield* combined.get(entry.keyDigest, options))).toEqual(fresh)
+        expect(remote.calls).toEqual(["get"])
+      }))
+  )
+
+  it.effect("preserves an expired exact row recorded during the remote lookup", () =>
+    withSqlStore(Effect.gen(function*() {
+      const local = yield* CacheStore.CacheStore
+      yield* TestClock.adjust("5 seconds")
+      const combined = CombinedCacheStore.make({
+        local,
+        remote: CacheStore.makeNoop({
+          get: () => local.put(expired).pipe(Effect.as(Option.some(fresh)))
+        })
+      })
+      expect(yield* combined.get(entry.keyDigest, options)).toEqual(Option.none())
+      expect(Option.getOrThrow(yield* local.get(entry.keyDigest, { recordedBy }))).toEqual(expired)
+    })))
+})
+
 describe("publications", () => {
   it.effect("records locally and publishes to the shared tier", () =>
     Effect.gen(function*() {
@@ -421,7 +501,9 @@ describe("write-back races", () => {
         yield* remote.store.put(remoteEntry)
         const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
         expect(Option.getOrThrow(yield* combined.get(entry.keyDigest, options))).toEqual(remoteEntry)
-        expect(local.getOptions).toEqual([options, options])
+        expect(local.getOptions).toEqual([options, { recordedBy: options.recordedBy }, options, {
+          recordedBy: options.recordedBy
+        }])
         expect(remote.getOptions).toEqual([options])
       })
   )

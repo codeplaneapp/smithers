@@ -6,7 +6,9 @@
  * `src/main/java/com/google/devtools/build/lib/remote/CombinedCache.java` in
  * {@link https://github.com/bazelbuild/bazel | bazelbuild/bazel}: consult the
  * disk cache, fall back to the remote cache only on a miss, and write what the
- * remote returned back into the disk cache so the next lookup is local.
+ * remote returned back into the disk cache so the next lookup is local. An
+ * exact local provenance record refused by age stops the lookup with a miss;
+ * it never falls through to the shared head.
  *
  * **Publication order is the caller's job, not this store's.** A cache entry
  * must never be observable in the shared tier while an artifact it references
@@ -39,7 +41,7 @@ import * as CacheStoreMetrics from "./CacheStoreMetrics.ts"
 export interface Options {
   /** The machine-local, durable tier. Every lookup tries this one first. */
   readonly local: CacheStore.Service
-  /** The shared tier. Consulted only on a local miss; written through on put. */
+  /** The shared tier. Consulted on a local miss unless an exact record expired; written through on put. */
   readonly remote: CacheStore.Service
   /**
    * When the shared tier's copy of an entry is written.
@@ -69,6 +71,20 @@ export const make = (options: Options): CacheStore.Service => {
   const { local, remote } = options
   const deferred = options.publication === "deferred"
 
+  // A bounded miss hides whether the exact ledger row is absent or expired.
+  // Resolve that distinction before either fallback to a shared entry. An
+  // unbounded read can itself fall back to the head, so both provenance fields
+  // must match before the miss is treated as a refusal.
+  const refusedLocally = (keyDigest: string, options: CacheStore.GetOptions | undefined) =>
+    Effect.gen(function*() {
+      if (options?.recordedBy === undefined || options.maxAgeMs === undefined) return false
+      const { recordedBy } = options
+      const recorded = yield* local.get(keyDigest, { recordedBy })
+      return Option.isSome(recorded) &&
+        recorded.value.recordedRunId === recordedBy.runId &&
+        recorded.value.recordedEventSeq === recordedBy.eventSeq
+    })
+
   const get: CacheStore.Service["get"] = Effect.fn("CombinedCacheStore.get")((keyDigest, options) =>
     Effect.gen(function*() {
       yield* Effect.annotateCurrentSpan({ keyDigest })
@@ -76,6 +92,7 @@ export const make = (options: Options): CacheStore.Service => {
       // its recorded version when it holds one and its head otherwise.
       const cached = yield* local.get(keyDigest, options)
       if (Option.isSome(cached)) return cached
+      if (yield* refusedLocally(keyDigest, options)) return cached
       // A shared cache is an accelerator. Its refusal is observable, but it
       // cannot replace the executable miss path with a failed run.
       const shared = yield* remote.get(keyDigest, options).pipe(
@@ -99,7 +116,9 @@ export const make = (options: Options): CacheStore.Service => {
       // detect. If the winner is already gone again, the remote entry is the
       // only row anyone holds and stands.
       const durable = yield* local.get(keyDigest, options)
-      return Option.isSome(durable) ? durable : shared
+      if (Option.isSome(durable)) return durable
+      if (yield* refusedLocally(keyDigest, options)) return durable
+      return shared
     })
   )
 
