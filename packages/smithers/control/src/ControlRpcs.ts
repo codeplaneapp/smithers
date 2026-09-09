@@ -19,6 +19,7 @@ import {
   PlanDigestMismatch,
   PlanNotFound,
   RunNotFound,
+  TransportError,
   Unauthorized,
   Unavailable
 } from "./ControlError.ts"
@@ -61,7 +62,15 @@ export class ControlAuth extends RpcMiddleware.Service<ControlAuth, {
   provides: ControlPrincipal
 }>()("/control/ControlAuth", { error: Unauthorized }) {}
 
-const mutationErrors = Schema.Union([RunNotFound, ClaimLost, InvalidInput, PersistenceError, Unavailable])
+const mutationErrors = Schema.Union([
+  RunNotFound,
+  ClaimLost,
+  InvalidInput,
+  PersistenceError,
+  Unavailable,
+  TransportError,
+  Unauthorized
+])
 
 /**
  * The ten remote procedures corresponding to `Control` operations.
@@ -74,7 +83,7 @@ export const ControlRpcs = RpcGroup.make(
   Rpc.make("Plan", {
     payload: PlanInputSchema,
     success: PlanCard,
-    error: Schema.Union([FlowNotFound, InvalidInput, PersistenceError, Unavailable])
+    error: Schema.Union([FlowNotFound, InvalidInput, PersistenceError, Unavailable, TransportError, Unauthorized])
   }),
   Rpc.make("Run", {
     payload: RunInputSchema,
@@ -89,7 +98,9 @@ export const ControlRpcs = RpcGroup.make(
       InvalidInput,
       LaunchFailed,
       PersistenceError,
-      Unavailable
+      Unavailable,
+      TransportError,
+      Unauthorized
     ])
   }),
   Rpc.make("Approve", {
@@ -105,7 +116,7 @@ export const ControlRpcs = RpcGroup.make(
       Unauthorized,
       PersistenceError,
       Unavailable,
-      Unauthorized
+      TransportError
     ])
   }),
   Rpc.make("Deny", {
@@ -121,18 +132,26 @@ export const ControlRpcs = RpcGroup.make(
       Unauthorized,
       PersistenceError,
       Unavailable,
-      Unauthorized
+      TransportError
     ])
   }),
   Rpc.make("Steer", {
     payload: SteerInputSchema,
     success: Receipt,
-    error: Schema.Union([RunNotFound, InvalidInput, PersistenceError, Unavailable])
+    error: Schema.Union([RunNotFound, InvalidInput, PersistenceError, Unavailable, TransportError, Unauthorized])
   }),
   Rpc.make("Signal", {
     payload: SignalInputSchema,
     success: Receipt,
-    error: Schema.Union([RunNotFound, NoMatchingWait, InvalidInput, PersistenceError, Unavailable])
+    error: Schema.Union([
+      RunNotFound,
+      NoMatchingWait,
+      InvalidInput,
+      PersistenceError,
+      Unavailable,
+      TransportError,
+      Unauthorized
+    ])
   }),
   Rpc.make("Cancel", { payload: CancelInputSchema, success: Receipt, error: mutationErrors }),
   Rpc.make("Resume", { payload: ReasonedMutationInputSchema, success: Receipt, error: mutationErrors }),

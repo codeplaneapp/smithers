@@ -18,6 +18,7 @@ import type {
   PlanDigestMismatch,
   PlanNotFound,
   RunNotFound,
+  TransportError,
   Unauthorized,
   Unavailable
 } from "./ControlError.ts"
@@ -144,6 +145,9 @@ export interface RunMutationInput {
 /**
  * Transport-independent control operations.
  *
+ * Every operation admits transport and authentication failures so the same
+ * service key can be provided by either a local implementation or an RPC client.
+ *
  * @category models
  * @since 0.1.0
  * @slop
@@ -151,7 +155,10 @@ export interface RunMutationInput {
 export interface Service {
   readonly plan: (
     input: PlanInput
-  ) => Effect.Effect<PlanCard, FlowNotFound | InvalidInput | PersistenceError | Unavailable>
+  ) => Effect.Effect<
+    PlanCard,
+    FlowNotFound | InvalidInput | PersistenceError | Unavailable | TransportError | Unauthorized
+  >
   readonly run: (
     input: RunInput
   ) => Effect.Effect<
@@ -166,6 +173,8 @@ export interface Service {
     | LaunchFailed
     | PersistenceError
     | Unavailable
+    | TransportError
+    | Unauthorized
   >
   readonly approve: (
     input: ApprovalInput
@@ -180,7 +189,7 @@ export interface Service {
     | Unauthorized
     | PersistenceError
     | Unavailable
-    | Unauthorized
+    | TransportError
   >
   readonly deny: (
     input: ApprovalInput
@@ -195,20 +204,32 @@ export interface Service {
     | Unauthorized
     | PersistenceError
     | Unavailable
-    | Unauthorized
+    | TransportError
   >
   readonly steer: (
     input: SteerInput
-  ) => Effect.Effect<Receipt, RunNotFound | InvalidInput | PersistenceError | Unavailable>
+  ) => Effect.Effect<
+    Receipt,
+    RunNotFound | InvalidInput | PersistenceError | Unavailable | TransportError | Unauthorized
+  >
   readonly signal: (
     input: SignalInput
-  ) => Effect.Effect<Receipt, RunNotFound | NoMatchingWait | InvalidInput | PersistenceError | Unavailable>
+  ) => Effect.Effect<
+    Receipt,
+    RunNotFound | NoMatchingWait | InvalidInput | PersistenceError | Unavailable | TransportError | Unauthorized
+  >
   readonly cancel: (
     input: RunMutationInput
-  ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | InvalidInput | PersistenceError | Unavailable>
+  ) => Effect.Effect<
+    Receipt,
+    RunNotFound | ClaimLost | InvalidInput | PersistenceError | Unavailable | TransportError | Unauthorized
+  >
   readonly resume: (
     input: RunMutationInput
-  ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | InvalidInput | PersistenceError | Unavailable>
+  ) => Effect.Effect<
+    Receipt,
+    RunNotFound | ClaimLost | InvalidInput | PersistenceError | Unavailable | TransportError | Unauthorized
+  >
   readonly list: (input: ListRequest) => Effect.Effect<ListResponse, ControlError>
   readonly watch: (filter: WatchFilter) => Stream.Stream<ControlEvent, ControlError>
 }

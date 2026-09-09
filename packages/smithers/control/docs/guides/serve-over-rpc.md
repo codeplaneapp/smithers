@@ -5,11 +5,9 @@ sidebar:
   order: 9
 ---
 
-Everything the in-process control plane does is reachable remotely, and nothing
-about the vtable changes to make that true. `ControlServer.layerHttp` mounts
-the same `Control` service as RPC; `ControlClient.layer` projects the RPC
-client back into the identical `Control` interface. A caller handed either one
-cannot tell which it has.
+`ControlServer.layerHttp` mounts the `Control` service as RPC;
+`ControlClient.layer` projects the RPC client back into the same interface.
+Remote operations also require transport configuration and authentication.
 
 ## Mount the server
 
@@ -45,24 +43,50 @@ own protocols.
 
 ## Connect a client
 
+`credential` authenticates HTTP requests only. Authenticated `watch` also
+requires an `Authorization` header on the WebSocket upgrade. An ordinary
+`NodeSocket.layerWebSocket` does not send it and watch fails with
+`Unauthorized`. This Node composition uses the `ws` constructor exported by
+`NodeSocket` to supply the upgrade header:
+
 ```ts
 import { NodeHttpClient, NodeSocket } from "@effect/platform-node"
 import * as ControlClient from "@smthrs/control/ControlClient"
+import * as Layer from "effect/Layer"
+import { RpcSerialization } from "effect/unstable/rpc"
+import { Socket } from "effect/unstable/socket"
+
+const credential = process.env["SMITHERS_CONTROL_TOKEN"] ?? ""
+const authenticatedSocket = Socket.layerWebSocket("ws://127.0.0.1:4000/rpc/ws").pipe(
+  Layer.provide(
+    Layer.succeed(Socket.WebSocketConstructor)((url, protocols) =>
+      new NodeSocket.NodeWS.WebSocket(url, protocols, {
+        headers: { Authorization: `Bearer ${credential}` }
+      }) as unknown as globalThis.WebSocket
+    )
+  )
+)
 
 const client = ControlClient.layer({
   url: "http://127.0.0.1:4000/rpc",
-  credential: process.env["SMITHERS_CONTROL_TOKEN"]
+  credential
 }).pipe(
   Layer.provide([
     NodeHttpClient.layerUndici,
-    NodeSocket.layerWebSocket("ws://127.0.0.1:4000/rpc/ws"),
+    authenticatedSocket,
     RpcSerialization.layerNdjson
   ])
 )
 ```
 
-`credential` is attached as a bearer token on every HTTP RPC request. Provide
-the client layer and every program written against `Control` works unchanged.
+With both HTTP and the socket upgrade authenticated, programs written against
+`Control` can use this client layer. Handle `TransportError` and `Unauthorized`
+in addition to each operation's domain failures; both are declared on every
+`Control.Service` method.
+
+Browser WebSockets cannot set upgrade headers. Browser deployments need a
+trusted proxy that authenticates the caller and supplies the header. Tokens
+in URL query strings are not supported.
 
 ## Authenticate
 

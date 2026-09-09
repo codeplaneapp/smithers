@@ -6,7 +6,7 @@
 import { Cause, Effect, Layer, Result, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { RpcClient, RpcClientError } from "effect/unstable/rpc"
-import { Control, make, type Service } from "./Control.ts"
+import { Control, make } from "./Control.ts"
 import { type ControlError, ControlErrorSchema, TransportError, Unauthorized } from "./ControlError.ts"
 import { ControlRpcs } from "./ControlRpcs.ts"
 import {
@@ -154,7 +154,9 @@ const classify = (error: unknown): TransportClassification => {
   return unknownClientFailure
 }
 
-const normalizedFailure = (cause: Cause.Cause<unknown>): Effect.Effect<never, ControlError> => {
+// Preserve the operation-specific control failures from the RPC schema while
+// replacing transport and decoding failures with the public TransportError.
+const normalizedFailure = <E>(cause: Cause.Cause<E>): Effect.Effect<never, (E & ControlError) | TransportError> => {
   const failure = Cause.findError(cause)
   if (Result.isSuccess(failure)) {
     return Effect.fail(
@@ -170,10 +172,10 @@ const normalizedFailure = (cause: Cause.Cause<unknown>): Effect.Effect<never, Co
   /* v8 ignore next 2 -- the fiber propagates an interrupt-only cause without reaching this operator */
   return Result.isSuccess(defect)
     ? Effect.fail(transportError(defect.success, classify(defect.success)))
-    : Effect.failCause(cause as Cause.Cause<ControlError>)
+    : Effect.failCause(cause as Cause.Cause<(E & ControlError) | TransportError>)
 }
 
-const normalize = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ControlError, R> =>
+const normalize = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, (E & ControlError) | TransportError, R> =>
   Effect.catchCause(effect, normalizedFailure)
 
 type RequestEncoder = (input: unknown) => Effect.Effect<unknown, Schema.SchemaError>
@@ -197,20 +199,22 @@ const normalizeRequest = <A, E, R>(
   encode: RequestEncoder,
   input: unknown,
   request: () => Effect.Effect<A, E, R>
-): Effect.Effect<A, ControlError, R> =>
+): Effect.Effect<A, (E & ControlError) | TransportError, R> =>
   encode(input).pipe(
     Effect.mapError((cause) => transportError(cause, requestEncoding)),
     Effect.andThen(Effect.suspend(() => normalize(request())))
   )
 
-const normalizeStream = <A, E, R>(stream: Stream.Stream<A, E, R>): Stream.Stream<A, ControlError, R> =>
+const normalizeStream = <A, E, R>(
+  stream: Stream.Stream<A, E, R>
+): Stream.Stream<A, (E & ControlError) | TransportError, R> =>
   Stream.catchCause(stream, (cause) => Stream.fromEffect(normalizedFailure(cause)))
 
 const normalizeStreamRequest = <A, E, R>(
   encode: RequestEncoder,
   input: unknown,
   request: () => Stream.Stream<A, E, R>
-): Stream.Stream<A, ControlError, R> =>
+): Stream.Stream<A, (E & ControlError) | TransportError, R> =>
   Stream.unwrap(
     encode(input).pipe(
       Effect.mapError((cause) => transportError(cause, requestEncoding)),
@@ -308,7 +312,7 @@ export const layer = (config: ClientConfig) => {
         // every unary call above never reaches this stream. Credentialed
         // deployments front the socket or use the HTTP protocol for watch.
         watch: (input) => normalizeStreamRequest(watchEncoder, input, () => streaming.Watch(input))
-      } as Service)
+      })
     })
   )
 }

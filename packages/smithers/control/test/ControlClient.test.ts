@@ -4,11 +4,14 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { Cause, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
+import { Socket } from "effect/unstable/socket"
+import { readFileSync } from "node:fs"
 import { createServer } from "node:http"
+import ts from "typescript"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
 import * as ControlClient from "../src/ControlClient.ts"
-import { RunNotFound, TransportError, Unauthorized } from "../src/ControlError.ts"
+import { type ControlError, RunNotFound, TransportError, Unauthorized } from "../src/ControlError.ts"
 import * as ControlRpcs from "../src/ControlRpcs.ts"
 import * as ControlServer from "../src/ControlServer.ts"
 import { delegateApproval } from "./ApprovalFixtures.ts"
@@ -113,7 +116,119 @@ const rawServer = (status: number, body: string): Promise<{
     })
   })
 
+const calls = (control: Control["Service"]): Record<keyof Control["Service"], Effect.Effect<unknown, ControlError>> => {
+  const approval = {
+    target: {
+      _tag: "Plan" as const,
+      planId: "missing-plan",
+      digest: "digest",
+      envelope: { capabilities: [], flows: [], budget: {} }
+    },
+    scope: "once" as const,
+    idempotencyKey: "approval-missing"
+  }
+  const mutation = { runId: "missing-run", idempotencyKey: "mutation-missing" }
+  return {
+    plan: control.plan({ flowId: "system/test", input: {} }),
+    run: control.run({ _tag: "Resume", ...mutation }),
+    approve: control.approve(approval),
+    deny: control.deny(approval),
+    steer: control.steer({
+      ...mutation,
+      message: {
+        messageId: "message-missing",
+        runId: mutation.runId,
+        principal: { id: "client", kind: "test", stampedAt: 0 },
+        createdAt: 0,
+        body: "continue"
+      }
+    }),
+    signal: control.signal({ ...mutation, signal: { name: "continue", payload: null } }),
+    cancel: control.cancel(mutation),
+    resume: control.resume(mutation),
+    list: control.list({ _tag: "flows" }),
+    watch: Stream.runCollect(control.watch({ follow: false }))
+  }
+}
+
 describe("ControlClient", () => {
+  it("declares transport and authentication failures on every operation", () => {
+    type Errors<T> = T extends Effect.Effect<infer _A, infer E, infer _R> ? E
+      : T extends Stream.Stream<infer _A, infer E, infer _R> ? E
+      : never
+    const boundaryErrors: {
+      [K in keyof Control["Service"]]: TransportError | Unauthorized extends Errors<ReturnType<Control["Service"][K]>>
+        ? true
+        : false
+    } = {
+      plan: true,
+      run: true,
+      approve: true,
+      deny: true,
+      steer: true,
+      signal: true,
+      cancel: true,
+      resume: true,
+      list: true,
+      watch: true
+    }
+    expect(Object.values(boundaryErrors)).toEqual(Array(10).fill(true))
+  })
+
+  it("authenticates watch with the RPC guide's client composition", async () => {
+    const guide = readFileSync(new URL("../docs/guides/serve-over-rpc.md", import.meta.url), "utf8")
+    const example = guide.split("## Connect a client")[1]?.match(/```ts\n([\s\S]*?)```/)?.[1]
+    if (example === undefined) throw new Error("missing RPC guide client example")
+    const events = await run(Effect.gen(function*() {
+      const url = yield* baseUrl
+      const source = example.replace(/^import .*$/gm, "")
+        .replaceAll("127.0.0.1:4000", new URL(url).host)
+      const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+      const guideClient: ReturnType<typeof client> = new Function(
+        "NodeHttpClient",
+        "NodeSocket",
+        "ControlClient",
+        "Layer",
+        "RpcSerialization",
+        "Socket",
+        "process",
+        `${compiled}\nreturn client`
+      )(NodeHttpClient, NodeSocket, ControlClient, Layer, RpcSerialization, Socket, {
+        env: { SMITHERS_CONTROL_TOKEN: token }
+      })
+      return yield* Effect.gen(function*() {
+        const control = yield* Control
+        yield* control.plan({ flowId: "system/test", input: { source: "guide" } })
+        return yield* Stream.runCollect(control.watch({ follow: false }))
+      }).pipe(Effect.provide(guideClient))
+    }))
+    expect(events.length).toBeGreaterThan(0)
+  })
+
+  const methods = ["plan", "run", "approve", "deny", "steer", "signal", "cancel", "resume", "list", "watch"] as const
+
+  it.each(methods)("surfaces a typed Unauthorized from %s", async (method) => {
+    const error = await run(Effect.gen(function*() {
+      const url = yield* baseUrl
+      return yield* withClient(url, "wrong-token", (control) => Effect.flip(calls(control)[method]))
+    }))
+    expect(error).toBeInstanceOf(Unauthorized)
+    expect(error.code).toBe("unauthorized")
+  })
+
+  it.each(methods)("surfaces a typed TransportError from %s", async (method) => {
+    const port = await closedPort()
+    const error = await Effect.runPromise(
+      withClient(`http://127.0.0.1:${port}`, token, (control) => Effect.flip(calls(control)[method])).pipe(
+        Effect.scoped
+      )
+    )
+    expect(error).toBeInstanceOf(TransportError)
+    if (!(error instanceof TransportError)) throw new Error("expected a transport failure")
+    expect(error.retryable).toBe(true)
+    expect(error.code).toBe("transport_error")
+  })
+
   it("completes a unary round trip through the real HTTP server", async () => {
     const listed = await run(Effect.gen(function*() {
       const url = yield* baseUrl
