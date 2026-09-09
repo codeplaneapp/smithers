@@ -208,6 +208,33 @@ describe("gateway projections over a real SQLite control plane", () => {
       expect(inbox).toHaveLength(0)
     }).pipe(Effect.provide(stack())))
 
+  test("removes a cancelled pending gate from a live workspace inbox", () =>
+    Effect.gen(function*() {
+      const control = yield* Control
+      const projections = yield* Projections
+      const runId = yield* launch
+      yield* parkOnApproval(runId, "cancel-gate", "Ship?")
+      const snapshotEnded = yield* Deferred.make<void>()
+      const following = yield* Effect.forkChild(
+        projections.subscribe({ _tag: "approvals" }).pipe(
+          Stream.tap((frame) =>
+            frame._tag === "snapshot-end" ? Deferred.succeed(snapshotEnded, undefined) : Effect.void
+          ),
+          Stream.filter((frame) => frame._tag === "delta"),
+          Stream.take(1),
+          Stream.runCollect
+        )
+      )
+      yield* Deferred.await(snapshotEnded)
+      yield* control.cancel({ runId, idempotencyKey: `cancel:${runId}` })
+      const frames = yield* Fiber.join(following).pipe(Effect.timeout("10 seconds"))
+      expect(frames[0]?.delta).toEqual([])
+      expect((yield* projections.snapshot({ _tag: "approvals" })).rows).toEqual([])
+      expect((yield* projections.snapshot({ _tag: "approvals", runId })).rows).toMatchObject([
+        { requestId: "cancel-gate", status: "pending" }
+      ])
+    }).pipe(Effect.provide(stack())))
+
   test("records a cancellation's source, reason, and principal on the run row", () =>
     Effect.gen(function*() {
       const projections = yield* Projections

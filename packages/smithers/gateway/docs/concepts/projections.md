@@ -119,5 +119,8 @@ retaining the rest of a hostile or corrupt stream.
 
 The approvals inbox is the one workspace projection that filters before it
 counts: it asks the control plane for runs whose status is `waiting-approval`,
-and a run with no pending gate does not consume the allowance. An inbox cannot
-be exhausted by completed histories.
+and admits only runs still in that status with at least one pending gate after
+reconciling their journals. Snapshot admission and live refresh use the same
+predicate: cancellation removes a run even when its gate remains pending.
+A run with no pending gate does not consume the source allowance. An inbox
+cannot be exhausted by completed histories.

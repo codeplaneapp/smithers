@@ -815,6 +815,182 @@ describe("Projections subscriptions", () => {
       expect(deltas[0]?.delta).toEqual([])
     }))
 
+  it.effect("remembers irrelevant histories and missing plan partitions during replay", () =>
+    Effect.gen(function*() {
+      for (const selector of [{ _tag: "approvals" }, { _tag: "workspace-runs" }] as const) {
+        let reads = 0
+        let missingLookups = 0
+        const history = Array.from({ length: 20 }, (_, index) => event(index >> 1, "control.run.completed", null))
+        const plans = history.map((item) => ({ ...item, runId: "plan:missing" }))
+        const projections = make(control({
+          list: (request) => {
+            const named = request._tag === "runs" ? request.filters?.runId : undefined
+            if (named === "plan:missing") missingLookups += 1
+            return Effect.succeed({
+              _tag: "runs",
+              items: named === run.runId ? [{ ...run, status: "completed" }] : []
+            })
+          },
+          watch: (filter) => {
+            if (filter.follow) return Stream.fromIterable([...history, ...plans])
+            reads += 1
+            return Stream.fromIterable(history)
+          }
+        }))
+        yield* Stream.runDrain(projections.subscribe(selector))
+        expect(reads).toBe(1)
+        expect(missingLookups).toBe(1)
+      }
+    }))
+
+  it.effect("removes cancelled runs with pending gates and rejects them on admission", () =>
+    Effect.gen(function*() {
+      for (const seeded of [true, false]) {
+        let following = false
+        const cancelled = event(2, "control.run.cancelled", { runId: run.runId })
+        const projections = make(control({
+          list: (request) => {
+            const named = request._tag === "runs" ? request.filters?.runId : undefined
+            const current: RunSummary = following ? { ...run, status: "cancelled" } : run
+            return Effect.succeed({
+              _tag: "runs",
+              items: named === undefined
+                ? seeded && current.status === "waiting-approval" ? [current] : []
+                : [current]
+            })
+          },
+          watch: (filter) => {
+            if (!filter.follow) return Stream.fromIterable([approvalRequested])
+            following = true
+            return Stream.fromIterable([approvalRequested, cancelled])
+          }
+        }))
+        const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "approvals" }))
+        const deltas = frames.filter((frame) => frame._tag === "delta")
+        expect(deltas.map((frame) => frame.delta)).toEqual(seeded ? [[]] : [])
+        expect((yield* projections.snapshot({ _tag: "approvals" })).rows).toEqual([])
+      }
+    }))
+
+  it.effect("checks reconciled status before admitting a snapshot gate", () =>
+    Effect.gen(function*() {
+      const projections = make(control({
+        list: (request) =>
+          Effect.succeed({
+            _tag: "runs",
+            items: [request._tag === "runs" && request.filters?.runId ? { ...run, status: "cancelled" } : run]
+          }),
+        watch: () => Stream.fromIterable([approvalRequested])
+      }))
+      expect((yield* projections.snapshot({ _tag: "approvals" })).rows).toEqual([])
+    }))
+
+  it.effect("reconsiders a judged run when it parks on a pending approval", () =>
+    Effect.gen(function*() {
+      let parked = false
+      let reads = 0
+      const waiting = event(2, "control.run.waiting-approval", { runId: run.runId })
+      const projections = make(control({
+        list: (request) =>
+          Effect.succeed({
+            _tag: "runs",
+            items: request._tag === "runs" && request.filters?.runId
+              ? [{ ...run, status: parked ? "waiting-approval" : "running" }]
+              : []
+          }),
+        watch: (filter) => {
+          if (!filter.follow) {
+            reads += 1
+            return Stream.fromIterable(parked ? [approvalRequested, waiting] : [approvalRequested])
+          }
+          return Stream.concat(
+            Stream.succeed(approvalRequested),
+            Stream.fromEffect(Effect.sync(() => {
+              parked = true
+              return waiting
+            }))
+          )
+        }
+      }))
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "approvals" }))
+      const deltas = frames.filter((frame) => frame._tag === "delta")
+      expect(reads).toBe(2)
+      expect(deltas).toHaveLength(1)
+      expect(deltas[0]?.delta).toMatchObject([{ requestId: "gate", status: "pending" }])
+    }))
+
+  it.effect("bounds retained workspace state across ignored and removed runs", () =>
+    Effect.gen(function*() {
+      const count = Projections.maxWorkspaceRuns * 2 + 1
+      const summaries = new Map<string, RunSummary>()
+      const histories = new Map<string, ReadonlyArray<ControlEvent>>()
+      const followed: Array<ControlEvent> = []
+      for (let index = 0; index < count; index += 1) {
+        const runId = `retained-${index}`
+        const relevant = index % 2 === 0
+        summaries.set(runId, { ...run, runId, status: relevant ? "waiting-approval" : "completed" })
+        const first = relevant
+          ? { ...approvalRequested, runId }
+          : { ...event(1, "control.run.completed", null), runId }
+        histories.set(runId, [first])
+        followed.push(first)
+        if (relevant) followed.push({ ...event(2, "control.approval.approved", { tokenId: "gate" }), runId })
+      }
+      const NativeMap = globalThis.Map
+      let peak = 0
+      class ObservedMap<K, V> extends NativeMap<K, V> {
+        override set(key: K, value: V): this {
+          super.set(key, value)
+          if (typeof key === "string" && key.startsWith("retained-")) peak = Math.max(peak, this.size)
+          return this
+        }
+      }
+      const projections = make(control({
+        list: (request) => {
+          const named = request._tag === "runs" ? request.filters?.runId : undefined
+          return Effect.succeed({ _tag: "runs", items: named === undefined ? [] : [summaries.get(named)!] })
+        },
+        watch: (filter) => Stream.fromIterable(filter.follow ? followed : histories.get(filter.runId!) ?? [])
+      }))
+      try {
+        globalThis.Map = ObservedMap
+        const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "approvals" }))
+        expect(frames.filter((frame) => frame._tag === "delta")).toHaveLength(1002)
+        expect(peak).toBeGreaterThan(0)
+        expect(peak).toBeLessThanOrEqual(Projections.maxWorkspaceRuns)
+      } finally {
+        globalThis.Map = NativeMap
+      }
+    }))
+
+  it.effect("checks workspace replay positions without scanning the retained history", () =>
+    Effect.gen(function*() {
+      const history = Array.from({ length: 200 }, (_, index) => event(index >> 1, "control.run.accepted", null))
+      let following = false
+      let visits = 0
+      const originalMap = Array.prototype.map
+      const projections = make(control({
+        list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+        watch: (filter) => {
+          if (filter.follow) following = true
+          return Stream.fromIterable(history)
+        }
+      }))
+      try {
+        Array.prototype.map = function(this: Array<ControlEvent>, callback, thisArg) {
+          if (following && this.length === history.length && this[0]?.kind === "control.run.accepted") {
+            visits += this.length
+          }
+          return originalMap.call(this, callback, thisArg)
+        } as typeof Array.prototype.map
+        const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+        expect(frames.filter((frame) => frame._tag === "delta")).toEqual([])
+        expect(visits).toBe(0)
+      } finally {
+        Array.prototype.map = originalMap
+      }
+    }))
+
   it.effect("does not let irrelevant followed runs exhaust the approvals inbox", () =>
     Effect.gen(function*() {
       const irrelevant = Array.from({ length: Projections.maxWorkspaceRuns }, (_, index) => {

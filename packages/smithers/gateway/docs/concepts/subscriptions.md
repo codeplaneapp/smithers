@@ -102,11 +102,18 @@ workspace-wide sequence to advertise. A workspace cursor is therefore always
 at all.
 
 It can still follow, and does, by following every partition without a cursor.
-Control replays each partition's history before tailing it, so the follower
-seeds one last sequence per run it snapshotted and drops that replayed prefix.
-A run the snapshot never saw is admitted with one read, up to the same
-`maxWorkspaceRuns` ceiling the snapshot folds, which keeps a live view inside
-the snapshot's cost model.
+The follower drops replay through each retained run's last sequence and
+duplicate-sequence offset. Each source stores that position and updates it on
+append, so checking replay does not scan its journal.
+
+Sources and cached exclusion verdicts share a `maxWorkspaceRuns` ceiling of
+500 entries. An excluded run retains its journal cutoff and observed position,
+without its history. Replayed events through that cutoff cost no further
+journal reads; later events reconsider the run. Missing run partitions,
+including `plan:` partitions, are skipped after the first lookup failure while
+the verdict is retained. New entries evict the oldest exclusion verdict and
+its cursor state. An evicted run may require another read. At 500 admitted
+sources, unseen runs are skipped.
 
 ## Heartbeats
 

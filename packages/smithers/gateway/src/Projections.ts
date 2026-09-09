@@ -20,10 +20,9 @@
  * run never re-reads history after reconciling the initial cutoff.
  *
  * A workspace subscription follows every journal partition without a cursor.
- * Control replays each partition's history before tailing it, so the follower
- * seeds one last sequence per snapshotted run and drops that replayed prefix.
- * It admits an unseen run with one read until the same run ceiling as the
- * snapshot, keeping a live view inside the snapshot's cost model.
+ * The follower stores each retained run's last position and drops replay
+ * through that cutoff. Sources and exclusion verdicts share the snapshot's
+ * run ceiling; eviction discards a verdict together with its cursor state.
  *
  * @since 1.0.0
  */
@@ -164,10 +163,10 @@ interface CursorPosition {
 interface EventBuffer {
   readonly events: Array<ControlSchema.ControlEvent>
   readonly encodedBytes: number
-  readonly lastSequence: number
+  readonly lastPosition: CursorPosition
 }
 
-const emptyEventBuffer = (): EventBuffer => ({ events: [], encodedBytes: 2, lastSequence: 0 })
+const emptyEventBuffer = (): EventBuffer => ({ events: [], encodedBytes: 2, lastPosition: { value: 0, offset: 0 } })
 
 const textEncoder = new TextEncoder()
 
@@ -196,7 +195,7 @@ const appendEvent = (
   message: string
 ): Effect.Effect<EventBuffer, GatewayError> =>
   Effect.flatMap(decodedEvent(candidate, message), (event) => {
-    if (state.events.length > 0 && event.sequence < state.lastSequence) {
+    if (state.events.length > 0 && event.sequence < state.lastPosition.value) {
       return Effect.fail(unavailable(message, undefined))
     }
     // `decodedEvent` has already rebuilt payload through `Schema.Json`, so it
@@ -211,11 +210,14 @@ const appendEvent = (
     if (!Number.isSafeInteger(encodedBytes) || encodedBytes > maxProjectionBytes) {
       return Effect.fail(resourceLimit(`Run event history exceeds ${maxProjectionBytes} encoded bytes`))
     }
+    const offset = state.events.length > 0 && event.sequence === state.lastPosition.value
+      ? state.lastPosition.offset + 1
+      : 0
     state.events.push(event)
     return Effect.succeed({
       events: state.events,
       encodedBytes,
-      lastSequence: event.sequence
+      lastPosition: { value: event.sequence, offset }
     })
   })
 
@@ -254,9 +256,6 @@ const positionedEvents = (
   })
 }
 
-const lastPositionOf = (events: ReadonlyArray<ControlSchema.ControlEvent>): CursorPosition =>
-  positionedEvents(events).at(-1)?.position ?? { value: 0, offset: 0 }
-
 const sameSelector = (
   left: GatewaySchema.ProjectionSelector,
   right: GatewaySchema.ProjectionSelector
@@ -277,11 +276,8 @@ const sameSelector = (
 }
 
 /** One run and the journal it has committed, read together and read once. */
-interface RunSource {
+interface RunSource extends EventBuffer {
   readonly run: ControlSchema.RunSummary
-  readonly events: Array<ControlSchema.ControlEvent>
-  readonly encodedBytes: number
-  readonly lastSequence: number
 }
 
 /** Everything a selector folds, read once per snapshot. */
@@ -320,6 +316,12 @@ const rowsOfRun = (
       return GatewayProjection.nodeOutput(source.events).filter((row) => row.nodeId === selector.nodeId)
   }
 }
+
+/** Snapshot and follow admit exactly the same runs to the workspace inbox. */
+const eligibleForWorkspace = (selector: GatewaySchema.ProjectionSelector, source: RunSource): boolean =>
+  selector._tag !== "approvals" ||
+  source.run.status === "waiting-approval" &&
+    GatewayProjection.approvals(source.events).some((row) => row.status === "pending")
 
 /**
  * The rows a workspace selector projects across every run it read.
@@ -392,7 +394,7 @@ const snapshotOf = (candidate: unknown): Effect.Effect<GatewaySchema.ProjectionS
  * there is no workspace-wide sequence to advertise and no workspace resume.
  */
 const cursorPositionOf = (source: Source): CursorPosition =>
-  source._tag === "run" ? lastPositionOf(source.run.events) : { value: 0, offset: 0 }
+  source._tag === "run" ? source.run.lastPosition : { value: 0, offset: 0 }
 
 /** Implements a read path after its construction settings have been admitted. */
 const makeService = (control: ControlService, heartbeatMillis: number): Service => {
@@ -497,10 +499,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
       (runs) =>
         Effect.map(
           Effect.forEach(runs, (run) => consistentRunSource(run), { concurrency: 8 }),
-          (sources) =>
-            selector._tag === "approvals"
-              ? sources.filter((source) => rowsOfWorkspace(selector, [source]).length > 0)
-              : sources
+          (sources) => sources.filter((source) => eligibleForWorkspace(selector, source))
         )
     )
 
@@ -585,11 +584,6 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
     readonly position: CursorPosition
   }
 
-  interface WorkspaceDelta {
-    readonly event: ControlSchema.ControlEvent & { readonly runId: string }
-    readonly position: CursorPosition
-  }
-
   /**
    * Deltas for one run, following from `from` and folding over the events the
    * caller already read plus each event that arrives.
@@ -608,11 +602,11 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
     const seedEvents = positionedEvents(source.events)
       .filter(({ position }) => comparePosition(position, from) <= 0)
       .map(({ event }) => event)
-    const seed = comparePosition(from, lastPositionOf(source.events)) === 0
+    const seed = comparePosition(from, source.lastPosition) === 0
       ? Effect.succeed<EventBuffer>({
         events: source.events,
         encodedBytes: source.encodedBytes,
-        lastSequence: source.events.at(-1)?.sequence ?? 0
+        lastPosition: source.lastPosition
       })
       : bufferOf(seedEvents, `${message}: the cursor seed is invalid`)
     return Stream.unwrap(Effect.map(seed, (initial) =>
@@ -673,113 +667,128 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
    *
    * Control sequences belong to run partitions, so this stream cannot start
    * after one workspace cursor. It follows without a cursor instead. That
-   * replays each partition from its beginning, and the map seeded from the
-   * snapshot drops events at or below each run's last folded sequence. An
-   * unseen run costs one read to admit, and the map never exceeds the snapshot
-   * ceiling.
+   * replays partition history, and the sources seeded from the snapshot drop
+   * events through each run's last folded position. Excluded runs retain only
+   * a verdict and replay positions, sharing the source ceiling. Their replay
+   * costs no further journal reads until the verdict is evicted.
    */
   const workspaceDeltaFrames = (
     selector: GatewaySchema.ProjectionSelector,
     runs: ReadonlyArray<RunSource>
   ): Stream.Stream<GatewaySchema.GatewayFrame, GatewayError> =>
     Stream.unwrap(Effect.sync(() => {
-      const sources = new Map<string, RunSource>(runs.map((source) => [source.run.runId, source]))
+      interface FollowedSource {
+        source: RunSource
+        observed: CursorPosition | undefined
+      }
+      interface JudgedRun {
+        readonly lastPosition: CursorPosition | undefined
+        observed: CursorPosition
+      }
+      const sources = new Map<string, FollowedSource>(runs.map((source) => [
+        source.run.runId,
+        { source, observed: undefined }
+      ]))
+      // A verdict retains no journal. Undefined lastPosition means run_not_found.
+      // Sources and verdicts share one ceiling; only verdicts may be evicted.
+      const judged = new Map<string, JudgedRun>()
+      const makeRoom = () => {
+        if (sources.size + judged.size >= maxWorkspaceRuns) {
+          // Callers have room for a source, so a full cache has a verdict.
+          judged.delete(judged.keys().next().value!)
+        }
+      }
+      const remember = (runId: string, lastPosition: CursorPosition | undefined, observed: CursorPosition) => {
+        judged.delete(runId)
+        makeRoom()
+        judged.set(runId, { lastPosition, observed })
+      }
       const noFrames: ReadonlyArray<GatewaySchema.GatewayFrame> = []
       const delta = (): Effect.Effect<ReadonlyArray<GatewaySchema.GatewayFrame>, GatewayError> =>
-        Effect.flatMap(boundedRows(selector, rowsOfWorkspace(selector, [...sources.values()])), (rows) =>
-          Effect.map(
-            frameOf({
-              _tag: "delta",
-              selector,
-              cursor: cursorOf(selector, { value: 0, offset: 0 }),
-              delta: rows
-            }),
-            (frame) => [frame]
-          ))
+        Effect.flatMap(
+          boundedRows(selector, rowsOfWorkspace(selector, [...sources.values()].map(({ source }) => source))),
+          (rows) =>
+            Effect.map(
+              frameOf({
+                _tag: "delta",
+                selector,
+                cursor: cursorOf(selector, { value: 0, offset: 0 }),
+                delta: rows
+              }),
+              (frame) => [frame]
+            )
+        )
       const message = "Following the workspace failed"
       return control.watch({ follow: true }).pipe(
         Stream.tapError((cause) => logReadFailure("follow-workspace", cause)),
         Stream.mapError((cause) => unavailable(message, cause)),
-        Stream.mapAccumEffect(
-          () => new Map<string, CursorPosition>(),
-          (positions, candidate): Effect.Effect<
-            readonly [Map<string, CursorPosition>, ReadonlyArray<WorkspaceDelta>],
-            GatewayError
-          > =>
-            Effect.flatMap(
-              decodedEvent(candidate, `${message}: the control plane returned an invalid event`),
-              (event) => {
-                const runId = event.runId
-                if (runId === undefined) {
-                  return Effect.succeed([positions, [] as ReadonlyArray<WorkspaceDelta>] as const)
-                }
-                const previous = positions.get(runId)
-                if (previous !== undefined && event.sequence < previous.value) {
-                  return Effect.fail(unavailable(`${message}: event sequences moved backward`, undefined))
-                }
-                const position: CursorPosition = {
-                  value: event.sequence,
-                  offset: previous?.value === event.sequence ? previous.offset + 1 : 0
-                }
-                const next = new Map(positions)
-                next.set(runId, position)
-                return Effect.succeed(
-                  [
-                    next,
-                    [{ event: { ...event, runId }, position }] satisfies ReadonlyArray<WorkspaceDelta>
-                  ] as const
-                )
+        Stream.mapEffect((candidate) =>
+          Effect.gen(function*() {
+            const event = yield* decodedEvent(candidate, `${message}: the control plane returned an invalid event`)
+            const runId = event.runId
+            if (runId === undefined) return noFrames
+            const current = sources.get(runId)
+            const verdict = judged.get(runId)
+            const previous = current?.observed ?? verdict?.observed
+            if (previous !== undefined && event.sequence < previous.value) {
+              return yield* Effect.fail(unavailable(`${message}: event sequences moved backward`, undefined))
+            }
+            const position: CursorPosition = {
+              value: event.sequence,
+              offset: previous?.value === event.sequence ? previous.offset + 1 : 0
+            }
+            if (current !== undefined) {
+              current.observed = position
+              if (
+                current.source.events.length > 0 && comparePosition(position, current.source.lastPosition) <= 0
+              ) return noFrames
+              const buffer = yield* appendEvent(current.source, event, `${message}: event history is invalid`)
+              const fresh = yield* runOf(runId)
+              const source = { run: fresh, ...buffer }
+              if (eligibleForWorkspace(selector, source)) {
+                current.source = source
+              } else {
+                sources.delete(runId)
+                remember(runId, source.lastPosition, position)
               }
-            )
-        ),
-        Stream.mapEffect(({ event, position }) => {
-          const runId = event.runId
-          const current = sources.get(runId)
-          if (current !== undefined) {
-            if (
-              current.events.length > 0 && comparePosition(position, lastPositionOf(current.events)) <= 0
-            ) return Effect.succeed(noFrames)
-            return Effect.flatMap(
-              appendEvent(current, event, `${message}: event history is invalid`),
-              (buffer) =>
-                Effect.flatMap(runOf(runId), (fresh) => {
-                  const source = { run: fresh, ...buffer }
-                  if (selector._tag === "approvals" && rowsOfWorkspace(selector, [source]).length === 0) {
-                    sources.delete(runId)
-                  } else {
-                    sources.set(runId, source)
+              return yield* delta()
+            }
+            if (verdict !== undefined) {
+              verdict.observed = position
+              if (verdict.lastPosition === undefined || comparePosition(position, verdict.lastPosition) <= 0) {
+                return noFrames
+              }
+            }
+            if (sources.size >= maxWorkspaceRuns) return noFrames
+            return yield* runSourceOf(runId).pipe(
+              Effect.flatMap((source) => {
+                const admitted = source.events.length > 0 && comparePosition(position, source.lastPosition) <= 0
+                  ? Effect.succeed(source)
+                  : Effect.map(
+                    appendEvent(source, event, `${message}: event history is invalid`),
+                    (buffer): RunSource => ({ run: source.run, ...buffer })
+                  )
+                return Effect.flatMap(admitted, (complete) => {
+                  if (!eligibleForWorkspace(selector, complete)) {
+                    remember(runId, complete.lastPosition, position)
+                    return Effect.succeed(noFrames)
                   }
+                  judged.delete(runId)
+                  makeRoom()
+                  sources.set(runId, { source: complete, observed: position })
                   return delta()
                 })
-            )
-          }
-
-          if (selector._tag !== "approvals" && sources.size >= maxWorkspaceRuns) {
-            return Effect.succeed(noFrames)
-          }
-          return runSourceOf(runId).pipe(
-            Effect.flatMap((source) => {
-              const admitted = source.events.length > 0 && comparePosition(position, lastPositionOf(source.events)) <= 0
-                ? Effect.succeed(source)
-                : Effect.map(
-                  appendEvent(source, event, `${message}: event history is invalid`),
-                  (buffer): RunSource => ({ run: source.run, ...buffer })
-                )
-              return Effect.flatMap(admitted, (complete) => {
-                if (selector._tag === "approvals" && rowsOfWorkspace(selector, [complete]).length === 0) {
+              }),
+              Effect.catchIf(
+                (failure) => failure.code === "run_not_found",
+                () => {
+                  remember(runId, undefined, position)
                   return Effect.succeed(noFrames)
                 }
-                if (sources.size >= maxWorkspaceRuns) return Effect.succeed(noFrames)
-                sources.set(runId, complete)
-                return delta()
-              })
-            }),
-            Effect.catchIf(
-              (failure) => failure.code === "run_not_found",
-              () => Effect.succeed(noFrames)
+              )
             )
-          )
-        }),
+          })
+        ),
         Stream.flattenIterable
       )
     }))
@@ -885,7 +894,7 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
     return typeof scope === "string"
       ? Effect.flatMap(runSourceOf(scope), (source) => {
         const position = { value: after.value, offset: after.offset }
-        const last = lastPositionOf(source.events)
+        const last = source.lastPosition
         if (comparePosition(position, last) > 0) {
           return Effect.fail(malformed(
             `Cursor ${after.value}:${after.offset} cannot resume run ${scope} past its last position ${last.value}:${last.offset}`
