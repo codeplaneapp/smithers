@@ -213,9 +213,6 @@ export const sortEntries = (entries: ReadonlyArray<FileListEntry>): FileListEntr
     return a.name.localeCompare(b.name)
   })
 
-/** A body that is nothing but base64 alphabet, long enough not to be a word. */
-const LOOKS_BASE64 = /^[A-Za-z0-9+/=\s]{256,}$/
-
 /**
  * Base64 → UTF-8, honest about binary: NUL bytes or an undecodable byte
  * sequence answer `binary` instead of mojibake (multi decodeBase64 :101, made
@@ -411,16 +408,10 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
 
   return {
     listFiles: async (pathArg, explicitRepoArg) => {
-      const global = splitGlobalPath(ctx.store, pathArg, explicitRepoArg)
-      const path = global?.path ?? pathArg
-      const explicitRepo = global?.repo ?? explicitRepoArg
-      if (unsafePath(path)) return "File paths must stay inside the repository."
-      const local = localTarget(ctx.store, explicitRepo)
-      if (local !== undefined) return "error" in local ? local.error : listLocal(local.repo, path)
-      const target = resolveTargetRepo(ctx.store, explicitRepo)
+      const target = resolveFileTarget(ctx.store, pathArg, explicitRepoArg)
       if ("error" in target) return target.error
-      const { repo } = target
-      const normalized = normalizePath(path)
+      if (target.kind === "local") return listLocal(target.repo, target.path)
+      const { repo, path: normalized } = target
       const label = normalized === "" ? "/" : normalized
 
       let response: Response
@@ -463,16 +454,10 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     },
 
     readFile: async (pathArg, explicitRepoArg, anchor) => {
-      const global = splitGlobalPath(ctx.store, pathArg, explicitRepoArg)
-      const path = global?.path ?? pathArg
-      const explicitRepo = global?.repo ?? explicitRepoArg
-      if (unsafePath(path)) return "File paths must stay inside the repository."
-      const local = localTarget(ctx.store, explicitRepo)
-      if (local !== undefined) return "error" in local ? local.error : readLocal(local.repo, path, anchor)
-      const target = resolveTargetRepo(ctx.store, explicitRepo)
+      const target = resolveFileTarget(ctx.store, pathArg, explicitRepoArg)
       if ("error" in target) return target.error
-      const { repo } = target
-      const normalized = normalizePath(path)
+      if (target.kind === "local") return readLocal(target.repo, target.path, anchor)
+      const { repo, path: normalized } = target
       if (normalized === "") return "files.read needs a file path"
 
       let response: Response
@@ -507,9 +492,10 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
        *
        * The declared encoding is not trusted on its own: the platform
        * answers `encoding: "utf-8"` for a file whose content is plainly
-       * base64-encoded bytes, so a body that is nothing but base64 alphabet
-       * is decoded and checked. A real text file never matches — the
-       * alphabet excludes every punctuation mark prose and code use.
+       * base64-encoded bytes. Only check for mislabelled binary when the
+       * stripped body's length matches base64's expansion of the byte size.
+       * Plain UTF-8 text (including word and hash lists) cannot have more
+       * characters than bytes, so it keeps its declared encoding.
        */
       const binaryCard = (): { readonly value: string } => {
         upsert({
@@ -530,7 +516,10 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
         content = decoded.text
       } else {
         if (rawContent.includes("\u0000")) return binaryCard()
-        if (LOOKS_BASE64.test(rawContent) && decodeBase64(rawContent).binary) return binaryCard()
+        const size = body.size
+        const hasBase64Length = typeof size === "number" && Number.isSafeInteger(size) && size > 0 &&
+          rawContent.replace(/\s+/g, "").length === 4 * Math.ceil(size / 3)
+        if (hasBase64Length && decodeBase64(rawContent).binary) return binaryCard()
         content = rawContent
       }
       const truncated = content.length > CARD_CONTENT_CAP

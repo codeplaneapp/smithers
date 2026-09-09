@@ -9,6 +9,7 @@ import type { AppServices } from "../AppController"
 import { repoKeyOf } from "../AppState"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
+import { resolveFileTarget } from "./FilesSeam"
 
 /*
  * The repo files seam (FilesSeam.ts) through the real command path: /files.list
@@ -57,6 +58,9 @@ const base64 = (text: string): string => Buffer.from(text, "utf8").toString("bas
 const README_TEXT = "# Flows — the runtime\n\nbun install\n"
 /** Longer than the 16 KB card cap, so the card truncates honestly. */
 const BIG_TEXT = "x".repeat(16 * 1024 + 100)
+
+const WORD_LIST = "apple\nberry\n".repeat(25)
+const SHA256SUMS = Array.from({ length: 8 }, (_, index) => `${String(index).repeat(64)}\n`).join("")
 
 interface SeenRequest {
   readonly method: string
@@ -128,6 +132,10 @@ const filesBackend = () => {
         encoding: "utf-8",
         size: 2000
       }),
+    ...Object.fromEntries(Object.entries({ "words.txt": WORD_LIST, SHA256SUMS }).map(([path, content]) => [
+      `/api/repos/will/flows/contents/${path}`,
+      () => json(200, { path, content, encoding: "utf-8", size: Buffer.byteLength(content) })
+    ])),
     "/api/repos/will/flows/contents/missing.txt": () => json(404, { message: "Path not found: missing.txt" }),
     "/api/repos/will/flows/contents/boom.txt": () => json(500, { message: "the platform fell over" })
   }
@@ -340,8 +348,8 @@ describe("files seam — files.read", () => {
   /*
    * The platform answers `encoding: "utf-8"` for a file whose content is
    * plainly base64-encoded bytes, so the declared encoding is not trusted on
-   * its own. A real text file never matches: the base64 alphabet excludes
-   * every punctuation mark prose and code use.
+   * its own. The byte size distinguishes encoded bytes from plain text,
+   * even when the text uses only characters from the base64 alphabet.
    */
   test("base64 bytes mislabelled as utf-8 are still recognised as binary", async () => {
     const { store, controller } = await freshController()
@@ -359,6 +367,19 @@ describe("files seam — files.read", () => {
     const card = fileCard(store, "file-will/flows-long.md")
     expect(card?.payload.binary ?? false).toBe(false)
     expect(card?.payload.content).toContain("Smithers")
+  })
+
+  test.each([
+    ["words.txt", WORD_LIST],
+    ["SHA256SUMS", SHA256SUMS]
+  ])("utf-8 %s stays text even when it uses only the base64 alphabet", async (path, content) => {
+    const { store, controller } = await freshController()
+    await ready(store)
+    const outcome = await controller.commands.run("files.read", path)
+    expect(outcome.status).toBe("executed")
+    const card = fileCard(store, `file-will/flows-${path}`)
+    expect(card?.payload.binary ?? false).toBe(false)
+    expect(card?.payload.content).toBe(content)
   })
 
   test("a missing path inside an imported repo answers the platform's path message, not the import hint", async () => {
@@ -568,6 +589,25 @@ describe("files seam — a repository open in the local app", () => {
     const cloud = await controller.commands.run("files.read", "README.md will/flows")
     expect(cloud.status).toBe("failed")
     expect(requests.some((request) => request.url.includes("/api/repos/will/flows/contents/README.md"))).toBe(true)
+  })
+
+  test("global paths use the same local copy in the helper, listing and reading", async () => {
+    const other = localRepo("repo-other", "aa/other", "/Users/will/other")
+    const { store, controller, requests } = await localController([other, SMITHERS])
+    await ready(store)
+    store.dispatch({ type: "repo.selected", actor: "user", id: repoKeyOf(other.path) })
+    await settled()
+    for (const [command, path] of [["files.list", "src"], ["files.read", "README.md"]] as const) {
+      const globalPath = `/smithersai/smithers/${path}`
+      const target = resolveFileTarget(store, globalPath, undefined)
+      expect(target).toMatchObject({ kind: "local", repo: SMITHERS, path })
+      expect((await controller.commands.run(command, globalPath)).status).toBe("executed")
+      expect(requests.at(-1)).toEqual({
+        url: "/api/repo/files", body: { repoId: SMITHERS.id, path }
+      })
+    }
+    expect(listCard(store, "files-repo-smithers-src")?.payload.localRepoId).toBe(SMITHERS.id)
+    expect(fileCard(store, "file-repo-smithers-README.md")?.payload.localRepoId).toBe(SMITHERS.id)
   })
 
   test("a bounded read states truncation, a binary file is stated not printed, and a missing path is the honest string", async () => {
