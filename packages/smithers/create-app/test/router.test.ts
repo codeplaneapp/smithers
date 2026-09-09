@@ -6,7 +6,17 @@
  */
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, sep } from "node:path"
 import ts from "typescript"
@@ -15,8 +25,10 @@ import { defaultDirs } from "../src/app.ts"
 import { discover, render, renderAll, renderUi, resolveLayer, RouterError, writeRoutes } from "../src/router.ts"
 
 const roots: Array<string> = []
+const unwritable: Array<string> = []
 
 afterEach(() => {
+  while (unwritable.length > 0) chmodSync(unwritable.pop()!, 0o700)
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true })
 })
 
@@ -533,4 +545,53 @@ describe("writeRoutes", () => {
     expect(report.stale).toEqual([])
     expect(report.files).toEqual({ "routes.gen.ts": "clean", "routes.ui.gen.ts": "clean" })
   })
+
+  // Each table is replaced by renaming a staging file into place, so a reader
+  // holding the previous file — the Worker bundle, Vite's module graph — sees
+  // the whole previous module or the whole next one, never the truncated
+  // middle an interrupted in-place write leaves behind. The hard link is the
+  // proof: a rename swaps the directory entry for a new inode, so the link
+  // still reads what the table held before.
+  it("replaces each generated file by renaming a staging file into place", () => {
+    const root = appTree({ ...layers, "app/page.tsx": "export default () => null\n" })
+    writeRoutes({ root, dirs })
+    const target = join(root, "routes.ui.gen.ts")
+    const before = readFileSync(target, "utf8")
+    const held = join(root, "held.gen.ts")
+    linkSync(target, held)
+
+    mkdirSync(join(root, "app/panes"), { recursive: true })
+    writeFileSync(join(root, "app/panes/balances.tsx"), "export const Pane = {}\n")
+    const report = writeRoutes({ root, dirs })
+
+    expect(report.files["routes.ui.gen.ts"]).toBe("written")
+    expect(readFileSync(target, "utf8")).toContain("balances")
+    expect(readFileSync(held, "utf8")).toBe(before)
+    expect(existsSync(`${target}.tmp`)).toBe(false)
+  })
+
+  // Writing in place used to mutate whichever table it reached before the
+  // filesystem refused, so a refusal between the two left one table new and
+  // one stale. Staging every write means a refused tree of files is left
+  // exactly as it was.
+  it.skipIf(process.getuid?.() === 0)(
+    "leaves both tables as they were when the filesystem refuses the write; root bypasses permission bits",
+    () => {
+      const root = appTree({ ...layers, "app/page.tsx": "export default () => null\n" })
+      writeRoutes({ root, dirs })
+      const before = {
+        "routes.gen.ts": readFileSync(join(root, "routes.gen.ts"), "utf8"),
+        "routes.ui.gen.ts": readFileSync(join(root, "routes.ui.gen.ts"), "utf8")
+      }
+
+      mkdirSync(join(root, "app/panes"), { recursive: true })
+      writeFileSync(join(root, "app/panes/balances.tsx"), "export const Pane = {}\n")
+      unwritable.push(root)
+      chmodSync(root, 0o500)
+
+      expect(() => writeRoutes({ root, dirs })).toThrow(/EACCES|EROFS|EPERM/)
+      expect(readFileSync(join(root, "routes.gen.ts"), "utf8")).toBe(before["routes.gen.ts"])
+      expect(readFileSync(join(root, "routes.ui.gen.ts"), "utf8")).toBe(before["routes.ui.gen.ts"])
+    }
+  )
 })

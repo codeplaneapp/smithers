@@ -8,7 +8,7 @@
  * startup cost and hide nothing.
  */
 import { afterEach, describe, expect, it } from "@effect/vitest"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import type { AppManifest, Brand } from "../src/app.ts"
@@ -16,8 +16,10 @@ import { RouterError } from "../src/router.ts"
 import { brandCss, brandModuleId, createApp, loadManifest, manifestModuleId } from "../src/vite.ts"
 
 const roots: Array<string> = []
+const unwritable: Array<string> = []
 
 afterEach(() => {
+  while (unwritable.length > 0) chmodSync(unwritable.pop()!, 0o700)
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true })
 })
 
@@ -231,6 +233,46 @@ describe("createApp", () => {
     expect(written.join("")).toContain("smthrs-create-app: invalid_name:")
     expect(written.join("")).toContain("app/panes/Balances.tsx")
   })
+
+  // A full disk, a locked file, a read-only checkout: the tree is fine and the
+  // plugin is fine, the machine refused the write. That leaves the previous
+  // tables on disk exactly as a refused tree does, so the dev server names it
+  // and keeps serving them rather than dying inside chokidar's emit.
+  it.skipIf(process.getuid?.() === 0)(
+    "reports a filesystem refusal instead of taking the dev server down; root bypasses permission bits",
+    async () => {
+      const root = tree({ ...layers, "app/page.tsx": "export default () => null\n" })
+      const plugin = createApp({ root, manifest: async () => manifestOf(minimal) })
+      await plugin.configResolved({ root })
+      const before = readFileSync(join(root, "routes.ui.gen.ts"), "utf8")
+
+      const listeners: Array<(file: string) => void> = []
+      plugin.configureServer({ watcher: { on: (_event, listener) => listeners.push(listener) } })
+
+      mkdirSync(join(root, "app/panes"), { recursive: true })
+      const pane = join(root, "app/panes/balances.tsx")
+      writeFileSync(pane, "export const Pane = {}\n")
+      rmSync(join(root, "routes.gen.ts"))
+      unwritable.push(root)
+      chmodSync(root, 0o500)
+
+      const written: Array<string> = []
+      const original = process.stderr.write.bind(process.stderr)
+      process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+        written.push(String(chunk))
+        return true
+      }) as typeof process.stderr.write
+      try {
+        expect(() => listeners[0]!(pane)).not.toThrow()
+      } finally {
+        process.stderr.write = original
+      }
+      expect(written.join("")).toMatch(/smthrs-create-app: (?:EACCES|EROFS|EPERM):/)
+      expect(written.join("")).toContain("routes.gen.ts")
+      // The tables the server is serving survive the refusal.
+      expect(readFileSync(join(root, "routes.ui.gen.ts"), "utf8")).toBe(before)
+    }
+  )
 
   it("still propagates a failure that is not a refused tree", async () => {
     // Only a RouterError means "the tree is wrong". Anything else is a defect

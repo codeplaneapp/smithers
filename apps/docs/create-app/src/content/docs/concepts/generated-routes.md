@@ -112,6 +112,11 @@ file counts as routed when it is a `page.tsx`, a `layout.tsx`, a file directly
 under a `panes/` directory, a `flow.ts` or `flow.mdx`, or one of the three
 layer files.
 
+Each table is written to a neighbouring `.tmp` file and renamed into place, so
+a write the filesystem refuses or an interrupted process leaves the previous
+table whole. A truncated table would be imported by both the Worker bundle and
+Vite, and a failure between the two tables would leave one new and one stale.
+
 A tree the router refuses while the server is running is reported on stderr
 rather than thrown. The watcher listener runs inside chokidar's emit, where a
 throw would take the dev server down instead of raising an overlay, so the
@@ -121,3 +126,9 @@ fails the startup.
 
 Pass `onRouterError` to the plugin to route those reports somewhere else. See
 [Brand an app](/guides/brand-an-app/) for the plugin's options.
+
+A filesystem that refuses the write is treated the same way: `ENOSPC`,
+`EACCES`, `EBUSY`, `EROFS` and their kind are reported on stderr and leave the
+previous tables in place. They are not routed through `onRouterError`, because
+nothing in the tree is wrong. `ENOENT` is not one of them: the app root itself
+is gone, so the regeneration throws.

@@ -380,7 +380,10 @@ manifest as virtual modules.
 | `onRouterError`                | Report the refusal on stderr            |
 
 `configResolved` is deliberately not routed through `onRouterError`: Vite
-awaits that hook, so a refused tree at startup fails the startup.
+awaits that hook, so a refused tree at startup fails the startup. A filesystem
+that refuses the write while the server runs (`ENOSPC`, `EACCES`, `EBUSY`,
+`EROFS`) is reported on stderr instead, since nothing in the tree is wrong;
+`ENOENT` still throws.
 
 `CreateAppPlugin` is typed by what the plugin actually uses rather than by
 Vite's full hook signatures, so a host or a test can drive it directly:

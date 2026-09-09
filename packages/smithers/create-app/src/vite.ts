@@ -154,6 +154,41 @@ const reportOnStderr = (error: RouterError): void => {
   process.stderr.write(`smthrs-create-app: ${error.code}: ${error.message}\n`)
 }
 
+/**
+ * The errno codes a regeneration can fail with that say the machine refused
+ * the write rather than that the tree or the plugin is wrong: a full disk or
+ * quota, a locked or read-only file, an exhausted descriptor table.
+ *
+ * `ENOENT` is deliberately absent. It means the app root itself is gone, so
+ * there is nothing left to serve and the throw stands.
+ */
+const refusedByFilesystem = new Set([
+  "EACCES",
+  "EAGAIN",
+  "EBUSY",
+  "EDQUOT",
+  "EMFILE",
+  "ENFILE",
+  "ENOSPC",
+  "EPERM",
+  "EROFS"
+])
+
+const isFilesystemRefusal = (cause: unknown): cause is NodeJS.ErrnoException =>
+  cause instanceof Error && refusedByFilesystem.has((cause as NodeJS.ErrnoException).code ?? "")
+
+/**
+ * Reports a filesystem refusal without taking the dev server down.
+ *
+ * This is not routed through {@link CreateAppPluginOptions.onRouterError}: the
+ * tables are fine and the tree is fine, so the report is about the machine and
+ * not about anything the app author can fix in their tree. Node's message
+ * already names the syscall and the path.
+ */
+const reportRefusalOnStderr = (error: NodeJS.ErrnoException): void => {
+  process.stderr.write(`smthrs-create-app: ${error.code}: could not write the route tables: ${error.message}\n`)
+}
+
 /** The slice of `ViteDevServer` the plugin watches. */
 interface WatchedServer {
   readonly watcher: {
@@ -226,10 +261,15 @@ export const createApp = (options: CreateAppPluginOptions = {}): CreateAppPlugin
           // uncaught exception that takes the dev server down rather than an
           // error overlay. Creating a capitalised pane file, adding a second
           // flow.ts for an existing id, or deleting the root AGENT.ts all
-          // raise one. A refused tree leaves the previous tables on disk and
-          // is reported; anything else is a defect and still propagates.
-          if (!(cause instanceof RouterError)) throw cause
-          report(cause)
+          // raise a refused tree; a full disk or a read-only checkout raises a
+          // filesystem refusal. Either one leaves the previous tables on disk
+          // and is reported; anything else is a defect and still propagates.
+          if (cause instanceof RouterError) {
+            report(cause)
+            return
+          }
+          if (!isFilesystemRefusal(cause)) throw cause
+          reportRefusalOnStderr(cause)
         }
       }
       server.watcher.on("add", onChange)

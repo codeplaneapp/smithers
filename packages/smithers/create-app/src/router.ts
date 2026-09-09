@@ -27,7 +27,7 @@
  *
  * @since 0.1.0
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join, posix, relative, resolve, sep } from "node:path"
 import { isRouteSegment, routeSegmentGrammar } from "./app.ts"
 import type { AppDirs, AppRoutes, FlowRoute, PageRoute, PaneRoute } from "./app.ts"
@@ -384,7 +384,13 @@ export const writeRoutes = (
       stale.push(file)
       continue
     }
-    writeFileSync(target, next)
+    // Written through a neighbouring staging file and renamed, so a refused or
+    // interrupted write leaves the previous table whole rather than a
+    // truncated module the Worker bundle and Vite both import, and a failure
+    // between the two tables leaves both of them as they were.
+    const staging = `${target}.tmp`
+    writeFileSync(staging, next)
+    renameSync(staging, target)
     files[file] = "written"
   }
   return {

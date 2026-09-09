@@ -112,6 +112,19 @@ file, adding a second `flow.ts` for an existing id, and deleting the root
 `AGENT.ts` each produce one. Pass `onRouterError` to send these reports
 somewhere you will see them.
 
+### smthrs-create-app: ENOSPC: could not write the route tables on stderr
+
+**What happened.** The dev server's watcher saw a routed file appear or
+disappear and the filesystem refused the write. A full disk or quota, a
+read-only checkout, a locked file, and an exhausted descriptor table all
+produce one. The previous tables stay on disk whole, because each table is
+written to a `.tmp` file and renamed into place.
+
+**What to change.** Fix what the message names: free space, permissions on the
+app root, whatever holds the file open. The report is not routed through
+`onRouterError`, which carries refused trees only. `ENOENT` is different: the
+app root is gone, so the regeneration throws.
+
 ## The runtime composition
 
 ### TOOLS.ts grant[0].action is not a capability action
