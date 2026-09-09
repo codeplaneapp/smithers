@@ -7,10 +7,11 @@
 // model straight out of pierre's shadow root: per line, the inline colour and
 // the text of every span. That sequence is what a viewer sees; the snapshot
 // pins it per language, and the structural checks say what the snapshot means.
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { getSharedHighlighter } from "@pierre/diffs";
+import type { WorkerResponse } from "@pierre/diffs/worker";
 import { CodeFileView, currentCodeViewPool, disposeCodeViewPool, languageForFile, type CodeTokenPosition } from "../src/adapters/code-view";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import { themeRegistry } from "../src/styles";
@@ -421,104 +422,71 @@ describe("CodeFileView token model (happy-dom, main thread)", () => {
   }, 90_000);
 
   /*
-   * The 300 ms law on the first open (apps/ui/docs/code-intel/PLAN.md §1
-   * "Where the work runs"). Under this runtime's JavaScriptCore the first
-   * synchronous tokenize of a 16 KiB TypeScript file measures ~2.6 s and a
-   * warm one ~300 ms, so a main-thread render breaks that law and the worker
-   * pool is what keeps it. What the law reduces to, structurally, is two
-   * facts this case asserts instead of a stopwatch: the tokenize is the
-   * worker's (the pool holds the task and reports a busy worker while the
-   * paint is outstanding, and the render slice returns with nothing coloured
-   * yet), and this thread stays free while it runs (the watchdog is a
-   * setTimeout chain, one tick per turn of this thread's loop — a tokenize on
-   * this thread is one synchronous task, inside which the chain cannot tick
-   * at all). The measured blocks are printed for a human and asserted on
-   * nothing: a shared runner's speed is not a property of this code, and
-   * asserting it ran a benchmark as a unit test.
+   * Hold delivery of real worker results so a fast worker cannot race the
+   * pending-work assertions. A scheduled main-thread callback must run while
+   * delivery is held; releasing the gate must paint the actual token output.
+   * Repeat with a second file to cover the warm pool without timing bounds.
    */
-  const MIN_MAIN_THREAD_TURNS = 10;
-
-  test("a 16 KiB TypeScript file is tokenized in the pool's worker: the render slice hands it over and this thread keeps turning", async () => {
+  test("a 16 KiB TypeScript file is tokenized in the pool's worker while this thread services a callback", async () => {
     const line = (index: number): string => `export const value${index} = (input: Readonly<Record<string, number>>): number => Object.values(input).reduce((sum, n) => sum + n, ${index})`;
     let contents = "";
     for (let index = 0; contents.length < 16 * 1024; index += 1) contents += `${line(index)}\n`;
     expect(contents.length).toBeGreaterThanOrEqual(16 * 1024);
     const manager = currentCodeViewPool().manager;
     if (manager === undefined) throw new Error(`the code view has no worker pool (state ${currentCodeViewPool().state})`);
-    const outstanding = (): number => {
-      const stats = manager.getStats();
-      return stats.activeTasks + stats.queuedTasks;
+    // Pierre's message listener calls this private method dynamically. Gate
+    // only file results; initialization, theme changes and errors still flow.
+    const boundary = manager as unknown as {
+      handleWorkerMessage: (worker: unknown, response: WorkerResponse) => void;
     };
-    let turns = 0;
-    let busiest = 0;
-    let pooled = 0;
-    let longestBlock = 0;
-    let last = performance.now();
-    let watching = true;
-    const reset = (): void => {
-      turns = 0;
-      busiest = 0;
-      pooled = 0;
-      longestBlock = 0;
-      last = performance.now();
+    const deliver = boundary.handleWorkerMessage.bind(manager);
+    const held: Array<() => void> = [];
+    const gate = spyOn(boundary, "handleWorkerMessage").mockImplementation((worker, response) => {
+      if (response.type === "success" && response.requestType === "file") {
+        held.push(() => deliver(worker, response));
+      } else {
+        deliver(worker, response);
+      }
+    });
+    const release = (): void => {
+      for (const deliverResponse of held.splice(0)) deliverResponse();
     };
-    const tick = (): void => {
-      const now = performance.now();
-      longestBlock = Math.max(longestBlock, now - last);
-      last = now;
-      turns += 1;
-      busiest = Math.max(busiest, manager.getStats().busyWorkers);
-      pooled = Math.max(pooled, outstanding());
-      if (watching) setTimeout(tick, 0);
-    };
-    setTimeout(tick, 0);
     try {
-      reset();
-      await mount(<CodeFileView name="src/big.ts" contents={contents} mode="dark" palette="night-owl" />);
-      // What the render slice left behind: the work, not the result.
-      const pendingAfterRender = outstanding();
-      const colouredInRenderSlice = shadow().querySelector("[data-line] span[style]") != null;
-      await highlighted();
-      expect(host().getAttribute("data-highlighter")).toBe("worker");
-      expect(currentCodeViewPool().state).toBe("ready");
-      expect(shadow().querySelectorAll("[data-line]").length).toBeGreaterThan(100);
-      expect(colouredInRenderSlice).toBe(false);
-      expect(pendingAfterRender).toBeGreaterThanOrEqual(1);
-      // The tokenize ran in the worker, and this thread turned its loop while it did.
-      expect(busiest).toBeGreaterThanOrEqual(1);
-      expect(pooled).toBeGreaterThanOrEqual(1);
-      expect(turns).toBeGreaterThanOrEqual(MIN_MAIN_THREAD_TURNS);
-      const firstTurns = turns;
-      const firstBlock = longestBlock;
-      /*
-       * A second file of the same language, handed to pierre by a plain
-       * render: the same two facts hold with the pool warm, which is what
-       * "the render is one synchronous slice" means — it dispatches and
-       * returns, and the tokenize is still the worker's when it is over.
-       */
-      const second = document.createElement("div");
-      document.body.appendChild(second);
-      const secondRoot = createRoot(second);
-      const secondColoured = (): boolean =>
-        second.querySelector("diffs-container")?.shadowRoot?.querySelector("[data-line] span[style]") != null;
-      reset();
-      await act(async () => secondRoot.render(<CodeFileView name="src/big2.ts" contents={contents.slice(200)} mode="dark" palette="night-owl" />));
-      const secondPendingAfterRender = outstanding();
-      const secondColouredInRenderSlice = secondColoured();
-      await until(secondColoured, "the second file never coloured a token");
-      expect(secondColouredInRenderSlice).toBe(false);
-      expect(secondPendingAfterRender).toBeGreaterThanOrEqual(1);
-      expect(busiest).toBeGreaterThanOrEqual(1);
-      expect(pooled).toBeGreaterThanOrEqual(1);
-      expect(turns).toBeGreaterThanOrEqual(MIN_MAIN_THREAD_TURNS);
-      await act(async () => secondRoot.unmount());
-      second.remove();
-      watching = false;
-      console.info(
-        `code view: first file ${firstTurns} main-thread turns, longest block ${firstBlock.toFixed(0)} ms; second file ${turns} turns, longest block ${longestBlock.toFixed(0)} ms`,
-      );
+      for (const [name, fileContents] of [["src/big.ts", contents], ["src/big2.ts", contents.slice(200)]] as const) {
+        await mount(<CodeFileView name={name} contents={fileContents} mode="dark" palette="night-owl" />);
+        await until(() => held.length > 0, `${name}: the worker never returned a file result`);
+        let callbackServiced = false;
+        await act(async () => {
+          await new Promise<void>((resolve) => setTimeout(() => {
+            callbackServiced = true;
+            resolve();
+          }, 0));
+        });
+        expect(callbackServiced).toBe(true);
+        expect(held).toHaveLength(1);
+        expect(shadow().querySelector("[data-line] span[style]")).toBeNull();
+        const stats = manager.getStats();
+        expect(stats.busyWorkers).toBeGreaterThanOrEqual(1);
+        expect(stats.activeTasks + stats.queuedTasks).toBeGreaterThanOrEqual(1);
+
+        await act(async () => release());
+        await highlighted();
+        expect(host().getAttribute("data-highlighter")).toBe("worker");
+        expect(currentCodeViewPool().state).toBe("ready");
+        const model = tokenModel();
+        expect(model.length).toBeGreaterThan(100);
+        expect(coloursOf(model).size).toBeGreaterThan(1);
+        expect(model.map((row) => row.tokens.map((token) => token.slice(token.indexOf("|") + 1)).join("").replace(/\n$/, "")))
+          .toEqual(fileContents.split("\n"));
+        expect(held).toHaveLength(0);
+        await act(async () => root!.unmount());
+        root = undefined;
+        container?.remove();
+        container = undefined;
+      }
     } finally {
-      watching = false;
+      gate.mockRestore();
+      await act(async () => release());
     }
   }, 120_000);
 
