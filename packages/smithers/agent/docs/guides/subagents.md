@@ -5,17 +5,31 @@ sidebar:
   order: 6
 ---
 
-A cell delegates the way it does anything else: it finds a flow in `ctx.flows`
-and calls it. Two shapes cover the ground, and only the second needs anything
-from this package.
+A cell delegates by finding a flow in `ctx.flows` and calling it.
 
-## Attached children need nothing
+## Attached markdown children need a host runner
 
-A dynamic flow (a `Flow.make` with a `model`) or a discovered markdown flow is
-already a subagent, and `ctx.call("review", { args })` already runs it inside
-its own durable boundary: the resolver hands the markdown body to the host's
-prompt runner, and the engine port keys the whole call on the cell identity.
-That is the common case, and it needs nothing from this package.
+A discovered markdown flow is callable through `ctx.call("review", { args })`
+when the host supplies `promptRunner`. Set it on `AgentSession.Options` or
+`AgentAction.Host`; both forward it to `Agent.Options.promptRunner`.
+
+The registry renders the markdown body against `{ args: string }`. The runner
+receives `{ call, text }` and returns an
+`Effect<Cell.CallResult, HarnessError>` with no unmet service requirements.
+Close over or provide the child's seat resolver, model, registry, sandbox,
+budget and quota policy, and durable runtime when constructing the runner.
+A runner built from `Agent.run` also needs `Steering.Source` and must execute
+inside a running flow with `FlowRuntime` and `FlowInstance` in context.
+The adapters do not choose the child's seat or install these dependencies for
+it. Use the call identity for durable child execution identity and preserve the
+parent's capability restrictions.
+
+The engine port records the attached call inside its durable cell boundary.
+The runner supplies the child execution and returns its answer as a successful
+`Cell.CallResult`, or propagates a `HarnessError` when the child must fail or
+park the run. Without a runner, markdown calls return the catchable
+`unimplemented` refusal. Module-backed flows use executable bindings or host
+implementations instead.
 
 ## Detached children need the lifecycle flows
 

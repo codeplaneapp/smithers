@@ -149,3 +149,12 @@ The module exports the pieces this half is built from
 `drainRecordedSignals`), because a host that runs the agent its own way needs
 the same ones. Their signatures are in the
 [API reference](../api.md#wait-and-driver-helpers).
+
+## Frame exhaustion
+
+A successful stream exit alone does not complete a session. The final frame
+must apply a `complete` transition. A bounded run ending with `continue` is
+persisted as `failed` with `HarnessError { code: "model_failed" }` and a
+`FramesExhausted` cause carrying the number of frames. `AgentAction` uses the
+same terminal outcome check before decoding its answer. An exhausted run is
+terminal; approval suspension still parks the run for resume.

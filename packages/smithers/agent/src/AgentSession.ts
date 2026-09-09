@@ -59,6 +59,7 @@ import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { DurableDeferred, Flow, FlowRuntime, WaitFor } from "@smthrs/flow"
 import type * as AgentEvent from "@smthrs/harness/AgentEvent"
 import type * as Cell from "@smthrs/harness/Cell"
+import type * as CellCalls from "@smthrs/harness/CellCalls"
 import * as CellTurn from "@smthrs/harness/CellTurn"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import * as HarnessError from "@smthrs/harness/HarnessError"
@@ -91,6 +92,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
 import type * as Budget from "./Budget.ts"
+import { agentOutcome } from "./internal/AgentOutcome.ts"
 import { failureSummary } from "./internal/FailureSummary.ts"
 import type * as QuotaPolicy from "./QuotaPolicy.ts"
 import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
@@ -113,6 +115,8 @@ export interface Options {
   readonly canExecute?: ((runId: string) => Effect.Effect<boolean>) | undefined
   /** Host executable-flow sources composed into every run's catalog. */
   readonly flows?: ReadonlyArray<FlowBinding.Source> | undefined
+  /** Runs rendered markdown children; the host closes over their runtime dependencies. */
+  readonly promptRunner?: CellCalls.PromptRunner | undefined
   /** The explicit sandbox budget every cell runs under. Never unlimited. */
   readonly limits: Sandbox.Limits
   /** Required quota park/retry policy for every model call in the run. */
@@ -1600,7 +1604,7 @@ export const make = (
         const pump = yield* Effect.forkChild(
           Effect.forever(Effect.andThen(Effect.sleep(Duration.millis(250)), flush))
         )
-        yield* agent.run({
+        const outcome = yield* agent.run({
           contextWindowTokensFor: contextWindowResolver(seats),
           session: payload.runId,
           seat,
@@ -1610,6 +1614,7 @@ export const make = (
           prompt: prompt(flowBody.text, plan.decodedInput),
           system: options.system,
           registry,
+          promptRunner: options.promptRunner,
           flows: [
             ...(options.flows ?? []),
             StandardFlows.clock(engineServices),
@@ -1633,7 +1638,7 @@ export const make = (
           unresolvedCap: options.unresolvedCap,
           approvalChannel: options.approvalChannel ?? false
         }).pipe(
-          Stream.runForEach(record),
+          (stream) => agentOutcome(stream, record),
           Effect.provide(options.budget(card.envelope)),
           Effect.provide(options.quotaPolicy),
           Effect.provide(QuickJSSandbox.layer),
@@ -1644,6 +1649,14 @@ export const make = (
           // run's trail is the one an operator most needs to read.
           Effect.onExit(() => Effect.andThen(Fiber.interrupt(pump), flush))
         )
+        if (outcome._tag === "FramesExhausted") {
+          return yield* new HarnessError.HarnessError({
+            code: "model_failed",
+            message:
+              `The agent session "${payload.runId}" ended without a completed answer after ${outcome.frames} frames`,
+            cause: outcome
+          })
+        }
         return tags
       })
 

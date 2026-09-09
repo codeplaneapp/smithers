@@ -10,6 +10,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Cell from "@smthrs/harness/Cell"
 import { HarnessError } from "@smthrs/harness/HarnessError"
 import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
@@ -17,6 +18,7 @@ import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
 import { make as makePlugin } from "@smthrs/plugin"
 import type { FlowsHooks } from "@smthrs/plugin"
+import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { Cause, Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import { describe, expect, it } from "vitest"
@@ -149,6 +151,45 @@ const run = (
   )
 
 describe("AgentAction.make", () => {
+  it("runs a discovered markdown child through the host prompt runner", async () => {
+    const rendered: Array<string> = []
+    const descriptor = new Descriptor.FlowDescriptor({
+      name: "review",
+      description: "Review a diff.",
+      body: new Descriptor.BodyRefMarkdown({ path: "/flows/review/flow.md", baseDirectory: "/flows/review" }),
+      input: new Descriptor.SchemaRefNone(),
+      output: new Descriptor.SchemaRefNone(),
+      model: Option.some("anthropic:test-model"),
+      flows: [],
+      capabilities: [],
+      effects: { reads: [], writes: [], mode: "expected", onConflict: "serialize", tier: "irreversible" },
+      placement: Option.none(),
+      modelInvocable: true,
+      path: "/flows/review",
+      frontmatter: {},
+      provenance: new Descriptor.Provenance({ source: "test", root: "/flows" })
+    })
+    const result = await Effect.runPromise(
+      ReviewFlow.execute({ diff: "diff" }, { executionId: "markdown-child" }).pipe(
+        Effect.provide(stack(Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)), {
+          ...host,
+          registry: Registry.makeNoop({
+            visible: () => Effect.succeed([descriptor]),
+            getOption: () => Effect.succeed(Option.some(descriptor)),
+            runPrompt: (_name, input) => Effect.succeed(`Review ${input.args}`)
+          }),
+          promptRunner: ({ text }) =>
+            Effect.sync(() => {
+              rendered.push(text)
+              return new Cell.CallResult({ outcome: "success", value: JSON.stringify({ approved: true, issues: [] }) })
+            })
+        }, scripted([`const answer = await ctx.call("review", { args: "diff" }); ctx.done(String(answer))`], [])))
+      )
+    )
+    expect(rendered).toEqual(["Review diff"])
+    expect(result).toEqual({ approved: true, issues: [] })
+  })
+
   it("runs the cell loop as one step and yields the schema-typed answer", async () => {
     const requests: Array<string> = []
     const result = await Effect.runPromise(
@@ -224,6 +265,7 @@ describe("AgentAction.make", () => {
     )
 
     expect(exit._tag).toBe("Failure")
+    expect(JSON.stringify(exit)).toContain("FramesExhausted")
     expect(JSON.stringify(exit._tag === "Failure" ? exit.cause : undefined)).toContain(
       "ended without a completed answer"
     )
@@ -777,8 +819,7 @@ describe("AgentAction event sink", () => {
     expect(outcome.settledDuring).toBe(false)
     expect(outcome.during).toEqual(["discipline-armed", "turn-opened", "model-delta"])
     expect(outcome.value).toEqual({ approved: true, issues: [] })
-    // The decode still reads the buffered run, so the step's answer is
-    // unchanged by the sink watching it.
+    // The terminal answer is unchanged by the sink watching it.
     expect(seen).toContain("transition-applied")
     expect(seen.length).toBeGreaterThan(outcome.during.length)
   })

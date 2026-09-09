@@ -25,6 +25,7 @@ import type { RunStatus } from "@smthrs/control/ControlSchema"
 import { FlowEngine } from "@smthrs/engine"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { type Flow, FlowRuntime } from "@smthrs/flow"
+import * as AgentEvent from "@smthrs/harness/AgentEvent"
 import * as Cell from "@smthrs/harness/Cell"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { HarnessError } from "@smthrs/harness/HarnessError"
@@ -245,11 +246,19 @@ const askCall = new Cell.Call({
   })
 })
 
+/** Successful stub runs must claim completion, just like the production loop. */
+const completed = Stream.make(
+  new AgentEvent.TransitionApplied({
+    eventType: "flows.harness.transition-applied.v1",
+    transition: new Cell.Complete({ output: "done" })
+  })
+)
+
 /** An agent that gates one ask through the executor's own `authorize` hook. */
 const askingAgent: Agent.Service = Agent.makeNoop({
   run: (options) =>
     Stream.unwrap(
-      Effect.as(options.authorize === undefined ? Effect.void : options.authorize(askCall), Stream.empty)
+      Effect.as(options.authorize === undefined ? Effect.void : options.authorize(askCall), completed)
     )
 })
 
@@ -269,7 +278,7 @@ const answeringAgent = (answers: Array<unknown>): Agent.Service =>
           const binding = bindings.find((entry) => entry.descriptor.name === "ask")
           if (binding === undefined) return Stream.empty
           answers.push((yield* binding.run(askCall)).value)
-          return Stream.empty
+          return completed
         })
       )
   })
@@ -324,7 +333,7 @@ const withExecutor = <A>(
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
-        Layer.succeed(Agent.Agent)(options.agent ?? Agent.makeNoop()),
+        Layer.succeed(Agent.Agent)(options.agent ?? Agent.makeNoop({ run: () => completed })),
         seatLayer,
         runtimeLayer(record, options.runtime),
         registryLayer(options.registry),

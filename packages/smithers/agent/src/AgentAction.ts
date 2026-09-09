@@ -70,11 +70,11 @@ import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
 import type * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
 import * as Budget from "./Budget.ts"
 import { EventSink } from "./EventSink.ts"
 import * as FlowEngineLike from "./FlowEngineLike.ts"
+import { agentOutcome } from "./internal/AgentOutcome.ts"
 import * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
 import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
@@ -100,6 +100,8 @@ export interface Host {
   readonly flows?: ReadonlyArray<FlowBinding.Source> | undefined
   /** Host implementations for module-backed flows, keyed by flow name. */
   readonly implementations?: ReadonlyMap<string, CellCalls.Implementation> | undefined
+  /** Runs rendered markdown children; the host closes over their runtime dependencies. */
+  readonly promptRunner?: CellCalls.PromptRunner | undefined
   readonly plugins?: PluginInput<FlowsHooks> | undefined
   readonly config?: FlowsConfig | undefined
   /** Stable system teaching placed ahead of every action's own. */
@@ -409,18 +411,6 @@ export interface AgentAction<
   >
 }
 
-const completedOutput = (
-  events: ReadonlyArray<AgentEvent.AgentEvent>
-): string | undefined => {
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]!
-    if (event._tag === "transition-applied" && event.transition._tag === "complete") {
-      return event.transition.output
-    }
-  }
-  return undefined
-}
-
 /**
  * Reports a refused budget as the budget failure, not as a harness one.
  *
@@ -658,8 +648,7 @@ export const make = <
           session,
           Effect.gen(function*() {
             const resolved = seatId === options.seat ? seat : yield* seats.resolve(seatId)
-            const events: Array<AgentEvent.AgentEvent> = []
-            yield* agent.run({
+            const outcome = yield* agent.run({
               contextWindowTokensFor: contextWindowResolver(seats),
               session,
               seat: resolved,
@@ -668,6 +657,7 @@ export const make = <
               registry: host.registry,
               flows: host.flows,
               implementations: host.implementations,
+              promptRunner: host.promptRunner,
               plugins: host.plugins,
               config: host.config,
               modelParams: options.modelParams,
@@ -676,24 +666,16 @@ export const make = <
               limits: host.limits,
               maxFrames: options.maxFrames ?? host.maxFrames
             }).pipe(
-              // The buffer is what the decode reads, so it is filled first and
-              // the sink is handed the event afterwards: a sink that fails to
-              // return still leaves the run's own record of the event complete.
-              Stream.runForEach((event) =>
-                Effect.suspend(() => {
-                  events.push(event)
-                  return observe(event)
-                })
-              )
+              (stream) => agentOutcome(stream, observe)
             )
-            const answer = completedOutput(events)
-            if (answer === undefined) {
+            if (outcome._tag === "FramesExhausted") {
               return yield* new HarnessError({
                 code: "model_failed",
-                message: `The agent action "${tag}" ended without a completed answer`
+                message: `The agent action "${tag}" ended without a completed answer after ${outcome.frames} frames`,
+                cause: outcome
               })
             }
-            return answer
+            return outcome.output
           }).pipe(Effect.provideService(FlowEngineLike.Correction, correction))
         )
 

@@ -31,8 +31,10 @@ import * as Registry from "@smthrs/registry/Registry"
 import { RegistryError } from "@smthrs/registry/RegistryError"
 import { Cause, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
+import type * as AgentAction from "../src/AgentAction.ts"
+import type * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as Safety from "./Safety.ts"
@@ -604,5 +606,12 @@ describe("the resolved context window arms or disarms compaction", () => {
     // `SeatResolver.contextWindowTokensFor` never returns it: the same
     // crowded window goes to the provider untouched.
     expect(await run(0)).not.toContain("compaction-settled")
+  })
+})
+
+describe("adapter prompt runner contracts", () => {
+  it("exposes the underlying agent runner on both hosts", () => {
+    expectTypeOf<AgentAction.Host["promptRunner"]>().toEqualTypeOf<Agent.Options["promptRunner"]>()
+    expectTypeOf<AgentSession.Options["promptRunner"]>().toEqualTypeOf<Agent.Options["promptRunner"]>()
   })
 })

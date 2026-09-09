@@ -22,6 +22,8 @@ import * as CoreFlow from "@smthrs/core/Flow"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import * as Cell from "@smthrs/harness/Cell"
+import type * as CellCalls from "@smthrs/harness/CellCalls"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import * as Jj from "@smthrs/jj"
 import { Journal, JournalEvent } from "@smthrs/journal"
@@ -43,6 +45,7 @@ import { mkdtempSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { afterEach, describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentSession from "../src/AgentSession.ts"
@@ -241,6 +244,9 @@ interface StackOptions {
   /** Completes when the test tool enters its gate, before its side effect. */
   readonly toolStarted?: Deferred.Deferred<void> | undefined
   /** Omit the host flow sources entirely, exercising the executor's default. */
+  readonly maxFrames?: number | undefined
+  readonly promptRunner?: CellCalls.PromptRunner | undefined
+  readonly registry?: Registry.Registry | undefined
   readonly bare?: boolean | undefined
   /** The host's reasoning-effort default, beneath a flow's own `effort:`. */
   readonly reasoningEffort?: ModelRequest.ReasoningEffort | undefined
@@ -258,7 +264,7 @@ const stack = (options: StackOptions) => {
   const journal = TestJournal.layer()
   const notifications = NotificationQueue.layer.pipe(Layer.provide(journal))
   const runtime = ControlRuntime.layerMemory({ flows: memoryFlows }).pipe(Layer.provide(NodeCrypto.layer))
-  const registry = Layer.succeed(Registry.Registry)(registryService)
+  const registry = Layer.succeed(Registry.Registry)(options.registry ?? registryService)
   const noteSource = FlowBinding.source("test/notes", [
     FlowBinding.make({
       flow: noteFlow,
@@ -287,7 +293,8 @@ const stack = (options: StackOptions) => {
     budget: Safety.budget,
     flows: options.bare === true ? undefined : [noteSource, checkSource],
     limits: { memoryBytes: 64 * 1024 * 1024, steps: 5_000_000 },
-    maxFrames: 4,
+    maxFrames: options.maxFrames ?? 4,
+    promptRunner: options.promptRunner,
     reasoningEffort: options.reasoningEffort
   }).pipe(
     // The agent and the seat resolver are the executor's own dependencies;
@@ -559,6 +566,98 @@ const textOf = (request: ModelRequest.ModelRequest): string =>
     .join("\n")
 
 describe("AgentSession", () => {
+  it.each([false, true])("settles a bounded run with markdown child=%s", async (child) => {
+    const rendered: Array<string> = []
+    const childDescriptor = new Descriptor.FlowDescriptor({
+      ...agentDescriptor,
+      name: "review",
+      modelInvocable: true
+    })
+    const childRegistry = Registry.makeNoop({
+      ...registryService,
+      visible: () => Effect.succeed([childDescriptor]),
+      getOption: (name) =>
+        name === "review"
+          ? Effect.succeed(Option.some(childDescriptor))
+          : registryService.getOption(name),
+      runPrompt: (_name, input) => Effect.succeed(`Review ${input.args}`)
+    })
+    const model = Model.make({
+      stream: () =>
+        Stream.fromIterable(cellEvents(
+          child
+            ? `const answer = await ctx.call("review", { args: "notes" }); ctx.done(String(answer))`
+            : `console.log("continue")`,
+          "bounded"
+        ))
+    })
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const gate = yield* Deferred.make<void>()
+        return yield* Effect.gen(function*() {
+          const control = yield* Control.Control
+          const runtime = yield* ControlRuntime.ControlRuntime
+          const journal = yield* Journal.Journal
+          const card = yield* control.plan({ flowId: "agents/notes", input: {} })
+          yield* control.approve(card.approval)
+          const receipt = yield* control.run({
+            _tag: "Plan",
+            planId: card.planId,
+            digest: card.digest,
+            envelope: card.envelope,
+            idempotencyKey: "run:bounded"
+          })
+          if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
+            return yield* Effect.die("expected an accepted run")
+          }
+          // Wait for either terminal state so the pre-fix regression reports
+          // the incorrect status directly instead of timing out.
+          const terminal = (): Effect.Effect<ControlSchema.RunStatus, unknown> =>
+            Effect.gen(function*() {
+              const run = yield* runtime.getRun(receipt.runId!)
+              if (run.status === "completed" || run.status === "failed") return run.status
+              yield* Effect.sleep(Duration.millis(10))
+              return yield* terminal()
+            })
+          const status = yield* terminal().pipe(Effect.timeout(Duration.seconds(20)))
+          yield* journal.flush
+          const page = yield* journal.entries({ runId: JournalEvent.RunId.make(receipt.runId), limit: 100 })
+          return { runId: receipt.runId, status, entries: page.entries }
+        }).pipe(Effect.provide(stack({
+          resolve: seat(model),
+          notes: [],
+          gate,
+          bare: true,
+          maxFrames: 1,
+          registry: childRegistry,
+          promptRunner: ({ text }) =>
+            Effect.sync(() => {
+              rendered.push(text)
+              return new Cell.CallResult({ outcome: "success", value: "reviewed" })
+            })
+        })))
+      }).pipe(Effect.scoped)
+    )
+    expect(rendered).toEqual(child ? ["Review notes"] : [])
+    expect(result.status).toBe(child ? "completed" : "failed")
+    if (!child) {
+      const failure = result.entries.find((entry) => entry.eventType === "control.run.failed")
+      expect(JSON.stringify(failure)).toContain("ended without a completed answer")
+      expect(JSON.stringify(failure)).toContain("FramesExhausted")
+      // Read the durable settlement after scope closure, not just the control status.
+      const database = new DatabaseSync(join([...engineRoots][0]!, "engine.db"), { readOnly: true })
+      try {
+        const row = database.prepare("SELECT state_json FROM flows_runs WHERE run_id = ?").get(result.runId)
+        const state = JSON.parse(String(row?.state_json))
+        expect(state.result).toMatchObject({ _tag: "Complete", exit: { _tag: "Failure" } })
+        expect(JSON.stringify(state.result)).toContain("\"_tag\":\"FramesExhausted\"")
+        expect(JSON.stringify(state.result)).toContain("\"frames\":1")
+      } finally {
+        database.close()
+      }
+    }
+  })
+
   for (
     const [change, descriptor] of [
       [
