@@ -6,7 +6,8 @@ import * as Digest from "@smthrs/core/Digest"
 import { Action, Flow, HumanTask } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Effect, Layer, Schema } from "effect"
-import { AtomicPlan, Change, Check, CodingError, Plan, Revision, validatePlan } from "./schema.ts"
+import { AtomicPlan, Change, Check, CodingError, Plan, PlanningInput, Revision, validatePlan } from "./schema.ts"
+export { PlanningInput } from "./schema.ts"
 
 const Text = Schema.NonEmptyString
 const Note = Schema.Struct({
@@ -25,12 +26,6 @@ export const PlanningContext = Schema.Struct({
   checks: Schema.Array(Check).check(Schema.isMinLength(2))
 })
 export type PlanningContext = typeof PlanningContext.Type
-export const PlanningInput = Schema.Struct({
-  prompt: Text.check(Schema.isMaxLength(32_768)),
-  // Saved disposable POC findings can enter the same second planning pass.
-  // This field is feedback, never evidence that a POC was actually executed.
-  feedback: Schema.String.check(Schema.isMaxLength(32_768))
-})
 export const Draft = Schema.Struct({
   rationale: Text,
   baseChangeId: Text,
@@ -151,7 +146,7 @@ export const finalize = (input: typeof PlanningInput.Type, context: PlanningCont
   }
   const plan: Plan = {
     prompt: input.prompt, memoryRevision: context.memoryRevision,
-    base: context.history[baseIndex]!, changes
+    base: context.history[baseIndex]!, observedHead: context.head, changes
   }
   validatePlan(plan)
   return plan

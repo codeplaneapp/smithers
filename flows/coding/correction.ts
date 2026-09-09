@@ -5,17 +5,14 @@ import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Cause, Effect, Layer, Schema } from "effect"
 import { ApplyNative, NativeCodingError, Operation, OperationResult, ReadResult, readNative, requestIdFor } from "./native.ts"
-import { Change, CodingError, Finding, Implementation, Plan, Result, Revision, ValidatedChange, sameRevision } from "./schema.ts"
+import { Change, CodingError, CorrectionResult, Finding, Implementation, Plan, Result, Revision, ValidatedChange, sameRevision } from "./schema.ts"
+export { CorrectionResult } from "./schema.ts"
 import { Assess, FastGate, Implement, ImplementPlan, RunCheck } from "./workflow.ts"
 
 const MaxRounds = Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(8))
 const Input = Schema.Struct({ plan: Plan, maxRounds: MaxRounds })
 const Cursor = Schema.Struct({ ...Input.fields, round: Schema.Int, previous: Schema.NullOr(Result) })
 const Blocked = Schema.Struct({ executionId: Schema.String, message: Schema.String })
-export const CorrectionResult = Schema.Struct({
-  status: Schema.Literals(["validated", "changes-requested", "blocked"]),
-  rounds: Schema.Int, result: Schema.NullOr(Result), blocked: Schema.NullOr(Blocked)
-})
 const RoundOutcome = Schema.Struct({ result: Schema.NullOr(Result), blocked: Schema.NullOr(Blocked) })
 const Selection = Schema.Struct({ changeId: Schema.NonEmptyString, intent: Schema.NonEmptyString })
 const Context = Schema.Struct({

@@ -44,9 +44,23 @@ export const Plan = Schema.Struct({
   prompt: Text,
   memoryRevision: Text,
   base: Revision,
+  // New prepared plans retain the complete source head. An amendment's base
+  // can be older than the source the planner inspected. Legacy manual plans
+  // remain readable, but cannot supply a source-fenced POC without this fact.
+  observedHead: Schema.optionalKey(Revision),
   changes: Schema.Array(Change).check(Schema.isMinLength(1))
 })
 export type Plan = typeof Plan.Type
+export const PlanningInput = Schema.Struct({
+  prompt: Text.check(Schema.isMaxLength(32_768)),
+  // Feedback is not evidence that a disposable POC was actually executed.
+  feedback: Schema.String.check(Schema.isMaxLength(32_768))
+})
+export const RequestInput = Schema.Struct({
+  prompt: PlanningInput.fields.prompt,
+  feedback: Schema.optionalKey(PlanningInput.fields.feedback),
+  maxRounds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(8)))
+})
 export const Finding = Schema.Struct({
   owner: Id,
   message: Text,
@@ -86,6 +100,13 @@ export const Result = Schema.Struct({
   findings: Schema.Array(Finding)
 })
 export type Result = typeof Result.Type
+/** Domain outcome is distinct from the enclosing engine execution finishing. */
+export const CorrectionResult = Schema.Struct({
+  status: Schema.Literals(["validated", "changes-requested", "blocked"]),
+  rounds: Schema.Int, result: Schema.NullOr(Result),
+  blocked: Schema.NullOr(Schema.Struct({ executionId: Schema.String, message: Schema.String }))
+})
+export const RequestResult = Schema.Struct({ plan: Plan, outcome: CorrectionResult })
 export class CodingError extends Schema.TaggedError<CodingError>()("coding/Error", {
   code: Schema.Literals(["invalid_plan", "fast_gate", "stale_revision", "invalid_receipt", "unavailable", "execution"]),
   message: Text

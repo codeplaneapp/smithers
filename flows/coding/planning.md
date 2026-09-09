@@ -56,8 +56,17 @@ After any human wait and model draft, `VerifyContext` captures current bytes
 again, verifies every gathered native identity and parent chain, and rechecks
 wiki freshness. A code change while planning refuses the result as stale.
 `FinalizePlan` binds choices to the original verified executable digests,
-memory identity, and actual native base. Downstream implementation and checks
+memory identity, actual native base, and `observedHead`: the complete native
+source revision inspected during planning. An amendment's base can precede
+that observed head. Downstream implementation and checks
 retain their own existing revision and executable fences.
+
+`AdmitSource` is a private action for a composed request. It captures current
+bytes through the injected `Jj` service, then compares the observed head and
+base with the prepared plan. A changed source refuses admission. This is an
+initial check, not a lock covering the entire run. Legacy manually supplied
+plans remain decodable without `observedHead`, but cannot pass this admission
+check; they must be prepared again.
 
 ## Internal data and native adapter contract
 
@@ -89,6 +98,14 @@ final history cleanup is a separate later lifecycle step.
 `feedback` is bounded text intended for saved disposable POC findings. Passing
 text does not assert that a POC ran, and this workflow does not produce a POC.
 The host owns the evidence source for that second pass.
+
+`PlanningInput`, `RequestInput`, `CorrectionResult`, and `RequestResult` live in
+the private pure `schema.ts` module so declarations and UI projections can
+decode recorded evidence without importing backend action implementations.
+The original planning and correction modules re-export their existing schemas.
+`RequestResult` pairs a prepared `plan` with a correction `outcome`; an outcome
+of `blocked` does not mean validation passed merely because its engine run
+completed. These are internal flow data, not new public package APIs or stores.
 
 ## Platform and verification
 
