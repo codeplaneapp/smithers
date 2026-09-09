@@ -582,6 +582,17 @@ const parseSession = (value: unknown): (SessionRow & { readonly workspaceId: str
   }
 }
 
+/** A session row as the repository-wide list carries it: it still names its workspace. */
+type RepoSessionRow = SessionRow & { readonly workspaceId: string | null }
+
+/*
+ * One workspace's rows out of the repository's list. A row that names no
+ * workspace belongs to every card — the list route answers for the whole
+ * repository and the wire may omit `workspace_id`.
+ */
+const sessionsOf = (rows: ReadonlyArray<RepoSessionRow>, workspaceId: string): ReadonlyArray<SessionRow> =>
+  rows.filter((row) => row.workspaceId === null || row.workspaceId === workspaceId)
+
 const cardIdOf = (workspaceId: string): string => `workspace-${workspaceId}`
 
 const splitRepo = (repoId: string): { readonly owner: string; readonly name: string } => {
@@ -784,14 +795,24 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     })
   }
 
-  /** One workspace's sessions; null = unread. */
-  const loadSessions = async (repoId: string, workspaceId: string): Promise<ReadonlyArray<SessionRow> | null> => {
+  /*
+   * The repository's whole session list; null = unread. The route is
+   * repository-wide, so a refresh that touches several cards reads it ONCE
+   * and selects each card's rows out of the one snapshot.
+   */
+  const loadRepoSessions = async (repoId: string): Promise<ReadonlyArray<RepoSessionRow> | null> => {
     const answer = await getJson(repoPath(repoId, "/workspace/sessions"))
     if ("error" in answer) return null
     return arrayOf(answer.body, "sessions").flatMap((entry) => {
       const parsed = parseSession(entry)
-      return parsed === null || (parsed.workspaceId !== null && parsed.workspaceId !== workspaceId) ? [] : [parsed]
+      return parsed === null ? [] : [parsed]
     })
+  }
+
+  /** One workspace's sessions; null = unread. */
+  const loadSessions = async (repoId: string, workspaceId: string): Promise<ReadonlyArray<SessionRow> | null> => {
+    const rows = await loadRepoSessions(repoId)
+    return rows === null ? null : sessionsOf(rows, workspaceId)
   }
 
   /* ---- the card ---- */
@@ -1334,12 +1355,13 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
      * a dead attachment); the session lists refresh after.
      */
     ctx.dispatch({ type: "workspace.session.destroyed", actor: ctx.actor(), sessionId })
+    /* One repository-wide read is the refresh for every card in it. */
+    const rows = await loadRepoSessions(resolved.repo)
     for (const card of ctx.store.collections.cards.values()) {
       if (card.kind !== "workspace" || card.payload.repo !== resolved.repo) continue
       const row = ctx.store.collections.cloudWorkspaces.get(card.payload.workspaceId)
       if (row === undefined) continue
-      const sessions = await loadSessions(resolved.repo, row.id)
-      renderWorkspace(row, sessions === null ? {} : { sessions })
+      renderWorkspace(row, rows === null ? {} : { sessions: sessionsOf(rows, row.id) })
     }
     return { value: `Session ${sessionId} is destroyed.` }
   }

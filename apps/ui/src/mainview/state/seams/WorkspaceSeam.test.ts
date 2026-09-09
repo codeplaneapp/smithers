@@ -972,6 +972,63 @@ describe("workspace seam terminal", () => {
     expect(destroyed).toEqual({ type: "workspace.session.destroyed", tabs: ["sess-2"], attached: undefined })
     expect(dispatched[0]?.type).toBe("workspace.session.destroyed")
   })
+
+  test("destroying a session reads the repository's session list once for every card it refreshes", async () => {
+    const cards = 10
+    let lists = 0
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspace/sessions/sess-0/destroy": json(204, null),
+      "api/repos/will/smithers/workspace/sessions": () => {
+        lists += 1
+        return json(
+          200,
+          Array.from({ length: cards }, (_, index) => ({
+            id: `sess-${index}`,
+            status: "running",
+            workspace_id: `ws-${index}`,
+            created_at: null
+          })).filter((session) => session.id !== "sess-0")
+        )
+      }
+    })
+    for (let index = 0; index < cards; index += 1) {
+      const workspace: CloudWorkspaceInput = { ...wsRow, id: `ws-${index}`, name: `review ${index}` }
+      await seedWorkspace(store, workspace)
+      await store.dispatch({
+        type: "card.upsert",
+        actor: "user",
+        card: {
+          id: `workspace-${workspace.id}`,
+          kind: "workspace",
+          title: workspace.name,
+          status: "active",
+          createdAt: 1,
+          ordinal: index,
+          payload: {
+            workspaceId: workspace.id,
+            repo: workspace.repoId,
+            name: workspace.name,
+            targetBookmark: "main",
+            status: "running",
+            provisioningStage: null,
+            bookmarkHead: null,
+            snapshots: [],
+            sessions: []
+          }
+        }
+      })
+    }
+
+    const result = await seam.destroySession("sess-0", "ws-0")
+
+    expect(typeof result).toBe("object")
+    /* The list route is repository-wide, so one read refreshes all ten cards. */
+    expect(lists).toBe(1)
+    /* Each card still shows only its own workspace's sessions out of that one snapshot. */
+    expect(payloadOf(store, "ws-0")?.sessions).toEqual([])
+    expect(payloadOf(store, "ws-7")?.sessions.map((session) => session.id)).toEqual(["sess-7"])
+    expect(payloadOf(store, "ws-9")?.sessions.map((session) => session.id)).toEqual(["sess-9"])
+  })
 })
 
 describe("workspace seam watch", () => {
