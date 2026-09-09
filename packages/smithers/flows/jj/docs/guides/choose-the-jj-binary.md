@@ -37,6 +37,31 @@ spawner must be able to execute the selected absolute path; its own PATH does
 not change the selection. The version probe also runs through that spawner,
 without a repository cwd.
 
+## Bound startup
+
+Node and Bun layers wait at most 5000 ms for `jj --version`, then interrupt the
+probe and await cleanup. A timeout fails construction with `JjError`,
+`code: "unknown"`, `method: "version"`, and `cause.code: "ETIMEDOUT"`. The
+command and message identify the resolved executable. Contained spawner
+cleanup can add its shutdown grace period to this budget.
+
+Provide `NodeJj.StartupTimeoutMs` to override the budget for one layer:
+
+```ts
+import * as NodeJj from "@smthrs/jj/node/NodeJj"
+import * as Layer from "effect/Layer"
+
+const jj = NodeJj.layerAt("/srv/repository").pipe(
+  Layer.provide(Layer.succeed(NodeJj.StartupTimeoutMs)(1_500))
+)
+```
+
+The value must be positive, finite, and at most 2147483647 ms. Invalid values
+fail construction with `JjError` and `cause.code: "EINVAL"`. A timeout is not
+cached as a version result; a later layer can retry. Each layer's budget also
+bounds its wait for an in-progress shared probe. Repository operations retain
+their existing lifetime and cancellation behavior.
+
 ## Read the resolution
 
 ```ts

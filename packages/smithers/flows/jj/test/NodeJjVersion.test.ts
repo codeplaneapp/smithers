@@ -160,6 +160,38 @@ describe("NodeJj version requirement", () => {
         expect(yield* Effect.promise(() => readFile(join(root, "probes"), "utf8"))).toBe("probe\nprobe\n")
       })))
 
+  it.live("retries a timed out probe with a new layer's budget", () =>
+    withVersion("jj 0.39.0", (root) =>
+      Effect.gen(function*() {
+        const binary = join(root, "jj")
+        const original = yield* Effect.promise(() => readFile(binary, "utf8"))
+        yield* Effect.promise(() => writeFile(binary, "#!/bin/sh\necho $$ > \"${0%/*}/pid\"\nexec /bin/sleep 300\n"))
+        const error = yield* Effect.flip(Effect.provide(Jj, NodeJj.layerAt(root))).pipe(
+          Effect.provideService(NodeJj.StartupTimeoutMs, 500)
+        )
+        expect(error).toMatchObject({ method: "version", cause: { code: "ETIMEDOUT" } })
+        const pid = Number(yield* Effect.promise(() => readFile(join(root, "pid"), "utf8")))
+        expect(pid).toBeGreaterThan(0)
+        expect(() => process.kill(pid, 0)).toThrow()
+        yield* Effect.promise(() => writeFile(binary, original))
+        yield* Effect.provide(Jj, NodeJj.layerAt(root)).pipe(
+          Effect.provideService(NodeJj.StartupTimeoutMs, 2_000)
+        )
+        expect(yield* Effect.promise(() => readFile(join(root, "probes"), "utf8"))).toBe("probe\n")
+      })))
+
+  for (const budget of [0, -1, Infinity, NaN, 2_147_483_648]) {
+    it.live(`rejects invalid startup budget ${budget} before spawning`, () =>
+      withVersion("jj 0.39.0", (root) =>
+        Effect.gen(function*() {
+          const error = yield* Effect.flip(Effect.provide(Jj, NodeJj.layerAt(root))).pipe(
+            Effect.provideService(NodeJj.StartupTimeoutMs, budget)
+          )
+          expect(error).toMatchObject({ method: "version", cause: { code: "EINVAL" } })
+          yield* Effect.promise(() => expect(stat(join(root, "probes"))).rejects.toMatchObject({ code: "ENOENT" }))
+        })))
+  }
+
   it.live("shares a completed probe across concurrent and subsequent layer builds", () =>
     withVersion("jj 0.39.0", (root) =>
       Effect.gen(function*() {

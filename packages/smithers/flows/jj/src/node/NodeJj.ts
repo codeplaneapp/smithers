@@ -26,6 +26,7 @@
  *
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as PlatformError from "effect/PlatformError"
@@ -52,6 +53,18 @@ const MODULE = "NodeJj"
  * @since 1.0.0
  */
 export const minimumVersion = "0.39.0"
+
+/**
+ * Milliseconds a layer waits for its startup version probe, before cleanup.
+ * Provide this reference to a layer to override the 5000 ms default. Values
+ * must be positive, finite, and within the host timer range (2147483647 ms).
+ *
+ * @category configuration
+ * @since 1.0.0
+ */
+export const StartupTimeoutMs = Context.Reference<number>("@smthrs/jj/NodeJj/StartupTimeoutMs", {
+  defaultValue: () => 5_000
+})
 
 interface Output {
   readonly stdout: string
@@ -454,14 +467,22 @@ const jj = (binary: Binary): Run => (method, args, cwd) =>
       finish(Effect.fail(spawnFailure(method, args, cwd, hint, error, error.code === "ENOENT"))))
     child.on("close", (exitCode: number | null) =>
       finish(Effect.succeed({ stdout, stderr, exitCode: exitCode ?? 1 })))
-    return Effect.sync(() => {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGKILL")
+    return Effect.callback<void>((done) => {
+      settled = true
+      // Close our pipes even if a wrapper left a descendant holding its ends.
+      // Await the direct child's close event so cancellation does not return
+      // while that child is still alive.
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) {
+        done(Effect.void)
+        return
       }
+      child.once("close", () =>
+        done(Effect.void))
+      child.kill("SIGKILL")
     })
-  }).pipe(Effect.flatMap((output) =>
-    settle(method, args, output)
-  ))
+  }).pipe(Effect.flatMap((output) => settle(method, args, output)))
 
 /**
  * Runs `jj` through a `ChildProcessSpawner`.
@@ -677,6 +698,19 @@ const checkedOperations = (
 ): Effect.Effect<Jj, JjError> =>
   Effect.gen(function*() {
     const binary = resolveJjBinary()
+    const startupTimeoutMs = yield* StartupTimeoutMs
+    if (!Number.isFinite(startupTimeoutMs) || startupTimeoutMs <= 0 || startupTimeoutMs > 2_147_483_647) {
+      return yield* Effect.fail(
+        new JjError({
+          code: "unknown",
+          module: MODULE,
+          method: "version",
+          command: `${binary.path} --version`,
+          message: `jj version: invalid startup timeout ${startupTimeoutMs}ms for ${binary.path}`,
+          cause: { code: "EINVAL", message: "StartupTimeoutMs must be positive and at most 2147483647" }
+        })
+      )
+    }
     // The unresolved fallback is diagnostic data, never a command to resolve
     // in a different runner environment or repository working directory.
     if (!isAbsolute(binary.path)) {
@@ -707,7 +741,23 @@ const checkedOperations = (
       )
       probes.set(binary.path, probe)
     }
-    const output = yield* probe
+    // Bound each layer's wait, including a wait on another layer's cached
+    // probe. Interrupting the runner cleans it up and invalidates its cache;
+    // a timeout is never cached as a version result.
+    const output = yield* probe.pipe(Effect.timeoutOrElse({
+      duration: startupTimeoutMs,
+      orElse: () =>
+        Effect.fail(
+          new JjError({
+            code: "unknown",
+            module: MODULE,
+            method: "version",
+            command: `${binary.path} --version`,
+            message: `jj version: startup probe for ${binary.path} timed out after ${startupTimeoutMs}ms`,
+            cause: { name: "TimeoutError", code: "ETIMEDOUT", message: "jj startup version probe timed out" }
+          })
+        )
+    }))
     const actual = /^jj (\d+)\.(\d+)\.(\d+)(?:[-+\s]|$)/.exec(output.trim())
     const required = minimumVersion.split(".").map(Number)
     let comparison = 0
