@@ -137,47 +137,58 @@ describe("run-store payload and timeline limits", () => {
       expect(result.row.heartbeatAtMs).toBe(20)
     }))
 
-  it.effect("round-trips multi-megabyte run state, meta, error, and outcome without caps", () =>
-    Effect.gen(function*() {
-      const large = "x".repeat(2 * 1024 * 1024)
-      const result = yield* migrated(
-        Effect.gen(function*() {
-          const runs = yield* RunStore.RunStore
-          const attempts = yield* AttemptStore.AttemptStore
-          const initialState = JSON.stringify({ phase: "created", large })
-          const transitionedState = JSON.stringify({ phase: "running", large })
-          yield* runs.create("large-payload-run", initialState)
-          yield* own(runs, "large-payload-run")
-          yield* runs.transitionOwned("large-payload-run", owner, "running", transitionedState)
-          const id = { runId: "large-payload-run", stepKeyDigest: "large-attempt", attempt: 0 }
-          const put = yield* attempts.put({
-            ...id,
-            state: "running",
-            startedAtMs: 1,
-            meta: { large }
-          }, owner)
-          const finish = yield* attempts.finish({
-            ...id,
-            state: "failed",
-            finishedAtMs: 2,
-            error: { large },
-            outcome: { large }
-          }, owner)
-          return {
-            attempt: Option.getOrThrow(yield* attempts.get(id)),
-            finish,
-            put,
-            run: yield* runs.get("large-payload-run")
-          }
-        })
-      )
+  it.effect(
+    "round-trips multi-megabyte run state, meta, error, and outcome without caps",
+    () =>
+      Effect.gen(function*() {
+        const large = "x".repeat(2 * 1024 * 1024)
+        const result = yield* migrated(
+          Effect.gen(function*() {
+            const runs = yield* RunStore.RunStore
+            const attempts = yield* AttemptStore.AttemptStore
+            const initialState = JSON.stringify({ phase: "created", large })
+            const transitionedState = JSON.stringify({ phase: "running", large })
+            yield* runs.create("large-payload-run", initialState)
+            yield* own(runs, "large-payload-run")
+            yield* runs.transitionOwned("large-payload-run", owner, "running", transitionedState)
+            const id = { runId: "large-payload-run", stepKeyDigest: "large-attempt", attempt: 0 }
+            const put = yield* attempts.put({
+              ...id,
+              state: "running",
+              startedAtMs: 1,
+              meta: { large }
+            }, owner)
+            const finish = yield* attempts.finish({
+              ...id,
+              state: "failed",
+              finishedAtMs: 2,
+              error: { large },
+              outcome: { large }
+            }, owner)
+            return {
+              attempt: Option.getOrThrow(yield* attempts.get(id)),
+              finish,
+              put,
+              run: yield* runs.get("large-payload-run")
+            }
+          })
+        )
 
-      // CONTRACT: only checkpoints have a configurable byte ceiling today.
-      expect(result.put).toEqual({ _tag: "Inserted" })
-      expect(result.finish).toEqual({ _tag: "Finished" })
-      expect(result.run.stateJson.length).toBeGreaterThan(2 * 1024 * 1024)
-      expect((result.attempt.meta as { readonly large: string }).large).toHaveLength(large.length)
-      expect((result.attempt.error as { readonly large: string }).large).toHaveLength(large.length)
-      expect((result.attempt.outcome as { readonly large: string }).large).toHaveLength(large.length)
-    }))
+        // CONTRACT: only checkpoints have a configurable byte ceiling today.
+        expect(result.put).toEqual({ _tag: "Inserted" })
+        expect(result.finish).toEqual({ _tag: "Finished" })
+        expect(result.run.stateJson.length).toBeGreaterThan(2 * 1024 * 1024)
+        expect((result.attempt.meta as { readonly large: string }).large).toHaveLength(large.length)
+        expect((result.attempt.error as { readonly large: string }).large).toHaveLength(large.length)
+        expect((result.attempt.outcome as { readonly large: string }).large).toHaveLength(large.length)
+      }),
+    // This case moves four separate 2 MB payloads through create, transition,
+    // put, and finish, which makes it the heaviest workload in the package by
+    // an order of magnitude. Under v8 coverage across parallel workers the
+    // machine-load multiplier described in vitest.config.ts leaves it no
+    // headroom against the 30 s package budget, so adding any test file to the
+    // suite fails it. Raise the budget for this case rather than shrinking the
+    // payload, and keep it finite so a genuine hang still fails the run.
+    { timeout: 120_000 }
+  )
 })
