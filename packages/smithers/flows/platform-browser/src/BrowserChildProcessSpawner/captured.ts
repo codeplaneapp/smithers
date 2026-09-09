@@ -37,10 +37,10 @@ export const captured = (
   const handling = option === undefined || typeof option === "string" || Sink.isSink(option)
     ? option
     : option.stream
+  if (handling === "ignore" || handling === "inherit") return Stream.empty
   const stream: Stream.Stream<Uint8Array, PlatformError.PlatformError> = Stream.fromArray(
     text === "" ? [] : [encoder.encode(text)]
   )
-  if (handling === undefined || handling === "pipe" || handling === "overlapped") return stream
   if (Sink.isSink(handling)) return Stream.transduce(stream, handling)
-  return Stream.empty
+  return stream
 }

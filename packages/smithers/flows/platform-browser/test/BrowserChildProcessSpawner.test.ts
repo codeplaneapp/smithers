@@ -21,6 +21,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { mkdtemp, rm } from "node:fs/promises"
 import * as NodeFsPromises from "node:fs/promises"
 import { tmpdir } from "node:os"
+import { vi } from "vitest"
 import * as BrowserChildProcessSpawner from "../src/BrowserChildProcessSpawner/index.ts"
 import * as BrowserFileSystem from "../src/BrowserFileSystem/index.ts"
 
@@ -214,6 +215,41 @@ describe("BrowserChildProcessSpawner", () => {
       )
 
       expect(observed).toBe(expected)
+    }))
+
+  it.effect.each<["ignore" | "inherit", boolean]>([
+    ["ignore", false],
+    ["inherit", false],
+    ["ignore", true],
+    ["inherit", true]
+  ])("does not encode discarded `%s` output (nested: %s)", ([handling, nested]) =>
+    Effect.gen(function*() {
+      const { bash } = stub(ok("hé", "err"))
+      yield* run(
+        bash,
+        Effect.scoped(Effect.gen(function*() {
+          const encode = vi.spyOn(TextEncoder.prototype, "encode")
+          yield* Effect.addFinalizer(() => Effect.sync(() => encode.mockRestore()))
+          const spawner = yield* ChildProcessSpawner
+          const option = nested ? { stream: handling } : handling
+          const ignored = yield* spawner.spawn(ChildProcess.make("thing", [], {
+            stdout: option,
+            stderr: option
+          }))
+          for (const stream of [ignored.stdout, ignored.stderr, ignored.all]) {
+            expect(Array.from(yield* Stream.runCollect(stream))).toEqual([])
+            expect(encode).not.toHaveBeenCalled()
+          }
+
+          const piped = yield* spawner.spawn(ChildProcess.make("thing", [], {
+            stdout: "pipe",
+            stderr: option
+          }))
+          const chunks = yield* Stream.runCollect(piped.all)
+          expect(Array.from(chunks)).toEqual([new Uint8Array([104, 195, 169])])
+          expect(encode).toHaveBeenCalledExactlyOnceWith("hé")
+        }))
+      )
     }))
 
   it.effect("honours an option nested in a stdout config, and an undefined one inside it", () =>
