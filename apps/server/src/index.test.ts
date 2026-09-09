@@ -2090,9 +2090,11 @@ const memoryStorage = (seed?: Record<string, unknown>): TurnCancelStorage => {
   }
 }
 
-const memoryCancels = (): TurnCancelNamespace => {
+const memoryCancels = (): TurnCancelNamespace & { generations: Map<string, string> } => {
+  const generations = new Map<string, string>()
   const registries = new Map<string, TurnCancelRegistry>()
   return {
+    generations,
     idFromName: (name) => name,
     get: (id) => {
       const name = String(id)
@@ -2101,23 +2103,40 @@ const memoryCancels = (): TurnCancelNamespace => {
         registry = new TurnCancelRegistry({ storage: memoryStorage() })
         registries.set(name, registry)
       }
-      return { fetch: (request) => registry.fetch(request) }
+      return { fetch: async (request) => {
+        const response = await registry.fetch(request)
+        if (new URL(request.url).pathname === "/register") {
+          const body = await response.clone().json() as { generation?: string }
+          if (body.generation !== undefined) generations.set(name, body.generation)
+        }
+        return response
+      } }
     }
   }
 }
 
-const doPost = (registry: TurnCancelRegistry, path: string): Promise<Response> =>
-  registry.fetch(new Request(`https://turn-cancel.internal${path}`, { method: "POST" }))
+const registryGenerations = new WeakMap<TurnCancelRegistry, string>()
+const doPost = async (registry: TurnCancelRegistry, path: string, owner?: string): Promise<Response> => {
+  const headers = new Headers(owner === undefined ? {} : { "x-turn-owner": owner })
+  const generation = registryGenerations.get(registry)
+  if (generation !== undefined) headers.set("x-turn-generation", generation)
+  const response = await registry.fetch(new Request(`https://turn-cancel.internal${path}`, { method: "POST", headers }))
+  if (path === "/register") {
+    const body = await response.clone().json() as { generation?: string }
+    if (body.generation !== undefined) registryGenerations.set(registry, body.generation)
+  }
+  return response
+}
 
 describe("the turn-cancel registry (Durable Object state)", () => {
   test("register starts a turn, a duplicate register is refused, cancel kills it", async () => {
     const registry = new TurnCancelRegistry({ storage: memoryStorage() })
-    expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "started" })
+    expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "started", generation: expect.any(String) })
     expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "already-running" })
     expect(await (await doPost(registry, "/cancel")).json()).toEqual({ status: "cancelled" })
     // The kill is terminal: a second cancel, and the state read, agree.
     expect(await (await doPost(registry, "/cancel")).json()).toEqual({ status: "not-found" })
-    expect(await (await registry.fetch(new Request("https://turn-cancel.internal/state"))).json()).toEqual({
+    expect(await (await doPost(registry, "/state")).json()).toEqual({
       state: "cancelled"
     })
   })
@@ -2128,7 +2147,7 @@ describe("the turn-cancel registry (Durable Object state)", () => {
     await doPost(registry, "/settle")
     expect(await (await doPost(registry, "/cancel")).json()).toEqual({ status: "not-found" })
     // Tool-loop legs reuse the runId: a settled turn registers again.
-    expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "started" })
+    expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "started", generation: expect.any(String) })
   })
 
   test("cancel on a never-registered run is not-found", async () => {
@@ -2142,19 +2161,13 @@ describe("the turn-cancel registry (Durable Object state)", () => {
       storage: memoryStorage({ state: { state: "active", at: stale } })
     })
     expect(await (await doPost(registry, "/cancel")).json()).toEqual({ status: "not-found" })
-    expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "started" })
+    expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "started", generation: expect.any(String) })
   })
 
   test("only the registering owner may cancel an owned registration", async () => {
     const registry = new TurnCancelRegistry({ storage: memoryStorage() })
-    const as = (login: string, path: string): Promise<Response> =>
-      registry.fetch(
-        new Request(`https://turn-cancel.internal${path}`, {
-          method: "POST",
-          headers: { "x-turn-owner": login }
-        })
-      )
-    expect(await (await as("alice", "/register")).json()).toEqual({ status: "started" })
+    const as = (login: string, path: string): Promise<Response> => doPost(registry, path, login)
+    expect(await (await as("alice", "/register")).json()).toEqual({ status: "started", generation: expect.any(String) })
     // A different login — and an anonymous caller — cannot kill alice's turn.
     expect(await (await as("bob", "/cancel")).json()).toEqual({ status: "forbidden" })
     expect(await (await doPost(registry, "/cancel")).json()).toEqual({ status: "forbidden" })
@@ -2171,7 +2184,7 @@ describe("the turn-cancel registry (Durable Object state)", () => {
           headers: { "x-turn-owner": login }
         })
       )
-    expect(await (await registerAs("alice")).json()).toEqual({ status: "started" })
+    expect(await (await registerAs("alice")).json()).toEqual({ status: "started", generation: expect.any(String) })
     expect(await (await registerAs("bob")).json()).toEqual({ status: "already-running" })
     expect(await (await registerAs("alice")).json()).toEqual({ status: "already-running" })
   })
@@ -3475,7 +3488,9 @@ describe("configured upstream headers deadlines", () => {
         expect(aborted).toHaveLength(1)
         if (path === "/api/agent/turn") {
           const registry = cancels.get(cancels.idFromName(turnBody.runId))
-          expect(await (await registry.fetch(new Request("https://turn-cancel.internal/state"))).json())
+          expect(await (await registry.fetch(new Request("https://turn-cancel.internal/state", {
+            headers: { "x-turn-generation": cancels.generations.get(turnBody.runId)! }
+          }))).json())
             .toEqual({ state: "settled" })
           expect(await (await worker.fetch(post("/api/agent/turn/cancel", { runId: turnBody.runId }), deadlineEnv())).json())
             .toEqual({ status: "not-found" })
@@ -3506,5 +3521,197 @@ describe("configured upstream headers deadlines", () => {
         expect(body.queueDepth).toBeNull()
       }
     )
+  })
+})
+
+describe("generation-scoped turn lifecycle", () => {
+  test("a delayed EOF cannot settle the continuation registered after done", async () => {
+    const cancels = memoryCancels()
+    let settlements = 0
+    const env = { ...assetsEnv(), TURN_CANCELS: {
+      ...cancels,
+      get: (id: unknown) => ({ fetch: (request: Request) => {
+        if (new URL(request.url).pathname === "/settle") settlements += 1
+        return cancels.get(id).fetch(request)
+      } })
+    } }
+    let first!: ReadableStreamDefaultController<Uint8Array>
+    let call = 0
+    await withMockedFetch(() => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (call++ === 0) {
+          first = controller
+          controller.enqueue(new TextEncoder().encode('{"type":"done","reason":"stop"}\n'))
+        }
+      }
+    })), async () => {
+      const request = () => post("/api/agent/turn", { ...turnBody, runId: "generation-eof" })
+      const old = (await worker.fetch(request(), env)).body!.getReader()
+      expect(JSON.parse(new TextDecoder().decode((await old.read()).value)).type).toBe("done")
+      const next = await worker.fetch(request(), env)
+      expect(next.status).toBe(200)
+      try {
+        first.close()
+        expect((await old.read()).done).toBe(true)
+        await Bun.sleep(10) // let the old pipe's finalizer run
+        expect(settlements).toBe(1)
+        const kill = await worker.fetch(post("/api/agent/turn/cancel", { runId: "generation-eof" }), env)
+        expect(await kill.json()).toEqual({ status: "cancelled" })
+      } finally {
+        await next.body!.cancel()
+      }
+    })
+  })
+
+  test("stale generation state, cancel and settle cannot affect a replacement", async () => {
+    const storage = memoryStorage()
+    const registry = new TurnCancelRegistry({ storage })
+    const first = await (await doPost(registry, "/register")).json() as { generation: string }
+    const state = await storage.get<Record<string, unknown>>("state")
+    await storage.put("state", { ...state, at: Date.now() - 11 * 60 * 1000 })
+    await doPost(registry, "/register")
+    const scoped = (path: string) => registry.fetch(new Request(`https://turn-cancel.internal${path}`, {
+      method: "POST", headers: { "x-turn-generation": first.generation ?? "missing-generation" }
+    }))
+    expect(await (await scoped("/state")).json()).toEqual({ state: "unknown" })
+    expect(await (await scoped("/cancel")).json()).toEqual({ status: "not-found" })
+    await scoped("/settle")
+    for (const path of ["/state", "/cancel", "/settle"]) {
+      expect(await (await registry.fetch(new Request(`https://turn-cancel.internal${path}`))).json())
+        .toEqual(path === "/state" ? { state: "unknown" } : { status: "not-found" })
+    }
+    expect((await storage.get<{ state: string }>("state"))?.state).toBe("active")
+  })
+
+  test("disconnect settlement is kept alive by waitUntil", async () => {
+    const storage = memoryStorage()
+    const registry = new TurnCancelRegistry({ storage })
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    let settling!: () => void
+    const started = new Promise<void>((resolve) => { settling = resolve })
+    const env: WorkerEnv = { ...assetsEnv(), TURN_CANCELS: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: async (request) => {
+        if (new URL(request.url).pathname === "/settle") {
+          settling()
+          await blocked
+        }
+        return registry.fetch(request)
+      } })
+    } }
+    const pending: Promise<unknown>[] = []
+    await withMockedFetch(() => new Response(new ReadableStream<Uint8Array>()), async () => {
+      const turn = await worker.fetch(post("/api/agent/turn", { ...turnBody, runId: "generation-disconnect" }), env,
+        { waitUntil: (promise) => { pending.push(promise) } })
+      const disconnect = turn.body!.cancel("client disconnected")
+      await started
+      try {
+        expect(pending.length).toBeGreaterThan(0)
+        let finished = false
+        const cleanup = Promise.all(pending).then(() => { finished = true })
+        await Bun.sleep(1)
+        expect(finished).toBe(false)
+        release()
+        await cleanup
+        expect((await storage.get<{ state: string }>("state"))?.state).toBe("settled")
+      } finally {
+        release()
+        await disconnect
+      }
+    })
+  })
+
+  test.each(["rejection", "invalid response"])("a registry %s ends monitoring and logs cleanup rejections", async (failure) => {
+    const registry = new TurnCancelRegistry({ storage: memoryStorage() })
+    const stateError = new Error("state transport failed")
+    const settleError = new Error("settle transport failed")
+    const cancelError = new Error("upstream cancel failed")
+    let settlements = 0
+    const logged = spyOn(console, "error").mockImplementation(() => {})
+    const pending: Promise<unknown>[] = []
+    const env: WorkerEnv = { ...assetsEnv(), TURN_CANCELS: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: async (request) => {
+        const path = new URL(request.url).pathname
+        if (path === "/state") {
+          if (failure === "rejection") throw stateError
+          return new Response("unavailable", { status: 503 })
+        }
+        if (path === "/settle") { settlements += 1; throw settleError }
+        return registry.fetch(request)
+      } })
+    } }
+    try {
+      await withMockedFetch(() => new Response(new ReadableStream<Uint8Array>({
+        cancel() { throw cancelError }
+      })), async () => {
+        const turn = await worker.fetch(post("/api/agent/turn", { ...turnBody, runId: "generation-failure" }), env,
+          { waitUntil: (promise) => { pending.push(promise) } })
+        expect(JSON.parse((await turn.text()).trim())).toEqual({
+          runId: "generation-failure", type: "done", reason: "stop",
+          error: "The turn lost cancellation monitoring. Try again."
+        })
+        await Promise.all(pending)
+        expect(settlements).toBe(1)
+        expect(logged).toHaveBeenCalledWith("turn registry state failed:",
+          failure === "rejection" ? stateError : expect.any(Error))
+        expect(logged).toHaveBeenCalledWith("turn registry settle failed:", settleError)
+        expect(logged).toHaveBeenCalledWith("turn upstream cancel failed:", cancelError)
+      })
+    } finally {
+      logged.mockRestore()
+    }
+  })
+
+  test("a silent upstream backs off and terminates before the cancel poll budget is spent", async () => {
+    const storage = memoryStorage()
+    const registry = new TurnCancelRegistry({ storage })
+    let polls = 0
+    let upstream!: ReadableStreamDefaultController<Uint8Array>
+    let cancelled = false
+    let signal!: AbortSignal
+    const env: WorkerEnv = { ...assetsEnv(), TURN_CANCELS: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: (request) => {
+        if (new URL(request.url).pathname === "/state" && ++polls === 110) upstream.close()
+        return registry.fetch(request)
+      } })
+    } }
+    const realTimeout = globalThis.setTimeout
+    let now = Date.now()
+    const intervals: number[] = []
+    const clock = spyOn(Date, "now").mockImplementation(() => now)
+    const timer = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, ms: number) => {
+      if (ms >= 500 && ms <= 5000) {
+        intervals.push(ms)
+        return realTimeout(() => { now += ms; callback() }, 0)
+      }
+      return realTimeout(callback, ms)
+    }) as typeof setTimeout)
+    try {
+      await withMockedFetch((request) => {
+        signal = request.signal
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) { upstream = controller },
+          cancel() { cancelled = true }
+        }))
+      }, async () => {
+        const turn = await worker.fetch(post("/api/agent/turn", { ...turnBody, runId: "generation-poll-cap" }), env)
+        const text = await turn.text()
+        const frames = text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        expect(frames).toEqual([{ runId: "generation-poll-cap", type: "done", reason: "stop",
+          error: "The turn exceeded its cancellation monitoring limit. Try again." }])
+        expect(polls).toBe(96)
+        expect(intervals.slice(0, 5)).toEqual([500, 1000, 2000, 4000, 5000])
+        expect(Math.max(...intervals)).toBe(5000)
+        expect(cancelled).toBe(true)
+        expect(signal.aborted).toBe(true)
+        expect((await storage.get<{ state: string }>("state"))?.state).toBe("settled")
+      })
+    } finally {
+      timer.mockRestore()
+      clock.mockRestore()
+    }
   })
 })

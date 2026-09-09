@@ -30,3 +30,21 @@ remain HTTP 499. Gateway deadlines retain the states and retry policy in
 Admin health retains its HTTP 200 partial report: timed-out health checks
 have `status: "failed"` and a detail naming the effective deadline. An
 unavailable balance or request queue remains `null`.
+
+Turn cancellation registrations carry a unique generation. Internal `/state`,
+`/cancel`, and `/settle` calls require `x-turn-generation`; stale or absent
+values cannot read or change a replacement registration. The public cancel
+route still accepts `{ runId }`: it resolves the owner's current generation
+through `/current` before attempting cancellation. A replacement between
+those calls returns `not-found` instead of cancelling the replacement.
+
+The terminal frame, headers deadline, disconnect, and stream finalization
+share one settlement promise. Settlement runs under `waitUntil`, including
+when the client disconnects. Settlement failures are logged; the ten-minute
+stale registration window remains the recovery backstop.
+
+Silent turn polling backs off from 500 milliseconds to 5 seconds, resets on
+upstream data, and stops after 96 registry reads. A monitoring failure or
+exhausted poll allowance aborts upstream, settles the registration, and emits
+a terminal `done` frame with `reason: "stop"` and an explanatory `error`.
+Registry read failures and stream cleanup rejections are logged.

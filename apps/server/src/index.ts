@@ -232,6 +232,7 @@ type TurnCancelStateName = "active" | "cancelled" | "settled"
 
 interface TurnCancelState {
   readonly state: TurnCancelStateName
+  readonly generation: string
   readonly at: number
   /**
    * The validated login that registered the run, when the deployment has an
@@ -243,6 +244,7 @@ interface TurnCancelState {
 
 /** Internal header carrying the registering/cancelling login between this Worker and its Durable Object. */
 const TURN_OWNER_HEADER = "x-turn-owner"
+const TURN_GENERATION_HEADER = "x-turn-generation"
 
 const TURN_STATE_KEY = "state"
 /**
@@ -260,8 +262,8 @@ export class TurnCancelRegistry {
     return this.ctx.storage.get<TurnCancelState>(TURN_STATE_KEY)
   }
 
-  private async write(state: TurnCancelStateName, owner?: string): Promise<void> {
-    await this.ctx.storage.put(TURN_STATE_KEY, { state, at: Date.now(), ...(owner === undefined ? {} : { owner }) })
+  private async write(state: TurnCancelStateName, generation: string, owner?: string): Promise<void> {
+    await this.ctx.storage.put(TURN_STATE_KEY, { state, generation, at: Date.now(), ...(owner === undefined ? {} : { owner }) })
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -269,26 +271,38 @@ export class TurnCancelRegistry {
       new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
     const current = await this.read()
     const stale = current?.state === "active" && Date.now() - current.at > STALE_ACTIVE_MS
+    const matches = current?.generation !== undefined &&
+      request.headers.get(TURN_GENERATION_HEADER) === current.generation
     switch (new URL(request.url).pathname) {
       case "/register": {
         if (current?.state === "active" && !stale) return answer({ status: "already-running" })
-        await this.write("active", request.headers.get(TURN_OWNER_HEADER) ?? undefined)
-        return answer({ status: "started" })
+        const generation = crypto.randomUUID()
+        await this.write("active", generation, request.headers.get(TURN_OWNER_HEADER) ?? undefined)
+        return answer({ status: "started", generation })
       }
-      case "/cancel": {
+      // Resolve the public runId to a generation before attempting its cancel.
+      case "/current": {
         if (current?.state !== "active" || stale) return answer({ status: "not-found" })
         if (current.owner !== undefined && request.headers.get(TURN_OWNER_HEADER) !== current.owner) {
           return answer({ status: "forbidden" })
         }
-        await this.write("cancelled")
+        return answer({ status: "active", generation: current.generation })
+      }
+      case "/cancel": {
+        if (!matches || current?.state !== "active" || stale) return answer({ status: "not-found" })
+        if (current.owner !== undefined && request.headers.get(TURN_OWNER_HEADER) !== current.owner) {
+          return answer({ status: "forbidden" })
+        }
+        await this.write("cancelled", current.generation, current.owner)
         return answer({ status: "cancelled" })
       }
       case "/settle": {
-        await this.write("settled")
+        if (!matches || current === undefined) return answer({ status: "not-found" })
+        if (current.state !== "settled") await this.write("settled", current.generation, current.owner)
         return answer({ status: "settled" })
       }
       case "/state": {
-        const effective: TurnCancelStateName | "unknown" = stale || current === undefined ? "unknown" : current.state
+        const effective: TurnCancelStateName | "unknown" = !matches || stale || current === undefined ? "unknown" : current.state
         return answer({ state: effective })
       }
       default:
@@ -521,12 +535,16 @@ const activeTurns = new Map<string, { readonly controller: AbortController; read
 
 /** How often the streaming pump re-checks the kill state while the upstream is silent. */
 const CANCEL_POLL_MS = 500
+const CANCEL_POLL_MAX_MS = 5000
+// At most eight minutes of silent monitoring, below the stale registration
+// window and with ample subrequests reserved for auth, inference and cleanup.
+const CANCEL_POLL_LIMIT = 96
 
 /**
  * The poll is a Durable Object subrequest, and a Worker request may only make
  * ~1000 of those — a token-streamed turn delivers far more chunks than that,
  * so polling once per chunk would kill long turns with "Too many subrequests".
- * The poll is therefore rate-limited: at most one per CANCEL_POLL_MS, and —
+ * The poll backs off during silence to CANCEL_POLL_MAX_MS. Also,
  * because workerd's clock only advances on I/O — at least one every
  * CANCEL_POLL_CHUNKS chunks, so a fast stream can never starve the check.
  */
@@ -539,7 +557,8 @@ const CANCEL_POLL_CHUNKS = 64
  * the turn finished so a later cancel answers an honest not-found.
  */
 interface TurnStreamHooks {
-  readonly isCancelled: () => Promise<boolean>
+  readonly isCancelled?: () => Promise<boolean>
+  readonly abort: (reason: string) => void
   readonly settle: () => Promise<void>
 }
 
@@ -590,23 +609,38 @@ const tagRunId = (
   // says another poll is due.
   let lastPollAt = 0
   let chunksSincePoll = CANCEL_POLL_CHUNKS
-  const killed = async (): Promise<boolean> => {
-    if (hooks === undefined || settled) return false
+  let pollInterval = CANCEL_POLL_MS
+  let polls = 0
+  const killed = async (): Promise<"cancelled" | "limit" | "unavailable" | false> => {
+    if (hooks?.isCancelled === undefined || settled) return false
     const now = Date.now()
-    if (now - lastPollAt < CANCEL_POLL_MS && chunksSincePoll < CANCEL_POLL_CHUNKS) return false
+    if (now - lastPollAt < pollInterval && chunksSincePoll < CANCEL_POLL_CHUNKS) return false
+    if (polls >= CANCEL_POLL_LIMIT) return "limit"
+    polls += 1
     lastPollAt = now
     chunksSincePoll = 0
-    return hooks.isCancelled().catch(() => false)
+    try {
+      return await hooks.isCancelled() ? "cancelled" : false
+    } catch (error) {
+      console.error("turn registry state failed:", error)
+      return "unavailable"
+    }
   }
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       for (;;) {
-        if (await killed()) {
-          controller.enqueue(
-            encoder.encode(`${JSON.stringify({ runId, type: "done", reason: "cancelled" })}\n`)
-          )
-          await reader.cancel("cancelled").catch(() => {})
+        const killedReason = await killed()
+        if (killedReason) {
+          hooks?.abort(killedReason)
+          await reader.cancel(killedReason).catch((error) => console.error("turn upstream cancel failed:", error))
           await settleOnce()
+          controller.enqueue(
+            encoder.encode(`${JSON.stringify(killedReason === "cancelled"
+              ? { runId, type: "done", reason: "cancelled" }
+              : { runId, type: "done", reason: "stop", error: killedReason === "limit"
+                ? "The turn exceeded its cancellation monitoring limit. Try again."
+                : "The turn lost cancellation monitoring. Try again." })}\n`)
+          )
           controller.close()
           return
         }
@@ -618,16 +652,24 @@ const tagRunId = (
         let tick: ReturnType<typeof setTimeout> | undefined
         const result = await Promise.race([
           read,
-          ...(hooks === undefined || settled
+          ...(hooks?.isCancelled === undefined || settled
             ? []
             : [
               new Promise<"tick">((resolve) => {
-                tick = setTimeout(() => resolve("tick"), CANCEL_POLL_MS)
+                tick = setTimeout(() => resolve("tick"), pollInterval)
               })
             ])
         ])
         if (tick !== undefined) clearTimeout(tick)
-        if (result === "tick") return // pull is re-invoked while downstream wants more
+        if (result === "tick") {
+          // Keep the pending read alive; returning without enqueueing would
+          // leave a silent stream with no subsequent pull to run its timer.
+          // Force the elapsed poll even as the next wait backs off.
+          chunksSincePoll = CANCEL_POLL_CHUNKS
+          pollInterval = Math.min(pollInterval * 2, CANCEL_POLL_MAX_MS)
+          continue
+        }
+        pollInterval = CANCEL_POLL_MS
         pendingRead = undefined
         chunksSincePoll += 1
         const { value, done } = result
@@ -670,6 +712,7 @@ const tagRunId = (
       }
     },
     cancel: async (reason) => {
+      hooks?.abort("client disconnected")
       await settleOnce()
       return reader.cancel(reason)
     }
@@ -753,23 +796,29 @@ const readStartTurn = async (request: Request): Promise<TurnRequest | Response> 
   }
 }
 
+interface TurnExecutionContext {
+  readonly waitUntil: (promise: Promise<unknown>) => void
+}
+
 const handleTurn = async (
   request: Request,
   env: WorkerEnv,
   turnSession?: ValidatedIdentity,
-  parsed?: TurnRequest
+  parsed?: TurnRequest,
+  ctx?: TurnExecutionContext
 ): Promise<Response> => {
   const body = parsed ?? await readStartTurn(request)
   if (body instanceof Response) return body
   // A cloud role (librarian, flows) is answered here on Cerebras, never upstream.
   if (isCloudRoleTurn(body)) return handleCloudRoleTurn(body, env, ISOLATION_HEADERS, request.signal)
   const registry = turnCancelStub(env, body.runId)
+  let generation: string | undefined
   if (registry !== undefined) {
     // The registry is the cross-isolate authority on duplicate turns; the
     // per-isolate map only ever sees this isolate's requests.
-    let registration: { status?: string } | undefined
+    let registration: { status?: string; generation?: string } | undefined
     try {
-      registration = await readStubJson<{ status?: string }>(
+      registration = await readStubJson<{ status?: string; generation?: string }>(
         await registry.fetch(
           new Request("https://turn-cancel.internal/register", {
             method: "POST",
@@ -781,28 +830,44 @@ const handleTurn = async (
       console.error("turn registry register failed:", error)
       return upstreamUnreachable("The turn registry", error)
     }
-    if (registration?.status !== "started") {
+    if (registration?.status !== "started" || typeof registration.generation !== "string") {
       return json(409, { status: "error", message: "That Smithers turn is already running." })
     }
+    generation = registration.generation
   } else if (activeTurns.has(body.runId)) {
     return json(409, { status: "error", message: "That Smithers turn is already running." })
   }
-  const settle = async (): Promise<void> => {
-    activeTurns.delete(body.runId)
-    if (registry !== undefined) {
-      await registry
-        .fetch(new Request("https://turn-cancel.internal/settle", { method: "POST" }))
-        .then((response) => response.arrayBuffer())
-        .catch(() => {})
-    }
+  const upstream = new AbortController()
+  const generationHeaders: Record<string, string> = generation === undefined ? {} : { [TURN_GENERATION_HEADER]: generation }
+  let settlement: Promise<void> | undefined
+  const settle = (): Promise<void> => {
+    if (settlement !== undefined) return settlement
+    if (activeTurns.get(body.runId)?.controller === upstream) activeTurns.delete(body.runId)
+    settlement = (async () => {
+      if (registry !== undefined) {
+        try {
+          const response = await registry.fetch(new Request("https://turn-cancel.internal/settle", {
+            method: "POST", headers: generationHeaders
+          }))
+          if (!response.ok) throw new Error(`Registry settle returned ${response.status}`)
+          await response.arrayBuffer()
+        } catch (error) {
+          console.error("turn registry settle failed:", error)
+        }
+      }
+    })()
+    ctx?.waitUntil(settlement)
+    return settlement
   }
 
-  const upstream = new AbortController()
   activeTurns.set(body.runId, { controller: upstream, owner: turnSession?.login })
-  // The client going away cancels the upstream turn exactly like the native
-  // CloudAgent's cancel does.
-  if (request.signal.aborted) upstream.abort(request.signal.reason)
-  else request.signal.addEventListener("abort", () => upstream.abort(request.signal.reason), { once: true })
+  // Register cleanup before an aborted fetch can end the request context.
+  const disconnect = () => {
+    upstream.abort(request.signal.reason)
+    void settle()
+  }
+  if (request.signal.aborted) disconnect()
+  else request.signal.addEventListener("abort", disconnect, { once: true })
 
   const upstreamRunId = crypto.randomUUID()
   let response: Response
@@ -855,22 +920,28 @@ const handleTurn = async (
   // Stream the upstream NDJSON through with the run tagged on every frame so
   // the client can match it to its turn; a terminal frame, a kill observed
   // between chunks, or a closed connection settles the registry entry.
-  const hooks: TurnStreamHooks | undefined = registry === undefined
-    ? undefined
-    : {
+  const hooks: TurnStreamHooks = {
+    ...(registry === undefined ? {} : {
       isCancelled: async () => {
-        const state = await readStubJson<{ state?: string }>(
-          await registry.fetch(new Request("https://turn-cancel.internal/state"))
-        )
-        return state?.state === "cancelled"
-      },
-      settle
-    }
+        const response = await registry.fetch(new Request("https://turn-cancel.internal/state", {
+          headers: generationHeaders
+        }))
+        const state = await readStubJson<{ state?: string }>(response)
+        if (!response.ok || state === undefined || !["active", "cancelled", "settled", "unknown"].includes(state.state ?? "")) {
+          throw new Error("Invalid turn registry state response")
+        }
+        // A replaced registration must not leave its old upstream running.
+        return state.state !== "active"
+      }
+    }),
+    abort: (reason) => upstream.abort(reason),
+    settle
+  }
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
   void tagRunId(response.body, body.runId, hooks, upstreamRunId)
     .pipeTo(writable)
-    .catch(() => {})
-    .finally(() => void settle())
+    .catch((error) => console.error("turn stream failed:", error))
+    .finally(settle)
   return withIsolationHeaders(
     new Response(readable, {
       status: 200,
@@ -1009,11 +1080,23 @@ const handleCancel = async (
     // ends the stream with an honest terminal frame.
     let result: { status?: string } | undefined
     try {
+      const headers = new Headers(session === undefined ? {} : { [TURN_OWNER_HEADER]: session.login })
+      const current = await readStubJson<{ status?: string; generation?: string }>(
+        await registry.fetch(new Request("https://turn-cancel.internal/current", { headers }))
+      )
+      if (current?.status === "forbidden") {
+        return json(403, { status: "error", message: "That turn belongs to a different account." })
+      }
+      if (current?.status === "not-found") return json(200, { status: "not-found" })
+      if (current?.status !== "active" || typeof current.generation !== "string") {
+        throw new Error("Invalid turn registry current response")
+      }
+      headers.set(TURN_GENERATION_HEADER, current.generation)
       result = await readStubJson<{ status?: string }>(
         await registry.fetch(
           new Request("https://turn-cancel.internal/cancel", {
             method: "POST",
-            headers: session === undefined ? {} : { [TURN_OWNER_HEADER]: session.login }
+            headers
           })
         )
       )
@@ -2672,7 +2755,7 @@ const isCatalogRepository = (name: unknown): boolean =>
  * client's messages, instructions, and tool spec to the chat upstream as it
  * does for a login; the ceiling is what bounds the spend.
  */
-const anonymousCatalogTurn = async (request: Request, env: WorkerEnv, refusal: Response): Promise<Response> => {
+const anonymousCatalogTurn = async (request: Request, env: WorkerEnv, refusal: Response, ctx?: TurnExecutionContext): Promise<Response> => {
   const body = await readStartTurn(request)
   if (body instanceof Response) return body
   if (!isCatalogRepository(body.context?.activeRepository)) return refusal
@@ -2686,7 +2769,7 @@ const anonymousCatalogTurn = async (request: Request, env: WorkerEnv, refusal: R
   // their own ceiling never draws down everyone's.
   const shared = await spendTurn(env.TURN_LIMITS, ANONYMOUS_ALL_KEY, ANONYMOUS_ALL_CEILING)
   if (!shared.allowed) return turnLimitResponse(shared, ISOLATION_HEADERS, ANONYMOUS_ALL_CEILING)
-  return handleTurn(request, env, undefined, body)
+  return handleTurn(request, env, undefined, body, ctx)
 }
 
 const handlePublicRepoActivity = createPublicRepoActivityHandler({
@@ -2740,7 +2823,7 @@ const withCanaryRobots = (url: URL, response: Response): Response => {
 }
 
 const worker = {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv, ctx?: TurnExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     // This one curated, read-only catalog is public to the marketing site.
     // Every authenticated API continues through the same-origin guard below.
@@ -2810,13 +2893,13 @@ const worker = {
       }
       const gate = await requireTurnSession(request, env)
       if (gate instanceof Response) {
-        return gate.status === 401 ? anonymousCatalogTurn(request, env, gate) : gate
+        return gate.status === 401 ? anonymousCatalogTurn(request, env, gate, ctx) : gate
       }
       if (gate !== undefined) {
         const budget = await spendTurn(env.TURN_LIMITS, gate.login)
         if (!budget.allowed) return turnLimitResponse(budget, ISOLATION_HEADERS)
       }
-      return handleTurn(request, env, gate)
+      return handleTurn(request, env, gate, undefined, ctx)
     }
     if (url.pathname === MODEL_STREAM_PATH) {
       if (request.method !== "POST") {
@@ -2911,10 +2994,10 @@ const worker = {
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv, ctx?: TurnExecutionContext): Promise<Response> {
     try {
       // Await the router: its routes may return promises without awaiting them.
-      return await worker.fetch(request, env)
+      return await worker.fetch(request, env, ctx)
     } catch (error) {
       console.error("worker fetch failed:", error)
       return json(500, {
