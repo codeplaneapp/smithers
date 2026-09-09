@@ -81,6 +81,10 @@ describe("ui styleguide", () => {
   });
 
   test("emits three selection states for every non-default palette", () => {
+    // Selectors only. What each selector declares -- and which variant a
+    // document with a given `data-palette`, `data-theme`, and system preference
+    // actually resolves to -- is `tests/paletteSelection.test.ts`, because
+    // these three assertions hold for any declarations at all.
     for (const key of nonDefaultKeys) {
       expect(workflowUiThemeCss).toContain(`:root[data-palette='${key}'] {`);
       expect(workflowUiThemeCss).toContain(`:root[data-palette='${key}']:not([data-theme='light'])`);
