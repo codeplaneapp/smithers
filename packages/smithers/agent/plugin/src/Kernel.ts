@@ -44,7 +44,8 @@ export interface Kernel<H = FlowsHooks> {
 }
 
 /**
- * Runs the `config` waterfall and produces the frozen `ResolvedConfig`.
+ * Snapshots the config before dispatching the `config` waterfall, then
+ * admits the result as a frozen `ResolvedConfig`.
  *
  * @category constructors
  * @since 1.0.0-rc.0
@@ -53,13 +54,15 @@ export const runConfig = <H = FlowsHooks>(
   plugins: Plugins.Service<H>,
   config: FlowsConfig
 ): Effect.Effect<ResolvedConfig, PluginError> =>
-  (plugins.waterfall as unknown as (
-    hook: string,
-    initial: FlowsConfig,
-    merge: (previous: FlowsConfig, patch: unknown) => FlowsConfig
-  ) => Effect.Effect<FlowsConfig, PluginError>)("config", config, Config.merge).pipe(
-    Effect.flatMap(Config.resolve)
-  )
+  Effect.gen(function*() {
+    const initial = yield* Config.snapshot(config)
+    const merged = yield* (plugins.waterfall as unknown as (
+      hook: string,
+      initial: FlowsConfig,
+      merge: (previous: FlowsConfig, patch: unknown) => FlowsConfig
+    ) => Effect.Effect<FlowsConfig, PluginError>)("config", initial, Config.merge)
+    return yield* Config.resolve(merged)
+  })
 
 /**
  * Resolves plugins, executes the config pipeline, and merges plugin layers.

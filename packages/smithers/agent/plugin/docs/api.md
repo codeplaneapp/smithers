@@ -162,7 +162,11 @@ const runConfig: <H = FlowsHooks>(
 The positional `config` is the kernel's only pre-resolution configuration
 source. `Options.config` is excluded from the options type so a caller cannot
 declare a second one. `runConfig` exposes step 3 and step 4 on their own, for a
-host that resolved its plugin list separately.
+host that resolved its plugin list separately. Before dispatching the first
+hook, it validates and copies the supplied config into a detached, recursively
+frozen snapshot. Invalid or accessor-bearing input fails with `config_invalid`
+before any hook runs, without executing accessors. The final waterfall result
+is admitted again through `Config.resolve`.
 
 `observerErrors` is a return value, not a log: a `configResolved` failure never
 fails startup, so a host that ignores the array cannot tell a working observer

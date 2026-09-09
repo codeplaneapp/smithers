@@ -4,6 +4,8 @@ import * as Config from "../src/Config.ts"
 import type { ResolvedConfig } from "../src/Config.ts"
 import type { FlowsPlugin } from "../src/index.ts"
 import * as Kernel from "../src/Kernel.ts"
+import * as Plugins from "../src/Plugins.ts"
+import * as Resolve from "../src/Resolve.ts"
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.runPromise(effect as Effect.Effect<A, E>)
 
@@ -29,6 +31,128 @@ describe("Config.merge", () => {
     }
     expect(thrown).toMatchObject({ code: "config_invalid", path: "$.a" })
     expect((thrown as { readonly message: string }).message).toContain("must contain only JSON values")
+  })
+})
+
+describe("Kernel.runConfig", () => {
+  it("detaches and recursively freezes the config before the first hook", async () => {
+    const source = { feature: { flags: [{ enabled: true }] } }
+    const seen: Array<Config.FlowsConfig> = []
+    const resolved = await run(Resolve.resolve([
+      {
+        name: "inspect",
+        hooks: {
+          config: (config) => {
+            seen.push(config)
+            return Effect.void
+          }
+        }
+      }
+    ]))
+
+    await run(Kernel.runConfig(Plugins.make(resolved), source))
+
+    const initial = seen[0] as typeof source
+    expect(initial).toEqual(source)
+    expect(initial).not.toBe(source)
+    expect(initial.feature).not.toBe(source.feature)
+    expect(initial.feature.flags).not.toBe(source.feature.flags)
+    expect(initial.feature.flags[0]).not.toBe(source.feature.flags[0])
+    expect(Object.isFrozen(initial)).toBe(true)
+    expect(Object.isFrozen(initial.feature)).toBe(true)
+    expect(Object.isFrozen(initial.feature.flags)).toBe(true)
+    expect(Object.isFrozen(initial.feature.flags[0])).toBe(true)
+    expect(Object.isFrozen(source)).toBe(false)
+    expect(Object.isFrozen(source.feature)).toBe(false)
+  })
+
+  it("prevents a mutation-attempting hook from changing caller state", async () => {
+    const source = { feature: { enabled: true } }
+    const mutations: Array<boolean> = []
+    const resolved = await run(Resolve.resolve([
+      {
+        name: "mutate",
+        hooks: {
+          config: (config) =>
+            Effect.sync(() => {
+              mutations.push(Reflect.set(config["feature"] as object, "enabled", false))
+            })
+        }
+      }
+    ]))
+
+    const result = await run(Kernel.runConfig(Plugins.make(resolved), source))
+
+    expect(source.feature.enabled).toBe(true)
+    expect(mutations).toEqual([false])
+    expect(result).toEqual({ feature: { enabled: true } })
+  })
+
+  it("keeps a detached frozen snapshot after an Effect.void handler", async () => {
+    const source = { feature: { enabled: true } }
+    const seen: Array<Config.FlowsConfig> = []
+    const resolved = await run(Resolve.resolve([
+      {
+        name: "silent",
+        hooks: {
+          config: (config) => {
+            seen.push(config)
+            return Effect.void
+          }
+        }
+      },
+      {
+        name: "next",
+        hooks: {
+          config: (config) => {
+            seen.push(config)
+            return Effect.void
+          }
+        }
+      }
+    ]))
+
+    await run(Kernel.runConfig(Plugins.make(resolved), source))
+
+    expect(seen).toHaveLength(2)
+    expect(seen[1]).toBe(seen[0])
+    expect(seen[1]).not.toBe(source)
+    expect(Object.isFrozen(seen[1])).toBe(true)
+    expect(Object.isFrozen(seen[1]?.["feature"])).toBe(true)
+  })
+
+  it.each(["non-JSON", "accessor", "reserved"])("refuses %s config before hook 1 executes", async (kind) => {
+    let calls = 0
+    let getterReads = 0
+    const source = kind === "non-JSON"
+      ? { feature: new Date() }
+      : kind === "reserved"
+      ? { engine: {} }
+      : Object.defineProperty({}, "feature", {
+        enumerable: true,
+        get: () => {
+          getterReads++
+          return { enabled: true }
+        }
+      })
+    const resolved = await run(Resolve.resolve([
+      {
+        name: "inspect",
+        hooks: {
+          config: (config) => {
+            calls++
+            void config["feature"]
+            return Effect.void
+          }
+        }
+      }
+    ]))
+
+    const error = await run(Kernel.runConfig(Plugins.make(resolved), source as Config.FlowsConfig).pipe(Effect.flip))
+
+    expect(error).toMatchObject({ code: "config_invalid", path: kind === "reserved" ? "$.engine" : "$.feature" })
+    expect(calls).toBe(0)
+    expect(getterReads).toBe(0)
   })
 })
 
