@@ -1,12 +1,12 @@
 import { CapabilityPattern } from "@smthrs/capability/Capability"
 import { Rule } from "@smthrs/capability/Permission"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Author from "../src/Author.ts"
 import * as Authorize from "../src/Authorize.ts"
 import type * as Catalog from "../src/Catalog.ts"
 import * as Chain from "../src/Chain.ts"
-import type * as Event from "../src/Event.ts"
+import * as Event from "../src/Event.ts"
 import * as Journal from "../src/Journal.ts"
 import * as QuickJsRunner from "../src/QuickJsRunner.ts"
 import * as ScriptRunner from "../src/ScriptRunner.ts"
@@ -49,25 +49,37 @@ describe("SubChains", () => {
     expect(settle.result).toEqual({ _tag: "Done", value: { files: ["a.ts"] } })
   })
 
-  it("resumes a crashed child from its own settled events", async () => {
+  it.each(["", "root-a"])("resumes a serialized interrupted child under root scope %s", async (chain) => {
     const grep = countingEntry("grep", { files: ["a.ts"] })
     const first = await runChain({
+      chain,
       author: Author.layerMock([parentDelegates, doneChild]),
       catalog: SubChains.layer({ entries: [grep.entry] })
     })
+    const child = chain === "" ? "1.0" : `${chain}/1.0`
     const childSettleIndex = first.events.findIndex((event) =>
-      event._tag === "CallSettled" && (event.chain ?? "") === "1.0" && event.name === "grep"
+      event._tag === "CallSettled" && event.chain === child && event.name === "grep"
     )
     expect(childSettleIndex).toBeGreaterThan(0)
+    const interrupted = first.events.slice(0, childSettleIndex + 1)
+    const encode = Schema.encodeSync(Event.Event)
+    const wire = JSON.stringify(interrupted.map((event) => encode(event)))
+    const initial = Schema.decodeUnknownSync(Schema.Array(Event.Event))(JSON.parse(wire))
+    expect(initial).toStrictEqual(interrupted)
+    expect(new Set(initial.map((event) => event.chain ?? ""))).toEqual(new Set([chain, child]))
+    expect(grep.count()).toBe(1)
     const resumedGrep = countingEntry("grep", { files: ["a.ts"] })
     const resumed = await runChain({
+      chain,
       author: Author.layerMock([]),
       catalog: SubChains.layer({ entries: [resumedGrep.entry] }),
-      initial: first.events.slice(0, childSettleIndex + 1)
+      initial
     })
     expect(resumed.outcome).toEqual(first.outcome)
     expect(resumedGrep.count()).toBe(0)
-    expect(resumed.events).toEqual(first.events)
+    expect(resumed.events).toStrictEqual(first.events)
+    expect(Event.terminal(resumed.events, chain)).toEqual(first.outcome)
+    expect(Event.terminal(resumed.events, child)).toEqual({ _tag: "Done", value: { files: ["a.ts"] } })
   })
 
   it("settles a child's non-approval park as data the parent script decides on", async () => {
@@ -307,6 +319,82 @@ describe("SubChains", () => {
     const rootAuthor = seen[3] as Author.Input
     expect(childAuthor.context.some((line) => line.startsWith("[steering]"))).toBe(false)
     expect(rootAuthor.context.some((line) => line.startsWith("[steering]"))).toBe(true)
+  })
+
+  describe.each(runners)("child budgets (%s)", (_, runner) => {
+    const parent = flow(
+      `const child = await ctx.call("agent", { goal: "bounded child" })`,
+      `await ctx.call("parent/after", {})`,
+      `return done(child)`
+    )
+
+    it.each([
+      [0, 0, 0],
+      [1, 0, 1],
+      [2, 1, 2],
+      [3, 2, 2]
+    ])("enforces maxLinks %i with %i child handlers and %i author calls", async (maxLinks, calls, authors) => {
+      const childWork = countingEntry("child/work", "ok")
+      const parentAfter = countingEntry("parent/after", null)
+      const { events, outcome } = await runChain({
+        runner,
+        maxLinks: 10,
+        maxCallsPerLink: 10,
+        author: Author.layerMock([
+          parent,
+          flow(
+            `await ctx.call("child/work", {})`,
+            `return to(await ctx.call("author", { context: [] }))`
+          ),
+          flow(`await ctx.call("child/work", {})`, `return done("child done")`)
+        ]),
+        catalog: SubChains.layer({ entries: [childWork.entry, parentAfter.entry], maxLinks })
+      })
+      const terminal = maxLinks === 3
+        ? { _tag: "Done", value: "child done" }
+        : { _tag: "Park", reason: { code: "quota", message: `the chain reached its budget of ${maxLinks} links` } }
+      expect(outcome).toEqual({ _tag: "Done", value: terminal })
+      expect(Event.terminal(events, "1.0")).toEqual(terminal)
+      expect(childWork.count()).toBe(calls)
+      expect(parentAfter.count()).toBe(1)
+      expect(events.filter((event) => event.chain === "1.0" && event._tag === "CallSettled" && event.name === "author"))
+        .toHaveLength(authors)
+    })
+
+    it.each([0, 1, 2, 3])("enforces maxCallsPerLink %i independently of parent fuel", async (maxCallsPerLink) => {
+      const childWork = countingEntry("child/work", "ok")
+      const parentAfter = countingEntry("parent/after", null)
+      const { events, outcome } = await runChain({
+        runner,
+        maxLinks: 10,
+        maxCallsPerLink: 10,
+        author: Author.layerMock([
+          parent,
+          flow(
+            `await ctx.call("child/work", {})`,
+            `await ctx.call("child/work", {})`,
+            `await ctx.call("child/work", {})`,
+            `return done("child done")`
+          )
+        ]),
+        catalog: SubChains.layer({ entries: [childWork.entry, parentAfter.entry], maxCallsPerLink })
+      })
+      const terminal = maxCallsPerLink === 3
+        ? { _tag: "Done", value: "child done" }
+        : {
+          _tag: "Park",
+          reason: {
+            code: "quota",
+            message: `link ${maxCallsPerLink === 0 ? 0 : 1} exceeded its budget of ${maxCallsPerLink} calls`
+          }
+        }
+      expect(outcome).toEqual({ _tag: "Done", value: terminal })
+      expect(Event.terminal(events, "1.0")).toEqual(terminal)
+      expect(childWork.count()).toBe(maxCallsPerLink)
+      expect(parentAfter.count()).toBe(1)
+      expect(events.filter((event) => event.chain === "1.0" && event._tag === "CallSettled" && event.name === "author"))
+        .toHaveLength(maxCallsPerLink === 0 ? 0 : 1)
+    })
   })
 
   it("passes child budgets and prefix through, and pins them in the contract digest", async () => {

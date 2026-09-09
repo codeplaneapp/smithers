@@ -47,6 +47,11 @@ describe("golden digests", () => {
     expect(Catalog.entryDigest(entry)).toBe(entryDigest)
   })
 
+  it("includes the child call budget in the sub-agent contract digest", () => {
+    const digest = (maxCallsPerLink?: number) => SubChains.contractDigest({ entries: [], maxCallsPerLink })
+    expect(new Set([digest(), digest(0), digest(1), digest(2)]).size).toBe(4)
+  })
+
   it("pins the sub-agent contract digest at its defaults", () => {
     expect(SubChains.contractDigest({ entries: [] })).toBe(
       "12f6ce3f7a304b4a89d16bd5592e91ae5446b158484edf80722662465cddd7fb"
@@ -61,72 +66,77 @@ describe("golden digests", () => {
 describe("golden wire format", () => {
   const encode = Schema.encodeSync(Event.Event)
 
-  it.each(
+  const fixtures = [
     [
-      [
-        "ChainStarted",
-        { _tag: "ChainStarted", envelope: null, goal: "fix TODOs" },
-        { _tag: "ChainStarted", envelope: null, goal: "fix TODOs" }
-      ],
-      [
-        "CallSettled",
-        {
-          _tag: "CallSettled",
-          key: { entryDigest, link: 1, ordinal: 0, scriptDigest },
-          link: 1,
-          name: "repo/read",
-          payload: { path: "src/a.ts" },
-          result: { body: "ok" }
-        },
-        {
-          _tag: "CallSettled",
-          key: { entryDigest, link: 1, ordinal: 0, scriptDigest },
-          link: 1,
-          name: "repo/read",
-          payload: { path: "src/a.ts" },
-          result: { body: "ok" }
-        }
-      ],
-      [
-        "LinkAuthored",
-        { _tag: "LinkAuthored", link: 2, script: { digest: scriptDigest, text: "return done(null)" } },
-        { _tag: "LinkAuthored", link: 2, script: { digest: scriptDigest, text: "return done(null)" } }
-      ],
-      [
-        "GateRejected",
-        {
-          _tag: "GateRejected",
-          link: 1,
-          observation: { kind: "catalog", message: `"nope" is not a catalog entry` },
-          ordinal: 3
-        },
-        {
-          _tag: "GateRejected",
-          link: 1,
-          observation: { kind: "catalog", message: `"nope" is not a catalog entry` },
-          ordinal: 3
-        }
-      ],
-      [
-        "SteeringDrained",
-        { _tag: "SteeringDrained", link: 1, messages: ["stop after this"], ordinal: 2 },
-        { _tag: "SteeringDrained", link: 1, messages: ["stop after this"], ordinal: 2 }
-      ],
-      [
-        "LinkEnded",
-        { _tag: "LinkEnded", link: 2, outcome: { _tag: "Park", reason: { code: "timer", message: "" } } },
-        { _tag: "LinkEnded", link: 2, outcome: { _tag: "Park", reason: { code: "timer", message: "" } } }
-      ]
-    ] as const
-  )("encodes %s to its pinned shape", (_tag, event, wire) => {
-    expect(encode(event as Event.Event)).toEqual(wire)
-  })
+      "ChainStarted",
+      { _tag: "ChainStarted", envelope: null, goal: "fix TODOs" },
+      { _tag: "ChainStarted", envelope: null, goal: "fix TODOs" }
+    ],
+    [
+      "CallSettled",
+      {
+        _tag: "CallSettled",
+        key: { entryDigest, link: 1, ordinal: 0, scriptDigest },
+        link: 1,
+        name: "repo/read",
+        payload: { path: "src/a.ts" },
+        result: { body: "ok" }
+      },
+      {
+        _tag: "CallSettled",
+        key: { entryDigest, link: 1, ordinal: 0, scriptDigest },
+        link: 1,
+        name: "repo/read",
+        payload: { path: "src/a.ts" },
+        result: { body: "ok" }
+      }
+    ],
+    [
+      "LinkAuthored",
+      { _tag: "LinkAuthored", link: 2, script: { digest: scriptDigest, text: "return done(null)" } },
+      { _tag: "LinkAuthored", link: 2, script: { digest: scriptDigest, text: "return done(null)" } }
+    ],
+    [
+      "GateRejected",
+      {
+        _tag: "GateRejected",
+        link: 1,
+        observation: { kind: "catalog", message: `"nope" is not a catalog entry` },
+        ordinal: 3
+      },
+      {
+        _tag: "GateRejected",
+        link: 1,
+        observation: { kind: "catalog", message: `"nope" is not a catalog entry` },
+        ordinal: 3
+      }
+    ],
+    [
+      "SteeringDrained",
+      { _tag: "SteeringDrained", link: 1, messages: ["stop after this"], ordinal: 2 },
+      { _tag: "SteeringDrained", link: 1, messages: ["stop after this"], ordinal: 2 }
+    ],
+    [
+      "LinkEnded",
+      { _tag: "LinkEnded", link: 2, outcome: { _tag: "Park", reason: { code: "timer", message: "" } } },
+      { _tag: "LinkEnded", link: 2, outcome: { _tag: "Park", reason: { code: "timer", message: "" } } }
+    ]
+  ] as const
 
-  it("decodes every pinned shape back", () => {
-    const decode = Schema.decodeUnknownSync(Event.Event)
-    expect(decode({ _tag: "ChainStarted", envelope: null, goal: "fix TODOs" })._tag).toBe("ChainStarted")
-    expect(
-      decode({ _tag: "LinkAuthored", link: 2, script: { digest: scriptDigest, text: "return done(null)" } })._tag
-    ).toBe("LinkAuthored")
+  describe.each(
+    [
+      ["absent", {}, {}],
+      ["empty", { chain: "" }, { chain: "" }],
+      ["child", { chain: "root-a/1.0" }, { chain: "root-a/1.0" }]
+    ] as const
+  )("%s chain scope", (_scope, decodedScope, wireScope) => {
+    it.each(fixtures)("encodes %s to its pinned shape", (_tag, event, wire) => {
+      expect(encode({ ...event, ...decodedScope } as Event.Event)).toStrictEqual({ ...wire, ...wireScope })
+    })
+
+    it.each(fixtures)("decodes the complete pinned %s shape", (_tag, event, wire) => {
+      const decode = Schema.decodeUnknownSync(Event.Event)
+      expect(decode({ ...wire, ...wireScope })).toStrictEqual({ ...event, ...decodedScope })
+    })
   })
 })
