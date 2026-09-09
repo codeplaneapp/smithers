@@ -1165,7 +1165,20 @@ describe("the Node host composition", () => {
   }, 60_000)
 
   it("releases the run it owns when a shutdown signal arrives, and kills what it spawned", async () => {
-    await Effect.runPromise(
+    // Every precondition the shutdown is read against is RECORDED here and
+    // asserted after the run, because the block below ends in `Effect.exit`:
+    // an `expect` inside it is a caught defect, ordinary scope cleanup still
+    // releases the run and kills its group on the way out, and the durable
+    // checks at the bottom then pass on a closure no signal caused.
+    const observed: {
+      status: string | undefined
+      spawned: number
+      aliveBeforeSignal: boolean
+      signalSent: boolean
+      settled: Exit.Exit<unknown, unknown> | undefined
+    } = { status: undefined, spawned: 0, aliveBeforeSignal: false, signalSent: false, settled: undefined }
+
+    const outcome = await Effect.runPromise(
       Effect.gen(function*() {
         const runs = yield* RunStore.RunStore
         const running = yield* Effect.forkChild(
@@ -1177,16 +1190,21 @@ describe("the Node host composition", () => {
           yield* Effect.sleep("25 millis")
           row = yield* runs.get("host-signal")
         }
-        expect(row.status).toBe("running")
-        // The action really did start an OS process tree, so the assertion
-        // below is about a process that existed.
-        expect(spawned).toHaveLength(1)
-        expect(groupIsAlive(spawned[0]!)).toBe(true)
+        yield* Effect.sync(() => {
+          observed.status = row.status
+          // The action really did start an OS process tree, so the kill
+          // assertion at the bottom is about a process that existed.
+          observed.spawned = spawned.length
+          observed.aliveBeforeSignal = spawned.length === 1 && groupIsAlive(spawned[0]!)
+        })
         // SIGUSR2 is the one user signal Node does not reserve — SIGUSR1
         // starts the inspector — so the handler under test is the only
         // listener this raise reaches.
-        yield* Effect.sync(() => process.kill(process.pid, "SIGUSR2"))
-        yield* Effect.exit(Fiber.join(running))
+        yield* Effect.sync(() => {
+          process.kill(process.pid, "SIGUSR2")
+          observed.signalSent = true
+        })
+        observed.settled = yield* Effect.exit(Fiber.join(running))
       }).pipe(
         Effect.provide(
           NodeRuntime.layerHost(
@@ -1209,6 +1227,30 @@ describe("the Node host composition", () => {
         Effect.exit
       )
     )
+
+    // A defect is the composition's failure, so it is rethrown with its own
+    // message rather than folded into a boolean. The block may end
+    // INTERRUPTED — the signal closes the runtime scope underneath it — but
+    // it may not die.
+    if (Exit.isFailure(outcome) && Cause.hasDies(outcome.cause)) throw Cause.squash(outcome.cause)
+    expect(Exit.isSuccess(outcome) || Cause.hasInterruptsOnly(outcome.cause)).toBe(true)
+
+    // What the shutdown was read against: a run this host was really driving,
+    // one live process group, and a signal that was really raised. Without
+    // these three the checks below prove only that a scope closed.
+    expect(observed.status).toBe("running")
+    expect(observed.spawned).toBe(1)
+    expect(observed.aliveBeforeSignal).toBe(true)
+    expect(observed.signalSent).toBe(true)
+    // The caller settles with the released run rather than waiting on it, and
+    // a release is an interruption of the fiber that was driving it. The
+    // forked effect is itself `Effect.exit`-wrapped, so the interruption is
+    // whichever of the two levels caught it.
+    expect(observed.settled).toBeDefined()
+    const settled = observed.settled !== undefined && Exit.isSuccess(observed.settled)
+      ? observed.settled.value as Exit.Exit<unknown, unknown>
+      : observed.settled
+    expect(settled !== undefined && Exit.isFailure(settled) && Cause.hasInterrupts(settled.cause)).toBe(true)
 
     // The run is reclaimable, not abandoned: `suspended` with the reason the
     // engine parks a released run under, and no owner still holding it.
@@ -1375,5 +1417,156 @@ describe("the Node host composition", () => {
     expect(
       readHostBack((database) => database.prepare("SELECT status FROM flows_runs WHERE run_id = 'host-cancel'").get())
     ).toMatchObject({ status: "cancelled" })
+  }, 60_000)
+})
+
+/**
+ * Shared-store execution routing: `Options.canExecute`.
+ *
+ * The option's documented job is to route "shared-store runs to the host
+ * configured for their workspace", and the whole of its wiring is one field
+ * forwarded into `EngineStore.layer` (`src/NodeRuntime.ts`,
+ * `canExecute: validated.canExecute`). Validation cannot see that field: a
+ * composition that dropped it would still refuse a non-function eagerly and
+ * still never invoke a valid one before it builds, so the eager-validation
+ * case above stays green while the option does nothing.
+ *
+ * What pins the forwarding is a run the wrong host must LEAVE and the right
+ * host must finish, over one SQLite file — the deployment the option exists
+ * for. `@smthrs/engine-store`'s own ownership suite drives `RunDriver`
+ * directly and the CLI's workspace suite exercises the routing helper;
+ * neither reaches this composition.
+ */
+describe("shared-store execution routing", () => {
+  const routingRoot = join(directory, "routing")
+  const routingFile = join(routingRoot, "runtime.sqlite")
+
+  const Land = Action.make("flows/routing/land", {
+    payload: { workspace: Schema.String },
+    success: Schema.String
+  })
+
+  const Route = Flow.make("flows/routing/route", {
+    payload: { workspace: Schema.String },
+    success: Schema.String,
+    body: (payload) => Land.call(payload)
+  })
+
+  /** Which host ran the action, in the order they ran it. */
+  const executedBy: Array<string> = []
+
+  /** Every `host:run` pair a routing predicate was consulted about. */
+  const consulted: Array<string> = []
+
+  /** One host's registration, whose action records the host that dispatched it. */
+  const routingFlows = (hostId: string) =>
+    Interpreter.layer(Route).pipe(
+      Layer.provideMerge(
+        Land.toLayer(({ workspace }) =>
+          Effect.sync(() => {
+            executedBy.push(hostId)
+            return `${hostId}:${workspace}`
+          })
+        )
+      ),
+      Layer.provideMerge(Action.layerImplementations)
+    )
+
+  /** The row a routing predicate is handed, taken from the public option. */
+  type RoutedRun = Parameters<NonNullable<NodeRuntime.Options["canExecute"]>>[0]
+
+  /**
+   * The workspace a run was started for, read off the state its row already
+   * carries. A predicate runs BEFORE any claim, so the row is the only thing
+   * it can key on.
+   */
+  const workspaceOf = (row: RoutedRun): string => {
+    const state = JSON.parse(row.stateJson) as { readonly payload?: { readonly workspace?: string } }
+    return state.payload?.workspace ?? ""
+  }
+
+  const routingOptions = (hostId: string, workspace: string): NodeRuntime.Options => ({
+    filename: routingFile,
+    workspaceRoot: routingRoot,
+    owner: { hostId },
+    isAlive: () => Effect.succeed(false),
+    canExecute: (row) =>
+      Effect.sync(() => {
+        consulted.push(`${hostId}:${row.runId}`)
+        return workspaceOf(row) === workspace
+      })
+  })
+
+  const routingHost = (options: NodeRuntime.Options, hostId: string) =>
+    NodeRuntime.layer(
+      options,
+      StepBoundary.layer,
+      WorkspaceSandbox.layerFileSystem(),
+      routingFlows(hostId)
+    ).pipe(Layer.provide(host))
+
+  /** Reads the routing file back through an independent connection. */
+  const readRouting = <A>(query: (database: DatabaseSync) => A): A => {
+    const database = new DatabaseSync(routingFile, { readOnly: true })
+    try {
+      return query(database)
+    } finally {
+      database.close()
+    }
+  }
+
+  it("executes a run only on the host whose predicate admits it", async () => {
+    const alphaOptions = routingOptions("alpha-host", "alpha")
+    const alpha = routingHost(alphaOptions, "alpha-host")
+    // The predicate is snapshotted when `layer` is CALLED. A caller that
+    // keeps its options object and edits it afterwards — the same object a
+    // long-lived host program holds — must not be able to move a run onto a
+    // host that was never configured for it. The replacement admits
+    // everything and records nothing, so `consulted` below also says which
+    // function the engine actually asked.
+    const mutated = alphaOptions as { canExecute: NodeRuntime.Options["canExecute"] }
+    mutated.canExecute = () => Effect.succeed(true)
+
+    const first = await Effect.runPromise(
+      Effect.gen(function*() {
+        const runs = yield* RunStore.RunStore
+        // A run for the OTHER host's workspace. `discard` is what makes the
+        // refusal observable: an undriven run has no result to wait for.
+        yield* Route.execute({ workspace: "beta" }, { executionId: "route-to-beta", discard: true })
+        const mine = yield* Route.execute({ workspace: "alpha" }, { executionId: "route-to-alpha" })
+        return { foreign: yield* runs.get("route-to-beta"), mine }
+      }).pipe(Effect.provide(alpha), Effect.provide(hostCrypto), Effect.scoped)
+    )
+
+    // This host ran its own workspace's run, and only that one.
+    expect(first.mine).toBe("alpha-host:alpha")
+    expect(executedBy).toEqual(["alpha-host"])
+    // The refused run was left exactly as it was created: never claimed,
+    // never owned, still there for the host that serves its workspace.
+    expect(first.foreign.status).toBe("pending")
+    expect(first.foreign.owner).toBeNull()
+    expect(first.foreign.claim).toBeNull()
+    // The predicate the layer was BUILT with is the one the engine asked, not
+    // the one the caller wrote into its options object afterwards.
+    expect(consulted).toContain("alpha-host:route-to-beta")
+
+    // The host that serves `beta` finds the run waiting and drives it home.
+    const settled = await Effect.runPromise(
+      Route.execute({ workspace: "beta" }, { executionId: "route-to-beta" }).pipe(
+        Effect.provide(routingHost(routingOptions("beta-host", "beta"), "beta-host")),
+        Effect.provide(hostCrypto),
+        Effect.scoped
+      )
+    )
+
+    expect(settled).toBe("beta-host:beta")
+    expect(executedBy).toEqual(["alpha-host", "beta-host"])
+    // Read back through an independent connection: routing decided which
+    // process did the work, not which one recorded a result.
+    expect(readRouting((database) => database.prepare("SELECT run_id, status FROM flows_runs ORDER BY run_id").all()))
+      .toEqual([
+        { run_id: "route-to-alpha", status: "completed" },
+        { run_id: "route-to-beta", status: "completed" }
+      ])
   }, 60_000)
 })
