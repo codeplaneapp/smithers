@@ -1,8 +1,8 @@
 /**
  * Serialized, retryable write boundary for the durable flows stores.
  *
- * Governing persistence designs: `docs/pages/api/database.md` and
- * `docs/pages/concepts/journal.md`.
+ * Governing persistence designs: `docs/api.md` and
+ * `docs/concepts/write-boundary.md`.
  *
  * The SQL client is Effect's own `SqlClient` service and is consumed
  * directly for queries; this module adds only the write policy the durable

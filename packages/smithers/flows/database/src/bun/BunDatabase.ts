@@ -29,7 +29,7 @@ const readTableNames = (filename: string): ReadonlyArray<string> | undefined => 
       (row) => row.name
     )
   } catch (error) {
-    if (String(error).includes("database is locked") || String(error).includes("database is busy")) throw error
+    if (SqliteOpen.isLockedError(error)) throw error
     return undefined
   } finally {
     db?.close()

@@ -4,7 +4,7 @@
  * package that mis-declares its namespace or id block must fail the migration
  * loudly rather than silently shadow its neighbour's table.
  *
- * Derived contract: `docs/pages/concepts/journal.md`.
+ * Derived contract: `docs/concepts/migration-ladder.md`.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"

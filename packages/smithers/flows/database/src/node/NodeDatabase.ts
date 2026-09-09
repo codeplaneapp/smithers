@@ -6,6 +6,7 @@ import { type Duration, Effect, Layer } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { closeSync, openSync, statSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
+import * as ReleasePolicy from "../internal/ReleasePolicy.ts"
 import * as SqliteOpen from "../internal/SqliteOpen.ts"
 
 export { isUnsupportedDatabase, UnsupportedDatabase, UnsupportedDatabaseCode } from "../internal/SqliteOpen.ts"
@@ -33,7 +34,7 @@ const readTableNames = (filename: string): ReadonlyArray<string> | undefined => 
       .all()
       .map((row) => String((row as { readonly name: unknown }).name))
   } catch (error) {
-    if (String(error).includes("database is locked") || String(error).includes("database is busy")) throw error
+    if (SqliteOpen.isLockedError(error)) throw error
     return undefined
   } finally {
     db?.close()
@@ -83,7 +84,8 @@ export const layer = (options: NodeDatabaseOptions): Layer.Layer<SqlClient.SqlCl
     if (process.versions.bun !== undefined) {
       throw new SqliteOpen.UnsupportedDatabase({
         code: "unsupported_runtime",
-        message: "Use @smthrs/database/bun/BunDatabase under Bun; NodeDatabase requires Node.js >=22.19.0"
+        message:
+          `Use @smthrs/database/bun/BunDatabase under Bun; NodeDatabase requires Node.js ${ReleasePolicy.nodeFloor}`
       })
     }
     return SqliteOpen.layer(

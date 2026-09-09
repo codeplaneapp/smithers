@@ -1,7 +1,7 @@
 /**
  * Write retry policy.
  *
- * Governing persistence design: `docs/pages/api/database.md`.
+ * Governing persistence design: `docs/concepts/write-boundary.md`.
  *
  * Retry
  * only structured transient failures, bound exponential delay, and use Effect

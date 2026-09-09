@@ -4,16 +4,35 @@
 import { Cause, Context, Duration, Effect, Exit, Layer, Schedule, Schema, Scope } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlConnection from "effect/unstable/sql/SqlConnection"
+import * as ReleasePolicy from "./ReleasePolicy.ts"
 
+/**
+ * The driver's own reader for the tables of a file, without joining the WAL
+ * or converting it.
+ *
+ * SQLite `file:` URIs bypass the filesystem stat because the URI itself is not
+ * a pathname; the driver receives it directly. Returns `undefined` when the
+ * file cannot be inspected at all: a path that does not exist, a directory, an
+ * in-memory name, or a file SQLite refuses to read. None of those is a 0.x
+ * database, so the driver's own open behavior decides what happens next and
+ * the guard says nothing.
+ *
+ * A file a peer holds locked is not one of those cases and is rethrown, so
+ * `guardOpen` outwaits the lock on the same ladder the open uses. Answering
+ * `undefined` there would wave the file through: the open ladder outwaits the
+ * same peer, so a 0.x `smithers.db` whose 0.x writer held it for a moment
+ * would be opened and migrated, which is the refusal the release policy
+ * states without condition.
+ */
 type InspectTables = (filename: string) => ReadonlyArray<string> | undefined
 
 /**
  * The three stable codes covering the rc.0 exclusions this driver enforces.
  *
- * `unsupported_runtime` reports selection of an incompatible driver. `unsupported_database_file` refuses a
- * 0.x `smithers.db`, and `database_locked` refuses a file the guard could not
- * read because a peer held it for longer than the open ladder waits
- * after the open ladder's wait expires.
+ * `unsupported_runtime` reports selection of an incompatible driver.
+ * `unsupported_database_file` refuses a 0.x `smithers.db`, and
+ * `database_locked` refuses a file the guard could not read because a peer
+ * held it for longer than the open ladder waits.
  *
  * @category models
  * @since 1.0.0
@@ -33,7 +52,7 @@ export const UnsupportedDatabaseCode = Schema.Literals([
 export type UnsupportedDatabaseCode = typeof UnsupportedDatabaseCode.Type
 
 /**
- * Refusal to open a durable database in 1.0.0-rc.0.
+ * Refusal to open a durable database in rc.0.
  *
  * Raised as a *defect* by `layer`, not as a typed failure, for the same
  * reason a non-lock open failure is a defect: `layer` is a leaf client layer
@@ -71,7 +90,21 @@ export const isUnsupportedDatabase = (input: unknown): input is UnsupportedDatab
  */
 const migrationLedgerTable = "flows_migrations"
 
-const isLockedError = (error: unknown): boolean => {
+/**
+ * The whole transient vocabulary of an open: the two texts SQLite raises for a
+ * file a peer holds.
+ *
+ * Deliberately narrower than `WriteRetry`'s classification, and not shared
+ * with it. A failure here is a raw throw from the driver's constructor, so it
+ * carries no `SqlError` and no `code` to key off, and the Postgres SQLSTATEs
+ * and the rollback text that policy also replays cannot come out of opening a
+ * SQLite file. Every native driver's table probe rethrows on this same
+ * predicate, so the probe and the ladder give up on a peer together.
+ *
+ * @category refinements
+ * @since 1.0.0
+ */
+export const isLockedError = (error: unknown): boolean => {
   const text = String(error)
   return text.includes("database is locked") || text.includes("database is busy")
 }
@@ -88,23 +121,6 @@ const isLockedError = (error: unknown): boolean => {
  */
 const isLockedDefect = (defect: unknown): boolean => !isUnsupportedDatabase(defect) && isLockedError(defect)
 
-/**
- * Reads the tables of a file without joining the WAL or converting it.
- *
- * SQLite `file:` URIs bypass the filesystem stat because the URI itself is not
- * a pathname; `DatabaseSync` receives it directly. Returns `undefined` when
- * the file cannot be inspected at all: a path that does not exist, a
- * directory, an in-memory name, or a file SQLite refuses to read. None of
- * those is a 0.x database, so the driver's own open behavior decides what
- * happens next and the guard says nothing.
- *
- * A file a peer holds locked is not one of those cases and is rethrown, so
- * `guardOpen` outwaits the lock on the same ladder the open uses. Answering
- * `undefined` there would wave the file through: the open ladder outwaits the
- * same peer, so a 0.x `smithers.db` whose 0.x writer held it for a moment
- * would be opened and migrated, which is the refusal the release policy
- * states without condition.
- */
 /**
  * The database a SQLite `file:` URI names, without the query that says how to
  * open it.
@@ -154,7 +170,8 @@ const unsupportedOpen = (filename: string, readTableNames: InspectTables): Unsup
   if (tables.includes(migrationLedgerTable)) return undefined
   return new UnsupportedDatabase({
     code: "unsupported_database_file",
-    message: `${filename} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
+    message:
+      `${filename} is not a Smithers 1.0 database (${ReleasePolicy.releaseVersion} does not load a 0.x smithers.db)`
   })
 }
 
@@ -252,9 +269,9 @@ const retryWhileLocked = <A>(self: Effect.Effect<A>): Effect.Effect<A> =>
  *   recovery while a peer is already recovering it.
  *
  * Both clear on their own as soon as the peer finishes, so the open is retried
- * on the same transient vocabulary `WriteRetry` uses. This is what made
- * `DurableWaitingRestart` flake: a child process lost the race and died during
- * startup. Because a contended attempt can spend up to the client's
+ * on the vocabulary `isLockedError` names, and on nothing else. This is what
+ * made `DurableWaitingRestart` flake: a child process lost the race and died
+ * during startup. Because a contended attempt can spend up to the client's
  * `busy_timeout` inside SQLite before the ladder's own delay, the wall-clock
  * cost of exhausting the ladder is bounded by the timeout the caller
  * configured, not by the delays below. Each attempt builds into its own scope,

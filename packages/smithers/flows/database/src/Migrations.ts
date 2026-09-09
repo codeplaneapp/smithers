@@ -29,7 +29,7 @@
  * the durable writer uses, so concurrent processes migrating one database
  * serialize instead of failing on the peer's `BEGIN IMMEDIATE` lock.
  *
- * Derived contract: `docs/pages/concepts/journal.md`.
+ * Derived contract: `docs/concepts/migration-ladder.md`.
  *
  * @since 0.1.0
  */

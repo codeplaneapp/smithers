@@ -17,6 +17,7 @@
  *
  * @since 1.0.0
  */
+import * as ReleasePolicy from "./internal/ReleasePolicy.ts"
 
 /** An environment as `process.env` presents it. */
 type Source = Readonly<Record<string, string | undefined>>
@@ -53,4 +54,5 @@ export const ignoredNames = (environment: Source): ReadonlyArray<string> =>
  * @category constructors
  * @since 1.0.0
  */
-export const ignoredNotice = (name: string): string => `ignored: ${name} has no effect in 1.0.0-rc.0 (SQLite only)`
+export const ignoredNotice = (name: string): string =>
+  `ignored: ${name} has no effect in ${ReleasePolicy.releaseVersion} (SQLite only)`
