@@ -57,10 +57,9 @@ const strings = (value: unknown): ReadonlyArray<string> =>
  * Derives one delivery delta per message a promotion entry named.
  *
  * A boundary promotes a batch, so one entry can disclose several deliveries.
- * Each delta carries the sequence of the entry it came from, so a consumer
- * resuming at a cursor sees the batch exactly once, and carries the boundary
- * that took it, because "which turn saw my message" is the question an
- * operator asks next.
+ * Each delta carries the source sequence and the boundary that took it.
+ * `ControlLive.watch` adds an expansion cursor so a consumer can resume
+ * between deliveries in the same batch.
  *
  * A promotion that named nothing derives nothing: an idle boundary drains an
  * empty queue on every turn, and reporting that as a delivery would bury the

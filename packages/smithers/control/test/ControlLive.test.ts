@@ -8,8 +8,9 @@ import { Effect, Layer, Stream } from "effect"
 import { readFileSync } from "fs"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
-import { ClaimLost, PersistenceError } from "../src/ControlError.ts"
+import { ClaimLost, InvalidInput, PersistenceError } from "../src/ControlError.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
+import type { WatchFilter } from "../src/ControlSchema.ts"
 import * as TestControl from "../src/test/TestControl.ts"
 import { contract, type Stack } from "./ControlContract.ts"
 import { live, memoryRuntime } from "./TestStack.ts"
@@ -17,6 +18,82 @@ import { live, memoryRuntime } from "./TestStack.ts"
 contract("memory", (executor) => TestControl.layer(undefined, executor) as unknown as Layer.Layer<Stack>)
 
 describe("ControlLive", () => {
+  it.each([false, true])("resumes after every expanded member without losing deltas (follow=%s)", async (follow) => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const journal = yield* Journal.Journal
+        const runId = "expanded-cursor"
+        for (
+          const [eventType, payload] of [
+            ["plain", {}],
+            ["flows.engine.run-decision", { decision: "created", parentExecutionId: "parent" }],
+            ["flows/notifications/Promoted", { boundary: "turn", ids: ["one", "two", "three"] }]
+          ] as const
+        ) {
+          yield* journal.emitDurableUnfenced(
+            new JournalEvent.Input({
+              runId: JournalEvent.RunId.make(runId),
+              sourceId: JournalEvent.SourceId.make("/test"),
+              eventType,
+              payload
+            })
+          )
+        }
+        const full = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
+        expect(full.map((event) => event.kind)).toEqual([
+          "plain",
+          "flows.engine.run-decision",
+          "control.run.lineage",
+          "flows/notifications/Promoted",
+          "control.steer.delivered",
+          "control.steer.delivered",
+          "control.steer.delivered"
+        ])
+        for (let count = 1; count <= full.length; count++) {
+          const consumed = yield* control.watch({ runId, follow: false }).pipe(Stream.take(count), Stream.runCollect)
+          const last = consumed.at(-1)!
+          expect(last.cursor).toBeDefined()
+          const checkpoint = { afterCursor: last.cursor }
+          const resumed = yield* control.watch({ runId, follow, ...checkpoint }).pipe(
+            Stream.take(full.length - count),
+            Stream.runCollect
+          )
+          expect([...consumed, ...resumed]).toEqual(full)
+        }
+        expect(yield* control.watch({ runId, follow: false, afterCursor: full.at(-1)!.cursor }).pipe(Stream.runCollect))
+          .toEqual([])
+        expect(full.map((event) => event.cursor)).toEqual([
+          { sequence: full[0]!.sequence },
+          { sequence: full[1]!.sequence, offset: 0 },
+          { sequence: full[1]!.sequence },
+          { sequence: full[3]!.sequence, offset: 0 },
+          { sequence: full[3]!.sequence, offset: 1 },
+          { sequence: full[3]!.sequence, offset: 2 },
+          { sequence: full[3]!.sequence }
+        ])
+      }).pipe(Effect.provide(TestControl.layer()), Effect.scoped, Effect.orDie)
+    )
+  })
+
+  it.each([
+    { afterCursor: { sequence: 1 } },
+    { runId: "run-1", afterSequence: 1, afterCursor: { sequence: 1 } },
+    ...[-1, 1.5, Infinity, Number.MAX_SAFE_INTEGER].flatMap((invalid) => [
+      { runId: "run-1", afterCursor: { sequence: invalid } },
+      { runId: "run-1", afterCursor: { sequence: 1, offset: invalid } }
+    ])
+  ])("rejects an invalid composite watch cursor: %j", async (filter) => {
+    const error = await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control
+        return yield* Effect.flip(control.watch(filter as WatchFilter).pipe(Stream.runCollect))
+      }).pipe(Effect.provide(TestControl.layer()), Effect.scoped, Effect.orDie)
+    )
+    expect(error).toBeInstanceOf(InvalidInput)
+    expect((error as InvalidInput).issue).toContain("afterCursor")
+  })
+
   it("answers a terminal outcome observed after losing the cancellation claim", async () => {
     const runtime = Layer.effect(
       ControlRuntime,

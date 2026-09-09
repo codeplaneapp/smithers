@@ -57,7 +57,8 @@ import {
   RunInputSchema,
   SignalInputSchema,
   SteerInputSchema,
-  steerItem
+  steerItem,
+  WatchCursor
 } from "./ControlSchema.ts"
 import * as DispatchReader from "./DispatchReader.ts"
 import { schemaIssuePath } from "./internal/issues.ts"
@@ -1094,35 +1095,50 @@ export const layer: Layer.Layer<
           })
         )
 
-    /**
-     * Journal entries plus the ancestry deltas they disclose.
-     *
-     * The expansion runs after the follow branch's snapshot-to-tail handoff,
-     * so a derived event is emitted exactly once beside its source row.
-     *
-     * An `afterSequence` without a `runId` is refused. Journal sequences are
-     * partition-local, so one scalar cursor applied to every partition skipped
-     * every lower unseen sequence in every partition but the one the cursor
-     * came from, while the api page promised a consumer resuming at a cursor
-     * sees each event exactly once. Refusing the unscoped cursor keeps that
-     * promise true for the scoped watch that can actually hold it.
-     */
-    const watch = (filter: WatchFilter): Stream.Stream<ControlEvent, ControlError> =>
-      filter.afterSequence !== undefined && filter.runId === undefined
-        ? Stream.fail(
-          invalid("afterSequence: a watch cursor resumes one run, so it requires runId")
-        )
-        : entries(filter).pipe(
-          Stream.map((event): ReadonlyArray<ControlEvent> => {
-            const lineage = Lineage.derive(event)
-            return [
-              event,
-              ...(lineage === undefined ? [] : [lineage]),
-              ...Steering.derive(event)
-            ]
-          }),
-          Stream.flattenIterable
-        )
+    /** Expands each source row in stable order and checkpoints individual members. */
+    const watch = (filter: WatchFilter): Stream.Stream<ControlEvent, ControlError> => {
+      if (filter.afterSequence !== undefined && filter.runId === undefined) {
+        return Stream.fail(invalid("afterSequence: a watch cursor resumes one run, so it requires runId"))
+      }
+      const cursor = filter.afterCursor
+      if (cursor !== undefined) {
+        if (filter.runId === undefined) {
+          return Stream.fail(invalid("afterCursor: a watch cursor resumes one run, so it requires runId"))
+        }
+        if (filter.afterSequence !== undefined) {
+          return Stream.fail(invalid("afterCursor: cannot be combined with afterSequence"))
+        }
+        if (!Schema.is(WatchCursor)(cursor)) {
+          return Stream.fail(invalid("afterCursor: sequence and offset must be nonnegative safe journal integers"))
+        }
+      }
+      // A partial checkpoint rereads only its source row. A complete one
+      // starts strictly after it, so polling never rereads completed entries.
+      const afterSequence = cursor === undefined ?
+        filter.afterSequence
+        : cursor.offset === undefined ?
+        cursor.sequence
+        : cursor.sequence === 0
+        ? undefined
+        : cursor.sequence - 1
+      return entries({
+        ...filter,
+        afterSequence
+      }).pipe(
+        Stream.map((event): ReadonlyArray<ControlEvent> => {
+          const lineage = Lineage.derive(event)
+          const expanded = [event, ...(lineage === undefined ? [] : [lineage]), ...Steering.derive(event)]
+          const checkpointed = expanded.map((member, offset): ControlEvent => ({
+            ...member,
+            cursor: offset === expanded.length - 1 ? { sequence: event.sequence } : { sequence: event.sequence, offset }
+          }))
+          return cursor?.offset !== undefined && event.sequence === cursor.sequence
+            ? checkpointed.slice(cursor.offset + 1)
+            : checkpointed
+        }),
+        Stream.flattenIterable
+      )
+    }
 
     const service: Service = {
       plan: Effect.fn("Control.plan")((input) =>

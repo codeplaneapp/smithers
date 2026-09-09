@@ -184,6 +184,120 @@ describe("Monitor.classify", () => {
 })
 
 describe("Monitor.run over the durable control plane", () => {
+  it("reads only new watch events across beats, including its own records", async () => {
+    await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("incremental")
+      const delivered: Array<Array<ControlEvent>> = []
+      const filters: Array<Parameters<typeof control.watch>[0]> = []
+      const report = yield* Monitor.run({ runId, intervalMs: 0, maxChecks: 4, stallBeats: 1 }).pipe(
+        Effect.provideService(Control, {
+          ...control,
+          watch: (filter) => {
+            filters.push(filter)
+            const events: Array<ControlEvent> = []
+            delivered.push(events)
+            return control.watch(filter).pipe(Stream.tap((event) =>
+              Effect.sync(() => {
+                events.push(event)
+              })
+            ))
+          }
+        })
+      )
+      expect(delivered[0]!.length).toBeGreaterThan(0)
+      expect(delivered.slice(1).map((events) => events.map((event) => event.kind))).toEqual([
+        [Monitor.beatEventType],
+        [Monitor.beatEventType],
+        [Monitor.beatEventType]
+      ])
+      expect(filters.slice(1).map((filter) => filter.afterCursor)).toEqual(
+        delivered.slice(0, -1).map((events) => events.at(-1)!.cursor)
+      )
+      expect(report.beats.map((beat) => beat.health)).toEqual(["healthy", "stalled", "stalled", "stalled"])
+      expect(new Set(report.beats.map((beat) => beat.sequence)).size).toBe(1)
+    }))
+  })
+
+  it("checkpoints completed snapshots from providers without expansion cursors", async () => {
+    await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("legacy-cursor")
+      const delivered: Array<Array<ControlEvent>> = []
+      const report = yield* Monitor.run({ runId, intervalMs: 0, maxChecks: 3, stallBeats: 1 }).pipe(
+        Effect.provideService(Control, {
+          ...control,
+          watch: (filter) => {
+            const events: Array<ControlEvent> = []
+            delivered.push(events)
+            return control.watch({ runId: filter.runId, follow: filter.follow, afterSequence: filter.afterSequence })
+              .pipe(
+                Stream.map(({ cursor: _cursor, ...event }) => event),
+                Stream.tap((event) =>
+                  Effect.sync(() => {
+                    events.push(event)
+                  })
+                )
+              )
+          }
+        })
+      )
+      expect(report.beats.map((beat) => beat.health)).toEqual(["healthy", "stalled", "stalled"])
+      expect(delivered.slice(1).map((events) => events.map((event) => event.kind))).toEqual([
+        [Monitor.beatEventType],
+        [Monitor.beatEventType]
+      ])
+    }))
+  })
+
+  it("retains open attempts and the last outcome while folding only new entries", async () => {
+    await run(Effect.gen(function*() {
+      const control = yield* Control
+      const journal = yield* Journal.Journal
+      const runId = yield* start("fold-attempts")
+      let check = 0
+      const report = yield* Monitor.run({ runId, intervalMs: 0, maxChecks: 8, stallBeats: 1 }).pipe(
+        Effect.provideService(Control, {
+          ...control,
+          watch: (filter) =>
+            Stream.unwrap(
+              Effect.gen(function*() {
+                const additions = check === 0 || check === 6 ?
+                  [started(0)]
+                  : check === 2 ?
+                  [finished(0, "failed")]
+                  : check === 4 ?
+                  [started(0), finished(0, "succeeded")]
+                  : []
+                check++
+                for (const addition of additions) {
+                  yield* journal.emitDurableUnfenced(
+                    new JournalEvent.Input({
+                      runId: JournalEvent.RunId.make(runId),
+                      sourceId: JournalEvent.SourceId.make("/test"),
+                      eventType: addition.kind,
+                      payload: addition.payload
+                    })
+                  )
+                }
+                return control.watch(filter)
+              }).pipe(Effect.orDie)
+            )
+        })
+      )
+      expect(report.beats.map((beat) => beat.health)).toEqual([
+        "healthy",
+        "wedged-node",
+        "failing",
+        "failing",
+        "healthy",
+        "stalled",
+        "healthy",
+        "wedged-node"
+      ])
+    }))
+  })
+
   it("takes every beat it was asked for and journals each one", async () => {
     const observed = await run(Effect.gen(function*() {
       const control = yield* Control

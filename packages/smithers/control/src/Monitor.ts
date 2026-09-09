@@ -21,7 +21,7 @@ import { Duration, Effect, Schema, Stream } from "effect"
 import { Control } from "./Control.ts"
 import type { ControlError } from "./ControlError.ts"
 import { PersistenceError } from "./ControlError.ts"
-import type { ControlEvent, Receipt, RunId, RunSummary } from "./ControlSchema.ts"
+import type { ControlEvent, Receipt, RunId, RunSummary, WatchFilter } from "./ControlSchema.ts"
 
 /**
  * The journal event type the engine records when an action attempt starts.
@@ -122,24 +122,19 @@ export interface Observation {
 /** How many rounds a trampoline may take before a monitor calls it runaway. */
 const defaultRoundBound = 32
 
-const openAttempts = (events: ReadonlyArray<ControlEvent>): number => {
-  let open = 0
-  for (const event of events) {
-    if (event.kind === attemptStartedEventType) open += 1
-    if (event.kind === attemptFinishedEventType) open -= 1
-  }
-  return open
+interface AttemptState {
+  open: number
+  failed: boolean
 }
 
-const lastAttemptFailed = (events: ReadonlyArray<ControlEvent>): boolean => {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event === undefined || event.kind !== attemptFinishedEventType) continue
+const foldAttempt = (state: AttemptState, event: ControlEvent): void => {
+  if (event.kind === attemptStartedEventType) state.open += 1
+  if (event.kind === attemptFinishedEventType) {
+    state.open -= 1
     const payload = event.payload
-    return typeof payload === "object" && payload !== null && !Array.isArray(payload) &&
+    state.failed = typeof payload === "object" && payload !== null && !Array.isArray(payload) &&
       (payload as { readonly state?: unknown })["state"] === "failed"
   }
-  return false
 }
 
 /**
@@ -176,6 +171,12 @@ const lastAttemptFailed = (events: ReadonlyArray<ControlEvent>): boolean => {
  * @since 0.1.0
  */
 export const classify = (observation: Observation): Health => {
+  const attempts: AttemptState = { open: 0, failed: false }
+  for (const event of observation.events) foldAttempt(attempts, event)
+  return classifyState(observation, attempts)
+}
+
+const classifyState = (observation: Omit<Observation, "events">, attempts: AttemptState): Health => {
   const summary = observation.summary
   if (summary === undefined) return "unknown"
   if (summary.status === "failed") return "failing"
@@ -186,9 +187,9 @@ export const classify = (observation: Observation): Health => {
   }
   const bound = observation.roundBound ?? defaultRoundBound
   if (summary.roundOrdinal !== undefined && summary.roundOrdinal >= bound) return "runaway-loop"
-  if (lastAttemptFailed(observation.events)) return "failing"
+  if (attempts.failed) return "failing"
   if (observation.beatsWithoutProgress >= observation.stallBeats) {
-    return openAttempts(observation.events) > 0 ? "wedged-node" : "stalled"
+    return attempts.open > 0 ? "wedged-node" : "stalled"
   }
   return "healthy"
 }
@@ -310,23 +311,6 @@ const summaryOf = (runId: RunId): Effect.Effect<RunSummary | undefined, ControlE
       Effect.map((listed) => listed._tag === "runs" ? listed.items[0] : undefined)
     ))
 
-/**
- * Every entry the run has, minus the monitor's own records.
- *
- * A monitor that counted its own heartbeat as progress could never observe a
- * stall: the beat it wrote at the top of the loop would be the new entry it
- * congratulated the run for at the bottom. The heal record is excluded for the
- * same reason — what a remedy achieved shows up as the entries the RUN then
- * wrote, and a monitor whose own bookkeeping counted would call any run it
- * remedied healthy for one beat whether or not the remedy did anything.
- */
-const progressOf = (runId: RunId): Effect.Effect<ReadonlyArray<ControlEvent>, ControlError, Control> =>
-  Effect.flatMap(Control, (control) =>
-    control.watch({ runId, follow: false }).pipe(
-      Stream.filter((event) => event.kind !== beatEventType && event.kind !== healedEventType),
-      Stream.runCollect
-    ))
-
 const terminal = (summary: RunSummary | undefined): boolean =>
   summary !== undefined &&
   (summary.status === "completed" || summary.status === "failed" || summary.status === "cancelled")
@@ -444,23 +428,33 @@ export const run = (
     const beats: Array<Beat> = []
     let beatsWithoutProgress = 0
     let lastSequence = -1
+    let checkpoint: Pick<WatchFilter, "afterCursor" | "afterSequence"> = {}
+    const attempts: AttemptState = { open: 0, failed: false }
+    let sequence = -1
     for (let beat = 0; beat < maxChecks; beat += 1) {
       if (beat > 0 && intervalMs > 0) yield* Effect.sleep(Duration.millis(intervalMs))
       const summary = yield* summaryOf(options.runId)
-      const events = yield* progressOf(options.runId)
-      // An index read answers `undefined` for an empty list, which is the same
-      // "no progress yet" a length check would have derived, so one fallback
-      // covers both instead of a length test guarding an unreachable one.
-      const sequence = events[events.length - 1]?.sequence ?? -1
+      yield* control.watch({ runId: options.runId, follow: false, ...checkpoint }).pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            // Advance over bookkeeping too, but never count it as run progress.
+            checkpoint = event.cursor === undefined
+              ? { afterSequence: event.sequence }
+              : { afterCursor: event.cursor }
+            if (event.kind === beatEventType || event.kind === healedEventType) return
+            sequence = event.sequence
+            foldAttempt(attempts, event)
+          })
+        )
+      )
       beatsWithoutProgress = sequence === lastSequence ? beatsWithoutProgress + 1 : 0
       lastSequence = sequence
-      const health = classify({
+      const health = classifyState({
         ...(summary === undefined ? {} : { summary }),
-        events,
         beatsWithoutProgress,
         stallBeats,
         ...(options.roundBound === undefined ? {} : { roundBound: options.roundBound })
-      })
+      }, attempts)
       const remedy = autoHeal.includes(health) ? remedyFor(health) : "none"
       const observed: Beat = { beat, health, sequence }
       yield* record(observed, remedy)

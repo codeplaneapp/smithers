@@ -122,6 +122,33 @@ describe("ControlLive.watch failures", () => {
 })
 
 describe("ControlLive.watch snapshots", () => {
+  it("resumes inside an expansion at journal sequence zero", async () => {
+    const source = {
+      ...entry(0, "run-zero"),
+      eventType: "flows/notifications/Promoted",
+      payload: { boundary: "turn", ids: ["one", "two"] }
+    }
+    const journal = Layer.succeed(
+      Journal.Journal,
+      Journal.makeNoop({
+        entries: (options) => Effect.succeed({ entries: options.after === undefined ? [source] : [], hasMore: false })
+      })
+    )
+    const events = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        return yield* control.watch({ runId: "run-zero", follow: false, afterCursor: { sequence: 0, offset: 0 } }).pipe(
+          Stream.runCollect
+        )
+      }),
+      live({ journal })
+    )
+    expect(events.map((event) => [event.kind, event.cursor])).toEqual([
+      ["control.steer.delivered", { sequence: 0, offset: 1 }],
+      ["control.steer.delivered", { sequence: 0 }]
+    ])
+  })
+
   it("returns an empty snapshot for a partition with no entries at all", async () => {
     const events = await run(Effect.gen(function*() {
       const control = yield* Control
@@ -183,7 +210,14 @@ describe("ControlLive.watch snapshots", () => {
     // The probe stops at the largest sequence the journal can represent and
     // never asks for the unallocatable MAX_SAFE_INTEGER value.
     expect(events).toEqual([
-      { sequence: 1, kind: "control.test", runId: "run-extreme", occurredAt: 1, payload: { seq: 1 } }
+      {
+        cursor: { sequence: 1 },
+        sequence: 1,
+        kind: "control.test",
+        runId: "run-extreme",
+        occurredAt: 1,
+        payload: { seq: 1 }
+      }
     ])
   })
 

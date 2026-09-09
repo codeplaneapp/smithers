@@ -30,7 +30,7 @@ partition and every run partition each start at 0.
 
 One scalar cursor applied to all of them would therefore skip every lower
 unseen sequence in every partition but the one the cursor came from. So
-`watch` refuses `afterSequence` without a `runId`:
+`watch` refuses either `afterSequence` or `afterCursor` without a `runId`:
 
 ```text
 InvalidInput: afterSequence: a watch cursor resumes one run, so it requires runId
@@ -106,10 +106,11 @@ that delivers a steer runs in the agent process, not this one, so a control
 plane that wrote its own delivery record would be asserting a fact it did not
 observe.
 
-Each derived event carries the sequence of the entry it came from, so a
-consumer resuming at a cursor on that run sees it exactly once. Expansion runs
-after the snapshot-to-tail handoff, so a derived event never competes with its
-own entry for a `(runId, sequence)` key.
+Each derived event carries its source sequence. `watch` also assigns a
+composite `cursor` that distinguishes members of an expansion. Checkpoint
+`event.cursor` and resume with `afterCursor` to retain unconsumed deltas.
+`afterSequence` skips the whole source entry, including its deltas. Expansion
+runs after the snapshot-to-tail handoff.
 
 `Lineage.derive`, `Lineage.expand`, `Steering.derive`, and `Steering.expand`
 are exported, so a client reading the journal directly reaches the same

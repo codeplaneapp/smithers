@@ -692,6 +692,29 @@ export const ReasonedMutationInputSchema = Schema.Struct({
 export const CancelInputSchema = ReasonedMutationInputSchema
 
 /**
+ * A checkpoint in one journal entry's expansion. Without `offset`, the whole
+ * entry is consumed. With it, only members through that zero-based index are
+ * consumed. Pass the cursor back unchanged with the same run id.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const WatchCursor = Schema.Struct({
+  sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThan(Number.MAX_SAFE_INTEGER)),
+  offset: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThan(Number.MAX_SAFE_INTEGER))
+  )
+})
+
+/**
+ * A checkpoint in one journal entry's expansion.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type WatchCursor = typeof WatchCursor.Type
+
+/**
  * A journal-projection cursor, optional run restriction, and delivery mode.
  * Omitting `follow` preserves the live-stream behavior; `false` requests a
  * finite snapshot of entries durable when the request is handled.
@@ -702,17 +725,10 @@ export const CancelInputSchema = ReasonedMutationInputSchema
  */
 export const WatchFilter = Schema.Struct({
   runId: Schema.optional(RunId),
-  /**
-   * A resumable cursor into ONE run's journal partition.
-   *
-   * Journal sequences are partition-local: the plan partition and every run
-   * partition each start at 0, so one scalar cursor means different positions
-   * in different partitions. An unscoped watch that applied it to all of them
-   * skipped every lower unseen sequence in every other partition, which is why
-   * `Control.watch` refuses `afterSequence` without `runId`. Exactly-once
-   * resumption is a promise about a scoped watch, and only about a scoped one.
-   */
+  /** Resume after a fully consumed source entry, including all its deltas. Requires `runId`. */
   afterSequence: Schema.optional(Schema.Number),
+  /** Resume after one emitted event, even inside an expansion. Requires `runId`. Cannot be combined with `afterSequence`. */
+  afterCursor: Schema.optional(WatchCursor),
   follow: Schema.optional(Schema.Boolean)
 })
 
@@ -733,6 +749,8 @@ export type WatchFilter = typeof WatchFilter.Type
  * @slop
  */
 export const ControlEvent = Schema.Struct({
+  /** Present on `ControlLive.watch` events; absent on raw projections and older providers. */
+  cursor: Schema.optional(WatchCursor),
   sequence: Schema.Number,
   kind: Schema.String,
   runId: Schema.optional(RunId),

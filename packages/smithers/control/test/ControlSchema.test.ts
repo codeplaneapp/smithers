@@ -120,6 +120,21 @@ describe("ControlSchema", () => {
     })
   })
 
+  it.each([{ sequence: 42 }, { sequence: 42, offset: 0 }, { sequence: 42, offset: 2 }])(
+    "round-trips a watch checkpoint in requests and events: %j",
+    (cursor) => {
+      roundTrip(ControlSchema.WatchFilter, { runId: "run-1", follow: false, afterCursor: cursor })
+      roundTrip(ControlSchema.ControlEvent, {
+        cursor,
+        sequence: 42,
+        kind: "control.steer.delivered",
+        runId: "run-1",
+        occurredAt: 42,
+        payload: {}
+      })
+    }
+  )
+
   it("round-trips every receipt variant", () => {
     roundTrip(ControlSchema.Receipt, { _tag: "Accepted", receiptId: "receipt-1", runId: "run-1" })
     roundTrip(ControlSchema.Receipt, { _tag: "AlreadyApplied", receiptId: "receipt-1" })

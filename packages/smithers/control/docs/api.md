@@ -133,11 +133,12 @@ the same run.
 
 ### Signals and events
 
-| Export          | Shape                                                                                                                                                                         |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SignalPayload` | `{ name: string; payload: Json }`.                                                                                                                                            |
-| `WatchFilter`   | `{ runId?: RunId; afterSequence?: number; follow?: boolean }`. `afterSequence` requires `runId`. Omitting `follow` keeps the live stream; `false` requests a finite snapshot. |
-| `ControlEvent`  | `{ sequence: number; kind: string; runId?: RunId; occurredAt: number; payload: Json }`.                                                                                       |
+| Export          | Shape                                                                                                                                                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SignalPayload` | `{ name: string; payload: Json }`.                                                                                                                                                                                          |
+| `WatchCursor`   | `{ sequence: number; offset?: number }`. A present offset is the last consumed expansion index; absent means the source entry is fully consumed.                                                                            |
+| `WatchFilter`   | `{ runId?: RunId; afterSequence?: number; afterCursor?: WatchCursor; follow?: boolean }`. Either cursor requires `runId`; do not combine them. Omitting `follow` keeps the live stream; `false` requests a finite snapshot. |
+| `ControlEvent`  | `{ cursor?: WatchCursor; sequence: number; kind: string; runId?: RunId; occurredAt: number; payload: Json }`.                                                                                                               |
 
 ### Listing
 

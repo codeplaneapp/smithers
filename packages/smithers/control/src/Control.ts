@@ -231,6 +231,7 @@ export interface Service {
     RunNotFound | ClaimLost | InvalidInput | PersistenceError | Unavailable | TransportError | Unauthorized
   >
   readonly list: (input: ListRequest) => Effect.Effect<ListResponse, ControlError>
+  /** Checkpoint `event.cursor` after processing each event and resume with `afterCursor`. */
   readonly watch: (filter: WatchFilter) => Stream.Stream<ControlEvent, ControlError>
 }
 
