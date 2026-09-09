@@ -18,12 +18,15 @@ Effect service tags, and a host bundle is the thing that fills them:
 | Version control | `Jj`, from [`@smthrs/jj`](https://jj.smithers.sh/reference/api/)            |
 | Network         | `effect/unstable/http/HttpClient`             |
 
-The list is closed for two reasons, both owned by
-[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/). A service that is not on it cannot be
-attenuated, denied, or audited, so it must not exist. And step keys digest the
-list as their `layers` component, which makes "which platform implementations
-were in scope" part of a step's identity rather than a silent assumption a
-replay could violate.
+The list is closed for one reason, owned by
+[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/): a service that is not on it cannot be
+attenuated, denied, or audited, so it must not exist.
+
+Closing the list does not make the platform implementations part of a step's
+identity. [`@smthrs/plan`](https://plan.smithers.sh/reference/api/)'s step key digests only the `layers` its
+caller passes it, so "which platform implementations were in scope" is an
+explicit input a caller supplies, not something this bundle contributes. The
+identity table below is data to pass; nothing reads it for you.
 
 `BunHost.layer` provides all five, and `BunHost` is the type union of them:
 
