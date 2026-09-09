@@ -206,13 +206,19 @@ export const parseSmithersCloudRemote = (
   hosts: ReadonlySet<string> = new Set(defaultSmithersCloudHosts)
 ): DiscoveredSmithersCloudRepository | undefined => {
   const trimmed = url.trim()
-  let host: string | undefined
-  let path: string | undefined
+  let host = ""
+  let path = ""
   try {
     const parsed = new URL(trimmed)
     host = parsed.hostname.toLowerCase()
     path = parsed.pathname
   } catch {
+    // Not a URL at all, so the SCP-style fallback below is the only reading.
+  }
+  // A userless SCP remote such as `jjhub.tech:alice/repo.git` is a URL to the
+  // WHATWG parser: the host becomes an opaque scheme and the hostname is empty.
+  // The fallback therefore reruns on an empty host, not only on a parse failure.
+  if (host === "") {
     const match = scpLike.exec(trimmed)
     if (match === null) return undefined
     host = match[1]!.toLowerCase()
