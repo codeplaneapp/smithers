@@ -1,7 +1,9 @@
 /** Private Bun boundary for the shared native control host; no Node sidecar.
  * @since 1.0.0
  */
-import { BunCrypto, BunHttpClient, BunServices } from "@effect/platform-bun"
+import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Database from "@smthrs/database/bun/BunDatabase"
 import * as Runtime from "@smthrs/flows/BunRuntime"
 import * as Gateway from "@smthrs/gateway/bun/BunGateway"

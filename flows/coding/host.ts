@@ -10,6 +10,8 @@ import { atomDelegate, atomFlows, atomOperations, EditAtom } from "./atoms.ts"
 import { checkDelegate, checkLayers } from "./checks.ts"
 import { NativeCoding, nativeActions, nativeLayer, type NativeOptions } from "./native.ts"
 import { registration, RunPlan } from "./registration.ts"
+import * as Snapshots from "./snapshots.ts"
+import * as CodingFileSystem from "./filesystem.ts"
 
 /** Operator configuration, never accepted from a workflow or gateway request. */
 export interface Options extends NativeOptions {
@@ -39,7 +41,10 @@ export const roleResolver = (base: SeatResolver.Service, implementationModel: st
 /** Both platform entries call this one recipe; no second executor or store. */
 export const layer = (platform: NativeControl.Platform, options: Options, suppliedSeats?: SeatResolver.Service) => {
   configured(options)
-  const native = NativeControl.make(platform, environment => Layer.effect(SeatResolver.SeatResolver)(
+  const native = NativeControl.make({ ...platform,
+    jj: root => Snapshots.layerAt({ ...options, repositoryPath: root }),
+    filesystem: (root, fs, spawner) => Effect.succeed(CodingFileSystem.make({ ...options, repositoryPath: root }, fs, spawner))
+  }, environment => Layer.effect(SeatResolver.SeatResolver)(
     Effect.map(SeatResolver.SeatResolver, base => roleResolver(base, options.implementationModel))
   ).pipe(Layer.provide(suppliedSeats === undefined ? NativeEquipment.layerSeatResolver(environment) : SeatResolver.layer(suppliedSeats))))
   return Layer.suspend(() => Layer.unwrap(Effect.gen(function*() {

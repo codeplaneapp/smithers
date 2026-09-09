@@ -127,22 +127,14 @@ export const make = (catalog: Effect.Effect<Executable.Catalog>, actionHost: Age
         })
     })
 
-    const source = Effect.gen(function*() {
-      const instance = yield* Effect.serviceOption(FlowRuntime.FlowInstance)
-      if (Option.isNone(instance)) return yield* new HarnessError({
-        code: "assembly_failed", message: "Native steering requires an approved execution context"
-      })
-      const { rootId } = yield* owner(instance.value.executionId)
-      const steering = yield* Notifications.make({ runId: rootId, lineageId: rootId }).pipe(
-        Effect.provideService(NotificationQueue.NotificationQueue, notifications)
-      )
-      return { steering, executionId: instance.value.executionId }
-    })
+    // Construction closes the service dependency but grants no root identity.
+    // Every admitted handler installs the real queue source below, once.
+    const unowned = Effect.fail(new HarnessError({
+      code: "assembly_failed", message: "Native steering requires an approved execution context"
+    }))
     const steering = Steering.make({
-      read: () => source.pipe(Effect.flatMap(({ steering }) => steering.read())),
-      drain: input => source.pipe(Effect.flatMap(({ steering, executionId }) => steering.drain({
-        ...input, boundary: JSON.stringify([executionId, input.boundary])
-      })))
+      read: () => unowned,
+      drain: () => unowned
     })
     const runtime = FlowRuntime.FlowRuntime.of({
       ...engine,
@@ -150,6 +142,15 @@ export const make = (catalog: Effect.Effect<Executable.Catalog>, actionHost: Age
         engine.register(flow, (payload, executionId) =>
           Effect.scoped(Effect.gen(function*() {
             const { rootId, envelope } = yield* owner(executionId)
+            const notificationsForRoot = yield* Notifications.make({ runId: rootId, lineageId: rootId }).pipe(
+              Effect.provideService(NotificationQueue.NotificationQueue, notifications)
+            )
+            const handlerSteering = Steering.make({
+              read: notificationsForRoot.read,
+              drain: input => notificationsForRoot.drain({
+                ...input, boundary: JSON.stringify([executionId, input.boundary])
+              })
+            })
             const budget = yield* RcMap.get(budgets, rootId).pipe(Effect.orDie)
             const instance = yield* FlowRuntime.FlowInstance
             const accountingInstance = { ...instance, executionId: rootId }
@@ -171,7 +172,7 @@ export const make = (catalog: Effect.Effect<Executable.Catalog>, actionHost: Age
               Effect.provideService(AgentAction.Host, { ...actionHost,
                 capabilityEnvelope: AgentSession.patterns(envelope.capabilities) }),
               Effect.provideService(Budget.Budget, shared),
-              Effect.provideService(Steering.Source, steering),
+              Effect.provideService(Steering.Source, handlerSteering),
               Effect.provideService(QuotaPolicy.QuotaClassifier, quota)
             )
           })))

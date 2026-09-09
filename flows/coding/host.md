@@ -9,7 +9,7 @@ The `coding/implement` role must map to an explicit `provider:model` through the
 The executable accepts the existing command shape:
 
 ```sh
-smithers serve --root /home/developer/workspace --host 0.0.0.0 --port 7331 --listen
+smithers-coding-host serve --root /home/developer/workspace --host 0.0.0.0 --port 7331 --listen
 ```
 
 `--help` and `--version` work before opening the repository or resolving provider credentials. The same `Serve.refuse` policy requires a credential and explicit `--listen` for a non-loopback bind. The Plue service owns its workspace lifetime lock and process scope.
@@ -22,6 +22,47 @@ Every native handler traverses recorded parent edges to its one active, approved
 
 Steering uses `Notifications.make` over the captured Control notification queue. It is addressed to the approved root, including after a cold descendant resume. Drain boundaries combine the native execution ID with the agent's frame boundary, so two descendants cannot accidentally replay each other's drain. Native usage and execution evidence remain in the native journal; Control lifecycle and steering remain in their existing stores.
 
+The existing queue delivers a pending root steer to the first consuming boundary; it does not broadcast to every descendant. This coding recipe has one model-backed editing branch, while slow checks run command actions and consume no steering. Before enabling multiple model branches, the coordinating/editing branch must own user steering and propagate a revised plan explicitly. Each admitted handler binds its verified root source once, avoiding a fresh ancestor walk and disk read on every frame.
+
 The host catalog is pinned for its process lifetime. Deploying a changed executable definition requires restarting the host. A source change after approval explicitly fails the old plan; restarting cannot make that old approval describe the new source. An ordinary host without the configured catalog leaves native module runs parked.
 
 The native acceptance fixture uses a scripted model behind the existing `SeatResolver`, while exercising the actual `AgentAction`, QuickJS cell, guarded write, Plue adapter, immutable checks and durable Control/engine journals. This distinguishes executable evidence from an agent's claimed summary. Both required fast and slow checks must inspect the implemented revision before validation succeeds.
+
+## Deployment artifact
+
+`node flows/coding/build.mjs /path/to/smithers-coding-host` uses the repository's existing esbuild dependency to emit one executable ESM file. It fits Plue's current gzip/base64 single-executable staging path. The Node shebang selects the default runtime; `bun smithers-coding-host ...` uses the Bun adapters in the same artifact. A build-only lazy wrapper keeps the Bun SQLite builtin behind the existing dynamic platform import, preventing an eager Node import of `bun:sqlite`. It changes no SQL or gateway protocol.
+
+QuickJS's existing single-file variant is bundled. SQLite remains the runtime's native builtin, and process containment programs remain their existing embedded source. Plue separately provisions JJ, Python, the owning coding adapter/configuration and `smithers-jj-export`; these are explicit native dependencies, not files hidden inside the JavaScript artifact. Declared repository modules still resolve their own project dependencies as usual. This artifact is private deployment composition, not another published package or runtime primitive.
+
+The configured executable is staged separately from the general Smithers CLI.
+Plue's existing `SMITHERS_WORKSPACE_CODING_HOST_BINARY` operator option selects
+that artifact; it is installed as `/usr/local/bin/smithers-coding-host`. General
+CLI pack setup and interactive commands retain their existing executable.
+
+Engine compensation uses the private `snapshots.ts` configuration of the existing
+Jj service. Its opaque preimage is an immutable full commit ID; snapshots never
+create or describe another planned JJ change. Privileged snapshot subprocesses
+use the existing contained spawner and Control journal process ledger. Standard
+agent tools keep their existing guarded spawner and native journal process ledger.
+
+`filesystem.ts` adds native JJ eligibility to the existing guarded standard file
+tools. New ignored files, metadata/symlink paths, native snapshot exclusions and
+oversized files are refused before final mutation. Existing tracked ignored files
+remain editable. Write/Edit/ApplyPatch retain their own parsing and atomic sibling
+replacement. A transient Set tracks only exclusive Preserve siblings until final
+rename/cleanup; final destinations always receive the native prospective-byte
+check. It is not persistent file ownership or memory. As with Preserve itself,
+process death can leave an operational sibling; this never makes an ignored user
+file an accepted output. Direct streaming/writable handles, recursive mutations,
+links and independent permission/timestamp changes are explicitly unsupported in
+this coding configuration. Shell commands remain irreversible and are never
+advertised as fully compensated file tools. Provisioned repository roots must be
+canonical; this recipe does not relax the existing filesystem boundary for aliases.
+
+The native acceptance test rejects an ignored Write, writes through a `*.tmp`
+ignore rule, edits the resulting file, verifies both immutable check tiers, and
+asserts one planned JJ atom and matching health identity. Run the same bundle
+proof with `node flows/test/coding-host-bundle.mjs` or
+`bun flows/test/coding-host-bundle.mjs`, with `PLUE_CODING_ADAPTER_SOURCE` and
+`PLUE_JJ_EXPORT_BINARY` pointing to the actual Plue artifacts. It exercises bundled
+QuickJS, builtin SQLite and contained processes; `--version` alone is insufficient.

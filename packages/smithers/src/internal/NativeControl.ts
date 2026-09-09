@@ -24,7 +24,8 @@ import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
 import type * as Sandbox from "@smthrs/harness/Sandbox"
 import * as Steering from "@smthrs/harness/Steering"
 import * as GatewayProjections from "@smthrs/gateway/Projections"
-import type * as NodeJj from "@smthrs/jj/node/NodeJj"
+import type * as KernelJj from "@smthrs/kernel/Jj"
+import type { JjError } from "@smthrs/jj"
 import { SqlJournal } from "@smthrs/journal"
 import * as Journal from "@smthrs/journal/Journal"
 import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
@@ -36,7 +37,7 @@ import type * as McpClient from "@smthrs/mcp/McpClient"
 import * as McpFlows from "@smthrs/mcp/McpFlows"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import * as Recall from "@smthrs/memory/Recall"
-import * as RequestExecutor from "@smthrs/model/RequestExecutor"
+import type * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import type { NotificationQueue } from "@smthrs/notifications"
 import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import * as Descriptor from "@smthrs/registry/Descriptor"
@@ -51,8 +52,8 @@ import * as RunCatalog from "@smthrs/sync/RunCatalog"
 import * as SyncAuth from "@smthrs/sync/SyncAuth"
 import * as SyncServer from "@smthrs/sync/SyncServer"
 import * as WorkspaceShare from "@smthrs/sync/WorkspaceShare"
-import { Context, Effect, FileSystem, Layer, Scope } from "effect"
-import type { Crypto, Path } from "effect"
+import { Cause, Context, Effect, FileSystem, Layer } from "effect"
+import type { Crypto, Path, Scope } from "effect"
 import * as Deferred from "effect/Deferred"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { randomUUID } from "node:crypto"
@@ -104,7 +105,10 @@ export interface Platform {
   readonly crypto: Layer.Layer<Crypto.Crypto>
   readonly database: (filename: string) => Layer.Layer<DurableWriter.DurableWriter | SqlClient>
   readonly runtime: typeof NodeFlowsRuntime.layer
-  readonly jj: typeof NodeJj.layerAt
+  readonly jj: (root: string) => Layer.Layer<KernelJj.Jj, JjError, KernelChildProcessSpawner.ChildProcessSpawner>
+  /** Private deployment policy around the already guarded standard file tools. */
+  readonly filesystem?: (root: string, filesystem: FileSystem.FileSystem,
+    spawner: KernelChildProcessSpawner.ChildProcessSpawner["Service"]) => Effect.Effect<FileSystem.FileSystem>
   readonly requestExecutor: Layer.Layer<RequestExecutor.RequestExecutor>
   readonly gateway: typeof NodeGateway.layer
   readonly bearerPrincipal: typeof NodeGateway.bearerPrincipal
@@ -496,10 +500,20 @@ const executorFromEngine = (
   // MCP connections, and reap only verified children of dead owners before
   // exposing the spawner. The registration phase receives the engine journal
   // from native.runtime, so these records survive this process.
-  const contained = ProcessReaper.layerSpawner().pipe(
+  const contain = () => ProcessReaper.layerSpawner().pipe(
     Layer.provideMerge(platform),
     Layer.provideMerge(ProcessReaper.layer()),
     Layer.provide(ProcessLedger.layer({ hostId: hostname(), ownerPid: process.pid }))
+  )
+  let toolSpawner: KernelChildProcessSpawner.ChildProcessSpawner["Service"] | undefined
+  const contained = contain().pipe(Layer.tap(context => Effect.sync(() => {
+    toolSpawner = Context.get(context, KernelChildProcessSpawner.ChildProcessSpawner)
+  })))
+  // Engine bookkeeping must be contained before the native engine itself
+  // starts. Reuse the already materialized control journal for that lifetime;
+  // a distinct layer instance keeps registration's native journal separate.
+  const engineJj = native.jj(workspaceRoot).pipe(
+    Layer.provide(contain().pipe(Layer.provide(engine.journal)))
   )
   const guarded = KernelChildProcessSpawner.layer.pipe(
     Layer.provide(grants),
@@ -529,7 +543,11 @@ const executorFromEngine = (
   // one is in hand, so a run that rebuilds many times still holds one pool.
   const registration = Layer.effect(ControlExecutor.ControlExecutor)(
     Effect.gen(function*() {
-      const filesystemServices = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
+      const capturedFilesystem = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
+      const filesystemServices = native.filesystem === undefined ? capturedFilesystem : Context.add(
+        capturedFilesystem, FileSystem.FileSystem,
+        yield* native.filesystem(workspaceRoot, Context.get(capturedFilesystem, FileSystem.FileSystem), toolSpawner!)
+      )
       const shellServices = yield* Effect.context<
         KernelChildProcessSpawner.ChildProcessSpawner | Path.Path
       >()
@@ -583,7 +601,10 @@ const executorFromEngine = (
       })
       admission = (runId) => routing.canExecute(workspaceRoot, runId).pipe(
         Effect.flatMap(allowed => allowed ? moduleAdmission(runId) : Effect.succeed(false)),
-        Effect.catchCause(() => Effect.succeed(false))
+        Effect.catchCause(cause => Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : Effect.logWarning("Native admission lookup failed; leaving the run parked", { runId, cause: Cause.pretty(cause) })
+            .pipe(Effect.as(false)))
       )
       const session = AgentSession.make({
         canExecute,
@@ -661,7 +682,7 @@ const executorFromEngine = (
     WorkspaceSandbox.layerFileSystem(),
     registration
   ).pipe(
-    Layer.provide([platform, native.crypto, native.jj(workspaceRoot)]),
+    Layer.provide([platform, native.crypto, engineJj]),
     Layer.tap(() =>
       secureSqliteFiles(executionDatabasePath(root)).pipe(Effect.provide(native.host))
     ),
