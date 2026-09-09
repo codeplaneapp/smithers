@@ -33,6 +33,8 @@ The implementation plans one `ExpandFilegroup` action call whose payload is the 
 
 The declared files and globs inside `srcs` are collected by `Target.make` as declared inputs, so the group's own key carries their digests, and nested groups are dependency edges, so their keys reach the group's key. The planner adds the files of every group reachable from a consumer to that consumer's read set, so editing any member invalidates every target that names the group. Globs expand through `Input.expandGlob`, which is package scoped and applies `.gitignore`; the expansion is deduplicated by path and sorted, and a named file that does not exist digests to null instead of failing.
 
+For glob expansion and `Input.discoverFiles`, matching rules in deeper `.gitignore` files override ancestor rules. A negation such as `!**/*.log` restores files excluded by an ancestor `*.log` rule, provided their parent directories are not excluded. Globs with a static directory prefix obey the same restriction.
+
 `kinds` is empty, so `smithers-build build`, `test`, `lint`, and `docs` never select a group as a root. Dependency traversal, `smithers-build query`, and `smithers-build graph` ignore kinds, so a group is still addressable by label and still traversed by `deps(...)`. Under a Flow runtime, a group reached as a dependency records one `ExpandFilegroup` call that reads the named files and succeeds with them digested, which needs `ExpandFilegroupLive`. Under `smithers-build`, the group node settles green without spawning a process, and its files reach the consumer through the read set and the consumer's key.
 
 ## Channels

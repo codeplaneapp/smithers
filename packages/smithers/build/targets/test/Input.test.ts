@@ -36,6 +36,37 @@ afterEach(async () => {
   await Fs.rm(outside, { recursive: true, force: true })
 })
 
+describe("Input nested ignore precedence", () => {
+  const list = async (method: string): Promise<ReadonlyArray<string>> =>
+    method === "discoverFiles"
+      ? (await Input.discoverFiles(root)).filter((path) => path.endsWith(".log"))
+      : Input.expandGlob(root, "", method)
+
+  it.each(["discoverFiles", "**/*.log", "src/**/*.log", "src/nested/**/*.log"])(
+    "%s lets deeper negations restore files ignored by a parent",
+    async (method) => {
+      await write(".gitignore", "*.log\n")
+      await write("root.log", "ignored\n")
+      await write("src/.gitignore", "!**/*.log\n")
+      await write("src/nested/.gitignore", "*.tmp\n")
+      await write("src/nested/keep.log", "kept\n")
+      await write("src/nested/deeper/.gitignore", "*.log\n")
+      await write("src/nested/deeper/drop.log", "ignored again\n")
+      expect(await list(method)).toEqual(["src/nested/keep.log"])
+    }
+  )
+
+  it.each(["discoverFiles", "**/*.log", "src/**/*.log", "src/nested/**/*.log"])(
+    "%s cannot restore files below an excluded directory",
+    async (method) => {
+      await write(".gitignore", "src/\n")
+      await write("src/.gitignore", "!**/*.log\n")
+      await write("src/nested/keep.log", "still ignored\n")
+      expect(await list(method)).toEqual([])
+    }
+  )
+})
+
 describe("Input.expandGlob", () => {
   it.each(["C:/outside/*.ts", "src\\*.ts", "src/\uD800.ts", "src/\0.ts"])(
     "refuses the non-portable pattern %j",

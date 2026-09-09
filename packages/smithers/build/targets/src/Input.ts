@@ -709,11 +709,17 @@ const isIgnored = (
   scopes: ReadonlyArray<IgnoreScope>,
   path: string,
   isDirectory: boolean
-): boolean =>
-  scopes.some((scope) => {
+): boolean => {
+  let ignored = false
+  for (const scope of scopes) {
     const relative = scope.base === "" ? path : path.slice(scope.base.length + 1)
-    return relative.length > 0 && scope.matcher.ignores(isDirectory ? `${relative}/` : relative)
-  })
+    if (relative.length === 0) continue
+    // A deeper rule overrides an ancestor only when it makes a decision.
+    const result = scope.matcher.test(isDirectory ? `${relative}/` : relative)
+    if (result.ignored || result.unignored) ignored = result.ignored
+  }
+  return ignored
+}
 
 /**
  * Reports whether a symbolic link found during a walk names workspace content.
@@ -900,9 +906,12 @@ export const expandGlob = async (
   if (scan.packageScoped && await crossesPackageBoundary(scan, packageRoot, start, chain)) return []
   const scopes: Array<IgnoreScope> = []
   for (const ancestor of chain.slice(0, -1)) {
+    // Git never reads rules below an excluded directory, even for a static prefix.
+    if (isIgnored(scopes, ancestor.relative, true)) return []
     const matcher = await readIgnore(scan, ancestor.relative)
     if (matcher !== undefined) scopes.push({ base: ancestor.relative, matcher })
   }
+  if (isIgnored(scopes, start, true)) return []
   await walk(scan, chain[chain.length - 1]!, scopes, false)
   return scan.found
     .filter((path) =>
