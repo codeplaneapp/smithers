@@ -171,6 +171,103 @@ describe("Trellis", () => {
       expect(result.remaining).toBe(2)
     }))
 
+  it.effect("refuses deeply nested continuations with typed depth errors and completed-round residue", () =>
+    Effect.gen(function*() {
+      const first: Trellis.Plan = { agent: { goal: "only" } }
+      for (const terminal of [{ agent: { goal: "next" } }, { parallel: [] }]) {
+        let next: unknown = terminal
+        for (let depth = 0; depth < 20_000; depth++) next = { sequence: [next] }
+        const trace: Array<string> = []
+        const failure = yield* Trellis.run("ship it", {
+          envelope,
+          author: () => Effect.succeed(first),
+          continue: () => Effect.succeed(next),
+          leaf: ({ goal }) => Effect.sync(() => (trace.push(goal), goal))
+        }).pipe(Effect.flip)
+
+        expect(failure).toBeInstanceOf(Trellis.TrellisError)
+        expect(failure.code).toBe("depth_exceeded")
+        expect(failure.path).toBe("root.sequence[0].sequence[0].sequence[0]")
+        expect(failure.cause).toMatchObject({
+          rounds: [{ plan: first, result: "only" }],
+          remaining: 2
+        })
+        expect(trace).toEqual(["only"])
+      }
+    }))
+
+  it.effect("accepts empty continuations at the envelope depth", () =>
+    Effect.gen(function*() {
+      const result = yield* Trellis.run("ship it", {
+        envelope,
+        author: () => Effect.succeed({ agent: { goal: "only" } }),
+        continue: () => Effect.succeed({ sequence: [{ parallel: [{ sequence: [] }] }] }),
+        leaf: ({ goal }) => Effect.succeed(goal)
+      })
+
+      expect(result.rounds).toHaveLength(1)
+      expect(result.remaining).toBe(2)
+    }))
+
+  it.effect("retains every refusal from initial and continuation plans", () =>
+    Effect.gen(function*() {
+      const first: Trellis.Plan = { agent: { goal: "only" } }
+      const invalid = { sequence: [{ agent: { goal: "" } }, { agent: { goal: "ok", seat: 1 } }] }
+      const refusals = Trellis.validate(invalid, envelope)
+      expect(refusals.map(({ path }) => path)).toEqual([
+        "root.sequence[0].agent.goal",
+        "root.sequence[1].agent.seat"
+      ])
+      for (const initial of [true, false]) {
+        const trace: Array<string> = []
+        const failure = yield* Trellis.run("ship it", {
+          envelope,
+          author: () => Effect.succeed(initial ? invalid : first),
+          continue: () => Effect.succeed(invalid),
+          leaf: ({ goal }) => Effect.sync(() => (trace.push(goal), goal))
+        }).pipe(Effect.flip)
+
+        expect(failure.code).toBe(refusals[0]!.code)
+        expect(failure.path).toBe(refusals[0]!.path)
+        expect(failure.message).toBe(refusals[0]!.message)
+        expect(failure.cause).toEqual({
+          rounds: initial ? [] : [{ plan: first, result: "only" }],
+          remaining: initial ? 3 : 2,
+          refusals
+        })
+        expect(trace).toEqual(initial ? [] : ["only"])
+      }
+    }))
+
+  it.effect("retains completed-round residue and the original error when a later leaf fails", () =>
+    Effect.gen(function*() {
+      const first: Trellis.Plan = { agent: { goal: "first" } }
+      const next: Trellis.Plan = { sequence: [{ agent: { goal: "second" } }, { agent: { goal: "fail" } }] }
+      const error = { reason: "worker failed" }
+      const trace: Array<string> = []
+      let continued = 0
+      const failure = yield* Trellis.run("ship it", {
+        envelope,
+        author: () => Effect.succeed(first),
+        continue: () => Effect.sync(() => (continued += 1, next)),
+        leaf: ({ goal }) =>
+          Effect.suspend(() => {
+            trace.push(goal)
+            return goal === "fail" ? Effect.fail(error) : Effect.succeed(goal)
+          })
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(Trellis.TrellisError)
+      expect(failure).toMatchObject({
+        code: "leaf_failed",
+        path: "root.sequence[1]",
+        cause: { rounds: [{ plan: first, result: "first" }], remaining: 2, error }
+      })
+      expect((failure as Trellis.TrellisError).cause).toHaveProperty("error", error)
+      expect(trace).toEqual(["first", "second", "fail"])
+      expect(continued).toBe(1)
+    }))
+
   it.effect("refuses invalid execute concurrency before a leaf callback runs", () =>
     Effect.gen(function*() {
       const plan: Trellis.Plan = { agent: { goal: "a" } }

@@ -523,7 +523,17 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
     const exhausted = unapproved !== undefined
     const authored = unapproved === undefined ? derisked : unapproved.output
     const refusals = Trellis.validate(authored, envelope)
-    if (refusals.length > 0) return yield* Effect.fail(refusals[0] as Trellis.TrellisError)
+    if (refusals.length > 0) {
+      const refusal = refusals[0] as Trellis.TrellisError
+      return yield* Effect.fail(
+        new Trellis.TrellisError({
+          code: refusal.code,
+          path: refusal.path,
+          message: refusal.message,
+          cause: { rounds: [], remaining: envelope.fuel, refusals }
+        })
+      )
+    }
     const plan = authored as Trellis.Plan
     const outputs = new Map<string, unknown>()
     yield* Trellis.execute(plan, {

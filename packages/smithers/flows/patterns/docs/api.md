@@ -141,10 +141,21 @@ optional `cause` with the reported error or errors.
 fault was found at (`root`, or a path such as `root.parallel[1].sequence[0]`),
 a message, and an optional `cause`. `Trellis.validate` returns every refusal
 it finds as an array and attaches no cause. `Trellis.make` throws one, and
-`Trellis.execute` and `Trellis.run` fail with one; a refusal `run` reports
-carries `{ rounds, remaining }` as its cause, the rounds already executed and
-the fuel left. `DelegationChain.run` fails with the same error when the
-derisked plan does not fit its envelope.
+`Trellis.execute` and `Trellis.run` fail with one for admission errors.
+A plan validation failure from `Trellis.run` preserves the first refusal's code,
+path, and message and carries `{ rounds, remaining, refusals }` as its cause.
+`refusals` contains every validation reason. A later round that exceeds the
+remaining fuel carries `{ rounds, remaining }`.
+
+Typed leaf failures in `Trellis.run` become `leaf_failed` at the leaf's path,
+with `{ rounds, remaining, error }` as the cause. `error` is the original leaf
+failure. `rounds` contains completed rounds only; `remaining` is the fuel left
+after those rounds, before charging the failed round. `Trellis.execute`
+continues to propagate typed leaf failures unchanged.
+
+`DelegationChain.run` reports the first refusal with all `refusals` in the
+same cause when the derisked plan does not fit its envelope. Its `rounds` is
+empty and `remaining` is the envelope fuel because execution has not started.
 
 | Code               | Path          | Raised when                                                                                                                                                                      |
 | ------------------ | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -153,6 +164,7 @@ derisked plan does not fit its envelope.
 | `depth_exceeded`   | the node      | A node nests deeper than the envelope `depth`                                                                                                                                    |
 | `fanout_exceeded`  | the container | A container holds more members than the envelope `fanout`                                                                                                                        |
 | `fuel_exhausted`   | `root`        | A plan needs more leaf calls than the envelope `fuel`, or than the fuel left after earlier rounds                                                                                |
+| `leaf_failed`      | the leaf      | A leaf effect fails during `Trellis.run` |
 
 ### `DelegationError`
 

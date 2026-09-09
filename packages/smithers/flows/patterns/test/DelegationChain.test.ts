@@ -5,7 +5,7 @@ import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import * as DelegationChain from "../src/DelegationChain.ts"
 import { PatternError } from "../src/PatternError.ts"
-import type * as Trellis from "../src/Trellis.ts"
+import * as Trellis from "../src/Trellis.ts"
 
 const stub = (name: string): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, never> =>
   Flow.make({
@@ -63,6 +63,33 @@ const callsTagged = (graph: Graph.Graph, capability: string): ReadonlyArray<Grap
 const keys = (value: Record<string, unknown>): ReadonlyArray<string> => Object.keys(value).sort()
 
 describe("DelegationChain", () => {
+  it.effect("reports every plan refusal before executing any leaf", () =>
+    Effect.gen(function*() {
+      const invalid = { sequence: [{ agent: { goal: "" } }, { agent: { goal: "ok", seat: 1 } }] }
+      const trace: Array<string> = []
+      const failure = yield* DelegationChain.run("ship it", {
+        ...bounds,
+        refine: () => Effect.succeed("goal"),
+        plan: () => Effect.succeed(invalid),
+        derisk: () => Effect.succeed(true),
+        execute: {
+          weak: () => Effect.sync(() => trace.push("weak")),
+          strong: () => Effect.sync(() => trace.push("strong"))
+        },
+        review: () => Effect.sync(() => (trace.push("review"), true)),
+        settle: () => Effect.sync(() => trace.push("settle"))
+      }).pipe(Effect.flip)
+      const refusals = Trellis.validate(invalid, { fuel: 3, depth: 3, fanout: 3 })
+
+      expect(refusals).toHaveLength(2)
+      expect(failure).toBeInstanceOf(Trellis.TrellisError)
+      expect(failure.code).toBe(refusals[0]!.code)
+      expect(failure.path).toBe(refusals[0]!.path)
+      expect(failure.message).toBe(refusals[0]!.message)
+      expect(failure.cause).toEqual({ rounds: [], remaining: 3, refusals })
+      expect(trace).toEqual([])
+    }))
+
   it.effect("stops the derisk loop at the first approved round", () =>
     Effect.gen(function*() {
       const calls: Array<string> = []

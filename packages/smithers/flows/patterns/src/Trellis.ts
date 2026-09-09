@@ -36,7 +36,8 @@ export const TrellisErrorCode = Schema.Literals([
   "invalid_plan",
   "depth_exceeded",
   "fanout_exceeded",
-  "fuel_exhausted"
+  "fuel_exhausted",
+  "leaf_failed"
 ])
 
 /**
@@ -48,7 +49,7 @@ export const TrellisErrorCode = Schema.Literals([
 export type TrellisErrorCode = typeof TrellisErrorCode.Type
 
 /**
- * A rejected plan or envelope, naming the plan path it was found at.
+ * A rejected plan, envelope, or failed leaf, naming its plan path.
  *
  * Trellis owns this failure rather than reusing `PatternError` because every
  * rejection carries a plan path, and a path is what an author has to read to
@@ -234,11 +235,13 @@ const shape = (value: unknown): "agent" | "sequence" | "parallel" | undefined =>
   return key === "agent" || key === "sequence" || key === "parallel" ? key : undefined
 }
 
-const namesNoWork = (value: unknown): boolean => {
+const namesNoWork = (value: unknown, depth: number): boolean => {
+  // Stop at the admission bound so validate can report an over-deep value.
+  if (depth < 1) return false
   const kind = shape(value)
   if (kind === undefined || kind === "agent") return false
   const members = (value as { readonly [key: string]: unknown })[kind]
-  return Array.isArray(members) && members.every((member) => namesNoWork(member))
+  return Array.isArray(members) && members.every((member) => namesNoWork(member, depth - 1))
 }
 
 /**
@@ -528,9 +531,9 @@ export interface RuntimeOptions<E, R, E2, R2, E3, R3> {
   readonly envelope: Envelope
   /**
    * Requests another round. `undefined`, and any value whose only content is
-   * empty `sequence` or `parallel` containers, terminates the trampoline even
-   * though the {@link Plan} codec and {@link validate} refuse such a value as a
-   * plan. A continuation names work for another round, so one that names no
+   * empty `sequence` or `parallel` containers within the envelope depth,
+   * terminates the trampoline even though the {@link Plan} codec and
+   * {@link validate} refuse such a value as a plan. A continuation names work for another round, so one that names no
    * work is the same answer as no request.
    */
   readonly continue?: ((input: Continuation) => Effect.Effect<unknown, E3, R3>) | undefined
@@ -592,6 +595,11 @@ export const execute = <E, R>(
  * left over from earlier rounds, so a plan that overspends fails
  * `fuel_exhausted` before any of its leaves runs.
  *
+ * Plan refusals include every validation reason in `cause.refusals`. Typed
+ * leaf failures become `leaf_failed` with their original error in `cause.error`.
+ * Both include completed `rounds` and `remaining` fuel. Fuel is charged only
+ * after a round completes, so a failed round is absent from that residue.
+ *
  * `run` snapshots every callback, the envelope's three bounds, and
  * `concurrency` at the call, so a later edit to the option object does not
  * alter that run.
@@ -627,7 +635,7 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
               code: refusal.code,
               path: refusal.path,
               message: refusal.message,
-              cause: { rounds: [...rounds], remaining }
+              cause: { rounds: [...rounds], remaining, refusals }
             })
           )
         }
@@ -643,7 +651,20 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
             })
           )
         }
-        const result = yield* execute(plan, { leaf, concurrency })
+        const result = yield* execute(plan, {
+          concurrency,
+          leaf: (work) =>
+            leaf(work).pipe(
+              Effect.mapError((error) =>
+                new TrellisError({
+                  code: "leaf_failed",
+                  path: work.path,
+                  message: `Leaf ${work.path} failed in round ${round}`,
+                  cause: { rounds: [...rounds], remaining, error }
+                })
+              )
+            )
+        })
         remaining -= cost
         rounds.push({ plan, result })
         if (continuation === undefined) return { rounds, remaining }
@@ -651,7 +672,7 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
         // A continuation is a request for another round. Nothing, or a plan
         // that names no work, is the same answer: the trampoline is done. Every
         // other round costs at least one leaf, so `run` always terminates.
-        if (next === undefined || namesNoWork(next)) return { rounds, remaining }
+        if (next === undefined || namesNoWork(next, envelope.depth)) return { rounds, remaining }
         authored = next
       }
     })

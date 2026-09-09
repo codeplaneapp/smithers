@@ -110,8 +110,10 @@ const result = yield * Trellis.run("ship the release notes", {
 executed and the fuel left over.
 
 A continuation is a request for another round. Returning nothing ends the
-trampoline, and so does returning a plan that names no work: both are the same
-answer. Every other round costs at least one leaf, so `run` always terminates.
+trampoline, and so does returning a plan that names no work within the envelope
+depth. Deeper continuations fail with `depth_exceeded`, including trees made
+entirely of empty containers. Every other round costs at least one leaf, so
+`run` always terminates.
 
 Concurrency is bounded by one semaphore shared by the whole plan, defaulting to
 `envelope.fanout`. Sequence members run in order; parallel members start
