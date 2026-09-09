@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -58,11 +59,12 @@ export type MessageAvatarProps = Omit<ComponentProps<"span">, "children"> & {
 /** Author avatar: image with an automatic text/glyph fallback. */
 export function MessageAvatar({ src, alt = "", fallback, className, ...props }: MessageAvatarProps) {
   useMessageLaneCss();
+  const [failedSrc, setFailedSrc] = useState<string>();
   const decorative = alt === "";
   return (
     <span data-slot="message-avatar" className={cn("sui-msg-avatar", className)} {...props}>
-      {src ? (
-        <img src={src} alt={alt} aria-hidden={decorative ? true : undefined} />
+      {src && src !== failedSrc ? (
+        <img src={src} alt={alt} aria-hidden={decorative ? true : undefined} onError={() => setFailedSrc(src)} />
       ) : (
         <span aria-hidden={decorative ? true : undefined}>{fallback}</span>
       )}

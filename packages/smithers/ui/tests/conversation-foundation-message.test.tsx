@@ -103,6 +103,27 @@ describe("Message", () => {
     expect(decorative).toContain('aria-hidden="true"');
   });
 
+  test("avatar falls back once the image errors and retries a fresh src", async () => {
+    // Loadable under happy-dom, so only the dispatched error below unmounts the img.
+    const pixel = (tail: string) =>
+      `data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==#${tail}`;
+    const view = (src: string) => <MessageAvatar src={src} fallback="AB" />;
+
+    await render(view(pixel("one")));
+    const broken = container!.querySelector<HTMLImageElement>("img")!;
+    expect(broken.getAttribute("src")).toBe(pixel("one"));
+    expect(container!.textContent).toBe("");
+
+    await act(async () => broken.dispatchEvent(new Event("error")));
+    expect(container!.querySelector("img")).toBeNull();
+    expect(container!.textContent).toBe("AB");
+
+    // A different src clears the recorded failure and retries the image.
+    await act(async () => root!.render(view(pixel("two"))));
+    expect(container!.querySelector<HTMLImageElement>("img")?.getAttribute("src")).toBe(pixel("two"));
+    expect(container!.textContent).toBe("");
+  });
+
   test("MessageGroup carries role=group", () => {
     const html = renderToStaticMarkup(
       <MessageGroup>
