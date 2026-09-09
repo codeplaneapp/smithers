@@ -819,9 +819,15 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
       const target = resolveTargetRepo(ctx.store, repo)
       return "error" in target ? target : { repo: target.repo }
     }
+    const repositories = new Set<string>()
     for (const row of ctx.store.collections.changes.values()) {
-      if (row.changeId === changeId) return { repo: row.repoId }
+      if (row.changeId === changeId) repositories.add(row.repoId)
     }
+    const matches = [...repositories].sort()
+    if (matches.length > 1) {
+      return { error: `Change ${changeId} is loaded in several repositories (${matches.join(", ")}) — name one as owner/repo` }
+    }
+    if (matches.length === 1) return { repo: matches[0]! }
     const target = resolveTargetRepo(ctx.store, undefined)
     return "error" in target ? target : { repo: target.repo }
   }
@@ -1153,6 +1159,33 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
     return
   }
 
+  /** A committed mutation stays successful even when its cards cannot be refreshed. */
+  const mutationResult = async (
+    repoId: string,
+    changeIds: string | ReadonlyArray<string>,
+    value: string,
+    options: ViewOptions = {},
+    workspaceId: string | null = null
+  ): Promise<{ readonly value: string }> => {
+    const warnings: Array<string> = []
+    const refresh = async (label: string, read: () => Promise<unknown>): Promise<void> => {
+      try {
+        const error = await read()
+        if (typeof error === "string") warnings.push(`${label}: ${error}`)
+      } catch (error) {
+        warnings.push(`${label}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    for (const changeId of typeof changeIds === "string" ? [changeIds] : changeIds) {
+      await refresh(`change ${changeId} on ${repoId}`, () => surfaceChange(repoId, changeId, options))
+    }
+    const viewWorkspace = deps.viewWorkspace
+    if (workspaceId !== null && viewWorkspace !== undefined) {
+      await refresh(`computer ${workspaceId}`, () => viewWorkspace(workspaceId))
+    }
+    return { value: warnings.length === 0 ? value : `${value} Refresh warning: ${warnings.join("; ")}. Refresh the cards to reconcile the result; the mutation already succeeded.` }
+  }
+
   /**
    * The landing number carrying the change: the card's stack when read, then
    * the change GET's own `stack.landing_request_number` (plue#485 — the
@@ -1318,9 +1351,11 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
         return landed.error
       }
       const refreshed = parseChangeset(landed.body)
-      const error = await surfaceChange(repoId, changeId, refreshed === null ? {} : { overrides: { changeset: refreshed } })
-      if (error !== undefined) return error
-      return { value: `Changeset ${changeset.id} landed — every member bookmark moved together.` }
+      return mutationResult(
+        repoId, changeId,
+        `Changeset ${changeset.id} landed — every member bookmark moved together.`,
+        refreshed === null ? {} : { overrides: { changeset: refreshed } }
+      )
     }
     const landingRead = await loadLanding(repoId, changeId)
     if ("unread" in landingRead) {
@@ -1364,10 +1399,8 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
      * made. The re-read renders the state the platform answers; the line
      * names the scope the PUT covered.
      */
-    const error = await surfaceChange(repoId, changeId)
-    if (error !== undefined) return error
     const scope = size <= 1 ? `${changeId} alone` : `1 → ${size} together (${landing.changeIds.join(", ")})`
-    return { value: `Landing request #${landing.number} is queued — it lands ${scope}; the card tracks it.` }
+    return mutationResult(repoId, changeId, `Landing request #${landing.number} is queued — it lands ${scope}; the card tracks it.`)
   }
 
   const splitReady: ChangeSeam["splitReady"] = async (changeId, repo) => {
@@ -1412,15 +1445,11 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
     if (original === null || created === null) {
       return `Smithers Cloud's answer for the split of ${changeId} named no changes.`
     }
-    const error = await surfaceChange(resolved.repo, original, { facet: "diff" })
-    if (error !== undefined) return error
-    const secondary = await surfaceChange(resolved.repo, created, { facet: "diff" })
-    if (secondary !== undefined) {
-      return `Split ${wanted.join(", ")} out of ${original} into ${created}, but ${created}'s card couldn't be read: ${secondary}`
-    }
-    return {
-      value: `${wanted.join(", ")} moved out of ${original} into the new change ${created} — both cards track them.`
-    }
+    return mutationResult(
+      resolved.repo, [original, created],
+      `${wanted.join(", ")} moved out of ${original} into the new change ${created} — both cards track them.`,
+      { facet: "diff" }
+    )
   }
 
   const resolveConflict: ChangeSeam["resolveConflict"] = async (changeId, path, repo) => {
@@ -1433,11 +1462,10 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
     const dispatched = await sendJson("POST", changePath(resolved.repo, changeId, "/conflicts/resolve"), { path })
     if ("error" in dispatched) return dispatched.error
     const sessionId = isRecord(dispatched.body) ? str(dispatched.body.agent_session_id) : null
-    const error = await surfaceChange(resolved.repo, changeId)
-    if (error !== undefined) return error
-    return {
-      value: `Dispatched an agent${sessionId === null ? "" : ` (session ${sessionId})`} to resolve ${path} in ${changeId} — the next revision carries the resolution.`
-    }
+    return mutationResult(
+      resolved.repo, changeId,
+      `Dispatched an agent${sessionId === null ? "" : ` (session ${sessionId})`} to resolve ${path} in ${changeId} — the next revision carries the resolution.`
+    )
   }
 
   const revertChange: ChangeSeam["revertChange"] = async (changeId, repo) => {
@@ -1494,10 +1522,12 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
     const answer = await sendJson("POST", repoPath(resolved.repo, `/landings/${landing.number}/threads/${threadId}/${verb}`))
     if ("error" in answer) return answer.error
     const thread = parseComment(answer.body)
-    const error = await surfaceChange(resolved.repo, changeId, { facet: "review" })
-    if (error !== undefined) return error
     const state = thread?.state ?? null
-    return { value: `Thread ${threadId} on ${changeId}${state === null ? "" : ` is ${state}`} — the card tracks it.` }
+    return mutationResult(
+      resolved.repo, changeId,
+      `Thread ${threadId} on ${changeId}${state === null ? "" : ` is ${state}`} — the card tracks it.`,
+      { facet: "review" }
+    )
   }
 
   /*
@@ -1524,19 +1554,13 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
     const body = isRecord(dispatched.body) ? dispatched.body : null
     const sessionId = body === null ? null : str(body.id)
     const workspaceId = body === null ? null : str(body.workspace_id)
-    const error = await surfaceChange(resolved.repo, changeId, { facet: "findings" })
-    if (error !== undefined) return error
-    if (workspaceId !== null && deps.viewWorkspace !== undefined) {
-      const shown = await deps.viewWorkspace(workspaceId)
-      if (typeof shown === "string") {
-        return `The agent is on finding ${findingId} of ${changeId}, but the computer ${workspaceId} it runs in couldn't be read: ${shown}`
-      }
-    }
-    return {
-      value: `The agent is on finding ${findingId} of ${changeId}${sessionId === null ? "" : ` (session ${sessionId})`}${
+    return mutationResult(
+      resolved.repo, changeId,
+      `The agent is on finding ${findingId} of ${changeId}${sessionId === null ? "" : ` (session ${sessionId})`}${
         workspaceId === null ? "" : ` — the computer ${workspaceId} card tracks the run`
-      }.`
-    }
+      }.`,
+      { facet: "findings" }, workspaceId
+    )
   }
 
   /*
@@ -1559,9 +1583,11 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
       { useful: false }
     )
     if ("error" in recorded) return recorded.error
-    const error = await surfaceChange(resolved.repo, changeId, { facet: "findings" })
-    if (error !== undefined) return error
-    return { value: `Finding ${findingId} of ${changeId} is recorded not useful — the card dims it.` }
+    return mutationResult(
+      resolved.repo, changeId,
+      `Finding ${findingId} of ${changeId} is recorded not useful — the card dims it.`,
+      { facet: "findings" }
+    )
   }
 
   /*
@@ -1587,11 +1613,11 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
       agent === null ? { reviewer: who } : { agent }
     )
     if ("error" in asked) return asked.error
-    const error = await surfaceChange(resolved.repo, changeId, { facet: "review" })
-    if (error !== undefined) return error
-    return {
-      value: `Review of ${changeId} requested from ${agent === null ? who : `agent ${agent}`} on landing request #${landing.number}.`
-    }
+    return mutationResult(
+      resolved.repo, changeId,
+      `Review of ${changeId} requested from ${agent === null ? who : `agent ${agent}`} on landing request #${landing.number}.`,
+      { facet: "review" }
+    )
   }
 
   /* plue#488 `DELETE …/landings/{n}/review-requests/{id}` (204): the request is dismissed, never the review. */
@@ -1610,9 +1636,11 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
       repoPath(resolved.repo, `/landings/${landing.number}/review-requests/${requestId}`)
     )
     if ("error" in dismissed) return dismissed.error
-    const error = await surfaceChange(resolved.repo, changeId, { facet: "review" })
-    if (error !== undefined) return error
-    return { value: `Review request ${requestId} on landing request #${landing.number} is dismissed.` }
+    return mutationResult(
+      resolved.repo, changeId,
+      `Review request ${requestId} on landing request #${landing.number} is dismissed.`,
+      { facet: "review" }
+    )
   }
 
   const openComputer: ChangeSeam["openComputer"] = async (changeId, snapshotId, repo) => {

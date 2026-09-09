@@ -223,7 +223,7 @@ type Route = (request: { readonly method: string; readonly body: string | null }
 
 const harness = async (
   routes: Record<string, Route>,
-  options: { readonly signedIn?: boolean; readonly degraded?: boolean; readonly ownerKind?: "user" | "org" } = {}
+  options: { readonly signedIn?: boolean; readonly degraded?: boolean; readonly ownerKind?: "user" | "org"; readonly workspaceError?: string } = {}
 ) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const requests: Array<string> = []
@@ -273,7 +273,7 @@ const harness = async (
   const seam = createChangeSeam(ctx, {
     viewWorkspace: async (workspaceId) => {
       shownWorkspaces.push(workspaceId)
-      return { value: `shown ${workspaceId}` }
+      return options.workspaceError ?? { value: `shown ${workspaceId}` }
     }
   })
   return { store, seam, requests, bodies, shownWorkspaces }
@@ -1459,5 +1459,144 @@ describe("createChangeSeam", () => {
     await seam.setFacet("qupxosqw", "diff")
     expect(payloadOf(store)?.facet).toBe("diff")
     expect(requests).toEqual([])
+  })
+})
+
+
+describe("committed change mutations", () => {
+  const refreshFailure = json(503, { message: "refresh unavailable" })
+
+  test("please-fix retains its session and opens its workspace after a failed change refresh", async () => {
+    const { seam, requests, shownWorkspaces } = await harness({
+      ...viewRoutes,
+      [CHANGE_ROUTE]: refreshFailure,
+      [`POST ${CHANGE_ROUTE}/findings/11/dispatch`]: json(201, { id: "session-created", workspace_id: "ws-created" })
+    })
+    const result = await seam.pleaseFix("qupxosqw", 11)
+    expect(result).toEqual({ value: expect.stringContaining("session session-created") })
+    expect(textOf(result)).toContain("finding 11 of qupxosqw")
+    expect(textOf(result)).toContain("ws-created")
+    expect(textOf(result)).toContain("Refresh warning")
+    expect(textOf(result)).toContain("refresh unavailable")
+    expect(shownWorkspaces).toEqual(["ws-created"])
+    expect(requests.filter((request) => request.startsWith("POST "))).toHaveLength(1)
+  })
+
+  test("please-fix keeps its session when both the change and workspace refresh fail", async () => {
+    const { seam, shownWorkspaces } = await harness({
+      ...viewRoutes,
+      [CHANGE_ROUTE]: refreshFailure,
+      [`POST ${CHANGE_ROUTE}/findings/11/dispatch`]: json(201, { id: "session-created", workspace_id: "ws-created" })
+    }, { workspaceError: "workspace unavailable" })
+    const result = await seam.pleaseFix("qupxosqw", 11)
+    expect(result).toEqual({ value: expect.stringContaining("session session-created") })
+    expect(textOf(result)).toContain("refresh unavailable")
+    expect(textOf(result)).toContain("workspace unavailable")
+    expect(shownWorkspaces).toEqual(["ws-created"])
+  })
+
+  test("resolve retains the dispatched session after a failed change refresh", async () => {
+    const { seam } = await harness({
+      ...viewRoutes,
+      [CHANGE_ROUTE]: refreshFailure,
+      [`POST ${CHANGE_ROUTE}/conflicts/resolve`]: json(201, { agent_session_id: "session-created" })
+    })
+    const result = await seam.resolveConflict("qupxosqw", "src/app.ts")
+    expect(result).toEqual({ value: expect.stringContaining("session session-created") })
+    expect(textOf(result)).toContain("src/app.ts in qupxosqw")
+    expect(textOf(result)).toContain("Refresh warning")
+    expect(textOf(result)).toContain("refresh unavailable")
+  })
+
+  for (const failed of ["original", "created", "both"]) {
+    test(`split retains both change identities when ${failed} refresh fails and attempts both cards`, async () => {
+      const createdRoute = `${REPO}/changes/new-change`
+      const { seam, requests } = await harness({
+        ...viewRoutes,
+        [CHANGE_ROUTE]: failed === "created" ? json(200, CHANGE) : refreshFailure,
+        [createdRoute]: failed === "original" ? json(200, { ...CHANGE, change_id: "new-change" }) : refreshFailure,
+        [`POST ${CHANGE_ROUTE}/split`]: json(201, { original: CHANGE, split: { change_id: "new-change" } })
+      })
+      const result = await seam.splitChange("qupxosqw", ["docs/guide.md"])
+      expect(result).toEqual({ value: expect.stringContaining("new-change") })
+      expect(textOf(result)).toContain("docs/guide.md moved out of qupxosqw")
+      expect(textOf(result)).toContain("Refresh warning")
+      expect(textOf(result)).toContain("refresh unavailable")
+      expect(requests).toContain(`GET ${CHANGE_ROUTE}`)
+      expect(requests).toContain(`GET ${createdRoute}`)
+      expect(requests.filter((request) => request.startsWith("POST "))).toHaveLength(1)
+    })
+  }
+
+  test("land retains the queued request and scope after a failed change refresh", async () => {
+    let committed = false
+    const { seam, requests } = await harness({
+      ...viewRoutes,
+      [CHANGE_ROUTE]: (request) => (committed ? refreshFailure : json(200, CHANGE))(request),
+      [`PUT ${REPO}/landings/42/land`]: (request) => {
+        committed = true
+        return json(202, { state: "queued" })(request)
+      }
+    })
+    const result = await seam.landChange("qupxosqw")
+    expect(result).toEqual({ value: expect.stringContaining("Landing request #42 is queued") })
+    expect(textOf(result)).toContain("mzxvbnmk, qupxosqw")
+    expect(textOf(result)).toContain("Refresh warning")
+    expect(textOf(result)).toContain("refresh unavailable")
+    expect(requests.filter((request) => request.startsWith("PUT "))).toHaveLength(1)
+  })
+
+  test("land retains the committed changeset after a failed change refresh", async () => {
+    const changeset = { id: 7, organization: "will", state: "pending", superproject: "will/smithers", change_id: "qupxosqw", members: [] }
+    const { seam } = await harness({
+      ...viewRoutes,
+      [CHANGE_ROUTE]: refreshFailure,
+      "api/orgs/will/changesets": json(200, { changesets: [changeset] }),
+      "POST api/orgs/will/changesets/7/land": json(201, { ...changeset, state: "landed" })
+    }, { ownerKind: "org" })
+    const result = await seam.landChange("qupxosqw")
+    expect(result).toEqual({ value: expect.stringContaining("Changeset 7 landed") })
+    expect(textOf(result)).toContain("Refresh warning")
+    expect(textOf(result)).toContain("refresh unavailable")
+  })
+
+  const reviewCases = [
+    { act: "threadDone", arg: 3, route: `POST ${REPO}/landings/42/threads/3/done`, body: { ...COMMENTS[0], state: "done" }, success: "Thread 3 on qupxosqw is done" },
+    { act: "threadAck", arg: 3, route: `POST ${REPO}/landings/42/threads/3/ack`, body: { ...COMMENTS[0], state: "resolved" }, success: "Thread 3 on qupxosqw is resolved" },
+    { act: "threadReopen", arg: 3, route: `POST ${REPO}/landings/42/threads/3/reopen`, body: { ...COMMENTS[0], state: "open" }, success: "Thread 3 on qupxosqw is open" },
+    { act: "notUseful", arg: 11, route: `POST ${CHANGE_ROUTE}/findings/11/feedback`, body: { useful: false }, success: "Finding 11 of qupxosqw is recorded not useful" },
+    { act: "requestReview", arg: "ana", route: `POST ${REPO}/landings/42/review-requests`, body: { id: 8 }, success: "Review of qupxosqw requested from ana on landing request #42" },
+    { act: "unrequestReview", arg: 5, route: `DELETE ${REPO}/landings/42/review-requests/5`, body: {}, success: "Review request 5 on landing request #42 is dismissed" }
+  ] as const
+  for (const entry of reviewCases) {
+    test(`${entry.act} retains the committed result after a failed change refresh`, async () => {
+      const { seam } = await harness({ ...viewRoutes, [CHANGE_ROUTE]: refreshFailure, [entry.route]: json(201, entry.body) })
+      const result = entry.act === "requestReview"
+        ? await seam.requestReview("qupxosqw", entry.arg)
+        : await seam[entry.act]("qupxosqw", entry.arg)
+      expect(result).toEqual({ value: expect.stringContaining(entry.success) })
+      expect(textOf(result)).toContain("Refresh warning")
+      expect(textOf(result)).toContain("refresh unavailable")
+    })
+  }
+})
+
+describe("change repository resolution", () => {
+  test("bare mutations refuse duplicate change ids across repositories; explicit repositories still route", async () => {
+    const otherRoute = "api/repos/ana/other/changes/qupxosqw"
+    const { seam, requests } = await harness({
+      ...viewRoutes,
+      [otherRoute]: json(200, CHANGE),
+      [`POST ${otherRoute}/conflicts/resolve`]: json(201, { agent_session_id: "explicit-session" })
+    })
+    await seam.viewChange("qupxosqw", undefined, "will/smithers")
+    await seam.viewChange("qupxosqw", undefined, "ana/other")
+    requests.length = 0
+    const refusal = "Change qupxosqw is loaded in several repositories (ana/other, will/smithers) — name one as owner/repo"
+    expect(await seam.landChange("qupxosqw")).toBe(refusal)
+    expect(await seam.splitChange("qupxosqw", ["docs/guide.md"])).toBe(refusal)
+    expect(requests).toEqual([])
+    expect(textOf(await seam.resolveConflict("qupxosqw", "src/app.ts", "ana/other"))).toContain("explicit-session")
+    expect(requests.filter((request) => request.startsWith("POST "))).toEqual([`POST ${otherRoute}/conflicts/resolve`])
   })
 })

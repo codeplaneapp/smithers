@@ -253,6 +253,12 @@ card. The stack is the unit an LSC wave lands (§3.8).
 | `change.land` | `<changeId>` | user; agent confirm |
 | `change.abandon` | `<changeId>` | user; agent confirm |
 
+Change acts require an explicit `owner/repo` when the loaded change ID
+appears in several repositories. A committed mutation retains its success
+result and returned identities if a card refresh fails, with a refresh
+warning. Finding dispatch still opens its returned workspace; split attempts
+both returned change cards. Retry the read to reconcile a refresh failure.
+
 **States.** No changes on the bookmark: the card says so with New change.
 Conflicted: the header carries an ember "conflicts" line and the diff card
 shows the conflict markers, never a merged view.
