@@ -105,27 +105,6 @@ describe("in-memory durable state ordering", () => {
       ])
     }))
 
-  it.effect("orders waiting runs by wake time, sinks unbounded waits last, and breaks ties by run id", () =>
-    Effect.gen(function*() {
-      const state = DurableEngineState.makeMemory()
-      const result = yield* withCrypto(Effect.gen(function*() {
-        yield* state.park("late", { reason: "timer", wakeAt: 900 }, owner)
-        yield* state.park("event", { reason: "event" }, owner)
-        yield* state.park("tie-b", { reason: "timer", wakeAt: 100 }, owner)
-        yield* state.park("tie-a", { reason: "timer", wakeAt: 100 }, owner)
-        return {
-          all: yield* state.waitingRuns(),
-          timers: yield* state.waitingRuns({ reason: "timer" }),
-          dueAtBoundary: yield* state.waitingRuns({ dueBeforeMs: 100 })
-        }
-      }))
-
-      expect(result.all.map((row) => row.runId)).toEqual(["tie-a", "tie-b", "late", "event"])
-      expect(result.timers.map((row) => row.runId)).toEqual(["tie-a", "tie-b", "late"])
-      // An unbounded (`wakeAt: null`) wait is never due, whatever the bound.
-      expect(result.dueAtBoundary.map((row) => row.runId)).toEqual(["tie-a", "tie-b"])
-    }))
-
   it.effect("snapshots deferred inputs and every returned value", () =>
     Effect.gen(function*() {
       const state = DurableEngineState.makeMemory()

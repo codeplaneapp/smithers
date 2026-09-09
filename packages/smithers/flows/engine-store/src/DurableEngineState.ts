@@ -440,7 +440,8 @@ export interface Service {
   readonly waiting: (runId: string) => Effect.Effect<Option.Option<WaitingRow>>
   /**
    * Lists parked runs matching an optional reason/due-before filter, ordered
-   * for sweeper consumption (earliest wake first).
+   * for sweeper consumption (earliest wake first, untimed waits last, then
+   * run id to break ties).
    */
   readonly waitingRuns: (
     filter?: WaitingRunsFilter
@@ -1257,7 +1258,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         WHERE waiting_reason = ${filter.reason}
           AND (${cancelRequestedOnly} = 0 OR cancel_requested_at_ms IS NOT NULL)
           AND status NOT IN ('completed', 'failed', 'cancelled')
-        ORDER BY waiting_wake_at_ms, run_id
+        ORDER BY waiting_wake_at_ms IS NULL, waiting_wake_at_ms, run_id
       `
       : filter?.dueBeforeMs !== undefined
       ? sql<WaitingDatabaseRow>`
@@ -1284,7 +1285,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         WHERE waiting_reason IS NOT NULL
           AND (${cancelRequestedOnly} = 0 OR cancel_requested_at_ms IS NOT NULL)
           AND status NOT IN ('completed', 'failed', 'cancelled')
-        ORDER BY waiting_wake_at_ms, run_id
+        ORDER BY waiting_wake_at_ms IS NULL, waiting_wake_at_ms, run_id
       `).pipe(
         Effect.orDie,
         // The parked-run sweeper's only enumeration: one unreadable waiting
@@ -1864,7 +1865,8 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
             return Option.isSome(view) && view.value.cancelRequestedAtMs != null
           })
           .sort((left, right) =>
-            (left.wakeAt ?? Number.MAX_SAFE_INTEGER) - (right.wakeAt ?? Number.MAX_SAFE_INTEGER) ||
+            Number(left.wakeAt === null) - Number(right.wakeAt === null) ||
+            (left.wakeAt ?? 0) - (right.wakeAt ?? 0) ||
             compareText(left.runId, right.runId)
           )
           .map(snapshotWaiting)

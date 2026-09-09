@@ -191,7 +191,51 @@ export const describeContract = (harness: Harness): void => {
         expect(result.dueQuota).toEqual([{ runId: "due-quota", reason: "quota", wakeAt: 500, token: null }])
         expect(result.allQuota.map((row) => row.runId)).toEqual(["due-quota", "future-quota"])
         expect(result.dueAll.map((row) => row.runId)).toEqual(["due-approval", "due-quota"])
-        expect(result.all).toHaveLength(4)
+        expect(result.all.map((row) => row.runId)).toEqual(["due-approval", "due-quota", "future-quota", "no-wake"])
+      }))
+
+    it.effect("orders waiting runs by wake time, sinks unbounded waits last, and breaks ties by run id", () =>
+      Effect.gen(function*() {
+        const result = yield* harness.run((context) =>
+          Effect.gen(function*() {
+            const waits = [
+              { runId: "late", reason: "timer", wakeAt: 900 },
+              { runId: "event-b", reason: "event" },
+              { runId: "tie-b", reason: "timer", wakeAt: 100 },
+              { runId: "z-max", reason: "event", wakeAt: Number.MAX_SAFE_INTEGER },
+              { runId: "event-a", reason: "event" },
+              { runId: "tie-a", reason: "timer", wakeAt: 100 },
+              { runId: "timed-event", reason: "event", wakeAt: 400 }
+            ] as const
+            for (const { runId, ...wait } of waits) {
+              yield* context.seedRun(runId, owner)
+              yield* context.state.park(runId, wait, owner)
+              yield* context.setCancelRequested(runId, 1)
+            }
+            return {
+              all: yield* context.state.waitingRuns(),
+              timers: yield* context.state.waitingRuns({ reason: "timer" }),
+              events: yield* context.state.waitingRuns({ reason: "event" }),
+              cancelled: yield* context.state.waitingRuns({ cancelRequested: true }),
+              cancelledEvents: yield* context.state.waitingRuns({ reason: "event", cancelRequested: true }),
+              dueAtBoundary: yield* context.state.waitingRuns({ dueBeforeMs: 100 }),
+              dueTimers: yield* context.state.waitingRuns({ reason: "timer", dueBeforeMs: 100 }),
+              dueAtMax: yield* context.state.waitingRuns({ dueBeforeMs: Number.MAX_SAFE_INTEGER })
+            }
+          })
+        )
+
+        const all = ["tie-a", "tie-b", "timed-event", "late", "z-max", "event-a", "event-b"]
+        const events = ["timed-event", "z-max", "event-a", "event-b"]
+        expect(result.all.map((row) => row.runId)).toEqual(all)
+        expect(result.timers.map((row) => row.runId)).toEqual(["tie-a", "tie-b", "late"])
+        expect(result.events.map((row) => row.runId)).toEqual(events)
+        expect(result.cancelled.map((row) => row.runId)).toEqual(all)
+        expect(result.cancelledEvents.map((row) => row.runId)).toEqual(events)
+        // An unbounded (`wakeAt: null`) wait is never due, whatever the bound.
+        expect(result.dueAtBoundary.map((row) => row.runId)).toEqual(["tie-a", "tie-b"])
+        expect(result.dueTimers.map((row) => row.runId)).toEqual(["tie-a", "tie-b"])
+        expect(result.dueAtMax.map((row) => row.runId)).toEqual(["tie-a", "tie-b", "timed-event", "late", "z-max"])
       }))
 
     it.effect("filters waitingRuns to cancel-requested rows (issue #68)", () =>
