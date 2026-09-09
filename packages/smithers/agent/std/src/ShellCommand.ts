@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema"
 import { formatExecOutputForModel } from "./internal/CodexText.ts"
 import { capability, envelope } from "./internal/Declaration.ts"
 import * as Exec from "./internal/Exec.ts"
-import * as StdError from "./StdError.ts"
+import type * as StdError from "./StdError.ts"
 
 /**
  * Registry name for the shell_command flow. Matches the Codex CLI tool name.
@@ -139,9 +139,6 @@ export const capabilities = [capability("proc:spawn", "*")]
  */
 export const flow = Flow.make({ name, description, input: Input, output: Output, capabilities, effects })
 
-const isTimeout = (error: unknown): boolean =>
-  typeof error === "object" && error !== null && "code" in error && error.code === "timeout"
-
 /**
  * Executes a shell command through the permission-aware kernel service and
  * renders the Codex model-facing output format.
@@ -164,14 +161,9 @@ export const run = Effect.fn("ShellCommand.run")(function*(
   }).pipe(
     Effect.map((value) => ({ timedOut: false, value })),
     Effect.catch((error) =>
-      isTimeout(error)
+      error.code === "timeout"
         ? Effect.succeed({ timedOut: true, value: { exitCode: TIMEOUT_EXIT_CODE, stderr: "", stdout: "" } })
-        : Effect.fail(
-          new StdError.StdError({
-            code: "command_failed",
-            message: `Command failed to start: ${error instanceof Error ? error.message : String(error)}`
-          })
-        )
+        : Effect.fail(Exec.toStdError(input.command, error))
     )
   )
   const durationSeconds = (Date.now() - startedAt) / 1_000

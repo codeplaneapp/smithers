@@ -231,14 +231,7 @@ const execute = (
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       maxCaptureBytes: MAX_CAPTURE_BYTES
     }).pipe(
-      Effect.mapError((error) =>
-        failed(
-          `The test runner did not run: ${error instanceof Error ? error.message : String(error)}`,
-          typeof error === "object" && error !== null && "code" in error && error.code === "timeout"
-            ? "timeout"
-            : "command_failed"
-        )
-      )
+      Effect.mapError((error) => failed(`The test runner did not run: ${error.message}`, Exec.toStdErrorCode(error)))
     )
     const combined = result.stderr === ""
       ? result.stdout

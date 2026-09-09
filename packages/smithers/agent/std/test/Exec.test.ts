@@ -135,3 +135,41 @@ describe("Exec refuses partial capture", () => {
       expect(result).toMatchObject({ stdout: "éé", stderr: "abcd", stdoutDroppedBytes: 0, stderrDroppedBytes: 0 })
     }).pipe(Effect.provide(host)))
 })
+
+/**
+ * A command that never produced an exit code becomes one of two model-facing
+ * failures, and the three shell flows have to agree on which. `Exec.exec`
+ * fails with a typed `ExecError`, so the choice is a switch on its code rather
+ * than a duck-typed read of an `unknown`.
+ */
+describe("Exec.toStdError", () => {
+  it("keeps a timeout's own code and names the command", () => {
+    const error = new Exec.ExecError({ code: "timeout", message: "exec: `pytest -q` exceeded 5ms" })
+    expect(Exec.toStdError("pytest -q", error)).toMatchObject({
+      code: "timeout",
+      message: "Command timed out: pytest -q"
+    })
+  })
+
+  for (const code of ["spawn_error", "capture_overflow"] as const) {
+    it(`reports ${code} as a host failure carrying the exec message`, () => {
+      const error = new Exec.ExecError({ code, message: "boom" })
+      expect(Exec.toStdError("pytest -q", error)).toMatchObject({
+        code: "command_failed",
+        message: "Command failed to start: boom"
+      })
+    })
+  }
+
+  for (
+    const { code, expected } of [
+      { code: "timeout", expected: "timeout" },
+      { code: "spawn_error", expected: "command_failed" },
+      { code: "capture_overflow", expected: "command_failed" }
+    ] as const
+  ) {
+    it(`classifies ${code} as ${expected}`, () => {
+      expect(Exec.toStdErrorCode(new Exec.ExecError({ code, message: "boom" }))).toBe(expected)
+    })
+  }
+})

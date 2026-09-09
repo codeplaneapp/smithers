@@ -19,6 +19,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as StdError from "../StdError.ts"
 
 /**
  * Failure codes a buffered execution can report, matching the codes the
@@ -274,3 +275,35 @@ export const exec = (
           })
         )
     })
+
+/**
+ * The model-facing failure code a command that never produced an exit code
+ * carries.
+ *
+ * A timeout keeps its own code, because "the command never finished" and "the
+ * command never started" are different things to a caller deciding whether to
+ * retry. Every other way of producing no exit code is a host failure.
+ *
+ * @category errors
+ * @since 0.1.0
+ */
+export const toStdErrorCode = (error: ExecError): StdError.Code =>
+  error.code === "timeout" ? "timeout" : "command_failed"
+
+/**
+ * The model-facing failure one execution error becomes.
+ *
+ * A timeout names the command, which is what the caller asked for and all a
+ * timeout has to say. Any other failure carries the message the execution
+ * produced, which already names the command.
+ *
+ * @category errors
+ * @since 0.1.0
+ */
+export const toStdError = (command: string, error: ExecError): StdError.StdError =>
+  new StdError.StdError({
+    code: toStdErrorCode(error),
+    message: error.code === "timeout"
+      ? `Command timed out: ${command}`
+      : `Command failed to start: ${error.message}`
+  })
