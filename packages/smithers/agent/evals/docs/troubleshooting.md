@@ -39,13 +39,21 @@ The suite declaration is wrong. The suite author fixes it.
 
 ## invalid_baseline
 
-The committed baseline is unreadable or belongs to another suite. Regenerate
-it from a green run of the suite it belongs to.
+The committed baseline is unreadable or belongs to another suite. Check the
+artifact and its ownership before regenerating it from a green run.
 
 - `Baseline is not valid JSON` or `Baseline must be an object`: the file is
   not a baseline artifact. These two carry no `path`.
 - `Baseline version must be 1`, at `version`: the artifact was written by a
   different version of the format.
+- `Baseline field 'suite' must be a string`, at `suite`: a present top-level
+  `suite` has the wrong type.
+- `Cannot infer baseline suite: legacy artifact has no records`, at `suite`:
+  the version-1 artifact has neither a top-level `suite` nor records. Add the
+  known owning suite explicitly, or regenerate it from that suite's green run.
+- `Cannot infer baseline suite: legacy records name multiple suites`, at
+  `suite`: records disagree on ownership. Recover a baseline for the intended
+  suite; do not choose the first record's suite for a mixed artifact.
 - `Baseline records must be an array`, at `records`.
 - A record that is not an object, a non-string identity field, or a score
   outside [0, 1]: the record index and field are in `path`, as in
@@ -53,6 +61,10 @@ it from a green run of the suite it belongs to.
 - `Baseline belongs to suite '<name>', but the run is suite '<name>'`, at
   `baseline.suite` or `baseline.records`: comparison loaded the wrong file.
   Check the path CI reads.
+
+A suite-less version-1 artifact loads when its records are nonempty and all
+name the same suite. `Baseline.write` of that loaded value adds the inferred
+top-level `suite` and retains the existing scores.
 
 ## invalid_tolerance
 

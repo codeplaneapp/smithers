@@ -83,11 +83,13 @@ Four rules decide what a comparison reports, and none of them are obvious:
 - **A binding matches its target by reference identity.** `binding.appliesTo` has
   to be the same flow value the execution reports as its `target`; a structurally
   equal copy grades nothing.
-- **A baseline belongs to one suite.** Validation requires the artifact's
-  top-level `suite` field and a `suite` on every record, so ownership is recorded
-  even when the baseline has no records. Comparison refuses an artifact or any
-  record that names a suite other than the run's: a mismatch fails with
-  `invalid_baseline` rather than reporting a clean pass.
+- **A baseline belongs to one suite.** Validated baselines and newly written
+  artifacts require a top-level `suite`, even with no records. Every record
+  requires its own `suite`. `Baseline.load` accepts a suite-less version-1
+  artifact only when its nonempty records all name the same suite, then sets
+  the top-level `suite` to that value. Empty or ambiguous legacy artifacts fail
+  with `invalid_baseline` at `suite`. Comparison refuses an artifact or any
+  record that names a suite other than the run's with `invalid_baseline`.
 
 ## Failure codes
 
@@ -351,8 +353,12 @@ const load = (text: string): Effect.Effect<Baseline, EvalError>
 
 `write` serializes a baseline with recursively sorted keys and stable numbers,
 records ordered by an injective encoding of `(suite, case, scorer, stepKey)`,
-ending with a newline. `load` parses and validates canonical baseline JSON,
-failing with `invalid_baseline`.
+ending with a newline and always including the top-level `suite`. `load`
+parses and validates baseline JSON, failing with `invalid_baseline`. For a
+version-1 artifact without a top-level `suite`, it derives ownership only when
+all records name the same suite. Empty or ambiguous legacy artifacts fail at
+`path: "suite"` with an explicit reason. A present non-string `suite` is invalid.
+Writing the loaded baseline retains its scores and adds the inferred `suite`.
 
 ### Regression
 

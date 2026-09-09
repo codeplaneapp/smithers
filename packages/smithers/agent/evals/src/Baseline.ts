@@ -118,14 +118,25 @@ const validate = (value: unknown): Effect.Effect<Baseline, EvalError> =>
     if (rawVersion !== version) {
       return yield* fail(`Baseline version must be ${version}, got ${String(rawVersion)}`, "version")
     }
-    if (typeof rawSuite !== "string") {
+    if (rawSuite !== undefined && typeof rawSuite !== "string") {
       return yield* fail(`Baseline field 'suite' must be a string, got ${typeof rawSuite}`, "suite")
     }
     if (!Array.isArray(rawRecords)) {
       return yield* fail("Baseline records must be an array", "records")
     }
     const records = yield* Effect.forEach(rawRecords, decodeRecord)
-    return { version, suite: rawSuite, records: Object.freeze(records) }
+    let suite = rawSuite
+    if (suite === undefined) {
+      const first = records[0]
+      if (first === undefined) {
+        return yield* fail("Cannot infer baseline suite: legacy artifact has no records", "suite")
+      }
+      if (records.some((record) => record.suite !== first.suite)) {
+        return yield* fail("Cannot infer baseline suite: legacy records name multiple suites", "suite")
+      }
+      suite = first.suite
+    }
+    return { version, suite, records: Object.freeze(records) }
   })
 
 /**
@@ -191,7 +202,10 @@ export const make = (
 export const write = (baseline: Baseline): string => {
   const sortKey = (record: BaselineRecord): string =>
     JSON.stringify([record.suite, record.case, record.scorer, record.stepKey])
-  const records = [...baseline.records].sort((left, right) => compareText(sortKey(left), sortKey(right)))
+  const records = baseline.records
+    .map((record) => [sortKey(record), record] as const)
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([, record]) => record)
   return stringify({
     version: baseline.version,
     suite: baseline.suite,
@@ -200,7 +214,12 @@ export const write = (baseline: Baseline): string => {
 }
 
 /**
- * Loads and validates canonical baseline JSON.
+ * Loads and validates baseline JSON.
+ *
+ * A version-1 artifact without a top-level `suite` is accepted only when its
+ * nonempty records all name the same suite. That suite becomes the artifact's
+ * owner, so writing the result includes it. Empty or ambiguous legacy artifacts
+ * fail with `invalid_baseline` at `suite`.
  *
  * @category serialization
  * @since 0.1.0

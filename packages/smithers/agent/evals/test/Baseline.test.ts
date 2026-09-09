@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as Baseline from "../src/Baseline.ts"
 import type { EvalError } from "../src/EvalError.ts"
 
@@ -50,6 +50,78 @@ describe("Baseline", () => {
     expect(bad.code).toBe("invalid_baseline")
     expect(bad.message).toBe("Baseline version must be 1, got 2")
     expect(bad.path).toBe("version")
+  })
+
+  it("loads a suite-less version-1 artifact when every record names the same suite", async () => {
+    const records = [record, { ...record, case: "second", score: 0.75 }]
+    const baseline = await Effect.runPromise(Baseline.load(JSON.stringify({ version: 1, records })))
+
+    expect(baseline).toEqual({ version: 1, suite: "s", records })
+    expect(Object.isFrozen(baseline.records)).toBe(true)
+    const written = Baseline.write(baseline)
+    expect(JSON.parse(written)).toEqual({ version: 1, suite: "s", records })
+    expect(Baseline.write(await Effect.runPromise(Baseline.load(written)))).toBe(written)
+  })
+
+  it("rejects ambiguous ownership in a suite-less legacy artifact", async () => {
+    const error = await failure(Baseline.load(JSON.stringify({
+      version: 1,
+      records: [record, { ...record, suite: "other" }]
+    })))
+
+    expect(error.code).toBe("invalid_baseline")
+    expect(error.path).toBe("suite")
+    expect(error.message).toBe("Cannot infer baseline suite: legacy records name multiple suites")
+  })
+
+  it("rejects an empty suite-less legacy artifact", async () => {
+    const error = await failure(Baseline.load("{\"version\":1,\"records\":[]}"))
+
+    expect(error.code).toBe("invalid_baseline")
+    expect(error.path).toBe("suite")
+    expect(error.message).toBe("Cannot infer baseline suite: legacy artifact has no records")
+  })
+
+  it("validates every legacy record before inferring ownership", async () => {
+    const error = await failure(Baseline.load(JSON.stringify({
+      version: 1,
+      records: [record, { ...record, score: 2 }]
+    })))
+
+    expect(error.code).toBe("invalid_baseline")
+    expect(error.path).toBe("records[1].score")
+  })
+
+  it("rejects a present null suite even when records agree", async () => {
+    const error = await failure(Baseline.load(JSON.stringify({ version: 1, suite: null, records: [record] })))
+
+    expect(error.code).toBe("invalid_baseline")
+    expect(error.path).toBe("suite")
+    expect(error.message).toBe("Baseline field 'suite' must be a string, got object")
+  })
+
+  it("preserves explicit ownership when writing an empty baseline", async () => {
+    const baseline = await Effect.runPromise(Baseline.make({ suite: "s", records: [] }))
+    const written = Baseline.write(baseline)
+
+    expect(written).toBe("{\"records\":[],\"suite\":\"s\",\"version\":1}\n")
+    expect(await Effect.runPromise(Baseline.load(written))).toEqual(baseline)
+  })
+
+  it("computes each record's write sort key once", async () => {
+    const records = Array.from({ length: 32 }, (_, index) => ({
+      ...record,
+      case: `case-${(index * 7) % 32}`
+    }))
+    const baseline = await Effect.runPromise(Baseline.make({ suite: "s", records }))
+    const stringify = vi.spyOn(JSON, "stringify")
+    try {
+      Baseline.write(baseline)
+      const keys = stringify.mock.calls.filter(([value]) => Array.isArray(value))
+      expect(keys).toHaveLength(records.length)
+    } finally {
+      stringify.mockRestore()
+    }
   })
 
   it("orders records by an injective tuple encoding", async () => {

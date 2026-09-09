@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Load version-1 baselines without a top-level `suite` when every record names
+  the same suite. Reject empty or ambiguous legacy artifacts with an explicit
+  `invalid_baseline` reason at `suite`.
+- Compute each baseline record's serialization sort key once per write.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added
@@ -19,8 +26,9 @@
   which tags each observation with its job identity. A run correlates by identity
   when a runner implements it, so results may come back in any order.
 - Added `Baseline.suite`, which records artifact ownership even when the baseline
-  holds no records. It is optional, so a baseline written before it existed still
-  loads.
+  holds no records. It is required in validated baselines and newly written
+  artifacts. `Baseline.load` accepts older version-1 artifacts without it only
+  when their nonempty records all name the same suite.
 - Added package-owned documentation in `docs/`, gated by `test/docs.test.ts`.
 
 ### Changed
@@ -49,9 +57,10 @@
 - Turn a batch score that is not finite and inside `[0, 1]` into an inconclusive
   observation naming the scorer and the offending value.
 - Fail `Regression.compare` with `invalid_baseline` when the artifact or any of
-  its records belongs to another suite, or when an empty legacy artifact names
-  no suite. Older suite-less artifacts with records remain readable because the
-  records establish ownership. These comparisons used to report zero findings.
+  its records belongs to another suite. `Baseline.load` derives ownership for
+  older suite-less version-1 artifacts only when all records agree on one suite;
+  it rejects empty or ambiguous legacy artifacts. Comparisons with the wrong
+  suite used to report zero findings.
 - Snapshot and freeze suite cases and bindings, including a binding's sampling
   policy, and reject data that cannot be structured-cloned, so a run stays
   reproducible from the validated suite. `Suite.make` validated at call time and
