@@ -159,20 +159,15 @@ export const openRequestedRepo = async (
   const { repositories } = controller.store.collections
   if (repositories.get(repository.id) === undefined) {
     controller.store.dispatch({
-      type: "repositories.loaded",
+      type: "repository.upserted",
       actor: "system",
-      repositories: [
-        ...[...repositories.values()].map(({ id, org, ownerKind, name, head, catalog, summary }) => ({
-          id, org, ownerKind, name, head, ...(catalog === undefined ? {} : { catalog }), ...(summary === undefined ? {} : { summary })
-        })),
-        /*
-         * The catalog carries no owner kind and no head. "user" is the
-         * conservative reading: the one consumer (the org changesets read)
-         * treats it as "no org changesets", never as a fabricated org.
-         * `catalog` records where the row came from: readable signed out.
-         */
-        { ...repository, ownerKind: "user" as const, head: null, catalog: true }
-      ]
+      /*
+       * The catalog carries no owner kind and no head. "user" is the
+       * conservative reading: the one consumer (the org changesets read)
+       * treats it as "no org changesets", never as a fabricated org.
+       * `catalog` records where the row came from: readable signed out.
+       */
+      repository: { ...repository, ownerKind: "user" as const, head: null, catalog: true }
     })
   }
   const refusal = await controller.selectRepo(repository.id)
@@ -195,16 +190,8 @@ export const openRequestedRepo = async (
   const row = controller.store.collections.repositories.get(repository.id)
   if (bookmark === null || row === undefined || row.head !== null) return
   controller.store.dispatch({
-    type: "repositories.loaded",
+    type: "repository.upserted",
     actor: "system",
-    repositories: [...controller.store.collections.repositories.values()].map(({ id, org, ownerKind, name, head, catalog, summary }) => ({
-      id,
-      org,
-      ownerKind,
-      name,
-      head: id === repository.id ? { bookmark, changeId: null, commitId: null } : head,
-      ...(catalog === undefined ? {} : { catalog }),
-      ...(summary === undefined ? {} : { summary })
-    }))
+    repository: { ...row, head: { bookmark, changeId: null, commitId: null } }
   })
 }

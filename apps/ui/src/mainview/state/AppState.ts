@@ -1467,6 +1467,18 @@ export type AppTransition =
     actor: "system"
     repositories: ReadonlyArray<Pick<CloudRepository, "id" | "org" | "ownerKind" | "name" | "head" | "catalog" | "summary">>
   }
+  /*
+   * One repository row upserted: the catalog row a `/owner/name` request
+   * opens, and that row's default bookmark once the mirror answers
+   * (RepoLink.ts). Every other row is left as it was, so a caller adding one
+   * row never re-projects the whole collection. A row keeps its fresher head
+   * when the upsert carries none, the same reading `repositories.loaded` takes.
+   */
+  | {
+    type: "repository.upserted"
+    actor: "system"
+    repository: Pick<CloudRepository, "id" | "org" | "ownerKind" | "name" | "head" | "catalog" | "summary">
+  }
   | {
     type: "workingcopies.workspaces.loaded"
     actor: "system"

@@ -2566,6 +2566,31 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           })
           break
         }
+        case "repository.upserted": {
+          /*
+           * One row, never the collection: the rows beside it keep their own
+           * revision. A row keeps its fresher head when the upsert carries
+           * none, the same reading `repositories.loaded` takes.
+           */
+          const { repository } = transition
+          const existing = collections.repositories.get(repository.id)
+          const row: CloudRepository = {
+            ...repository,
+            head: repository.head ?? existing?.head ?? null,
+            updatedAt: createdAt,
+            revision
+          }
+          if (existing === undefined) collections.repositories.insert(row)
+          else {
+            collections.repositories.update(repository.id, (draft) => {
+              Object.assign(draft, row)
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
         case "workingcopies.workspaces.loaded": {
           /* The cloud workspace list replaces the workspace copies only. */
           const next = new Set(transition.copies.map((copy) => copy.id))

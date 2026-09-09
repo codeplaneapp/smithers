@@ -293,6 +293,42 @@ describe("openRequestedRepo", () => {
     expect(store.session().activeRepoKey ?? null).toBeNull()
   })
 
+  /*
+   * Opening one repository is a fact about that one row. The cloud inventory
+   * beside it is left exactly as it was: a whole-list replace would rewrite
+   * every row (and silently drop any field the caller's projection forgot).
+   */
+  test("the catalog row is upserted alone: every inventory row beside it is untouched", async () => {
+    const { store, controller } = await fixture()
+    store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        {
+          id: "acme/widgets",
+          org: "acme",
+          ownerKind: "org",
+          name: "widgets",
+          head: { bookmark: "trunk", changeId: "zzz", commitId: "abc" },
+          summary: "The widgets."
+        }
+      ]
+    })
+    const before = structuredClone(store.collections.repositories.get("acme/widgets"))
+    const http = async (input: RequestInfo | URL) =>
+      String(input) === "/api/repos/smithersai/smithers" ? jsonResponse({ default_bookmark: "main" }) : jsonResponse(catalog)
+    expect(await openRequestedRepo(controller, http, "smithersai/smithers")).toBeUndefined()
+    // Neither the catalog row's insert nor the mirror bookmark's landing touches it.
+    expect(structuredClone(store.collections.repositories.get("acme/widgets"))).toEqual(before)
+    expect(store.collections.repositories.get("smithersai/smithers")).toMatchObject({
+      org: "smithersai",
+      name: "smithers",
+      catalog: true,
+      summary: SUMMARY,
+      head: { bookmark: "main", changeId: null, commitId: null }
+    })
+  })
+
   test("the cloud inventory already loaded stays beside the catalog row", async () => {
     const { store, controller } = await fixture()
     store.dispatch({
