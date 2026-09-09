@@ -7,15 +7,25 @@ const packageRoot = fileURLToPath(new URL("../", import.meta.url))
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), "utf8")
 
-// `Migrations` is re-exported from a nested `index.ts`, so the path segment is
-// not a bare module name.
+// `index.ts` is a barrel, so every namespace names a sibling module.
 const namespaces = (): ReadonlyArray<readonly [string, string]> =>
-  [...read("../src/index.ts").matchAll(/export \* as (\w+) from "\.\/([\w/]+)\.ts"/g)]
+  [...read("../src/index.ts").matchAll(/export \* as (\w+) from "\.\/(\w+)\.ts"/g)]
     .map(([, namespace, file]) => [namespace!, file!] as const)
 
 // Migration step modules are applied through the root `Migrations` namespace;
 // the step bodies themselves are sealed implementation detail.
 describe("package exports", () => {
+  // `index.ts` carries no implementation: it names sibling modules and nothing
+  // else. A re-export with a path segment puts a concept in a directory's
+  // `index.ts` instead of its own named file, and every reader of the barrel
+  // then has to follow a path to find it.
+  it("re-exports every namespace from a bare sibling module", () => {
+    const specifiers = [...read("../src/index.ts").matchAll(/export \* as \w+ from "\.\/([^"]+)"/g)]
+      .map(([, specifier]) => specifier!)
+    expect(specifiers.length).toBeGreaterThan(0)
+    expect(specifiers.filter((specifier) => !/^[A-Za-z0-9_$]+\.ts$/.test(specifier))).toEqual([])
+  })
+
   it("keeps migration implementations private in development and published exports", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8")

@@ -12,8 +12,8 @@ import { migration as requiredFailureCodes } from "../src/migrations/0004_requir
 // `scripts/build.mjs` converts every module to CommonJS with esbuild under
 // `"type": "module"`, and esbuild then reads a default import of a sibling as
 // the whole interop wrapper `{ __esModule, default }` rather than the value.
-// `src/migrations/index.ts` used to build its record from four default
-// imports, so `Migrations.run` in `dist/cjs` held wrappers, none with `pipe`.
+// `src/Migrations.ts` used to build its record from four default imports,
+// so `Migrations.run` in `dist/cjs` held wrappers, none with `pipe`.
 // The named binding below is the one consumers import; the second test pins
 // that no module offers a default export to regress onto.
 const modules = {

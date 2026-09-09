@@ -10,10 +10,9 @@ const read = (path: string): string => readFileSync(new URL(path, import.meta.ur
 // pattern excludes a closing delimiter rather than matching lazily.
 const documented = /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*export\s+(const|function|class|interface|type)\s+([A-Za-z0-9_$]+)/g
 
-// `Migrations` is re-exported from a nested `index.ts`, so the path segment is
-// not a bare module name.
+// `index.ts` is a barrel, so every namespace names a sibling module.
 const namespaces = (): ReadonlyArray<readonly [string, string]> =>
-  [...read("../src/index.ts").matchAll(/export \* as (\w+) from "\.\/([\w/]+)\.ts"/g)]
+  [...read("../src/index.ts").matchAll(/export \* as (\w+) from "\.\/(\w+)\.ts"/g)]
     .map(([, namespace, file]) => [namespace!, file!] as const)
 
 const exported = (): ReadonlyArray<string> => {

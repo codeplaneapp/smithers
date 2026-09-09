@@ -7,11 +7,12 @@ description: "Every public export of @smthrs/scorers: the scorer declaration con
 replay-stable sampling, and persists the resulting observations. It does not
 decide what to score or when: [`@smthrs/evals`](/api/evals) does that.
 
-The root entry point re-exports every module as a namespace. Top-level modules
-are also importable directly as `@smthrs/scorers/<Module>`. The `internal/*`,
-`migrations/*`, and nested `*/index` subpaths are blocked, so the four
-migrations are reachable only through the root `Migrations` namespace. For the
-import forms, see [Installation](./installation.md#import-forms).
+The root entry point re-exports every module as a namespace. Each module named
+in the export map is also importable directly as `@smthrs/scorers/<Module>`.
+The `internal/*`, `migrations/*`, and nested `*/index` subpaths are blocked and
+the map lists no `Migrations` subpath, so the four migrations are reachable
+only through the root `Migrations` namespace. For the import forms, see
+[Installation](./installation.md#import-forms).
 
 Every export is listed once in the contract table at the end of this page,
 and once with its kind and a one-line summary in

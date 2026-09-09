@@ -35,8 +35,8 @@ The root entry point re-exports every module as a namespace:
 import { Binding, Runner, RunnerLive, Sampling, Scorer, ScoreStore, SqlScoreStore } from "@smthrs/scorers"
 ```
 
-Each top-level module is also importable from its own subpath, which is the
-form [`@smthrs/evals`](/api/evals) uses:
+Each module named in the export map is also importable from its own subpath,
+which is the form [`@smthrs/evals`](/api/evals) uses:
 
 ```ts
 import * as Sampling from "@smthrs/scorers/Sampling"
@@ -46,8 +46,9 @@ import * as Scorer from "@smthrs/scorers/Scorer"
 Three subpath families are blocked in the export map:
 `@smthrs/scorers/internal/*`,
 `@smthrs/scorers/migrations/*`, and `@smthrs/scorers/*/index`. The migration
-steps are implementation detail, so the aggregator is reachable only as the
-root `Migrations` namespace. Importing a blocked subpath fails with Node's
+steps are implementation detail, and the map lists no `Migrations` subpath, so
+the aggregator is reachable only as the root `Migrations` namespace. Importing
+a blocked or unlisted subpath fails with Node's
 `ERR_PACKAGE_PATH_NOT_EXPORTED`, under `import` and `require` alike.
 `@smthrs/scorers/package.json` is exported.
 

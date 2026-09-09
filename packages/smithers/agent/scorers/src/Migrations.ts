@@ -7,10 +7,10 @@ import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Migrator from "effect/unstable/sql/Migrator"
-import { migration as scores } from "./0001_scores.ts"
-import { migration as jobs } from "./0002_score_jobs.ts"
-import { migration as failureCodes } from "./0003_score_failure_codes.ts"
-import { migration as requiredFailureCodes } from "./0004_require_failure_codes.ts"
+import { migration as scores } from "./migrations/0001_scores.ts"
+import { migration as jobs } from "./migrations/0002_score_jobs.ts"
+import { migration as failureCodes } from "./migrations/0003_score_failure_codes.ts"
+import { migration as requiredFailureCodes } from "./migrations/0004_require_failure_codes.ts"
 
 const migrations = {
   "0001_scores": scores,

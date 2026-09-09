@@ -29,7 +29,7 @@ export * as Runner from "./Runner.ts"
 export * as RunnerLive from "./RunnerLive.ts"
 
 /** @category migrations @since 0.1.0 */
-export * as Migrations from "./migrations/index.ts"
+export * as Migrations from "./Migrations.ts"
 
 /** @category grading @since 0.1.0 */
 export * as ScoreGate from "./ScoreGate.ts"

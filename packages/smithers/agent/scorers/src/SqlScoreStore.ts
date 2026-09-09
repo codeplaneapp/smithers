@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Json from "./internal/json.ts"
 import * as Text from "./internal/text.ts"
-import * as Migrations from "./migrations/index.ts"
+import * as Migrations from "./Migrations.ts"
 import { ScorerError } from "./ScorerError.ts"
 import * as ScoreStore from "./ScoreStore.ts"
 
