@@ -226,13 +226,24 @@ describe("native sign-in handoff ownership", () => {
         if (path.endsWith(`/auth/native/${stage}`) || (stage === "session" && path.endsWith("/auth/session"))) {
           requestSignal = init?.signal
           // Deliberately ignore abort: late answers still need continuation fences.
+          // boundedFetch buffers the body at the seam, so a stalled body is a
+          // stream that withholds its chunk, not a slow `json()` on the Response.
           if (pause.endsWith("-body")) {
-            const result = json({})
-            result.json = async () => {
-              reached.resolve()
-              return (await response.promise).json()
-            }
-            return result
+            return new Response(
+              new ReadableStream<Uint8Array>({
+                async pull(stream) {
+                  reached.resolve()
+                  const late = await response.promise
+                  try {
+                    stream.enqueue(new TextEncoder().encode(await late.text()))
+                    stream.close()
+                  } catch {
+                    // The seam cancelled the reader first; the late answer is fenced.
+                  }
+                }
+              }),
+              { headers: { "content-type": "application/json" } }
+            )
           }
           reached.resolve()
           return response.promise
@@ -291,9 +302,11 @@ describe("native sign-in handoff ownership", () => {
       const h = await setup(pause)
       h.controller.signIn()
       await h.reached.promise
-      await h.ctx.dispose()
+      // Captured before disposal: an answer that lands *during* dispose is as
+      // much a fenced late answer as one that lands after it.
       const before = h.transitions()
       const requestsBefore = [...h.requests]
+      await h.ctx.dispose()
       h.response.resolve(json(pause.startsWith("start")
         ? { handoffId: "handoff-1", pollSecret: "secret-1" }
         : pause.startsWith("claim") ? { status: "ready" } : signedIn))
