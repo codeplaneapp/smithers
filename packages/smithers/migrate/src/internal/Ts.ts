@@ -1,8 +1,8 @@
 /**
  * TypeScript compiler helpers shared by the scanners.
  *
- * Every scanner parses one file at a time in an isolated native compiler
- * session, without checking types or emitting. A 0.x project does not typecheck against the
+ * Scanners share an isolated native compiler session for one scan,
+ * without checking types or emitting. A 0.x project does not typecheck against the
  * new packages, its `tsconfig.json` points at a JSX runtime that is being
  * removed, and its `node_modules` may be absent. The syntax tree is all the
  * scanners need, and it is available whatever state the project is in.
@@ -10,6 +10,7 @@
  * @since 1.0.0-rc.0
  * @private
  */
+import * as Effect from "effect/Effect"
 import { resolve } from "node:path"
 import * as ts from "typescript/unstable/ast"
 import { API } from "typescript/unstable/sync"
@@ -32,32 +33,14 @@ export interface ImportRecord {
   readonly typeOnly: boolean
 }
 
-/**
- * Parses one file. `.js` parses as JS with JSX enabled, because a 0.x example
- * such as `examples/simple-workflow.jsx` is JavaScript carrying JSX.
- *
- * The compiler sees only the supplied source and a synthetic configuration;
- * every other filesystem read reports absence without falling back to disk.
- * Its process closes before returning. The transferred tree remains usable.
- *
- * @since 1.0.0-rc.0
- * @private
- */
-export const parse = (file: string, text: string): ts.SourceFile => {
+/** A session owns one isolated compiler and caches trees by path and content. */
+const makeSession = () => {
   const directory = resolve(".__smithers_migration_syntax__").replace(/\\/g, "/")
-  const extension = /\.(tsx|jsx|mts|cts|mjs|cjs|js)$/i.exec(file)?.[1]?.toLowerCase() ?? "ts"
-  const input = `${directory}/input.${extension}`
   const config = `${directory}/tsconfig.json`
-  const files = new Map([
-    [input, text],
-    [
-      config,
-      JSON.stringify({
-        files: [`input.${extension}`],
-        compilerOptions: { noLib: true, noResolve: true, allowJs: true, types: [] }
-      })
-    ]
-  ])
+  const files = new Map<string, string>()
+  const trees = new Map<string, Map<string, ts.SourceFile>>()
+  let opened = false
+  let closed = false
   const api = new API({
     cwd: directory,
     fs: {
@@ -68,13 +51,76 @@ export const parse = (file: string, text: string): ts.SourceFile => {
       realpath: (name) => name
     }
   })
+  return {
+    parse: (file: string, text: string): ts.SourceFile => {
+      if (closed) throw new Error("TypeScript syntax session is closed")
+      const cached = trees.get(file)?.get(text)
+      if (cached !== undefined) return cached
+      const extension = /\.(tsx|jsx|mts|cts|mjs|cjs|js)$/i.exec(file)?.[1]?.toLowerCase() ?? "ts"
+      const input = `${directory}/input.${extension}`
+      files.clear()
+      files.set(input, text)
+      files.set(
+        config,
+        JSON.stringify({
+          files: [`input.${extension}`],
+          compilerOptions: { noLib: true, noResolve: true, allowJs: true, types: [] }
+        })
+      )
+      // This virtual input is reused for different sources. Keep transferred
+      // trees in our path/content cache, not the native API's filename cache.
+      api.clearSourceFileCache()
+      const snapshot = api.updateSnapshot(
+        opened
+          ? { fileChanges: { changed: [config, input] } }
+          : { openProjects: [config] }
+      )
+      opened = true
+      try {
+        const source = snapshot.getProject(config)?.program.getSourceFile(input)
+        if (source === undefined) throw new Error(`TypeScript did not return a syntax tree for ${file}`)
+        const versions = trees.get(file) ?? new Map<string, ts.SourceFile>()
+        versions.set(text, source)
+        trees.set(file, versions)
+        return source
+      } finally {
+        snapshot.dispose()
+      }
+    },
+    close: () => {
+      closed = true
+      trees.clear()
+      api.close()
+    }
+  }
+}
+
+/**
+ * A scan's parser. Releases its compiler and cached trees on every scope exit.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const session = Effect.acquireRelease(
+  Effect.sync(makeSession),
+  (session) => Effect.sync(() => session.close())
+).pipe(Effect.map((session) => session.parse))
+
+/**
+ * Parses one file in an isolated session that closes before returning its
+ * transferred tree. `.js` parses with JSX enabled for old workflow examples.
+ * The compiler sees only supplied text and a synthetic configuration; every
+ * other filesystem read reports absence without falling back to disk.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const parse = (file: string, text: string): ts.SourceFile => {
+  const session = makeSession()
   try {
-    const snapshot = api.updateSnapshot({ openProjects: [config] })
-    const source = snapshot.getProject(config)?.program.getSourceFile(input)
-    if (source === undefined) throw new Error(`TypeScript did not return a syntax tree for ${file}`)
-    return source
+    return session.parse(file, text)
   } finally {
-    api.close()
+    session.close()
   }
 }
 

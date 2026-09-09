@@ -149,11 +149,14 @@ const ctxMethods = new Set(
  * @category scanners
  * @since 1.0.0-rc.0
  */
-export const factoryNames = (sources: ReadonlyMap<string, string>): ReadonlySet<string> => {
+export const factoryNames = (
+  sources: ReadonlyMap<string, string>,
+  parse: typeof Ts.parse = Ts.parse
+): ReadonlySet<string> => {
   const names = new Set<string>(["createSmithers", "createSmithersPostgres", "createSmithersCloudflare"])
   for (const [file, text] of sources) {
     if (!/\bcreateSmithers\w*\s*\(/.test(text)) continue
-    const parsed = Ts.parse(file, text)
+    const parsed = parse(file, text)
     Ts.forEachNode(parsed, (node) => {
       if (ts.isFunctionDeclaration(node) && node.name !== undefined && node.body !== undefined) {
         if (/\bcreateSmithers\w*\s*\(/.test(node.body.getText())) names.add(node.name.text)
@@ -297,6 +300,7 @@ export const scanFile = (
   text: string,
   options: {
     readonly factories: ReadonlySet<string>
+    readonly parse?: typeof Ts.parse | undefined
     /** The text of an `.mdx` prompt, by its import specifier. */
     readonly prompt?: ((specifier: string) => string | undefined) | undefined
     /** The factory bindings one import specifier re-exports, by local name. */
@@ -308,7 +312,8 @@ export const scanFile = (
     readonly headers?: ReadonlyMap<string, string> | undefined
   }
 ): ReadonlyArray<InventoryEntry> => {
-  const source = Ts.parse(file, text)
+  const parse = options.parse ?? Ts.parse
+  const source = parse(file, text)
   const hits: Array<InventoryEntry> = []
   const locals = initializers(source)
 
@@ -425,7 +430,7 @@ export const scanFile = (
   /** The zod chain one field of an object chain holds. */
   const fieldChain = (chain: string | undefined, field: string): string | undefined => {
     if (chain === undefined) return undefined
-    const parsed = Ts.parse("chain.ts", `const value = ${chain}`)
+    const parsed = parse("chain.ts", `const value = ${chain}`)
     let found: string | undefined
     Ts.forEachNode(parsed, (node) => {
       if (found !== undefined || !ts.isPropertyAssignment(node)) return
@@ -439,7 +444,7 @@ export const scanFile = (
   const depsChains = (text: string | undefined): ReadonlyMap<string, string> => {
     const found = new Map<string, string>()
     if (text === undefined) return found
-    const parsed = Ts.parse("deps.ts", `const value = (${text})`)
+    const parsed = parse("deps.ts", `const value = (${text})`)
     Ts.forEachNode(parsed, (node) => {
       if (!ts.isPropertyAssignment(node) || node.name === undefined) return
       const chain = outputChain(node.initializer.getText())
@@ -795,9 +800,10 @@ export const scanFile = (
  */
 export const zodChains = (
   file: string,
-  text: string
+  text: string,
+  parse: typeof Ts.parse = Ts.parse
 ): ReadonlyArray<{ readonly name: string; readonly chain: string }> => {
-  const source = Ts.parse(file, text)
+  const source = parse(file, text)
   const chains: Array<{ name: string; chain: string }> = []
   Ts.forEachNode(source, (node) => {
     if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || node.initializer === undefined) return
@@ -816,9 +822,10 @@ export const zodChains = (
  */
 export const mdxImports = (
   file: string,
-  text: string
+  text: string,
+  parse: typeof Ts.parse = Ts.parse
 ): ReadonlyArray<{ readonly local: string; readonly specifier: string }> => {
-  const source = Ts.parse(file, text)
+  const source = parse(file, text)
   const found: Array<{ local: string; specifier: string }> = []
   for (const record of Ts.imports(source)) {
     if (!record.specifier.endsWith(".mdx")) continue
@@ -846,12 +853,13 @@ const withoutExtension = (file: string): string => file.replace(/\.(?:[cm]?[jt]s
  */
 export const factoryReexports = (
   sources: ReadonlyMap<string, string>,
-  factories: ReadonlySet<string>
+  factories: ReadonlySet<string>,
+  parse: typeof Ts.parse = Ts.parse
 ): ReadonlyMap<string, ReadonlyMap<string, string>> => {
   const modules = new Map<string, ReadonlyMap<string, string>>()
   for (const [file, text] of sources) {
     if (!/\bcreateSmithers\w*\s*\(/.test(text)) continue
-    const source = Ts.parse(file, text)
+    const source = parse(file, text)
     const bindings = new Map<string, string>()
     for (const statement of source.statements) {
       if (!ts.isVariableStatement(statement)) continue
@@ -879,11 +887,12 @@ export const factoryReexports = (
  * @since 1.0.0-rc.0
  */
 export const scan = (
-  detection: Detect.Detection
+  detection: Detect.Detection,
+  parse: typeof Ts.parse = Ts.parse
 ): Effect.Effect<ReadonlyArray<InventoryEntry>, MigrateError, FileSystem.FileSystem> =>
   Effect.sync(() => {
-    const factories = factoryNames(detection.sources)
-    const reexports = factoryReexports(detection.sources, factories)
+    const factories = factoryNames(detection.sources, parse)
+    const reexports = factoryReexports(detection.sources, factories, parse)
     const files = [
       ...detection.workflowFiles.map((workflow) => workflow.path),
       ...detection.components,
@@ -902,6 +911,7 @@ export const scan = (
       const carried = headers.get(file)
       hits.push(...scanFile(file, text, {
         factories,
+        parse,
         prompt: (specifier) => detection.sources.get(resolveRelative(file, specifier)),
         reexports: (specifier) =>
           specifier.startsWith(".") ? reexports.get(withoutExtension(resolveRelative(file, specifier))) : undefined,

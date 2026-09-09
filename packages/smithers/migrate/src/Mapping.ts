@@ -21,6 +21,7 @@ import * as Constructs from "./Constructs.ts"
 import * as CliScripts from "./internal/CliScripts.ts"
 import * as FlowNames from "./internal/FlowNames.ts"
 import * as Sort from "./internal/Sort.ts"
+import * as Ts from "./internal/Ts.ts"
 import type { InventoryEntry } from "./Inventory.ts"
 import * as PromptHints from "./PromptHints.ts"
 import * as ZodSchemaHints from "./ZodSchemaHints.ts"
@@ -969,7 +970,8 @@ const order: Record<MappingClass, number> = { automatic: 0, guided: 1, unsafe: 2
  * @since 1.0.0-rc.0
  */
 export const classifyWithReason = (
-  hit: InventoryEntry
+  hit: InventoryEntry,
+  parse: typeof Ts.parse = Ts.parse
 ): { readonly class: MappingClass; readonly reason: string | undefined } => {
   const base = byConstruct(hit.construct)?.class ?? "unsafe"
   let result: MappingClass = base
@@ -987,7 +989,7 @@ export const classifyWithReason = (
   // Amendment 1: `automatic` means mechanical given the captured source. A
   // component whose snippet cannot be built from this hit's own text is not
   // mechanical, whatever the table says, so it becomes a guided decision.
-  if (result === "automatic" && needsSnippet(hit.construct) && snippet(hit) === undefined) {
+  if (result === "automatic" && needsSnippet(hit.construct) && snippet(hit, parse) === undefined) {
     return {
       class: "guided",
       reason: [
@@ -1019,7 +1021,8 @@ const needsSnippet = (construct: string): boolean =>
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const classify = (hit: InventoryEntry): MappingClass => classifyWithReason(hit).class
+export const classify = (hit: InventoryEntry, parse: typeof Ts.parse = Ts.parse): MappingClass =>
+  classifyWithReason(hit, parse).class
 
 const identifier = (value: string | undefined, fallback: string): string => {
   const cleaned = (value ?? fallback).replace(/[^A-Za-z0-9]+/g, " ").trim()
@@ -1209,12 +1212,12 @@ const callArguments = (
  * falls outside the safe zod subset. A payload this function cannot print is a
  * payload the tool must not guess, so the hit becomes a guided decision.
  */
-const payloadOf = (raw: string | undefined): string | undefined => {
+const payloadOf = (raw: string | undefined, parse: typeof Ts.parse): string | undefined => {
   if (raw === undefined) return undefined
   const record = JSON.parse(raw) as Record<string, string>
   // A payload key is a struct field, so a default or an optional on the
   // chain is part of the field and printed as such.
-  const entries = Object.entries(record).map(([key, chain]) => [key, ZodSchemaHints.printField(chain)] as const)
+  const entries = Object.entries(record).map(([key, chain]) => [key, ZodSchemaHints.printField(chain, parse)] as const)
   if (entries.some(([, printed]) => printed === undefined)) return undefined
   if (entries.length === 0) return "{}"
   return `{\n${
@@ -1269,7 +1272,7 @@ const sequenced = (
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const snippet = (hit: InventoryEntry): string | undefined => {
+export const snippet = (hit: InventoryEntry, parse: typeof Ts.parse = Ts.parse): string | undefined => {
   const detail = hit.detail ?? {}
   switch (hit.construct) {
     case "Task": {
@@ -1279,8 +1282,8 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
       const name = identifier(id, "Step")
       const success = detail["outputChain"] === undefined
         ? undefined
-        : ZodSchemaHints.print(detail["outputChain"])
-      const payload = payloadOf(detail["payloadFields"])
+        : ZodSchemaHints.print(detail["outputChain"], parse)
+      const payload = payloadOf(detail["payloadFields"], parse)
       if (success === undefined || payload === undefined) return undefined
 
       if (hit.props.includes("agent")) {
@@ -1323,7 +1326,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
     case "Workflow": {
       const name = detail["name"]
       const chain = detail["payloadChain"]
-      const payload = chain === undefined ? undefined : ZodSchemaHints.print(chain)
+      const payload = chain === undefined ? undefined : ZodSchemaHints.print(chain, parse)
       const steps = namedChildren(hit)
       if (name === undefined || payload === undefined || steps === undefined || steps.length === 0) return undefined
       const body = sequenced(steps, childPayloads(hit))
@@ -1333,7 +1336,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
       // guessed would be exactly the drift a guided rewrite avoids.
       const last = steps[steps.length - 1]?.id
       const declared = last === undefined ? undefined : childOutputs(hit)?.[last]
-      const success = declared === undefined || declared === null ? undefined : ZodSchemaHints.print(declared)
+      const success = declared === undefined || declared === null ? undefined : ZodSchemaHints.print(declared, parse)
       if (success === undefined) return undefined
       const flow = identifier(name, "Flow")
       const agents = (detail["childAgents"] ?? "").split(",").filter((id) => id !== "")

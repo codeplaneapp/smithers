@@ -712,7 +712,8 @@ const resolveRelative = (
  */
 export const scan = (
   root: string,
-  options: ScanOptions = {}
+  options: ScanOptions = {},
+  parse: typeof Ts.parse = Ts.parse
 ): Effect.Effect<Detection, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const path = yield* Path.Path
@@ -947,7 +948,7 @@ export const scan = (
         pragmaMatch = pragmaRegexp.exec(text)
       }
 
-      const parsed = Ts.parse(file, text)
+      const parsed = parse(file, text)
       Ts.forEachNode(parsed, (node) => {
         if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) jsxFiles.add(file)
       })
@@ -1254,7 +1255,7 @@ export const scan = (
     for (const workflow of workflowFiles) {
       const text = sources.get(workflow.path)
       if (text === undefined) continue
-      const parsed = Ts.parse(workflow.path, text)
+      const parsed = parse(workflow.path, text)
       Ts.forEachNode(parsed, (node) => {
         if (!ts.isJsxSelfClosingElement(node) && !ts.isJsxOpeningElement(node)) return
         if (Ts.tagName(node) !== "UI" && Ts.tagName(node) !== "TUI") return

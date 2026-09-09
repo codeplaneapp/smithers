@@ -723,8 +723,10 @@ refuses to `apply` a plan built over one (`scan` and `plan` still report it).
   `packs`, asset type declarations, skills, evals, and every integration
   subpath import or `SMITHERS_*` name in a deployment manifest.
 
-`Detection.sources` carries the text of every file a scanner read, so the later
-modules parse nothing twice.
+`Detection.sources` carries the text of every file a scanner read. `Scan.scan`
+shares one native compiler session and caches syntax trees by path and content
+across detection, inventory, schema hints, mapping, and unit planning. The
+session and cache are released when the scan ends.
 
 ## RunState
 

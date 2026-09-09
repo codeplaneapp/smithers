@@ -11,9 +11,11 @@ vi.mock("typescript/unstable/sync", () => ({
     constructor(options: APIOptions) {
       state.options = options
     }
+    clearSourceFileCache() {}
     updateSnapshot() {
       if (state.failure === "snapshot") throw new Error("compiler failed")
       return {
+        dispose() {},
         getProject: () => state.failure === "project" ? undefined : { program: { getSourceFile: () => undefined } }
       }
     }

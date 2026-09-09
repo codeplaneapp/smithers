@@ -77,11 +77,11 @@ const unsupportedCalls: ReadonlyArray<{ readonly name: string; readonly reason: 
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const classify = (chain: string): Classification => {
+export const classify = (chain: string, parser: typeof Ts.parse = Ts.parse): Classification => {
   for (const { name, reason } of unsupportedCalls) {
     if (new RegExp(`\\b${name}\\s*\\(`).test(chain)) return { class: "guided", reason }
   }
-  return print(chain) === undefined
+  return print(chain, parser) === undefined
     ? { class: "guided", reason: "the chain uses a zod form outside the safe subset" }
     : { class: "automatic", reason: undefined }
 }
@@ -303,8 +303,8 @@ const convert = (node: ts.Expression): Converted | undefined => {
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const print = (chain: string): string | undefined => {
-  const value = parse(chain)
+export const print = (chain: string, parser: typeof Ts.parse = Ts.parse): string | undefined => {
+  const value = parse(chain, parser)
   if (value === undefined) return undefined
   // A top-level `.optional()` or `.default()` has no bare-schema spelling:
   // `Schema.optional` is a struct field's, and a decoding default applied at
@@ -315,8 +315,8 @@ export const print = (chain: string): string | undefined => {
   return value.description === undefined ? value.text : `${value.text}.annotate({ description: ${value.description} })`
 }
 
-const parse = (chain: string): Converted | undefined => {
-  const source = Ts.parse("chain.ts", `const value = ${chain}`)
+const parse = (chain: string, parser: typeof Ts.parse): Converted | undefined => {
+  const source = parser("chain.ts", `const value = ${chain}`)
   const statement = source.statements[0]
   if (statement === undefined || !ts.isVariableStatement(statement)) return undefined
   const declaration = statement.declarationList.declarations[0]
@@ -333,8 +333,8 @@ const parse = (chain: string): Converted | undefined => {
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const printField = (chain: string): string | undefined => {
-  const value = parse(chain)
+export const printField = (chain: string, parser: typeof Ts.parse = Ts.parse): string | undefined => {
+  const value = parse(chain, parser)
   if (value === undefined) return undefined
   let text = value.text
   if (value.description !== undefined) text = `${text}.annotate({ description: ${value.description} })`
@@ -353,7 +353,7 @@ export const printField = (chain: string): string | undefined => {
  * @category scanners
  * @since 1.0.0-rc.0
  */
-export const hints = (detection: Detection): ReadonlyArray<ZodHint> => {
+export const hints = (detection: Detection, parser: typeof Ts.parse = Ts.parse): ReadonlyArray<ZodHint> => {
   const files = [
     ...detection.workflowFiles.map((workflow) => workflow.path),
     ...detection.components,
@@ -366,15 +366,15 @@ export const hints = (detection: Detection): ReadonlyArray<ZodHint> => {
     seen.add(file)
     const text = detection.sources.get(file)
     if (text === undefined) continue
-    for (const { name, chain } of Inventory.zodChains(file, text)) {
-      const classification = classify(chain)
+    for (const { name, chain } of Inventory.zodChains(file, text, parser)) {
+      const classification = classify(chain, parser)
       found.push({
         file,
         name,
         chain,
         class: classification.class,
         reason: classification.reason,
-        schema: classification.class === "automatic" ? print(chain) : undefined
+        schema: classification.class === "automatic" ? print(chain, parser) : undefined
       })
     }
   }

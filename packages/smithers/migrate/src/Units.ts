@@ -21,6 +21,7 @@ import { localPackageName } from "./Detect.ts"
 import * as CommandLine from "./internal/CommandLine.ts"
 import * as FlowNames from "./internal/FlowNames.ts"
 import * as Sort from "./internal/Sort.ts"
+import * as Ts from "./internal/Ts.ts"
 import type { InventoryEntry } from "./Inventory.ts"
 import * as Mapping from "./Mapping.ts"
 import type { PromptHint } from "./PromptHints.ts"
@@ -437,8 +438,10 @@ export const orderWorkflows = <A extends { readonly path: string }>(
   return { ordered, cycles }
 }
 
-const unsafeConstructs = (hits: ReadonlyArray<InventoryEntry>): ReadonlyArray<string> =>
-  [...new Set(hits.filter((hit) => Mapping.classify(hit) === "unsafe").map((hit) => hit.construct))].sort(Sort.byText)
+const unsafeConstructs = (hits: ReadonlyArray<InventoryEntry>, parse: typeof Ts.parse): ReadonlyArray<string> =>
+  [...new Set(hits.filter((hit) => Mapping.classify(hit, parse) === "unsafe").map((hit) => hit.construct))].sort(
+    Sort.byText
+  )
 
 const mappingRows = (hits: ReadonlyArray<InventoryEntry>): ReadonlyArray<Mapping.MappingRow> => {
   const rows = new Map<string, Mapping.MappingRow>()
@@ -455,7 +458,11 @@ const mappingRows = (hits: ReadonlyArray<InventoryEntry>): ReadonlyArray<Mapping
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<UnitPlan> => {
+export const plan = (
+  input: PlanInput,
+  options: Options = {},
+  parse: typeof Ts.parse = Ts.parse
+): ReadonlyArray<UnitPlan> => {
   const flowsDir = options.flowsDir ?? "flows"
   const verification = verifyCommands(input.detection, options.commands ?? {}, flowsDir)
   const specifiers = specifierContext(input.detection)
@@ -573,7 +580,7 @@ export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<Uni
           return hint === undefined ? [] : [hint]
         })
       },
-      unsafe: unsafeConstructs(constructs),
+      unsafe: unsafeConstructs(constructs, parse),
       notes: cycleNotes(workflow.path),
       specifiers,
       verification
@@ -595,7 +602,7 @@ export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<Uni
       constructs,
       mapping: mappingRows(constructs),
       hints: { zod: [], prompt: [] },
-      unsafe: unsafeConstructs(constructs),
+      unsafe: unsafeConstructs(constructs, parse),
       notes: [],
       specifiers,
       verification

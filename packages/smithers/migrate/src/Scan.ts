@@ -14,6 +14,7 @@ import type * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
 import * as Detect from "./Detect.ts"
 import * as Sort from "./internal/Sort.ts"
+import * as Ts from "./internal/Ts.ts"
 import * as Inventory from "./Inventory.ts"
 import * as Mapping from "./Mapping.ts"
 import { make, type MigrateError } from "./MigrateError.ts"
@@ -69,14 +70,15 @@ const severity: Record<Mapping.MappingClass, number> = { automatic: 0, guided: 1
  * @since 1.0.0-rc.0
  */
 export const decisions = (
-  hits: ReadonlyArray<Inventory.InventoryEntry>
+  hits: ReadonlyArray<Inventory.InventoryEntry>,
+  parse: typeof Ts.parse = Ts.parse
 ): ReadonlyArray<Report.MappingDecision> => {
   const byConstruct = new Map<string, Report.MappingDecision>()
   const reasonsByConstruct = new Map<string, Array<string>>()
   for (const hit of hits) {
     const row = Mapping.byConstruct(hit.construct)
     if (row === undefined) continue
-    const classified = Mapping.classifyWithReason(hit)
+    const classified = Mapping.classifyWithReason(hit, parse)
     const existing = byConstruct.get(hit.construct)
     const occurrences = (existing?.occurrences ?? 0) + 1
     // One row stands for every occurrence of a construct, so it has to carry
@@ -117,14 +119,15 @@ export const scan = (
   options: Options = {}
 ): Effect.Effect<ScanResult, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
+    const parse = yield* Ts.session
     const detection = yield* Detect.scan(root, {
       ...(options.ignore === undefined ? {} : { ignore: options.ignore }),
       ...(options.environment === undefined ? {} : { environment: options.environment })
-    })
+    }, parse)
     const runState = yield* RunState.scan(root, detection, options.runState ?? {})
-    const inventory = yield* Inventory.scan(detection)
+    const inventory = yield* Inventory.scan(detection, parse)
     const hints = {
-      zod: ZodSchemaHints.hints(detection),
+      zod: ZodSchemaHints.hints(detection, parse),
       prompt: PromptHints.hints(detection)
     }
     // The whole plan first, then the selection. A `--unit` id the plan does
@@ -135,7 +138,7 @@ export const scan = (
     const planned = Units.plan({ detection, inventory, hints }, {
       ...(options.flowsDir === undefined ? {} : { flowsDir: options.flowsDir }),
       ...(options.commands === undefined ? {} : { commands: options.commands })
-    })
+    }, parse)
     const duplicates = Units.duplicateIds(planned)
     if (duplicates.length > 0) {
       return yield* Effect.fail(make(
@@ -161,8 +164,8 @@ export const scan = (
       }
     }
     const units = asked === undefined ? planned : planned.filter((unit) => asked.includes(unit.id))
-    return { root, detection, runState, inventory, mapping: decisions(inventory), hints, units }
-  })
+    return { root, detection, runState, inventory, mapping: decisions(inventory, parse), hints, units }
+  }).pipe(Effect.scoped)
 
 /**
  * The operator decisions one unit carries, as report `unresolved` entries.
