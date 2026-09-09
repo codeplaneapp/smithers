@@ -463,3 +463,27 @@ describe("empty journal follow", () => {
       ])
     }).pipe(Effect.provide(stack())))
 })
+
+describe("incremental journal snapshots", () => {
+  test("returns only rows after the issued cursor and retains full inspection", () =>
+    Effect.gen(function*() {
+      const projections = yield* Projections
+      const runId = yield* launch
+      const selector = { _tag: "run-events" as const, runId }
+      const initial = yield* projections.snapshot(selector)
+      expect(initial.rows.length).toBeGreaterThan(0)
+      const unchanged = yield* projections.snapshot(selector, initial.cursor)
+      expect(unchanged.rows).toEqual([])
+      yield* emit(runId, "control.agent.turn-opened", { seat: "test" })
+      const next = yield* projections.snapshot(selector, initial.cursor)
+      expect(next.rows).toHaveLength(1)
+      const full = yield* projections.snapshot(selector)
+      expect(full.rows).toEqual([...initial.rows, ...next.rows])
+      expect(next.cursor).toEqual(full.cursor)
+      expect((yield* projections.snapshot(selector, next.cursor)).rows).toEqual([])
+      const wrongRun = { ...initial.cursor, runId: "another-run" }
+      expect((yield* Effect.flip(projections.snapshot(selector, wrongRun))).code).toBe("malformed_request")
+      const future = { ...initial.cursor, value: next.cursor.value + 100 }
+      expect((yield* Effect.flip(projections.snapshot(selector, future))).code).toBe("malformed_request")
+    }).pipe(Effect.provide(stack())))
+})

@@ -986,6 +986,13 @@ describe("Projections subscriptions", () => {
         { heartbeatMillis: 60_000 }
       )
 
+      const suffix = yield* projections.snapshot(selector, issuedCursor(selector, 0, 0))
+      expect(suffix.rows).toEqual([history[1], history[2]])
+      expect(suffix.cursor).toEqual(issuedCursor(selector, 1, 0))
+      const summarySelector = { _tag: "run-summary" as const, runId: "run-1" }
+      const refused = yield* Effect.flip(projections.snapshot(summarySelector, issuedCursor(summarySelector, 0, 0)))
+      expect(refused.code).toBe("malformed_request")
+
       const frames = yield* Stream.runCollect(projections.subscribe(selector, issuedCursor(selector, 0, 0)))
       expect(frames.flatMap((frame) => frame._tag === "delta" ? [[frame.cursor.value, frame.cursor.offset]] : []))
         .toEqual([[0, 1], [1, 0]])

@@ -216,8 +216,16 @@ const relay = (options: {
           }
           case "transcript":
             return rowsAnswer("transcript", options.transcriptLines ?? [])
-          case "run-events":
-            return rowsAnswer("run-events", options.events ?? [])
+          case "run-events": {
+            const after = payload.after as { value: number; offset: number } | undefined
+            let offset = 0
+            const events = options.events ?? []
+            return rowsAnswer("run-events", events.filter((event, i) => {
+              offset = i > 0 && events[i - 1]?.sequence === event.sequence ? offset + 1 : 0
+              return after === undefined || Number(event.sequence) > after.value ||
+                (event.sequence === after.value && offset > after.offset)
+            }))
+          }
           default:
             return rowsAnswer(String(selector._tag), [])
         }

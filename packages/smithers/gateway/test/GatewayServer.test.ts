@@ -1079,6 +1079,22 @@ describe("the assembled gateway over a real loopback bind", () => {
       expect(exit.exit._tag).toBe("Success")
       // What the wire answers is what the service answers.
       expect(exit.exit.value).toEqual(yield* projections.snapshot(selector))
+      const eventSelector = { _tag: "run-events" as const, runId: receipt.runId }
+      const journal = yield* projections.snapshot(eventSelector)
+      expect(journal.rows.length).toBeGreaterThan(0)
+      const incrementalResponse = yield* Effect.promise(() => fetch(`${url}/projections`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          _tag: "Request", id: 2, tag: "Projection.Snapshot",
+          payload: { selector: eventSelector, after: journal.cursor }, headers: []
+        }) + "\n"
+      }))
+      const incrementalText = yield* Effect.promise(() => incrementalResponse.text())
+      const incremental = JSON.parse(incrementalText.split("\n")[0] ?? "{}")
+      expect(incremental.exit._tag).toBe("Success")
+      expect(incremental.exit.value.rows).toEqual([])
+      expect(incremental.exit.value.cursor).toEqual(journal.cursor)
     }).pipe(Effect.provide(served())))
 
   test("serves a sync read over POST /sync", () =>

@@ -298,3 +298,15 @@ describe("owning workspace binding", () => {
     expect(requests).toBe(0)
   })
 })
+
+test("runEvents forwards the exact cursor and preserves the issued revision", async () => {
+  const selector = { _tag: "run-events" as const, runId: "run-1" }
+  const after = { selector, projection: "run-events" as const, runId: "run-1", value: 42, offset: 1 }
+  const next = { ...after, value: 43, offset: 0 }
+  const event = { kind: "control.run.accepted", payload: {}, sequence: 43, occurredAt: 1000 }
+  const { calls, seam } = relay({ "Projection.Snapshot": { ok: true, payload: { rows: [event], cursor: next } } })
+  expect(await seam.runEvents("o/r", "run-1", undefined, after)).toEqual({ status: "ok", value: [event], cursor: next })
+  expect(calls[0]?.payload).toEqual({ selector, after })
+  await seam.runEvents("o/r", "run-1")
+  expect(calls[1]?.payload).toEqual({ selector })
+})

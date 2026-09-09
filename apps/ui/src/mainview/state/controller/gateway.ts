@@ -15,6 +15,7 @@
  */
 import { ControlEvent, type SteerMessage } from "@smthrs/control/ControlSchema"
 import { ApprovalRow, NodeOutputRow, RunSummaryRow, TranscriptRow } from "@smthrs/gateway/GatewayProjection"
+import { ProjectionCursor } from "@smthrs/gateway/GatewaySchema"
 import { WORKFLOW_RPC_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { Option, Schema } from "effect"
 
@@ -25,7 +26,7 @@ import { Option, Schema } from "effect"
  * by shape rather than by matching prose.
  */
 export type GatewayResult<A> =
-  | { readonly status: "ok"; readonly value: A }
+  | { readonly status: "ok"; readonly value: A; readonly cursor?: ProjectionCursor }
   | { readonly status: "error"; readonly message: string; readonly code?: string }
 
 /** ControlError.FlowNotFound on the wire: its `code` and its tag. */
@@ -67,7 +68,7 @@ const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
 
 const map = <A, B>(result: GatewayResult<A>, project: (value: A) => B): GatewayResult<B> =>
-  result.status === "ok" ? { status: "ok", value: project(result.value) } : result
+  result.status === "ok" ? { ...result, value: project(result.value) } : result
 
 /**
  * One projection snapshot's rows, decoded against the schema the gateway
@@ -80,13 +81,17 @@ const map = <A, B>(result: GatewayResult<A>, project: (value: A) => B): GatewayR
  */
 const snapshotOf = <S extends Schema.Top>(row: S) => Schema.Struct({ rows: Schema.Array(row) })
 
+// A legacy response may omit cursor metadata; its rows remain readable.
+const decodeCursor = Schema.decodeUnknownOption(ProjectionCursor)
+
 const rowsDecoder =
   <A>(decode: (input: unknown) => Option.Option<{ readonly rows: ReadonlyArray<A> }>) =>
   (result: GatewayResult<unknown>): GatewayResult<ReadonlyArray<A>> => {
     if (result.status !== "ok") return result
     const decoded = decode(result.value)
+    const cursor = decodeCursor(asRecord(result.value).cursor)
     return Option.isSome(decoded)
-      ? { status: "ok", value: decoded.value.rows }
+      ? { status: "ok", value: decoded.value.rows, ...(Option.isSome(cursor) ? { cursor: cursor.value } : {}) }
       : {
         status: "error",
         message: "The workspace answered with a projection I couldn't read.",
@@ -179,8 +184,13 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
   }
 
   /** One projection snapshot, by selector. */
-  const projection = (repo: string, selector: unknown, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<unknown>> =>
-    call(repo, "Projection.Snapshot", { selector }, binding)
+  const projection = (
+    repo: string,
+    selector: unknown,
+    binding?: GatewayWorkspaceBinding,
+    after?: ProjectionCursor
+  ): Promise<GatewayResult<unknown>> =>
+    call(repo, "Projection.Snapshot", { selector, ...(after === undefined ? {} : { after }) }, binding)
 
   return {
     call,
@@ -363,9 +373,14 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     transcript: async (repo: string, runId: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<TranscriptRow>>> =>
       decodeTranscriptRows(await projection(repo, { _tag: "transcript", runId }, binding)),
 
-    /** One run's raw control events, in journal order. */
-    runEvents: async (repo: string, runId: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<ControlEvent>>> =>
-      decodeControlEventRows(await projection(repo, { _tag: "run-events", runId }, binding))
+    /** Journal rows after a cursor; omit it for full historical inspection. */
+    runEvents: async (
+      repo: string,
+      runId: string,
+      binding?: GatewayWorkspaceBinding,
+      after?: ProjectionCursor
+    ): Promise<GatewayResult<ReadonlyArray<ControlEvent>>> =>
+      decodeControlEventRows(await projection(repo, { _tag: "run-events", runId }, binding, after))
   }
 }
 

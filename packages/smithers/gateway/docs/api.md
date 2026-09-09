@@ -135,7 +135,7 @@ The read path, served as bounded snapshots and followed deltas.
 | ------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `Projections`             | `Context.Service` tagged `@smthrs/gateway/Projections`                                               | The service tag the mounts read through.                                                                           |
 | `Service`                 | `{ snapshot; subscribe }`                                                                            | Read-path operations served by the gateway.                                                                        |
-| `Service.snapshot`        | `(selector: ProjectionSelector) => Effect<ProjectionSnapshot, GatewayError>`                         | Every row the selector currently projects, and the cursor they were read at.                                       |
+| `Service.snapshot`        | `(selector: ProjectionSelector, after?: ProjectionCursor) => Effect<ProjectionSnapshot, GatewayError>`                         | Current rows, or the run-events suffix after `after`, with the current cursor.                                       |
 | `Service.subscribe`       | `(selector: ProjectionSelector, after?: ProjectionCursor) => Stream<GatewayFrame, GatewayError>`     | A snapshot followed by deltas and keepalives, or, with `after`, the deltas after that cursor alone.                |
 | `make`                    | `(control: ControlService, options?: { heartbeatMillis?: number }) => Effect<Service, GatewayError>` | Builds the read path over a control plane. Invalid settings are `bind_failed` failures; construction never throws. |
 | `layer`                   | `Layer<Projections, GatewayError, Control>`                                                          | The read path over the ambient control plane, at the default cadence.                                              |
@@ -184,6 +184,16 @@ ones, which is what a run card renders.
 selector projects, so a client decodes a snapshot instead of casting it.
 
 ### Cursors, snapshots, and frames
+
+`Projection.Snapshot` accepts optional `after: ProjectionCursor` for
+`run-events` only. It returns rows strictly after that sequence and offset,
+with the current journal cursor. An unchanged journal returns no rows.
+The cursor must belong to the same selector and run and cannot be ahead of
+the journal. Other selectors with `after` return `malformed_request`.
+Omit `after` for the full snapshot and when no journal rows are retained:
+the empty cursor `0:0` also names the first sequence-zero event.
+This bounds transferred rows; the gateway still reconciles the full source
+journal before producing the suffix.
 
 | Export               | Shape                                                                      |
 | -------------------- | -------------------------------------------------------------------------- |

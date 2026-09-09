@@ -85,9 +85,10 @@ export const maxProjectionBytes = 4 * 1024 * 1024
  * @category models
  */
 export interface Service {
-  /** Every row the selector currently projects, and the cursor they were read at. */
+  /** Current rows, or only run-events rows after an issued cursor. */
   readonly snapshot: (
-    selector: GatewaySchema.ProjectionSelector
+    selector: GatewaySchema.ProjectionSelector,
+    after?: GatewaySchema.ProjectionCursor | undefined
   ) => Effect.Effect<GatewaySchema.ProjectionSnapshot, GatewayError>
   /**
    * A snapshot followed by recomputed deltas and keepalive frames, or, when
@@ -512,18 +513,30 @@ const makeService = (control: ControlService, heartbeatMillis: number): Service 
   }
 
   const snapshot = (
-    selector: GatewaySchema.ProjectionSelector
+    selector: GatewaySchema.ProjectionSelector,
+    after?: GatewaySchema.ProjectionCursor | undefined
   ): Effect.Effect<GatewaySchema.ProjectionSnapshot, GatewayError> =>
-    Effect.flatMap(
-      sourceOf(selector),
-      (source) =>
-        Effect.flatMap(boundedRows(selector, rowsOf(selector, source)), (rows) =>
-          snapshotOf({
-            selector,
-            cursor: cursorOf(selector, cursorPositionOf(source)),
-            rows
-          }))
-    )
+    Effect.gen(function*() {
+      if (after !== undefined) {
+        if (selector._tag !== "run-events") {
+          return yield* malformed("Only run-events snapshots accept an after cursor")
+        }
+        const scope = resumeScope(selector, after)
+        if (typeof scope !== "string") return yield* scope
+      }
+      const source = yield* sourceOf(selector)
+      const position = cursorPositionOf(source)
+      if (after !== undefined && comparePosition(after, position) > 0) {
+        return yield* malformed("A snapshot cursor cannot be ahead of the run's journal")
+      }
+      const projected = after !== undefined && source._tag === "run"
+        ? positionedEvents(source.run.events)
+          .filter((entry) => comparePosition(entry.position, after) > 0)
+          .map((entry) => entry.event)
+        : rowsOf(selector, source)
+      const rows = yield* boundedRows(selector, projected)
+      return yield* snapshotOf({ selector, cursor: cursorOf(selector, position), rows })
+    })
 
   const snapshotFrames = (
     selector: GatewaySchema.ProjectionSelector,

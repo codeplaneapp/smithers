@@ -107,7 +107,10 @@ const submitErrors = Schema.Union([
  */
 export const GatewayRpcs = RpcGroup.make(
   Rpc.make("Projection.Snapshot", {
-    payload: Schema.Struct({ selector: GatewaySchema.ProjectionSelector }),
+    payload: Schema.Struct({
+      selector: GatewaySchema.ProjectionSelector,
+      after: Schema.optional(GatewaySchema.ProjectionCursor)
+    }),
     success: GatewaySchema.ProjectionSnapshot,
     error: GatewayError
   }),
