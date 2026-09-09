@@ -37,11 +37,38 @@ import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
 import type { AppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
+import { scopedControllers } from "../state/ControllerTestScope"
 import type { CommandState, FlowEntry } from "./registry"
 import { nameOf, nativeOnly, recommendedNames } from "./registry"
 
 /* (a″) mounts the shell; the same register/unregister the component tests use. */
 GlobalRegistrator.register()
+
+/**
+ * Nets capture-phase `keydown` registrations against removals on the shared
+ * document. Every controller installs one (state/controller/tabs.ts
+ * `installKeyboard`, via AppController's `onDispose`), so an undisposed
+ * fixture keeps steering key events for every test that follows it in this
+ * process. The hygiene test at the bottom asserts the count returns to zero.
+ */
+const trackCaptureKeydown = (target: Document): (() => number) => {
+  let open = 0
+  const add = target.addEventListener.bind(target)
+  const remove = target.removeEventListener.bind(target)
+  const capturing = (options?: boolean | AddEventListenerOptions | EventListenerOptions): boolean =>
+    options === true || (typeof options === "object" && options !== null && options.capture === true)
+  target.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+    if (type === "keydown" && capturing(options)) open += 1
+    add(type, listener, options)
+  }) as Document["addEventListener"]
+  target.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+    if (type === "keydown" && capturing(options)) open -= 1
+    remove(type, listener, options)
+  }) as Document["removeEventListener"]
+  return () => open
+}
+
+const openCaptureKeydown = trackCaptureKeydown(document)
 
 afterAll(async () => {
   const { disposeCodeViewPool } = await import("@smthrs/ui/adapters/code-view")
@@ -77,9 +104,40 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
+/** Per-test fixtures; the scope disposes each one in its own `afterEach`. */
+const scopedController = scopedControllers()
+
 const controllerFor = async (bootstrap?: AppBootstrap): Promise<AppController> => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-  return createAppController(store, unavailableRepositories, unavailableAgent, { bootstrap })
+  return scopedController(store, unavailableRepositories, unavailableAgent, { bootstrap })
+}
+
+/*
+ * The three registries are built once and read by every parity test, so they
+ * outlive `afterEach` and are released in the describe's `afterAll` instead —
+ * before the file-level hook drops the code-view pool and the document they
+ * hold listeners on.
+ */
+const sharedControllers = new Set<AppController>()
+
+const sharedControllerFor = async (bootstrap?: AppBootstrap): Promise<AppController> => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const controller = createAppController(store, unavailableRepositories, unavailableAgent, { bootstrap })
+  sharedControllers.add(controller)
+  return controller
+}
+
+const disposeSharedControllers = async (): Promise<void> => {
+  const errors: unknown[] = []
+  for (const controller of sharedControllers) {
+    try {
+      await controller.dispose()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  sharedControllers.clear()
+  if (errors.length > 0) throw new AggregateError(errors, "Shared controller fixture cleanup failed")
 }
 
 const cloudBootstrap = (capabilities: ReadonlyArray<RuntimeCapability>): AppBootstrap => ({
@@ -251,10 +309,17 @@ const KNOWN_UNPROXIED: ReadonlyArray<{ readonly path: string; readonly flows: Re
 
 describe("host parity — the web and native catalogs against the servers' own capability tables", () => {
   const registries = (async () => ({
-    web: await controllerFor(WEB),
-    native: await controllerFor(NATIVE),
-    unknown: await controllerFor()
+    web: await sharedControllerFor(WEB),
+    native: await sharedControllerFor(NATIVE),
+    unknown: await sharedControllerFor()
   }))()
+
+  afterAll(async () => {
+    // Settle construction first: a fixture still being built would otherwise
+    // register itself after the drain and outlive the file.
+    await registries.catch(() => {})
+    await disposeSharedControllers()
+  })
 
   /** Every declared non-admin flow: the union of the three registries. */
   const declared = async (): Promise<ReadonlyArray<FlowEntry>> => {
@@ -483,7 +548,7 @@ describe("host parity — the web and native catalogs against the servers' own c
    */
   test("(a‴) a signed-in web page with a workspace card and a TypeScript file card renders no control bound to a flow the web registry lacks", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const controller = createAppController(store, unavailableRepositories, unavailableAgent, {
+    const controller = scopedController(store, unavailableRepositories, unavailableAgent, {
       bootstrap: WEB,
       fetchImpl: async () =>
         new Response(JSON.stringify({ status: "error" }), { status: 404, headers: { "content-type": "application/json" } })
@@ -558,14 +623,14 @@ describe("host parity — the web and native catalogs against the servers' own c
       expect(host.querySelector('[data-kind="file"] [data-intel="unavailable"]')?.textContent).toContain("needs the native app")
     } finally {
       flushSync(() => root.unmount())
-      controller.dispose()
+      await controller.dispose()
       host.remove()
     }
   })
 
   test("(a″) the web DOM's data-flow controls and data-flows manifest name only web-registered flows", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const controller = createAppController(store, unavailableRepositories, unavailableAgent, {
+    const controller = scopedController(store, unavailableRepositories, unavailableAgent, {
       bootstrap: WEB,
       // The download button renders only while a native release exists to download; the sweep must see it.
       downloadUrl: "https://example.test/download",
@@ -593,8 +658,22 @@ describe("host parity — the web and native catalogs against the servers' own c
       expect(rendered.filter((name) => nativeOnlyNames.has(name))).toEqual([])
     } finally {
       flushSync(() => root.unmount())
-      controller.dispose()
+      await controller.dispose()
       host.remove()
     }
+  })
+})
+
+/*
+ * Fixture hygiene. This file installs one shared Happy DOM document and builds
+ * real controllers on it, and each controller attaches a capture-phase keydown
+ * handler to that document. A fixture that is never disposed therefore keeps
+ * handling keys — and keeps its store subscriptions and polls alive — for the
+ * rest of the process. The parity describe above has released every fixture by
+ * the time this runs, so the net registration count is back to zero.
+ */
+describe("fixture hygiene", () => {
+  test("no capture-phase keydown listener outlives the parity fixtures", () => {
+    expect(openCaptureKeydown()).toBe(0)
   })
 })
