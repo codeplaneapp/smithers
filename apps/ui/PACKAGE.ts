@@ -8,6 +8,9 @@
  * use the workspace's Node runtime and package manager.
  */
 import { Smithers } from "@smthrs/targets"
+import { Package as rpcPackage } from "../../packages/rpc/PACKAGE.ts"
+import { Package as gatewayPackage } from "../../packages/smithers/gateway/PACKAGE.ts"
+import { Package as componentPackage } from "../../packages/smithers/ui/PACKAGE.ts"
 
 const cwd = "apps/ui"
 
@@ -31,8 +34,8 @@ const buildConfigs = [
  * The harness and suite sources outside `src/`. The tsconfig compiles them, so
  * the typecheck measures them and its key has to carry them too.
  */
-const harnessSources = Smithers.glob("//apps/ui/scripts/**/*.ts")
-const suiteSources = Smithers.glob("//apps/ui/e2e/**/*.ts")
+const harnessSources = Smithers.glob("//apps/ui/scripts/**/*")
+const suiteSources = Smithers.glob("//apps/ui/e2e/**/*")
 
 /** The assertion contracts the e2e tiers share; pure, so the unit suite gates them. */
 const contractSources = Smithers.glob("//apps/ui/e2e/contracts/**/*.ts")
@@ -90,8 +93,9 @@ const check = Smithers.Typecheck({
 })
 
 /**
- * The unit suite: everything under `src/` plus the e2e assertion contracts
- * under `e2e/contracts/`, hermetic, no server and no browser.
+ * The unit suite: everything under `src/`, the e2e assertion contracts under
+ * `e2e/contracts/` and the script contracts under `scripts/`, hermetic, with no
+ * server and no browser.
  *
  * @since 0.1.0
  * @category test
@@ -101,13 +105,31 @@ const check = Smithers.Typecheck({
 // scripts/repo-contract/README.md for the denominator exception.
 const unitTests = Smithers.NodeTest({
   runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
-  runner: Smithers.testSuite(["src", "e2e/contracts"]),
-  srcs: [sources, componentSources, styleSources, contractSources],
-  deps: [],
+  runner: Smithers.testSuite(["src", "e2e/contracts", "scripts"]),
+  // Conformance reads harnesses, configuration and workspace vocabularies.
+  // Discovery paths alone do not contribute to the target's input identity.
+  srcs: [
+    sources,
+    componentSources,
+    styleSources,
+    contractSources,
+    harnessSources,
+    suiteSources,
+    ...buildConfigs,
+    Smithers.glob("//apps/ui/*.ts"),
+    Smithers.file("tsconfig.json"),
+    Smithers.file("package.json"),
+    Smithers.file("//package.json"),
+    Smithers.file("//pnpm-lock.yaml"),
+    Smithers.file("//packages/rpc/fixtures/force/graph.json"),
+    Smithers.file("//packages/rpc/fixtures/force/plan-typeCheck.json")
+  ],
+  // Globs cannot cross PACKAGE.ts boundaries; dependency keys carry these sources.
+  deps: [rpcPackage.check, componentPackage.check, gatewayPackage.check],
   cwd
 })
 
-/** Runs the actual pinned Playwright browser suite, with no live provider calls. */
+/** Runs pinned Playwright and Bun browser OAuth tests, with no live provider calls. */
 const browserE2e = Smithers.NodeTest({
   runner: Smithers.entrypoint(Smithers.file("scripts/run-pr-e2e.mjs")),
   srcs: [sources, componentSources, styleSources, harnessSources, suiteSources, ...buildConfigs,

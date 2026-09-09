@@ -66,7 +66,7 @@ test("required CI resolves package, app, script, evaluation and fault suites to 
   ]) assert.ok(selected(label, job).length, `${label} must be a required root of ${job}`)
   const uiUnits = inventory.rows.filter((row) => row.label === "//apps/ui:unitTests" && row.required && row.selectedRoot)
   assert.equal(uiUnits.length, 1, "the UI unit tier runs once in required CI")
-  assert.deepEqual(uiUnits[0].runner, ["bun", "test", "src"])
+  assert.deepEqual(uiUnits[0].runner, ["bun", "test", "src", "scripts"])
   const packageTests = inventory.rows.filter((row) => row.job === "packages" && row.required && row.selectedRoot)
   assert.ok(packageTests.length > 100, "the complete package test graph must resolve")
   for (const row of packageTests) assert.ok(selected(row.label, "test").length, `${row.label} must also be selected by ci //packages/...`)

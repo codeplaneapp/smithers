@@ -12,111 +12,112 @@
 E2E and live-check scripts. Unless a section says otherwise, run them from
 `apps/ui`.
 
+## Declared test runners
+
+| Command (from `apps/ui`) | Files executed | Requirement |
+| --- | --- | --- |
+| `pnpm test` | Tests under `src/` and `scripts/` | Bun |
+| `pnpm run test:e2e` | Specs under `e2e/playwright/` | Playwright Chromium and the local app server |
+| `pnpm run test:e2e:auth` | `e2e/native/CloudAuthFragment.test.ts` | Playwright Chromium; starts isolated loopback OAuth fixtures |
+| `pnpm run test:e2e:packaged` | Bridge, fixture lease and packaged-app tests named by `e2e/packaged/run.ts` | Packaged Electrobun app |
+
+`test:e2e:native` aliases the packaged runner. Native process probes are Bun
+tests, separate from Playwright specs. `src/conformance/TestInventory.test.ts`
+checks that each test file belongs to an executable runner. The `unitTests`
+target uses the same discovery as `pnpm test`; its inputs include scripts,
+E2E harnesses, configs and RPC fixtures. It depends on the RPC, gateway and
+shared UI typechecks so the inspected package sources contribute their keys.
+The `browserE2e` target invokes `run-pr-e2e.mjs`, which installs Chromium, runs
+`test:e2e:auth`, then runs the offline Playwright suite. Any failed command
+stops the wrapper with a nonzero exit code.
+
 ## Launch checklist (`launch-checklist.ts`)
 
-Headless, one-command re-run of the signed-in launch checklist (§A-F) that
-produced `apps/reports/launch-checklist/*`. No origin is hardcoded — the
-target is always explicit, via `--target`/`-t` or `$CHECKLIST_TARGET`.
+Run the signed-in launch checklist (§A-F) against an explicit origin.
+`--target`/`-t` overrides `$CHECKLIST_TARGET`; there is no default target.
 
-The command works from the repository root and from `apps/ui`; the root
-`checklist` script forwards to this one.
-
-### Post-deploy re-run
-
-Right after a deploy, point it at the deployed origin:
+From the repository root:
 
 ```sh
-CHECKLIST_SESSION_COOKIE='smithers_session=<cookie value>' \
-CHECKLIST_ZERO_BALANCE_BEARER='smithers_session=<zero-balance test account cookie>' \
 pnpm run checklist -- --target https://canary.smithers.sh
 ```
 
-or with the flag instead of `$CHECKLIST_TARGET`:
+From `apps/ui`:
 
 ```sh
-pnpm run checklist -- --target <origin>
+pnpm run checklist -- --target https://canary.smithers.sh
 ```
 
-### What it actually checks
+The root script forwards to the UI package. Both commands run
+`bun scripts/launch-checklist.ts` with `apps/ui` as the working directory.
+A local origin can be passed to `--target` for local verification.
 
-Every row in the catalog has a probe — nothing is enumerated but unchecked:
+### Probes and prerequisites
 
-- The §A, §B, §C and §F rows, plus D-3 and D-4's pause half, drive a **real
-  headless Chrome page** on the target over the DevTools protocol
-  (`headless-page.ts`), carrying `$CHECKLIST_SESSION_COOKIE` as the session.
-  They assert against the rendered document: the composer next to the
-  transcript, the `[data-flows]` command manifest the app shell publishes,
-  the `[data-flow]` name on each affordance, the `$500 of usage on us` line
-  against the balance seam's `introUsd`, the reply to each impossible ask.
-- D-1, D-2 and the §E rows are HTTP: the product Worker's billing seams and
-  the billing upstream's admin surface.
-- D-4 asserts **both** halves: the turn seam still answers at $0 (chat is
-  complimentary), and a workflow launch on the $0 session is refused into the
-  transcript with the client's zero-balance pause statement instead of
-  starting a run.
+The §A, §B, §C and §F rows, plus D-3 and D-4's pause half, use a system
+Chrome/Chromium through `headless-page.ts`. The §D HTTP rows inspect billing
+and turn seams; §E inspects the billing upstream. D-4 checks both the turn
+response and the workflow refusal at zero balance.
 
-No browser is downloaded or installed. The driver uses a system
-Chrome/Chromium (`--browser <path>`, else `$CHECKLIST_BROWSER`, else the usual
-install locations). One browser process is launched per run and one page per
-distinct session cookie.
+The checklist downloads no browser. Choose one with `--browser <path>` or
+`$CHECKLIST_BROWSER`, or use automatic system-browser discovery. One browser
+process serves the run, with a separate page per session cookie.
+`--no-browser` skips browser prerequisites while HTTP probes still run.
 
-A row reports `not-testable-yet` only for a named, specific reason: a missing
-auth env var, no browser on this machine (or `--no-browser`), or a fact the
-target's own state does not contain — an empty watched set for A-3, no
-recommendation to dismiss for A-9, no run id rendered for B-3. It is never a
-blanket deferral. `live-signed-in-check.ts` and `live-workflow-check.ts`
-remain the checks that drive the real OAuth redirect and launch their own
-workflow runs.
+Missing prerequisites produce `not-testable-yet` rows with a named reason.
+A probe that starts but cannot decide also produces `not-testable-yet`, with
+`undecidedInProbe: true`. These outcomes have different exit codes below.
 
 ### Auth material
 
-The `CHECKLIST_*` env vars are auth material; never commit them.
+The `CHECKLIST_*` credentials are auth material; never commit them.
 
-| Variable                         | Rows                                       | What it is                                                                                               |
-| -------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `CHECKLIST_SESSION_COOKIE`       | §A (except A-1), §B, §C, §F, D-1, D-2, D-3 | Cookie header for a normal signed-in session                                                             |
-| `CHECKLIST_ZERO_BALANCE_BEARER`  | D-4                                        | Cookie header for a session already parked at $0                                                         |
-| `CHECKLIST_BILLING_UPSTREAM_URL` | §E                                         | Billing upstream origin                                                                                  |
-| `CHECKLIST_BILLING_ADMIN_TOKEN`  | E-2, E-3                                   | Billing upstream admin token                                                                             |
+| Variable | Rows | Value |
+| --- | --- | --- |
+| `CHECKLIST_SESSION_COOKIE` | §A except A-1, §B, §C, §F, D-1, D-2, D-3 | Cookie header for a signed-in session |
+| `CHECKLIST_ZERO_BALANCE_BEARER` | D-4 | Cookie header for an account at zero balance |
+| `CHECKLIST_BILLING_UPSTREAM_URL` | §E | Billing upstream origin |
+| `CHECKLIST_BILLING_ADMIN_TOKEN` | E-2, E-3 | Billing upstream admin token |
 
-Get the cookie headers from a real browser session (e.g.
-`launch-mint-session.ts`'s storage-state output, formatted as
-`name=value; name2=value2`). Rows whose required env var is missing report
-`not-testable-yet` instead of failing — the run still completes and still
-writes a report. A-1 is deliberately cookie-less: it is the signed-out view.
+Set cookie headers as `name=value; name2=value2`. Missing required variables
+skip that row's prerequisites; the run continues and writes a report. A-1
+checks the signed-out view without a cookie.
 
-### Dry run (no target needed)
+### Dry run
 
-Proves the row catalog, CLI wiring, and report writer all work without
-touching any origin — zero network calls and no browser:
+From either directory:
 
 ```sh
 pnpm run checklist -- --dry-run
 ```
 
-### Local mode
+No target, credentials or browser are required. Dry runs make zero network
+calls, mark every row `skipped-dry-run`, write both reports, and exit `0`.
+They verify CLI wiring and report generation, not the deployed application.
 
-Point `--target` at a local/dev origin instead of canary. The probes really
-run against it; if nothing answers, that reports an honest `fail` per row
-(connection refused) rather than crashing the run — this is how the runner
-proves it "wires up" without needing the live deployment. Add `--no-browser`
-to keep a local run HTTP-only.
+### Output and exit codes
 
-### Where the code lives
+Every completed run writes `launch-checklist-report.json` and
+`launch-checklist-report.md` under
+`apps/reports/launch-checklist/<timestamp>Z-<dry-run|run>/`.
+`--out <dir>` overrides the report directory; relative paths resolve from
+`apps/ui`, including when invoked through the root forwarding script.
+Reports contain `generatedAt`, `target`, `totals`, and `rows[]`.
 
-The row catalog, the runner, and the CLI contract are under
-`../src/launch-checklist/` and are covered by `bun test src`. This script is
-the process shell (clock, filesystem, browser, exit code), and
-`headless-page.ts` is the DevTools-protocol page driver.
+| Exit code | Meaning |
+| --- | --- |
+| `0` | No failed rows and no run-mode probe-undecided rows. A run containing only passes and prerequisite-skipped rows also exits zero; zero alone does not prove every row ran. Dry runs exit zero. |
+| `1` | At least one row is `fail`, even if other probes are undecided. Invocation without a target outside dry-run mode also exits one. |
+| `2` | No failed rows, but at least one run-mode probe-undecided row (`undecidedInProbe: true`, counted in `totals.probeUndecided`). |
 
-### Output
+Prerequisite-skipped rows include missing auth variables and unavailable or
+disabled browsers. Probe-undecided rows include an empty watched set or no run
+identifier in the rendered state. Inspect row reasons and totals before
+accepting a release. Connection failures from probes that run are failed rows.
 
-Every run (dry, local, or live) writes `launch-checklist-report.json` and
-`launch-checklist-report.md` under `apps/reports/launch-checklist/<timestamp>Z-<dry-run|run>/`
-(override with `--out <dir>`), matching the historical `launch-checklist-report.*`
-shape (`generatedAt`, `target`, `totals`, `rows[]`). Exit code is `1` if any
-row's status is `fail`, `0` otherwise (a dry run, or a run made entirely of
-`not-testable-yet`/`pass` rows, never fails the command).
+The catalog, runner and CLI contract live in `../src/launch-checklist/`.
+`pnpm test` covers them and the script contracts. The process shell owns the
+clock, filesystem, browser lifecycle and final exit code.
 
 ## The browser e2e scripts
 

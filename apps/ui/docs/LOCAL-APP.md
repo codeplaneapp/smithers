@@ -641,3 +641,17 @@ or patch existing cards of those kinds. Runtime flow handlers still create
 their own output. Chain policy registers approvals directly with the store.
 Legacy cards without a trusted request cannot authorize an operation; a fresh
 runtime request or gateway refresh must register the gate first.
+
+## App-shell verification
+
+From `apps/ui`, `pnpm test` runs Bun tests under `src/` and `scripts/`.
+`pnpm run test:e2e:auth` runs the browser OAuth callback regression with
+Playwright Chromium and local fixture servers. CI's `browserE2e` wrapper runs
+it before the Playwright specs; packaged native probes remain a separate tier.
+
+`pnpm run checklist -- --target <origin>` works from the repository root or
+`apps/ui`. `--dry-run` writes reports without network calls or a browser.
+Exit codes are `0` for no failed or undecided probes (prerequisite skips are
+allowed), `1` for failures, and `2` for probes that ran but could not decide.
+See [the scripts runbook](../scripts/README.md#launch-checklist-launch-checklistts)
+for prerequisites, commands and report fields.

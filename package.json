@@ -38,6 +38,7 @@
     "check:npm-dedupe": "node scripts/check-npm-dedupe.mjs",
     "circular": "pnpm --recursive --if-present run circular",
     "dev": "pnpm --filter smithers-ui run start",
+    "checklist": "pnpm --filter smithers-ui run checklist",
     "deploy:dry": "pnpm --filter smithers-server run deploy:dry",
     "docs:build": "pnpm --filter \"@smithers/docs-*\" --filter \"!@smithers/docs-shared\" -r run build",
     "docs:check": "node apps/docs/shared/gen-sites.mjs --check && node apps/docs/shared/sync-content.mjs --all --check",
