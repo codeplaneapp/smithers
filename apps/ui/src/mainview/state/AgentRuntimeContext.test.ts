@@ -66,13 +66,13 @@ describe("per-turn runtime context", () => {
 
     controller.send("first turn")
     await settled()
-    controller.showWorld()
+    controller.showConnectors()
     controller.send("second turn")
     await settled()
 
     expect(requests).toHaveLength(2)
     expect(requests[0]?.context?.surface).toBe("chat")
-    expect(requests[1]?.context?.surface).toBe("world")
+    expect(requests[1]?.context?.surface).toBe("connectors")
     // Freshly derived, not cached: the revision moved with the surface change.
     const firstRevision = requests[0]?.context?.revision ?? 0
     expect(requests[1]?.context?.revision ?? 0).toBeGreaterThan(firstRevision)

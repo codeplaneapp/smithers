@@ -52,6 +52,7 @@
     "lucide-react": "1.40.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "yjs": "13.6.32",
     "zod": "4.5.4"
   },
   "devDependencies": {

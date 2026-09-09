@@ -33,16 +33,18 @@ const updateDocumentBody = (document: WorldDocument, body: string) => {
 export interface WorldController {
   readonly clearConversation: (options?: { readonly summarize?: boolean }) => Promise<string | void>
   readonly selectWorldDocument: (id: string) => string | void
-  readonly changeWorldDocument: (id: string, body: string) => void
+  readonly changeWorldDocument: (id: string, body: string) => Promise<string | void>
+  readonly selectWikiCardDocument: (cardId: string, documentId: string) => string | void
+  readonly setWikiCardView: (cardId: string, view: "outline" | "document") => string | void
   readonly createWorldDocument: () => void
   readonly removeWorldDocument: (id: string) => string | void
   readonly confirmWorldDelete: () => string | void
   readonly cancelWorldDelete: () => void
-  /** `wiki.open <path>`: the note in the pane for the human, the note as an embedded card (with its links as the value) for the agent. */
+  /** `wiki.open <path>` embeds the note for either actor and returns its links to the agent. */
   readonly openWorldDocument: (path: string) => string | void | { readonly value: string }
   /** `wiki.backlinks <path>`: the note's link rail as a card, for either actor; the agent also gets the names as the value. */
   readonly showWorldLinks: (path: string) => string | void | { readonly value: string }
-  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card (with its counts as the value) for the agent. */
+  /** `wiki.graph [path]` embeds the graph for either actor and returns its counts to the agent. */
   readonly showWorldGraph: (path?: string) => string | void | { readonly value: string }
   /** The open note's editor, registered by its mount and released on unmount; the seam `wiki.heading` scrolls through. */
   readonly attachWikiEditor: (editor: WikiEditorHandle | null) => void
@@ -57,7 +59,7 @@ export interface WikiEditorHandle {
 
 export const createWorldController = (
   ctx: ControllerContext,
-  deps: { readonly nextOrdinal: () => number }
+  deps: { readonly nextOrdinal: () => number; readonly cloudWiki?: { readonly editCloudWiki: (id: string, body: string) => Promise<string | void> } }
 ): WorldController => {
   let pendingClear: AbortController | undefined
   let disposed = false
@@ -209,10 +211,11 @@ export const createWorldController = (
     ctx.store.dispatch({ type: "world.document.selected", actor: "user", id })
   }
 
-  const changeWorldDocument = (id: string, body: string): void => {
+  const changeWorldDocument = async (id: string, body: string): Promise<string | void> => {
     const document = ctx.store.collections.worldDocuments.get(id)
     if (document === undefined || document.body === body) return
-    ctx.store.dispatch({ type: "world.document.upserted", actor: "user", document: updateDocumentBody(document, body) })
+    if (document.cloud !== undefined) return deps.cloudWiki?.editCloudWiki(id, restoreWikilinks(body)) ?? "Refresh this cloud Wiki before editing it."
+    await ctx.store.dispatch({ type: "world.document.upserted", actor: ctx.commandActor, document: updateDocumentBody(document, body), select: false }).isPersisted.promise
   }
 
   const createWorldDocument = (): void => {
@@ -232,16 +235,7 @@ export const createWorldController = (
         confidence: 1
       }
     })
-    /*
-     * A note created from the chat (`/wiki.new-note` typed, or the agent's
-     * call) used to land in a pane that stayed closed: the act "executed"
-     * and nothing on screen changed. The new note is the selected document
-     * of the Wiki pane, so the pane opens to show it, for the USER's act
-     * only: the agent's output embeds (THE EMBED LAW), never opens a pane.
-     */
-    if (ctx.commandActor === "user" && ctx.store.session().surface !== "world") {
-      ctx.store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
-    }
+    openWorldDocument(path)
   }
 
   /*
@@ -305,29 +299,34 @@ export const createWorldController = (
   }
 
   /*
-   * `wiki.open <path>` (07-librarian.md §8: the citation door). The human's
-   * act selects the note and opens the pane in its editor mode; the agent's
-   * act embeds the note as a world card (THE EMBED LAW), the same card its
-   * bare `wiki` invocation renders, cut to the one note.
+   * `wiki.open <path>` embeds one note in the existing world card for either
+   * actor. Selection and outline/document view belong to its durable payload.
    */
   const openWorldDocument = (path: string): string | void | { readonly value: string } => {
     const notes = notesOf(ctx.store)
     const document = resolveLink(notes, path)
     if (document === undefined) return noNote(path)
-    if (ctx.commandActor === "smithers") {
-      embed({
-        id: `wiki-open-${document.id}`,
-        kind: "world",
-        title: document.title,
-        payload: { documents: [{ path: document.path, title: document.title, confidence: document.confidence }] }
-      })
-      // The model's tool result is what it can answer from beside the card: the note and its links, never a bare "executed".
-      return { value: `Embedded ${document.path}. ${linkSummary(notes, document.path)}` }
-    }
-    ctx.store.dispatch({ type: "world.document.selected", actor: "user", id: document.id })
-    const session = ctx.store.session()
-    if (session.wikiPane === "graph") ctx.store.dispatch({ type: "wiki.pane.changed", actor: "user", pane: "document", path: null })
-    if (session.surface !== "world") ctx.store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
+    embed({
+      id: `wiki-open-${document.id}`,
+      kind: "world",
+      title: document.title,
+      payload: { documents: [{ id: document.id, path: document.path, title: document.title, confidence: document.confidence }], selectedDocumentId: document.id }
+    })
+    return { value: `Embedded ${document.path}. ${linkSummary(notes, document.path)}` }
+  }
+
+  const selectWikiCardDocument = (cardId: string, documentId: string): string | void => {
+    const card = ctx.store.collections.cards.get(cardId)
+    const document = ctx.store.collections.worldDocuments.get(documentId)
+    if (card?.kind !== "world" || !card.payload.documents.some((entry) =>
+      entry.id === documentId || (entry.id === undefined && document !== undefined && entry.path === document.path))) return "This Wiki page is not in this card."
+    ctx.store.dispatch({ type: "card.updated", actor: ctx.commandActor, id: cardId, patch: { kind: "world", payload: { selectedDocumentId: documentId } } })
+  }
+
+  const setWikiCardView = (cardId: string, view: "outline" | "document"): string | void => {
+    const card = ctx.store.collections.cards.get(cardId)
+    if (card?.kind !== "world") return "This Wiki card is no longer available."
+    ctx.store.dispatch({ type: "card.updated", actor: ctx.commandActor, id: cardId, patch: { kind: "world", payload: { view } } })
   }
 
   const titled = (notes: ReadonlyArray<WorldDocument>, paths: ReadonlyArray<string>) =>
@@ -367,17 +366,14 @@ export const createWorldController = (
   }
 
   /*
-   * `wiki.graph [path]`: the human's act puts the pane in graph mode (toggles
-   * toggle, §2c: the same call in graph mode returns to the editor); the
-   * agent's act embeds the graph as a card. A path focuses either on the
-   * note and its neighbours one hop away.
+   * `wiki.graph [path]` embeds the same graph for either actor. A path
+   * focuses the note and its neighbours one hop away.
    */
   const showWorldGraph = (path?: string): string | void | { readonly value: string } => {
     const notes = notesOf(ctx.store)
     const wanted = path?.trim() === "" ? undefined : path?.trim()
     const focus = wanted === undefined ? undefined : resolveLink(notes, wanted)
     if (wanted !== undefined && focus === undefined) return noNote(wanted)
-    if (ctx.commandActor === "smithers") {
       const whole = linkGraphOf(notes)
       const graph = focus === undefined ? whole : neighbourhoodOf(whole, focus.path) ?? whole
       embed({
@@ -405,16 +401,6 @@ export const createWorldController = (
           missing.length === 0 ? "" : ` (${missing.join(", ")})`
         }.`
       }
-    }
-    const session = ctx.store.session()
-    /*
-     * Toggles toggle (§2c): in graph mode, the same focus again OR a bare
-     * call (the header's Graph button, /wiki.graph) returns to the editor.
-     * A different focus refocuses the graph instead of leaving it.
-     */
-    const already = session.wikiPane === "graph" && (focus === undefined || (session.wikiGraphPath ?? null) === focus.path)
-    ctx.store.dispatch({ type: "wiki.pane.changed", actor: "user", pane: already ? "document" : "graph", path: already ? null : focus?.path ?? null })
-    if (session.surface !== "world") ctx.store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
   }
 
   return {
@@ -429,6 +415,8 @@ export const createWorldController = (
     showWorldLinks,
     showWorldGraph,
     attachWikiEditor,
-    jumpToHeading
+    jumpToHeading,
+    selectWikiCardDocument,
+    setWikiCardView
   }
 }

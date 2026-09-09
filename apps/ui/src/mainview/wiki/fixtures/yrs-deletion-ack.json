@@ -1,0 +1,18 @@
+{
+  "bootstrap": {
+    "state": "AQHSzZ64BAAEAQhtYXJrZG93bhVIZWxsbyDwn4yOIGZyb20gQWxpY2UA",
+    "state_vector": "AdLNnrgEEw==",
+    "markdown": "Hello 🌎 from Alice"
+  },
+  "submittedDeletionDelta": "AAHSzZ64BAEABg==",
+  "acceptedDocument": {
+    "state": "AQLSzZ64BAABAQhtYXJrZG93bgaE0s2euAQFD/CfjI4gZnJvbSBBbGljZQHSzZ64BAEABg==",
+    "state_vector": "AdLNnrgEEw==",
+    "markdown": "🌎 from Alice"
+  },
+  "concurrentLaterDocument": {
+    "state": "AgHU+cDxBQBE0s2euAQAA0I6IALSzZ64BAABAQhtYXJrZG93bgaE0s2euAQFD/CfjI4gZnJvbSBBbGljZQHSzZ64BAEABg==",
+    "state_vector": "AtT5wPEFA9LNnrgEEw==",
+    "markdown": "B: 🌎 from Alice"
+  }
+}

@@ -35,6 +35,52 @@ export const wikiSurfaceFlows = (actions: CommandActions): ReadonlyArray<FlowEnt
 /** The `wiki.*` flows: notes and their confirms. */
 export const wikiFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   flow({
+    name: "wiki.cloud",
+    summary: "Browse the repository Wiki",
+    args: "<owner/repo> [page]",
+    input: Schema.Struct({ repo: Schema.String, page: Schema.optional(Schema.Number) }),
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    handler: ({ repo, page }) => actions.listCloudWiki(repo, page)
+  }),
+  flow({
+    name: "wiki.cloud.open",
+    summary: "Open a collaborative repository Wiki page in the conversation",
+    args: "<slug> <owner/repo>",
+    input: Schema.Struct({ slug: Schema.String, repo: Schema.String }),
+    handler: ({ slug, repo }) => actions.openCloudWiki(repo, slug)
+  }),
+  flow({
+    name: "wiki.sync",
+    summary: "Refresh a cloud Wiki page and retry its saved edits",
+    args: "<documentId>",
+    input: Schema.Struct({ documentId: Schema.String }),
+    handler: ({ documentId }) => actions.retryCloudWiki(documentId)
+  }),
+  flow({
+    name: "wiki.edit",
+    summary: "Edit a Wiki page as Markdown",
+    args: "<documentId> <JSON Markdown string>",
+    input: Schema.Struct({ documentId: Schema.String, body: Schema.String }),
+    form: { fields: { body: { label: "Markdown" } }, args: (payload) => `${payload.documentId} ${JSON.stringify(payload.body)}` },
+    handler: ({ documentId, body }) => actions.changeWorldDocument(documentId, body)
+  }),
+  flow({
+    name: "wiki.card.select",
+    summary: "Select a page in an embedded Wiki card",
+    hidden: true,
+    args: "<cardId> <documentId>",
+    input: Schema.Struct({ cardId: Schema.String, documentId: Schema.String }),
+    handler: ({ cardId, documentId }) => actions.selectWikiCardDocument(cardId, documentId)
+  }),
+  flow({
+    name: "wiki.card.view",
+    summary: "Show a Wiki page outline or its Markdown document",
+    hidden: true,
+    args: "<cardId> <outline|document>",
+    input: Schema.Struct({ cardId: Schema.String, view: Schema.Literals(["outline", "document"]) }),
+    handler: ({ cardId, view }) => actions.setWikiCardView(cardId, view)
+  }),
+  flow({
     name: "wiki.new-note",
     summary: `Create a ${WIKI_DISPLAY_NAME} note`,
     input: NoPayload,
@@ -52,10 +98,8 @@ export const wikiFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    * The vault kit's three flows (Librarian L5; 07-librarian.md §8 registers
    * wiki.open as the citation door). Each takes a note by path, file stem
    * or title, so a `[[wikilink]]` target and a citation ref both resolve.
-   * The human's wiki.open opens the note in the pane; the agent's embeds it
-   * as a card (THE EMBED LAW). wiki.backlinks is a read and embeds its card
-   * for either actor. wiki.graph switches the pane to graph mode for the
-   * human, and toggles back; for the agent it embeds the graph.
+   * wiki.open, wiki.backlinks and wiki.graph embed their existing card for
+   * either actor, preserving the conversation and composer.
    */
   flow({
     name: "wiki.open",

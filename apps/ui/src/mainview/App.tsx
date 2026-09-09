@@ -571,7 +571,8 @@ function App() {
                     debugVerbose={session.verbose === true}
                     signedOut={identity?.state === "signed-out"}
                     worldDocuments={worldDocuments}
-                    onChangeWorldDocument={(id, body) => controller.changeWorldDocument(id, body)}
+                    onChangeWorldDocument={(id, body) => controller.runCommandArgs("wiki.edit", `${id} ${JSON.stringify(body)}`)}
+        onAttachWorldEditor={controller.attachWorldEditor}
                     onRunCommand={(name, commandArgs) =>
                       commandArgs === undefined
                         ? controller.runCommand(name)

@@ -47,6 +47,7 @@ export function CardView({
   onChooseWorkflowRepo,
   worldDocuments,
   onChangeWorldDocument,
+  onAttachWorldEditor,
   onRunCommand,
   debugVerbose,
   signedOut
@@ -198,6 +199,7 @@ export function CardView({
             onChooseWorkflowRepo,
             worldDocuments,
             onChangeWorldDocument,
+  onAttachWorldEditor,
             onRunCommand,
             debugVerbose,
             signedOut

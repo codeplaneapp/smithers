@@ -49,7 +49,8 @@ export function CardTabBody({ cardId }: { readonly cardId: string }) {
         onChooseWorkflowRepo={(name) => controller.runCommandArgs("flow.repo.choose", name)}
         debugVerbose={sessionRows[0]?.verbose === true}
         worldDocuments={worldDocuments}
-        onChangeWorldDocument={(id, body) => controller.changeWorldDocument(id, body)}
+        onChangeWorldDocument={(id, body) => controller.runCommandArgs("wiki.edit", `${id} ${JSON.stringify(body)}`)}
+        onAttachWorldEditor={controller.attachWorldEditor}
         onRunCommand={(name, commandArgs) =>
           commandArgs === undefined
             ? controller.runCommand(name)

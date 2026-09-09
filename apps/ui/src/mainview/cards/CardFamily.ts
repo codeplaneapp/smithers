@@ -10,6 +10,7 @@
  * a slice entry in its family's file and one spread line in the aggregator.
  */
 import type { ReactNode } from "react"
+import type { MarkdownEditorHandle } from "@smthrs/ui/adapters/markdown-editor"
 import type { Card, WorldDocument } from "../state/AppState"
 
 /** The card of one kind. */
@@ -34,6 +35,7 @@ export interface CardActions {
   /* The world card reads live documents so its editor never shows stale bodies. */
   readonly worldDocuments: ReadonlyArray<WorldDocument>
   readonly onChangeWorldDocument: (id: string, body: string) => void
+  readonly onAttachWorldEditor?: (id: string, slot: string, editor: MarkdownEditorHandle | null) => void
   /*
    * The one delegated dispatch for the domain cards (issues, PRs,
    * notifications, env, import): every in-card act names its command and

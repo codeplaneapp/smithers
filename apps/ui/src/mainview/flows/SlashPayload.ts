@@ -299,6 +299,32 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "connector.remove.ask": (args) => required("connectorId", args, "connector.remove.ask needs the connector id"),
   "connector.remove": (args) => required("connectorId", args, "connector.remove needs the connector id"),
   "wiki.select": (args) => required("documentId", args, "wiki.select needs the document id"),
+  "wiki.cloud": (args) => {
+    const [repo, page] = tokensOf(args)
+    if (repo === undefined) return no("Choose a repository for its Wiki.")
+    return ok({ repo, ...(page === undefined ? {} : { page: Number(page) }) })
+  },
+  "wiki.cloud.open": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    return rest === "" || repo === undefined ? no("Choose a Wiki page slug and repository.") : ok({ slug: rest, repo })
+  },
+  "wiki.sync": (args) => required("documentId", args, "wiki.sync needs the document id"),
+  "wiki.card.select": (args) => {
+    const [cardId, documentId] = tokensOf(args)
+    return cardId === undefined || documentId === undefined ? no("Choose a Wiki card and page.") : ok({ cardId, documentId })
+  },
+  "wiki.card.view": (args) => {
+    const [cardId, view] = tokensOf(args)
+    return cardId === undefined || view === undefined ? no("Choose a Wiki card and view.") : ok({ cardId, view })
+  },
+  "wiki.edit": (args) => {
+    const [documentId] = tokensOf(args)
+    if (documentId === undefined) return no("Choose a Wiki page and its Markdown.")
+    const body = trimmed(args).slice(documentId.length).trim()
+    if (body === "") return no("Supply the Wiki page's Markdown.")
+    try { return ok({ documentId, body: JSON.parse(body) }) }
+    catch { return no("Supply Markdown as a JSON string, or open the Wiki edit form without a body.") }
+  },
   "wiki.delete": (args) => required("documentId", args, "wiki.delete needs the document id"),
   // Librarian L5: a note by path, file stem or title; wiki.graph without one is the whole Wiki.
   "wiki.open": (args) => required("path", args, "wiki.open needs a note path or title"),

@@ -8,8 +8,7 @@ import { createAppStore } from "./AppStore"
 /*
  * `/world.new-note` typed from the chat used to create a note in a pane
  * that stayed closed: the act "executed" and nothing on screen changed. The
- * user's act opens the World pane on the new note; the agent's act embeds
- * (THE EMBED LAW) and leaves the surface alone.
+ * user's and agent's acts both embed the new note and leave the composer visible.
  */
 
 const memoryStorage = (): StorageApi => {
@@ -34,7 +33,7 @@ const noRepositories: NativeRepositories = {
 }
 
 describe("world.new-note from the chat", () => {
-  test("the user's act opens the World pane on the new note", async () => {
+  test("the user's act embeds the new Wiki note", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, noRepositories, silentAgent, {
       fetchImpl: async () => new Response("{}", { status: 200 })
@@ -43,10 +42,12 @@ describe("world.new-note from the chat", () => {
     expect(store.session().surface).toBe("chat")
     expect((await controller.commands.run("world.new-note")).status).toBe("executed")
     expect(store.collections.worldDocuments.size).toBe(before + 1)
-    expect(store.session().surface).toBe("world")
+    expect(store.session().surface).toBe("chat")
     const selected = store.session().selectedWorldDocumentId
     const created = [...store.collections.worldDocuments.values()].find((document) => document.id === selected)
     expect(created?.title).toMatch(/^Untitled/)
+    expect(store.collections.cards.get(`wiki-open-${selected}`)?.kind).toBe("world")
+    controller.dispose()
   })
 
   test("the agent's act creates the note and leaves the surface where it was", async () => {

@@ -697,8 +697,17 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("world"),
     payload: z.object({
       documents: z.array(
-        z.object({ path: z.string(), title: z.string(), confidence: z.number() })
-      )
+        z.object({
+          id: z.string().optional(),
+          path: z.string(),
+          title: z.string(),
+          confidence: z.number(),
+          cloud: z.object({ repo: z.string(), slug: z.string(), revision: z.number().int().positive() }).optional()
+        })
+      ),
+      selectedDocumentId: z.string().optional(),
+      view: z.enum(["outline", "document"]).optional(),
+      index: z.object({ repo: z.string(), page: z.number().int().positive(), hasNext: z.boolean() }).optional()
     })
   }),
   /*

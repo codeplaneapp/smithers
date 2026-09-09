@@ -1,6 +1,8 @@
 import { Badge, Button, FileTree } from "@smthrs/ui"
 import { ExternalLink, GitPullRequest, HardDrive, Server } from "lucide-react"
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useId } from "react"
+import { parseOutline } from "@smthrs/ui/vault"
+import type { MarkdownEditorHandle } from "@smthrs/ui/adapters/markdown-editor"
 import type { Card, WorldDocument } from "../state/AppState"
 import { WIKI_DISPLAY_NAME } from "../state/AppState"
 import type { CardFamily } from "./CardFamily"
@@ -86,65 +88,89 @@ export const ConnectCardBody = ({
 export const WorldCardBody = ({
   card,
   worldDocuments,
-  onChangeWorldDocument
+  onChangeWorldDocument,
+  onAttachWorldEditor,
+  onRunCommand
 }: {
   readonly card: Extract<Card, { kind: "world" }>
   readonly worldDocuments: ReadonlyArray<WorldDocument>
   readonly onChangeWorldDocument: (id: string, body: string) => void
+  readonly onAttachWorldEditor?: (id: string, slot: string, editor: MarkdownEditorHandle | null) => void
+  readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const [selectedPath, setSelectedPath] = useState(card.payload.documents[0]?.path)
+  const editorSlot = useId()
   if (card.payload.documents.length === 0) {
-    return (
-      <ul className="world-card-list">
-        <li className="world-card-empty">{WIKI_DISPLAY_NAME} is empty so far.</li>
-      </ul>
-    )
+    return <div className="world-card-empty"><p>No Wiki pages in this view.</p>{card.payload.index !== undefined && card.payload.index.page > 1 ?
+      <Button size="sm" data-flow="wiki.cloud" onClick={() => onRunCommand("wiki.cloud", `${card.payload.index!.repo} ${card.payload.index!.page - 1}`)}>Previous page</Button> : null}</div>
   }
-  const selectedEntry = card.payload.documents.find((document) => document.path === selectedPath) ??
-    card.payload.documents[0]
-  const selectedDocument = worldDocuments.find(
-    (document) => document.path === selectedEntry.path
-  )
+  const documents = card.payload.documents.map((entry) => ({ entry, document: worldDocuments.find((document) =>
+    entry.id === undefined ? document.path === entry.path : document.id === entry.id) }))
+  const selected = documents.find(({ entry, document }) => (document?.id ?? entry.id) === card.payload.selectedDocumentId) ?? documents[0]!
+  const { entry, document } = selected
+  const treePath = ({ entry, document }: typeof selected) => document?.cloud?.slug ?? entry.cloud?.slug ?? document?.path ?? entry.path
+  const view = card.payload.view ?? "outline"
+  const cloud = document?.cloud
+  const readOnly = cloud !== undefined && (cloud.phase === "cached" || cloud.phase === "deleted")
   return (
     <div className="world-card-workspace">
       <aside className="world-card-sidebar" aria-label={`${WIKI_DISPLAY_NAME} documents`}>
         <FileTree
-          nodes={card.payload.documents.map((document) => ({
-            path: document.path,
-            label: document.title
-          }))}
-          selected={selectedEntry.path}
-          onSelect={(path) => setSelectedPath(path)}
+          nodes={documents.map((row) => ({ path: treePath(row), label: row.document?.title ?? row.entry.title }))}
+          selected={treePath(selected)}
+          onSelect={(path) => {
+            const row = documents.find((candidate) => treePath(candidate) === path)
+            if (row !== undefined) onRunCommand("wiki.card.select", `${card.id} ${row.document?.id ?? row.entry.id ?? row.entry.path}`)
+          }}
         />
+        {card.payload.index === undefined ? null : <div className="wiki-card-pages">
+          {card.payload.index.page <= 1 ? null : <Button size="sm" variant="ghost" data-flow="wiki.cloud" onClick={() =>
+            onRunCommand("wiki.cloud", `${card.payload.index!.repo} ${card.payload.index!.page - 1}`)}>Previous page</Button>}
+          {card.payload.index.hasNext ? <Button size="sm" variant="ghost" data-flow="wiki.cloud" onClick={() =>
+            onRunCommand("wiki.cloud", `${card.payload.index!.repo} ${card.payload.index!.page + 1}`)}>Next page</Button> : null}
+        </div>}
       </aside>
       <div className="world-card-doc">
-        {
-          /*
-           * No confidence badge. A bare "80%" is a score, and no score,
-           * grade or number is user-facing (DESIGN.md, launch-checklist
-           * row B-5). The confidence still rides the entry for ranking;
-           * it is not shown.
-           */
-        }
         <div className="world-card-meta">
-          <span className="world-card-path">{selectedEntry.path}</span>
+          <span className="world-card-path">{document?.path ?? entry.path}</span>
+          <div className="wiki-card-views" aria-label="Wiki view">
+            {(["outline", "document"] as const).map((mode) => <Button key={mode} size="sm" variant="ghost"
+              aria-pressed={view === mode} data-flow="wiki.card.view"
+              onClick={() => onRunCommand("wiki.card.view", `${card.id} ${mode}`)}>
+              {mode === "outline" ? "Outline" : "Document"}
+            </Button>)}
+          </div>
         </div>
-        {selectedDocument !== undefined ?
-          (
-            <Suspense fallback={<p className="smithers-card-note">Loading editor…</p>}>
-              <MarkdownEditorSurface
-                value={selectedDocument.body}
-                resetKey={selectedDocument.id}
-                label={`Edit ${selectedDocument.title}`}
-                onChange={(body) => onChangeWorldDocument(selectedDocument.id, body)}
-              />
-            </Suspense>
-          ) :
-          (
-            <p className="world-card-empty">
-              This note has left {WIKI_DISPLAY_NAME} since the answer was written.
-            </p>
-          )}
+        {document === undefined ? entry.cloud === undefined ? <p className="world-card-empty">This note is no longer available in {WIKI_DISPLAY_NAME}.</p> :
+          <div className="wiki-card-outline"><h3>{entry.title}</h3><p>Page revision {entry.cloud.revision}</p>
+            <Button size="sm" data-flow="wiki.cloud.open" onClick={() => onRunCommand("wiki.cloud.open", `${entry.cloud!.slug} ${entry.cloud!.repo}`)}>Open page</Button>
+          </div> : <>
+          {cloud === undefined ? null : <div className="wiki-card-source">
+            <span>Page revision {cloud.remoteRevision} · {cloud.remoteAuthor}</span>
+            <span>{cloud.pending.length === 0 ? "No pending edits" : `${cloud.pending.length} pending edit${cloud.pending.length === 1 ? "" : "s"}`}</span>
+            {cloud.phase === "deleted" ? null : <Button size="sm" variant="ghost" data-flow="wiki.sync"
+              onClick={() => onRunCommand("wiki.sync", document.id)}>Refresh</Button>}
+            {cloud.phase === "cached" ? <p>This is a saved copy. Refresh to resume collaboration.</p> : null}
+            {cloud.error === null ? null : <p role="status">{cloud.error}</p>}
+          </div>}
+          {view === "outline" ? <div className="wiki-card-outline">
+            <h3>{document.title}</h3>
+            <ol aria-label="Page outline">{parseOutline(document.body).map((heading) =>
+              <li key={heading.line} data-depth={heading.depth}>{heading.text}</li>)}</ol>
+            <details><summary>Sources</summary><ul>{document.sources.map((source) => <li key={source}>{source}</li>)}</ul>
+              {cloud === undefined ? <p>Saved by {document.updatedBy} at app revision {document.revision}.</p> :
+                <p>Page {cloud.pageId} in {cloud.repo}. Recorded at {cloud.remoteUpdatedAt}.</p>}
+            </details>
+          </div> : <Suspense fallback={<p className="smithers-card-note">Loading editor…</p>}>
+            <MarkdownEditorSurface
+              value={document.body}
+              resetKey={document.id}
+              label={`${readOnly ? "Read" : "Edit"} ${document.title}`}
+              readOnly={readOnly}
+              onChange={(body) => onChangeWorldDocument(document.id, body)}
+              onEditor={(editor) => onAttachWorldEditor?.(document.id, `${card.id}:${editorSlot}`, editor)}
+            />
+          </Suspense>}
+        </>}
       </div>
     </div>
   )
@@ -225,6 +251,8 @@ export const conversationCardFamily: CardFamily<"connect" | "world" | "browser">
         card={card}
         worldDocuments={actions.worldDocuments}
         onChangeWorldDocument={actions.onChangeWorldDocument}
+        onAttachWorldEditor={actions.onAttachWorldEditor}
+        onRunCommand={actions.onRunCommand}
       />
     ),
     pill: settledPill

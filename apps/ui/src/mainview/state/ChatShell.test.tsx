@@ -123,7 +123,8 @@ describe("chat-first shell: panes never replace the conversation", () => {
     controller.changeDraft("a draft that must survive")
 
     expect(controller.runCommand("world")).toBe(true)
-    expect(store.session().surface).toBe("world")
+    expect(store.session().surface).toBe("chat")
+    expect(store.collections.cards.get("world-embedded")?.kind).toBe("world")
     expect([...store.collections.messages.values()].map((message) => message.id)).toEqual(before)
     expect(store.session().draft).toBe("a draft that must survive")
 
@@ -137,7 +138,7 @@ describe("chat-first shell: panes never replace the conversation", () => {
     const { store, controller } = await harness()
     expect(controller.commands.find("chat")).toBeDefined()
 
-    controller.runCommand("world")
+    store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
     expect(store.session().surface).toBe("world")
     expect(controller.runCommand("chat")).toBe(true)
     expect(store.session().surface).toBe("chat")
@@ -154,7 +155,8 @@ describe("chat-first shell: panes never replace the conversation", () => {
       text: "a turn that must survive the pane"
     }).isPersisted.promise
     controller.changeDraft("draft stays in the composer")
-    controller.runCommand("world")
+    // Previously persisted pane navigation remains renderable; the Wiki flow now embeds.
+    store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
 
     const markup = renderApp(controller)
     expect(markup).toContain("world-surface")
@@ -197,7 +199,7 @@ describe("chat-first shell: panes never replace the conversation", () => {
     controller.runCommand("world")
     const openMarkup = renderApp(controller)
     expect(openMarkup).toContain("remember this message")
-    expect(openMarkup).toContain("world-surface")
+    expect(openMarkup).toContain("world-card-workspace")
 
     controller.runCommand("chat")
     const closedMarkup = renderApp(controller)
@@ -224,7 +226,10 @@ describe("chat-first shell: panes never replace the conversation", () => {
     expect(composer).not.toBeNull()
 
     for (const pane of ["connect", "world"] as const) {
-      await view.act(() => void controller.runCommand(pane))
+      await view.act(() => {
+        if (pane === "world") store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
+        else controller.runCommand(pane)
+      })
       expect(store.session().surface).toBe(pane === "connect" ? "connectors" : "world")
       expect(view.host.querySelector(".embedded-pane")).not.toBeNull()
       // The very same nodes, not equivalent replacements.
@@ -284,7 +289,7 @@ describe("chat-first shell: panes never replace the conversation", () => {
     for (
       const [command, paneClass] of [
         ["connect", "connectors-surface"],
-        ["wiki", "world-surface"]
+        ["wiki", "world-card-workspace"]
       ] as const
     ) {
       // The surface buttons collapsed into ONE dropdown (§2c′): open it,
@@ -298,17 +303,18 @@ describe("chat-first shell: panes never replace the conversation", () => {
       expect(item).not.toBeNull()
 
       await view.act(() => item?.click())
-      expect(store.session().surface).toBe(command === "connect" ? "connectors" : "world")
+      expect(store.session().surface).toBe(command === "connect" ? "connectors" : "chat")
       expect(view.host.querySelector(`.${paneClass}`)).not.toBeNull()
       // The toggle law (§2c): invoking the open pane's entry returns to chat.
       await view.act(() => trigger?.click())
       const again = view.host.querySelector<HTMLButtonElement>(
         `.composer-menu-item[data-flow="${command}"]`
       )
-      expect(again?.getAttribute("aria-pressed")).toBe("true")
+      expect(again?.getAttribute("aria-pressed")).toBe(command === "connect" ? "true" : "false")
       await view.act(() => again?.click())
       expect(store.session().surface).toBe("chat")
-      expect(view.host.querySelector(`.${paneClass}`)).toBeNull()
+      if (command === "connect") expect(view.host.querySelector(`.${paneClass}`)).toBeNull()
+      else expect(view.host.querySelector(`.${paneClass}`)).not.toBeNull()
       expect(view.host.querySelector("textarea")).not.toBeNull()
       expect(view.host.querySelector(".smithers-transcript")).not.toBeNull()
     }

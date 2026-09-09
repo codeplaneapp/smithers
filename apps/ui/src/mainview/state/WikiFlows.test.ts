@@ -7,11 +7,9 @@ import { createAppStore } from "./AppStore"
 
 /*
  * The vault kit's three flows (Librarian L5) through the one run path, each
- * by both actors. wiki.open: the human's act selects the note and opens the
- * pane; the agent's act embeds the note as a world card and leaves the
- * surface alone (THE EMBED LAW). wiki.backlinks: a read, so both actors get
- * the same embedded rail card. wiki.graph: the human's act switches the
- * pane to graph mode and toggles back; the agent's embeds the graph card.
+ * by both actors. Opening notes, backlinks and graphs embeds the same card
+ * without replacing the conversation or composer. Selection and view state
+ * are durable card payload, changed through the shared dispatcher.
  * A path no note answers refuses with the note's name in the reason, from
  * every door.
  */
@@ -61,13 +59,12 @@ const setup = async () => {
 }
 
 describe("wiki.open", () => {
-  test("the user's act selects the note by title and opens the pane in document mode", async () => {
+  test("the user's act embeds the selected note and keeps the composer surface", async () => {
     const { store, controller } = await setup()
     expect(store.session().surface).toBe("chat")
     expect((await controller.commands.run("wiki.open", "plans")).status).toBe("executed")
-    expect(store.session().surface).toBe("world")
-    expect(store.session().selectedWorldDocumentId).toBe("plans")
-    expect(store.session().wikiPane).toBe("document")
+    expect(store.session().surface).toBe("chat")
+    expect(store.collections.cards.get("wiki-open-plans")).toMatchObject({ kind: "world", payload: { selectedDocumentId: "plans" } })
     controller.dispose()
   })
 
@@ -103,6 +100,18 @@ describe("wiki.open", () => {
 })
 
 describe("wiki.backlinks", () => {
+  test("cloud Wiki inputs and Markdown edits use the same schema forms and actor bindings", async () => {
+    const { store, controller } = await setup()
+    expect(await controller.commands.runForAgent("wiki.cloud")).toMatchObject({ status: "form", fields: ["repo"] })
+    expect(await controller.commands.runForAgent("wiki.cloud.open", "architecture")).toMatchObject({ status: "form", fields: ["repo"] })
+    expect(await controller.commands.runForAgent("wiki.edit", "plans")).toMatchObject({ status: "form", fields: ["body"] })
+    const body = "# Agent plan\n\nUse Effect everywhere."
+    expect((await controller.commands.runForAgent("wiki.edit", `plans ${JSON.stringify(body)}`)).status).toBe("executed")
+    expect(store.collections.worldDocuments.get("plans")).toMatchObject({ body, updatedBy: "smithers" })
+    expect(store.session().surface).toBe("chat")
+    controller.dispose()
+  })
+
   test("either actor gets the rail card: who links here, where it links out, and the targets no note answers", async () => {
     const { store, controller } = await setup()
     expect((await controller.commands.run("wiki.backlinks", "World.md")).status).toBe("executed")
@@ -131,38 +140,24 @@ describe("wiki.backlinks", () => {
 })
 
 describe("wiki.graph", () => {
-  test("the user's act opens the pane in graph mode, focuses on a note, and toggles back", async () => {
+  test("both the whole graph and a focused graph embed for the human", async () => {
     const { store, controller } = await setup()
     expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
-    expect(store.session().surface).toBe("world")
-    expect(store.session().wikiPane).toBe("graph")
-    expect(store.session().wikiGraphPath).toBeNull()
+    expect(store.session().surface).toBe("chat")
+    expect(store.collections.cards.get("wiki-graph")).toMatchObject({ kind: "wiki-graph", payload: { path: null } })
     expect((await controller.commands.run("wiki.graph", "Plans")).status).toBe("executed")
-    expect(store.session().wikiPane).toBe("graph")
-    expect(store.session().wikiGraphPath).toBe("Plans.md")
-    // The same call again returns to the editor (toggles toggle).
-    expect((await controller.commands.run("wiki.graph", "Plans.md")).status).toBe("executed")
-    expect(store.session().wikiPane).toBe("document")
-    expect(store.session().wikiGraphPath).toBeNull()
-    // Opening a note from graph mode returns the pane to the editor too.
-    expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
-    expect((await controller.commands.run("wiki.open", "Plans")).status).toBe("executed")
-    expect(store.session().wikiPane).toBe("document")
+    expect(store.collections.cards.get("wiki-graph-plans")).toMatchObject({ kind: "wiki-graph", payload: { path: "Plans.md" } })
     controller.dispose()
   })
 
-  test("a bare call in a focused graph toggles back to the editor; a different focus refocuses instead", async () => {
+  test("Wiki card selection and view are actor-tagged, durable and shared between doors", async () => {
     const { store, controller } = await setup()
-    expect((await controller.commands.run("wiki.graph", "Plans")).status).toBe("executed")
-    expect(store.session().wikiGraphPath).toBe("Plans.md")
-    // The header's Graph button (aria-pressed) and /wiki.graph carry no path: still a toggle from a focused graph.
-    expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
-    expect(store.session().wikiPane).toBe("document")
-    expect(store.session().wikiGraphPath).toBeNull()
-    expect((await controller.commands.run("wiki.graph", "Plans")).status).toBe("executed")
-    expect((await controller.commands.run("wiki.graph", "World")).status).toBe("executed")
-    expect(store.session().wikiPane).toBe("graph")
-    expect(store.session().wikiGraphPath).toBe("World.md")
+    await controller.commands.run("wiki")
+    expect(store.session().surface).toBe("chat")
+    await controller.commands.runForAgent("wiki.card.select", "world-embedded plans")
+    await controller.commands.run("wiki.card.view", "world-embedded document")
+    expect(store.collections.cards.get("world-embedded")).toMatchObject({ payload: { selectedDocumentId: "plans", view: "document" } })
+    expect([...store.collections.transitions.values()].some((row) => row.actor === "smithers" && row.type === "card.updated")).toBe(true)
     controller.dispose()
   })
 
@@ -208,7 +203,9 @@ describe("wiki.heading", () => {
     const closed = await controller.commands.run("wiki.heading", "5")
     expect(closed).toMatchObject({ status: "failed", error: "No Wiki note is open in the editor." })
     expect((await controller.commands.run("wiki.open", "Plans")).status).toBe("executed")
-    // The note is open but its editor has not mounted yet (the surface loads lazily).
+    // Legacy explicit pane navigation remains supported; wiki.open itself now embeds.
+    await store.dispatch({ type: "world.document.selected", actor: "user", id: "plans" }).isPersisted.promise
+    await store.dispatch({ type: "surface.changed", actor: "user", surface: "world" }).isPersisted.promise
     const loading = await controller.commands.run("wiki.heading", "5")
     expect(loading).toMatchObject({ status: "failed", error: "The editor for Plans is still loading; try again in a moment." })
     controller.attachWikiEditor({ scrollToLine: (line) => (scrolled.push(line), line <= 7) })
@@ -216,11 +213,11 @@ describe("wiki.heading", () => {
     expect(scrolled).toEqual([5])
     expect(await controller.commands.run("wiki.heading", "9")).toMatchObject({ status: "failed", error: "Plans.md has no line 9." })
     expect(await controller.commands.run("wiki.heading", "five")).toMatchObject({ status: "failed", error: "five is not a line number." })
-    // In graph mode there is no editor to scroll.
-    expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
+    // The explicitly opened legacy graph pane has no editor to scroll.
+    await store.dispatch({ type: "wiki.pane.changed", actor: "user", pane: "graph", path: null }).isPersisted.promise
     expect((await controller.commands.run("wiki.heading", "5")).status).toBe("failed")
     // The mount's release: the handle is gone.
-    expect((await controller.commands.run("wiki.graph")).status).toBe("executed")
+    await store.dispatch({ type: "wiki.pane.changed", actor: "user", pane: "document", path: null }).isPersisted.promise
     controller.attachWikiEditor(null)
     expect((await controller.commands.run("wiki.heading", "5")).status).toBe("failed")
     // The handle saw the two in-range calls only; graph mode and the released mount never reached it.

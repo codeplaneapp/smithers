@@ -17,6 +17,7 @@ import type { Harness, Repo } from "@smthrs/rpc/LocalApp"
 import { REPOSITORY_ACCESS_VALUES } from "@smthrs/rpc/NativeRepository"
 import type { LocalRepositoryInspection, RepositoryAccess } from "@smthrs/rpc/NativeRepository"
 import { z } from "zod"
+import { CloudWikiState } from "../wiki/CloudWikiState"
 
 export {
   CardPatchSchema,
@@ -988,6 +989,7 @@ export const WorldDocumentSchema = z.object({
   tags: z.array(z.string()),
   sources: z.array(z.string()),
   confidence: z.number().min(0).max(1),
+  cloud: CloudWikiState.optional(),
   updatedAt: z.number(),
   updatedBy: ActorSchema,
   revision: z.number().int().nonnegative()

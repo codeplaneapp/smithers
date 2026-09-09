@@ -59,6 +59,8 @@ import { createWorkflowPumpController } from "./controller/workflow-pump"
 import { createWorkflowController, type WorkflowController } from "./controller/workflows"
 import { createRunsController, type RunsController } from "./controller/runs"
 import { createWorldController } from "./controller/world"
+import { createCloudWikiController } from "./controller/cloud-wiki"
+import type { MarkdownEditorHandle } from "@smthrs/ui/adapters/markdown-editor"
 import type { WikiEditorHandle } from "./controller/world"
 import { createGitHubSeam } from "./seams/GitHubSeam"
 import type { GitHubSeam } from "./seams/GitHubSeam"
@@ -149,17 +151,23 @@ export interface AppController {
   readonly cancelConnectorRemoval: () => void
   readonly removeConnector: (id: string) => Promise<string | void>
   readonly selectWorldDocument: (id: string) => string | void
-  readonly changeWorldDocument: (id: string, body: string) => void
+  readonly changeWorldDocument: (id: string, body: string) => Promise<string | void>
+  readonly listCloudWiki: (repo: string, page?: number) => Promise<string | { value: string }>
+  readonly openCloudWiki: (repo: string, slug: string) => Promise<string | { value: string }>
+  readonly retryCloudWiki: (id: string) => Promise<string | void | { value: string }>
+  readonly attachWorldEditor: (id: string, slot: string, editor: MarkdownEditorHandle | null) => void
+  readonly selectWikiCardDocument: (cardId: string, documentId: string) => string | void
+  readonly setWikiCardView: (cardId: string, view: "outline" | "document") => string | void
   readonly createWorldDocument: () => void
   /** Ask whether to delete a note; the answer is `world.delete.confirm|cancel`. */
   readonly removeWorldDocument: (id: string) => string | void
   readonly confirmWorldDelete: () => string | void
   readonly cancelWorldDelete: () => void
-  /** `wiki.open <path>`: the human's act selects the note in the pane; the agent's embeds it as a card and reads its links back. */
+  /** `wiki.open <path>` embeds the note for either actor and returns its links to the agent. */
   readonly openWorldDocument: (path: string) => string | void | { readonly value: string }
   /** `wiki.backlinks <path>`: the note's link rail as an embedded card, for either actor; the agent reads the names back. */
   readonly showWorldLinks: (path: string) => string | void | { readonly value: string }
-  /** `wiki.graph [path]`: the pane's graph mode for the human, the graph as a card (its counts as the value) for the agent. */
+  /** `wiki.graph [path]` embeds the graph for either actor and returns its counts to the agent. */
   readonly showWorldGraph: (path?: string) => string | void | { readonly value: string }
   /** The Wiki pane's editor mount registers its handle here (null on unmount); `wiki.heading` scrolls through it. */
   readonly attachWikiEditor: (editor: WikiEditorHandle | null) => void
@@ -967,6 +975,8 @@ export const createAppController = (
     forwardApprovalDecision,
     forwardInboxApprovalDecision
   })
+  const cloudWiki = actors.pair(ctx, (context) => createCloudWikiController(context, nextTranscriptOrdinal))
+  const { listCloudWiki, openCloudWiki, retryCloudWiki, attachWorldEditor } = cloudWiki
   const {
     clearConversation,
     selectWorldDocument,
@@ -979,8 +989,10 @@ export const createAppController = (
     showWorldLinks,
     showWorldGraph,
     attachWikiEditor,
-    jumpToHeading
-  } = actors.pair(ctx, (context) => createWorldController(context, { nextOrdinal: nextTranscriptOrdinal }))
+    jumpToHeading,
+    selectWikiCardDocument,
+    setWikiCardView
+  } = actors.pair(ctx, (context, select) => createWorldController(context, { nextOrdinal: nextTranscriptOrdinal, cloudWiki: select(cloudWiki) }))
 
   const changeDraft = (draft: string): void => {
     store.dispatch({ type: "composer.changed", actor: "user", draft })
@@ -1249,6 +1261,12 @@ export const createAppController = (
     showWorldGraph,
     attachWikiEditor,
     jumpToHeading,
+    listCloudWiki,
+    openCloudWiki,
+    retryCloudWiki,
+    attachWorldEditor,
+    selectWikiCardDocument,
+    setWikiCardView,
     decideApproval,
     retryLastTurn,
     clearConversation,
@@ -1604,6 +1622,12 @@ export const createAppController = (
     showWorldGraph,
     attachWikiEditor,
     jumpToHeading,
+    listCloudWiki,
+    openCloudWiki,
+    retryCloudWiki,
+    attachWorldEditor,
+    selectWikiCardDocument,
+    setWikiCardView,
     decideApproval,
     retryLastTurn,
     clearConversation,

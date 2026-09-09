@@ -585,6 +585,34 @@
 	padding: 0.375rem 0.75rem;
 	border-bottom: 1px solid var(--border, #e4ddd2);
 }
+.wiki-card-views {
+	display: flex;
+	gap: 0.25rem;
+}
+.wiki-card-source {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.375rem 0.75rem;
+	padding: 0.375rem 0.75rem;
+	font-size: 0.75rem;
+	color: var(--muted-foreground);
+}
+.wiki-card-source p {
+	flex-basis: 100%;
+	margin: 0;
+}
+.wiki-card-outline {
+	padding: 0.5rem 1rem 1rem;
+	overflow: auto;
+	font-size: 0.875rem;
+}
+.wiki-card-outline h3 { margin: 0.5rem 0; }
+.wiki-card-outline ol { padding-left: 1rem; }
+.wiki-card-outline li { margin: 0.35rem 0; overflow-wrap: anywhere; }
+.wiki-card-outline [data-depth="2"] { margin-left: 0.75rem; }
+.wiki-card-outline [data-depth="3"] { margin-left: 1.5rem; }
+.wiki-card-outline details { margin-top: 1rem; color: var(--muted-foreground); }
 .world-card-doc > .world-card-empty {
 	margin: 0;
 	padding: 0.75rem;

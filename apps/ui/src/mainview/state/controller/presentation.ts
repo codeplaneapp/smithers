@@ -47,7 +47,6 @@ export const createPresentationController = (
    * surface-maximizing takeover is structurally unavailable to the model.
    */
   const showWorld = (): void => {
-    if (ctx.commandActor === "smithers") {
       const snapshot = ctx.store.worldStateSnapshot()
       let highest = -1
       for (const message of ctx.store.collections.messages.values()) highest = Math.max(highest, message.ordinal)
@@ -61,20 +60,14 @@ export const createPresentationController = (
         ordinal: highest + 1,
         payload: {
           documents: snapshot.documents.map((document) => ({
+            id: document.id,
             path: document.path,
             title: document.title,
             confidence: document.confidence
           }))
         }
       }
-      ctx.store.dispatch({ type: "card.upsert", actor: "smithers", card })
-      return
-    }
-    ctx.store.dispatch({
-      type: "surface.changed",
-      actor: "user",
-      surface: ctx.store.session().surface === "world" ? "chat" : "world"
-    })
+      ctx.store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
   }
 
   const showConnectors = (): void => {

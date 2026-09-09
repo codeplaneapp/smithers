@@ -443,7 +443,7 @@ describe("the composer's + menu and surface pill", () => {
     expect(store.session().addMenuOpen).toBe(false)
   })
 
-  test("the surface pill lists Chat, Connect, Wiki and Flows, and reads the pane it opened", async () => {
+  test("the surface menu opens Wiki as an embedded card while the composer stays in chat", async () => {
     const { store, controller } = await localController()
     const view = mount(controller)
 
@@ -451,8 +451,9 @@ describe("the composer's + menu and surface pill", () => {
     const items = [...view.host.querySelectorAll<HTMLElement>(".composer-surfaces [role=\"menuitem\"]")]
     expect(items.map((item) => item.dataset.flow)).toEqual(["chat", "connect", "wiki", "flows"])
     await view.act(() => items[2]?.click())
-    expect(store.session().surface).toBe("world")
-    expect(text(byTestId(view.host, "composer-surface-trigger"))).toBe("Wiki")
+    expect(store.session().surface).toBe("chat")
+    expect(text(byTestId(view.host, "composer-surface-trigger"))).toBe("Chat")
+    expect(store.collections.cards.get("world-embedded")?.kind).toBe("world")
   })
 
   /*

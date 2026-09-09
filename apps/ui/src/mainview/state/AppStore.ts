@@ -939,6 +939,9 @@ const forgetAccountState = (collections: StoredCollections): void => {
     const keys = [...(collection as { keys: () => Iterable<string> }).keys()]
     if (keys.length > 0) (collection as { delete: (keys: string[]) => void }).delete(keys)
   }
+  // Cloud Wiki content and unsent CRDT updates belong to the signed-in account.
+  const cloudNotes = [...collections.worldDocuments.values()].filter((row) => row.cloud !== undefined).map((row) => row.id)
+  if (cloudNotes.length > 0) collections.worldDocuments.delete(cloudNotes)
   // Card tabs and cloud terminals also carry private repository names.
   closeTabRows(collections, [
     ...workspaceTabIds(collections),
@@ -968,6 +971,9 @@ const forgetAccountState = (collections: StoredCollections): void => {
     draft.paletteActionsRef = null
     draft.paletteLastQuery = ""
     draft.paletteRecents = []
+    if (draft.selectedWorldDocumentId !== null && cloudNotes.includes(draft.selectedWorldDocumentId)) {
+      draft.selectedWorldDocumentId = [...collections.worldDocuments.values()][0]?.id ?? null
+    }
     draft.activeRepoKey = null
     draft.maximizedCardId = null
     draft.activeFrameId = rootFrameId(branchId)
@@ -1158,7 +1164,10 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           if (collections.cards.get(row.id) === undefined) collections.cards.insert(row)
           else collections.cards.update(row.id, (draft) => replace(draft, row))
         }
-        for (const row of saved.worldDocuments) {
+        for (const savedRow of saved.worldDocuments) {
+          // A recorded Wiki projection cannot revive a transport or publish its pending edits.
+          const row = savedRow.cloud === undefined || savedRow.cloud.phase === "deleted" ? savedRow :
+            { ...savedRow, cloud: { ...savedRow.cloud, phase: "cached" as const } }
           if (collections.worldDocuments.get(row.id) === undefined) collections.worldDocuments.insert(row)
           else collections.worldDocuments.update(row.id, (draft) => replace(draft, row))
         }
