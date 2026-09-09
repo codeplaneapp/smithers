@@ -362,6 +362,121 @@ describe("MemoryEngine live execution joins", () => {
       expect(yield* Fiber.join(resumed)).toEqual({ executionId, status: "completed", value: "done" })
     }))
 
+  // Real elapsed time: two callers must contend for one claim, which a frozen
+  // clock cannot schedule.
+  it.live("claims one worker when two resume callers contend for the same execution", () =>
+    Effect.gen(function*() {
+      for (const ops of [3, 4, 5, 6, 7, 8]) {
+        const store = yield* MemoryEngine.makeStore()
+        const engine = yield* MemoryEngine.make(store)
+        const release = yield* Latch.make()
+        const executionId = `testing/memory/contended-resume-${ops}`
+        let frontierRuns = 0
+        const flow: FlowSpec = {
+          name: executionId,
+          steps: [{
+            key: "frontier",
+            sealed: false,
+            kind: "step",
+            run: () =>
+              Effect.suspend(() => {
+                frontierRuns += 1
+                return frontierRuns === 1 ? Effect.interrupt : Effect.as(release.await, `run-${frontierRuns}`)
+              })
+          }]
+        }
+        expect((yield* engine.run({ flow, payload: undefined, executionId })).status).toBe("suspended")
+
+        const resumes = yield* Effect.all(
+          [engine.resume(executionId), engine.resume(executionId)],
+          { concurrency: "unbounded" }
+        ).pipe(
+          Effect.provideService(Scheduler.MaxOpsBeforeYield, ops),
+          Effect.forkChild({ startImmediately: true })
+        )
+        for (let turn = 0; turn < 50; turn++) yield* Effect.yieldNow
+        yield* release.open
+        const results = yield* Fiber.join(resumes).pipe(Effect.timeout("10 seconds"))
+
+        expect(results, `resumes disagreed at ${ops} ops`).toEqual([
+          { executionId, status: "completed", value: "run-2" },
+          { executionId, status: "completed", value: "run-2" }
+        ])
+        expect(frontierRuns, `the frontier step ran twice at ${ops} ops`).toBe(2)
+        const journal = yield* engine.journal(executionId)
+        expect(
+          journal.filter((entry) => entry.stepKey === "frontier" && entry.outcome === "completed"),
+          `two workers journalled the frontier at ${ops} ops`
+        ).toHaveLength(1)
+      }
+    }))
+
+  it.scoped("runs a later race that reuses an unsealed branch key instead of replaying the earlier winner", () =>
+    Effect.gen(function*() {
+      const store = yield* MemoryEngine.makeStore()
+      const engine = yield* MemoryEngine.make(store)
+      const executionId = "testing/memory/race-occurrence"
+      let contenderRuns = 0
+      const contender = (): StepSpec => ({
+        key: "contender",
+        sealed: false,
+        kind: "step",
+        run: () => Effect.sync(() => `win-${++contenderRuns}`)
+      })
+      const result = yield* engine.run({
+        flow: {
+          name: executionId,
+          steps: [
+            { key: "first-race", sealed: false, kind: "race", branches: [contender()] },
+            { key: "second-race", sealed: false, kind: "race", branches: [contender()] }
+          ]
+        },
+        payload: undefined,
+        executionId
+      })
+
+      expect(result).toEqual({ executionId, status: "completed", value: "win-2" })
+      expect(contenderRuns).toBe(2)
+      const journal = yield* engine.journal(executionId)
+      expect(
+        journal
+          .filter((entry) => entry.stepKey === "contender" && entry.outcome === "completed")
+          .map((entry) => entry.value)
+      ).toEqual(["win-1", "win-2"])
+    }))
+
+  it.scoped("replays a sealed branch key shared by two races", () =>
+    Effect.gen(function*() {
+      const store = yield* MemoryEngine.makeStore()
+      const engine = yield* MemoryEngine.make(store)
+      const executionId = "testing/memory/race-sealed-alias"
+      let contenderRuns = 0
+      const contender = (): StepSpec => ({
+        key: "contender",
+        sealed: true,
+        kind: "step",
+        run: () => Effect.sync(() => `win-${++contenderRuns}`)
+      })
+      const result = yield* engine.run({
+        flow: {
+          name: executionId,
+          steps: [
+            { key: "first-race", sealed: true, kind: "race", branches: [contender()] },
+            { key: "second-race", sealed: true, kind: "race", branches: [contender()] }
+          ]
+        },
+        payload: undefined,
+        executionId
+      })
+
+      expect(result).toEqual({ executionId, status: "completed", value: "win-1" })
+      expect(contenderRuns).toBe(1)
+      const journal = yield* engine.journal(executionId)
+      expect(
+        journal.filter((entry) => entry.stepKey === "contender" && entry.outcome === "completed")
+      ).toHaveLength(1)
+    }))
+
   it.scoped("interrupting a completed execution preserves its terminal result", () =>
     Effect.gen(function*() {
       const store = yield* MemoryEngine.makeStore()

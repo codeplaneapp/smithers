@@ -151,16 +151,60 @@ const appendEntry = (
     return [entry, { ...execution, journal: [...execution.journal, entry] }] as const
   })
 
-const findRecorded = (
-  journal: ReadonlyArray<JournalEntryLike>,
-  stepKey: string,
-  outcome: JournalEntryLike["outcome"]
-): JournalEntryLike | undefined => {
-  for (let index = journal.length - 1; index >= 0; index--) {
-    const entry = journal[index]
-    if (entry !== undefined && entry.stepKey === stepKey && entry.outcome === outcome) {
-      return entry
+const branchPath = (path: string, index: number): string => `${path}.${index}`
+
+/**
+ * The replay slot every journalling spec in a flow claims, keyed by its
+ * position path: `"2"` is the third step and `"2.1"` is that step's second
+ * branch.
+ *
+ * A sealed key has content identity and always replays slot 0. An unsealed key
+ * has occurrence identity, so it replays the entry at the ordinal its key
+ * reaches in flow order. Branches claim from the same key ledger as steps,
+ * which is what makes a later race that reuses a branch key run and journal
+ * separately instead of replaying an earlier race's winner. A race journals
+ * nothing under its own key unless it is itself a branch, so a top-level race
+ * claims no slot.
+ */
+const occurrenceSlots = (flow: FlowSpec): ReadonlyMap<string, number> => {
+  const claimed = new Map<string, number>()
+  const slots = new Map<string, number>()
+  const visit = (step: StepSpec, path: string, journals: boolean): void => {
+    if (journals) {
+      const occurrence = claimed.get(step.key) ?? 0
+      claimed.set(step.key, occurrence + 1)
+      slots.set(path, occurrence)
     }
+    if (step.kind === "race") {
+      step.branches.forEach((branch, index) => visit(branch, branchPath(path, index), true))
+    }
+  }
+  flow.steps.forEach((step, index) => visit(step, String(index), step.kind === "step"))
+  return slots
+}
+
+const recordedOutcome = (
+  journal: ReadonlyArray<JournalEntryLike>,
+  step: StepSpec,
+  occurrence: number
+): JournalEntryLike | undefined => {
+  const completed = journal.filter(
+    (entry) => entry.stepKey === step.key && entry.outcome === "completed"
+  )
+  return completed[step.sealed ? 0 : occurrence]
+}
+
+const recordedWinner = (
+  journal: ReadonlyArray<JournalEntryLike>,
+  race: Extract<StepSpec, { readonly kind: "race" }>,
+  slots: ReadonlyMap<string, number>,
+  path: string
+): { readonly branch: StepSpec; readonly recorded: JournalEntryLike } | undefined => {
+  for (let index = 0; index < race.branches.length; index++) {
+    const branch = race.branches[index]
+    if (branch === undefined) continue
+    const recorded = recordedOutcome(journal, branch, slots.get(branchPath(path, index)) ?? 0)
+    if (recorded !== undefined) return { branch, recorded }
   }
   return undefined
 }
@@ -169,21 +213,16 @@ const firstFrontier = (
   flow: FlowSpec,
   journal: ReadonlyArray<JournalEntryLike>
 ): StepSpec | undefined => {
-  const occurrences = new Map<string, number>()
-  for (const step of flow.steps) {
+  const slots = occurrenceSlots(flow)
+  for (let index = 0; index < flow.steps.length; index++) {
+    const step = flow.steps[index]
+    if (step === undefined) continue
+    const path = String(index)
     if (step.kind === "step") {
-      const occurrence = occurrences.get(step.key) ?? 0
-      occurrences.set(step.key, occurrence + 1)
-      const completed = journal.filter(
-        (entry) => entry.stepKey === step.key && entry.outcome === "completed"
-      )
-      if (completed[step.sealed ? 0 : occurrence] === undefined) return step
+      if (recordedOutcome(journal, step, slots.get(path) ?? 0) === undefined) return step
       continue
     }
-    const winner = step.branches.find(
-      (branch) => findRecorded(journal, branch.key, "completed") !== undefined
-    )
-    if (winner === undefined) return step
+    if (recordedWinner(journal, step, slots, path) === undefined) return step
   }
   return undefined
 }
@@ -264,11 +303,13 @@ const executeRaceBranch = (
   branch: StepSpec,
   input: unknown,
   index: number,
-  winnerIndex: { value: number | undefined }
+  winnerIndex: { value: number | undefined },
+  slots: ReadonlyMap<string, number>,
+  path: string
 ): Effect.Effect<unknown, unknown> => {
   const effect = branch.kind === "step"
     ? branch.run(input)
-    : executeRace(store, executionId, branch, input)
+    : executeRace(store, executionId, branch, input, slots, path)
   return effect.pipe(
     Effect.onExit((exit) => {
       if (Exit.isSuccess(exit)) {
@@ -309,21 +350,32 @@ const executeRace = (
   store: EngineStore,
   executionId: string,
   race: Extract<StepSpec, { readonly kind: "race" }>,
-  input: unknown
+  input: unknown,
+  slots: ReadonlyMap<string, number>,
+  path: string
 ): Effect.Effect<unknown, unknown> =>
   getExecution(store, executionId).pipe(
     Effect.orDie,
     Effect.flatMap((execution) => {
-      for (const branch of race.branches) {
-        const completed = findRecorded(execution.journal, branch.key, "completed")
-        if (completed !== undefined) return Effect.succeed(completed.value)
-      }
+      const replayed = recordedWinner(execution.journal, race, slots, path)
+      if (replayed !== undefined) return Effect.succeed(replayed.recorded.value)
       if (race.branches.length === 0) {
         return Effect.fail(unavailable(`Race ${race.key} has no branches`))
       }
       const winnerIndex: { value: number | undefined } = { value: undefined }
       return Effect.raceAll(
-        race.branches.map((branch, index) => executeRaceBranch(store, executionId, branch, input, index, winnerIndex)),
+        race.branches.map((branch, index) =>
+          executeRaceBranch(
+            store,
+            executionId,
+            branch,
+            input,
+            index,
+            winnerIndex,
+            slots,
+            branchPath(path, index)
+          )
+        ),
         {
           onWinner: ({ index }) => {
             winnerIndex.value = index
@@ -333,11 +385,7 @@ const executeRace = (
         Effect.tap(() =>
           Effect.gen(function*() {
             const settled = yield* getExecution(store, executionId)
-            const winner = race.branches.find(
-              (branch) =>
-                findRecorded(settled.journal, branch.key, "completed") !==
-                  undefined
-            )
+            const winner = recordedWinner(settled.journal, race, slots, path)?.branch
             for (const branch of race.branches) {
               if (branch === winner) continue
               const hasOutcome = settled.journal.some(
@@ -371,31 +419,22 @@ const executeStep = (
   step: StepSpec,
   input: unknown,
   active: ActiveExecution,
-  occurrence: number
+  slots: ReadonlyMap<string, number>,
+  path: string
 ): Effect.Effect<StepOutcome, EngineUnavailableError> =>
   getExecution(store, executionId).pipe(
     Effect.flatMap((execution) => {
-      if (step.kind === "step") {
-        const completed = execution.journal.filter(
-          (entry) => entry.stepKey === step.key && entry.outcome === "completed"
-        )
-        const recorded = completed[step.sealed ? 0 : occurrence]
-        if (recorded !== undefined) {
-          return Effect.succeed({ status: "completed" as const, value: recorded.value })
-        }
-      } else {
-        for (const branch of step.branches) {
-          const recorded = findRecorded(execution.journal, branch.key, "completed")
-          if (recorded !== undefined) {
-            return Effect.succeed({ status: "completed" as const, value: recorded.value })
-          }
-        }
+      const recorded = step.kind === "step"
+        ? recordedOutcome(execution.journal, step, slots.get(path) ?? 0)
+        : recordedWinner(execution.journal, step, slots, path)?.recorded
+      if (recorded !== undefined) {
+        return Effect.succeed({ status: "completed" as const, value: recorded.value })
       }
 
       active.activeStep = step
       const effect = step.kind === "step"
         ? step.run(input)
-        : executeRace(store, executionId, step, input)
+        : executeRace(store, executionId, step, input, slots, path)
 
       return Effect.exit(effect).pipe(
         Effect.flatMap((exit): Effect.Effect<StepOutcome, EngineUnavailableError> => {
@@ -464,18 +503,19 @@ const execute = (
 ): Effect.Effect<ExecutionResult, EngineUnavailableError> =>
   Effect.gen(function*() {
     const execution = yield* getExecution(store, executionId)
-    const occurrences = new Map<string, number>()
+    const slots = occurrenceSlots(execution.flow)
     let input = execution.payload
-    for (const step of execution.flow.steps) {
-      const occurrence = occurrences.get(step.key) ?? 0
-      occurrences.set(step.key, occurrence + 1)
+    for (let index = 0; index < execution.flow.steps.length; index++) {
+      const step = execution.flow.steps[index]
+      if (step === undefined) continue
       const outcome = yield* executeStep(
         store,
         executionId,
         step,
         input,
         active,
-        occurrence
+        slots,
+        String(index)
       )
       if (outcome.status === "failed") {
         return yield* setStatus(store, executionId, "failed", outcome.value)
@@ -633,20 +673,29 @@ export const make = (
         Effect.orDie
       )
 
+      // Claiming the execution is one synchronous step. The check above ran
+      // before a store read, so a concurrent caller can reach here too; only
+      // re-reading `active` in the same step that publishes keeps two callers
+      // from forking two workers over one journal. The loser joins the winner's
+      // deferred and forks nothing.
+      //
       // Publishing an active entry and the fiber that owns it is one
       // interruption boundary. If cancellation could land between those two
       // writes, interrupt and resume would wait forever on deferreds no worker
       // can complete. A typed store failure still rolls the provisional entry
       // back, because no worker was successfully published to own its cleanup.
-      yield* Effect.gen(function*() {
+      const claimed = yield* Effect.gen(function*() {
+        const concurrent = active.get(executionId)
+        if (concurrent !== undefined) return concurrent
         active.set(executionId, activeExecution)
         yield* setStatus(store, executionId, "running", execution.value)
         const fiber = yield* Effect.forkIn(worker, scope)
         yield* Deferred.succeed(activeExecution.fiber, fiber)
+        return activeExecution
       }).pipe(
         Effect.onError(() =>
           Effect.sync(() => {
-            active.delete(executionId)
+            if (active.get(executionId) === activeExecution) active.delete(executionId)
           })
         ),
         Effect.uninterruptible
@@ -655,7 +704,7 @@ export const make = (
       // Only arming is protected. A caller may stop waiting without stopping
       // the independently scoped execution, which is the engine's join
       // contract for run and resume.
-      return yield* Deferred.await(deferred)
+      return yield* Deferred.await(claimed.deferred)
     })
 
     const engine: EngineSubjectService = EngineSubjectTag.of({

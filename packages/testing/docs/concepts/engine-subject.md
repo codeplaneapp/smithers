@@ -112,6 +112,11 @@ does not satisfy this.
 prove it adversarially: they invert the timing on the replay so the recorded
 loser would win a fresh race, and then require the recorded winner anyway.
 
+A branch claims a replay slot from the same key ledger as a step, so `sealed`
+selects a branch's identity exactly as it selects a step's. Two races that
+reuse an unsealed branch key run and journal separately; two races that share a
+sealed branch key replay one recorded result.
+
 Both pins advance virtual time, so a runner must register them under a
 deterministic clock. `Vitest.testEffect(...).effect`, and its `scoped` alias,
 supplies one; `.live` does not.
