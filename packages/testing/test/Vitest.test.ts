@@ -1,11 +1,12 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Journal from "@smthrs/journal"
-import { Clock, Context, Effect, Layer, Ref } from "effect"
+import { Clock, Context, Effect, FileSystem, Layer, Random, Ref } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import * as EngineSubject from "../src/EngineSubject.ts"
 import { runEffectTest } from "../src/internal/TestEffectRunner.ts"
+import * as TestHost from "../src/TestHost.ts"
 import * as TestLayers from "../src/TestLayers.ts"
 import { describe, expect, it, testEffect } from "../src/Vitest.ts"
 
@@ -13,8 +14,24 @@ const Counter = Context.Service<{ readonly ref: Ref.Ref<number> }>("flows/testin
 const counterLayer = Layer.effect(Counter, Effect.map(Ref.make(0), (ref) => ({ ref })))
 const test = testEffect(counterLayer)
 const unitTest = testEffect(TestLayers.unit(EngineSubject.layerNoop()))
+const hostTest = testEffect(TestHost.TestHost)
 
 describe("Vitest", () => {
+  for (const runtime of [1, 2]) {
+    hostTest.effect(
+      `resets the exported TestHost filesystem and random seed in runtime ${runtime}`,
+      () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          expect.soft(yield* Random.next).toBe(0.6011037519201636)
+          expect.soft(yield* fs.readDirectory("/")).toEqual([])
+          yield* fs.writeFileString("/previous-test.txt", "must stay in this runtime")
+          expect(yield* fs.readFileString("/previous-test.txt")).toBe("must stay in this runtime")
+          yield* Random.next
+        })
+    )
+  }
+
   // Importing this module used to write `scoped` into `@effect/vitest`'s own
   // exported `it`. That module is externalized and shared across every test
   // file in a worker process, so the library's own `it.scoped` was replaced

@@ -138,6 +138,20 @@ describe("TestHost scripted commands", () => {
 })
 
 describe("TestHost determinism", () => {
+  it.effect("restores seeded files on every build of the same layer", () =>
+    Effect.gen(function*() {
+      const host = TestHost.layer({ files: { "/seed.txt": "initial" } })
+      const readThenWrite = Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const contents = yield* fs.readFileString("/seed.txt")
+        yield* fs.writeFileString("/seed.txt", "changed")
+        return contents
+      })
+
+      expect(yield* Effect.provide(readThenWrite, host)).toBe("initial")
+      expect(yield* Effect.provide(readThenWrite, host)).toBe("initial")
+    }))
+
   it.effect("produces the same random sequence for the same seed and a different one otherwise", () =>
     Effect.gen(function*() {
       const draw = Effect.gen(function*() {
@@ -145,8 +159,9 @@ describe("TestHost determinism", () => {
         return [random.nextDoubleUnsafe(), random.nextDoubleUnsafe(), random.nextIntUnsafe()]
       })
 
-      const first = yield* (Effect.provide(draw, TestHost.layer({ seed: 7 })))
-      const second = yield* (Effect.provide(draw, TestHost.layer({ seed: 7 })))
+      const host = TestHost.layer({ seed: 7 })
+      const first = yield* (Effect.provide(draw, host))
+      const second = yield* (Effect.provide(draw, host))
       const other = yield* (Effect.provide(draw, TestHost.layer({ seed: 8 })))
 
       expect(first).toEqual(second)

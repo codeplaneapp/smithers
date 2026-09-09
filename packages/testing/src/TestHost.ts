@@ -16,7 +16,7 @@ import * as BrowserJj from "@smthrs/jj/browser/BrowserJj"
 import * as HttpClient from "@smthrs/kernel/HttpClient"
 import * as BrowserChildProcessSpawner from "@smthrs/platform-browser/BrowserChildProcessSpawner"
 import * as BrowserFileSystem from "@smthrs/platform-browser/BrowserFileSystem"
-import { type FileSystem, Layer, Path, Random } from "effect"
+import { Effect, type FileSystem, Layer, Path, Random } from "effect"
 import { TestClock } from "effect/testing"
 import type { HttpClient as EffectHttpClient } from "effect/unstable/http/HttpClient"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -207,8 +207,8 @@ export const makeStubBash = (
  * @since 1.0.0-rc.0
  */
 export const layerSeededRandom = (seed = 42): Layer.Layer<never> =>
-  Layer.succeed(Random.Random)(
-    (() => {
+  Layer.sync(Random.Random)(
+    () => {
       let state = seed >>> 0
       const nextDoubleUnsafe = (): number => {
         state = (state + 0x6d2b79f5) >>> 0
@@ -221,7 +221,7 @@ export const layerSeededRandom = (seed = 42): Layer.Layer<never> =>
         nextDoubleUnsafe,
         nextIntUnsafe: () => Math.floor(nextDoubleUnsafe() * Number.MAX_SAFE_INTEGER)
       }
-    })()
+    }
   )
 
 /**
@@ -245,6 +245,8 @@ export type TestHost =
  * `TestClock.adjust`), and a seeded PRNG. `Jj` reuses its package's
  * ticket-failing browser layer so a test that reaches for it fails loudly
  * instead of touching the real machine.
+ * Each layer build allocates its own filesystem and restarts the PRNG from
+ * the configured seed, including when the same layer value is reused.
  *
  * The spawner is provided *over* the filesystem and path layers, exactly the
  * way `NodeChildProcessSpawner` is, so the interpreter and the `FileSystem`
@@ -266,8 +268,10 @@ export const layer = (options?: {
   >
   readonly seed?: number
 }): Layer.Layer<TestHost> => {
-  // The browser layer already attests filesystem isolation.
-  const isolatedFileSystem = BrowserFileSystem.layer(makeMemoryFs(options?.files)).pipe(Layer.orDie)
+  // Allocate per build while retaining the browser layer's isolation attestation.
+  const isolatedFileSystem = Layer.unwrap(
+    Effect.sync(() => BrowserFileSystem.layer(makeMemoryFs(options?.files)))
+  ).pipe(Layer.orDie)
   const platform = Layer.mergeAll(
     isolatedFileSystem,
     Path.layer

@@ -64,7 +64,9 @@ import * as TestLayers from "@smthrs/testing/TestLayers"
 ## Three modules stay off the root barrel
 
 `TestHost` is the deterministic host bundle: an in-memory filesystem, scripted
-interpreter, `TestClock`, and seeded PRNG. Import it explicitly:
+interpreter, `TestClock`, and seeded PRNG. Each layer build starts with a fresh
+filesystem and restarts the PRNG from its seed, even when tests reuse the
+exported `TestHost.TestHost` layer. Import it explicitly:
 
 ```ts
 import * as TestHost from "@smthrs/testing/TestHost"
