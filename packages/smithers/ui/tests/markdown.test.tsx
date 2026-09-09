@@ -97,6 +97,10 @@ describe("Markdown (static markup)", () => {
       "```ts\nconst x = 1;\n```\nAfter",
       "same\n\nsame\n\nlast",
       "Raw <tag> and **bold**, *italic*, `code`, and [link](/docs).",
+      "| repo | issues |\n| --- | ---: |\n| smithers | 3 |",
+      "Before\n\n| a | b |\n|:-:|---|\n| 1 | 2 |\n\nAfter",
+      // A header row that also looks like a bullet: the delimiter row decides.
+      "- a | b\n--- | ---\n- c | d",
       SAMPLE,
     ];
 
@@ -175,6 +179,31 @@ describe("Markdown (link activation)", () => {
       anchor.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  test("replacing the content keeps the completed-block cache the size of the document", async () => {
+    // The cache is private to the instance, so the test captures it the only way
+    // a caller can: the Map that block sources are written into.
+    const caches = new Set<Map<unknown, unknown>>();
+    const originalSet = Map.prototype.set;
+    Map.prototype.set = function set(this: Map<unknown, unknown>, key: unknown, value: unknown) {
+      if (typeof key === "string" && key.startsWith("cache-probe:")) caches.add(this);
+      return originalSet.call(this, key, value);
+    };
+    try {
+      await render(<Markdown content={"cache-probe:0\n\ntail"} />);
+      for (let version = 1; version < 200; version += 1) {
+        await act(async () => root!.render(<Markdown content={`cache-probe:${version}\n\ntail`} />));
+      }
+    } finally {
+      Map.prototype.set = originalSet;
+    }
+
+    expect(caches.size).toBe(1);
+    // One completed block is on screen ("cache-probe:199"); the trailing block
+    // is never cached. Retaining every replaced version would be 200 entries.
+    expect([...caches][0]!.size).toBe(1);
+    expect(container!.textContent).toContain("cache-probe:199");
   });
 
   test("appending streamed content does not re-parse completed blocks", async () => {

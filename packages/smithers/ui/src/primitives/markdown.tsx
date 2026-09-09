@@ -128,47 +128,101 @@ const tableAt = (lines: ReadonlyArray<string>, index: number): number | undefine
   return rowCells(header).length === cells.length ? cells.length : undefined;
 };
 
-/** Parse the source into block-level React nodes. */
-function renderBlocks(content: string, onLinkClick?: MarkdownLinkClick): ReactNode[] {
+/** The block kinds the scanner recognizes. */
+type BlockKind = "fence" | "table" | "heading" | "bullet" | "ordered" | "paragraph";
+
+/**
+ * One block of source, tagged with the kind that claimed it. `text` is the
+ * exact source slice, which is what the completed-block cache is keyed by.
+ */
+type BlockSpan = { readonly kind: BlockKind; readonly lines: ReadonlyArray<string>; readonly text: string };
+
+/**
+ * The one block-boundary grammar: rendering dispatches on these spans and the
+ * completed-block cache is keyed by their text, so a boundary rule is stated
+ * once and a streaming block boundary cannot disagree with what is drawn.
+ *
+ * Priority is fence, table, heading, bullet, ordered, paragraph. A table wins
+ * over a list because the delimiter row is the stronger signal: `- a | b` above
+ * `--- | ---` is a header row, not a bullet.
+ *
+ * The final span may still grow while content streams; every earlier span is
+ * stable, which is what makes it safe to cache.
+ */
+function scanBlocks(content: string): BlockSpan[] {
   const lines = content.split("\n");
-  const blocks: ReactNode[] = [];
+  const spans: BlockSpan[] = [];
   let i = 0;
-  let key = 0;
 
   while (i < lines.length) {
-    const line = lines[i]!;
-
-    if (isFence(line)) {
-      const info = line.trimStart().slice(3).trim();
-      const language = info ? info.split(/\s+/, 1)[0]!.toLowerCase() : undefined;
-      const code: string[] = [];
-      i += 1;
-      while (i < lines.length && !isFence(lines[i]!)) {
-        code.push(lines[i]!);
-        i += 1;
-      }
-      i += 1; // consume the closing fence (or run off the end)
-      blocks.push(<CodeBlock code={code.join("\n")} language={language} key={key++} />);
-      continue;
-    }
-
-    if (line.trim() === "") {
+    if (lines[i]!.trim() === "") {
       i += 1;
       continue;
     }
 
-    const columns = tableAt(lines, i);
-    if (columns !== undefined) {
-      const alignments = rowCells(lines[i + 1]!).map(alignmentOf);
-      const header = rowCells(line);
+    const start = i;
+    let kind: BlockKind;
+    if (isFence(lines[i]!)) {
+      kind = "fence";
+      i += 1;
+      while (i < lines.length && !isFence(lines[i]!)) i += 1;
+      if (i < lines.length) i += 1; // consume the closing fence (or run off the end)
+    } else if (tableAt(lines, i) !== undefined) {
+      kind = "table";
       i += 2;
-      const rows: string[][] = [];
-      while (i < lines.length && isRow(lines[i]!) && lines[i]!.trim() !== "") {
-        rows.push(rowCells(lines[i]!));
+      while (i < lines.length && isRow(lines[i]!) && lines[i]!.trim() !== "") i += 1;
+    } else if (isHeading(lines[i]!)) {
+      kind = "heading";
+      i += 1;
+    } else if (isBullet(lines[i]!)) {
+      kind = "bullet";
+      while (i < lines.length && isBullet(lines[i]!)) i += 1;
+    } else if (isOrdered(lines[i]!)) {
+      kind = "ordered";
+      while (i < lines.length && isOrdered(lines[i]!)) i += 1;
+    } else {
+      kind = "paragraph";
+      while (
+        i < lines.length &&
+        lines[i]!.trim() !== "" &&
+        !isFence(lines[i]!) &&
+        !isHeading(lines[i]!) &&
+        !isBullet(lines[i]!) &&
+        !isOrdered(lines[i]!) &&
+        tableAt(lines, i) === undefined
+      ) {
         i += 1;
       }
-      blocks.push(
-        <Table className="sui-md-table" key={key++}>
+    }
+
+    const block = lines.slice(start, i);
+    spans.push({ kind, lines: block, text: block.join("\n") });
+  }
+
+  return spans;
+}
+
+/** Render one scanned span, dispatching on the kind the scanner gave it. */
+function renderSpan(span: BlockSpan, key: number, onLinkClick?: MarkdownLinkClick): ReactNode {
+  const lines = span.lines;
+
+  switch (span.kind) {
+    case "fence": {
+      const info = lines[0]!.trimStart().slice(3).trim();
+      const language = info ? info.split(/\s+/, 1)[0]!.toLowerCase() : undefined;
+      const body = lines.slice(1);
+      // An unterminated fence has no closing line to drop.
+      if (body.length > 0 && isFence(body[body.length - 1]!)) body.pop();
+      return <CodeBlock code={body.join("\n")} language={language} key={key} />;
+    }
+
+    case "table": {
+      const columns = rowCells(lines[1]!).length;
+      const alignments = rowCells(lines[1]!).map(alignmentOf);
+      const header = rowCells(lines[0]!);
+      const rows = lines.slice(2).map(rowCells);
+      return (
+        <Table className="sui-md-table" key={key}>
           <TableHeader>
             <TableRow>
               {header.map((cell, column) => (
@@ -193,131 +247,59 @@ function renderBlocks(content: string, onLinkClick?: MarkdownLinkClick): ReactNo
               </TableRow>
             ))}
           </TableBody>
-        </Table>,
+        </Table>
       );
-      continue;
     }
 
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
+    case "heading": {
+      const heading = /^(#{1,6})\s+(.*)$/.exec(lines[0]!)!;
       const level = heading[1]!.length;
-      blocks.push(
-        <div className={`sui-md-heading sui-md-h${level}`} key={key++}>
+      return (
+        <div className={`sui-md-heading sui-md-h${level}`} key={key}>
           {renderInline(heading[2]!, `h${key}`, onLinkClick)}
-        </div>,
+        </div>
       );
-      i += 1;
-      continue;
     }
 
-    if (isBullet(line)) {
-      const items: ReactNode[] = [];
-      while (i < lines.length && isBullet(lines[i]!)) {
-        const text = lines[i]!.replace(/^\s*[-*]\s+/, "");
-        items.push(<li key={items.length}>{renderInline(text, `ul${key}.${items.length}`, onLinkClick)}</li>);
-        i += 1;
-      }
-      blocks.push(
-        <ul className="sui-md-list" key={key++}>
-          {items}
-        </ul>,
+    case "bullet":
+      return (
+        <ul className="sui-md-list" key={key}>
+          {lines.map((line, item) => (
+            <li key={item}>{renderInline(line.replace(/^\s*[-*]\s+/, ""), `ul${key}.${item}`, onLinkClick)}</li>
+          ))}
+        </ul>
       );
-      continue;
-    }
 
-    if (isOrdered(line)) {
-      const items: ReactNode[] = [];
-      while (i < lines.length && isOrdered(lines[i]!)) {
-        const text = lines[i]!.replace(/^\s*\d+\.\s+/, "");
-        items.push(<li key={items.length}>{renderInline(text, `ol${key}.${items.length}`, onLinkClick)}</li>);
-        i += 1;
-      }
-      blocks.push(
-        <ol className="sui-md-list" key={key++}>
-          {items}
-        </ol>,
+    case "ordered":
+      return (
+        <ol className="sui-md-list" key={key}>
+          {lines.map((line, item) => (
+            <li key={item}>{renderInline(line.replace(/^\s*\d+\.\s+/, ""), `ol${key}.${item}`, onLinkClick)}</li>
+          ))}
+        </ol>
       );
-      continue;
-    }
 
-    const para: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i]!.trim() !== "" &&
-      !isFence(lines[i]!) &&
-      !isHeading(lines[i]!) &&
-      !isBullet(lines[i]!) &&
-      !isOrdered(lines[i]!) &&
-      tableAt(lines, i) === undefined
-    ) {
-      para.push(lines[i]!);
-      i += 1;
-    }
-    blocks.push(
-      <p className="sui-md-p" key={key++}>
-        {para.map((text, idx) => (
-          <Fragment key={idx}>
-            {idx > 0 ? <br /> : null}
-            {renderInline(text, `p${key}.${idx}`, onLinkClick)}
-          </Fragment>
-        ))}
-      </p>,
-    );
+    case "paragraph":
+      return (
+        <p className="sui-md-p" key={key}>
+          {lines.map((text, idx) => (
+            <Fragment key={idx}>
+              {idx > 0 ? <br /> : null}
+              {renderInline(text, `p${key}.${idx}`, onLinkClick)}
+            </Fragment>
+          ))}
+        </p>
+      );
   }
-
-  return blocks;
 }
 
-/**
- * Split at the same boundaries as `renderBlocks`. The final block may still
- * grow while content streams; every earlier block is stable.
- */
-function splitBlockSources(content: string): string[] {
-  const lines = content.split("\n");
-  const blocks: string[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    if (lines[i]!.trim() === "") {
-      i += 1;
-      continue;
-    }
-
-    const start = i;
-    if (isFence(lines[i]!)) {
-      i += 1;
-      while (i < lines.length && !isFence(lines[i]!)) i += 1;
-      if (i < lines.length) i += 1;
-    } else if (isHeading(lines[i]!)) {
-      i += 1;
-    } else if (isBullet(lines[i]!)) {
-      while (i < lines.length && isBullet(lines[i]!)) i += 1;
-    } else if (isOrdered(lines[i]!)) {
-      while (i < lines.length && isOrdered(lines[i]!)) i += 1;
-    } else if (tableAt(lines, i) !== undefined) {
-      i += 2;
-      while (i < lines.length && isRow(lines[i]!) && lines[i]!.trim() !== "") i += 1;
-    } else {
-      while (
-        i < lines.length &&
-        lines[i]!.trim() !== "" &&
-        !isFence(lines[i]!) &&
-        !isHeading(lines[i]!) &&
-        !isBullet(lines[i]!) &&
-        !isOrdered(lines[i]!) &&
-        tableAt(lines, i) === undefined
-      ) {
-        i += 1;
-      }
-    }
-    blocks.push(lines.slice(start, i).join("\n"));
-  }
-
-  return blocks;
+/** Parse the source into block-level React nodes. */
+function renderBlocks(content: string, onLinkClick?: MarkdownLinkClick): ReactNode[] {
+  return scanBlocks(content).map((span, index) => renderSpan(span, index, onLinkClick));
 }
 
 /** @internal Exposed so parser reuse can be verified without mocking Markdown output. */
-export const markdownBlockParser = { render: renderBlocks };
+export const markdownBlockParser = { render: renderBlocks, scan: scanBlocks };
 
 export type MarkdownProps = Omit<ComponentProps<"div">, "children" | "onClick"> & {
   /** The Markdown source string to render. */
@@ -331,9 +313,9 @@ export type MarkdownProps = Omit<ComponentProps<"div">, "children" | "onClick"> 
 
 /**
  * A small, dependency-free Markdown renderer covering what a chat model
- * actually emits: fenced code blocks, headings, ordered/unordered lists, inline
- * code, bold, italics, and links. Anything else falls through as plain
- * paragraphs.
+ * actually emits: fenced code blocks, headings, ordered/unordered lists,
+ * GitHub-flavored tables, inline code, bold, italics, and links. Anything else
+ * falls through as plain paragraphs.
  *
  * Wrapped in `React.memo`, with completed blocks cached by source so streaming
  * updates only re-parse the trailing block.
@@ -341,17 +323,27 @@ export type MarkdownProps = Omit<ComponentProps<"div">, "children" | "onClick"> 
 function MarkdownImpl({ content, onLinkClick, className, ...props }: MarkdownProps) {
   useInjectUiCss();
   const completedBlocks = useMemo(() => new Map<string, ReactNode[]>(), [onLinkClick]);
-  const sources = splitBlockSources(content);
-  const rendered = sources.map((source, index) => {
-    if (index === sources.length - 1) return markdownBlockParser.render(source, onLinkClick);
+  const spans = scanBlocks(content);
+  const live = new Set<string>();
+  const rendered = spans.map((span, index) => {
+    if (index === spans.length - 1) return markdownBlockParser.render(span.text, onLinkClick);
 
-    let block = completedBlocks.get(source);
+    live.add(span.text);
+    let block = completedBlocks.get(span.text);
     if (!block) {
-      block = markdownBlockParser.render(source, onLinkClick);
-      completedBlocks.set(source, block);
+      block = markdownBlockParser.render(span.text, onLinkClick);
+      completedBlocks.set(span.text, block);
     }
     return block;
   });
+  /*
+   * Keep only what this document still shows. Content that is replaced rather
+   * than appended -- a changing preview on one long-lived instance -- would
+   * otherwise retain the source and node tree of every version it ever drew.
+   */
+  for (const source of completedBlocks.keys()) {
+    if (!live.has(source)) completedBlocks.delete(source);
+  }
 
   return (
     <div data-slot="markdown" className={cn("sui-md", className)} {...props}>
