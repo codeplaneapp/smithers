@@ -14,10 +14,20 @@ const filesWithExtension = (directory, extension) =>
   })
 
 rmSync(resolve(packageRoot, "dist"), { recursive: true, force: true })
+// A wedged compiler would otherwise hold the build open for as long as the
+// caller allows. `spawnSync` enforces this bound itself, and SIGKILL leaves
+// nothing behind for the caller's own deadline to have to clean up.
+const declarationTimeoutMs = 90_000
 const declarationResult = spawnSync(process.execPath, [tsc, "-p", "tsconfig.json"], {
   cwd: packageRoot,
-  stdio: "inherit"
+  stdio: "inherit",
+  timeout: declarationTimeoutMs,
+  killSignal: "SIGKILL"
 })
+if (declarationResult.error !== undefined) {
+  console.error(`tsc did not finish within ${declarationTimeoutMs} ms: ${declarationResult.error.message}`)
+  process.exit(1)
+}
 if (declarationResult.status !== 0) process.exit(declarationResult.status ?? 1)
 
 await build({
