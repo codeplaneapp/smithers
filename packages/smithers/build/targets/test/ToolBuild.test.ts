@@ -1,21 +1,35 @@
 /**
- * Output measurement, the shared step every producing build target ends with.
+ * The `ToolBuild` target itself, and output measurement, the shared step every
+ * producing build target ends with.
  *
- * The end-to-end cases live in `cli/test/ToolBuild.test.ts`. These pin the
- * containment decisions directly, because a link planted below a declared
- * output, or an ancestor that is itself a link, is awkward to arrange through
- * a whole build and is exactly what must not be followed.
+ * The construction cases pin what a declaration alone decides: which attrs
+ * admit a cache entry, which paths the target promises, and the argv and
+ * environment its body plans. The measurement cases pin the containment
+ * decisions directly, because a link planted below a declared output, or an
+ * ancestor that is itself a link, is awkward to arrange through a whole build
+ * and is exactly what must not be followed.
  */
 import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import * as Input from "../src/Input.ts"
 import * as Target from "../src/Target.ts"
-import { measureOutput, measureOutputs, OutputError, readOutputManifest, verifyOutputs } from "../src/ToolBuild.ts"
+import {
+  measureOutput,
+  measureOutputs,
+  OutputError,
+  readOutputManifest,
+  ToolBuild,
+  verifyOutputs
+} from "../src/ToolBuild.ts"
+import { plannedCalls } from "./plan.ts"
 
 let root: string
 let outside: string
+
+const posixOnly = process.platform !== "win32"
 
 const write = async (relative: string, text: string): Promise<void> => {
   const path = NodePath.join(root, relative)
@@ -31,6 +45,68 @@ beforeEach(async () => {
 afterEach(async () => {
   await Fs.rm(root, { recursive: true, force: true })
   await Fs.rm(outside, { recursive: true, force: true })
+})
+
+describe("ToolBuild", () => {
+  const dependency = ToolBuild({
+    tool: "cbindgen",
+    command: "cbindgen",
+    args: ["--output", "include/native.h"],
+    inputs: [],
+    outputs: ["include/native.h"],
+    deps: [],
+    env: {},
+    cache: true
+  })
+
+  const base = {
+    tool: "cargo",
+    command: "cargo",
+    args: ["build", "--release"],
+    inputs: [Input.file("Cargo.toml")],
+    outputs: ["target/release/libnative.a"],
+    deps: [dependency],
+    env: { CARGO_TERM_COLOR: "never" }
+  }
+
+  it("declares a cacheable build target whose outputs hang off its own cwd", () => {
+    const metadata = Target.metadata(ToolBuild({ ...base, cache: true, cwd: "packages/native" }))
+    expect(metadata.target).toBe("ToolBuild")
+    expect(metadata.kinds).toEqual(["build"])
+    expect(metadata.cacheable).toBe(true)
+    expect(metadata.outputs).toEqual({ cwd: "packages/native", paths: ["target/release/libnative.a"] })
+    expect(metadata.inputs).toContainEqual(Input.file("Cargo.toml"))
+    expect(metadata.dependencies).toContain(dependency)
+  })
+
+  it("admits the cache from the declaration, so a tool that is not reproducible never replays", () => {
+    // `cache: (attrs) => attrs.cache` is the whole admission rule: the same
+    // command, inputs and outputs are cacheable or not purely by declaration.
+    const uncached = Target.metadata(ToolBuild({ ...base, cache: false, cwd: "packages/native" }))
+    expect(uncached.cacheable).toBe(false)
+    expect(uncached.outputs).toEqual({ cwd: "packages/native", paths: ["target/release/libnative.a"] })
+  })
+
+  it("defaults cwd to the workspace root, so a declaration without one still names where its outputs land", () => {
+    const target = ToolBuild({ ...base, cache: true })
+    expect(Target.metadata(target).outputs).toEqual({ cwd: ".", paths: ["target/release/libnative.a"] })
+    expect(plannedCalls(target)[0]?.payload["cwd"]).toBe(".")
+  })
+
+  it("plans the command ahead of its args and captures the declared outputs after it", () => {
+    const calls = plannedCalls(ToolBuild({ ...base, cache: true, cwd: "packages/native" }))
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.action).toBe("smithers-build/exec")
+    expect(calls[0]?.payload["argv"]).toEqual(["cargo", "build", "--release"])
+    expect(calls[0]?.payload["cwd"]).toBe("packages/native")
+    expect(calls[0]?.payload["env"]).toEqual({ CARGO_TERM_COLOR: "never" })
+    expect(calls[1]?.action).toBe("smithers-build/capture-outputs")
+    expect(calls[1]?.payload).toEqual({ cwd: "packages/native", paths: ["target/release/libnative.a"] })
+  })
+
+  it("refuses a declaration with no command", () => {
+    expect(() => ToolBuild({ ...base, command: "", cache: true })).toThrow()
+  })
 })
 
 describe("measureOutput", () => {
@@ -130,7 +206,7 @@ describe("measureOutput", () => {
     })
   })
 
-  it("fails when the output is neither a file nor a directory", async () => {
+  it.runIf(posixOnly)("fails when the output is neither a file nor a directory", async () => {
     const { execFile } = await import("node:child_process")
     await new Promise<void>((resolve, reject) => {
       execFile("mkfifo", [NodePath.join(root, "out")], (error) => error === null ? resolve() : reject(error))

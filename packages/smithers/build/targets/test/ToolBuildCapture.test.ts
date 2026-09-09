@@ -24,6 +24,9 @@ import { defaultCaptureIo, defaultCaptureLimits, measureOutput, measureOutputs, 
 let root: string
 let outside: string
 
+/** FIFOs, character devices and the executable bit are POSIX kernel objects. */
+const posixOnly = process.platform !== "win32"
+
 const at = (...parts: ReadonlyArray<string>): string => NodePath.join(root, ...parts)
 
 const write = async (relative: string, text: string | Uint8Array): Promise<void> => {
@@ -125,7 +128,7 @@ describe("streaming file contents", () => {
     }
   )
 
-  it("changes the digest when a produced file becomes executable", async () => {
+  it.runIf(posixOnly)("changes the digest when a produced file becomes executable", async () => {
     await write("out/tool", "#!/bin/sh\n")
     await Fs.chmod(at("out/tool"), 0o644)
     const inert = await measureOutput(root, ".", "out/tool")
@@ -232,7 +235,7 @@ describe("a final-component swap", () => {
    * The seam reports the decoy's stats for the declared name; the name itself
    * is a real FIFO, which is exactly the state the race would produce.
    */
-  it("refuses a FIFO swapped in after the listing, without blocking", async () => {
+  it.runIf(posixOnly)("refuses a FIFO swapped in after the listing, without blocking", async () => {
     await write("decoy.txt", "decoy")
     await Fs.mkdir(at("out"), { recursive: true })
     await mkfifo(at("out", "a.txt"))
@@ -282,7 +285,7 @@ describe("a final-component swap", () => {
   })
 
   /** A character device reaches capture only through a descriptor's `fstat`. */
-  it("refuses a character device behind a regular-looking name", async () => {
+  it.runIf(posixOnly)("refuses a character device behind a regular-looking name", async () => {
     await write("out/a.txt", "real")
 
     await expect(measureOutput(root, ".", "out", {
