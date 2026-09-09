@@ -54,7 +54,7 @@ export interface TargetGraphController {
   /** A history row: replay the recorded run into a timeline card (with the scrubber) and the graph overlay. */
   readonly selectRun: (repoId: string | undefined, runId: string) => Promise<string | void>
   /** The scrubber: re-derive the timeline and the overlay at the cursor (time travel). */
-  readonly scrubRun: (runId: string, cursor: number) => string | void
+  readonly scrubRun: (runId: string, cursor: number) => Promise<string | void>
   /** `affected`: the working-tree diff's changed files and the labels they re-key. */
   readonly showAffected: (repoId: string | undefined) => Promise<string | void>
   /** `show ci`: the generated GitHub workflows/jobs/matrix card. */
@@ -86,35 +86,144 @@ export const ciMatrixCardId = (repoId: string): string => `ci-${repoId}`
 const MAX_LOG_CHARS = 200_000
 const capLog = (text: string): string => (text.length > MAX_LOG_CHARS ? text.slice(text.length - MAX_LOG_CHARS) : text)
 
-/** The replay fold: every recorded frame up to the cursor, as timeline/overlay state. */
-export const replayAtCursor = (
-  events: ReadonlyArray<TargetRunEvent>,
-  cursor: number
-): { readonly nodes: Array<NodeTiming>; readonly summary: RunSummary | undefined; readonly logs: Record<string, string>; readonly error: string | undefined } => {
-  const nodes = new Map<string, NodeTiming>()
-  const logs: Record<string, string> = {}
-  let summary: RunSummary | undefined
-  let error: string | undefined
-  /*
-   * stdout/stderr (and exit/error) frames carry no `at` of their own. They are
-   * recorded IN ORDER, so an untimed frame happened at the clock of the last
-   * timed frame before it — without that carry the cursor would gate the node
-   * frames but let every log line through, and scrubbing to the start of a run
-   * would show output the run had not produced yet.
-   */
+type ReplayState = {
+  readonly nodes: Array<NodeTiming>
+  readonly summary: RunSummary | undefined
+  readonly logs: Record<string, string>
+  readonly error: string | undefined
+}
+type Version<T> = { readonly at: number; readonly order: number; readonly value: T }
+
+/* Keep histories once, not a full log tail at every checkpoint. Binary search
+ * finds each label's cursor; only its last MAX_LOG_CHARS are joined. Untimed
+ * frames inherit the preceding clock. Unordered clocks retain recording order
+ * via a linear fallback, rather than silently changing replay semantics. */
+const indexReplay = (events: ReadonlyArray<TargetRunEvent>) => {
+  const nodes = new Map<string, Array<Version<NodeTiming>>>()
+  const logs = new Map<string, Array<Version<string>>>()
+  const summaries: Array<Version<RunSummary>> = []
+  const errors: Array<Version<string>> = []
+  const exits: Array<Version<string>> = []
   let clock = Number.NEGATIVE_INFINITY
+  let ordered = true
+  let bytes = 0
+  let order = 0
+  const append = <T>(history: Array<Version<T>>, value: T, size: number): void => {
+    history.push({ at: clock, order: order++, value })
+    bytes += 64 + size
+  }
+  const history = <T>(map: Map<string, Array<Version<T>>>, label: string): Array<Version<T>> => {
+    let values = map.get(label)
+    if (values === undefined) {
+      values = []
+      map.set(label, values)
+      bytes += 64 + label.length * 2
+    }
+    return values
+  }
   for (const event of events) {
-    if ("at" in event) clock = event.at
-    if (clock > cursor) continue
-    if (event.type === "node") nodes.set(event.node.label, event.node)
-    else if (event.type === "summary") summary = event.summary
-    else if (event.type === "error") error = event.message
-    else if (event.type === "exit" && event.code !== 0 && error === undefined) error = event.code === null ? "The run ended without an exit code." : `The run exited ${event.code}.`
-    else if ((event.type === "stdout" || event.type === "stderr") && event.label !== undefined) {
-      logs[event.label] = capLog((logs[event.label] ?? "") + event.data)
+    if ("at" in event) {
+      if (event.at < clock) ordered = false
+      clock = event.at
+    }
+    switch (event.type) {
+      case "node": append(history(nodes, event.node.label), event.node, JSON.stringify(event.node).length * 2); break
+      case "summary": append(summaries, event.summary, JSON.stringify(event.summary).length * 2); break
+      case "error": append(errors, event.message, event.message.length * 2); break
+      case "exit":
+        if (event.code !== 0) {
+          const message = event.code === null ? "The run ended without an exit code." : `The run exited ${event.code}.`
+          append(exits, message, message.length * 2)
+        }
+        break
+      case "stdout":
+      case "stderr":
+        if (event.label !== undefined) {
+          const tail = capLog(event.data)
+          // A sliced string may retain its source buffer. Charge the original
+          // chunk so a huge frame cannot bypass the recording byte budget.
+          const chunks = history(logs, event.label)
+          // Preserve an empty attributed log, but do not index empty chunks
+          // forever: they add no output and would make a tail scan unbounded.
+          if (tail.length > 0 || chunks.length === 0 || !ordered) append(chunks, tail, event.data.length * 2)
+        }
+        break
     }
   }
-  return { nodes: [...nodes.values()], summary, logs, error }
+  const last = <T>(values: Array<Version<T>>, cursor: number): number => {
+    if (!ordered) {
+      for (let i = values.length - 1; i >= 0; i--) if (values[i]!.at <= cursor) return i
+      return -1
+    }
+    let lo = 0
+    let hi = values.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if (values[mid]!.at <= cursor) lo = mid + 1
+      else hi = mid
+    }
+    return lo - 1
+  }
+  const atCursor = (cursor: number): ReplayState => {
+    const visibleNodes: Array<{ node: NodeTiming; order: number }> = []
+    for (const values of nodes.values()) {
+      const value = values[last(values, cursor)]?.value
+      if (value !== undefined) {
+        const first = ordered ? values[0]! : values.find((entry) => entry.at <= cursor)!
+        visibleNodes.push({ node: value, order: first.order })
+      }
+    }
+    if (!ordered) visibleNodes.sort((a, b) => a.order - b.order)
+    const visibleLogs: Array<[string, string]> = []
+    for (const [label, values] of logs) {
+      const end = last(values, cursor)
+      if (end < 0) continue
+      const chunks: string[] = []
+      let remaining = MAX_LOG_CHARS
+      for (let i = end; i >= 0 && remaining > 0; i--) {
+        const chunk = values[i]!
+        if (chunk.at > cursor) continue
+        chunks.push(chunk.value.length > remaining ? chunk.value.slice(-remaining) : chunk.value)
+        remaining -= chunk.value.length
+      }
+      visibleLogs.push([label, chunks.reverse().join("")])
+    }
+    const firstExit = ordered ? exits[0] : exits.find((exit) => exit.at <= cursor)
+    return {
+      nodes: visibleNodes.map((entry) => entry.node),
+      summary: summaries[last(summaries, cursor)]?.value,
+      logs: Object.fromEntries(visibleLogs),
+      error: errors[last(errors, cursor)]?.value ?? (firstExit !== undefined && firstExit.at <= cursor ? firstExit.value : undefined)
+    }
+  }
+  return { atCursor, bytes }
+}
+
+/** A standalone projection; controllers retain the index for subsequent scrubs. */
+export const replayAtCursor = (events: ReadonlyArray<TargetRunEvent>, cursor: number): ReplayState =>
+  indexReplay(events).atCursor(cursor)
+
+const MAX_CACHED_RUNS = 16
+const MAX_CACHE_BYTES = 16 * 1024 * 1024
+
+/** Maps are ordered by last use; an oversize recording is projected but not retained. */
+const trimCache = <T>(cache: Map<string, T>, size: (value: T) => number): void => {
+  let bytes = 0
+  for (const [key, value] of cache) {
+    const retained = size(value)
+    if (retained > MAX_CACHE_BYTES) cache.delete(key)
+    else bytes += retained
+  }
+  for (const [key, value] of cache) {
+    if (cache.size <= MAX_CACHED_RUNS && bytes <= MAX_CACHE_BYTES) break
+    bytes -= size(value)
+    cache.delete(key)
+  }
+}
+const touch = <T>(cache: Map<string, T>, key: string): T | undefined => {
+  const value = cache.get(key)
+  if (value !== undefined) { cache.delete(key); cache.set(key, value) }
+  return value
 }
 
 /** A live frame folds into the same per-run state the replay fold produces. */
@@ -138,9 +247,15 @@ export const createTargetGraphController = (
   const { store, baseUrl } = ctx
   const { nextOrdinal, runs, devFixtures } = dependencies
   /** Recorded/replayed events per runId, for the scrubber. */
-  const replayEvents = actorSharedState(ctx, "target-replays", () => new Map<string, ReadonlyArray<TargetRunEvent>>())
+  const replayEvents = actorSharedState(ctx, "target-replays", () => new Map<string, ReturnType<typeof indexReplay>>())
   /** Live folds per runId, shared by the graph overlay and the timeline card. */
   const liveRuns = actorSharedState(ctx, "target-live-runs", () => new Map<string, { nodes: Map<string, NodeTiming>; summary: RunSummary | undefined; logs: Map<string, string>; error?: string }>())
+
+  const completed = actorSharedState(ctx, "target-completed-runs", () => new Map<string, number>())
+  const lifetime = actorSharedState(ctx, "target-graph-lifetime", () => ({ disposed: false }))
+  const pendingScrubs = actorSharedState(ctx, "target-pending-scrubs", () => new Map<string, {
+    cursor: number; promise: Promise<string | void>; cancel: () => void
+  }>())
 
   const upsert = (card: Card): void => {
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
@@ -154,11 +269,16 @@ export const createTargetGraphController = (
     const existing = store.collections.cards.get(id)
     if (existing === undefined || existing.kind !== kind) return
     const next = update(existing as unknown as Extract<Card, { kind: K }>)
+    // This helper replaces a projection. card.updated merges payload fields,
+    // so explicitly clear omitted fields (notably summary/error on rewind).
     store.dispatch({
       type: "card.updated",
       actor: "system",
       id,
-      patch: { payload: next.payload, ...(next.status === undefined ? {} : { status: next.status }) }
+      patch: {
+        payload: { ...Object.fromEntries(Object.keys(existing.payload).filter((key) => !(key in next.payload)).map((key) => [key, undefined])), ...next.payload },
+        ...(next.status === undefined ? {} : { status: next.status })
+      }
     })
   }
 
@@ -198,7 +318,8 @@ export const createTargetGraphController = (
 
   /** Paint a live fold into the graph overlay and the timeline card of one run. */
   const paintRun = (repoId: string, runId: string): void => {
-    const fold = liveRuns.get(runId)
+    const fold = touch(liveRuns, runId)
+    touch(completed, runId)
     if (fold === undefined) return
     const nodes = [...fold.nodes.values()]
     const summary = fold.summary
@@ -238,19 +359,55 @@ export const createTargetGraphController = (
     detach()
   }
   const watchRun = (repoId: string, runId: string, label: string): void => {
-    if (liveRuns.has(runId)) return
+    if (lifetime.disposed || liveRuns.has(runId)) return
     liveRuns.set(runId, { nodes: new Map(), summary: undefined, logs: new Map() })
     const onFrame = (frame: TargetRunFrame): void => {
       const fold = liveRuns.get(runId)
       if (fold === undefined) return
       foldRunFrame(fold, frame)
       paintRun(repoId, runId)
-      if (frame.type === "exit") releaseRun(runId)
+      if (frame.type === "exit") {
+        releaseRun(runId)
+        let bytes = 128 + (fold.error?.length ?? 0) * 2
+        for (const node of fold.nodes.values()) bytes += 64 + JSON.stringify(node).length * 2
+        for (const [label, log] of fold.logs) bytes += 64 + (label.length + log.length) * 2
+        if (fold.summary !== undefined) bytes += JSON.stringify(fold.summary).length * 2
+        completed.set(runId, bytes)
+        trimCache(completed, (bytes) => bytes)
+        for (const id of liveRuns.keys()) if (!detachers.has(id) && !completed.has(id)) liveRuns.delete(id)
+      }
     }
     detachers.set(runId, devFixtures !== undefined ? devFixtures.streamRun(runId, label, onFrame) : runs.attach(runId, onFrame))
   }
-  ctx.onDispose(() => {
-    for (const runId of [...detachers.keys()]) releaseRun(runId)
+  actorSharedState(ctx, "target-cache-cleanup", () => {
+    const subscription = store.collections.cards.subscribeChanges(() => {
+      const visible = new Set<string>()
+      for (const card of store.collections.cards.values()) {
+        if (card.kind === "run-timeline") visible.add(card.payload.runId)
+        if (card.kind === "graph" && card.payload.runId !== undefined) visible.add(card.payload.runId)
+      }
+      for (const id of replayEvents.keys()) if (!visible.has(id)) replayEvents.delete(id)
+      for (const id of liveRuns.keys()) if (!visible.has(id)) {
+        releaseRun(id)
+        liveRuns.delete(id)
+        completed.delete(id)
+      }
+      for (const [id, pending] of pendingScrubs) if (store.collections.cards.get(runTimelineCardId(id))?.kind !== "run-timeline") {
+        pending.cancel()
+        pendingScrubs.delete(id)
+      }
+    })
+    ctx.onDispose(() => {
+      lifetime.disposed = true
+      subscription.unsubscribe()
+      for (const runId of [...detachers.keys()]) releaseRun(runId)
+      replayEvents.clear()
+      liveRuns.clear()
+      completed.clear()
+      for (const pending of pendingScrubs.values()) pending.cancel()
+      pendingScrubs.clear()
+    })
+    return true
   })
 
   const showGraph: TargetGraphController["showGraph"] = async (repoIdArg, label) => {
@@ -450,7 +607,8 @@ export const createTargetGraphController = (
 
   /** Paint a recording as the (replay) timeline card, the history selection, and the graph overlay. */
   const paintReplay = (repoId: string, runId: string, replay: RunReplayResponse): void => {
-    replayEvents.set(runId, replay.events)
+    if (lifetime.disposed) return
+    const index = indexReplay(replay.events)
     /*
      * The end of a run that never recorded `endedAt` is its last timed frame.
      * A fold, never `Math.max(...events)`: a chatty run retains ~10^6 tiny
@@ -466,7 +624,7 @@ export const createTargetGraphController = (
     } else {
       endCursor = replay.run.endedAt
     }
-    const state = replayAtCursor(replay.events, endCursor)
+    const state = index.atCursor(endCursor)
     patch(runHistoryCardId(repoId), "run-history", (card) => ({ payload: { ...card.payload, selected: runId } }))
     upsert({
       id: runTimelineCardId(runId),
@@ -488,6 +646,9 @@ export const createTargetGraphController = (
         logs: state.logs
       }
     })
+    replayEvents.delete(runId)
+    replayEvents.set(runId, index)
+    trimCache(replayEvents, (entry) => entry.bytes)
     // Time travel paints the graph overlay too, when the graph card is up.
     if (store.collections.cards.get(graphCardId(repoId))?.kind === "graph") {
       patch(graphCardId(repoId), "graph", (card) => ({
@@ -501,12 +662,51 @@ export const createTargetGraphController = (
   }
 
   const scrubRun: TargetGraphController["scrubRun"] = (runId, cursor) => {
-    const events = replayEvents.get(runId)
-    if (events === undefined) return `There is no recording of run ${runId} to scrub.`
-    const state = replayAtCursor(events, cursor)
+    if (lifetime.disposed) return Promise.resolve()
+    const queued = pendingScrubs.get(runId)
+    if (queued !== undefined) {
+      queued.cursor = cursor
+      return queued.promise
+    }
+    const entry = { cursor, promise: Promise.resolve() as Promise<string | void>, cancel: () => {} }
+    pendingScrubs.set(runId, entry)
+    // One projection per animation frame while dragging. Headless callers use
+    // the next task, and await the same completion as every coalesced caller.
+    const scheduled = new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === "function") {
+        const frame = requestAnimationFrame(() => resolve())
+        entry.cancel = () => { cancelAnimationFrame(frame); resolve() }
+      } else {
+        const timer = setTimeout(resolve, 0)
+        entry.cancel = () => { clearTimeout(timer); resolve() }
+      }
+    })
+    entry.promise = scheduled.then(async () => {
+      const cardId = runTimelineCardId(runId)
+      const card = store.collections.cards.get(cardId)
+      if (lifetime.disposed || pendingScrubs.get(runId) !== entry) return
+      if (card?.kind !== "run-timeline") return `There is no recording of run ${runId} to scrub.`
+      let index = touch(replayEvents, runId)
+      if (index === undefined) {
+        const recorded = await fetchReplay(runId)
+        if (lifetime.disposed || pendingScrubs.get(runId) !== entry || store.collections.cards.get(cardId) !== card) return
+        if (recorded === undefined) return `There is no recording of run ${runId} to scrub.`
+        if (typeof recorded === "string") return recorded
+        index = indexReplay(recorded.events)
+        replayEvents.set(runId, index)
+        trimCache(replayEvents, (value) => value.bytes)
+      }
+      paintCursor(runId, entry.cursor, index.atCursor(entry.cursor))
+    }).finally(() => {
+      if (pendingScrubs.get(runId) === entry) pendingScrubs.delete(runId)
+    })
+    return entry.promise
+  }
+
+  const paintCursor = (runId: string, cursor: number, state: ReplayState): void => {
     const cardId = runTimelineCardId(runId)
     const card = store.collections.cards.get(cardId)
-    if (card === undefined || card.kind !== "run-timeline") return
+    if (card?.kind !== "run-timeline") return
     const repoId = card.payload.repoId
     /*
      * Time travel replaces the fold, it does not merge into it: a cursor

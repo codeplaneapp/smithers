@@ -324,6 +324,12 @@ decodable for migration and render in a CSP-restricted inert iframe with
 scripts and network access denied.
 
 Target-run Timeline controls invoke `/target.timeline <repoId> <runId>`.
+Replay scrubs share a cursor index per recording and coalesce pending values to the latest cursor.
+Each node projects at most 200,000 log characters. Replay indexes and completed live folds each
+retain at most 16 runs and an estimated 16 MiB of payload plus index metadata, in last-use order.
+Entries without a graph or timeline card are released; controller disposal clears both caches.
+Evicted recordings are fetched again when a timeline or scrub needs them. Oversize recordings
+can be projected but are not retained in the replay cache.
 Run and failed-node Explain controls send `agent.explain` a JSON envelope with
 `kind: "target-failure"`, a fixed `request`, and `evidence` containing `repoId`,
 `runId`, `target`, `exitCode`, and the last 4,000 characters of captured output.

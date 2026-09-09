@@ -18,7 +18,12 @@ import type { AgentPort } from "../../runtime/AgentPort"
 import { createAppController } from "../AppController"
 import { createAppStore } from "../AppStore"
 import type { Card } from "../AppState"
-import { replayAtCursor } from "./targetGraph"
+import { createTargetGraphController, replayAtCursor } from "./targetGraph"
+import { actorSharedState } from "../ActorBindings"
+import type { ControllerContext } from "./context"
+import type { TargetGraphDevFixtures } from "../../dev/fixtureRunStream"
+import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
+import type { TargetRunEvent } from "@smthrs/rpc/TargetGraph"
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -331,4 +336,171 @@ describe("the replay fold gates every frame on the cursor", () => {
     expect(replayAtCursor(EVENTS, RUN_END).summary).toBeDefined()
     expect(replayAtCursor(EVENTS, RUN_BASE).summary).toBeUndefined()
   })
+})
+
+const cacheHarness = async (events: TargetRunEvent[] = [...EVENTS]) => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const finalizers: Array<() => void> = []
+  const listeners = new Map<string, (frame: TargetRunFrame) => void>()
+  let fetches = 0
+  const ctx = { store, commandActor: "user", onDispose: (f: () => void) => { finalizers.push(f) } } as unknown as ControllerContext
+  const controller = createTargetGraphController(ctx, {
+    nextOrdinal: () => 1,
+    runs: { attach: () => () => {}, dispose: () => {} },
+    devFixtures: {
+      graph: () => GRAPH,
+      replay: (runId: string) => { fetches++; return { ...REPLAY, run: { ...REPLAY.run, runId }, events } },
+      streamRun: (runId: string, _label: string, onFrame: (frame: TargetRunFrame) => void) => {
+        listeners.set(runId, onFrame)
+        return () => { listeners.delete(runId) }
+      }
+    } as unknown as TargetGraphDevFixtures
+  })
+  return {
+    store, controller, listeners, fetches: () => fetches,
+    replays: actorSharedState(ctx, "target-replays", () => new Map<string, unknown>()),
+    live: actorSharedState(ctx, "target-live-runs", () => new Map<string, unknown>()),
+    dispose: () => { for (const f of finalizers) f() }
+  }
+}
+
+test("target caches release recordings and live folds when their last card is removed or conversation clears", async () => {
+  const h = await cacheHarness()
+  try {
+    await h.controller.selectRun("force", "recorded")
+    h.store.dispatch({ type: "card.removed", actor: "user", id: "run-timeline-recorded" })
+    await Promise.resolve()
+    expect(h.replays.size).toBe(0)
+    await h.controller.showGraph("force")
+    h.controller.noteRunStarted("force", "live", "//a:b")
+    h.listeners.get("live")?.({ type: "stdout", label: "//a:b", data: "x".repeat(200_000) })
+    h.listeners.get("live")?.({ type: "exit", code: 0 })
+    h.store.dispatch({ type: "card.removed", actor: "user", id: "graph-force" })
+    await Promise.resolve()
+    expect(h.live.size).toBe(0)
+    await h.controller.selectRun("force", "recorded")
+    h.store.dispatch({ type: "conversation.cleared", actor: "user", branchId: "fresh-cache-conversation", notes: [] })
+    await Promise.resolve()
+    expect(h.replays.size).toBe(0)
+  } finally { h.dispose() }
+})
+
+test("controller teardown clears target caches even while cards remain", async () => {
+  const h = await cacheHarness()
+  await h.controller.selectRun("force", "recorded")
+  await h.controller.showGraph("force")
+  h.controller.noteRunStarted("force", "live", "//a:b")
+  h.dispose()
+  expect(h.listeners.size).toBe(0)
+  expect(h.replays.size).toBe(0)
+  expect(h.live.size).toBe(0)
+})
+
+test("successive large-recording scrubs reuse an index and coalesce queued cursors", async () => {
+  let reads = 0
+  const events: TargetRunEvent[] = []
+  for (let i = 0; i < 10_000; i++) {
+    events.push({ type: "node", node: { label: "//a:b", status: "running", startedAt: RUN_BASE }, at: RUN_BASE + i, seq: i * 2 })
+    events.push({ get type() { reads++; return "stdout" as const }, label: "//a:b", data: "x".repeat(80), seq: i * 2 + 1 })
+  }
+  const h = await cacheHarness(events)
+  try {
+    await h.controller.selectRun("force", "large")
+    reads = 0
+    const transitions = h.store.collections.transitions.size
+    await Promise.all([1000, 2000, 3000].map((i) => h.controller.scrubRun("large", RUN_BASE + i)))
+    const card = h.store.collections.cards.get("run-timeline-large")
+    if (card?.kind !== "run-timeline") throw new Error("missing timeline")
+    expect(card.payload.cursor).toBe(RUN_BASE + 3000)
+    expect(card.payload.logs?.["//a:b"]).toBe("x".repeat(200_000))
+    expect(reads).toBeLessThan(100)
+    expect(h.store.collections.transitions.size - transitions).toBe(1)
+    await h.controller.scrubRun("large", RUN_BASE + 3001)
+    await h.controller.scrubRun("large", RUN_BASE + 2999)
+    expect(reads).toBeLessThan(100)
+  } finally { h.dispose() }
+})
+
+test("replay LRU bounds count, refreshes scrubbed entries, and refetches an evicted recording", async () => {
+  const h = await cacheHarness()
+  try {
+    for (let i = 0; i < 16; i++) await h.controller.selectRun("force", `r${i}`)
+    await h.controller.scrubRun("r0", RUN_BASE)
+    await h.controller.selectRun("force", "r16")
+    expect(h.replays.size).toBe(16)
+    expect(h.replays.has("r0")).toBe(true)
+    expect(h.replays.has("r1")).toBe(false)
+    const fetches = h.fetches()
+    await h.controller.scrubRun("r1", RUN_BASE)
+    expect(h.fetches()).toBe(fetches + 1)
+    expect(h.replays.size).toBe(16)
+    expect(h.replays.has("r1")).toBe(true)
+    const card = h.store.collections.cards.get("run-timeline-r1")
+    if (card?.kind !== "run-timeline") throw new Error("missing timeline")
+    expect(card.payload.cursor).toBe(RUN_BASE)
+  } finally { h.dispose() }
+})
+
+test("oversize recordings project capped tails without remaining in the cache", async () => {
+  const events: TargetRunEvent[] = Array.from({ length: 45 }, (_, seq) => ({
+    type: "stdout", label: "//a:b", data: "x".repeat(200_000), seq
+  }))
+  const h = await cacheHarness(events)
+  try {
+    await h.controller.selectRun("force", "large")
+    expect(h.replays.size).toBe(0)
+    await h.controller.scrubRun("large", RUN_BASE)
+    expect(h.fetches()).toBe(2)
+    expect(h.replays.size).toBe(0)
+    const card = h.store.collections.cards.get("run-timeline-large")
+    if (card?.kind !== "run-timeline") throw new Error("missing timeline")
+    expect(card.payload.logs?.["//a:b"]?.length).toBe(200_000)
+  } finally { h.dispose() }
+})
+
+test("completed live folds are bounded by count and bytes even with their cards open", async () => {
+  const h = await cacheHarness()
+  try {
+    await h.controller.showGraph("force")
+    for (let i = 0; i < 17; i++) {
+      h.controller.noteRunStarted("force", `live${i}`, "//a:b")
+      await h.controller.showTimeline("force", `live${i}`)
+      h.listeners.get(`live${i}`)?.({ type: "exit", code: 0 })
+    }
+    expect(h.live.size).toBe(16)
+    expect(h.live.has("live0")).toBe(false)
+    await h.controller.showTimeline("force", "live0")
+    expect(h.fetches()).toBe(1)
+    h.controller.noteRunStarted("force", "noisy", "//a:b")
+    for (let i = 0; i < 45; i++) h.listeners.get("noisy")?.({ type: "stdout", label: `//node:${i}`, data: "x".repeat(200_000) })
+    h.listeners.get("noisy")?.({ type: "exit", code: 0 })
+    expect(h.live.has("noisy")).toBe(false)
+  } finally { h.dispose() }
+})
+
+test("removal or disposal cancels a queued scrub without retaining a refetched recording", async () => {
+  for (const dispose of [false, true]) {
+    const h = await cacheHarness()
+    try {
+      await h.controller.selectRun("force", "r0")
+      h.replays.clear() // Simulate LRU eviction while this card stays open.
+      const pending = h.controller.scrubRun("r0", RUN_BASE)
+      await Promise.resolve() // Let the refetch start before invalidation.
+      if (dispose) h.dispose()
+      else h.store.dispatch({ type: "card.removed", actor: "user", id: "run-timeline-r0" })
+      await pending
+      expect(h.replays.size).toBe(0)
+    } finally { h.dispose() }
+  }
+})
+
+test("a single oversized log chunk cannot bypass the replay byte budget through a sliced tail", async () => {
+  const h = await cacheHarness([{ type: "stdout", label: "a", data: "x".repeat(9_000_000), seq: 0 }])
+  try {
+    await h.controller.selectRun("force", "huge-chunk")
+    expect(h.replays.size).toBe(0)
+    const card = h.store.collections.cards.get("run-timeline-huge-chunk")
+    if (card?.kind !== "run-timeline") throw new Error("missing timeline")
+    expect(card.payload.logs?.a?.length).toBe(200_000)
+  } finally { h.dispose() }
 })

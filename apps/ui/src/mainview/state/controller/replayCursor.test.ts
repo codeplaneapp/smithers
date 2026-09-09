@@ -145,3 +145,30 @@ test("frames the fold has no state for change nothing", () => {
   expect(live.logs.size).toBe(0)
   expect(live.summary).toBeUndefined()
 })
+
+
+test("indexed replay preserves recording order when event clocks move backward", () => {
+  const events: TargetRunEvent[] = [
+    { type: "node", at: 30, seq: 0, node: { label: "a", status: "running" } },
+    { type: "stdout", label: "a", data: "future", seq: 1 },
+    { type: "node", at: 10, seq: 2, node: { label: "b", status: "running" } },
+    { type: "node", at: 20, seq: 3, node: { label: "a", status: "failed" } },
+    { type: "stderr", label: "a", data: "visible", seq: 4 },
+    { type: "exit", code: 2, seq: 5 },
+    { type: "error", message: "detail", seq: 6 }
+  ]
+  const state = replayAtCursor(events, 20)
+  expect(state.nodes.map((node) => node.label)).toEqual(["b", "a"])
+  expect(state.logs).toEqual({ a: "visible" })
+  expect(state.error).toBe("detail")
+  expect(replayAtCursor(events.slice(0, -1), 20).error).toBe("The run exited 2.")
+})
+
+test("empty chunks preserve attributed output and oversized chunks preserve the exact tail", () => {
+  const events: TargetRunEvent[] = [
+    { type: "stdout", label: "a", data: "", seq: 0 },
+    { type: "stdout", label: "b", data: "prefix" + "x".repeat(200_000), seq: 1 },
+    { type: "stderr", label: "b", data: "end", seq: 2 }
+  ]
+  expect(replayAtCursor(events, 0).logs).toEqual({ a: "", b: "x".repeat(199_997) + "end" })
+})
