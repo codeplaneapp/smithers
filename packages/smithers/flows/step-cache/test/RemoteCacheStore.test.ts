@@ -28,6 +28,7 @@ const entry: CacheStore.CacheEntry = {
 }
 
 interface Call {
+  readonly signal: AbortSignal
   readonly method: string
   readonly url: string
   readonly headers: Record<string, string>
@@ -36,25 +37,30 @@ interface Call {
 
 const stubClient = (responder: (call: Call) => Response) => {
   const calls: Array<Call> = []
-  const client = HttpClient.make((request, url) =>
+  const responses: Array<HttpClientResponse.HttpClientResponse> = []
+  const client = HttpClient.make((request, url, signal) =>
     Effect.sync(() => {
       const call: Call = {
+        signal,
         method: request.method,
         url: url.toString(),
         headers: { ...request.headers } as Record<string, string>,
         body: request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
       }
       calls.push(call)
-      return HttpClientResponse.fromWeb(request, responder(call))
+      const response = HttpClientResponse.fromWeb(request, responder(call))
+      responses.push(response)
+      return response
     })
   )
-  return { calls, layer: Layer.succeed(HttpClient.HttpClient)(client) }
+  return { calls, responses, layer: Layer.succeed(HttpClient.HttpClient)(client) }
 }
 
 const tierOf = (responder: (call: Call) => Response, options?: RemoteCacheStore.Options) => {
   const stub = stubClient(responder)
   return {
     calls: stub.calls,
+    responses: stub.responses,
     store: Effect.provide(
       RemoteCacheStore.make(options ?? { endpoint: "https://cache.example.com/" }),
       stub.layer
@@ -313,38 +319,71 @@ describe("lookups", () => {
       expect(errorOf(exit).code).toBe("decode_failed")
     }))
 
-  it.effect("bounds declared and chunked response bodies before decoding", () =>
+  it.effect.each([true, false])(
+    "accepts the exact UTF-8 byte bound (declared: %s)",
+    (declared) =>
+      Effect.gen(function*() {
+        const candidate = { ...entry, result: { text: "café 😀" } }
+        const body = JSON.stringify(candidate)
+        const bytes = new TextEncoder().encode(body)
+        expect(bytes.byteLength).toBeGreaterThan(body.length)
+        const tier = tierOf(
+          () => new Response(bytes, { headers: declared ? { "content-length": String(bytes.byteLength) } : {} }),
+          { endpoint: "https://cache.example.com", maxResponseBytes: bytes.byteLength }
+        )
+        const found = yield* Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest))
+        expect(Option.getOrThrow(found)).toEqual(candidate)
+        expect(tier.calls[0]!.signal.aborted).toBe(true)
+      })
+  )
+
+  it.effect.each([true, false])(
+    "rejects one byte over the UTF-8 byte bound (declared: %s)",
+    (declared) =>
+      Effect.gen(function*() {
+        const bytes = new TextEncoder().encode(JSON.stringify({ ...entry, result: { text: "café 😀" } }))
+        const bound = bytes.byteLength - 1
+        const tier = tierOf(
+          () => new Response(bytes, { headers: declared ? { "content-length": String(bytes.byteLength) } : {} }),
+          { endpoint: "https://cache.example.com", maxResponseBytes: bound }
+        )
+        const exit = yield* Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest)).pipe(Effect.exit)
+        expect(errorOf(exit).code).toBe("persistence_failed")
+        expect(errorOf(exit).message).toBe(
+          `the remote cache tier returned ${bytes.byteLength} bytes, past the ${bound}-byte bound`
+        )
+      })
+  )
+
+  it.effect("cancels a multi-chunk body as soon as the byte bound is crossed", () =>
     Effect.gen(function*() {
-      const declared = tierOf(
-        () => new Response("{}", { status: 200, headers: { "content-length": "11" } }),
-        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
-      )
-      const chunked = tierOf(
-        () => new Response("x".repeat(11), { status: 200 }),
-        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
-      )
-      const malformed = tierOf(
-        () => new Response("{}", { status: 200, headers: { "content-length": "unknown" } }),
-        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
-      )
-      const within = tierOf(
+      const bytes = new TextEncoder().encode(JSON.stringify({ ...entry, result: "café 😀" }))
+      // The unread suffix is valid JSON: consuming it would succeed without the guard.
+      const chunks = [bytes.slice(0, 10), bytes.slice(10, 20), bytes.slice(20)]
+      let pulls = 0
+      let cancelled = false
+      const tier = tierOf(
         () =>
-          new Response(JSON.stringify(entry), {
-            status: 200,
-            headers: { "content-length": String(JSON.stringify(entry).length) }
-          }),
-        { endpoint: "https://cache.example.com", maxResponseBytes: 1_000 }
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                const chunk = chunks[pulls++]
+                if (chunk === undefined) controller.close()
+                else controller.enqueue(chunk)
+              },
+              cancel() {
+                cancelled = true
+              }
+            }, { highWaterMark: 0 })
+          ),
+        { endpoint: "https://cache.example.com", maxResponseBytes: 15 }
       )
-      const exits = yield* Effect.forEach([declared, chunked, malformed], (tier) =>
-        Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest)).pipe(Effect.exit))
-      expect(exits.map((exit) =>
-        errorOf(exit).code
-      )).toEqual([
-        "persistence_failed",
-        "persistence_failed",
-        "persistence_failed"
-      ])
-      expect(Option.isSome(yield* Effect.flatMap(within.store, (store) => store.get(entry.keyDigest)))).toBe(true)
+      const exit = yield* Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest)).pipe(Effect.exit)
+      expect(errorOf(exit).code).toBe("persistence_failed")
+      expect(errorOf(exit).message).toBe("the remote cache tier returned 20 bytes, past the 15-byte bound")
+      expect(pulls).toBe(2)
+      expect(cancelled).toBe(true)
+      expect(tier.calls[0]!.signal.aborted).toBe(true)
     }))
 
   it.effect("rejects invalid UTF-8 and a failing response stream", () =>
@@ -444,6 +483,107 @@ describe("lookups", () => {
       )
       expect(errorOf(exit).code).toBe("decode_failed")
       expect(errorOf(exit).message).toContain("other")
+    }))
+})
+
+describe("response cleanup", () => {
+  it.effect.each(
+    [
+      ["get", 404],
+      ["get", 500],
+      ["put", 201],
+      ["put", 200],
+      ["put", 409],
+      ["put", 500],
+      ["evict", 200],
+      ["evict", 404],
+      ["evict", 500]
+    ] as const
+  )("aborts unread %s HTTP %s responses before returning", ([method, status]) =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(new ReadableStream(), { status }))
+      const store = yield* tier.store
+      const operation: Effect.Effect<unknown, CacheStore.CacheStoreError> = method === "put"
+        ? store.put(entry)
+        : store[method](entry.keyDigest)
+      const exit = yield* Effect.exit(operation)
+      expect(exit._tag).toBe(status === 500 ? "Failure" : "Success")
+      expect(tier.calls[0]!.signal.aborted).toBe(true)
+      // Keep the underlying response alive so GC cannot supply the cleanup.
+      expect(tier.responses).toHaveLength(1)
+    }))
+
+  it.effect.each(["11", "unknown", "9007199254740992"])(
+    "aborts a response with rejected Content-Length %s before returning",
+    (length) =>
+      Effect.gen(function*() {
+        let pulls = 0
+        const tier = tierOf(
+          () =>
+            new Response(
+              new ReadableStream({
+                pull: () => {
+                  pulls++
+                }
+              }, { highWaterMark: 0 }),
+              {
+                headers: { "content-length": length }
+              }
+            ),
+          { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
+        )
+        const exit = yield* Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest)).pipe(Effect.exit)
+        expect(errorOf(exit).code).toBe("persistence_failed")
+        expect(tier.calls[0]!.signal.aborted).toBe(true)
+        expect(pulls).toBe(0)
+        expect(tier.responses).toHaveLength(1)
+      })
+  )
+
+  it.effect("cancels and aborts a stalled body at the operation deadline", () =>
+    Effect.gen(function*() {
+      let cancelled = false
+      const tier = tierOf(
+        () =>
+          new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled = true
+              }
+            })
+          ),
+        { endpoint: "https://cache.example.com", requestTimeout: "10 millis" }
+      )
+      const store = yield* tier.store
+      const fiber = yield* store.get(entry.keyDigest).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("10 millis")
+      const exit = yield* Fiber.await(fiber)
+      expect(errorOf(exit).message).toBe("the remote cache tier did not finish within its configured deadline")
+      expect(cancelled).toBe(true)
+      expect(tier.calls[0]!.signal.aborted).toBe(true)
+      expect(tier.responses).toHaveLength(1)
+    }).pipe(Effect.provide(TestClock.layer())))
+
+  it.effect("cancels and aborts a response when the caller interrupts", () =>
+    Effect.gen(function*() {
+      let cancelled = false
+      const tier = tierOf(() =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true
+            }
+          })
+        )
+      )
+      const store = yield* tier.store
+      const fiber = yield* store.get(entry.keyDigest).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(fiber)
+      expect(cancelled).toBe(true)
+      expect(tier.calls[0]!.signal.aborted).toBe(true)
+      expect(tier.responses).toHaveLength(1)
     }))
 })
 

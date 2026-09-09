@@ -68,6 +68,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Headers from "effect/unstable/http/Headers"
 import * as HttpClient from "effect/unstable/http/HttpClient"
@@ -300,15 +301,17 @@ export const make = (
     // resolves when the response *headers* arrive, so a per-phase deadline let
     // a tier that answered headers promptly and then stalled the body spend the
     // configured value twice, and a caller budgeting 60 s waited 120 s.
+    // The scope also aborts unread bodies on early status/length returns.
     const withDeadline = <A>(
-      effect: Effect.Effect<A, CacheStore.CacheStoreError>
+      effect: Effect.Effect<A, CacheStore.CacheStoreError, Scope.Scope>
     ): Effect.Effect<A, CacheStore.CacheStoreError> =>
       effect.pipe(
+        Effect.scoped,
         Effect.timeout(requestDeadline),
         Effect.catchTag("TimeoutError", () => Effect.fail(timedOut()))
       )
     const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
-      client.execute(authorize(request)).pipe(
+      HttpClient.withScope(client).execute(authorize(request)).pipe(
         Effect.updateService(Headers.CurrentRedactedNames, (names) => [...names, ...credentialNames]),
         Effect.mapError((cause) => transportFailure(operation, cause))
       )

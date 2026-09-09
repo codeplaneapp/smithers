@@ -541,6 +541,14 @@ All names configured in `headers` are redacted case-insensitively in Effect
 HTTP tracing spans. Each request extends the caller's existing header
 redaction policy locally, preserving its defaults and custom matchers.
 
+Each operation closes its HTTP response scope before returning, including
+misses, errors, publications, evictions, deadlines, and caller interruption.
+Unread responses are aborted when that scope closes.
+
+`maxResponseBytes` counts encoded UTF-8 bytes, inclusively. Declared lengths
+above the bound are rejected before reading; streamed bodies stop at the first
+chunk that crosses the bound, with a size-specific `persistence_failed` error.
+
 ### defaultRequestTimeout
 
 ```ts
