@@ -67,6 +67,9 @@ export * as Container from "./Container.ts"
 /** @category services @since 0.1.0 */
 export * as Checkpoints from "./Checkpoints.ts"
 
+/** @category conversions @since 0.1.0 */
+export * as Relocate from "./Relocate.ts"
+
 /**
  * @category flows
  * @since 0.1.0

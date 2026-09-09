@@ -31,3 +31,11 @@ export const withinEnvelope = (declared: ReadonlyArray<string>, path: string): b
     return Effects.covers(envelope, candidate) || candidate.startsWith(`${normalized}/`)
   })
 }
+
+/**
+ * A path without its trailing slashes, so a root compares and joins as one name.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const withoutTrailingSlash = (path: string): string => path.replace(/\/+$/, "")

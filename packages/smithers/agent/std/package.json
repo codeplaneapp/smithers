@@ -57,6 +57,7 @@
     "./PortableSearch": "./src/PortableSearch.ts",
     "./Probe": "./src/Probe.ts",
     "./Read": "./src/Read.ts",
+    "./Relocate": "./src/Relocate.ts",
     "./Search": "./src/Search.ts",
     "./SearchConformance": "./src/SearchConformance.ts",
     "./SearchContract": "./src/SearchContract.ts",
@@ -193,6 +194,11 @@
         "types": "./dist/esm/Read.d.ts",
         "import": "./dist/esm/Read.js",
         "require": "./dist/cjs/Read.js"
+      },
+      "./Relocate": {
+        "types": "./dist/esm/Relocate.d.ts",
+        "import": "./dist/esm/Relocate.js",
+        "require": "./dist/cjs/Relocate.js"
       },
       "./Search": {
         "types": "./dist/esm/Search.d.ts",

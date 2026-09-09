@@ -261,6 +261,20 @@ Pinned trees, and the scratch checkouts a call runs against.
 `capture(id)` returns a `Snapshot`. `materialize(id, use)` is scoped: it hands
 the tree to `use` and removes the checkout however that effect ends.
 
+## Relocate
+
+What can be pointed at a checkpoint, and what cannot.
+
+| Export       | Type                                                                    | Meaning                                                        |
+| ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `Relocation` | tagged union                                                            | `Relocated`, `UnsupportedFlow`, `AbsolutePath`, `OutsideTree`. |
+| `relocate`   | `(flow: string, input: Json, materialized: Materialized) => Relocation` | Rewrites one call's input onto a checkpoint.                   |
+
+`relocate` knows the field each supported flow names a location in: `cwd` for
+`bash`, `path` for `read` and `ls`, `root` for `grep` and `glob`. Every other
+flow answers `UnsupportedFlow`. Both names are re-exported from `Checkpoints`,
+which is how the harness reaches them.
+
 ## LanguageServer
 
 The code-intelligence seam.

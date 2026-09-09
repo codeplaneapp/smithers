@@ -2,9 +2,8 @@
  * The checkpoint store's two halves, against a scripted process.
  *
  * `CheckpointsFixture.test.ts` drives the git half against a real repository;
- * this file pins the argv it spawns, the shape it answers with, and the whole of
- * the relocation table — which is the part that decides what a checkpoint can be
- * pointed at, and is therefore the part a wrong answer would silently corrupt.
+ * this file pins the argv it spawns and the shape it answers with. The
+ * relocation table it re-exports is pinned by `Relocate.test.ts`.
  */
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import { Cause, Effect, Exit, Layer, Option, Sink, Stream } from "effect"
@@ -13,6 +12,7 @@ import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildPr
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as Checkpoints from "../src/Checkpoints.ts"
+import * as Relocate from "../src/Relocate.ts"
 
 interface Response {
   readonly stdout?: string
@@ -422,154 +422,9 @@ describe("Checkpoints.makeNoop", () => {
 })
 
 describe("Checkpoints.relocate", () => {
-  it("points a shell call at the checkpoint's own directory", () => {
-    expect(Checkpoints.relocate("bash", { mode: "unhermetic", command: "bin/test" }, materialized)).toEqual({
-      _tag: "Relocated",
-      input: { mode: "unhermetic", command: "bin/test", cwd: "/work/repo/.flows-checkpoints/cp-0-1" }
-    })
-  })
-
-  it("gives a containerised shell call the path the container will resolve", () => {
-    // The container reaches the workspace through a mount, so it reaches the
-    // scratch checkout at the same subpath under that mount. `bash` says which
-    // side it is on by naming a container, so this reads the same field.
-    expect(
-      Checkpoints.relocate(
-        "bash",
-        { mode: "unhermetic", command: "bin/test", container: "swebench-1" },
-        materialized
-      )
-    ).toEqual({
-      _tag: "Relocated",
-      input: {
-        mode: "unhermetic",
-        command: "bin/test",
-        container: "swebench-1",
-        cwd: "/testbed/.flows-checkpoints/cp-0-1"
-      }
-    })
-  })
-
-  it("overrides a cwd the caller supplied, because at is where the call runs", () => {
-    expect(Checkpoints.relocate("bash", { command: "x", cwd: "/elsewhere" }, materialized)).toEqual({
-      _tag: "Relocated",
-      input: { command: "x", cwd: "/work/repo/.flows-checkpoints/cp-0-1" }
-    })
-    // Including one that climbs out of the workspace: a checkpoint is a copy of
-    // the tree and holds no copy of anywhere else, so there is no subpath to
-    // keep and the tree itself is the whole of what can be offered.
-    expect(Checkpoints.relocate("bash", { command: "x", cwd: "../sibling" }, materialized)).toMatchObject({
-      input: { cwd: "/work/repo/.flows-checkpoints/cp-0-1" }
-    })
-  })
-
-  it("keeps the subdirectory a shell call named, on both sides of the mount", () => {
-    // The failure this closes is a false baseline. django's suite is run as
-    // `./runtests.py` from `tests/`; dropping that `tests/` runs it at the
-    // repository top, where the script does not exist, and the non-zero exit
-    // reads as "the check fails on the pinned tree" when nothing was checked at
-    // all. A checkpoint that manufactures a failing baseline is worse than no
-    // checkpoint.
-    expect(
-      Checkpoints.relocate("bash", { command: "./runtests.py", cwd: "tests" }, materialized)
-    ).toMatchObject({ input: { cwd: "/work/repo/.flows-checkpoints/cp-0-1/tests" } })
-    // The same directory named absolutely, from inside the container.
-    expect(
-      Checkpoints.relocate(
-        "bash",
-        { command: "./runtests.py", cwd: "/testbed/tests", container: "swebench-1" },
-        materialized
-      )
-    ).toMatchObject({ input: { cwd: "/testbed/.flows-checkpoints/cp-0-1/tests" } })
-    // And named absolutely on the host, which is the same question asked of the
-    // other of the two names.
-    expect(
-      Checkpoints.relocate("bash", { command: "x", cwd: "/work/repo/sympy/stats" }, materialized)
-    ).toMatchObject({ input: { cwd: "/work/repo/.flows-checkpoints/cp-0-1/sympy/stats" } })
-    // The workspace root itself names no subdirectory, under either name.
-    for (const cwd of ["/work/repo", "/work/repo/", ".", "./"]) {
-      expect(Checkpoints.relocate("bash", { command: "x", cwd }, materialized)).toMatchObject({
-        input: { cwd: "/work/repo/.flows-checkpoints/cp-0-1" }
-      })
-    }
-  })
-
-  it("treats an empty container name as no container", () => {
-    expect(Checkpoints.relocate("bash", { command: "x", container: "" }, materialized)).toMatchObject({
-      input: { cwd: "/work/repo/.flows-checkpoints/cp-0-1" }
-    })
-  })
-
-  it("prefixes a reader's relative path with the checkpoint's directory", () => {
-    // These flows resolve their subject against the workspace root, and the
-    // checkpoint is a directory under it, so the prefix is workspace-relative.
-    expect(Checkpoints.relocate("read", { path: "sympy/stats/crv_types.py" }, materialized)).toEqual({
-      _tag: "Relocated",
-      input: { path: ".flows-checkpoints/cp-0-1/sympy/stats/crv_types.py" }
-    })
-    expect(Checkpoints.relocate("ls", { path: "sympy" }, materialized)).toMatchObject({
-      input: { path: ".flows-checkpoints/cp-0-1/sympy" }
-    })
-    expect(Checkpoints.relocate("grep", { pattern: "def _cdf", root: "sympy/stats" }, materialized)).toMatchObject({
-      input: { pattern: "def _cdf", root: ".flows-checkpoints/cp-0-1/sympy/stats" }
-    })
-    expect(Checkpoints.relocate("glob", { pattern: "**/*.py", root: "sympy/" }, materialized)).toMatchObject({
-      input: { pattern: "**/*.py", root: ".flows-checkpoints/cp-0-1/sympy" }
-    })
-  })
-
-  it("takes the checkpoint's own directory when the reader names no root", () => {
-    for (const named of [{}, { root: "" }, { root: "." }]) {
-      expect(Checkpoints.relocate("grep", { pattern: "x", ...named }, materialized)).toMatchObject({
-        input: { root: ".flows-checkpoints/cp-0-1" }
-      })
-    }
-  })
-
-  it("refuses an absolute path rather than guessing which prefix names the tree", () => {
-    // An absolute path in these runs is a container path, and the host cannot
-    // know which part of it is the repository.
-    expect(Checkpoints.relocate("read", { path: "/testbed/a.py" }, materialized)).toEqual({
-      _tag: "AbsolutePath",
-      path: "/testbed/a.py"
-    })
-  })
-
-  it("refuses a reader's path that climbs back out into the live tree", () => {
-    // `.flows-checkpoints/cp-0-1/../../mod.py` is `mod.py` in the live tree.
-    // Rewriting it would hand the cell the very work it took the reading to
-    // avoid, under the checkpoint's own name — and because the checkpoint is
-    // folded into the call key, that live reading would replay as a pinned one
-    // for the rest of the run.
-    for (const path of ["../../mod.py", "../..", "a/../../../mod.py", "./../../mod.py"]) {
-      expect(Checkpoints.relocate("read", { path }, materialized)).toEqual({ _tag: "OutsideTree", path })
-    }
-    expect(Checkpoints.relocate("grep", { pattern: "x", root: "../.." }, materialized)).toEqual({
-      _tag: "OutsideTree",
-      path: "../.."
-    })
-    // A `..` that stays inside is arithmetic, not an escape, and resolves.
-    expect(Checkpoints.relocate("read", { path: "sympy/../mod.py" }, materialized)).toMatchObject({
-      input: { path: ".flows-checkpoints/cp-0-1/mod.py" }
-    })
-  })
-
-  it("refuses a flow that names what it touches with something other than a path", () => {
-    expect(Checkpoints.relocate("read", { path: 7 }, materialized)).toEqual({ _tag: "UnsupportedFlow" })
-  })
-
-  it("treats an input that is not an object as naming nothing, and takes the checkpoint itself", () => {
-    expect(Checkpoints.relocate("read", "a.py", materialized)).toMatchObject({
-      input: { path: ".flows-checkpoints/cp-0-1" }
-    })
-  })
-
-  it("refuses every flow the table does not name, `test` included", () => {
-    for (const flow of ["edit", "write", "apply_patch", "remember", "webfetch"]) {
-      expect(Checkpoints.relocate(flow, {}, materialized)).toEqual({ _tag: "UnsupportedFlow" })
-    }
-    // `test` answers this exact question already, with `against: "base"`. Two
-    // mechanisms pointed at one tree are two answers that can disagree.
-    expect(Checkpoints.relocate("test", { selection: [] }, materialized)).toEqual({ _tag: "UnsupportedFlow" })
+  it("is the relocation table, re-exported so the harness reaches it here", () => {
+    // `Relocate.test.ts` owns the behaviour. This pins only that the name the
+    // harness and `@smthrs/agent` import still resolves to it.
+    expect(Checkpoints.relocate).toBe(Relocate.relocate)
   })
 })
