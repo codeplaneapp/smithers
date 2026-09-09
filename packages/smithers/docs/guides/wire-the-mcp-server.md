@@ -37,7 +37,9 @@ The write is a temp-file-plus-rename under a lock file, with the original
 file's mode preserved, so a crash mid-write cannot leave a half-written
 configuration. The lock names the process holding it, so one left by a process
 that has since died is reclaimed rather than blocking every later run. If the file already holds the exact entry, nothing is written
-and the result says `unchanged`. If every target fails, the command prints
+and the result says `unchanged`. Add `--json` for one array of registration results,
+with `agent`, `path`, and `status` fields. Registration does not open a workspace
+database. If every target fails, the command prints
 manual instructions to stderr and exits 1.
 
 ## Serve it by hand

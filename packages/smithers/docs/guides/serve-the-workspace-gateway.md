@@ -7,7 +7,9 @@ description: "Host this project's control plane over HTTP with smthrs serve, und
 UI, for another `smthrs --remote`, and for any client that is not this process.
 It is the other side of [Local and remote control planes](../concepts/local-and-remote.md).
 
-`smthrs gateway` is an alias of the same verb.
+`smthrs gateway` is an alias of the same verb. Both spellings host the durable
+trigger scheduler alongside HTTP, polling registered schedules and queued
+occurrences. Neither spelling approves a trigger plan automatically.
 
 ## Serve on loopback
 

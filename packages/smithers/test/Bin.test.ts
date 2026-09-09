@@ -103,6 +103,50 @@ const inEmptyDirectory = <A>(use: (cwd: string) => A): A => {
   }
 }
 
+describe("canonical verb ownership", processBudget, () => {
+  it("documents run as the default approval scope in the executable schema", () => {
+    const result = run(["approvals", "approve", "--schema", "--json"])
+    expect(result.status, result.stdout + result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout).options.properties.scope.default).toBe("run")
+  })
+
+  it("registers the documented MCP entry using the current executable", () => {
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["mcp", "add", "--agent", "claude", "--json"])
+      expect(result.status, result.stdout + result.stderr).toBe(0)
+      expect(JSON.parse(result.stdout)).toEqual([{
+        agent: "claude",
+        path: join(cwd, ".claude.json"),
+        status: "written"
+      }])
+      expect(JSON.parse(readFileSync(join(cwd, ".claude.json"), "utf8"))).toEqual({
+        mcpServers: { smithers: { command: process.execPath, args: [executable, "--mcp"] } }
+      })
+      expect(existsSync(join(cwd, ".flows"))).toBe(false)
+      const repeated = runIn(cwd, ["mcp", "add", "--agent", "claude", "--json"])
+      expect(repeated.status, repeated.stdout + repeated.stderr).toBe(0)
+      expect(JSON.parse(repeated.stdout)[0].status).toBe("unchanged")
+    })
+  })
+
+  it.each(
+    [
+      [["memory", "get"], "key"],
+      [["memory", "set", "key"], "value"]
+    ] as const
+  )("uses canonical validation for incomplete %j", (args, field) => {
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, [...args, "--json"])
+      expect(result.status).toBe(1)
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        code: "VALIDATION_ERROR",
+        fieldErrors: expect.arrayContaining([expect.objectContaining({ path: field, missing: true })])
+      })
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+})
+
 describe("legacy fork routing", processBudget, () => {
   it.each([
     ["resume", "fork-run", "--silent"],
@@ -277,9 +321,9 @@ describe("smithers executable", processBudget, () => {
     ["memory", ["list", "get", "set", "rm"]],
     ["claude", ["tick", "node-wait", "monitor", "subscribe", "unsubscribe"]],
     ["mcp", ["add"]]
-  ])("requires a subcommand for %s", (verb, subcommands) => {
+  ])("shows the available subcommands for bare %s", (verb, subcommands) => {
     const result = run([verb as string])
-    expect(result.status).toBe(2)
+    expect(result.status).toBe(verb === "claude" ? 2 : 0)
     for (const subcommand of subcommands) expect(result.stdout + result.stderr).toContain(subcommand)
   })
 
@@ -559,8 +603,6 @@ describe("an invocation that never runs a command answers before the control pla
       [["up"], "flow"],
       [["resume"], "run-id"],
       [["deny"], "approval"],
-      [["memory", "get"], "key"],
-      [["memory", "set", "key"], "value"],
       [["claude", "node-wait", "run-1"], "node-id"],
       [["bug"], "summary"],
       [["approve"], "approval"],
@@ -624,7 +666,8 @@ describe("an invocation that never runs a command answers before the control pla
 
     expect(shipped.length).toBeGreaterThan(0)
     for (const name of shipped) {
-      expect(declared, name).toContain(name)
+      if (["serve", "init", "suggest", "memory", "mcp"].includes(name)) expect(declared, name).not.toContain(name)
+      else expect(declared, name).toContain(name)
       const result = inEmptyDirectory((cwd) => ({ ...runIn(cwd, [name, "--help"]), files: readdirSync(cwd) }))
 
       expect(result.stderr, name).not.toContain("Unknown subcommand")
@@ -742,9 +785,9 @@ describe("the served gateway", processBudget, () => {
   /** A loopback port nothing else in this suite is using. */
   const port = 34_000 + Math.floor(Math.random() * 8000)
 
-  it("answers every mount its banner advertises", async () => {
+  it.each(["serve", "gateway"])("%s answers every mount and starts the scheduler", async (verb) => {
     const cwd = mkdtempSync(temporaryDirectoryPrefix)
-    const child = spawn(process.execPath, ["--no-warnings", executable, "serve", "--port", String(port)], {
+    const child = spawn(process.execPath, ["--no-warnings", executable, verb, "--port", String(port)], {
       cwd,
       env: { ...process.env }
     })
@@ -778,6 +821,18 @@ describe("the served gateway", processBudget, () => {
       const identity = await health!.json() as Record<string, unknown>
       expect(typeof identity.workspaceHash).toBe("string")
       expect(identity.version).toBe(Version.packageVersion)
+
+      const database = new DatabaseSync(join(cwd, ".flows", "control.db"), { readOnly: true })
+      try {
+        const heartbeat = database.prepare("SELECT ticked_at_ms FROM flows_scheduler_heartbeat")
+        const deadline = Date.now() + 10_000
+        while (heartbeat.get() === undefined && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        expect(heartbeat.get()).toEqual({ ticked_at_ms: expect.any(Number) })
+      } finally {
+        database.close()
+      }
 
       // The three RPC mounts. A 404 here is the defect this case exists for:
       // the banner advertised routes only the control server carried.

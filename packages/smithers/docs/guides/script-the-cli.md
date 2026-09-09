@@ -90,10 +90,10 @@ smthrs --json approve "$ask" --scope once
 ```
 
 `--scope` decides how far the grant reaches: `once` answers this ask alone,
-`run` covers the whole run, and `remembered` covers every later run. Legacy
-`smthrs approve` defaults to `run`, matching what `smthrs up` grants itself.
-`smthrs approvals approve` and the MCP `resolve_approval` tool default to
-`once`. Pass the scope explicitly in scripts.
+`run` covers the whole run, and `remembered` covers every later run. Both
+`smthrs approvals approve` and its `smthrs approve` compatibility spelling
+default to `run`, matching what `smthrs up` grants itself. The compatibility
+MCP `resolve_approval` tool defaults to `once`. Pass the scope explicitly in scripts.
 
 `smthrs status <run-id>` prints the approval command and a resume command on
 its `Unblock` line, already quoted for a shell. Use `smthrs runs resume

@@ -1,4 +1,5 @@
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
+import type * as Namespace from "@smthrs/memory/Namespace"
 import { Effect } from "effect"
 import { Cli } from "incur"
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
@@ -7,6 +8,21 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createMemoryCli, withMemory } from "../src/operator/Memory.ts"
 import { localRoot } from "../src/operator/Store.ts"
+
+const ports = vi.hoisted(() => ({ layer: undefined as typeof MemoryStore.layer | undefined }))
+vi.mock("@smthrs/memory/MemoryStore", async (load) => {
+  const actual = await load<typeof import("@smthrs/memory/MemoryStore")>()
+  return {
+    ...actual,
+    get layer() {
+      return ports.layer ?? actual.layer
+    }
+  }
+})
+const asNamespace = (input: MemoryStore.NamespaceInput): Namespace.Namespace => {
+  if (typeof input === "string") throw new Error(`the CLI passed an undecoded namespace: ${input}`)
+  return input
+}
 
 const roots: Array<string> = []
 const fixture = () => {
@@ -32,12 +48,99 @@ beforeEach(() => {
   vi.stubEnv("SMITHERS_REMOTE", undefined)
 })
 afterEach(() => {
+  ports.layer = undefined
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe("operator memory", () => {
+  it.each(["list", "get", "set", "rm"])("refuses invalid identities before memory %s opens its store", async (verb) => {
+    for (const namespace of ["team:alpha", "user:", "alpha", "user:alpha\0tail"]) {
+      const root = fixture()
+      const result = await invoke(root, [
+        verb,
+        ...(verb === "list" ? [] : ["key"]),
+        ...(verb === "set" ? ["value"] : []),
+        "--namespace",
+        namespace
+      ])
+      expect(result.code).toBe(1)
+      expect(result.data.code).toBe("operator_failed")
+      expect(existsSync(join(root, ".flows", "control.db"))).toBe(false)
+    }
+  })
+
+  it("preserves one Unicode namespace identity across all four verbs", async () => {
+    const seen: Array<Namespace.Namespace> = []
+    const namespace = { kind: "user" as const, id: "álîçé-用户-😀" }
+    ports.layer = MemoryStore.layerNoop({
+      listFacts: (input) => Effect.sync(() => (seen.push(asNamespace(input.namespace)), [])),
+      getFact: (input) =>
+        Effect.sync(() => {
+          seen.push(asNamespace(input.namespace))
+          return {
+            namespace: asNamespace(input.namespace),
+            key: input.key,
+            value: "found",
+            provenance: {},
+            createdAtMs: 0,
+            updatedAtMs: 0
+          }
+        }),
+      putFact: (input) => Effect.sync(() => void seen.push(asNamespace(input.namespace))),
+      deleteFact: (input) => Effect.sync(() => (seen.push(asNamespace(input.namespace)), true))
+    })
+    const root = fixture()
+    for (const name of ["list", "get", "set", "rm"] as const) {
+      const result = await invoke(root, [
+        name,
+        ...(name === "list" ? [] : ["key"]),
+        ...(name === "set" ? ["value"] : []),
+        "--namespace",
+        `user:${namespace.id}`
+      ])
+      expect(result.code, result.output).toBe(0)
+    }
+    expect(seen).toEqual([namespace, namespace, namespace, namespace])
+  })
+
+  it("never lets an unknown kind address a valid user's record", async () => {
+    const facts = new Map<string, MemoryStore.Fact>()
+    let reads = 0
+    const keyOf = (input: MemoryStore.GetFactInput) => {
+      const namespace = asNamespace(input.namespace)
+      return `${namespace.kind}:${namespace.id}:${input.key}`
+    }
+    ports.layer = MemoryStore.layerNoop({
+      putFact: (input) =>
+        Effect.sync(() => {
+          facts.set(keyOf(input), {
+            namespace: asNamespace(input.namespace),
+            key: input.key,
+            value: input.value,
+            provenance: input.provenance,
+            createdAtMs: 0,
+            updatedAtMs: 0
+          })
+        }),
+      getFact: (input) =>
+        Effect.sync(() => {
+          reads += 1
+          return facts.get(keyOf(input))
+        })
+    })
+    const root = fixture()
+    expect((await invoke(root, ["set", "key", "value", "--namespace", "user:alpha"])).code).toBe(0)
+    const valid = await invoke(root, ["get", "key", "--namespace", "user:alpha"])
+    const refused = await invoke(root, ["get", "key", "--namespace", "team:alpha"])
+    expect(valid.data.value).toBe("value")
+    expect(refused.code).toBe(1)
+    expect(refused.data.code).toBe("operator_failed")
+    expect(refused.data.value).toBeUndefined()
+    expect(reads).toBe(1)
+  })
+
   it("keeps facts durable, uses the legacy user:cli namespace, and auto-decodes JSON", async () => {
     const root = fixture()
     expect((await invoke(root, ["set", "settings", "{\"fast\":true}"])).code).toBe(0)

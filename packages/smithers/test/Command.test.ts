@@ -11,10 +11,13 @@ import * as Verb from "../src/Verb.ts"
 const names = cli.subcommands.flatMap((group) => group.commands.map((command) => command.name))
 
 describe("Command", () => {
-  it("registers every shipped verb and every removed one", () => {
+  it("registers retained handlers and refusals without duplicating canonical verbs", () => {
     // The exact sets are pinned by `Verb.test.ts`; this asserts only that the
     // command tree is built from them rather than from a hand-kept list.
-    for (const verb of Verb.subcommands) expect(names).toContain(verb.name)
+    for (const verb of Verb.subcommands) {
+      if (["serve", "init", "suggest", "memory", "mcp"].includes(verb.name)) expect(names).not.toContain(verb.name)
+      else expect(names).toContain(verb.name)
+    }
     for (const verb of Unsupported.removedVerbs) {
       expect(names).toContain(verb.name === "workflows" ? "workflow" : verb.name)
     }

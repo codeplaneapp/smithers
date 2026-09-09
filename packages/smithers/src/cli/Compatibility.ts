@@ -38,16 +38,10 @@ export const legacyArguments = (input: ReadonlyArray<string> | Argv.Globals): Ar
   const args = parsed.argv
   const index = parsed.first
   const [command, ...rest] = parsed.rest
-  if (command === "init" && rest.some((arg) => arg === "--global" || arg.startsWith("--global="))) {
-    return [...args]
-  }
   if (command === "internal" && args[index + 1] === "claude") return [...args.slice(0, index), ...args.slice(index + 1)]
-  // Preserve the existing no-input refusal without constructing either runtime.
-  if ((command === "memory" || command === "mcp" || command === "bug") && rest.length === 0) return [...args]
-  if (
-    command === "memory" && ((rest[0] === "get" && rest.length === 1) ||
-      (rest[0] === "set" && rest.length === 2))
-  ) return [...args]
+  // Only the removed lifecycle subcommands use the compatibility refusal.
+  if (command === "gateway") return rest[0] === "status" || rest[0] === "stop" ? [...args] : undefined
+  if (command === "bug" && rest.length === 0) return [...args]
   if (command !== undefined && legacy.has(command)) return [...args]
   if (command === "run") {
     if (rest.some((arg) => arg === "--resume" || arg.startsWith("--resume=")) || rest[0]?.trimStart().startsWith("{")) {

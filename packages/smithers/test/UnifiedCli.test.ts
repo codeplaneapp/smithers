@@ -141,6 +141,21 @@ describe("unified CLI", { timeout: 240_000 }, () => {
     expect(legacyArguments(["run", "--resume", "id"])).toBeDefined()
     expect(legacyArguments(["run", "//app:serve"])).toBeUndefined()
     expect(legacyArguments(["flow", "start", "hello"])).toBeUndefined()
+    for (
+      const args of [
+        ["gateway"],
+        ["gateway", "--port", "0"],
+        ["init", "--global"],
+        ["memory"],
+        ["memory", "get"],
+        ["memory", "set", "key"],
+        ["mcp"],
+        ["mcp", "add", "--agent", "claude"]
+      ]
+    ) {
+      expect(legacyArguments(args), args.join(" ")).toBeUndefined()
+    }
+    expect(legacyArguments(["gateway", "status"])).toEqual(["gateway", "status"])
   })
 
   it("accepts canonical log formatting through the flat alias", async () => {

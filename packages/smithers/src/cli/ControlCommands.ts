@@ -9,6 +9,7 @@ import { Effect } from "effect"
 import { Cli, z } from "incur"
 import { readFile } from "node:fs/promises"
 import * as Forensics from "../Forensics.ts"
+import { defaultApprovalScope } from "../internal/ApprovalScope.ts"
 import * as Failure from "../internal/Failure.ts"
 import * as FeaturedFlows from "../internal/FeaturedFlows.ts"
 import * as History from "../internal/History.ts"
@@ -363,7 +364,7 @@ export const createApprovalsCli = (runtime: Bridge.Runtime = {}) =>
       description: "Approve the exact serialized payload or @file",
       mcp: false,
       args: z.object({ approval: z.string() }),
-      options: options.extend({ scope: z.enum(["once", "run", "remembered"]).default("once") }),
+      options: options.extend({ scope: z.enum(["once", "run", "remembered"]).default(defaultApprovalScope) }),
       run: (c) =>
         safe(
           c,

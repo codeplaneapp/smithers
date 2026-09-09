@@ -41,9 +41,10 @@ const noteStatus = z.enum(["pending", "accepted", "rejected"])
  * @since 1.0.0
  */
 export const withMemory = <A, E>(
-  options: LocalOptions,
+  options: LocalOptions & { readonly namespace?: string | undefined; readonly id?: string | undefined },
   effect: Effect.Effect<A, E, MemoryStore.MemoryStore>
 ): Promise<A> => {
+  if (options.namespace !== undefined) namespace({ ...options, namespace: options.namespace })
   const layer = MemoryStore.layer.pipe(Layer.provide(databaseLayer(localRoot(options))))
   return Effect.runPromise(effect.pipe(Effect.provide(layer)))
 }

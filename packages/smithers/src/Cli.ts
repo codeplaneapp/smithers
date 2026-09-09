@@ -6,8 +6,10 @@
 import { makeCli as makeBuildCli } from "@smthrs/build-cli/Cli"
 import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
 import { Effect, Logger } from "effect"
-import { z } from "incur"
+import { Cli, z } from "incur"
 import { resolve } from "node:path"
+import * as Agents from "./Agents.ts"
+import * as Argv from "./cli/Argv.ts"
 import * as Bridge from "./cli/ControlBridge.ts"
 import { createApprovalsCli, createFlowCli, createRunsCli, safe } from "./cli/ControlCommands.ts"
 import { createGenerateCli, initialize } from "./cli/Generate.ts"
@@ -24,6 +26,7 @@ import { createTriggersCli } from "./operator/Triggers.ts"
 import * as Serve from "./Serve.ts"
 import * as Suggest from "./Suggest.ts"
 import * as Ui from "./Ui.ts"
+import * as Unsupported from "./Unsupported.ts"
 import { packageVersion } from "./Version.ts"
 
 const options = Bridge.connectionOptions
@@ -34,6 +37,39 @@ const options = Bridge.connectionOptions
  * @since 1.0.0
  */
 export const makeCli = (config: Bridge.Runtime = {}): ReturnType<typeof makeBuildCli> => {
+  const mcp = Cli.create("mcp", {
+    version: packageVersion,
+    description: "Register the Smithers MCP server with an agent",
+    globals: z.object({
+      audience: z.enum(["auto", "human", "agent"]).default("auto"),
+      silent: z.boolean().default(false),
+      ui: z.enum(["auto", "tty", "stream", "plain"]).default("auto")
+    })
+  }).command("add", {
+    description: "Register with Claude Code or Codex; omit --agent to configure both",
+    mcp: false,
+    options: options.extend({ agent: z.string().optional() }),
+    run: (c) =>
+      safe(c, async () => {
+        const requested = c.options.agent
+        const targets = requested === undefined
+          ? Agents.agents
+          : Agents.agents.filter((agent) => agent.id === requested)
+        if (targets.length === 0) {
+          throw new CliError.UsageError({
+            message: `Unknown agent ${requested}. Known agents: ${Agents.agents.map((agent) => agent.id).join(", ")}`
+          })
+        }
+        const wired = targets.map((agent) => Agents.addMcp(agent, (config.environment ?? process.env)["HOME"]))
+        if (wired.every((entry) => entry.status === "failed")) {
+          const stderr = config.stderr ?? process.stderr
+          stderr.write(`${Agents.manualInstructions(targets.map((agent) => agent.id))}\n`)
+          throw new CliError.UnsupportedError({ message: "Could not register the MCP server" })
+        }
+        return wired
+      })
+  })
+  mcp.use((context, next) => Presentation.scope(context, config, next))
   const cli = makeBuildCli({
     ...config,
     cliName: "smthrs",
@@ -47,6 +83,7 @@ export const makeCli = (config: Bridge.Runtime = {}): ReturnType<typeof makeBuil
     .command(createApprovalsCli(config))
     .command(createGenerateCli(config))
     .command(createMemoryCli())
+    .command(mcp)
     .command(createCredentialsCli())
     .command(createTriggersCli(config))
     .command(createIntegrationsCli())
@@ -54,9 +91,13 @@ export const makeCli = (config: Bridge.Runtime = {}): ReturnType<typeof makeBuil
     .command("init", {
       description: "Initialize workspace and target declarations plus a starter flow, preserving existing files",
       args: z.object({ name: z.string().optional() }),
-      options: z.object({ root: z.string().optional().describe("Directory to initialize; defaults to cwd") }),
+      options: z.object({
+        root: z.string().optional().describe("Directory to initialize; defaults to cwd"),
+        global: z.boolean().default(false).describe("Removed; initialize a workspace instead")
+      }),
       run: (c) =>
         safe(c, () => {
+          if (c.options.global) throw Unsupported.flagError(Unsupported.findFlag("init", "global"))
           const root = resolve(c.options.root ?? process.cwd())
           return initialize(root, c.args.name ?? Init.defaultName(root), config.environment ?? process.env)
         })
@@ -67,6 +108,7 @@ export const makeCli = (config: Bridge.Runtime = {}): ReturnType<typeof makeBuil
       run: (c) => safe(c, () => Bridge.invoke(["doctor"], c.options, config))
     })
     .command("serve", {
+      aliases: ["gateway"],
       description: "Host the control gateway and durable trigger scheduler",
       mcp: false,
       options: options.extend({
@@ -208,5 +250,24 @@ export const makeCli = (config: Bridge.Runtime = {}): ReturnType<typeof makeBuil
             )
         )
     })
+  // Incur 0.5 intercepts `mcp` before looking up registered commands. Dispatch
+  // the mounted subtree directly so registration uses Agents.addMcp as documented.
+  const serve = cli.serve.bind(cli)
+  cli.serve = (argv = process.argv.slice(2), serveOptions) => {
+    const parsed = Argv.parse(argv)
+    let offset = 0
+    // Argv retains document switches and --ui in rest; use its parsed option
+    // values to skip those prefixes without mistaking their values for verbs.
+    while (parsed.rest[offset]?.startsWith("-") && parsed.rest[offset] !== "--") {
+      const flag = parsed.rest[offset]!
+      const value = parsed.options.get(flag.split("=")[0]!)
+      offset += !flag.includes("=") && typeof value === "string" ? 2 : 1
+    }
+    const index = parsed.restIndices[offset]
+    if (parsed.rest[offset] === "mcp" && index !== undefined && !argv.includes("--mcp")) {
+      return mcp.serve([...argv.slice(0, index), ...argv.slice(index + 1)], serveOptions)
+    }
+    return serve(argv, serveOptions)
+  }
   return cli
 }

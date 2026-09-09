@@ -133,6 +133,17 @@ const approvalEvents = [
 
 describe("unified control dispatch", () => {
   it.each([
+    ["mcp", "--help"],
+    ["--help", "mcp"],
+    ["--ui", "plain", "mcp", "--help"]
+  ])("uses the Smithers MCP registration help with prefixes: %j", async (...args) => {
+    const result = await invoke(args)
+    expect(result.codes).toEqual([])
+    expect(result.stdout).toContain("Register with Claude Code or Codex")
+    expect(ports.invoke).not.toHaveBeenCalled()
+  })
+
+  it.each([
     [["flow", "list"], ["ls"]],
     [["flow", "plan", "demo/ship"], ["plan", "demo/ship"]],
     [["flow", "plan", "demo/ship", "branch=next", "count=2", "--data", "{\"extra\":true}"], [
@@ -156,7 +167,7 @@ describe("unified control dispatch", () => {
       "--message",
       "Keep the exact words"
     ]],
-    [["approvals", "approve", JSON.stringify(approval)], ["approve", JSON.stringify(approval), "--scope", "once"]],
+    [["approvals", "approve", JSON.stringify(approval)], ["approve", JSON.stringify(approval), "--scope", "run"]],
     [["approvals", "approve", JSON.stringify(approval), "--scope", "remembered"], [
       "approve",
       JSON.stringify(approval),

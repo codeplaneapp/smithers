@@ -10,8 +10,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { Control as ControlService, ControlError, type ControlSchema } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
-import * as MemoryStore from "@smthrs/memory/MemoryStore"
-import type * as Namespace from "@smthrs/memory/Namespace"
 import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { CliError as ParserError, Command } from "effect/unstable/cli"
@@ -376,115 +374,6 @@ describe("presentation flags", () => {
 
     expect(error).toBeInstanceOf(CliError.UsageError)
     expect((error as CliError.UsageError).message).toBe("--limit must be a positive integer; got \"0\"")
-  })
-})
-
-describe("memory namespace parsing", () => {
-  // The store admits a `"kind:id"` string as well as the structured value, but
-  // every memory verb decodes the flag through the public schema before the
-  // store sees it. These fakes assert that guarantee instead of repeating the
-  // parse, so a verb that stopped decoding fails here loudly.
-  const asNamespace = (input: MemoryStore.NamespaceInput): Namespace.Namespace => {
-    if (typeof input === "string") throw new Error(`the CLI passed an undecoded namespace: ${input}`)
-    return input
-  }
-
-  const verb = (name: "list" | "get" | "set" | "rm", namespace: string): ReadonlyArray<string> => {
-    const prefix = ["memory", name, "--namespace", namespace]
-    if (name === "list") return prefix
-    if (name === "set") return [...prefix, "key", "value"]
-    return [...prefix, "key"]
-  }
-
-  it.each(["list", "get", "set", "rm"] as const)(
-    "refuses every invalid namespace identity before memory %s",
-    async (name) => {
-      for (const namespace of ["team:alpha", "user:", "alpha", "user:alpha\0tail"]) {
-        const error = await run(Effect.flip(runCommand(verb(name, namespace))), testControl)
-        expect(error).toBeInstanceOf(CliError.UsageError)
-        expect((error as CliError.UsageError).message).toBe(
-          `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(namespace)}`
-        )
-        expect(CliError.exitCode(error as CliError.UsageError)).toBe(2)
-      }
-    }
-  )
-
-  it("preserves one Unicode namespace identity across all four verbs", async () => {
-    const seen: Array<Namespace.Namespace> = []
-    const namespace = { kind: "user" as const, id: "álîçé-用户-😀" }
-    const memory = MemoryStore.layerNoop({
-      listFacts: (input) => Effect.sync(() => (seen.push(asNamespace(input.namespace)), [])),
-      getFact: (input) =>
-        Effect.sync(() => {
-          seen.push(asNamespace(input.namespace))
-          return {
-            namespace: asNamespace(input.namespace),
-            key: input.key,
-            value: "found",
-            provenance: {},
-            createdAtMs: 0,
-            updatedAtMs: 0
-          }
-        }),
-      putFact: (input) => Effect.sync(() => void seen.push(asNamespace(input.namespace))),
-      deleteFact: (input) => Effect.sync(() => (seen.push(asNamespace(input.namespace)), true))
-    })
-    await Effect.runPromise(
-      Effect.forEach(["list", "get", "set", "rm"] as const, (name) => runCommand(verb(name, `user:${namespace.id}`)))
-        .pipe(
-          Effect.provide(testControl),
-          Effect.provide(Layer.mergeAll(TestConsole.layer, Output.layer, memory)),
-          Effect.provide(NodeServices.layer)
-        )
-    )
-    expect(seen).toEqual([namespace, namespace, namespace, namespace])
-  })
-
-  it("never lets an unknown kind address a valid user's record", async () => {
-    const facts = new Map<string, MemoryStore.Fact>()
-    let reads = 0
-    const keyOf = (input: MemoryStore.GetFactInput) => {
-      const namespace = asNamespace(input.namespace)
-      return `${namespace.kind}:${namespace.id}:${input.key}`
-    }
-    const memory = MemoryStore.layerNoop({
-      putFact: (input) =>
-        Effect.sync(() => {
-          facts.set(keyOf(input), {
-            namespace: asNamespace(input.namespace),
-            key: input.key,
-            value: input.value,
-            provenance: input.provenance,
-            createdAtMs: 0,
-            updatedAtMs: 0
-          })
-        }),
-      getFact: (input) =>
-        Effect.sync(() => {
-          reads += 1
-          return facts.get(keyOf(input))
-        })
-    })
-    const result = await Effect.runPromise(
-      Effect.gen(function*() {
-        yield* json(["--json", "memory", "set", "--namespace", "user:alpha", "key", "value"])
-        const valid = yield* json(["--json", "memory", "get", "--namespace", "user:alpha", "key"])
-        const refused = yield* Effect.flip(
-          runCommand(["memory", "get", "--namespace", "team:alpha", "key"])
-        )
-        return { valid, refused }
-      }).pipe(
-        Effect.provide(testControl),
-        Effect.provide(Layer.mergeAll(TestConsole.layer, Output.layer, memory)),
-        Effect.provide(NodeServices.layer)
-      )
-    )
-
-    expect(result.valid).toBe("value")
-    expect(result.refused).toBeInstanceOf(CliError.UsageError)
-    expect((result.refused as CliError.UsageError).message).toContain("\"team:alpha\"")
-    expect(reads).toBe(1)
   })
 })
 

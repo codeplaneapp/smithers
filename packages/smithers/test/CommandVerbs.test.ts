@@ -32,6 +32,7 @@ import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import * as Agents from "../src/Agents.ts"
+import { makeCli } from "../src/Cli.ts"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
 import * as NodeControl from "../src/NodeControl.ts"
@@ -59,6 +60,24 @@ const demoFlow = {
   deployClass: false,
   envelope: { capabilities: [], flows: [], budget: {} }
 } as const
+
+const canonical = async (args: Array<string>, root?: string) => {
+  let output = ""
+  let code = 0
+  await makeCli({ environment: { HOME: process.env["HOME"] } }).serve([
+    ...args,
+    ...(root === undefined ? [] : ["--root", root]),
+    "--json"
+  ], {
+    stdout: (text) => {
+      output += text
+    },
+    exit: (value) => {
+      code = value
+    }
+  })
+  return { code, data: JSON.parse(output), output }
+}
 
 const testControl = TestControl.layer({ now: () => 0, flows: [demoFlow] })
 
@@ -245,9 +264,9 @@ describe("smthrs init", () => {
   it("scaffolds a flow into the project and reports where it wrote", async () => {
     const root = project()
 
-    const scaffolded = await run(json(["--json", "init", "ship-it"]), testControl, root) as {
-      readonly created?: unknown
-    }
+    const result = await canonical(["init", "ship-it"], root)
+    expect(result.code, result.output).toBe(0)
+    const scaffolded = result.data
 
     expect(scaffolded).toBeTypeOf("object")
     expect(existsSync(join(root, "flows", "ship-it"))).toBe(true)
@@ -256,10 +275,10 @@ describe("smthrs init", () => {
   it("refuses a name that would write outside flows/ before touching the disk", async () => {
     const root = project()
 
-    const exit = await run(Effect.exit(text(["init", "../outside"])), testControl, root)
+    const result = await canonical(["init", "../outside"], root)
 
-    expect(exit._tag).toBe("Failure")
-    expect(String(exit._tag === "Failure" ? exit.cause : "")).toContain("one path segment")
+    expect(result.code).toBe(1)
+    expect(result.output).toContain("one path segment")
     // The refusal is a refusal, not a partial scaffold: nothing was created
     // under the project and nothing was created beside it.
     expect(existsSync(join(root, "flows"))).toBe(false)
@@ -420,7 +439,11 @@ describe("smthrs mcp add", () => {
 
     const wired = await withHome(
       home,
-      () => run(json(["--json", "mcp", "add"]), testControl)
+      async () => {
+        const result = await canonical(["mcp", "add"])
+        expect(result.code, result.output).toBe(0)
+        return result.data
+      }
     ) as ReadonlyArray<{ readonly agent: string; readonly status: string }>
 
     expect(wired.map((entry) => entry.agent).sort()).toEqual(Agents.agents.map((agent) => agent.id).sort())
@@ -435,11 +458,11 @@ describe("smthrs mcp add", () => {
 
     const exit = await withHome(
       home,
-      () => run(Effect.exit(text(["mcp", "add", "--agent", "emacs"])), testControl)
+      () => canonical(["mcp", "add", "--agent", "emacs"])
     )
 
-    expect(exit._tag).toBe("Failure")
-    const failure = String(exit._tag === "Failure" ? exit.cause : "")
+    expect(exit.code).toBe(2)
+    const failure = exit.output
     expect(failure).toContain("emacs")
     for (const agent of Agents.agents) expect(failure).toContain(agent.id)
   })

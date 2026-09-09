@@ -1,15 +1,10 @@
 /**
- * The `smthrs` command tree.
+ * Retained Effect handlers and migration refusals for the unified CLI.
  *
- * Every verb in the shipped catalog is here with a handler, and every verb
- * and flag in the removed-command contract is here as a hidden refusal. Those two facts are the
- * whole design: a release that silently accepts a removed verb, or that
- * answers a removed one with a parser error, leaves an operator guessing which
- * of their scripts still mean what they used to.
- *
- * Handlers talk to `Control` and nothing else. A command that reached into a
- * store would answer differently under `--remote`, and the point of the
- * control plane is that it does not.
+ * Cli.ts owns the public command tree. Its control commands delegate here,
+ * and Compatibility.ts retains old spellings with their output contracts.
+ * Local init, suggest, memory, MCP registration, and gateway hosting belong
+ * exclusively to the Incur tree.
  *
  * @since 1.0.0
  */
@@ -19,8 +14,6 @@ import type { Service as ControlServiceShape } from "@smthrs/control/Control"
 import * as Sha256 from "@smthrs/crypto/Sha256"
 import * as UnsupportedBackend from "@smthrs/database/UnsupportedBackend"
 import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
-import * as MemoryStore from "@smthrs/memory/MemoryStore"
-import * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
 import * as Registry from "@smthrs/registry/Registry"
 import { Ownership } from "@smthrs/run-store"
@@ -29,7 +22,6 @@ import { Argument, CliError as ParserError, Command, Flag, Prompt } from "effect
 import { randomUUID } from "node:crypto"
 import { hostname } from "node:os"
 import { resolve } from "node:path"
-import * as Agents from "./Agents.ts"
 import * as Bug from "./Bug.ts"
 import * as ClaudeMirror from "./ClaudeMirror.ts"
 import * as RunProgress from "./cli/RunProgress.ts"
@@ -40,7 +32,7 @@ import * as Environment from "./Environment.ts"
 import * as ExecutorOwnership from "./ExecutorOwnership.ts"
 import * as Forensics from "./Forensics.ts"
 import * as Gc from "./Gc.ts"
-import * as Init from "./Init.ts"
+import { defaultApprovalScope } from "./internal/ApprovalScope.ts"
 import * as CommandStatus from "./internal/CommandStatus.ts"
 import { causeLine } from "./internal/Failure.ts"
 import * as FeaturedFlows from "./internal/FeaturedFlows.ts"
@@ -49,8 +41,6 @@ import * as Legacy from "./Legacy.ts"
 import * as NodeOutput from "./NodeOutput.ts"
 import { Output, renderValue } from "./Output.ts"
 import * as Project from "./Project.ts"
-import * as Serve from "./Serve.ts"
-import * as Suggest from "./Suggest.ts"
 import * as Ui from "./Ui.ts"
 import * as Unsupported from "./Unsupported.ts"
 import * as Update from "./Update.ts"
@@ -157,10 +147,9 @@ const selectedFlow = (value: string) =>
 
 /**
  * Removed verbs that are registered by hand instead of by the loop below,
- * because their bare form still does something: `gateway` runs `serve` and
- * `workflow list` is the `ls` alias.
+ * because `workflow list` is the `ls` alias.
  */
-const ownGroupCommands = new Set(["gateway", "workflow"])
+const ownGroupCommands = new Set(["workflow"])
 
 /** One removed verb by name, so a handler cannot cite the wrong entry. */
 const removedVerb = (name: string): Unsupported.RemovedVerb =>
@@ -767,7 +756,7 @@ const approve = Command.make("approve", {
   // `up`. MCP defaults to `once` because an omitted tool argument must not
   // widen a client's capabilities for the rest of the run.
   scope: Flag.choice("scope", ["once", "run", "remembered"] as const).pipe(
-    Flag.withDefault("run"),
+    Flag.withDefault(defaultApprovalScope),
     Flag.withDescription(
       "How far the grant reaches: this ask only, the whole run (the default, matching `up`), or every later run. " +
         "The MCP resolve_approval tool defaults to `once` instead, because an argument a client never sent must " +
@@ -1186,66 +1175,6 @@ const down = Command.make("down", {}, () =>
     yield* render(yield* cancelAll())
   })).pipe(Command.withDescription(Verb.find("down")!.help))
 
-const init = Command.make("init", {
-  name: Argument.string("name").pipe(Argument.optional),
-  global: removedFlag("init", "global")
-}, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    yield* refuseRemoved("init", { global: config.global })
-    const projectRoot = yield* Project.ProjectRoot
-    const name = Option.getOrElse(config.name, () => Init.defaultName(projectRoot))
-    const nameProblem = Init.nameProblem(name)
-    if (nameProblem !== undefined) {
-      return yield* Effect.fail(
-        new CliError.UsageError({ message: nameProblem })
-      )
-    }
-    yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name, process.env)))
-  })).pipe(Command.withDescription(Verb.find("init")!.help))
-
-/**
- * `--json` is not declared here: it is a shared global, and a second
- * declaration would shadow the one every other verb answers to. The verb
- * reads it off `rootCommand` like every other handler does.
- */
-const suggest = Command.make("suggest", {
-  path: Argument.string("path").pipe(Argument.optional),
-  seat: Flag.string("seat").pipe(
-    Flag.optional,
-    Flag.withDescription("The provider:model seat to scan and implement with, instead of the first available one")
-  ),
-  list: Flag.boolean("list").pipe(
-    Flag.withDefault(false),
-    Flag.withDescription("Print the suggestions and exit without asking which one to implement")
-  )
-}, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const root = yield* rootCommand
-    const projectRoot = yield* Project.ProjectRoot
-    const target = Option.match(config.path, {
-      onNone: () => projectRoot,
-      onSome: (path) => resolve(Environment.ambientWorkingDirectory(), path)
-    })
-    if (!Suggest.isDirectory(target)) {
-      return yield* Effect.fail(
-        new CliError.UsageError({ message: `the path to suggest for must be a directory; ${target} is not one` })
-      )
-    }
-    const outcome = yield* Suggest.run({
-      root: target,
-      seat: Option.getOrUndefined(config.seat),
-      list: config.list,
-      json: root.json,
-      environment: process.env
-    })
-    // The status is the outcome's, not a rendering's: this verb prints as it
-    // scans, so there is no one document for `Output.render` to publish a
-    // status from. A cancelled prompt is 130, everything else is 0.
-    yield* CommandStatus.set(Suggest.exitStatus(outcome))
-  })).pipe(Command.withDescription(Verb.find("suggest")!.help))
-
 /**
  * The migration tool's own flag set, declared on the verb.
  *
@@ -1398,110 +1327,6 @@ const migrate = Command.make("migrate", {
     // `NodeControl.layerOutput` transfers a rendered status.
     yield* CommandStatus.set(MigrateCommand.exitCode(report))
   })).pipe(Command.withDescription(Verb.find("migrate")!.help))
-
-const memoryNamespace = (
-  raw: Option.Option<string>
-): Effect.Effect<Namespace.Namespace, CliError.UsageError> => {
-  if (Option.isNone(raw)) return Effect.succeed({ kind: "user", id: "cli" })
-  const value = raw.value
-  const separator = value.indexOf(":")
-  const kind = separator < 0 ? "" : value.slice(0, separator)
-  const id = separator < 0 ? "" : value.slice(separator + 1)
-  const invalid = new CliError.UsageError({
-    message: `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(value)}`
-  })
-  if (/[\p{Cc}]/u.test(id)) return Effect.fail(invalid)
-  return Schema.decodeUnknownEffect(Namespace.Namespace, { reportInput: false })({ kind, id }).pipe(
-    Effect.mapError(() => invalid)
-  )
-}
-
-const memoryFlags = {
-  namespace: Flag.string("namespace").pipe(
-    Flag.optional,
-    Flag.withDescription("Namespace as flow:<id>, agent:<id>, user:<id>, or global:<id>; defaults to user:cli")
-  )
-}
-
-const memoryList = Command.make("list", {
-  ...memoryFlags,
-  prefix: Flag.string("prefix").pipe(
-    Flag.optional,
-    Flag.withDescription("Only list fact keys starting with this prefix")
-  )
-}, (
-  config
-) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const namespace = yield* memoryNamespace(config.namespace)
-    const store = yield* MemoryStore.MemoryStore
-    const facts = yield* store.listFacts({
-      namespace,
-      ...(Option.isNone(config.prefix) ? {} : { prefix: config.prefix.value })
-    })
-    yield* render(facts.map((fact) => ({ key: fact.key, value: fact.value, updatedAtMs: fact.updatedAtMs })))
-  })).pipe(Command.withDescription("List facts in a memory namespace"))
-
-const memoryGet = Command.make(
-  "get",
-  { ...memoryFlags, key: requiredArgument("key") },
-  (config) =>
-    Effect.gen(function*() {
-      yield* guardGlobals
-      const namespace = yield* memoryNamespace(config.namespace)
-      const store = yield* MemoryStore.MemoryStore
-      const fact = yield* store.getFact({ namespace, key: config.key })
-      if (fact === undefined) {
-        return yield* Effect.fail(new CliError.UsageError({ message: `No fact ${config.key} in this namespace` }))
-      }
-      yield* render(renderValue(fact.value))
-    })
-).pipe(Command.withDescription("Read one fact"))
-
-const memorySet = Command.make("set", {
-  ...memoryFlags,
-  key: requiredArgument("key"),
-  value: requiredArgument("value")
-}, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const namespace = yield* memoryNamespace(config.namespace)
-    const store = yield* MemoryStore.MemoryStore
-    // A value that parses as JSON is stored as JSON; anything else is the
-    // string as typed. An operator writing `{"a":1}` means the object.
-    let parsed: unknown = config.value
-    try {
-      parsed = JSON.parse(config.value)
-    } catch {
-      parsed = config.value
-    }
-    yield* store.putFact({
-      namespace,
-      key: config.key,
-      value: parsed,
-      provenance: {}
-    })
-    yield* render({ key: config.key, written: true })
-  })).pipe(Command.withDescription("Write one fact"))
-
-const memoryRm = Command.make(
-  "rm",
-  { ...memoryFlags, key: requiredArgument("key") },
-  (config) =>
-    Effect.gen(function*() {
-      yield* guardGlobals
-      const namespace = yield* memoryNamespace(config.namespace)
-      const store = yield* MemoryStore.MemoryStore
-      const removed = yield* store.deleteFact({ namespace, key: config.key })
-      yield* render({ key: config.key, removed })
-    })
-).pipe(Command.withDescription("Delete one fact"))
-
-const memory = Command.make("memory").pipe(
-  Command.withDescription(Verb.find("memory")!.help),
-  Command.withSubcommands([memoryList, memoryGet, memorySet, memoryRm])
-)
 
 const claudeSession = Flag.string("session").pipe(
   Flag.optional,
@@ -1662,40 +1487,6 @@ const claudeUnsubscribe = Command.make("unsubscribe", {
 const claude = Command.make("claude").pipe(
   Command.withDescription(Verb.find("claude")!.help),
   Command.withSubcommands([claudeTick, claudeNodeWait, claudeMonitor, claudeSubscribe, claudeUnsubscribe])
-)
-
-const mcpAdd = Command.make("add", {
-  agent: Flag.string("agent").pipe(
-    Flag.optional,
-    Flag.withDescription("Agent to configure; omit to register with every supported agent")
-  )
-}, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const requested = Option.getOrUndefined(config.agent)
-    const targets = requested === undefined
-      ? Agents.agents
-      : Agents.find(requested) === undefined
-      ? []
-      : [Agents.find(requested)!]
-    if (targets.length === 0) {
-      return yield* Effect.fail(
-        new CliError.UsageError({
-          message: `Unknown agent ${requested}. Known agents: ${Agents.agents.map((agent) => agent.id).join(", ")}`
-        })
-      )
-    }
-    const wired = yield* Effect.sync(() => targets.map((agent) => Agents.addMcp(agent)))
-    if (wired.every((entry) => entry.status === "failed")) {
-      yield* Console.error(Agents.manualInstructions(targets.map((agent) => agent.id)))
-      return yield* Effect.fail(new CliError.UnsupportedError({ message: "Could not register the MCP server" }))
-    }
-    yield* render(wired)
-  })).pipe(Command.withDescription("Register the Smithers MCP server with an agent"))
-
-const mcp = Command.make("mcp").pipe(
-  Command.withDescription(Verb.find("mcp")!.help),
-  Command.withSubcommands([mcpAdd])
 )
 
 const update = Command.make("update", {}, () =>
@@ -1868,67 +1659,6 @@ const gc = Command.make("gc", {
     }
   })).pipe(Command.withDescription(Verb.find("gc")!.help))
 
-const serveFlags = {
-  host: Flag.string("host").pipe(
-    Flag.withDefault(Serve.defaultBind.host),
-    Flag.withDescription("Host address to bind; non-loopback addresses require --listen and a credential")
-  ),
-  port: Flag.integer("port").pipe(
-    Flag.withDefault(Serve.defaultBind.port),
-    Flag.withDescription("TCP port for the control server")
-  ),
-  listen: Flag.boolean("listen").pipe(
-    Flag.withDefault(false),
-    Flag.withDescription("Allow binding a non-loopback host; also requires --credential or SMITHERS_API_KEY")
-  )
-}
-
-const serveHandler = (config: { readonly host: string; readonly port: number; readonly listen: boolean }) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const root = yield* rootCommand
-    const credential = Option.getOrUndefined(root.credential) ??
-      Environment.read(process.env, "SMITHERS_API_KEY")
-    const bind: Serve.Bind = {
-      host: config.host,
-      port: config.port,
-      listen: config.listen,
-      credential
-    }
-    const refusal = Serve.refuse(bind)
-    if (refusal !== undefined) return yield* Effect.fail(refusal)
-    const projectRoot = yield* Project.ProjectRoot
-    if (!root.quiet) yield* Console.error(Serve.banner(bind))
-    yield* Serve.host(bind, projectRoot)
-  })
-
-const serveCommand = Command.make("serve", serveFlags, serveHandler).pipe(
-  Command.withDescription(Verb.find("serve")!.help)
-)
-
-/**
- * `gateway`: the rc.0-only alias of `serve`, and the two subcommands section
- * 4.2 removed.
- *
- * It is a command group rather than `Command.withAlias("gateway")` because an
- * alias has no subcommands: `gateway status` reached the parser as a stray
- * positional argument and exited 2 with serve's usage text, which tells an
- * operator migrating a script nothing about where the gateway lifecycle went.
- */
-const gatewaySubcommand = (name: string) =>
-  Command.make(name, {}, () => Effect.fail(Unsupported.verbError(removedVerb("gateway"), name))).pipe(
-    Command.withDescription(`Removed in 1.0.0-rc.0: ${removedVerb("gateway").reason}`),
-    Command.unlisted
-  )
-
-const gatewayCommand = Command.make("gateway", serveFlags, serveHandler).pipe(
-  Command.withDescription("Alias of `serve`; `gateway status` and `gateway stop` were removed"),
-  Command.unlisted,
-  Command.withSubcommands(Unsupported.removedVerbs.find((verb) => verb.name === "gateway")!.subcommands!.map(
-    gatewaySubcommand
-  ))
-)
-
 // == the removed-command contract refusals
 
 /**
@@ -1984,16 +1714,10 @@ export const cli = rootCommand.pipe(
     events,
     output,
     down,
-    serveCommand,
-    gatewayCommand,
-    init,
-    suggest,
     doctor,
     gc,
     migrate,
-    memory,
     claude,
-    mcp,
     update,
     bug,
     ...removedCommands
