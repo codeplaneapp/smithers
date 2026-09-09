@@ -42,6 +42,11 @@ export interface TargetGraphController {
   readonly showGraph: (repoId: string | undefined, label?: string) => Promise<string | void>
   /** The drawer's focus: pin the graph card on one label, or clear it when the label goes unnamed. */
   readonly focusGraph: (repoId: string | undefined, label?: string) => string | void
+  /** The canvas' toolbar: the label filter and the private-node toggle, both in the card payload. */
+  readonly filterGraph: (
+    repoId: string | undefined,
+    change: { readonly query?: string; readonly showPrivate?: boolean }
+  ) => string | void
   /** `timeline [runId]`: one run's Gantt card, streamed live when the run is live. */
   readonly showTimeline: (repoId: string | undefined, runId?: string) => Promise<string | void>
   /** `history`: the recorded runs table. */
@@ -324,6 +329,31 @@ export const createTargetGraphController = (
     })
   }
 
+  /*
+   * The toolbar's filter belongs to the card, not to the component: a graph
+   * opened in a sidebar tab or restored after a reload paints the same view
+   * the human left, exactly as the targets table's view does.
+   */
+  const filterGraph: TargetGraphController["filterGraph"] = (repoIdArg, change) => {
+    const repoId = resolveRepoId(repoIdArg)
+    if (typeof repoId !== "string") return repoId.error
+    const id = graphCardId(repoId)
+    if (store.collections.cards.get(id)?.kind !== "graph") return "There is no graph card open to filter."
+    patch(id, "graph", (card) => {
+      const view = { ...card.payload.view }
+      if (change.query !== undefined) {
+        if (change.query.trim() === "") delete view.query
+        else view.query = change.query
+      }
+      if (change.showPrivate !== undefined) {
+        if (change.showPrivate) view.showPrivate = true
+        else delete view.showPrivate
+      }
+      const { view: _replaced, ...rest } = card.payload
+      return { payload: Object.keys(view).length === 0 ? rest : { ...rest, view } }
+    })
+  }
+
   const showTimeline: TargetGraphController["showTimeline"] = async (repoIdArg, runIdArg) => {
     const repoId = resolveRepoId(repoIdArg)
     if (typeof repoId !== "string") return repoId.error
@@ -584,6 +614,7 @@ export const createTargetGraphController = (
   return {
     showGraph,
     focusGraph,
+    filterGraph,
     showTimeline,
     showHistory,
     selectRun,

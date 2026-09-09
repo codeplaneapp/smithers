@@ -335,15 +335,19 @@ export const GraphCardBody = ({
   readonly card: Extract<Card, { kind: "graph" }>
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const { status, graph, error, focus, runId, run } = card.payload
-  const [search, setSearch] = useState("")
-  const [showPrivate, setShowPrivate] = useState(false)
-  const [selected, setSelected] = useState<string | undefined>(undefined)
+  const { status, graph, error, focus, runId, run, view } = card.payload
+  /*
+   * Filter and focus live in the card payload (target.graph.filter /
+   * target.graph.focus), so the component stays a projection and the view
+   * survives a reload and an open-in-tab — the targets table's rule.
+   */
+  const search = view?.query ?? ""
+  const showPrivate = view?.showPrivate ?? false
+  const repoId = card.payload.repoId
 
-  const focusLabel = selected ?? focus
   const focusModel = useMemo(
-    () => (graph !== undefined && focusLabel !== undefined ? focusFor(graph.edges, focusLabel) : undefined),
-    [graph, focusLabel]
+    () => (graph !== undefined && focus !== undefined ? focusFor(graph.edges, focus) : undefined),
+    [graph, focus]
   )
   const timings = useMemo(() => new Map((run?.nodes ?? []).map((timing) => [timing.label, timing])), [run])
   const laidOut = useMemo(
@@ -359,7 +363,7 @@ export const GraphCardBody = ({
           }),
     [graph, showPrivate, search, timings, focusModel, run]
   )
-  const drawerNode = graph?.nodes.find((node) => node.label === focusLabel)
+  const drawerNode = graph?.nodes.find((node) => node.label === focus)
 
   if (status === "pending") return <p className="smithers-card-note">Loading the target graph…</p>
   if (status === "failed" || graph === undefined) {
@@ -379,13 +383,15 @@ export const GraphCardBody = ({
           value={search}
           placeholder="Filter labels…"
           aria-label="Filter graph labels"
-          onChange={(event) => setSearch(event.target.value)}
+          data-flow="target.graph.filter"
+          onInput={(event) => onRunCommand("target.graph.filter", `${repoId} query=${event.currentTarget.value}`)}
         />
         <label className="graph-card-private-toggle">
           <input
             type="checkbox"
             checked={showPrivate}
-            onChange={(event) => setShowPrivate(event.target.checked)}
+            data-flow="target.graph.filter"
+            onChange={(event) => onRunCommand("target.graph.filter", `${repoId} private=${event.target.checked ? "on" : "off"}`)}
           />
           Private nodes
         </label>
@@ -421,7 +427,8 @@ export const GraphCardBody = ({
                 nodesFocusable
                 deleteKeyCode={null}
                 proOptions={{ hideAttribution: true }}
-                onNodeClick={(_, flowNode) => setSelected(flowNode.id === selected ? undefined : flowNode.id)}
+                onNodeClick={(_, flowNode) =>
+                  onRunCommand("target.graph.focus", flowNode.id === focus ? repoId : `${repoId} ${flowNode.id}`)}
               >
                 <Background gap={26} />
                 <Controls showInteractive={false} />
@@ -436,11 +443,8 @@ export const GraphCardBody = ({
               repoId={card.payload.repoId}
               timing={timings.get(drawerNode.label)}
               onRunCommand={onRunCommand}
-              onDismissDrawer={() => {
-                setSelected(undefined)
-                /* A payload focus outlives local state, so clearing it is the command's job. */
-                if (focus !== undefined) onRunCommand("target.graph.focus", card.payload.repoId)
-              }}
+              /* The focus is payload state, so only the command can clear it. */
+              onDismissDrawer={() => onRunCommand("target.graph.focus", repoId)}
             />
           ) :
           null}

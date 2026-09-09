@@ -26,6 +26,32 @@ afterAll(async () => {
 
 const GRAPH: TargetGraphResponse = fixtureTargetGraph("force")
 
+/*
+ * The captured force graph happens to declare no private helpers, so
+ * asserting the collapse against it alone proves nothing (82 === 82). Graft
+ * one on: a private helper between two real nodes is exactly the shape the
+ * toggle exists for.
+ */
+const WITH_PRIVATE: TargetGraphResponse = {
+  ...GRAPH,
+  nodes: [
+    ...GRAPH.nodes,
+    {
+      label: "//src:__private_Overlay_4",
+      package: "//src",
+      name: "__private_Overlay_4",
+      rule: "Shell.Run",
+      kinds: [],
+      private: true
+    }
+  ],
+  edges: [
+    ...GRAPH.edges,
+    { from: "//src:typeCheck", to: "//src:__private_Overlay_4", kind: "deps" },
+    { from: "//src:__private_Overlay_4", to: "//src:srcs", kind: "data" }
+  ]
+}
+
 const card = (
   payload: Partial<Extract<Card, { kind: "graph" }>["payload"]>
 ): Extract<Card, { kind: "graph" }> => ({
@@ -57,32 +83,6 @@ describe("the fixture graph's layout", () => {
     expect(laidOut.edges.length).toBe(94)
   })
 
-  /*
-   * The captured force graph happens to declare no private helpers, so
-   * asserting the collapse against it alone proves nothing (82 === 82). Graft
-   * one on: a private helper between two real nodes is exactly the shape the
-   * toggle exists for.
-   */
-  const WITH_PRIVATE: TargetGraphResponse = {
-    ...GRAPH,
-    nodes: [
-      ...GRAPH.nodes,
-      {
-        label: "//src:__private_Overlay_4",
-        package: "//src",
-        name: "__private_Overlay_4",
-        rule: "Shell.Run",
-        kinds: [],
-        private: true
-      }
-    ],
-    edges: [
-      ...GRAPH.edges,
-      { from: "//src:typeCheck", to: "//src:__private_Overlay_4", kind: "deps" },
-      { from: "//src:__private_Overlay_4", to: "//src:srcs", kind: "data" }
-    ]
-  }
-
   test("private nodes drop out (with their edges) until asked for", () => {
     const shown = layoutTargetGraph(WITH_PRIVATE, { showPrivate: true })
     expect(shown.nodes.length).toBe(83)
@@ -97,13 +97,14 @@ describe("the fixture graph's layout", () => {
     expect(hidden.edges.some((edge) => edge.id.includes("__private_"))).toBe(false)
   })
 
-  test("a private node renders dimmed when the toggle asks for it", () => {
+  test("a private node renders dimmed when the payload's toggle asks for it", () => {
     const host = render(card({ graph: WITH_PRIVATE }))
     expect(host.querySelector("[data-label=\"//src:__private_Overlay_4\"]")).toBeNull()
     const toggle = host.querySelector(".graph-card-private-toggle input") as HTMLInputElement | null
     expect(toggle).not.toBeNull()
-    flushSync(() => toggle?.click())
-    const helper = host.querySelector("[data-label=\"//src:__private_Overlay_4\"]")
+    expect(toggle?.checked).toBe(false)
+    const asked = render(card({ graph: WITH_PRIVATE, view: { showPrivate: true } }))
+    const helper = asked.querySelector("[data-label=\"//src:__private_Overlay_4\"]")
     expect(helper?.getAttribute("data-private")).toBe("true")
   })
 
@@ -214,7 +215,7 @@ describe("the graph card over the fixture", () => {
     expect(refusal?.textContent).toContain("host binary docker is not on PATH")
   })
 
-  test("clicking a node focuses it; the drawer's Run dispatches target.run", () => {
+  test("clicking a node dispatches the focus command; the drawer's Run dispatches target.run", () => {
     const ran: Array<string> = []
     const host = render(card({}), (name, args) => ran.push(`${name} ${args ?? ""}`))
     const node = host.querySelector("[data-label=\"//src:lint\"]")
@@ -222,11 +223,23 @@ describe("the graph card over the fixture", () => {
     flushSync(() => {
       node?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     })
-    expect(node?.getAttribute("data-focus")).toBe("root")
-    const run = host.querySelector(".graph-drawer-actions [data-flow=\"target.run\"]") as HTMLElement | null
+    expect(ran).toEqual(["target.graph.focus force //src:lint"])
+    // The command writes the payload; the card the controller re-renders paints the focus.
+    const focused = render(card({ focus: "//src:lint" }), (name, args) => ran.push(`${name} ${args ?? ""}`))
+    expect(focused.querySelector("[data-label=\"//src:lint\"]")?.getAttribute("data-focus")).toBe("root")
+    const run = focused.querySelector(".graph-drawer-actions [data-flow=\"target.run\"]") as HTMLElement | null
     expect(run).not.toBeNull()
     flushSync(() => run?.click())
-    expect(ran).toEqual(["target.run force //src:lint"])
+    expect(ran).toEqual(["target.graph.focus force //src:lint", "target.run force //src:lint"])
+  })
+
+  test("clicking the focused node clears the focus through the command", () => {
+    const ran: Array<string> = []
+    const host = render(card({ focus: "//src:lint" }), (name, args) => ran.push(`${name} ${args ?? ""}`))
+    flushSync(() => {
+      host.querySelector("[data-label=\"//src:lint\"]")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+    expect(ran).toEqual(["target.graph.focus force"])
   })
 
   /*
@@ -244,16 +257,38 @@ describe("the graph card over the fixture", () => {
     expect(ran).toEqual(["target.graph.focus force"])
   })
 
-  test("dismissing a click-selected drawer stays local — no focus command", () => {
+  /*
+   * The whole point of payload state: a graph re-mounted from its card (the
+   * sidebar tab, the reload) paints the filter and the drawer the human left,
+   * and the toolbar's own gestures are the commands that write them.
+   */
+  test("the toolbar's filter and the private toggle dispatch target.graph.filter", () => {
     const ran: Array<string> = []
     const host = render(card({}), (name, args) => ran.push(`${name} ${args ?? ""}`))
+    const search = host.querySelector(".graph-card-search") as HTMLInputElement | null
+    expect(search).not.toBeNull()
     flushSync(() => {
-      host.querySelector("[data-label=\"//src:lint\"]")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(search, "lint")
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(search, "lint")
+      search!.dispatchEvent(new Event("input", { bubbles: true }))
     })
-    const close = host.querySelector(".graph-drawer-header [data-flow=\"target.graph.focus\"]") as HTMLElement | null
-    flushSync(() => close?.click())
-    expect(ran).toEqual([])
-    expect(host.querySelector("[data-testid=\"graph-drawer-//src:lint\"]")).toBeNull()
+    const toggle = host.querySelector(".graph-card-private-toggle input") as HTMLInputElement | null
+    expect(toggle).not.toBeNull()
+    flushSync(() => toggle?.click())
+    expect(ran).toEqual(["target.graph.filter force query=lint", "target.graph.filter force private=on"])
+  })
+
+  test("a card re-mounted from its payload restores the filter, the private nodes and the drawer", () => {
+    const restored = render(
+      card({ graph: WITH_PRIVATE, view: { query: "Overlay", showPrivate: true }, focus: "//src:typeCheck" })
+    )
+    const search = restored.querySelector(".graph-card-search") as HTMLInputElement | null
+    expect(search?.value).toBe("Overlay")
+    expect((restored.querySelector(".graph-card-private-toggle input") as HTMLInputElement | null)?.checked).toBe(true)
+    // The filter is applied, not merely echoed: only the private helper matches "Overlay".
+    expect(restored.querySelector("[data-label=\"//src:__private_Overlay_4\"]")).not.toBeNull()
+    expect(restored.querySelector("[data-label=\"//src:lint\"]")).toBeNull()
+    expect(restored.querySelector("[data-testid=\"graph-drawer-//src:typeCheck\"]")).not.toBeNull()
   })
 
   test("the overlay paints node statuses, durations and hit badges from run frames", () => {

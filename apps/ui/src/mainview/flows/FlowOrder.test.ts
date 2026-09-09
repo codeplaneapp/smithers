@@ -221,6 +221,7 @@ const PRE_SPLIT_BASE: ReadonlyArray<string> = [
   "target.list",
   "target.graph",
   "target.graph.focus",
+  "target.graph.filter",
   "target.timeline",
   "target.history",
   "target.runs.select",

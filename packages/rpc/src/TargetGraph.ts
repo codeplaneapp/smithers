@@ -392,6 +392,17 @@ export const GraphCardPayloadSchema = z.object({
   error: z.string().optional(),
   /** Focused label: the UI highlights deps()/rdeps() and opens the detail drawer. */
   focus: z.string().optional(),
+  /*
+   * The canvas' own filter, in the payload for the same reason the targets
+   * table keeps its view there: the card stays a projection, so the filter
+   * survives a reload and an open-in-tab.
+   */
+  view: z.object({
+    /** Substring match on the node label; absent = every node. */
+    query: z.string().optional(),
+    /** Private helpers drawn; absent = they stay collapsed. */
+    showPrivate: z.boolean().optional()
+  }).optional(),
   /** When set, the DAG overlays this run's node statuses. */
   runId: z.string().optional(),
   /*

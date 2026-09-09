@@ -951,6 +951,20 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     const [repoId, ...rest] = tokens
     return ok({ repoId, label: rest.join(" ") })
   },
+  /* `<repoId> [query=…] [private=on|off]`: a bare token with no `=` is the query. */
+  "target.graph.filter": (args) => {
+    const [repoId, ...rest] = tokensOf(args)
+    if (repoId === undefined) return no("target.graph.filter needs a repository id")
+    const payload: Record<string, string> = { repoId }
+    const query: Array<string> = []
+    for (const token of rest) {
+      const split = /^(query|private)=(.*)$/.exec(token)
+      if (split === null) query.push(token)
+      else payload[split[1]!] = split[2]!
+    }
+    if (query.length > 0) payload["query"] = [payload["query"] ?? "", ...query].join(" ").trim()
+    return ok(payload)
+  },
   "target.timeline": (args) => {
     const tokens = tokensOf(args)
     if (tokens.length > 2) return no("target.timeline takes a run id and optionally a repository id")

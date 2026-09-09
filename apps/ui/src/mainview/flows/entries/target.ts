@@ -206,6 +206,26 @@ export const targetFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =
     handler: ({ repoId, label }) => actions.focusGraphNode(repoId, label)
   }),
   flow({
+    /* The canvas toolbar: the label filter and the private-node toggle, both card payload state. */
+    name: "target.graph.filter",
+    summary: "Filter the target graph's labels, or show its private helpers",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "the graph canvas' own toolbar; the agent opens the graph focused with target.graph [label]",
+    args: "<repoId> [query=<text>] [private=<on|off>]",
+    input: Schema.Struct({
+      repoId: Schema.optional(Schema.String),
+      query: Schema.optional(Schema.String),
+      private: Schema.optional(Schema.Literals(["on", "off"]))
+    }),
+    handler: ({ repoId, query, private: showPrivate }) =>
+      actions.filterGraph(repoId, {
+        ...(query === undefined ? {} : { query }),
+        ...(showPrivate === undefined ? {} : { showPrivate: showPrivate === "on" })
+      })
+  }),
+  flow({
     name: "target.timeline",
     summary: "Show one target run's timeline",
     runtime: ["local.targets"],

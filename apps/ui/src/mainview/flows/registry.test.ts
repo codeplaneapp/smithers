@@ -723,6 +723,7 @@ describe("command registry bindings", () => {
       "target.list",
       "target.graph",
       "target.graph.focus",
+      "target.graph.filter",
       "target.timeline",
       "target.history",
       "target.runs.select",

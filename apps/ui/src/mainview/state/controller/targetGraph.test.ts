@@ -169,6 +169,22 @@ describe("the chat commands dispatch the target-graph cards", () => {
     expect(cleared.payload.focus).toBeUndefined()
   })
 
+  test("/target.graph.filter writes the canvas view into the card payload", async () => {
+    const { store, controller } = await freshController()
+    expect((await controller.commands.run("target.graph")).status).toBe("executed")
+    expect((await controller.commands.run("target.graph.filter", "force query=lint")).status).toBe("executed")
+    expect((await controller.commands.run("target.graph.filter", "force private=on")).status).toBe("executed")
+    const filtered = cardOf(store, "graph-force")
+    if (filtered?.kind !== "graph") throw new Error("expected a graph card")
+    expect(filtered.payload.view).toEqual({ query: "lint", showPrivate: true })
+    /* An emptied box and an unticked toggle drop out again, so the view stays the default. */
+    expect((await controller.commands.run("target.graph.filter", "force query=")).status).toBe("executed")
+    expect((await controller.commands.run("target.graph.filter", "force private=off")).status).toBe("executed")
+    const cleared = cardOf(store, "graph-force")
+    if (cleared?.kind !== "graph") throw new Error("expected a graph card")
+    expect(cleared.payload.view).toBeUndefined()
+  })
+
   test("/target.history lands the run table; selecting a row replays it into a timeline", async () => {
     const { store, controller } = await freshController()
     expect((await controller.commands.run("target.history")).status).toBe("executed")

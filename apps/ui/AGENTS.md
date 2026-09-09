@@ -27,6 +27,7 @@ Nothing user-visible may be added unless the current brief or the canon (`DESIGN
 - Prefer derived values during render, event-driven updates, TanStack Query for server state, and focused hooks from a maintained hooks library for external subscriptions.
 - If synchronization truly cannot fit one of those patterns, stop and document why before introducing lifecycle synchronization.
 - React components are projections, never authorities for application state. Store all application state in TanStack DB collections.
+- `useState` is exempt only for transient chrome that no reader would miss after a reload: a "Copied" flag on its timer, a menu's keyboard highlight, an open/closed disclosure with no address. Anything a card projects — a filter, a selection, a drawer, a view mode — lives in the card payload and changes through a flow, so it survives a reload and an open-in-tab (`cards/TargetCards.tsx` `target.filter` / `target.select`, `cards/GraphCard.tsx` `target.graph.filter` / `target.graph.focus`).
 - Human, Smithers, and system changes must enter through the shared Flux transition dispatcher with their actor recorded.
 - Persist local collections with SQLite. Preserve the collection boundary so Electric can become the synced authority without rewriting UI consumers.
 - Keep Smithers' Wiki (its world state; the `world` ids persist under the Wiki label) as Markdown-native, linked documents in its own TanStack DB collection. Record provenance, confidence, actor, and revision; do not present inferred world state as ground truth.

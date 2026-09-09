@@ -75,6 +75,7 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
   "target.pick": "picking a grouped row's members is the human's control",
   "target.run.set": "runs the members the human picked in the table; the agent runs a target by label with target.run",
   "target.graph.focus": "the graph drawer's own selection; the agent opens the graph focused with target.graph [label]",
+  "target.graph.filter": "the graph canvas' own toolbar; the agent opens the graph focused with target.graph [label]",
   "target.run.scrub": "the replay slider is the human's gesture (time travel)",
   // The run trace's reader gestures (factory spec 06 §6).
   "runs.trace.filter": "a view filter is the reader's gesture",
