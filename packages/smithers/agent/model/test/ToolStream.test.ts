@@ -1,8 +1,44 @@
+import { Chunk } from "effect"
 import { describe, expect, it } from "vitest"
 import { ModelError } from "../src/ModelError.ts"
 import * as ToolStream from "../src/ToolStream.ts"
 
 describe("ToolStream", () => {
+  it("accumulates increasing fragment counts in near-linear time", () => {
+    const measure = (count: number): number => {
+      let state = ToolStream.start(ToolStream.initial(), { callId: "call", name: "write" })
+      state = ToolStream.delta(state, "call", "{\"text\":\"")
+      const started = performance.now()
+      for (let index = 0; index < count; index++) {
+        state = ToolStream.delta(state, "call", index % 2 === 0 ? "a" : "b")
+      }
+      const elapsed = performance.now() - started
+      state = ToolStream.delta(state, "call", "\"}")
+      const result = ToolStream.end(state, "call")
+      if (result instanceof ModelError) throw result
+      expect(result.completed.arguments).toBe("{\"text\":\"" + "ab".repeat(count / 2) + "\"}")
+      return elapsed
+    }
+    measure(2_000)
+    // Best of three reduces interference from other workers and GC. Four times
+    // the input permits eight times the work, but rejects quadratic copying.
+    const small = Math.min(...Array.from({ length: 3 }, () => measure(10_000)))
+    const large = Math.min(...Array.from({ length: 3 }, () => measure(40_000)))
+    expect(large).toBeLessThan(small * 8 + 20)
+  })
+
+  it("preserves earlier states when tool arguments branch", () => {
+    const opened = ToolStream.start(ToolStream.initial(), { callId: "call", name: "write" })
+    const prefix = ToolStream.delta(opened, "call", "{\"value\":")
+    const left = ToolStream.delta(prefix, "call", "1}")
+    const right = ToolStream.delta(prefix, "call", "2}")
+
+    expect(ToolStream.flushAborted(opened).completed[0]?.arguments).toBe("")
+    expect(ToolStream.flushAborted(prefix).completed[0]?.arguments).toBe("{\"value\":")
+    expect(ToolStream.end(left, "call")).toMatchObject({ completed: { arguments: "{\"value\":1}" } })
+    expect(ToolStream.end(right, "call")).toMatchObject({ completed: { arguments: "{\"value\":2}" } })
+  })
+
   it("reassembles JSON fragments", () => {
     let state = ToolStream.initial()
     state = ToolStream.start(state, { callId: "call_1", name: "lookup" })
@@ -31,8 +67,8 @@ describe("ToolStream", () => {
     state = ToolStream.delta(state, "missing", "ignored")
 
     expect(state.open).toEqual([
-      { callId: "first", name: "one", fragments: [] },
-      { callId: "second", name: "two", fragments: ["{\"b\":2}"] }
+      { callId: "first", name: "one", fragments: Chunk.empty() },
+      { callId: "second", name: "two", fragments: Chunk.of("{\"b\":2}") }
     ])
   })
 
@@ -60,7 +96,7 @@ describe("ToolStream", () => {
     state = ToolStream.delta(state, "call_1", "{\"stale\":true}")
     state = ToolStream.start(state, { callId: "call_1", name: "second" })
 
-    expect(state.open).toEqual([{ callId: "call_1", name: "second", fragments: [] }])
+    expect(state.open).toEqual([{ callId: "call_1", name: "second", fragments: Chunk.empty() }])
     const result = ToolStream.end(state, "call_1")
     if (result instanceof ModelError) throw result
     expect(result.completed).toEqual({ callId: "call_1", name: "second", arguments: "{}" })

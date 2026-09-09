@@ -3,7 +3,7 @@
  *
  * @since 0.1.0
  */
-import { Effect, Option, Result, Schema } from "effect"
+import { Chunk, Effect, Option, Result, Schema } from "effect"
 import * as DeferredTools from "./DeferredTools.ts"
 import { classifyHttpStatus } from "./HttpStatusClassifier.ts"
 import { ModelError, type ModelErrorCode } from "./ModelError.ts"
@@ -208,7 +208,7 @@ type Block =
     readonly id: string
     readonly signature: string | undefined
     readonly started: boolean
-    readonly fragments: ReadonlyArray<string>
+    readonly fragments: Chunk.Chunk<string>
   }
   | { readonly type: "tool_use"; readonly index: number; readonly id: string; readonly name: string }
 
@@ -522,8 +522,8 @@ const onContentBlockStart = (state: State, event: AnthropicEvent): StepResult | 
         signature: content.signature,
         started,
         fragments: started || content.thinking === undefined || content.thinking === ""
-          ? []
-          : [content.thinking]
+          ? Chunk.empty()
+          : Chunk.of(content.thinking)
       }),
       events: started
         ? [
@@ -544,7 +544,7 @@ const onContentBlockStart = (state: State, event: AnthropicEvent): StepResult | 
     const id = `thinking-${index}`
     const signature = `${REDACTED_THINKING_PREFIX}${content.data ?? ""}`
     return {
-      state: startBlock(state, { type: "thinking", index, id, signature, started: true, fragments: [] }),
+      state: startBlock(state, { type: "thinking", index, id, signature, started: true, fragments: Chunk.empty() }),
       events: [ModelEvent.ThinkingStart({ type: "thinking-start", id, signature })]
     }
   }
@@ -589,7 +589,7 @@ const onContentBlockDelta = (state: State, event: AnthropicEvent): StepResult =>
   if (delta.type === "thinking_delta" && delta.thinking !== undefined && block?.type === "thinking") {
     if (!block.started) {
       return {
-        state: startBlock(state, { ...block, fragments: [...block.fragments, delta.thinking] }),
+        state: startBlock(state, { ...block, fragments: Chunk.append(block.fragments, delta.thinking) }),
         events: []
       }
     }
@@ -611,7 +611,7 @@ const onContentBlockDelta = (state: State, event: AnthropicEvent): StepResult =>
         ...block,
         signature: delta.signature,
         started: true,
-        fragments: []
+        fragments: Chunk.empty()
       }),
       events: [
         ModelEvent.ThinkingStart({
@@ -619,7 +619,7 @@ const onContentBlockDelta = (state: State, event: AnthropicEvent): StepResult =>
           id: block.id,
           signature: delta.signature
         }),
-        ...block.fragments.map((text) =>
+        ...Chunk.toReadonlyArray(block.fragments).map((text) =>
           ModelEvent.ThinkingDelta({
             type: "thinking-delta",
             id: block.id,
@@ -675,7 +675,7 @@ const onContentBlockStop = (
               id: block.id,
               signature: block.signature
             }),
-            ...block.fragments.map((text) =>
+            ...Chunk.toReadonlyArray(block.fragments).map((text) =>
               ModelEvent.ThinkingDelta({
                 type: "thinking-delta",
                 id: block.id,
@@ -797,7 +797,7 @@ const finalize = (state: State): ReadonlyArray<ModelEvent> => {
             id: block.id,
             signature: block.signature
           }),
-          ...block.fragments.map((text) =>
+          ...Chunk.toReadonlyArray(block.fragments).map((text) =>
             ModelEvent.ThinkingDelta({
               type: "thinking-delta",
               id: block.id,

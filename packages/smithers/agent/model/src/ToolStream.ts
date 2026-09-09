@@ -3,7 +3,7 @@
  *
  * @since 0.1.0
  */
-import { Option, Schema } from "effect"
+import { Chunk, Option, Schema } from "effect"
 import { ModelError } from "./ModelError.ts"
 import { JsonObject } from "./ModelRequest.ts"
 
@@ -17,7 +17,7 @@ import { JsonObject } from "./ModelRequest.ts"
 export interface OpenToolCall {
   readonly callId: string
   readonly name: string
-  readonly fragments: ReadonlyArray<string>
+  readonly fragments: Chunk.Chunk<string>
 }
 
 /**
@@ -90,7 +90,7 @@ export const initial = (): State => ({ open: [] })
  * @slop
  */
 export const start = (state: State, call: { readonly callId: string; readonly name: string }): State => ({
-  open: [...state.open.filter((entry) => entry.callId !== call.callId), { ...call, fragments: [] }]
+  open: [...state.open.filter((entry) => entry.callId !== call.callId), { ...call, fragments: Chunk.empty() }]
 })
 
 /**
@@ -102,7 +102,7 @@ export const start = (state: State, call: { readonly callId: string; readonly na
  */
 export const delta = (state: State, callId: string, fragment: string): State => ({
   open: state.open.map((entry) =>
-    entry.callId === callId ? { ...entry, fragments: [...entry.fragments, fragment] } : entry
+    entry.callId === callId ? { ...entry, fragments: Chunk.append(entry.fragments, fragment) } : entry
   )
 })
 
@@ -126,7 +126,7 @@ export const end = (state: State, callId: string): EndResult => {
   if (call === undefined) {
     return invalidOutput(`Received completion for unknown tool call ${callId}`)
   }
-  const arguments_ = call.fragments.join("") || "{}"
+  const arguments_ = Chunk.toReadonlyArray(call.fragments).join("") || "{}"
   if (Option.isNone(decodeArguments(arguments_))) {
     return invalidOutput(`Invalid JSON input for streamed tool call ${call.name}`)
   }
@@ -153,6 +153,6 @@ export const flushAborted = (state: State): FlushResult => ({
   completed: state.open.map((call) => ({
     callId: call.callId,
     name: call.name,
-    arguments: call.fragments.join("")
+    arguments: Chunk.toReadonlyArray(call.fragments).join("")
   }))
 })

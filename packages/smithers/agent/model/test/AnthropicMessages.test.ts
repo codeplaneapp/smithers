@@ -196,6 +196,85 @@ describe("AnthropicMessages streaming", () => {
     ])
   })
 
+  it("buffers increasing unsigned thinking fragment counts in near-linear time", () => {
+    const stream = AnthropicMessages.protocol.stream
+    const decode = Schema.decodeUnknownSync(stream.event)
+    const deltas = ["a", "b"].map((thinking) =>
+      decode(JSON.stringify({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking }
+      }))
+    )
+    const measure = (count: number): number => {
+      let [state] = step(
+        stream.initial(streamRequest),
+        JSON.stringify({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "prefix" }
+        })
+      )
+      const started = performance.now()
+      for (let index = 0; index < count; index++) {
+        const [next, events] = Effect.runSync(stream.step(state, deltas[index % 2]!))
+        state = next
+        if (events.length !== 0) throw new Error("Unsigned thinking was emitted before settlement")
+      }
+      const elapsed = performance.now() - started
+      const [, events] = step(state, "{\"type\":\"content_block_stop\",\"index\":0}")
+      expect(events.filter((event) => event.type === "thinking-delta").map((event) => event.text).join(""))
+        .toBe("prefix" + "ab".repeat(count / 2))
+      return elapsed
+    }
+    measure(2_000)
+    const small = Math.min(...Array.from({ length: 3 }, () => measure(10_000)))
+    const large = Math.min(...Array.from({ length: 3 }, () => measure(40_000)))
+    expect(large).toBeLessThan(small * 8 + 20)
+  })
+
+  it.each(["signature", "stop", "halt"] as const)(
+    "flushes thinking in order on %s without changing earlier states",
+    (ending) => {
+      const stream = AnthropicMessages.protocol.stream
+      const [prefix] = step(
+        stream.initial(streamRequest),
+        JSON.stringify({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "first" }
+        })
+      )
+      let state = prefix
+      for (const thinking of [" second", " third"]) {
+        const [next, events] = step(
+          state,
+          JSON.stringify({
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "thinking_delta", thinking }
+          })
+        )
+        expect(events).toEqual([])
+        state = next
+      }
+      const events = ending === "halt"
+        ? stream.onHalt!(state)
+        : step(
+          state,
+          JSON.stringify(
+            ending === "signature"
+              ? { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig" } }
+              : { type: "content_block_stop", index: 0 }
+          )
+        )[1]
+      expect(events.filter((event) => event.type === "thinking-delta").map((event) => event.text))
+        .toEqual(["first", " second", " third"])
+      expect(stream.onHalt!(prefix).filter((event) => event.type === "thinking-delta").map((event) => event.text))
+        .toEqual(["first"])
+    }
+  )
+
   it("attaches a late signature to the complete thinking block", () => {
     const data = [
       "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}",

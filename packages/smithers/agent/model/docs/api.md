@@ -480,6 +480,11 @@ and a partition with no immediate tools collapses to all-immediate.
 
 Pure accumulation of fragmented provider tool-call arguments.
 
+`OpenToolCall.fragments` is an immutable `Chunk<string>` in arrival order.
+Deltas share prior chunks without copying all previous fragments; completion
+and abort settlement flatten the chunks once. Earlier states remain reusable.
+Use `Chunk.toReadonlyArray(call.fragments)` when an array is needed.
+
 | Export                           | Kind        | Behavior                                                                                                                                                                                                                                                                                                                                    |
 | -------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `State`                          | interface   | `{ open: OpenToolCall[] }`: the accumulator.                                                                                                                                                                                                                                                                                                |
