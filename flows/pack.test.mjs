@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, matchesGlob, relative } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +33,7 @@ import * as Detect from "../packages/smithers/migrate/src/Detect.ts";
 
 const flowsRoot = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(flowsRoot);
+const cli = join(repoRoot, "packages/smithers/bin/smithers.mjs");
 const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer);
 const run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(platform)));
 
@@ -250,10 +251,9 @@ describe("the binary this lane's suites spawn", () => {
 
 describe("the CLI the staged prompt bodies teach", () => {
   const files = markdownFlows();
-  const sourceCli = join(repoRoot, "packages/smithers/bin/smithers.mjs");
 
   /**
-   * `smithers <verb> --help`, once per verb path.
+   * `smthrs <verb> --help`, once per verb path.
    *
    * These bodies are shipped instructions: an agent reads one and runs the
    * command it names. `effect/unstable/cli` answers an undeclared flag with
@@ -266,7 +266,7 @@ describe("the CLI the staged prompt bodies teach", () => {
     if (!listings.has(path)) {
       listings.set(
         path,
-        spawnSync(process.execPath, [sourceCli, ...path.split(" "), "--help"], {
+        spawnSync(process.execPath, [cli, ...path.split(" "), "--help"], {
           cwd: repoRoot,
           encoding: "utf8",
           timeout: 180_000,
@@ -276,9 +276,9 @@ describe("the CLI the staged prompt bodies teach", () => {
     return listings.get(path);
   };
 
-  /** Every `smithers ...` invocation a body names, in code spans or fences. */
+  /** Every `smthrs ...` or legacy `smithers ...` invocation in code spans or fences. */
   const invocations = (text) =>
-    [...text.matchAll(/`smithers ([^`\n]+)`|^\s*smithers ([^\n]+)$/gm)]
+    [...text.matchAll(/`(?:smthrs|smithers) ([^`\n]+)`|^\s*(?:smthrs|smithers) ([^\n]+)$/gm)]
       .map((match) => (match[1] ?? match[2]).trim())
       .filter((argv) => argv.length > 0);
 
@@ -294,40 +294,86 @@ describe("the CLI the staged prompt bodies teach", () => {
 
   const longFlags = (text) => [...text.matchAll(/--[a-z][a-z-]+/g)].map((match) => match[0]);
 
+  const validatePrompt = (text, name) => {
+    const named = invocations(text);
+    if (/\b(?:smthrs|smithers)\s+[a-z]/.test(text)) {
+      assert.ok(named.length > 0, `${name} teaches CLI commands but none reached validation`);
+    }
+    const paths = new Set();
+
+    for (const argv of named) {
+      const path = verbPath(argv);
+      assert.ok(path.length > 0, `\`smthrs ${argv}\` names no verb`);
+      const listing = help(path);
+      assert.equal(listing.status, 0, `\`smthrs ${path}\` is not a command: ${listing.stderr}`);
+      // An unknown verb with --help can print root help and still exit zero.
+      const usage = /(?:^Usage:|^USAGE)\s+([^\n]+)/m.exec(listing.stdout)?.[1];
+      assert.ok(
+        usage === `smthrs ${path}` || usage?.startsWith(`smthrs ${path} `),
+        `\`smthrs ${path}\` is not a command: ${listing.stdout}`,
+      );
+      paths.add(path);
+      for (const flag of longFlags(argv)) {
+        assert.ok(
+          listing.stdout.includes(flag),
+          `\`smthrs ${path}\` does not declare ${flag}, which ${name} tells the operator to run; ` +
+            "effect/unstable/cli exits 2 on an undeclared flag",
+        );
+      }
+    }
+
+    // A flag named on its own, away from its command, is the same defect
+    // wearing a different shape: some command in the body has to declare it.
+    const attached = new Set(named.flatMap((argv) => longFlags(argv)));
+    for (const [, flag] of text.matchAll(/`(--[a-z][a-z-]+)(?:[ =][^`\n]*)?`/g)) {
+      if (attached.has(flag)) continue;
+      const declaring = [...paths].find((path) => help(path).stdout.includes(flag));
+      assert.ok(
+        declaring !== undefined,
+        `${name} names ${flag}, and no command it names declares it: ${[...paths].join(", ")}`,
+      );
+    }
+  };
+
+  it("extracts current and legacy commands from inline spans and fences", () => {
+    const prompt = [
+      "Run `smthrs ls` and `smithers doctor`.",
+      "```sh",
+      "  smthrs logs <run-id> --follow",
+      "  smithers plan <flow>",
+      "```",
+    ].join("\n");
+    assert.deepEqual(invocations(prompt), ["ls", "doctor", "logs <run-id> --follow", "plan <flow>"]);
+  });
+
+  it("rejects a fixture prompt teaching an invalid smthrs verb and flag", () => {
+    for (const argv of ["definitely-invalid-verb", "definitely-invalid-verb --definitely-invalid-flag"]) {
+      assert.throws(
+        () => validatePrompt(`Run \`smthrs ${argv}\`.`, "invalid verb fixture"),
+        /smthrs definitely-invalid-verb.*is not a command/,
+      );
+    }
+  });
+
+  it("rejects a fixture prompt teaching an invalid flag on a valid smthrs command", () => {
+    assert.throws(
+      () => validatePrompt("```sh\nsmthrs ls --definitely-invalid-flag\n```", "invalid flag fixture"),
+      /smthrs ls.*does not declare --definitely-invalid-flag/,
+    );
+  });
+
+  it("rejects a command-teaching prompt with no extracted invocations", () => {
+    assert.throws(
+      () => validatePrompt("Run smthrs ls to list flows.", "unformatted command fixture"),
+      /teaches CLI commands but none reached validation/,
+    );
+  });
+
   for (const file of files) {
     const name = relative(flowsRoot, dirname(file)).split("\\").join("/");
 
     it(`${name} names only commands and flags this CLI declares`, () => {
-      const text = readFileSync(file, "utf8");
-      const named = invocations(text);
-      const paths = new Set();
-
-      for (const argv of named) {
-        const path = verbPath(argv);
-        assert.ok(path.length > 0, `\`smithers ${argv}\` names no verb`);
-        const listing = help(path);
-        assert.equal(listing.status, 0, `\`smithers ${path}\` is not a command: ${listing.stderr}`);
-        paths.add(path);
-        for (const flag of longFlags(argv)) {
-          assert.ok(
-            listing.stdout.includes(flag),
-            `\`smithers ${path}\` does not declare ${flag}, which ${name} tells the operator to run; ` +
-              "effect/unstable/cli exits 2 on an undeclared flag",
-          );
-        }
-      }
-
-      // A flag named on its own, away from its command, is the same defect
-      // wearing a different shape: some command in the body has to declare it.
-      const attached = new Set(named.flatMap((argv) => longFlags(argv)));
-      for (const [, flag] of text.matchAll(/`(--[a-z][a-z-]+)(?:[ =][^`\n]*)?`/g)) {
-        if (attached.has(flag)) continue;
-        const declaring = [...paths].find((path) => help(path).stdout.includes(flag));
-        assert.ok(
-          declaring !== undefined,
-          `${name} names ${flag}, and no command it names declares it: ${[...paths].join(", ")}`,
-        );
-      }
+      validatePrompt(readFileSync(file, "utf8"), name);
     });
   }
 });
@@ -533,7 +579,7 @@ describe("the smithers-0x-hello fixture", () => {
     const globs = [...workspace.matchAll(/^ {2}- "([^"]+)"$/gm)].map((match) => match[1]);
     assert.ok(globs.length > 0, "the workspace file must declare package globs");
     for (const glob of globs) {
-      assert.ok(!glob.startsWith("flows"), `workspace glob "${glob}" would pick up the fixture`);
+      assert.ok(!matchesGlob(`flows/${FIXTURE}`, glob), `workspace glob "${glob}" would pick up the fixture`);
     }
   });
 
@@ -564,7 +610,7 @@ describe("the smithers-0x-hello fixture", () => {
     assert.equal(detection.effectPin, "4.0.0-beta.105");
     assert.ok(
       detection.warnings.some((warning) => warning.code === "effect-pin-conflict"),
-      "the beta.105 pin must be reported against the rc.108 the 1.0 tree requires",
+      "the fixture's Effect pin must be reported against the version the 1.0 tree requires",
     );
   });
 
@@ -588,8 +634,6 @@ describe("the fixture under the real CLI", () => {
   after(() => {
     for (const directory of staged) rmSync(directory, { recursive: true, force: true });
   });
-
-  const cli = join(repoRoot, "packages", "cli", "bin", "smithers.mjs");
 
   /**
    * A copy of the fixture outside this repository.
@@ -635,7 +679,7 @@ describe("the fixture under the real CLI", () => {
   it("passes the migrate verb's 0.x run gate, having no run state to refuse", () => {
     const project = detached();
 
-    const result = smithers(project, "migrate");
+    const result = smithers(project, "migrate", "--format", "json");
 
     // The gate reads any 0.x `smithers.db` for non-terminal runs. The fixture
     // has none, so the verb gets past it and reaches the migration tool, which
@@ -643,7 +687,8 @@ describe("the fixture under the real CLI", () => {
     // project being migrated does not have. A refusal here would mean the gate
     // fired on a project with nothing to refuse.
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /^Run state: clean\.$/m);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.runState.verdict, "clean");
     assert.ok(
       !`${result.stdout}${result.stderr}`.includes("non-terminal"),
       "the 0.x run gate refused a fixture that holds no run state",
@@ -653,18 +698,17 @@ describe("the fixture under the real CLI", () => {
   it("is a project the migration planner reads as 0.x work, not an empty directory", () => {
     const project = detached();
 
-    const result = smithers(project, "migrate");
+    const result = smithers(project, "migrate", "--format", "json");
 
     assert.equal(result.status, 0, result.stderr);
     // The fixture exists to give the migration tool something real to plan
     // against. A fixture that planned zero units would pass every gate above
     // and prove nothing, so the counts are the assertion.
-    const units = /^Units: (\d+) planned, /m.exec(result.stdout);
-    assert.ok(units, `the planner reported no unit line:\n${result.stdout}`);
-    assert.ok(Number(units[1]) >= 3, `the fixture planned only ${units[1]} units`);
-    const constructs = /^Constructs: (\d+) rows across (\d+) mapping decisions\.$/m.exec(result.stdout);
-    assert.ok(constructs, `the planner reported no construct line:\n${result.stdout}`);
-    assert.ok(Number(constructs[1]) > 0 && Number(constructs[2]) > 0);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.mode, "plan");
+    assert.ok(report.units.length >= 3, `the fixture planned only ${report.units.length} units`);
+    assert.ok(report.inventory.length > 0, "the planner reported no construct rows");
+    assert.ok(report.mapping.length > 0, "the planner reported no mapping decisions");
     // The 0.x `<UI>` element is the construct the 1.0 command contract has no
     // counterpart for, and the fixture carries one so a person sees it.
     assert.match(result.stdout, /\.smithers\/workflows\/hello\.tsx/);
