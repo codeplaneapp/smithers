@@ -434,11 +434,16 @@ const fileSystemProbe = (
           Effect.timeout("5 seconds"),
           Effect.forkChild({ startImmediately: true })
         )
-        // A supplied host may itself provide TestClock. This foreign Promise
-        // gives the watcher time to subscribe without depending on that clock.
-        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 10)))
-        yield* fs.writeFile(at("watched.txt"), bytes)
-        yield* Fiber.join(watched)
+        // Keep producing events until the watcher observes one: subscribing
+        // can take longer than any fixed initial delay. The foreign Promise
+        // also works when the supplied host provides a frozen TestClock.
+        yield* Effect.raceFirst(
+          Fiber.join(watched),
+          fs.writeFile(at("watched.txt"), bytes).pipe(
+            Effect.andThen(Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 10)))),
+            Effect.forever
+          )
+        )
       })
     case "writeFile":
       return Effect.gen(function*() {

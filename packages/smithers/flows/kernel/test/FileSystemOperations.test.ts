@@ -224,6 +224,12 @@ const cases: ReadonlyArray<Case> = [
     run: (fs) => Effect.scoped(fs.makeTempFileScoped())
   },
   {
+    name: "makeTempFileScoped in an explicit directory",
+    capabilities: [write("/workspace/scratch")],
+    hostCall: "makeTempFileScoped",
+    run: (fs) => Effect.scoped(fs.makeTempFileScoped({ directory: "scratch" }))
+  },
+  {
     name: "open for reading",
     capabilities: [read("/workspace/a")],
     hostCall: "open",
@@ -450,10 +456,24 @@ describe("FileSystem operation guards", () => {
       }))
   }
 
-  it.effect("uses the resolved outside-workspace sentinel for every implicit system-temp operation", () =>
+  it.effect("uses the system-temp sentinel and normalizes every explicit temporary directory", () =>
     Effect.gen(function*() {
       const checks: Array<Capability.Capability> = []
       const calls: Array<string> = []
+      const directories: Array<string | undefined> = []
+      const recordTemp = (name: string, options?: { readonly directory?: string | undefined }) =>
+        Effect.sync(() => {
+          calls.push(name)
+          directories.push(options?.directory)
+          return "/tmp/temp"
+        })
+      const host = FileSystem.withIsolatedFileSystem(EffectFileSystem.makeNoop({
+        ...makeHostFileSystem(calls),
+        makeTempDirectory: (options) => recordTemp("makeTempDirectory", options),
+        makeTempDirectoryScoped: (options) => recordTemp("makeTempDirectoryScoped", options),
+        makeTempFile: (options) => recordTemp("makeTempFile", options),
+        makeTempFileScoped: (options) => recordTemp("makeTempFileScoped", options)
+      }))
       const exit = yield* (
         provide(
           (fileSystem) =>
@@ -462,8 +482,12 @@ describe("FileSystem operation guards", () => {
               yield* Effect.scoped(fileSystem.makeTempDirectoryScoped())
               yield* fileSystem.makeTempFile()
               yield* Effect.scoped(fileSystem.makeTempFileScoped())
+              yield* fileSystem.makeTempDirectory({ directory: "scratch" })
+              yield* Effect.scoped(fileSystem.makeTempDirectoryScoped({ directory: "scratch" }))
+              yield* fileSystem.makeTempFile({ directory: "scratch" })
+              yield* Effect.scoped(fileSystem.makeTempFileScoped({ directory: "scratch" }))
             }),
-          hostFileSystem(calls),
+          host,
           scriptedStore(() => true, checks)
         )
       )
@@ -473,14 +497,32 @@ describe("FileSystem operation guards", () => {
         write("/<system-temp>"),
         write("/<system-temp>"),
         write("/<system-temp>"),
-        write("/<system-temp>")
+        write("/<system-temp>"),
+        write("/workspace/scratch"),
+        write("/workspace/scratch"),
+        write("/workspace/scratch"),
+        write("/workspace/scratch")
       ])
-      expect(checks.every((check) => !check.resource.startsWith("/workspace"))).toBe(true)
+      expect(checks.slice(0, 4).every((check) => !check.resource.startsWith("/workspace"))).toBe(true)
       expect(calls.filter((call) => call !== "stat")).toEqual([
         "makeTempDirectory",
         "makeTempDirectoryScoped",
         "makeTempFile",
+        "makeTempFileScoped",
+        "makeTempDirectory",
+        "makeTempDirectoryScoped",
+        "makeTempFile",
         "makeTempFileScoped"
+      ])
+      expect(directories).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "/workspace/scratch",
+        "/workspace/scratch",
+        "/workspace/scratch",
+        "/workspace/scratch"
       ])
     }))
 
