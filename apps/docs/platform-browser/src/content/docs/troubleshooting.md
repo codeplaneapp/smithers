@@ -64,14 +64,14 @@ the mount, so only the page knows when a checkpoint is due.
 ChildProcess.spawn: the working directory /workspace/notes.txt is not a directory
 ```
 
-**Cause.** The `cwd` on the command names a regular file, or names nothing at
-all. The adapter stats `cwd` and refuses a non-directory rather than handing it
-to the interpreter.
+**Cause.** The `cwd` on the command names an existing non-directory. The
+adapter stats `cwd` and reports `BadArgument` from `ChildProcess.spawn` before
+calling the interpreter. An absent path propagates `NotFound` from `FileSystem.stat`
+instead.
 
 **Fix.** Pass an absolute path to an existing directory inside the volume. A tab
 has no `process.cwd()`, so a relative `cwd` resolves against the volume root
-rather than against the ambient working directory a server would have. A missing
-path fails the same way, with the backend's `NotFound` from the `stat`.
+rather than against the ambient working directory a server would have.
 
 ## The spawner refuses an option instead of running the command
 
@@ -113,8 +113,10 @@ the whole run being cancelled by someone else, so the abort is reported as a
 value in the error channel instead. The `pathOrDescriptor` is the command line
 that was aborted.
 
-**Fix.** Handle the failure. `Effect.either(handle.exitCode)` gives you a `Left`
-carrying this error rather than an interrupted fiber.
+**Fix.** `Effect.result(handle.exitCode)` returns a `Failure` with this
+`PlatformError` in `failure`, or a `Success` with the exit code in `success`.
+The abort is a typed failure; defects and fiber interruptions are not captured
+by `Effect.result`.
 
 ## Unknown: a message from the interpreter, at ChildProcess.spawn
 

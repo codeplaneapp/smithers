@@ -149,7 +149,8 @@ module and covered by a test:
 | Concurrency                    | one run at a time, behind a permit held until the interpreter promise settles, abort included, so two interpreters never mutate the mount at once                                                                     |
 | `pid`                          | a per-layer counter, not an OS pid; `unref` is a no-op                                                                                                                                                                |
 | Process pipelines              | a `PipedCommand` is rejected; express the pipeline as one command line                                                                                                                                                |
-| `additionalFds`                | `Sink.drain` and `Stream.empty`, the answer `NodeChildProcessSpawner` gives for an unconfigured descriptor                                                                                                            |
+| `additionalFds`                | a nonempty configuration is rejected at spawn time with `BadArgument`; just-bash cannot configure extra file descriptors |
+| `getInputFd` / `getOutputFd`   | `Sink.drain` / `Stream.empty` for an unconfigured descriptor, matching `NodeChildProcessSpawner` |
 | `extendEnv`                    | honoured as a request to the interpreter: just-bash merges `env` into its own environment unless asked for `replaceEnv`, so the adapter asks for replacement whenever `env` is supplied and `extendEnv` is not `true` |
 | `stdout`/`stderr` options      | kept at their Node meaning: `"inherit"` and `"ignore"` yield an empty stream, a `Sink` is transduced through, even though the interpreter captured the text either way                                                |
 

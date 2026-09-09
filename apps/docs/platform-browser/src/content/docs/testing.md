@@ -74,9 +74,10 @@ const output = Effect.flatMap(
 ).pipe(Effect.provide(BrowserServices.layer({ bash, fs: NodeFsPromises })))
 ```
 
-The spawner stats `cwd` through `FileSystem` before it runs anything, so a test
-that passes a directory which does not exist asserts a `BadArgument` and an
-interpreter that was never called.
+The spawner stats `cwd` before it runs anything. For an absent path, assert
+`NotFound` from `FileSystem.stat`. For an existing non-directory, assert
+`BadArgument` from `ChildProcess.spawn`. In both cases, assert that the
+interpreter was never called.
 
 ## Assert the rendered command line
 
@@ -115,9 +116,9 @@ const throwingFs = (cause: unknown): BrowserFileSystem.ZenFsPromisesLike => {
 const denied = BrowserFileSystem.make(throwingFs(Object.assign(new Error("EACCES: boom"), { code: "EACCES" })))
 ```
 
-`lstat` and `realpath` are absent from that literal on purpose. They are the two
-optional members, and omitting them is how a test exercises the degraded paths:
-lexical canonicalization in `realPath`, and the 128-level ceiling on a recursive
+`lstat` and `realpath` are absent from that literal on purpose. Both members are
+optional. Without `realpath`, `realPath` fails with a `PermissionDenied`
+`PlatformError`. Omitting both exercises the 128-level ceiling on a recursive
 `readDirectory`.
 
 ## Make the stub settle after an abort

@@ -34,9 +34,9 @@ command runs. `BrowserServices.layer` and `BrowserHost.layer` provide both.
 ## Pass an absolute working directory
 
 A tab has no `process.cwd()`, so give `cwd` an absolute path inside the mounted
-volume. The adapter stats it first and fails with a `BadArgument` before running
-anything when the path is missing or is not a directory, rather than handing a
-regular file to the interpreter as a working directory.
+volume. The adapter stats it before running anything. An absent path propagates
+`NotFound` from `FileSystem.stat`; an existing non-directory produces
+`BadArgument` from `ChildProcess.spawn`. Neither case calls the interpreter.
 
 ## Environment variables replace by default
 
@@ -86,11 +86,15 @@ const cancelled = Effect.scoped(
     const spawner = yield* ChildProcessSpawner
     const handle = yield* spawner.spawn(ChildProcess.make("slow-thing"))
     yield* handle.kill()
-    // Left(PlatformError), not an interrupted fiber.
-    return yield* Effect.either(handle.exitCode)
+    // Failure carrying the abort PlatformError.
+    return yield* Effect.result(handle.exitCode)
   })
 )
 ```
+
+`Effect.result` returns a `Failure` with the `PlatformError` in `failure`, or a
+`Success` with the exit code in `success`. The abort is a typed failure; defects
+and fiber interruptions are not captured by `Effect.result`.
 
 `killSignal` is accepted and ignored, because there is no process to signal in a
 tab. `forceKillAfter` is refused instead of dropped: there is no harder stop
