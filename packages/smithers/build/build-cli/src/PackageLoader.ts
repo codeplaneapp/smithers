@@ -595,19 +595,24 @@ export const load = async (discovery: Discovery): Promise<LoadedGraph> => {
 }
 
 /**
- * Evaluates only WORKSPACE.ts (with its own imports) to learn the declared
- * cache directory, so discovery can prune it before the package walk.
+ * Evaluates only WORKSPACE.ts (with its own imports) and returns the
+ * validated declaration, so discovery can read the two boundaries it bounds
+ * itself with — the cache directory and the child repositories — before the
+ * package walk.
  *
- * The probe is deliberately forgiving: any failure returns undefined and the
- * full load reports the real diagnostic. The evaluated namespace is
- * discarded — target identity always comes from the one real load.
+ * Every failure rejects: a typed `PackageError` from the scan or from the
+ * declaration itself passes through untouched, and anything else is wrapped
+ * as `module_import_failed` naming the workspace file. Nothing here resolves
+ * to undefined, and this function keeps no memo of its own, so every call
+ * re-evaluates the module.
  *
  * ## Evaluation lifetime
  *
- * The discovery probe and {@link load} use separate tsx namespaces. The full
- * graph evaluates the workspace again, with its packages sharing that graph's
- * namespace. The probe's target values are discarded. The memo below avoids
- * repeating the probe within one process; it does not invalidate module caches.
+ * Each call evaluates the workspace in a fresh tsx namespace, separate from
+ * the one {@link load} uses. The full graph evaluates the workspace again,
+ * with its packages sharing that graph's namespace, so target identity always
+ * comes from the one real load and the namespace this call evaluates is
+ * discarded once the declaration validates.
  *
  * @category loading
  * @since 0.1.0
@@ -643,8 +648,14 @@ export const loadWorkspaceDeclaration = async (
 }
 
 /**
- * Evaluates only WORKSPACE.ts to learn its cache directory. Failures stay
- * forgiving here so the full graph load can report the typed diagnostic.
+ * Reads the declared cache directory off the workspace declaration, so the
+ * package walk can prune it before it lists anything.
+ *
+ * The probe is deliberately forgiving: any failure returns undefined and the
+ * full load reports the real diagnostic. The memo below avoids repeating the
+ * probe within one process; it does not invalidate module caches, and it
+ * holds the probe alone — {@link loadWorkspaceDeclaration} above is
+ * unmemoized.
  *
  * @category loading
  * @since 0.1.0

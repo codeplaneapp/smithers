@@ -82,10 +82,16 @@ inside the workspace, and a directory outside one is refused with
 `current directory is outside workspace`. Absolute labels and patterns never
 need one.
 
-An exact label loads the one declaration module it names. A recursive pattern
-loads the modules of the selected subtree. A direct import between declaration
-modules is an ordinary ESM edge and creates a dependency edge between their
-targets.
+The pattern never narrows what is loaded. Every admitted `PACKAGE.ts` is
+evaluated and validated first, and the index is built from the whole graph;
+the pattern then selects rows out of that finished index. A declaration that
+fails to evaluate or to validate therefore refuses the command even when the
+pattern names one target in an unrelated package, and the fault is reported
+against the file that broke, not against the label you typed.
+
+A direct import between declaration modules is an ordinary ESM edge. It
+declares a relationship, not a loading order, and it creates a dependency edge
+between the importing and imported targets.
 
 ## Repository targets
 

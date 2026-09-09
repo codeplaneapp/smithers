@@ -10,9 +10,11 @@
  */
 import { Cli as Incur } from "incur"
 import * as Fs from "node:fs"
+import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
 import { makeCli } from "../src/Cli.ts"
+import * as PackageLoader from "../src/PackageLoader.ts"
 
 const doc = Fs.readFileSync(NodePath.join(import.meta.dirname, "../docs/cli.md"), "utf8")
 
@@ -162,5 +164,72 @@ describe("planning documentation", () => {
     expect(text).toMatch(/resolve or build\s+declared environments/i)
     expect(text).toContain("Nix store")
     expect(text).toMatch(/tools.*PATH/)
+  })
+})
+
+/**
+ * The doc comments on `PackageLoader`'s two workspace entry points, checked
+ * against what each one does. The forgiving probe and the strict loader sat
+ * under one comment, so the exported loader advertised an undefined fallback
+ * and a memo that only the probe below it has.
+ */
+describe("workspace loader documentation", () => {
+  const loader = Fs.readFileSync(NodePath.join(import.meta.dirname, "../src/PackageLoader.ts"), "utf8")
+
+  /** The doc comment immediately above an exported binding, markers stripped. */
+  const docFor = (name: string): string => {
+    const declaration = loader.indexOf(`export const ${name} =`)
+    expect(declaration, `PackageLoader no longer exports ${name}`).toBeGreaterThan(0)
+    const open = loader.lastIndexOf("/**", declaration)
+    const close = loader.indexOf("*/", open)
+    expect(close, `${name} carries no doc comment`).toBeLessThan(declaration)
+    return loader.slice(open + 3, close).replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ")
+  }
+
+  it("documents loadWorkspaceDeclaration as the rejecting, unmemoized loader", () => {
+    const text = docFor("loadWorkspaceDeclaration")
+    expect(text).toContain("returns the validated declaration")
+    expect(text).toContain("module_import_failed")
+    expect(text).toMatch(/keeps no memo of its own/)
+    expect(text).not.toMatch(/any failure returns undefined/)
+    expect(text).not.toMatch(/memo below/)
+  })
+
+  it("documents probeCacheDirectory as the forgiving, memoized probe", () => {
+    const text = docFor("probeCacheDirectory")
+    expect(text).toMatch(/any failure returns undefined/)
+    expect(text).toMatch(/memo below/)
+  })
+
+  it("pins the behaviour each comment now claims", async () => {
+    const directory = Fs.mkdtempSync(NodePath.join(Os.tmpdir(), "build-cli-loader-docs-"))
+    Fs.writeFileSync(NodePath.join(directory, "WORKSPACE.ts"), "throw new Error(\"workspace refuses\")\n")
+    await expect(PackageLoader.loadWorkspaceDeclaration(directory, "WORKSPACE.ts")).rejects.toMatchObject({
+      code: "module_import_failed",
+      path: "WORKSPACE.ts"
+    })
+    await expect(PackageLoader.probeCacheDirectory(directory, "WORKSPACE.ts")).resolves.toBeUndefined()
+  })
+})
+
+/**
+ * The discovery guide's loading model. It promised that a label loaded only
+ * the modules it named, but every declaration is evaluated and validated
+ * before the pattern selects anything out of the finished index.
+ */
+describe("discovery guide loading model", () => {
+  const page = Fs.readFileSync(NodePath.join(import.meta.dirname, "../docs/concepts/discovery.md"), "utf8")
+    .replace(/\s+/g, " ")
+
+  it("does not promise selective declaration loading", () => {
+    expect(page).not.toMatch(/exact label loads the one declaration module/i)
+    expect(page).not.toMatch(/pattern loads the modules of the selected subtree/i)
+  })
+
+  it("describes whole-workspace evaluation followed by label selection", () => {
+    expect(page).toMatch(/pattern never narrows what is loaded/i)
+    expect(page).toMatch(/Every admitted `PACKAGE\.ts` is evaluated and validated first/)
+    expect(page).toMatch(/index is built from the whole graph/)
+    expect(page).toMatch(/refuses the command even when the pattern names one target in an unrelated package/)
   })
 })
