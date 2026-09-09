@@ -25,7 +25,7 @@ import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect"
 import { execFile, spawn } from "node:child_process"
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -107,6 +107,67 @@ const described = (failure: PlatformError.PlatformError) =>
   String((failure.reason as { readonly description?: string }).description)
 
 describe("atomic helper toolchain identity", () => {
+  it.live("follows real interpreter symlinks while refusing workspace targets and link cycles", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const tools = yield* Effect.promise(() => temporaryDirectory())
+      const target = join(root, "content.txt")
+      yield* Effect.promise(() => writeFile(target, "resolved interpreter"))
+      yield* Effect.promise(() => symlink("second", join(tools, "first")))
+      yield* Effect.promise(() => symlink(AtomicFileSystem.defaultExecutable, join(tools, "second")))
+      expect(
+        yield* run(
+          root,
+          Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(target)),
+          hostedBy(join(tools, "first"))
+        )
+      ).toBe("resolved interpreter")
+
+      const marker = join(tools, "executed")
+      const untrusted = yield* Effect.promise(() =>
+        fakeInterpreter(
+          `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed");`,
+          root
+        )
+      )
+      yield* Effect.promise(() => symlink(untrusted, join(tools, "outside-name")))
+      const refusal = yield* run(
+        root,
+        Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.exists(target))),
+        hostedBy(join(tools, "outside-name"))
+      )
+      expect(described(refusal)).toContain("outside the confined workspace")
+      expect(yield* Effect.promise(() => missing(marker))).toBe(false)
+
+      yield* Effect.promise(() => symlink("cycle-b", join(tools, "cycle-a")))
+      yield* Effect.promise(() => symlink("cycle-a", join(tools, "cycle-b")))
+      const cycle = yield* run(
+        root,
+        Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.exists(target))),
+        hostedBy(join(tools, "cycle-a"))
+      )
+      expect(described(cycle)).toContain("too many symbolic links")
+    }))
+
+  it.live("resolves a symlink before traversing a following parent component", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const tools = yield* Effect.promise(() => temporaryDirectory())
+      yield* Effect.promise(() => mkdir(join(tools, "actual", "deep"), { recursive: true }))
+      yield* Effect.promise(() => symlink("actual/deep", join(tools, "bridge")))
+      yield* Effect.promise(() => symlink(AtomicFileSystem.defaultExecutable, join(tools, "actual", "python3")))
+      yield* Effect.promise(() => symlink("bridge/../python3", join(tools, "python3")))
+      const target = join(root, "content.txt")
+      yield* Effect.promise(() => writeFile(target, "filesystem traversal"))
+      expect(
+        yield* run(
+          root,
+          Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(target)),
+          hostedBy(join(tools, "python3"))
+        )
+      ).toBe("filesystem traversal")
+    }))
+
   /**
    * `-I` isolates an interpreter that has already been chosen. Choosing it
    * through `PATH` — or through a cwd that a shell would search — hands

@@ -42,9 +42,9 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import { Effect, FileSystem, Layer, Option, PlatformError, Result, Semaphore } from "effect"
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
-import { accessSync, constants, realpathSync, statSync } from "node:fs"
+import { accessSync, constants, lstatSync, readlinkSync, realpathSync, statSync } from "node:fs"
 import { availableParallelism } from "node:os"
-import { isAbsolute, relative } from "node:path"
+import { basename, dirname, isAbsolute, join, relative } from "node:path"
 
 const helper = String.raw`
 import base64, errno, hashlib, json, os, stat, sys
@@ -1424,6 +1424,25 @@ const inside = (root: string, target: string): boolean => {
   return path === "" || (path !== ".." && !path.startsWith("../") && !isAbsolute(path))
 }
 
+/** Resolve symlinks without replacing a hard-linked executable's entry name. */
+const executablePath = (configured: string): string => {
+  let current = configured
+  for (let links = 0; links < 40; links++) {
+    if (current.endsWith("/")) throw new Error("atomic helper executable cannot end with a directory separator")
+    // Bun's macOS realpath can return another hard link to the final inode:
+    // /usr/bin/python3 became /usr/bin/git during concurrent guarded reads.
+    // Directories cannot have those file aliases. Resolve the parent, preserve
+    // the leaf name, and explicitly follow only actual leaf symlinks.
+    const parent = realpathSync.native(dirname(current))
+    const candidate = join(parent, basename(current))
+    if (!lstatSync(candidate).isSymbolicLink()) return candidate
+    const target = readlinkSync(candidate)
+    // Do not normalize `link/..` lexically; realpath must traverse it first.
+    current = isAbsolute(target) ? target : `${parent}/${target}`
+  }
+  throw new Error("atomic helper executable has too many symbolic links")
+}
+
 /**
  * Resolves the configured interpreter to an absolute, executable regular file
  * that the confined workspace cannot have supplied. Every failure throws, and
@@ -1436,7 +1455,7 @@ const usableExecutable = (configured: string, boundaryRoot: string | undefined):
   }
   // Resolved first: the checks below have to describe the file that will
   // actually run, not the name that leads to it.
-  const resolved = realpathSync.native(configured)
+  const resolved = executablePath(configured)
   if (!statSync(resolved).isFile()) {
     throw new Error(`atomic helper executable is not a regular file: ${resolved}`)
   }
