@@ -12,6 +12,18 @@ const bucket = (): R2Bucket =>
     put: async () => null
   }) as unknown as R2Bucket
 
+/** A Rate Limiting binding that records the keys it was asked to count. */
+const budget = (success = true) => {
+  const keys: Array<string> = []
+  const binding = {
+    limit: async ({ key }: { readonly key: string }) => {
+      keys.push(key)
+      return { success }
+    }
+  } as unknown as RateLimit
+  return { binding, keys }
+}
+
 describe("worker entry point", () => {
   let d1: TestDatabase
   let errors: ReturnType<typeof vi.spyOn>
@@ -33,6 +45,8 @@ describe("worker entry point", () => {
       CACHE_BUCKET: bucket(),
       CACHE_READ_TOKEN: readTokenHash,
       CACHE_WRITE_TOKEN: writeTokenHash,
+      CACHE_REQUEST_BUDGET: budget().binding,
+      CACHE_FIND_MISSING_BUDGET: budget().binding,
       ...overrides
     }) as never
 
@@ -77,6 +91,35 @@ describe("worker entry point", () => {
     )
 
     expect(response.status).toBe(503)
+  })
+
+  it("counts every request under the presented credential's digest and refuses a spent budget", async () => {
+    const worker = await load()
+    const requests = budget()
+    const probes = budget(false)
+    const authorized = (path: string, init: RequestInit = {}) =>
+      new Request(`https://cache.test${path}`, {
+        ...init,
+        headers: { authorization: "Bearer entry-point-read-token", ...(init.headers as Record<string, string>) }
+      })
+    const environment = env({ CACHE_REQUEST_BUDGET: requests.binding, CACHE_FIND_MISSING_BUDGET: probes.binding })
+
+    const read = await worker.fetch(authorized(`/ac/${"a".repeat(64)}`), environment)
+    const probe = await worker.fetch(
+      authorized("/cas/findMissing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ digests: ["b".repeat(64)] })
+      }),
+      environment
+    )
+
+    expect(read.status).toBe(404)
+    expect(probe.status).toBe(429)
+    // The key is the digest the Worker already computes to classify the
+    // credential, never the bearer value itself.
+    expect(requests.keys).toEqual([readTokenHash, readTokenHash])
+    expect(probes.keys).toEqual([readTokenHash])
   })
 
   it("keeps one handler per isolate so admission counters and the health cache mean something", async () => {

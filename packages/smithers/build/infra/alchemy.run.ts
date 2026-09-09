@@ -11,6 +11,8 @@ import {
   cacheDatabaseOptions,
   cacheStackOutputs,
   cacheWorkerOptions,
+  credentialRequestBudget,
+  findMissingBudget,
   stackName
 } from "./deployment.ts"
 
@@ -19,9 +21,20 @@ import {
 // be applied without a Cloudflare account.
 const cacheDatabase = Cloudflare.D1.Database("CacheDatabase", cacheDatabaseOptions)
 const cacheBucket = Cloudflare.R2.Bucket("CacheBucket", cacheBucketOptions)
+// Rate Limiting bindings have no backing resource: they live on the Worker
+// alone, and the Worker keys them by the SHA-256 of the presented credential.
+const requestBudget = Cloudflare.RateLimit("CACHE_REQUEST_BUDGET", credentialRequestBudget)
+const probeBudget = Cloudflare.RateLimit("CACHE_FIND_MISSING_BUDGET", findMissingBudget)
 const cacheWorker = Cloudflare.Worker(
   "CacheWorker",
-  Stack.useSync(cacheWorkerOptions({ database: cacheDatabase, bucket: cacheBucket }))
+  Stack.useSync(
+    cacheWorkerOptions({
+      database: cacheDatabase,
+      bucket: cacheBucket,
+      requestBudget,
+      findMissingBudget: probeBudget
+    })
+  )
 )
 
 /**

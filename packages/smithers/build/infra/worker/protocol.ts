@@ -252,6 +252,41 @@ export interface ContentStore {
 }
 
 /**
+ * Which of a credential's budgets one admitted request draws on.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type CredentialBudgetRoute = "request" | "findMissing"
+
+/**
+ * Charges admitted requests to the credential that presented them.
+ *
+ * The per-isolate concurrency ceilings bound what one isolate holds in memory,
+ * not what a credential may cost over time: Cloudflare scales isolates per
+ * location, and every pull-request job holds the read credential. A budget is
+ * charged once the credential is classified and the method authorized, so an
+ * unauthenticated caller has no key to spend, and before any store is touched,
+ * so a refused request costs nothing metered. `findMissing` draws on the
+ * `request` budget and then on its own, because one probe fans out to up to
+ * {@link maxFindMissingDigests} metered existence checks.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface CredentialBudget {
+  /**
+   * Draws one unit from `route`'s budget for the credential whose SHA-256 is
+   * `credentialDigest`. Resolves `false` once that budget is spent.
+   */
+  readonly charge: (
+    credentialDigest: string,
+    route: CredentialBudgetRoute,
+    signal?: AbortSignal
+  ) => Promise<boolean>
+}
+
+/**
  * Dependencies for the remote-cache protocol handler.
  *
  * @category models
@@ -272,6 +307,12 @@ export interface ProtocolDependencies {
    * credential digest.
    */
   readonly writeTokenHash: string
+  /**
+   * The budget every admitted request is charged to. Absent, a credential may
+   * make any number of requests and only the per-isolate concurrency ceilings
+   * apply; the deployed Worker always configures one.
+   */
+  readonly credentialBudget?: CredentialBudget
   readonly health?: (signal?: AbortSignal) => Promise<void>
   readonly maxArtifactBytes?: number
 }
@@ -312,6 +353,18 @@ const busy = (message: string): Response =>
   new Response(JSON.stringify({ error: message }), {
     status: 429,
     headers: { "content-type": "application/json", "retry-after": "1" }
+  })
+
+/**
+ * Refuses a request whose credential has spent its budget.
+ *
+ * A budget window is tens of seconds, not the instant a concurrency slot
+ * frees, so the retry hint is longer than {@link busy}'s.
+ */
+const throttled = (message: string): Response =>
+  new Response(JSON.stringify({ error: message }), {
+    status: 429,
+    headers: { "content-type": "application/json", "retry-after": "10" }
   })
 
 const methodNotAllowed = (allowed: string): Response => new Response(null, { status: 405, headers: { allow: allowed } })
@@ -849,15 +902,22 @@ const readPublication = async (request: Request, keyDigest: string): Promise<Pub
   }
 }
 
-const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")
-}
+const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+
+const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
+  hexOf(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
 
 const bearerScheme = /^Bearer +/i
 
 /** What the credential a request presented is allowed to do. */
 type Presented = "write" | "read" | "none"
+
+/** The classified credential and the digest its budget is keyed by. */
+interface Credential {
+  readonly kind: Presented
+  /** SHA-256 of the presented token, so the budget never sees the bearer value. */
+  readonly digest: string
+}
 
 const matches = (supplied: Uint8Array<ArrayBuffer>, expected: Uint8Array<ArrayBuffer>): boolean => {
   // Both are SHA-256 digests, so every index of `expected` reads inside `supplied`.
@@ -882,7 +942,7 @@ const presentedCredential = async (
   request: Request,
   expectedWrite: Uint8Array<ArrayBuffer>,
   expectedRead: Uint8Array<ArrayBuffer>
-): Promise<Presented> => {
+): Promise<Credential> => {
   const authorization = request.headers.get("authorization") ?? ""
   const scheme = bearerScheme.exec(authorization)
   const bearer = scheme !== null
@@ -891,9 +951,10 @@ const presentedCredential = async (
   const supplied = new Uint8Array(suppliedDigest)
   const isWrite = matches(supplied, expectedWrite)
   const isRead = matches(supplied, expectedRead)
-  if (!bearer) return "none"
-  if (isWrite) return "write"
-  return isRead ? "read" : "none"
+  const digest = hexOf(supplied)
+  if (!bearer) return { kind: "none", digest }
+  if (isWrite) return { kind: "write", digest }
+  return { kind: isRead ? "read" : "none", digest }
 }
 
 const handleActionCache = async (
@@ -1154,6 +1215,7 @@ export const describeFailure = (cause: unknown): string => {
 interface NormalizedProtocolDependencies {
   readonly actionCache: ActionCache
   readonly contentStore: ContentStore
+  readonly credentialBudget: CredentialBudget
   readonly health: (signal?: AbortSignal) => Promise<void>
   readonly maxArtifactBytes: number
   readonly readTokenHash: string
@@ -1210,6 +1272,7 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
   const allowed = new Set([
     "actionCache",
     "contentStore",
+    "credentialBudget",
     "health",
     "maxArtifactBytes",
     "readTokenHash",
@@ -1238,6 +1301,14 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
   const configuredHealth = read("health")
   const health = configuredHealth ?? (async (): Promise<void> => undefined)
   if (typeof health !== "function") throw new TypeError("health must be a function")
+  const configuredBudget = read("credentialBudget")
+  const charge = configuredBudget === undefined
+    ? async (): Promise<boolean> => true
+    : serviceMethod<[credentialDigest: string, route: CredentialBudgetRoute, signal?: AbortSignal], Promise<boolean>>(
+      configuredBudget,
+      "charge",
+      "credentialBudget"
+    )
   const readTokenHash = read("readTokenHash")
   if (typeof readTokenHash !== "string" || !hexDigest.test(readTokenHash)) {
     throw new TypeError("readTokenHash must be a lowercase SHA-256 digest")
@@ -1289,6 +1360,7 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
         Promise<ReadonlySet<string>>
       >(content, "presentDigests", "contentStore")
     }),
+    credentialBudget: Object.freeze({ charge }),
     health: health as (signal?: AbortSignal) => Promise<void>,
     maxArtifactBytes: maxArtifactBytes as number,
     readTokenHash,
@@ -1333,6 +1405,21 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
     normalized.contentStore.presentDigests,
     maxConcurrentFindMissingRequests
   )
+  const budgetCharge = boundedOperation<[string, CredentialBudgetRoute], boolean>(
+    normalized.credentialBudget.charge,
+    maxConcurrentCacheRequests
+  )
+  // A budget that cannot answer, or a request already cancelled when it is
+  // asked, still owes the body a cancellation: the failure path below answers
+  // 503 without touching it.
+  const charge = async (request: Request, credentialDigest: string, route: CredentialBudgetRoute): Promise<boolean> => {
+    try {
+      return await budgetCharge(request.signal, credentialDigest, route)
+    } catch (cause) {
+      await discardBody(request.body)
+      throw cause
+    }
+  }
   const health = boundedOperation<[], void>(normalized.health, 1)
   const actionCache: ActionCache = {
     get: (key, signal) => actionGet(signal, key),
@@ -1416,7 +1503,7 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
       activeCacheRequests += 1
       try {
         const credential = await presentedCredential(request, expectedWriteTokenHash, expectedReadTokenHash)
-        if (credential === "none") {
+        if (credential.kind === "none") {
           await discardBody(request.body)
           return unauthorized()
         }
@@ -1425,9 +1512,17 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
         // reading its body. Every route below this line either reads state or
         // probes it; `findMissing` is a POST that mutates nothing, so it is not
         // in the mutating set.
-        if ((request.method === "PUT" || request.method === "DELETE") && credential !== "write") {
+        if ((request.method === "PUT" || request.method === "DELETE") && credential.kind !== "write") {
           await discardBody(request.body)
           return forbidden()
+        }
+        // The budget is charged once the credential is known and the method
+        // authorized, and before any route touches a store: a refused request
+        // costs nothing metered, and a caller without a credential has no key
+        // to spend.
+        if (!(await charge(request, credential.digest, "request"))) {
+          await discardBody(request.body)
+          return throttled("this credential's request budget is spent")
         }
         const [root, route, encoded, ...rest] = url.pathname.split("/")
         // Every cache route is `/<route>/<one segment>`: nothing before the
@@ -1437,6 +1532,10 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
           if (activeFindMissingRequests >= maxConcurrentFindMissingRequests) {
             await discardBody(request.body)
             return busy("too many simultaneous findMissing requests")
+          }
+          if (!(await charge(request, credential.digest, "findMissing"))) {
+            await discardBody(request.body)
+            return throttled("this credential's findMissing budget is spent")
           }
           activeFindMissingRequests += 1
           try {

@@ -230,6 +230,41 @@ export const cacheCredentialBindings = {
 } as const
 
 /**
+ * How many cache requests one credential may make per minute.
+ *
+ * The read credential is public within the organization, and the Worker's
+ * per-isolate concurrency ceilings bound memory, not aggregate rate:
+ * Cloudflare scales isolates per location. This is the Rate Limiting binding
+ * the Worker charges every admitted request to, keyed by the SHA-256 of the
+ * credential that presented it, so a leaked read token can drive at most this
+ * many metered operations a minute at one Cloudflare location. The binding
+ * counts per location; only an account-level rate rule is a global ceiling.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const credentialRequestBudget = {
+  namespaceId: 1001,
+  simple: { limit: 12_000, period: 60 }
+} as const
+
+/**
+ * How many `findMissing` probes one credential may make per minute.
+ *
+ * One `findMissing` fans out to up to a thousand R2 `HEAD` calls, so it has a
+ * budget of its own, well under the request budget. The default pull policy
+ * never probes and a publication probes at most twice per target, so the
+ * ceiling sits above any job's legitimate rate.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const findMissingBudget = {
+  namespaceId: 1002,
+  simple: { limit: 600, period: 60 }
+} as const
+
+/**
  * The stage-dependent half of the Worker's configuration.
  *
  * Production claims the custom domain and refuses a `workers.dev` URL, so the
@@ -281,21 +316,25 @@ export const workerEntry = "./worker/index.ts"
 export const workerCompatibilityDate = "2026-08-14"
 
 /**
- * The D1 and R2 resources the Worker binds.
+ * The D1 and R2 resources and the two Rate Limiting bindings the Worker binds.
  *
  * @category models
  * @since 0.1.0
  */
-export interface CacheWorkerResources<Database, Bucket> {
+export interface CacheWorkerResources<Database, Bucket, Budget> {
   readonly database: Database
   readonly bucket: Bucket
+  /** The binding declared from {@link credentialRequestBudget}. */
+  readonly requestBudget: Budget
+  /** The binding declared from {@link findMissingBudget}. */
+  readonly findMissingBudget: Budget
 }
 
 /**
  * Builds the Worker's configuration for the stage a stack is deploying.
  *
  * Every rule the resource graph used to encode inline lives here: the entry
- * module, the compatibility date, the retention trigger, the four bindings,
+ * module, the compatibility date, the retention trigger, the six bindings,
  * and the stage's public address. `alchemy.run.ts` hands the result to
  * `Cloudflare.Worker` unchanged, so the suite executes what the deployment
  * applies.
@@ -304,7 +343,8 @@ export interface CacheWorkerResources<Database, Bucket> {
  * @since 0.1.0
  */
 export const cacheWorkerOptions =
-  <Database, Bucket>(resources: CacheWorkerResources<Database, Bucket>) => (stack: { readonly stage: string }) => ({
+  <Database, Bucket, Budget>(resources: CacheWorkerResources<Database, Bucket, Budget>) =>
+  (stack: { readonly stage: string }) => ({
     main: workerEntry,
     compatibility: { date: workerCompatibilityDate },
     // The Worker's `scheduled` handler prunes entries past the retention
@@ -313,6 +353,8 @@ export const cacheWorkerOptions =
     env: {
       CACHE_DATABASE: resources.database,
       CACHE_BUCKET: resources.bucket,
+      CACHE_REQUEST_BUDGET: resources.requestBudget,
+      CACHE_FIND_MISSING_BUDGET: resources.findMissingBudget,
       ...cacheCredentialBindings
     },
     ...workerStageOptions(stack.stage)

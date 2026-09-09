@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { makeActionCache, pruneStaleEntries, retentionDays } from "../index.ts"
+import { makeActionCache, pruneStaleEntries, readTouchDays, retentionDays } from "../index.ts"
 import type { ActionCache, ActionCachePublication } from "../protocol.ts"
 import { makeTestDatabase, type TestDatabase } from "./d1.ts"
 
@@ -197,20 +197,62 @@ describe("D1 action cache", () => {
     expect(await cache.get("unfenced")).toBe("{\"result\":{\"exitOk\":true}}")
   })
 
-  it("touches access metadata on a read and on a losing publication", async () => {
+  const updates = (): number =>
+    gate.ran.filter((query) => query.trimStart().startsWith("UPDATE smithers_build_cache_entry")).length
+
+  const lastAccessed = (keyDigest: string, at: string): void => {
+    d1.sqlite
+      .prepare("UPDATE smithers_build_cache_entry SET last_accessed_at = ? WHERE key_digest = ?")
+      .run(at, keyDigest)
+  }
+
+  it("touches access metadata on a losing publication", async () => {
     await cache.put("key", publication())
     const published = row("key")
 
     await new Promise((resolve) => setTimeout(resolve, 2))
-    await cache.get("key")
-    const read = row("key")
     await cache.put("key", publication())
     const contested = row("key")
 
     expect(published?.access_count).toBe(0)
-    expect(read?.access_count).toBe(1)
-    expect(contested?.access_count).toBe(2)
-    expect(read?.last_accessed_at.localeCompare(published?.last_accessed_at ?? "")).toBe(1)
+    expect(contested?.access_count).toBe(1)
+    expect(contested?.last_accessed_at.localeCompare(published?.last_accessed_at ?? "")).toBe(1)
+  })
+
+  it("reads an entry touched inside the last day without writing its row", async () => {
+    await cache.put("key", publication())
+    const published = row("key")
+
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    expect(await cache.get("key")).toBe("{\"result\":{\"exitOk\":true}}")
+    expect(await cache.get("key")).toBe("{\"result\":{\"exitOk\":true}}")
+
+    // The read credential is public within the organization, so a read that
+    // wrote its row would let any reader drive metered D1 writes one request
+    // at a time. A hot key costs its readers row reads and one write a day.
+    expect(updates()).toBe(0)
+    expect(row("key")?.access_count).toBe(0)
+    expect(row("key")?.last_accessed_at).toBe(published?.last_accessed_at)
+  })
+
+  it("touches an entry once its last access is more than a day old", async () => {
+    await cache.put("key", publication())
+    const stale = new Date(Date.now() - (readTouchDays * 86_400_000 + 60_000)).toISOString()
+    lastAccessed("key", stale)
+
+    expect(await cache.get("key")).toBe("{\"result\":{\"exitOk\":true}}")
+    const touched = row("key")
+    expect(await cache.get("key")).toBe("{\"result\":{\"exitOk\":true}}")
+
+    expect(updates()).toBe(1)
+    expect(touched?.access_count).toBe(1)
+    expect(touched?.last_accessed_at.localeCompare(stale)).toBe(1)
+    expect(row("key")?.last_accessed_at).toBe(touched?.last_accessed_at)
+  })
+
+  it("touches often enough that an entry read daily stays inside retention", () => {
+    expect(readTouchDays).toBeGreaterThan(0)
+    expect(readTouchDays).toBeLessThan(retentionDays)
   })
 
   it("reports a missing key rather than inventing one", async () => {

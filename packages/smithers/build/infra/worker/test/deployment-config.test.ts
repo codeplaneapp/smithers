@@ -17,6 +17,8 @@ import {
   cacheTokenDigest,
   cacheTokenVerifier,
   cacheWorkerOptions,
+  credentialRequestBudget,
+  findMissingBudget,
   maxCacheTokenBytes,
   minCacheTokenBytes,
   retentionCron,
@@ -25,7 +27,7 @@ import {
   workerEntry,
   workerStageOptions
 } from "../../deployment.ts"
-import { retentionDays } from "../index.ts"
+import { readTouchDays, retentionDays } from "../index.ts"
 
 const readToken = "SMITHERS_CACHE_READ_TOKEN"
 const writeToken = "SMITHERS_CACHE_WRITE_TOKEN"
@@ -118,6 +120,31 @@ describe("cache credential verification", () => {
     expect(maxAges.every((maxAge) => Number.isInteger(maxAge) && maxAge > 0)).toBe(true)
     expect(artifactMaxAge).toBeGreaterThan(retentionDays * 24 * 60 * 60)
     expect(retentionCron.trim().split(/\s+/)).toHaveLength(5)
+    // A reader keeps an entry alive by touching it, so the touch interval has
+    // to fit inside the window the sweep measures.
+    expect(readTouchDays).toBeLessThan(retentionDays)
+  })
+
+  it("budgets each credential's requests and its findMissing probes separately", () => {
+    // The Rate Limiting binding counts over ten or sixty seconds only.
+    expect(credentialRequestBudget.simple.period).toBe(60)
+    expect(findMissingBudget.simple.period).toBe(60)
+    expect(Number.isInteger(credentialRequestBudget.simple.limit)).toBe(true)
+    expect(Number.isInteger(findMissingBudget.simple.limit)).toBe(true)
+    // One findMissing fans out to up to a thousand metered probes, so its
+    // budget is the tighter one, counted in its own namespace.
+    expect(findMissingBudget.simple.limit).toBeLessThan(credentialRequestBudget.simple.limit)
+    expect(findMissingBudget.namespaceId).not.toBe(credentialRequestBudget.namespaceId)
+  })
+
+  it("documents what a leaked read credential can cost with the deployed budgets", async () => {
+    const guide = await Fs.readFile(NodePath.join(infraRoot, "CACHE-TRUST.md"), "utf8")
+
+    expect(guide).toContain(`${credentialRequestBudget.simple.limit} requests`)
+    expect(guide).toContain(`${findMissingBudget.simple.limit} findMissing`)
+    expect(guide).toContain(`${readTouchDays} day`)
+    expect(guide).toContain("account-level")
+    expect(guide).not.toContain("\u2014")
   })
 
   /**
@@ -152,8 +179,14 @@ describe("cache credential verification", () => {
   })
 
   it("configures the Worker from the seams the resource graph applies", async () => {
-    const production = cacheWorkerOptions({ database: "the-database", bucket: "the-bucket" })({ stage: "prod" })
-    const development = cacheWorkerOptions({ database: "the-database", bucket: "the-bucket" })({ stage: "dev_alice" })
+    const resources = {
+      database: "the-database",
+      bucket: "the-bucket",
+      requestBudget: "the-request-budget",
+      findMissingBudget: "the-findMissing-budget"
+    }
+    const production = cacheWorkerOptions(resources)({ stage: "prod" })
+    const development = cacheWorkerOptions(resources)({ stage: "dev_alice" })
 
     expect(production).toEqual({
       main: workerEntry,
@@ -162,6 +195,8 @@ describe("cache credential verification", () => {
       env: {
         CACHE_DATABASE: "the-database",
         CACHE_BUCKET: "the-bucket",
+        CACHE_REQUEST_BUDGET: "the-request-budget",
+        CACHE_FIND_MISSING_BUDGET: "the-findMissing-budget",
         CACHE_READ_TOKEN: cacheCredentialBindings.CACHE_READ_TOKEN,
         CACHE_WRITE_TOKEN: cacheCredentialBindings.CACHE_WRITE_TOKEN
       },

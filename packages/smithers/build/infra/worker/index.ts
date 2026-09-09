@@ -9,6 +9,7 @@ import {
   canonicalJson,
   type ContentStore,
   createHandler,
+  type CredentialBudget,
   describeFailure,
   maxArtifactBodyBytes,
   maxCanonicalJsonBytes
@@ -17,6 +18,10 @@ import {
 interface CacheWorkerEnv {
   readonly CACHE_DATABASE: D1Database
   readonly CACHE_BUCKET: R2Bucket
+  /** Counts every admitted request per credential digest at this location. */
+  readonly CACHE_REQUEST_BUDGET: RateLimit
+  /** Counts `findMissing` probes per credential digest at this location. */
+  readonly CACHE_FIND_MISSING_BUDGET: RateLimit
   /** SHA-256 of the pull credential every job may hold, trusted or not. */
   readonly CACHE_READ_TOKEN: string
   /** SHA-256 of the publish credential only post-merge jobs may hold. */
@@ -29,6 +34,8 @@ interface KeyRow {
 
 interface EntryRow {
   readonly entry_json: string
+  /** `1` when the row's last access is older than {@link readTouchDays}. */
+  readonly stale: number
 }
 
 interface ResultRow {
@@ -50,12 +57,30 @@ const maxPublicationAttempts = 3
  * store reaches its ceiling at roughly ten thousand entries and every
  * publication after that fails. Deleting a cold entry only costs the next
  * build a cache miss, so retention is a plain time window over the
- * `last_accessed_at` index the read path already maintains.
+ * `last_accessed_at` index the read path maintains once per {@link readTouchDays}.
  *
  * @category constants
  * @since 0.1.0
  */
 export const retentionDays = 30
+
+/**
+ * How long a read leaves an entry's access metadata alone.
+ *
+ * `GET /ac/{key}` is the read credential's route, and the read credential is
+ * public within the organization, so a read must not be a write: one that
+ * updated its row on every hit would let any reader drive metered D1 writes
+ * and keep an entry alive past retention one request at a time. A read
+ * touches `last_accessed_at` only when the row's last access is older than
+ * this, so a hot key costs one write a day and an entry read daily still
+ * stays inside {@link retentionDays}.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const readTouchDays = 1
+
+const staleReadCutoff = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-${readTouchDays} days')`
 
 const retentionBatchRows = 500
 const maxRetentionBatches = 20
@@ -203,6 +228,28 @@ const readAndTouchStoredResult = (
     .first<ResultRow>()
 
 /**
+ * Refreshes the access metadata of a row a read found stale.
+ *
+ * The cutoff is repeated in the predicate, so two readers that both found the
+ * row stale write it once, and a row deleted between the read and the touch
+ * stays deleted.
+ */
+const touchStaleEntry = (database: D1Database, keyDigest: string): Promise<KeyRow | null> =>
+  database
+    .prepare(
+      `UPDATE smithers_build_cache_entry
+      SET last_accessed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          access_count = CASE
+            WHEN access_count < 9223372036854775807 THEN access_count + 1
+            ELSE access_count
+          END
+      WHERE key_digest = ? AND last_accessed_at < ${staleReadCutoff}
+      RETURNING key_digest`
+    )
+    .bind(keyDigest)
+    .first<KeyRow>()
+
+/**
  * Adapts D1 to the first-writer-wins action-cache contract.
  *
  * @category constructors
@@ -210,20 +257,18 @@ const readAndTouchStoredResult = (
  */
 export const makeActionCache = (database: D1Database): ActionCache => ({
   async get(keyDigest) {
+    // A read is a row read; it becomes a row write only once a day per key.
     const row = await database
       .prepare(
-        `UPDATE smithers_build_cache_entry
-        SET last_accessed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-            access_count = CASE
-              WHEN access_count < 9223372036854775807 THEN access_count + 1
-              ELSE access_count
-            END
-        WHERE key_digest = ?
-        RETURNING entry_json`
+        `SELECT entry_json, last_accessed_at < ${staleReadCutoff} AS stale
+        FROM smithers_build_cache_entry
+        WHERE key_digest = ?`
       )
       .bind(keyDigest)
       .first<EntryRow>()
-    return row?.entry_json ?? null
+    if (row === null) return null
+    if (row.stale === 1) await touchStaleEntry(database, keyDigest)
+    return row.entry_json
   },
   async put(keyDigest, publication) {
     for (let attempt = 0; attempt < maxPublicationAttempts; attempt += 1) {
@@ -342,6 +387,27 @@ export const makeContentStore = (bucket: R2Bucket): ContentStore => ({
 })
 
 /**
+ * Adapts the two Rate Limiting bindings to the per-credential budget contract.
+ *
+ * Both are keyed by the SHA-256 the handler already computed to classify the
+ * credential, never by the bearer value, so the bindings' counters hold no
+ * secret. `findMissing` draws on the tighter binding because one probe fans
+ * out to up to a thousand metered R2 calls. An outcome that does not say
+ * `success` is a refusal: a budget the platform cannot vouch for admits
+ * nothing.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makeCredentialBudget = (requests: RateLimit, findMissing: RateLimit): CredentialBudget => ({
+  async charge(credentialDigest, route) {
+    const binding = route === "findMissing" ? findMissing : requests
+    const outcome = await binding.limit({ key: credentialDigest })
+    return outcome.success === true
+  }
+})
+
+/**
  * Deletes action-cache entries last read before `cutoff`, in bounded batches.
  *
  * `cutoff` is an ISO-8601 instant in the same rendering the table stores, so
@@ -394,6 +460,7 @@ const handlerFor = (env: CacheWorkerEnv): CacheHandler => {
     contentStore: makeContentStore(env.CACHE_BUCKET),
     readTokenHash: env.CACHE_READ_TOKEN,
     writeTokenHash: env.CACHE_WRITE_TOKEN,
+    credentialBudget: makeCredentialBudget(env.CACHE_REQUEST_BUDGET, env.CACHE_FIND_MISSING_BUDGET),
     health: makeHealth(env.CACHE_DATABASE, env.CACHE_BUCKET)
   })
   return isolateHandler

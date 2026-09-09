@@ -162,6 +162,61 @@ before the route is parsed. Its loopback-only development mode, which
 configures no token at all, is the one deployment shape without the split, and
 `variables.tf` cannot produce it.
 
+## What a leaked read credential can cost
+
+The read credential is public within the organization, so the question is not
+whether it leaks but what a holder can make the service spend. Two reader
+routes are metered out of proportion to their request size:
+
+- `POST /cas/findMissing` probes up to 1000 digests per request, one R2 `HEAD`
+  each, so one 67 KB request is a thousand Class B operations.
+- `GET /ac/{key}` maintains the `last_accessed_at` the retention sweep orders
+  by. It reads the row and writes it only when the last access is more than
+  1 day old (`readTouchDays` in `worker/index.ts`), so a hot key costs its
+  readers row reads and one row write a day, whatever the request rate.
+
+The Worker's per-isolate ceilings (64 requests, 8 `findMissing`, 2 artifact
+transfers) bound what one isolate holds in memory, not what a credential may
+cost over time: Cloudflare scales isolates per location. The budget is
+therefore per credential. `alchemy.run.ts` declares two Cloudflare Rate
+Limiting bindings from the constants in `deployment.ts`, and
+`worker/protocol.ts` charges every admitted request to the SHA-256 of the
+credential that presented it, after the credential is classified and the
+method authorized, and before any store is touched:
+
+| Budget                  | Binding                     | Per credential, per minute, per Cloudflare location |
+| ----------------------- | --------------------------- | --------------------------------------------------- |
+| Every cache request     | `CACHE_REQUEST_BUDGET`      | 12000 requests                                      |
+| `POST /cas/findMissing` | `CACHE_FIND_MISSING_BUDGET` | 600 findMissing probes, on top of the request       |
+
+A request over budget is answered `429` with `Retry-After: 10` and its body is
+discarded unread; the CLI treats it like any other refusal, a miss for that
+target and no publication. A `401` or `403` charges nothing, so a caller
+without the credential cannot spend its budget. Both limits sit above a job's
+legitimate rate: the default pull policy never probes, and a publication
+probes at most twice per target.
+
+What the budget bounds is the bill. At the deployed limits one credential can
+drive at most 600 x 1000 = 600000 R2 `HEAD` operations a minute at one
+location, about 36 million an hour, plus 12000 other metered operations a
+minute. Multiply by the Cloudflare locations the holder can reach and by the
+read credentials issued; that product is what a leaked read token can cost
+until it is rotated.
+
+The binding counts per location and per Worker, so it is not a global
+ceiling. A deployment that needs one, or that must refuse a source address
+outright, needs an account-level WAF rate rule on `build.smithers.sh`.
+`alchemy.run.ts` does not declare one, and nothing in this package can.
+
+Retention is the other thing a reader can spend. The sweep deletes entries
+last read more than 30 days ago, and a read renews that clock, so a holder of
+the read credential can keep any entry alive indefinitely by reading it once
+a month. The conditional touch makes that cost one row write a day rather
+than one per request; it does not remove the ability, which is inherent in
+last-access retention. The artifact bucket's own lifecycle, 90 days from
+upload, is the backstop a reader cannot extend: an entry kept alive past it
+dangles and answers a miss.
+
 ## Public read tokens on Smithers Cloud
 
 The Smithers Cloud-hosted cache makes the read credential a committed literal: a
