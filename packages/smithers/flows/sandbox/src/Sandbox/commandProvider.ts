@@ -72,13 +72,16 @@ export const commandProvider = (
   // by session identity.
   let live: { readonly session: Session } | undefined
   const spawn: RemoteProvider["spawn"] = (command, spawnOptions) =>
-    live === undefined ? Effect.fail(noSession("spawn a command")) : live.session.spawn(command, spawnOptions)
+    Effect.suspend(() =>
+      live === undefined ? Effect.fail(noSession("spawn a command")) : live.session.spawn(command, spawnOptions)
+    )
   const kill: RemoteProvider["kill"] = options.provides?.kill === true
-    ? (process, signal) => {
-      if (live === undefined) return Effect.fail(noSession("signal a command"))
-      const deliver = live.session.kill
-      return deliver === undefined ? Effect.fail(undeclared("kill")) : deliver(process, signal)
-    }
+    ? (process, signal) =>
+      Effect.suspend(() => {
+        if (live === undefined) return Effect.fail(noSession("signal a command"))
+        const deliver = live.session.kill
+        return deliver === undefined ? Effect.fail(undeclared("kill")) : deliver(process, signal)
+      })
     : undefined
   const ping: RemoteProvider["ping"] = options.provides?.ping === true
     ? Effect.suspend(() => {

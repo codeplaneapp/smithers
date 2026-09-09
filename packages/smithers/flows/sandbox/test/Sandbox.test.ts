@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, FileSystem, Path, PlatformError, Stream } from "effect"
+import { Effect, Exit, Fiber, FileSystem, Path, PlatformError, Stream } from "effect"
 import * as Scope from "effect/Scope"
+import { TestClock } from "effect/testing"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
@@ -123,6 +124,81 @@ describe("Sandbox.commandProvider", () => {
       expect(output).toBe("hello")
       expect(provider.state.acquired).toEqual(["cmd"])
       expect(provider.state.released).toBe(1)
+    }))
+
+  it.effect("runs a spawn composed before the session opens", () =>
+    Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make({ scripts: { greet: { stdout: "hello" } } })
+      const projected = Sandbox.commandProvider(provider, { session: "cmd" })
+      const program = Effect.andThen(projected.open("cmd"), projected.spawn("greet", {}))
+      const output = yield* Effect.scoped(
+        Effect.flatMap(program, (process) => Stream.mkString(Stream.decodeText(process.stdout)))
+      )
+      expect(output).toBe("hello")
+      expect(provider.state.commands).toEqual(["greet"])
+      expect(provider.state.released).toBe(1)
+    }))
+
+  it.effect("runs a kill composed before the session opens", () =>
+    Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make()
+      const delivered: Array<unknown> = []
+      const projected = Sandbox.commandProvider({
+        acquire: (key) =>
+          Effect.map(provider.acquire(key), (session): Sandbox.Session => ({
+            ...session,
+            kill: (process, signal) =>
+              Effect.sync(() => {
+                delivered.push([process, signal])
+              })
+          }))
+      }, { session: "cmd", provides: { kill: true } })
+      const process = { stdout: Stream.empty, stderr: Stream.empty, exitCode: Effect.succeed(0) }
+      const program = Effect.andThen(projected.open("cmd"), projected.kill!(process, "SIGTERM"))
+      yield* Effect.scoped(program)
+      expect(delivered).toEqual([[process, "SIGTERM"]])
+      expect(provider.state.released).toBe(1)
+    }))
+
+  it.effect("rechecks the session for effects built during an earlier generation", () =>
+    Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make()
+      const delivered: Array<string> = []
+      const projected = Sandbox.commandProvider({
+        acquire: (key) =>
+          Effect.map(provider.acquire(key), (session): Sandbox.Session => ({
+            ...session,
+            spawn: () =>
+              Effect.sync(() => {
+                delivered.push(`spawn:${key}`)
+                return { stdout: Stream.empty, stderr: Stream.empty, exitCode: Effect.succeed(0) }
+              }),
+            kill: () =>
+              Effect.sync(() => {
+                delivered.push(`kill:${key}`)
+              })
+          }))
+      }, { session: "cmd", provides: { kill: true } })
+      const pending = yield* Effect.scoped(
+        Effect.gen(function*() {
+          yield* projected.open("first")
+          return {
+            spawn: projected.spawn("greet", {}),
+            kill: projected.kill!(
+              { stdout: Stream.empty, stderr: Stream.empty, exitCode: Effect.succeed(0) },
+              "SIGTERM"
+            )
+          }
+        })
+      )
+      expect((yield* Effect.flip(Effect.scoped(pending.spawn))).code).toBe("unavailable")
+      expect((yield* Effect.flip(pending.kill)).code).toBe("unavailable")
+      expect(delivered).toEqual([])
+      yield* Effect.scoped(
+        Effect.andThen(projected.open("second"), Effect.andThen(pending.spawn, pending.kill))
+      )
+      expect(delivered).toEqual(["spawn:second", "kill:second"])
+      expect(provider.state.released).toBe(2)
     }))
 
   it.effect("refuses to spawn, signal, or ping with no open session", () =>
@@ -754,6 +830,28 @@ describe("Sandbox.layerHost", () => {
       // A session with no ping cannot be asked, so nothing is watching it and
       // the probe says healthy rather than pretending to have checked.
       expect((yield* probe(Sandbox.TestSession.make()))._tag).toBe("Healthy")
+    }))
+
+  it.effect("forwards the configured health deadline to the held machine's probe", () =>
+    Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make({ ping: Effect.never })
+      yield* Effect.gen(function*() {
+        const health = yield* SandboxHealth.SandboxHealth
+        const check = yield* health.check.pipe(Effect.forkChild)
+        yield* TestClock.adjust("9 millis")
+        expect(check.pollUnsafe()).toBeUndefined()
+        yield* TestClock.adjust("1 milli")
+        expect(check.pollUnsafe()).toBeDefined()
+        expect(yield* Fiber.join(check)).toMatchObject({
+          _tag: "Unhealthy",
+          component: "sandbox",
+          reason: "unresponsive"
+        })
+      }).pipe(
+        Effect.provide(Sandbox.layerHost(provider, { session: "watched", health: { deadline: "10 millis" } })),
+        Effect.provide(TestClock.layer())
+      )
+      expect(provider.state.released).toBe(1)
     }))
 
   it.effect("fails to build when the machine cannot be acquired", () =>

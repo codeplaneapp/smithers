@@ -83,7 +83,12 @@ generation. The held session is cleared only by its own finalizer's identity
 check, so a stale generation closing late cannot null out the session a newer
 open installed.
 
-`Sandbox.layerHost` deliberately does not do this. It holds one session for the
+`commandProvider` resolves the held session when each `spawn`, `kill`, or `ping`
+effect runs. Effects can be composed before `open` runs. Reusing an effect
+after reopening uses the current generation; running it with no open session
+fails with `unavailable`.
+
+`Sandbox.layerHost` does not reopen sessions. It holds one session for the
 layer's lifetime and reports a dead machine as a failure. Retiring and
 reopening is right for a transport, where a command is the whole unit of work,
 and wrong for a placed body, which has been writing to this machine: swapping
