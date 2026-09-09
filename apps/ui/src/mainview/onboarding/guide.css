@@ -687,11 +687,11 @@
 .guide-sidebar .composer-connect { margin-bottom: 18px; }
 .guide-sidebar nav { display: grid; }
 /* Results share the dock’s scroll area, so they cannot run off-window. */
-  margin-top: 6px;
 .guide-composer-layer .composer-wrap > .slash-menu {
   position: relative;
   top: auto;
   bottom: auto;
+  margin-top: 6px;
 }
 .guide-summoned {
   padding: 30px 36px;
@@ -1017,6 +1017,13 @@
   }
   .guide-primary:hover {
     transform: none;
+  }
+}
+/* Keep long lessons scrollable and their footer out of the reading column. */
+.guide-shell {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 .guide-content {
@@ -1027,13 +1034,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  display: flex;
-  flex-direction: column;
-  }
-}
-/* Keep long lessons scrollable and their footer out of the reading column. */
-.guide-shell {
-  height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -1057,8 +1057,8 @@
 
 .guide-word {
   opacity: 0;
-  animation: guide-fade 320ms ease both;
-  animation-delay: calc(.2s + var(--word-delay));
+  animation: guide-fade 160ms ease both;
+  animation-delay: calc(.1s + var(--word-delay));
 }
 .guide-shell[data-step="0"] .guide-lesson { animation: none; }
 .guide-shell[data-step="0"] .guide-lesson h1 { animation: guide-rise .8s 1s both; }

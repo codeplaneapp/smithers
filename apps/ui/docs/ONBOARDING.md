@@ -22,7 +22,7 @@ The reusable `smithers-control` glow means Smithers controls a surface: a faint 
 2. **Control the UI.** “I am more than a chat app. I control this entire UI. And I will help you get work done. For example, let’s change the theme.” Enter or Change theme immediately runs the dark-mode transition. The glow explains itself visually.
 3. **Light mode.** Switch back to light mode with the next action.
 4. **Notifications.** Send a deliberate notification using the button or N.
-5. **UI widgets.** An optional form asks how the user found Smithers and what they want to build; answers are saved when continuing.
+5. **UI widgets.** After the message’s final word finishes revealing, an optional form appears and scrolls into view. It asks how the user found Smithers and what they want to build; answers are saved when continuing. Reduced motion reveals the form immediately.
 6. **Flows.** Explain executable instructions and offer the five-second example with R.
 7. **New flows.** Smithers can create useful flows for the user.
 8. **Call me when you need me.** Hide the conversation; the user performs Command K / Control K (a touch/click fallback is available). The composer slides in from the bottom and resizes the lesson above; demonstrate Escape and restore focus.
@@ -64,7 +64,7 @@ Keyboard-only operation is a rule for the whole product. Required interactions m
 
 ## Opening pace refinement
 
-The wordmark settles in about one second, then the meeting moves quickly: the introduction card arrives at 1.2s, its words reveal from 1.5s at 30ms per word with 120ms pauses between sentences, and the invitation is up by ~2.4s. Subsequent lessons reveal word by word on the same cadence while the message card opens. Reduced motion is immediate. Enter/Right can advance immediately for a returning or fast reader.
+The wordmark settles in about one second, then the meeting moves quickly: the introduction card arrives at 1.2s, its words reveal from 1.5s at 15ms per word with 60ms pauses between sentences, and the invitation is up by ~2.4s. Subsequent lessons reveal word by word on the same cadence while the message card opens. Reduced motion is immediate. Enter/Right can advance immediately for a returning or fast reader.
 
 ## Practice review
 

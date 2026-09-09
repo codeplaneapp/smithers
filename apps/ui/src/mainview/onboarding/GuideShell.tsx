@@ -84,6 +84,12 @@ function chime() {
     })
 }
 
+const scrollProfileIntoView = (node: HTMLFormElement | null) => {
+  if (node) requestAnimationFrame(() => {
+    if (node.isConnected) node.scrollIntoView({ block: "nearest" })
+  })
+}
+
 export function GuideShell({ children }: { children: ReactNode }) {
   const controller = useController()
   const { data: sessions } = useLiveQuery(controller.store.collections.sessions)
@@ -92,6 +98,10 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const stage = guide.step
   const lastScrolledStep = useRef(-1)
   const transcriptRef = useRef<HTMLDivElement>(null)
+  // Animation progress is transient; the form answers remain in the store.
+  const [finishedProfileMessage, setFinishedProfileMessage] = useState<number | null>(null)
+  const profileMessageFinished = finishedProfileMessage === (guide.playthrough ?? 0)
+  const finishProfileMessage = () => setFinishedProfileMessage(guide.playthrough ?? 0)
   /* Keep the portal mounted so closing can animate without losing the draft. */
   const [composerHost, setComposerHost] = useState<HTMLDivElement | null>(null)
   /*
@@ -328,17 +338,34 @@ export function GuideShell({ children }: { children: ReactNode }) {
                   <p>
                     {message.split(" ").map((word, index, words) => {
                       const pauses = words.slice(0, index).filter(part => /[.!?]$/.test(part)).length
-                      return <span key={index} className="guide-word" style={{ "--word-delay": `${index * .03 + pauses * .12}s` } as CSSProperties}>{word}{" "}</span>
+                      const profileLastWord = messageStep === 4 && index === words.length - 1
+                      return <span
+                        key={index}
+                        className="guide-word"
+                        style={{ "--word-delay": `${index * .015 + pauses * .06}s` } as CSSProperties}
+                        ref={profileLastWord ? (node) => {
+                          // Reduced motion (or revisiting an already read message) has no animation event.
+                          if (!node) return
+                          if (getComputedStyle(node).animationName === "none") finishProfileMessage()
+                          node.addEventListener("animationcancel", finishProfileMessage)
+                          return () => node.removeEventListener("animationcancel", finishProfileMessage)
+                        } : undefined}
+                        onAnimationEnd={profileLastWord ? finishProfileMessage : undefined}
+                      >{word}{" "}</span>
                     })}
                   </p>
                 </article>
               </div>
             ))}
           </div>
-          {stage === 4 && (
+          {stage === 4 && profileMessageFinished && (
             <form
               id="guide-profile"
               className="guide-form"
+              ref={scrollProfileIntoView}
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget) event.currentTarget.scrollIntoView({ block: "nearest" })
+              }}
               onSubmit={(event) => {
                 event.preventDefault()
                 runCommandNext()
@@ -572,11 +599,11 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 Run a flow {keyHint("R")}
               </button>
             )}
-            {stage === 4 ? (
+            {stage === 4 ? (profileMessageFinished && (
               <button type="submit" form="guide-profile" aria-keyshortcuts="Enter ArrowRight" className="guide-primary" data-flow="onboarding.act">
                 Continue, with or without answers {keyHint()}
               </button>
-            ) : stage === 1 ? (
+            )) : stage === 1 ? (
               primary("Change theme", "dark")
             ) : stage === 2 ? (
               primary("Bring back the light", "light")

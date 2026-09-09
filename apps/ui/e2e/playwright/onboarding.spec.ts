@@ -112,6 +112,7 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
       await expect(page.locator(".guide-actions .guide-back .guide-button-key")).toHaveText("←")
     }
   }
+  await expect(page.locator("#guide-profile")).toBeVisible()
   await page.keyboard.press("Tab")
   await expect(page.getByTestId("composer-repo-trigger")).toBeFocused()
   await page.keyboard.press("Tab")
@@ -283,4 +284,37 @@ test("S toggles sound without interrupting text entry", async ({ page }) => {
   await page.keyboard.press("s")
   await expect(page.getByTestId("composer-input")).toHaveValue("s")
   await expect(sound).toBeVisible()
+})
+
+
+test("the profile form waits for the last word, then scrolls into view", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "0")
+  for (let step = 1; step <= 3; step++) {
+    await page.keyboard.press("ArrowRight")
+    await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", String(step))
+  }
+  // Hold the words mid-animation to prove the form follows completion, not a timer.
+  await page.addStyleTag({ content: '.guide-word { animation-play-state: paused !important; }' })
+  await page.keyboard.press("ArrowRight")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "4")
+  await expect(page.locator("#guide-profile")).toHaveCount(0)
+  const lastWord = page.locator('[data-message-step="4"] .guide-word').last()
+  await expect(lastWord).toHaveCSS("animation-duration", "0.16s")
+  await page.addStyleTag({ content: '.guide-word { animation-play-state: running !important; }' })
+  await expect(page.locator("#guide-profile")).toBeVisible()
+  await expect(page.getByLabel("How did you hear about Smithers?")).toBeInViewport()
+  await expect(page.getByLabel("What would you love to build?")).toBeInViewport()
+})
+
+test("reduced motion reveals the profile form without waiting for animation", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await page.goto("/")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "0")
+  for (let step = 1; step <= 4; step++) {
+    await page.keyboard.press("ArrowRight")
+    await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", String(step))
+  }
+  await expect(page.locator("#guide-profile")).toBeVisible()
 })
