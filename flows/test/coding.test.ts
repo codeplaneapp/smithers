@@ -8,35 +8,36 @@ import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import * as Executable from "@smthrs/registry/Executable"
 import * as Discovery from "@smthrs/registry/Discovery"
+import * as Descriptor from "@smthrs/registry/Descriptor"
 import { RunStore } from "@smthrs/run-store/RunStore"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Effect, Layer, Schema } from "effect"
 import { Implement, ImplementPlan, RunCheck, policyLayers } from "../coding/workflow.ts"
 import { catalogLayers } from "../coding/catalog.ts"
 import { RunPlan, invalidInputLayer } from "../coding/registration.ts"
-import { Implementation as ImplementationSchema, Receipt as ReceiptSchema } from "../coding/schema.ts"
+import { Implementation as ImplementationSchema, Receipt as ReceiptSchema, checkInputDigest } from "../coding/schema.ts"
 import type { Check, CodingError, Implementation, Plan, Receipt, Revision } from "../coding/schema.ts"
 
 const revision = (name: string, parent?: string): Revision => ({ changeId: `jj-${name}`, commitId: `commit-${name}`, treeId: `tree-${name}`, operationId: `op-${name}`, parentCommitIds: parent === undefined ? [] : [`commit-${parent}`] })
 const plan: Plan = {
   prompt: "Build the database, then the server", memoryRevision: "sha256:memory", base: revision("base"),
   changes: ["database", "server"].map(id => ({
-    id, title: id, intent: `Implement ${id}`, implementation: `implement/${id}`,
+    id, title: id, intent: `Implement ${id}`, implementation: `implement/${id}`, implementationDigest: "0".repeat(64),
     atoms: [{ changeId: null, message: `✨ feat: ${id}`, intent: id, reads: [], writes: [`src/${id}.ts`] }],
     checks: [
-      { id: "build", target: "//:build", flow: "backpressure/build", tier: "fast", required: true },
-      { id: "review", target: "//:review", flow: "review", tier: "slow", required: true },
-      { id: "canary", target: "//:canary", flow: "delivery/canary", tier: "delivery", required: true }
+      { id: "build", target: "//:build", flow: "backpressure/build", flowDigest: "0".repeat(64), tier: "fast", required: true },
+      { id: "review", target: "//:review", flow: "review", flowDigest: "0".repeat(64), tier: "slow", required: true },
+      { id: "canary", target: "//:canary", flow: "delivery/canary", flowDigest: "0".repeat(64), tier: "delivery", required: true }
     ]
   }))
 }
 const implementation = (id: string): Implementation => {
   const parent = id === "database" ? "base" : "database"
-  return { change: id, parent: revision(parent), atoms: [revision(id, parent)], head: revision(id, parent), reads: [], writes: [`src/${id}.ts`] }
+  return { change: id, parent: parent === "database" ? revision(parent, "base") : revision(parent), atoms: [revision(id, parent)], head: revision(id, parent), reads: [], writes: [`src/${id}.ts`] }
 }
 const receipt = (impl: Implementation, check: Check): Receipt => ({
   checkId: check.id, target: check.target, tier: check.tier, change: impl.change,
-  commitId: impl.head.commitId, treeId: impl.head.treeId, inputDigest: `digest:${impl.head.treeId}:${check.target}`,
+  commitId: impl.head.commitId, treeId: impl.head.treeId, inputDigest: checkInputDigest(impl, check),
   status: "passed", evidence: "fixture build receipt", findings: []
 })
 const latch = () => {
@@ -128,7 +129,7 @@ test("an implementation on a different parent cannot advance the mythical progre
   const repo = await fixture(t), implemented: string[] = []
   const runtime = wiring(repo, ({ change }) => Effect.sync(() => {
     implemented.push(change.id)
-    return { ...implementation(change.id), atoms: [revision(change.id, "unrelated")] }
+    return { ...implementation(change.id), head: revision(change.id, "unrelated"), atoms: [revision(change.id, "unrelated")] }
   }), ({ implementation: impl, check }) => Effect.succeed(receipt(impl, check)))
   await assert.rejects(Effect.runPromise(Effect.scoped(ImplementPlan.execute({ plan }).pipe(Effect.provide(runtime)))), /linear progression/)
   assert.deepEqual(implemented, ["database"])
@@ -155,6 +156,11 @@ test("registered project flows persist native child lineage and replay without r
     assert.equal(found.entries.length, 4)
     return yield* Effect.forEach(found.entries, descriptor => Executable.fromDescriptor(descriptor, { delegates: [Delegate] }))
   }).pipe(Effect.provide(Discovery.layer.pipe(Layer.provideMerge(platform)))))
+  const digests = new Map(executables.map(executable => [executable.descriptor.name, Descriptor.executionDigest(executable.descriptor)!]))
+  const pinnedPlan = { ...plan, changes: plan.changes.map(change => ({
+    ...change, implementationDigest: digests.get(change.implementation)!,
+    checks: change.checks.map(check => ({ ...check, flowDigest: digests.get(check.flow) ?? check.flowDigest }))
+  })) }
   const delegates = DelegateAction.toLayer(input => Effect.gen(function*() {
     const instance = yield* FlowRuntime.FlowInstance
     called.push({ flow: input.flow, runId: instance.executionId })
@@ -170,7 +176,7 @@ test("registered project flows persist native child lineage and replay without r
       .pipe(Layer.provideMerge(Action.layerImplementations), Layer.provideMerge(Layer.succeed(Executable.Catalog, { executables, refused: [] }))))
   const run = Effect.gen(function*() {
     const result = yield* RunPlan.execute({
-      flow: "coding", input: { plan }, prompt: "", model: null, placement: null,
+      flow: "coding", input: { plan: pinnedPlan }, prompt: "", model: null, placement: null,
       placementOptions: null, capabilities: [], flows: ["coding/RunPlan"]
     }, { executionId: "coding-catalog-parent" })
     const store = yield* RunStore
@@ -193,4 +199,41 @@ test("registered project flows persist native child lineage and replay without r
     placement: null, placementOptions: null, capabilities: [], flows: ["coding/RunPlan"]
   }, { executionId: "coding-invalid-envelope" }).pipe(Effect.provide(runtime), Effect.scoped)), /must contain a valid predicted/)
   assert.equal(called.length, 6)
+  const stalePlan = { ...pinnedPlan, changes: pinnedPlan.changes.map(change => ({ ...change, implementationDigest: "f".repeat(64) })) }
+  await assert.rejects(Effect.runPromise(ImplementPlan.execute({ plan: stalePlan }, { executionId: "coding-stale-definition" })
+    .pipe(Effect.provide(runtime), Effect.scoped)), /changed since this plan/)
+  assert.equal(called.length, 6, "a changed executable definition must not start native implementation")
+})
+
+test("a check receipt for different delegated inputs cannot unlock progression", { timeout: 60_000 }, async t => {
+  const repo = await fixture(t), called: string[] = []
+  const runtime = wiring(repo, ({ change }) => Effect.sync(() => { called.push(change.id); return implementation(change.id) }),
+    ({ implementation: impl, check }) => Effect.succeed({ ...receipt(impl, check), inputDigest: "sha256:wrong-inputs" }))
+  await assert.rejects(Effect.runPromise(ImplementPlan.execute({ plan }).pipe(Effect.provide(runtime), Effect.scoped)), /current revision/)
+  assert.deepEqual(called, ["database"])
+})
+
+test("head and parent evidence must agree on every native revision field", { timeout: 90_000 }, async t => {
+  for (const [subject, field] of [
+    ["head", "changeId"], ["head", "operationId"], ["head", "parentCommitIds"],
+    ["parent", "changeId"], ["parent", "treeId"], ["parent", "operationId"], ["parent", "parentCommitIds"]
+  ] as const) {
+    const repo = await fixture(t)
+    const runtime = wiring(repo, ({ change }) => Effect.succeed({
+      ...implementation(change.id), [subject]: { ...implementation(change.id)[subject], [field]: field === "parentCommitIds" ? ["forged"] : "forged" }
+    }), ({ implementation: impl, check }) => Effect.succeed(receipt(impl, check)))
+    await assert.rejects(Effect.runPromise(ImplementPlan.execute({ plan }).pipe(Effect.provide(runtime), Effect.scoped)), /does not match the planned atoms/)
+  }
+})
+
+test("an atom cannot be reused under a later nonadjacent Change", { timeout: 60_000 }, async t => {
+  const repo = await fixture(t)
+  const third = { ...plan.changes[1]!, id: "interface", title: "Interface" }
+  const runtime = wiring(repo, ({ change }) => Effect.succeed(change.id !== "interface" ? implementation(change.id) : {
+    change: "interface", parent: revision("server", "database"),
+    head: { ...revision("interface", "server"), changeId: "jj-database" },
+    atoms: [{ ...revision("interface", "server"), changeId: "jj-database" }], reads: [], writes: []
+  }), ({ implementation: impl, check }) => Effect.succeed(receipt(impl, check)))
+  await assert.rejects(Effect.runPromise(ImplementPlan.execute({ plan: { ...plan, changes: [...plan.changes, third] } })
+    .pipe(Effect.provide(runtime), Effect.scoped)), /more than one implemented owner/)
 })

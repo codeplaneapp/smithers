@@ -22,7 +22,17 @@ the actual reviewed commit, so a downstream discovery can request an earlier fix
 
 `Check.flow` and `Change.implementation` name the host's existing registered
 project flows. Those flows perform the actual native JJ and build operations and
-return the schemas in `schema.ts`. The catalog adapter derives child execution
+return the schemas in `schema.ts`. Plans pin `flowDigest` and
+`implementationDigest` from the registry's existing `Descriptor.executionDigest`
+before execution. The catalog refuses a changed definition, and replanning starts
+a new execution. Reopening a completed execution shows its original planned
+definition and receipts; it does not silently substitute current code.
+
+`Receipt.inputDigest` must equal `checkInputDigest(implementation, check)`, the
+existing canonical SHA-256 digest of the exact delegated inputs including the
+pinned definition. A native build's additional artifact/environment evidence
+belongs in `evidence`; this fingerprint alone is not proof that a test ran.
+The catalog adapter derives child execution
 identity from the full payload and the registry's verified executable digest.
 The ordinary runtime attaches the ambient parent and recovers completed children
 after restart. It refuses unavailable or unverified project flows.
@@ -58,8 +68,10 @@ Plue JJ/build delegates and subsequent ordinary workflow stages. Nor does a
 receipt schema prove that an arbitrary delegate performed a real test: deployment
 adapters must measure their native results rather than trust agent assertions.
 
-Seven integration tests exercise a real native flows runtime with SQLite and JJ
+Ten integration tests exercise a real native flows runtime with SQLite and JJ
 fixtures: fast failure, stale receipt, wrong parent, earlier-owner feedback,
 overlapping slow review, preflight refusal, and registered child replay across a
-host restart. Implementation/check fixtures are scripted; these tests establish
+host restart. Review regressions also reject changed executable definitions,
+different check inputs, inconsistent complete revision fields, and atom identities
+reused by nonadjacent Changes. Implementation/check fixtures are scripted; these tests establish
 graph and durability behavior, not live coding capability.

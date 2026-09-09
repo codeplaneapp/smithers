@@ -4,7 +4,7 @@ import { Node } from "@smthrs/plan"
 import { Effect, Layer, Schema } from "effect"
 import {
   Change, Check, CodingError, Implementation, Plan, Receipt, Result, Revision,
-  ValidatedChange, receiptMatches, validatePlan
+  ValidatedChange, receiptMatches, sameRevision, validatePlan
 } from "./schema.ts"
 
 /** These leaves are implemented by existing project flows and repository/build hosts. */
@@ -65,9 +65,8 @@ export const policyLayers = Layer.mergeAll(
     cause instanceof CodingError ? cause : new CodingError({ code: "invalid_plan", message: String(cause) }) })),
   FastGate.toLayer(({ change, parent, implementation, receipts }) => Effect.gen(function*() {
     if (implementation.change !== change.id || implementation.atoms.length !== change.atoms.length ||
-        implementation.atoms.at(-1)?.commitId !== implementation.head.commitId ||
-        implementation.atoms.at(-1)?.treeId !== implementation.head.treeId ||
-        implementation.parent.commitId !== parent.commitId) {
+        !sameRevision(implementation.atoms.at(-1)!, implementation.head) ||
+        !sameRevision(implementation.parent, parent)) {
       return yield* Effect.fail(new CodingError({ code: "stale_revision", message: `Implementation does not match the planned atoms of ${change.id}` }))
     }
     let previous = parent
@@ -96,10 +95,15 @@ export const policyLayers = Layer.mergeAll(
   })),
   Assess.toLayer(({ plan, changes }) => Effect.gen(function*() {
     const findings: Array<typeof Result.Type["findings"][number]> = []
+    const identities = new Set([plan.base.changeId])
     if (changes.length !== plan.changes.length) return yield* Effect.fail(new CodingError({ code: "invalid_receipt", message: "The result is missing planned Changes" }))
     for (const [index, group] of plan.changes.entries()) {
       const result = changes[index]!
       if (result.implementation.change !== group.id) return yield* Effect.fail(new CodingError({ code: "invalid_receipt", message: "The result reordered the mythical progression" }))
+      for (const atom of result.implementation.atoms) {
+        if (identities.has(atom.changeId)) return yield* Effect.fail(new CodingError({ code: "stale_revision", message: `Native JJ change ${atom.changeId} has more than one implemented owner` }))
+        identities.add(atom.changeId)
+      }
       for (const check of group.checks.filter(check => check.tier !== "delivery")) {
         const receipt = result.receipts.find(receipt => receipt.checkId === check.id)
         if (!receipt || !receiptMatches(result.implementation, check, receipt)) {

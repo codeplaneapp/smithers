@@ -1,5 +1,6 @@
 /** Coding policy is ordinary flow input; the engine remains its durable store. */
 import { Schema } from "effect"
+import * as Digest from "@smthrs/core/Digest"
 
 const Text = Schema.NonEmptyString
 const Id = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/))
@@ -24,6 +25,7 @@ export const Check = Schema.Struct({
   id: Id,
   target: Text,
   flow: Text,
+  flowDigest: Text,
   tier: Schema.Literals(["fast", "slow", "delivery"]),
   required: Schema.Boolean
 })
@@ -33,6 +35,7 @@ export const Change = Schema.Struct({
   title: Text,
   intent: Text,
   implementation: Text,
+  implementationDigest: Text,
   atoms: Schema.Array(AtomicPlan).check(Schema.isMinLength(1)),
   checks: Schema.Array(Check)
 })
@@ -114,4 +117,13 @@ export const validatePlan = (plan: Plan): void => {
 export const receiptMatches = (implementation: Implementation, check: Check, receipt: Receipt): boolean =>
   receipt.change === implementation.change && receipt.checkId === check.id && receipt.target === check.target &&
   receipt.tier === check.tier && receipt.commitId === implementation.head.commitId &&
-  receipt.treeId === implementation.head.treeId
+  receipt.treeId === implementation.head.treeId && receipt.inputDigest === checkInputDigest(implementation, check)
+
+/** The existing canonical digest binds a receipt to the exact delegated inputs. */
+export const checkInputDigest = (implementation: Implementation, check: Check): string =>
+  `sha256:${Digest.digest(Digest.canonical({ version: 1, implementation, check }))}`
+
+export const sameRevision = (left: Revision, right: Revision): boolean =>
+  left.changeId === right.changeId && left.commitId === right.commitId && left.treeId === right.treeId &&
+  left.operationId === right.operationId && left.parentCommitIds.length === right.parentCommitIds.length &&
+  left.parentCommitIds.every((parent, index) => parent === right.parentCommitIds[index])
