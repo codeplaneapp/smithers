@@ -25,6 +25,10 @@
  * scorer changed for a reason you can name. `--json` prints the score as JSON
  * instead of the table.
  *
+ * stdout carries the score and nothing else: one table, or under `--json` one
+ * JSON value, in every mode. Verdicts and paths are diagnostics and go to
+ * stderr, so `run.ts --json | jq` parses whichever mode produced it.
+ *
  * Exit codes: `0` scored, or matched the baseline; `1` the fixture's score
  * disagrees with the baseline; `2` the input could not be read or parsed;
  * `3` the live pull failed.
@@ -226,7 +230,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), host
   if (update) {
     writeFileSync(baselinePath, current);
     report(score, json, host);
-    host.stdout(`recorded ${baselinePath}\n`);
+    host.stderr(`recorded ${baselinePath}\n`);
     return 0;
   }
   let baseline: string;
@@ -238,7 +242,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), host
   }
   report(score, json, host);
   if (baseline === current) {
-    host.stdout(`recommend: the fixture's score matches the baseline\n`);
+    host.stderr(`recommend: the fixture's score matches the baseline\n`);
     return 0;
   }
   host.stderr(

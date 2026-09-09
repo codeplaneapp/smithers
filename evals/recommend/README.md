@@ -25,6 +25,11 @@ run, and a red run means the scorer moved, not the model.
 | `--json`               | Prints the score as canonical JSON instead of the table.                                 |
 | `--help`               | Prints usage and exits 0.                                                                |
 
+stdout carries the score and nothing else: one table, or under `--json` one
+JSON value, in every mode. Verdicts and recorded paths are diagnostics and go
+to stderr, so `bun evals/recommend/run.ts --json | jq` parses whichever mode
+produced it.
+
 Exit codes: `0` scored, or the fixture matched the baseline; `1` the fixture's
 score disagrees with the baseline; `2` the input could not be read or parsed;
 `3` the live pull failed.

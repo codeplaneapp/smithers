@@ -76,7 +76,7 @@ describe("run.ts", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toMatch(/^recommend eval: 16 rows, 13 with an outcome/);
     expect(result.stdout).toMatch(/overall\s+16\s+13\s+81\.3%\s+69\.2%\s+38\.5%/);
-    expect(result.stdout).toMatch(/matches the baseline/);
+    expect(result.stderr).toMatch(/matches the baseline/);
   });
 
   test("--input scores any log and consults no baseline", async () => {
@@ -96,6 +96,44 @@ describe("run.ts", () => {
     const result = await capture(["--input", fixturePath, "--json"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(readFileSync(baselinePath, "utf8"));
+  });
+
+  test("--json writes exactly one JSON value to stdout in every mode", async () => {
+    const baseline = readFileSync(baselinePath, "utf8");
+    const rows = fixtureLines().map((line) => JSON.parse(line));
+    const live = {
+      env: { [LIVE_TOKEN_ENV]: "secret-token" },
+      fetch: (() => Promise.resolve(new Response(JSON.stringify({ rows }), { status: 200 }))) as Fetch,
+    };
+    // All four modes score the same 16 fixture rows, so all four print the baseline.
+    const modes: Array<{ argv: string[]; options?: { env?: Record<string, string | undefined>; fetch?: Fetch } }> = [
+      { argv: ["--json"] },
+      { argv: ["--json", "--update"] },
+      { argv: ["--json", "--input", fixturePath] },
+      { argv: ["--json", "--live"], options: live },
+    ];
+    for (const mode of modes) {
+      const result = await capture(mode.argv, mode.options);
+      expect(result.code).toBe(0);
+      // The whole buffer, not a prefix: one JSON value and no human trailer.
+      expect(JSON.parse(result.stdout)).toEqual(JSON.parse(baseline));
+      expect(result.stdout).toBe(baseline);
+    }
+    // --update rewrote the baseline with the bytes it already held.
+    expect(readFileSync(baselinePath, "utf8")).toBe(baseline);
+  });
+
+  test("the baseline verdict and the recorded path are diagnostics on stderr", async () => {
+    const gated = await capture([]);
+    expect(gated.code).toBe(0);
+    expect(gated.stderr).toMatch(/matches the baseline/);
+    expect(gated.stdout).not.toMatch(/matches the baseline/);
+
+    const updated = await capture(["--update"]);
+    expect(updated.code).toBe(0);
+    expect(updated.stderr).toMatch(new RegExp(`recorded ${baselinePath.replace(/[.]/g, "[.]")}`));
+    expect(updated.stdout).not.toMatch(/recorded /);
+    expect(readFileSync(baselinePath, "utf8")).toBe(canonical(scoreLog(parseLog(readFileSync(fixturePath, "utf8")))));
   });
 
   test("a malformed log exits 2 and names the line", async () => {
@@ -161,7 +199,10 @@ describe("run.ts", () => {
   test("the launch line runs under bun and exits 0 on the committed baseline", () => {
     const result = spawnSync("bun", [runScript], { encoding: "utf8", timeout: 60_000 });
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/matches the baseline/);
+    expect(result.stderr).toMatch(/matches the baseline/);
+    const scored = spawnSync("bun", [runScript, "--json"], { encoding: "utf8", timeout: 60_000 });
+    expect(scored.status).toBe(0);
+    expect(JSON.parse(scored.stdout)).toEqual(JSON.parse(readFileSync(baselinePath, "utf8")));
     const help = spawnSync("bun", [runScript, "--help"], { encoding: "utf8", timeout: 60_000 });
     expect(help.status).toBe(0);
     expect(help.stdout).toBe(usage);
