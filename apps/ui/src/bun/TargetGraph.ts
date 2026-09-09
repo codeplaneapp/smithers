@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises"
 import { dirname, join, relative, sep } from "node:path"
 import type { GraphEdge, GraphNode, TargetGraphResponse } from "@smthrs/rpc/TargetGraph"
 import { splitLabel } from "@smthrs/rpc/LocalApp"
+import { isPrivateLabel } from "@smthrs/rpc/TargetGraphCli"
 import type { NodeSidecar } from "./Node"
 import { declarationBindings } from "./DeclarationBindings"
 import { currentSandboxHost, loaderPolicy, wrapSandbox } from "./Sandbox"
@@ -89,7 +90,8 @@ export const parseTextGraph = (
       ...parts,
       rule: row?.rule ?? row?.target ?? ruleOf.get(label) ?? "",
       kinds: [...(row?.kinds ?? [])],
-      private: parts.name.startsWith("__private_")
+      /* The contract's rule, shared with the dev fixture stream's reader so a card hides the same nodes either way. */
+      private: isPrivateLabel(label)
     }
   })
   return { nodes, edges }

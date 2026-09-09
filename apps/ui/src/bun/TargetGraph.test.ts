@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import forceGraph from "../../../../packages/rpc/fixtures/force/graph.json"
 import forcePlan from "../../../../packages/rpc/fixtures/force/plan-typeCheck.json"
+import type { GraphEdge, GraphNode } from "@smthrs/rpc/TargetGraph"
+import type { CliGraphEnvelope } from "@smthrs/rpc/TargetGraphCli"
+import { CliGraphEnvelopeSchema, targetGraphFromCli } from "@smthrs/rpc/TargetGraphCli"
 import { foldPlan, loaderFailureText, parseTextGraph } from "./TargetGraph"
 
 describe("loaderFailureText", () => {
@@ -67,5 +70,72 @@ test("foldPlan adds structured plan facts without dropping graph nodes", () => {
     cacheable: true,
     key: "83972035f4fb7ae765630a96173ee529617cc5e3c6a249a6b083297e1306d546",
     argv: ["/Users/williamcory/artsy/force/node_modules/.bin/tsc"]
+  })
+})
+
+/*
+ * One private-label rule, two readers. The backend parses the CLI's text
+ * rendering; the dev fixture stream reads the same envelope's structured
+ * rows through `@smthrs/rpc/TargetGraphCli`. They used to disagree about
+ * what a private helper is (`__` here, `__private_` there), so a card driven
+ * by fixtures hid nodes the real backend showed.
+ */
+describe("the backend's text parse and the CLI envelope adapter agree", () => {
+  const compare = (envelope: CliGraphEnvelope) => {
+    const text = parseTextGraph(envelope.graph, envelope.targets)
+    const structured = targetGraphFromCli(envelope, { repoId: "force" })
+    const byLabel = (left: { readonly label: string }, right: { readonly label: string }) =>
+      left.label.localeCompare(right.label)
+    const edgeKey = (edge: GraphEdge) => `${edge.from} ${edge.to} ${edge.kind}`
+    return {
+      textNodes: [...text.nodes].sort(byLabel),
+      structuredNodes: [...structured.nodes].sort(byLabel),
+      textEdges: text.edges.map(edgeKey).sort(),
+      structuredEdges: structured.edges.map(edgeKey).sort()
+    }
+  }
+
+  test("the captured force envelope yields the same nodes and edges either way", () => {
+    const { structuredEdges, structuredNodes, textEdges, textNodes } = compare(
+      CliGraphEnvelopeSchema.parse(forceGraph)
+    )
+    expect(textNodes).toEqual(structuredNodes)
+    expect(textEdges).toEqual(structuredEdges)
+    expect(textNodes).toHaveLength(82)
+  })
+
+  test("a `__private_` helper is private and a declared `__helper` key is not, on both sides", () => {
+    const envelope = CliGraphEnvelopeSchema.parse({
+      pattern: "//src:...",
+      format: "text",
+      graph: [
+        "//src:build",
+        "  -data-> //src:__private_Overlay_4",
+        "  -data-> //src:__helper",
+        "//src:__private_Overlay_4",
+        "//src:__helper"
+      ].join("\n"),
+      roots: ["//src:build"],
+      targets: [
+        { label: "//src:build", target: "Shell.Build" },
+        { label: "//src:__private_Overlay_4", target: "Filegroup" },
+        { label: "//src:__helper", target: "Filegroup" }
+      ],
+      edges: [
+        { from: "//src:build", to: "//src:__private_Overlay_4", kind: "data" },
+        { from: "//src:build", to: "//src:__helper", kind: "data" }
+      ],
+      warnings: []
+    })
+    const { structuredEdges, structuredNodes, textEdges, textNodes } = compare(envelope)
+    expect(textNodes).toEqual(structuredNodes)
+    expect(textEdges).toEqual(structuredEdges)
+    const privately = (nodes: ReadonlyArray<GraphNode>, label: string) =>
+      nodes.find((node) => node.label === label)?.private
+    for (const nodes of [textNodes, structuredNodes]) {
+      expect(privately(nodes, "//src:__private_Overlay_4")).toBe(true)
+      expect(privately(nodes, "//src:__helper")).toBe(false)
+      expect(privately(nodes, "//src:build")).toBe(false)
+    }
   })
 })

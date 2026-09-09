@@ -1,5 +1,5 @@
 /**
- * Adapters from captured build-CLI envelopes to target graph contracts.
+ * Adapters from build-CLI `--format json` envelopes to target graph contracts.
  *
  * @since 1.0.0
  */
@@ -8,14 +8,21 @@ import { splitLabel } from "./LocalApp.ts"
 import type { GraphNode, TargetGraphResponse } from "./TargetGraph.ts"
 
 /*
- * The CLI envelope → contract mapping, shared so the local backend
- * (`apps/ui/src/bun`) and the UI's dev fixture stream read the real CLI's
- * `--format json` answers identically. The graph envelope carries the text
- * rendering (`graph`) beside the structured rows (`targets`, `edges`); the
- * structured rows are the authority. The plan envelope (`<label> --plan
+ * The CLI envelope → contract mapping. The graph envelope carries the text
+ * rendering (`graph`) beside the structured rows (`targets`, `edges`); these
+ * adapters read the structured rows. The plan envelope (`<label> --plan
  * --format json`) merges per-node plan facts (rule, mode, key, cacheable,
  * argv, refusal) onto the nodes it names. Fixtures captured from the real
  * CLI on the force workspace live in `packages/rpc/fixtures/force/`.
+ *
+ * Who reads this: the UI's dev fixture stream
+ * (`apps/ui/src/mainview/dev/fixtureRunStream.ts`). The local backend
+ * (`apps/ui/src/bun/TargetGraph.ts`) answers the same envelopes by parsing
+ * the TEXT rendering instead, because it merges several envelopes, the
+ * separate `query` listing's kinds, and the declaration sources into one
+ * response. The two share {@link isPrivateLabel} so they cannot disagree
+ * about which nodes a card hides; folding the rest of the backend onto
+ * {@link targetGraphFromCli} is open work (finding rpc/maintainability/3).
  */
 
 /**
@@ -76,11 +83,15 @@ export const CliPlanEnvelopeSchema = z.object({
  */
 export type CliPlanEnvelope = z.infer<typeof CliPlanEnvelopeSchema>
 
-/** A private (unlabeled) helper node reads `__private_` (or another `__` prefix) in its name.
+/** A private (unlabeled) helper node: the build system names one
+ * `//<package>:__private_<Rule>_<n>` when a target is reached through an attr
+ * but never bound to a declaration key, so the prefix has to be `__private_`
+ * at the START of the name. A declared key that merely begins with `__` is an
+ * ordinary addressable target.
  * @since 1.0.0
  * @category conversions
  */
-export const isPrivateLabel = (label: string): boolean => splitLabel(label).name.startsWith("__")
+export const isPrivateLabel = (label: string): boolean => splitLabel(label).name.startsWith("__private_")
 
 /**
  * The CLI's graph envelope as the contract's `TargetGraphResponse`: one node

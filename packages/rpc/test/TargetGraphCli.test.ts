@@ -8,12 +8,14 @@ import {
   isPrivateLabel,
   mergePlanFacts,
   targetGraphFromCli
-} from "../src/TargetGraphFixture.ts"
+} from "../src/TargetGraphCli.ts"
 
 /*
  * The captured force workspace (packages/rpc/fixtures/force/): 82 targets,
- * 94 edges. The parse is the dev fixture stream's and the backend's shared
- * read of the CLI envelope, so the counts pin it end to end.
+ * 94 edges. This is the dev fixture stream's read of the CLI envelope, so
+ * the counts pin it end to end. The backend's own reader is held to the same
+ * answer by apps/ui/src/bun/TargetGraph.test.ts ("the backend's text parse
+ * and the CLI envelope adapter agree").
  */
 
 const graph = targetGraphFromCli(CliGraphEnvelopeSchema.parse(graphFixture), { repoId: "force" })
@@ -64,9 +66,18 @@ describe("the force CLI graph envelope as a TargetGraphResponse", () => {
     expect(ci?.plan).toBeUndefined()
   })
 
-  test("private helper labels read their __ name prefix", () => {
+  test("a private helper is the generated `__private_` label, not any `__` name", () => {
     expect(isPrivateLabel("//src:__private_Overlay_4")).toBe(true)
     expect(isPrivateLabel("//src:typeCheck")).toBe(false)
+    /*
+     * The only private form the build system emits is
+     * `//<package>:__private_<Rule>_<n>` (build-cli internal/PackagePlanner
+     * `labelOf`). A declared key named `__helper` is addressable, and the
+     * backend's reader has always called it public; reading a bare `__`
+     * prefix as private hid it from the graph card on one path only.
+     */
+    expect(isPrivateLabel("//src:__helper")).toBe(false)
+    expect(isPrivateLabel("//src:not__private_x")).toBe(false)
   })
 
   test("criticalPath is pure over the same edges the UI renders", () => {

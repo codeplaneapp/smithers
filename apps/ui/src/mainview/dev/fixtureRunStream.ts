@@ -28,7 +28,7 @@ import {
   CliPlanEnvelopeSchema,
   mergePlanFacts,
   targetGraphFromCli
-} from "@smthrs/rpc/TargetGraphFixture"
+} from "@smthrs/rpc/TargetGraphCli"
 
 export const TARGET_GRAPH_FIXTURE_FLAG = "smithers.dev.targetGraphFixtures"
 
