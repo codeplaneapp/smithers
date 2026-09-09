@@ -336,7 +336,7 @@ describe("BrowserFileSystem error mapping", () => {
       expect(yield* (make("other").stat("/o"))).toMatchObject({ type: "Unknown" })
     }))
 
-  // Effect's makeNoop defects on makeTemp*, so BrowserFileSystem wires those four explicitly to NotFound.
+  // Effect's makeNoop defects on makeTemp*, so BrowserFileSystem wires those four explicitly to PermissionDenied.
   it.effect("fails every deliberately unsupported operation with PermissionDenied", () =>
     Effect.gen(function*() {
       const fileSystem = BrowserFileSystem.make(throwingFs(codeError("ENOENT")))

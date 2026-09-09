@@ -40,10 +40,14 @@ wants Effect's platform services and nothing more.
   `realpath`, and a `..` after a link names the parent of the link's target
   rather than being collapsed lexically first. This is the boundary
   [`@smthrs/kernel`](/api/kernel) resolves a guarded path through before it
-  checks the grant.
+  checks the grant. Without `realpath`, `realPath` fails with a `PermissionDenied`
+  `PlatformError`; there is no fallback.
 - **A refusal is typed, never silent.** The operations a promises-shaped volume
   cannot serve, symlink creation and writable handles and watchers among them,
-  fail with a `NotFound` `PlatformError`.
+  fail with a `PermissionDenied` `PlatformError` naming the method.
+  `rename` and `utimes` are served when the backend supplies them; otherwise
+  they fail with the same refusal. `NotFound` is reserved for a path the backend
+  reports absent.
   [Read and write files on a mounted volume](./guides/work-with-files.md#what-fails-and-how)
   lists every one with the served operation to use instead.
 - **Backend errors keep their meaning.** `ENOENT` becomes `NotFound`, `EEXIST`
@@ -76,7 +80,7 @@ wants Effect's platform services and nothing more.
 | You supply                                                             | What breaks without it                                                                            |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | One mount behind `bash`, `fs`, and `jj.fs`                             | Nothing raises. A command writes a file no reader sees, or jj snapshots a tree never written.     |
-| `realpath` on a volume that can hold symlinks                          | `realPath` answers lexically, and the workspace boundary becomes a naming convention.             |
+| `realpath` for canonicalization                                       | `realPath` fails with `PermissionDenied`; there is no fallback.                                    |
 | An `exec` whose promise settles once its `AbortSignal` fires           | The permit is never released, and every later run blocks.                                         |
 | A volume that addresses nothing outside itself, if you compose `layer` | The isolation attestation is false, and the capability kernel resolves paths it should not trust. |
 | The mount's `sync()` after writes that must survive a reload           | An acknowledged write is still only in the synchronous mirror.                                    |

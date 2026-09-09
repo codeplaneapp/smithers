@@ -73,8 +73,8 @@
   from the reported mode bits, `makeDirectory` forwards `mode`, and `realPath`
   canonicalizes instead of returning its input, which is what makes
   `@smthrs/kernel`'s symlink boundary resolution real over a backend that
-  supplies `realpath`; without that member the answer is lexical, and the
-  boundary is naming rather than resolution. Canonicalization is left to that
+  supplies `realpath`. Without `realpath`, `realPath` fails with a `PermissionDenied`
+  `PlatformError`. Canonicalization is left to that
   backend rather than being pre-empted: a `..` is no longer collapsed lexically
   before the link that precedes it is followed, so `link/..` names the parent of
   the link's target the way POSIX and `node:fs/promises` name it.

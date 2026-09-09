@@ -118,9 +118,12 @@ each one as a typed failure at the call, not as a wrong answer later:
   promise settles, so two runs never mutate the mount at once.
 - **A promises-shaped volume has no symlink creation, writable handles, or
   watcher**, so `chmod`, `chown`, `copy`, `copyFile`, `glob`, `link`, `symlink`,
-  `readLink`, `open`, `rename`, `sink`, `truncate`, `utimes`, `watch`, and the
-  `makeTemp*` family fail with a `NotFound` `PlatformError`. Copy by reading and
-  writing, and append with `writeFile({ flag: "a" })`.
+  `readLink`, `open`, `sink`, `truncate`, `watch`, and the `makeTemp*` family
+  fail with a `PermissionDenied` `PlatformError` naming the method.
+  `rename` and `utimes` are served when the backend supplies them; otherwise
+  they fail with the same refusal. `NotFound` is reserved for a path the backend
+  reports absent. Copy by reading and writing, and append with
+  `writeFile({ flag: "a" })`.
 - **A tab has no working directory**, so `cwd` and a relative path given to
   `realPath` resolve against the volume root. Pass absolute virtual paths.
 - **Durability belongs to the page.** ZenFS acknowledges a write before it
@@ -131,7 +134,8 @@ What is served honours its options rather than dropping them: `makeDirectory`
 forwards `mode`, `writeFile` forwards `flag` and `mode`, `access` answers from
 the reported mode bits, `stream` honours its bounds and refuses fractional ones,
 and `realPath` canonicalizes through the backend's own `realpath` when it has
-one. The full statement is at https://platform-browser.smithers.sh/contract/,
+one. Without `realpath`, `realPath` fails with a `PermissionDenied` `PlatformError`;
+there is no fallback. The full statement is at https://platform-browser.smithers.sh/contract/,
 and every refusal with its fix is at
 https://platform-browser.smithers.sh/troubleshooting/.
 
