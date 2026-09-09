@@ -36,8 +36,41 @@ export interface Options {
   /** @default [] */
   readonly deps?: ReadonlyArray<Target.AnyTarget> | undefined
   readonly cwd?: string | undefined
+  /**
+   * The package's TypeScript sources. It feeds every target that reads them:
+   * `lib`, `check`, `test`, `lint`, `fmt`, and `circular`. It does not name
+   * the published entry point, which is `entry`, so a package that relocates
+   * its sources overrides both.
+   *
+   * @default src/**\/*.ts
+   */
   readonly sources?: Input.Glob | undefined
+  /**
+   * The published entry file `lib` declares. `TsBuild` derives the emitted
+   * `dist/<format>/<name>.js` and its declaration from this basename, so a
+   * package whose entry is not `src/index.ts` names it here rather than
+   * inheriting a path outside its own `sources`.
+   *
+   * @default src/index.ts
+   */
+  readonly entry?: Input.File | undefined
+  /**
+   * The glob Vitest collects cases from. It feeds `test` alone. Narrowing it
+   * to a subset of the test tree, which is how a package holds a tier such as
+   * fault injection out of its default suite, must not narrow what `check`
+   * typechecks or what `fmt` keys on, so those read `testSources` instead.
+   *
+   * @default test/**\/*.test.ts
+   */
   readonly tests?: Input.Glob | undefined
+  /**
+   * Every TypeScript file in the package's test tree, including helpers and
+   * fixtures no suite collects. It feeds `check` and `fmt`, and a package
+   * that keeps its tests outside `test/` overrides it beside `tests`.
+   *
+   * @default test/**\/*.ts
+   */
+  readonly testSources?: Input.Glob | undefined
   /** Package-relative globs for data read by tests, included in the test cache inputs. */
   readonly testData?: readonly string[] | undefined
   readonly tsconfig?: Input.File | undefined
@@ -114,7 +147,11 @@ export interface PackageTargets {
  * verb and exists so a generator in another package, such as the site's API
  * page sync, can depend on the docs by label instead of through a glob that
  * package scoping expands to nothing. Callers can override any shared input
- * without replacing the macro.
+ * without replacing the macro; each option documents which targets it feeds.
+ * `sources` and `entry` are separate options, as are `tests` and
+ * `testSources`, because the published entry point is one file inside the
+ * sources and because narrowing the suite one package runs must not narrow
+ * what it typechecks or formats.
  *
  * @category macros
  * @since 0.1.0
@@ -124,6 +161,8 @@ export const BuildAndCheckTypeScriptPackage = (options: Options): PackageTargets
   const deps = options.deps ?? []
   const sources = options.sources ?? Input.glob("src/**/*.ts")
   const tests = options.tests ?? Input.glob("test/**/*.test.ts")
+  const testSources = options.testSources ?? Input.glob("test/**/*.ts")
+  const entry = options.entry ?? Input.file("src/index.ts")
   const tsconfig = options.tsconfig ?? Input.file("tsconfig.json")
   const testTsconfig = options.testTsconfig ?? Input.file("tsconfig.test.json")
   const vitestConfig = options.vitestConfig === undefined
@@ -143,7 +182,7 @@ export const BuildAndCheckTypeScriptPackage = (options: Options): PackageTargets
   const lib = TsBuild({
     ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
     srcs: [sources],
-    entries: [Input.file("src/index.ts")],
+    entries: [entry],
     deps,
     tsconfig,
     tool: { name: "program", entry: options.buildProgram ?? Input.file("scripts/build.mjs") },
@@ -153,7 +192,7 @@ export const BuildAndCheckTypeScriptPackage = (options: Options): PackageTargets
   })
   const check = Typecheck({
     ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
-    srcs: [sources, Input.glob("test/**/*.ts")],
+    srcs: [sources, testSources],
     deps: [lib, ...deps],
     tsconfig: testTsconfig,
     buildMode: false,
@@ -182,7 +221,7 @@ export const BuildAndCheckTypeScriptPackage = (options: Options): PackageTargets
   })
   const fmt = Dprint({
     ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
-    sources: [sources, Input.glob("test/**/*.ts")],
+    sources: [sources, testSources],
     deps: [],
     config: dprintConfig,
     fix: false,

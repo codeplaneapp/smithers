@@ -1,7 +1,11 @@
+import type * as Dprint from "@smthrs/targets/Dprint"
+import type * as EsLint from "@smthrs/targets/EsLint"
 import * as Filegroup from "@smthrs/targets/Filegroup"
 import * as Input from "@smthrs/targets/Input"
 import * as NodeTest from "@smthrs/targets/NodeTest"
 import * as Target from "@smthrs/targets/Target"
+import * as TsBuild from "@smthrs/targets/TsBuild"
+import type * as Typecheck from "@smthrs/targets/Typecheck"
 import type * as Vitest from "@smthrs/targets/Vitest"
 import { globSync } from "node:fs"
 import { resolve } from "node:path"
@@ -226,5 +230,181 @@ describe("BuildAndCheckTypeScriptPackage test data", () => {
     }).map((path) => path.replaceAll("\\", "/"))
     expect(paths).toContain("test/fixtures/artifact-esm.mjs")
     expect(paths).toContain("test/fixtures/artifact-cjs.cjs")
+  })
+})
+
+describe("BuildAndCheckTypeScriptPackage dependencies", () => {
+  const upstream = Filegroup.Filegroup({
+    srcs: [Input.file("package.json")],
+    cwd: "packages/upstream"
+  })
+  const second = Filegroup.Filegroup({
+    srcs: [Input.file("package.json")],
+    cwd: "packages/second"
+  })
+
+  /**
+   * A package's declared dependencies are what makes `smithers-build ci`
+   * order one package's build after the packages it imports. `check` and
+   * `test` additionally read the package's own built declarations, so each
+   * carries its own `lib` ahead of the caller's list.
+   */
+  it("hands every declared dependency to lib, check, and test, each behind its own lib", () => {
+    const targets = BuildAndCheckTypeScriptPackage({
+      packageManager,
+      cwd: "packages/example",
+      deps: [upstream, second]
+    })
+    expect(Target.metadata(targets.lib).dependencies).toEqual([upstream, second])
+    expect(Target.metadata(targets.check).dependencies).toEqual([targets.lib, upstream, second])
+    expect(Target.metadata(targets.test).dependencies).toEqual([targets.lib, upstream, second])
+    // The gates read the working tree, not a built dependency, so a declared
+    // dependency must not serialize them behind a build.
+    for (const name of ["lint", "fmt", "docs", "circular", "docsFiles"] as const) {
+      expect(Target.metadata(targets[name]).dependencies).toEqual([])
+    }
+  })
+
+  it("keeps the self-lib edges when a package declares no dependencies", () => {
+    const targets = BuildAndCheckTypeScriptPackage({ packageManager, deps: [], cwd: "packages/example" })
+    expect(Target.metadata(targets.lib).dependencies).toEqual([])
+    expect(Target.metadata(targets.check).dependencies).toEqual([targets.lib])
+    expect(Target.metadata(targets.test).dependencies).toEqual([targets.lib])
+  })
+})
+
+describe("BuildAndCheckTypeScriptPackage lint and fmt gates", () => {
+  /**
+   * Both targets are gates rather than fixers: CI fails on a warning and the
+   * working tree is never rewritten under them. Asserting the planned argv
+   * rather than the target kind is what holds that, since raising the warning
+   * budget or enabling fix changes only the argv.
+   */
+  it("plans ESLint over the sources at zero warnings without fixing", () => {
+    const targets = BuildAndCheckTypeScriptPackage({ packageManager, cwd: "packages/example" })
+    expect(plannedArgv(targets.lint)).toEqual([
+      "pnpm",
+      "exec",
+      "eslint",
+      "--config",
+      "eslint.config.js",
+      "--max-warnings",
+      "0",
+      "src/**/*.ts"
+    ])
+    const attrs = attrsOf<EsLint.Attrs>(targets.lint)
+    expect(attrs.maxWarnings).toBe(0)
+    expect(attrs.fix).toBe(false)
+    // The jsdoc rules are declared key material even though only the first
+    // config reaches the argv, so editing them re-keys the target.
+    expect(attrs.configs).toEqual([Input.file("eslint.config.js"), Input.file("//eslint.jsdoc.js")])
+  })
+
+  it("plans dprint in check mode over the sources and the test tree", () => {
+    const targets = BuildAndCheckTypeScriptPackage({ packageManager, cwd: "packages/example" })
+    expect(plannedArgv(targets.fmt)).toEqual(["pnpm", "exec", "dprint", "check", "--config", "dprint.json"])
+    const attrs = attrsOf<Dprint.Attrs>(targets.fmt)
+    expect(attrs.fix).toBe(false)
+    expect(attrs.sources).toEqual([Input.glob("src/**/*.ts"), Input.glob("test/**/*.ts")])
+  })
+
+  it("keeps both gates strict under caller-selected sources and configs", () => {
+    const targets = BuildAndCheckTypeScriptPackage({
+      packageManager,
+      cwd: "packages/example",
+      sources: Input.glob("lib/**/*.ts"),
+      eslintConfigs: [Input.file("//eslint.strict.js")],
+      dprintConfig: Input.file("config/dprint.json")
+    })
+    expect(plannedArgv(targets.lint)).toEqual([
+      "pnpm",
+      "exec",
+      "eslint",
+      "--config",
+      "../../eslint.strict.js",
+      "--max-warnings",
+      "0",
+      "lib/**/*.ts"
+    ])
+    expect(plannedArgv(targets.fmt)).toEqual([
+      "pnpm",
+      "exec",
+      "dprint",
+      "check",
+      "--config",
+      "config/dprint.json"
+    ])
+    expect(attrsOf<EsLint.Attrs>(targets.lint).fix).toBe(false)
+    expect(attrsOf<Dprint.Attrs>(targets.fmt).fix).toBe(false)
+  })
+})
+
+describe("BuildAndCheckTypeScriptPackage option propagation", () => {
+  const standard = BuildAndCheckTypeScriptPackage({ packageManager, cwd: "packages/example" })
+
+  it("narrows the collected suite alone when tests excludes a tier", () => {
+    const narrowed = BuildAndCheckTypeScriptPackage({
+      packageManager,
+      cwd: "packages/example",
+      tests: Input.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
+    })
+    expect(attrsOf<Vitest.Attrs>(narrowed.test).tests).toEqual([
+      Input.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
+    ])
+    // The excluded tier stays typechecked and formatted, which is why the
+    // suite glob does not reach check or fmt.
+    expect(Target.metadata(narrowed.check).inputs).toEqual(Target.metadata(standard.check).inputs)
+    expect(Target.metadata(narrowed.fmt).inputs).toEqual(Target.metadata(standard.fmt).inputs)
+  })
+
+  it("moves the typechecked and formatted test tree with testSources", () => {
+    const relocated = BuildAndCheckTypeScriptPackage({
+      packageManager,
+      cwd: "packages/example",
+      tests: Input.glob("spec/**/*.test.ts"),
+      testSources: Input.glob("spec/**/*.ts")
+    })
+    expect(attrsOf<Typecheck.Attrs>(relocated.check).srcs).toEqual([
+      Input.glob("src/**/*.ts"),
+      Input.glob("spec/**/*.ts")
+    ])
+    expect(attrsOf<Dprint.Attrs>(relocated.fmt).sources).toEqual([
+      Input.glob("src/**/*.ts"),
+      Input.glob("spec/**/*.ts")
+    ])
+    expect(attrsOf<Vitest.Attrs>(relocated.test).tests).toEqual([Input.glob("spec/**/*.test.ts")])
+  })
+
+  it("reaches every source-reading target when sources moves", () => {
+    const moved = Input.glob("lib/**/*.ts")
+    const relocated = BuildAndCheckTypeScriptPackage({
+      packageManager,
+      cwd: "packages/example",
+      sources: moved
+    })
+    expect(attrsOf<TsBuild.Attrs>(relocated.lib).srcs).toEqual([moved])
+    expect(attrsOf<Typecheck.Attrs>(relocated.check).srcs).toEqual([moved, Input.glob("test/**/*.ts")])
+    expect(attrsOf<Vitest.Attrs>(relocated.test).sources).toEqual([moved])
+    expect(attrsOf<EsLint.Attrs>(relocated.lint).sources).toEqual([moved])
+    expect(attrsOf<Dprint.Attrs>(relocated.fmt).sources).toEqual([moved, Input.glob("test/**/*.ts")])
+    expect(attrsOf<NodeTest.Attrs>(relocated.circular).srcs).toEqual([moved, Input.file("tsconfig.json")])
+    // The published entry is one file, not the glob, so it stays where the
+    // caller left it until `entry` moves it.
+    expect(attrsOf<TsBuild.Attrs>(relocated.lib).entries).toEqual([Input.file("src/index.ts")])
+  })
+
+  it("names the built distribution's entry file from entry", () => {
+    const relocated = BuildAndCheckTypeScriptPackage({
+      packageManager,
+      cwd: "packages/example",
+      sources: Input.glob("lib/**/*.ts"),
+      entry: Input.file("lib/main.ts")
+    })
+    expect(attrsOf<TsBuild.Attrs>(relocated.lib).entries).toEqual([Input.file("lib/main.ts")])
+    expect(TsBuild.distributionLayout(attrsOf<TsBuild.Attrs>(relocated.lib))).toEqual([
+      { format: "esm", directory: "dist/esm", entry: "dist/esm/main.js", declaration: "dist/esm/main.d.ts" },
+      { format: "cjs", directory: "dist/cjs", entry: "dist/cjs/main.js", declaration: null }
+    ])
+    expect(attrsOf<TsBuild.Attrs>(standard.lib).entries).toEqual([Input.file("src/index.ts")])
   })
 })
