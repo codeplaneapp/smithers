@@ -15,7 +15,7 @@
  *
  * @since 1.0.0
  */
-import type { ControlSchema } from "@smthrs/control"
+import { ControlSchema } from "@smthrs/control"
 
 /**
  * The run statuses a digest may report.
@@ -36,17 +36,9 @@ export type RunStatus = ControlSchema.RunStatus
  * `control.run.pending` under the same prefix as the status transitions, and
  * `Lineage.derive` adds one more to every followed stream. Reading a status
  * off the prefix alone made a live run's verdict read `lineage` or `resume`,
- * so the fold accepts only the seven names a client may render.
+ * so the fold accepts only the schema statuses a client may render.
  */
-const runStatuses: ReadonlySet<string> = new Set([
-  "accepted",
-  "running",
-  "parked",
-  "waiting-approval",
-  "cancelled",
-  "completed",
-  "failed"
-])
+const runStatuses: ReadonlySet<string> = new Set(ControlSchema.RunStatus.literals)
 
 /**
  * One refused flow call, aggregated by its refusal message.
@@ -225,7 +217,7 @@ export const digest = (events: ReadonlyArray<ControlSchema.ControlEvent>): Diges
   for (const event of events) {
     const payload = asRecord(event.payload)
     const at = timeOf(event)
-    const handler = handlers[event.kind]
+    const handler = Object.hasOwn(handlers, event.kind) ? handlers[event.kind] : undefined
     if (handler !== undefined) {
       observe(at)
       handler(accumulator, payload)

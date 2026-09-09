@@ -5,7 +5,7 @@
  * engine database, asked of the events instead: what happened, why it stopped,
  * and what the run actually did while it ran.
  */
-import type { ControlSchema } from "@smthrs/control"
+import { ControlSchema } from "@smthrs/control"
 import { describe, expect, it } from "vitest"
 import * as Diagnosis from "../src/Diagnosis.ts"
 
@@ -42,11 +42,20 @@ describe("Diagnosis.digest", () => {
       event("control.agent.turn-opened", { seat: "opus", at: 100 }),
       event("control.agent.turn-opened", {}),
       event("control.agent.cell-call-started", { flowName: "write" }),
+      event("control.agent.cell-call-started", { flowName: "edit" }),
+      event("control.agent.cell-call-started", { flowName: "apply_patch" }),
       event("control.agent.cell-call-started", { flowName: "read" }),
       event("control.agent.cell-call-started", {}),
       event("control.agent.cell-call-settled", { flowName: "write", outcome: "success" }),
-      event("control.agent.cell-call-settled", { outcome: "failure", message: "denied\nsecond line" }),
       event("control.agent.cell-call-settled", { outcome: "failure" }),
+      event("control.agent.cell-call-settled", { flowName: "edit", outcome: "success" }),
+      event("control.agent.cell-call-settled", {
+        flowName: "apply_patch",
+        outcome: "failure",
+        message: "denied\nsecond line"
+      }),
+      event("control.agent.cell-call-settled", { outcome: "failure", message: "denied\r\nthird line" }),
+      event("control.agent.cell-call-settled", { outcome: "failure", message: "denied" }),
       event("control.agent.cell-call-settled", { flowName: "read", outcome: "success" }),
       event("control.agent.cell-call-settled", { outcome: "success" }),
       event("control.agent.model-settled", { usage: { inputTokens: 10, outputTokens: 5 } }),
@@ -60,17 +69,17 @@ describe("Diagnosis.digest", () => {
       status: "completed",
       seat: "opus",
       turns: 2,
-      calls: 3,
-      callsFailed: 2,
-      editsAttempted: 1,
-      editsSucceeded: 1,
+      calls: 5,
+      callsFailed: 4,
+      editsAttempted: 3,
+      editsSucceeded: 2,
       inputTokens: 10,
       outputTokens: 5,
       finalOutput: "shipped"
     })
-    // Refusal messages aggregate by first line, most frequent first.
+    // Refusals arrive least frequent first, but aggregate most frequent first.
     expect(digest.refusals).toEqual([
-      { message: "denied", count: 1 },
+      { message: "denied", count: 3 },
       { message: "unknown refusal", count: 1 }
     ])
     // The payload's own stamp wins over journal admission time.
@@ -95,12 +104,27 @@ describe("Diagnosis.digest", () => {
     expect(digest).toMatchObject({ turns: 2, seat: undefined, status: "failed", cause: undefined })
   })
 
-  it("ignores an event kind outside the vocabulary", () => {
-    expect(Diagnosis.digest([event("something.else", {})])).toMatchObject({ status: undefined, turns: 0 })
-  })
+  it.each(["something.else", "__proto__", "hasOwnProperty", "toString"])(
+    "ignores unknown kind %s without changing the digest or timestamps",
+    (kind) => {
+      const unknown = [event(kind, null, 0), event(kind, { at: 9_000 }, 10_000)] as const
+      expect(() => Diagnosis.digest(unknown)).not.toThrow()
+      expect(Diagnosis.digest(unknown)).toEqual(Diagnosis.digest([]))
+      const known = [event("control.run.running", {}, 100), event("control.run.completed", {}, 900)]
+      expect(Diagnosis.digest([unknown[0], ...known, unknown[1]])).toEqual(Diagnosis.digest(known))
+    }
+  )
 })
 
 describe("Diagnosis.digest over the run lifecycle", () => {
+  it.each(ControlSchema.RunStatus.literals)("recognizes schema status %s", (status) => {
+    expect(Diagnosis.digest([event(`control.run.${status}`, {}, 100)])).toMatchObject({
+      status,
+      startedAt: 100,
+      endedAt: 100
+    })
+  })
+
   it("keeps the last STATUS, not the last `control.run.` event", () => {
     // `@smthrs/control` journals lineage, resume, cancel-requested, and
     // pending under the same prefix, and `Lineage.derive` adds one to every

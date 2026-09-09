@@ -43,6 +43,7 @@ completed — shipped
 ```
 
 An unlaunched run, one with no status event at all, reads `unlaunched`.
+Status events use the vocabulary from `ControlSchema.RunStatus.literals`.
 
 ## Fold your own
 
@@ -66,6 +67,9 @@ events cover.
 The fold is total on purpose: an event kind outside its vocabulary contributes
 nothing rather than failing it, and a payload that is not a record reads as an
 empty one. A malformed journal produces a sparse digest, never a throw.
+Unknown kinds include `__proto__`, `hasOwnProperty`, and `toString`; none changes
+the digest or its timestamps. The unknown-kind cases in
+[`Diagnosis.test.ts`](../../test/Diagnosis.test.ts) pin this guarantee.
 
 ## What counts as an edit
 

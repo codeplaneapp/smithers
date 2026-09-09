@@ -29,7 +29,7 @@ import type { Service as ControlService } from "@smthrs/control/Control"
 import * as ControlClient from "@smthrs/control/ControlClient"
 import { Unavailable } from "@smthrs/control/ControlError"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
-import type { ApprovalPayload, PlanCard } from "@smthrs/control/ControlSchema"
+import { type ApprovalPayload, type PlanCard, RunStatus } from "@smthrs/control/ControlSchema"
 import { SyncAuth as SyncAuthTag } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
 import { Effect, Fiber, Layer, type Scope, Stream } from "effect"
@@ -71,17 +71,6 @@ const approvalOf = (card: PlanCard): ApprovalPayload => ({
   scope: card.approval.scope,
   idempotencyKey: `approve:${card.planId}`
 })
-
-/** The rc.0 run-status vocabulary a client may render (the release policy). */
-const SEVEN_STATUSES = [
-  "accepted",
-  "running",
-  "parked",
-  "waiting-approval",
-  "cancelled",
-  "completed",
-  "failed"
-]
 
 const test = <E>(title: string, body: () => Effect.Effect<void, E, Scope.Scope>) =>
   it(title, () => Effect.runPromise(Effect.scoped(body())))
@@ -980,9 +969,9 @@ describe("the assembled gateway over a real loopback bind", () => {
       expect(remote.after._tag).toBe("runs")
       expect(remote.flows._tag).toBe("flows")
       if (remote.listed._tag !== "runs" || remote.after._tag !== "runs") return
-      // Read back by run id, in the seven-status vocabulary, over the wire.
+      // Read back by run id, in the schema status vocabulary, over the wire.
       expect(remote.listed.items).toMatchObject([{ runId: remote.runId, flowId: "system/test" }])
-      expect(SEVEN_STATUSES).toContain(remote.listed.items[0]?.status ?? "")
+      expect(RunStatus.literals).toContain(remote.listed.items[0]?.status ?? "")
       // The cancel is durable: the next read of the same run says so.
       expect(remote.after.items).toMatchObject([{ runId: remote.runId, status: "cancelled" }])
     }).pipe(Effect.provide(served())))
