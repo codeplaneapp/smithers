@@ -506,10 +506,13 @@ export const within: {
 /**
  * Attaches one typed annotation to a flow, returning a fresh flow.
  *
- * Annotations are metadata a host or a decorator reads; they take no part in
- * flow identity, so an annotated flow plans the same graph as the flow it was
- * built from. {@link within} is the placement-shaped special case of this
- * combinator.
+ * Annotations are metadata a host or a decorator reads, and they leave the
+ * flow's implementation digest unchanged. A custom key is advisory, so a flow
+ * annotated with one plans the same graph as the flow it was built from. The
+ * built-in {@link Annotations.Placement} and {@link Annotations.Effects} keys
+ * are not advisory: `Graph.build` projects both into node key material, so
+ * annotating with either changes the keys the graph plans. {@link within} is
+ * the placement-shaped special case of this combinator.
  *
  * @category combinators
  * @since 0.1.0

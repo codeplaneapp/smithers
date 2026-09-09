@@ -182,11 +182,44 @@ describe("Flow", () => {
     expect(Option.isNone(Annotations.getOption(original.annotations, Bank))).toBe(true)
     expect(Option.getOrUndefined(Annotations.getOption(direct.annotations, Bank))).toEqual({ bank: "one" })
     expect(Option.getOrUndefined(Annotations.getOption(piped.annotations, Bank))).toEqual({ bank: "two" })
-    // An annotation is metadata, so it takes no part in identity or planning.
+    // A custom annotation is advisory, so it takes no part in identity or planning.
     expect(direct.implementation).toEqual(original.implementation)
     expect(Graph.nodes(Graph.build(direct, "x")).map((node) => node.id)).toEqual(
       Graph.nodes(Graph.build(original, "x")).map((node) => node.id)
     )
+    expect(Graph.nodes(Graph.build(direct, "x"))[0]?.keyMaterial).toEqual(
+      Graph.nodes(Graph.build(original, "x"))[0]?.keyMaterial
+    )
+  })
+
+  it("keeps the implementation digest but changes key material when a built-in annotation is attached", () => {
+    const original = Flow.make({
+      name: "annotated-builtin",
+      input: Schema.String,
+      output: Schema.String,
+      body: (input) => Node.succeed(input)
+    })
+    const declaration = Effects.make({
+      reads: ["src"],
+      writes: ["dist"],
+      mode: "expected",
+      onConflict: "serialize"
+    })
+
+    const placed = Flow.annotate(original, Annotations.Placement, Placement.remote())
+    const effected = Flow.annotate(original, Annotations.Effects, declaration)
+
+    const material = (flow: typeof original) => Graph.nodes(Graph.build(flow, "x"))[0]?.keyMaterial
+
+    // Placement and Effects are read by Graph.build, so they are key material,
+    // not advisory metadata. The implementation digest still comes across.
+    expect(placed.implementation).toEqual(original.implementation)
+    expect(effected.implementation).toEqual(original.implementation)
+    expect(material(original)?.placement).toBeUndefined()
+    expect(material(placed)?.placement).toEqual(Placement.remote())
+    expect(material(placed)).not.toEqual(material(original))
+    expect(material(effected)?.effects).toEqual(declaration)
+    expect(material(effected)).not.toEqual(material(original))
   })
 
   it("merges annotation bags with supplied values winning without changing identity", () => {
