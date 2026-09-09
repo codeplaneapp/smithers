@@ -240,11 +240,14 @@ the D1 row and never the R2 objects the entry named.
 
 ## Deploy wrapper
 
-The deploy wrapper forwards termination to the Alchemy process group, waits a
-bounded grace period, escalates when necessary, and runs state redaction after
-success, failure, or signal. Redaction uses bounded descriptor-stable reads and
-atomic durable publication; use the wrapper instead of invoking Alchemy deploy
-directly.
+The deploy wrapper forwards termination to the Alchemy process group and sends
+SIGKILL to surviving members after a bounded grace period. After interruption,
+it waits until the group is observed gone before redaction and return, even if
+the leader exits first. Windows waits for the directly signalled child.
+Ordinary command completion does not wait out the grace period. The wrapper
+runs state redaction after success, failure, or signal. Redaction uses bounded
+descriptor-stable reads and atomic durable publication; use the wrapper instead
+of invoking Alchemy deploy directly.
 
 ## Self-host instead
 

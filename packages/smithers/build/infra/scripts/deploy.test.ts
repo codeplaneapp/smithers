@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import * as NodePath from "node:path"
@@ -49,6 +49,25 @@ writeFileSync(marker + ".ready", "ready")
   )
   // The first wrapper argument names the signal this stub ends itself with.
   await write("self-signal", "process.kill(process.pid, process.argv[4])\nsetInterval(() => {}, 1000)\n")
+  await write(
+    "descendant",
+    `import { appendFileSync, writeFileSync } from "node:fs"
+const marker = process.argv[2]
+process.on("SIGTERM", () => writeFileSync(marker + ".sigterm", "seen"))
+writeFileSync(marker + ".tick", "tick\\n")
+setInterval(() => appendFileSync(marker + ".tick", "tick\\n"), 20)
+writeFileSync(marker + ".ready", String(process.pid))
+`
+  )
+  await write(
+    "exiting-leader",
+    `import { spawn } from "node:child_process"
+import { writeFileSync } from "node:fs"
+writeFileSync(process.argv[4] + ".leader", String(process.pid))
+spawn(process.execPath, [${JSON.stringify(script("descendant"))}, process.argv[4]], { stdio: "inherit" })
+setInterval(() => {}, 1000)
+`
+  )
 })
 
 afterAll(async () => {
@@ -56,6 +75,73 @@ afterAll(async () => {
 })
 
 describe("deploy wrapper", () => {
+  it.skipIf(process.platform === "win32").each(["deadline", "second-signal", "denied-probe"])(
+    "terminates surviving descendants before redaction and return (%s)",
+    async (mode) => {
+      const marker = NodePath.join(directory, `surviving-descendant-${mode}`)
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+      const originalKill = process.kill.bind(process)
+      let probeDenied = false
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (mode === "denied-probe" && signal === 0 && typeof pid === "number" && pid < 0 && !probeDenied) {
+          probeDenied = true
+          throw Object.assign(new Error("probe refused"), { code: "EPERM" })
+        }
+        return originalKill(pid, signal)
+      })
+      let running: Promise<number> | undefined
+      let ticksAtRedaction: string | undefined
+      try {
+        const code = await withIsolatedSignals(async () => {
+          running = deploy([marker], {
+            cli: script("exiting-leader"),
+            cwd: directory,
+            escalationDelayMs: mode === "second-signal" ? 10_000 : 300,
+            redact: async () => {
+              ticksAtRedaction = readFileSync(`${marker}.tick`, "utf8")
+              return 0
+            }
+          })
+          await vi.waitFor(() => expect(existsSync(`${marker}.ready`)).toBe(true), { timeout: 10_000 })
+          process.emit("SIGTERM")
+          await vi.waitFor(() => expect(existsSync(`${marker}.sigterm`)).toBe(true), { timeout: 10_000 })
+          if (mode === "second-signal") {
+            const leader = Number(readFileSync(`${marker}.leader`, "utf8"))
+            await vi.waitFor(() => expect(() => process.kill(leader, 0)).toThrow(), { timeout: 10_000 })
+            const signalled = Date.now()
+            process.emit("SIGTERM")
+            const code = await running
+            expect(Date.now() - signalled).toBeLessThan(8_000)
+            return code
+          }
+          return await running
+        })
+
+        expect(code).toBe(143)
+        const ticksAtReturn = readFileSync(`${marker}.tick`, "utf8")
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        expect(readFileSync(`${marker}.tick`, "utf8")).toBe(ticksAtReturn)
+        expect(ticksAtReturn).toBe(ticksAtRedaction)
+        expect(() => originalKill(-Number(readFileSync(`${marker}.leader`, "utf8")), 0)).toThrow()
+        expect(probeDenied).toBe(mode === "denied-probe")
+      } finally {
+        // Also reap the fixture when testing the broken implementation, which
+        // returns while this group is still writing its heartbeat.
+        if (existsSync(`${marker}.leader`)) {
+          try {
+            process.kill(-Number(readFileSync(`${marker}.leader`, "utf8")), "SIGKILL")
+          } catch {
+            // A successful wrapper has already removed the process group.
+          }
+        }
+        await running
+        kill.mockRestore()
+        stdout.mockRestore()
+      }
+    },
+    30_000
+  )
+
   it("drives the pinned Alchemy CLI from this directory and redacts real state by default", () => {
     const resolved = resolveDeployOptions({})
 

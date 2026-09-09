@@ -45,6 +45,17 @@ const terminateProcessTree = (child: ChildProcess, signal: NodeJS.Signals): void
   }
 }
 
+const processGroupExists = (pid: number): boolean => {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    // Only ESRCH establishes that the group is gone. A refused probe must
+    // not cancel escalation or allow redaction while descendants may run.
+    return (error as NodeJS.ErrnoException).code !== "ESRCH"
+  }
+}
+
 /**
  * Substitutions for the process the wrapper drives.
  *
@@ -92,8 +103,7 @@ export const resolveDeployOptions = (options: DeployOptions): ResolvedDeployOpti
 const runAlchemy = (
   command: { readonly cli: string; readonly cwd: string },
   args: ReadonlyArray<string>,
-  onSpawn: (child: ChildProcess) => void,
-  onFinish: (child: ChildProcess) => void
+  onSpawn: (child: ChildProcess) => void
 ): Promise<CommandResult> =>
   new Promise((resolve, reject) => {
     let child: ChildProcess
@@ -112,7 +122,6 @@ const runAlchemy = (
     const finish = (complete: () => void): void => {
       if (finished) return
       finished = true
-      onFinish(child)
       complete()
     }
     onSpawn(child)
@@ -130,8 +139,11 @@ const runAlchemy = (
  * Runs Alchemy and always scrubs legacy local state before returning.
  *
  * Termination signals are held while cleanup runs and are forwarded to the
- * complete detached Alchemy process group. A command that ignores the first
- * signal is killed after a bounded grace period.
+ * complete detached Alchemy process group. After interruption, the group is
+ * tracked until it is observed gone, even if its leader exits first. Surviving
+ * members receive SIGKILL after a bounded grace period, before redaction and
+ * return. Windows waits for the directly signalled child; ordinary command
+ * completion does not wait out the grace period.
  *
  * @category commands
  * @since 0.1.0
@@ -157,7 +169,13 @@ export const deploy = async (
     if (signal !== "SIGKILL") {
       clearEscalation()
       escalationTimer = setTimeout(() => terminateProcessTree(child, "SIGKILL"), escalationDelay)
-      escalationTimer.unref()
+    }
+  }
+  const waitForProcessGroup = async (): Promise<void> => {
+    const pid = activeChild?.pid
+    if (requestedSignal === undefined || process.platform === "win32" || pid === undefined) return
+    while (processGroupExists(pid)) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 25))
     }
   }
   const handlers = new Map<NodeJS.Signals, () => void>()
@@ -180,22 +198,24 @@ export const deploy = async (
   try {
     try {
       // The handlers above are installed and the child is spawned in the
-      // same synchronous run, so no signal can arrive before `onSpawn`, and
-      // one wrapper drives one child, so `onFinish` always ends the active one.
+      // same synchronous run, so no signal can arrive before `onSpawn`.
       command = await runAlchemy(
         target,
         args,
         (child) => {
           activeChild = child
-        },
-        () => {
-          activeChild = undefined
-          clearEscalation()
         }
       )
     } catch (error) {
       commandFailure = error
     }
+
+    // The leader's close event says nothing about surviving descendants.
+    // Keep the group handle and referenced escalation deadline until the
+    // interrupted group is gone, including for a second termination signal.
+    await waitForProcessGroup()
+    activeChild = undefined
+    clearEscalation()
 
     try {
       const redactedFiles = await redact()
