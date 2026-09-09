@@ -308,6 +308,9 @@ describe("render", () => {
     // Bun installs itself; a second manager-setup action would install the same
     // program twice.
     expect(rendered).not.toContain("pnpm/action-setup")
+    expect(rendered).toContain(`      - uses: ${actions.setupNode}\n`)
+    expect(rendered).not.toContain("cache: pnpm")
+    expect(rendered).not.toMatch(/^\s+cache:/m)
   })
 
   it("refuses to render a pipeline that drops a declared gate", () => {

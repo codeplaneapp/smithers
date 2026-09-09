@@ -755,7 +755,10 @@ const diagnostic = (text: string): string => {
 const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 
 /** The steps one declared interpreter installation renders to. */
-const runtimeSteps = (setup: CiToolchain.RuntimeSetup): ReadonlyArray<RenderedStep> => {
+const runtimeSteps = (
+  setup: CiToolchain.RuntimeSetup,
+  manager: PackageManager.Name
+): ReadonlyArray<RenderedStep> => {
   switch (setup.name) {
     case "node":
       return [
@@ -763,7 +766,7 @@ const runtimeSteps = (setup: CiToolchain.RuntimeSetup): ReadonlyArray<RenderedSt
           uses: actions.setupNode,
           with: {
             "node-version": setup.release,
-            ...(setup.cachePackageStore ? { cache: "pnpm" } : {})
+            ...(setup.cachePackageStore && manager === "pnpm" ? { cache: manager } : {})
           }
         },
         ...(setup.npmRelease === undefined ? [] : [{
@@ -871,7 +874,8 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
   } else {
     const managerSetup = managerSetupAction(attrs.packageManager)
     if (needs.install && managerSetup !== undefined) steps.push({ uses: managerSetup })
-    for (const setup of needs.runtimes) steps.push(...runtimeSteps(setup))
+    const manager = PackageManager.required(attrs.packageManager).name
+    for (const setup of needs.runtimes) steps.push(...runtimeSteps(setup, manager))
     if (needs.install) steps.push({ run: installArgv(attrs).join(" ") })
   }
   if (needs.rust !== undefined) {

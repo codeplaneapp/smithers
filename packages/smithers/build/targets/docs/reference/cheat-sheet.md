@@ -1131,6 +1131,8 @@ const changesetsPublish = S.Changesets.Publish({
 
 `CiToolchain.Node` accepts an optional `npmRelease` pin. The generated job installs that npm version after setting up Node; omitting it keeps Node's bundled npm. The release tarball rehearsal requires npm 11.16.0, so its toolchain declares that pin explicitly.
 
+`cachePackageStore` defaults to `true`. Node setup restores the pnpm store when the workspace declares pnpm. For Bun workspaces, Node setup omits the package-store cache because `actions/setup-node` does not cache Bun. Set `cachePackageStore: false` to disable package-store caching.
+
 ```ts
 import { Smithers as S } from "@smthrs/targets"
 
