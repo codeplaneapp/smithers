@@ -76,8 +76,9 @@ Schema.encodeUnknownSync(Canonical)(document)
 // => { a: 1, b: 2 }
 ```
 
-Pass `{ reportInput: false }` when the value is key material, so the rejected
-input is not rendered into the schema issue. See
+Pass `{ reportInput: false }` to suppress Schema input rendering only. It does
+not redact the custom issue message, which includes the path and any original
+getter or `toJSON` exception text. See
 [Canonicalize inside an Effect pipeline](./guides/use-the-schema.md).
 
 ## Canonical (type)
@@ -103,16 +104,21 @@ class CanonicalError extends TypeError {
 
 A stable, located canonicalization failure, thrown by `canonicalize`.
 
-| Member    | Type                 | Meaning                                                                                          |
-| --------- | -------------------- | ------------------------------------------------------------------------------------------------ |
-| `name`    | `string`             | Always `"CanonicalError"`.                                                                       |
-| `code`    | `CanonicalErrorCode` | The stable failure identifier. Safe to branch on and to log.                                     |
-| `path`    | `string`             | The JSON-style path of the offending value. Contains member names, never member values.          |
-| `message` | `string`             | `` `${code}: ${detail} at ${path}` ``.                                                           |
-| `cause`   | `unknown`            | The original error, for `canonical_tojson_threw` and `canonical_getter_threw`. Absent otherwise. |
+| Member    | Type                 | Meaning                                                                                            |
+| --------- | -------------------- | -------------------------------------------------------------------------------------------------- |
+| `name`    | `string`             | Always `"CanonicalError"`.                                                                         |
+| `code`    | `CanonicalErrorCode` | The stable failure identifier. Safe to branch on and to log.                                       |
+| `path`    | `string`             | The JSON-style path of the offending value. Member names are caller-supplied and may be sensitive. |
+| `message` | `string`             | `` `${code}: ${detail} at ${path}` ``.                                                             |
+| `cause`   | `unknown`            | The original error, for `canonical_tojson_threw` and `canonical_getter_threw`. Absent otherwise.   |
 
-Neither `code` nor `path` contains the rejected value, so both are safe to
-report across a boundary.
+Report only the stable `code` by default. Treat every path segment, `message`,
+and `cause` text as caller-controlled and potentially sensitive. Member names
+can contain tokens or emails, and callback exception text is copied into
+`message`. `reportInput: false` affects Schema input rendering only; it does
+not sanitize a `CanonicalError`. Allowlist or redact diagnostics before they
+cross a log or RPC boundary. See
+[Limit diagnostic disclosure](./guides/use-the-schema.md#limit-diagnostic-disclosure).
 
 Path grammar:
 
@@ -178,7 +184,8 @@ Each code, with its cause and its fix, is in
 `BoundedJson.admit(input, limits)` copies inert JSON without calling getters or
 `toJSON`. A success carries `{ ok: true, value, bytes }`; a refusal carries
 `{ ok: false, code, complaint, path }`. `path` contains property names and array
-indices, so callers should bound it when displaying untrusted field names.
+indices, so callers should allowlist or redact sensitive segments before
+reporting it, then bound its length. A length cap does not remove secrets.
 
 The required limits are `maxDepth`, `maxNodes`, and `maxMembers` (per array or
 object). Optional `maxTotalMembers` bounds members across the whole tree.
