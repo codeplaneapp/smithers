@@ -104,7 +104,7 @@ settles depends on who is reading:
   command records only the exit code, so nothing is printed twice.
 - A green summary is the envelope's data, unless the same renderer already
   drew it, in which case standard output stays empty.
-- An inert plan from `--plan` is always data, for a person and a program
+- A plan report from `--plan` is always data, for a person and a program
   alike.
 
 The reporter is closed however the run ends, in a `finally`, so a live

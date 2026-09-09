@@ -87,14 +87,14 @@ required dependencies instead of silently dropping them.
 ## Check the selection before running it
 
 `query` lists pattern matches without filtering by verb or exclusive tier,
-and executes nothing:
+and skips target bodies while evaluating trusted declarations:
 
 ```bash
 pnpm exec smithers-build query '//packages/...:faults'
 ```
 
 `--plan` goes one step further and shows what running that selection would do,
-still without executing:
+while skipping target bodies:
 
 ```bash
 pnpm exec smithers-build test '//packages/...' --plan
@@ -102,8 +102,11 @@ pnpm exec smithers-build ci '//packages/...' --plan
 pnpm exec smithers-build test '//packages/...:faults' --plan
 ```
 
-Use `query` when you are unsure the pattern matches. Use `--plan` when you are
-unsure the run is safe or want to see which targets the cache already covers.
+Use `query` when you are unsure the pattern matches. Use `--plan` to inspect
+keys and see which targets the cache already covers. Planning evaluates trusted
+declarations and may run tool probes or resolve and build declared environments.
+See [Planning requirements](./inspect-a-workspace.md#see-what-a-run-would-do)
+for required tools and possible host and cache writes.
 
 ## Bound the concurrency
 

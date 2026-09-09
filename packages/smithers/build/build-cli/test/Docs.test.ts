@@ -145,3 +145,22 @@ describe("command documentation contracts", () => {
     expect(page).toMatch(/conflicting non-lint.*reject/)
   })
 })
+
+describe("planning documentation", () => {
+  it.each(["quickstart.md", "cli.md"])("%s makes no promise of zero subprocesses or host writes", (page) => {
+    const text = Fs.readFileSync(NodePath.join(import.meta.dirname, "../docs", page), "utf8")
+    expect(text).not.toMatch(/nothing spawns|spawns nothing|executes? nothing|nothing is\s+written outside the cache/i)
+  })
+
+  it("quickstart states the plan-time trust, tool and write requirements", () => {
+    const text = Fs.readFileSync(NodePath.join(import.meta.dirname, "../docs/quickstart.md"), "utf8")
+    expect(text).toMatch(/skips target bodies/i)
+    expect(text).toMatch(/evaluates trusted declarations/i)
+    expect(text).toMatch(/reads the workspace/i)
+    expect(text).toMatch(/bounded tool probes/i)
+    expect(text).toMatch(/version and identity lookups/i)
+    expect(text).toMatch(/resolve or build\s+declared environments/i)
+    expect(text).toContain("Nix store")
+    expect(text).toMatch(/tools.*PATH/)
+  })
+})

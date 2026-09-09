@@ -1,12 +1,14 @@
 ---
-title: "Inspect a workspace without running it"
-description: "Four read-only moves: list what a pattern selects, read a dependency closure, draw the graph, and resolve who owns a change, none of which executes a target."
+title: "Inspect a workspace without running target bodies"
+description: "List selections, read dependency closures, draw graphs, resolve ownership, and plan targets, with the trust and tool requirements of inspection."
 sidebar:
   order: 2
 ---
 
-`query`, `graph`, `owners`, and `--plan` execute nothing. They are how you
-answer a question about a workspace without paying for a build.
+`query`, `graph`, `owners`, and `--plan` skip target bodies. Inspection still
+evaluates workspace and package declarations as host code, so use it only on
+trusted declarations. Planning can also run tools and build declared
+environments, as described below.
 
 ## List what a pattern selects
 
@@ -72,8 +74,23 @@ pnpm exec smithers-build ci '//packages/...' --plan
 
 The plan names each selected target, its declared inputs and outputs, whether
 it is cacheable, whether the cache already holds a result, and a preview of
-its key material. Nothing spawns and nothing is written outside the cache
-directory.
+its key material.
+
+`--plan` skips target bodies, but evaluates trusted declarations and reads the
+workspace. It may spawn bounded tool probes for version and identity lookups,
+and may resolve or build declared environments such as Nix. For a declared
+Nix environment, this includes `nix --version`, `nix build`, and
+`nix print-dev-env`; a memoized resolution still needs the version probe.
+
+Planning can write resolution memos under the configured cache directory.
+Declarations and spawned tools run on the host and can write outside that
+cache, including the Nix store and tool caches. Environment resolution may
+fetch dependencies or perform expensive builds. Target write-set confinement
+does not make declaration evaluation or these planning tools read-only.
+
+Install the required runtime, package manager, and tools on `PATH`, including
+`nix` for a declared Nix environment. Planning may fail or report a refusal
+when a required tool or environment is unavailable.
 
 `--plan` is the honest answer to "is this going to rebuild everything?". If a
 target you expected to hit is planned to run, its key moved, and

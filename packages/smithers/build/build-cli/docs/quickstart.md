@@ -6,7 +6,7 @@ sidebar:
 ---
 
 This walks one workspace from nothing to a cached run. It takes about five
-minutes and spawns one shell command.
+minutes and runs one shell target, plus planning tools.
 
 You need Node 22.19+ (Node 22) or 24.11+, git, and a checkout that carries
 `@smthrs/build-cli` and `@smthrs/targets` as workspace dependencies. See
@@ -58,8 +58,8 @@ workspace root; a `PACKAGE.ts` at `apps/site/` would declare
 
 ## Look before you run
 
-`--plan` prints the plan and executes nothing. Read it before the first real
-run:
+`--plan` prints the plan and skips target bodies. Read it before running the
+target:
 
 ```bash
 pnpm exec smithers-build test '//:greet' --plan
@@ -67,8 +67,16 @@ pnpm exec smithers-build test '//:greet' --plan
 
 The plan names each selected target, its declared inputs and outputs, whether
 it is cacheable, whether the cache already holds a result, and a preview of
-the key material that result is filed under. Nothing spawns, and nothing is
-written outside the cache directory.
+the key material that result is filed under.
+
+Planning evaluates trusted declarations and reads the workspace. It may spawn
+bounded tool probes for version and identity lookups, and may resolve or build
+declared environments such as Nix. It can write resolution memos in the
+configured cache; declarations and tools can also write on the host, including
+the Nix store and tool caches,
+and environment resolution can fetch dependencies or perform expensive builds.
+Have the required runtime, package manager, and tools on `PATH`, including
+`nix` when declared. See [Planning requirements](./guides/inspect-a-workspace.md#see-what-a-run-would-do).
 
 ## Run it
 
@@ -82,9 +90,9 @@ pnpm exec smithers-build test '//:greet'
 pnpm exec smithers-build test '//:greet'
 ```
 
-The second run reports a hit and spawns nothing. The key covers the target's
-attributes, its expanded declared inputs, the result of each dependency, the
-executor's own implementation, and the host's Node version, platform, and
+The second run reports a hit and skips the target body. Planning still runs.
+The key covers the target's attributes, its expanded declared inputs, the
+result of each dependency, the executor's own implementation, and the host's Node version, platform, and
 architecture. Nothing moved, so the recorded result stands. Edit the command
 in `PACKAGE.ts` and the key moves with it, and the next run executes again.
 
@@ -93,7 +101,8 @@ cache reads for that invocation and still publishes what it produces.
 
 ## Ask the workspace questions
 
-Three verbs read the workspace and execute nothing.
+These queries read the workspace and skip target bodies. They still evaluate
+trusted declarations.
 
 ```bash
 pnpm exec smithers-build query '//...'

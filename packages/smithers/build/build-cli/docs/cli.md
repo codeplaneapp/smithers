@@ -37,7 +37,7 @@ in the workspace declaration, then `.flows`. See
 
 | Option                   | Alias | Type       | Default          | Meaning                                                           |
 | ------------------------ | ----- | ---------- | ---------------- | ----------------------------------------------------------------- |
-| `--plan`                 |       | boolean    | `false`          | Print the inert plan and execute nothing.                         |
+| `--plan`                 |       | boolean    | `false`          | Print the plan and skip target bodies.                         |
 | `--verbose`              |       | boolean    | `false`          | Show plain progress for agents and pipe consumers.                |
 | `--jobs`                 | `-j`  | integer 1+ | host parallelism | Maximum concurrent targets.                                       |
 | `--include-exclusive`    |       | boolean    | `false`          | Include exclusive targets in wildcard `ci` and `test` selections. |
@@ -46,7 +46,11 @@ in the workspace declaration, then `.flows`. See
 Exclusive targets run alone after ready ordinary work drains, regardless of
 `--jobs`. Dependencies keep their ordering. Explicit labels, including
 `//packages/...:faults`, select exclusive targets without an opt-in flag.
-`--plan` applies the same selection rules and executes no targets.
+`--plan` applies the same selection rules and skips target bodies. It still
+evaluates trusted declarations, reads the workspace, and may run tool probes
+or resolve and build declared environments. See
+[Planning requirements](./guides/inspect-a-workspace.md#see-what-a-run-would-do)
+for required tools and possible host and cache writes.
 
 ## Global options
 
