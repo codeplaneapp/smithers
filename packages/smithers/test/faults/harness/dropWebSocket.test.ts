@@ -1,6 +1,6 @@
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { dropWebSocket, trackingWebSocketConstructor } from "./dropWebSocket.ts"
+import { dropWebSocket, SocketState, trackingWebSocketConstructor } from "./dropWebSocket.ts"
 
 // The `ws` server class the client half of this harness is built on, reached
 // through the same re-export `@effect/platform-node` uses for the client.
@@ -44,6 +44,7 @@ describe("dropWebSocket", () => {
   it("tracks every socket a client constructs", async () => {
     const tracker = trackingWebSocketConstructor()
     expect(tracker.opened()).toBe(0)
+    expect(tracker.latestState()).toBeUndefined()
     tracker.construct(url)
     tracker.construct(url)
     expect(tracker.opened()).toBe(2)
@@ -56,9 +57,13 @@ describe("dropWebSocket", () => {
       readyState: number
     }
     await opened(socket)
-    expect(socket.readyState).toBe(1)
-    await tracker.dropLatest("abrupt")
-    expect(socket.readyState).toBe(3)
+    expect(socket.readyState).toBe(SocketState.open)
+    expect(tracker.latestState()).toBe(SocketState.open)
+    // The report is what a case reads to know it cut a live connection rather
+    // than one its own scope had already released.
+    expect(await tracker.dropLatest("abrupt")).toEqual({ stateBefore: SocketState.open, cut: true })
+    expect(socket.readyState).toBe(SocketState.closed)
+    expect(tracker.latestState()).toBe(SocketState.closed)
   })
 
   it("closes a socket politely when asked to", async () => {
@@ -68,11 +73,11 @@ describe("dropWebSocket", () => {
       readyState: number
     }
     await opened(socket)
-    await tracker.dropLatest("close")
-    expect(socket.readyState).toBe(3)
+    expect(await tracker.dropLatest("close")).toEqual({ stateBefore: SocketState.open, cut: true })
+    expect(socket.readyState).toBe(SocketState.closed)
   })
 
-  it("is a no-op on a socket that is already closed", async () => {
+  it("reports that a socket which is already closed was not cut", async () => {
     const tracker = trackingWebSocketConstructor()
     const socket = tracker.construct(url) as unknown as {
       once: (e: string, l: () => void) => unknown
@@ -82,8 +87,8 @@ describe("dropWebSocket", () => {
     }
     await opened(socket)
     await tracker.dropLatest("abrupt")
-    await dropWebSocket(socket, "abrupt")
-    expect(socket.readyState).toBe(3)
+    expect(await dropWebSocket(socket, "abrupt")).toEqual({ stateBefore: SocketState.closed, cut: false })
+    expect(socket.readyState).toBe(SocketState.closed)
   })
 
   it("refuses to drop when nothing has been constructed", async () => {

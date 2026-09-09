@@ -23,6 +23,37 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket"
  */
 export type DropMode = "abrupt" | "close"
 
+/**
+ * The `ws` ready states, so a case can name the state it expects instead of
+ * repeating a number.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const SocketState = {
+  connecting: 0,
+  open: 1,
+  closing: 2,
+  closed: 3
+} as const
+
+/**
+ * What one drop did.
+ *
+ * `cut` separates a real network fault from a no-op against a socket that had
+ * already gone away. A case whose reader has already released its client cuts
+ * nothing, and without this it still reads as though it had.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface DropReport {
+  /** The socket's `readyState` when the drop was asked for. */
+  readonly stateBefore: number
+  /** Whether this call actually cut a connection that was still there. */
+  readonly cut: boolean
+}
+
 /** The half of the `ws` client surface this harness drives. */
 export interface DroppableSocket {
   readonly readyState: number
@@ -31,16 +62,16 @@ export interface DroppableSocket {
   once: (event: "close", listener: () => void) => unknown
 }
 
-const CLOSED = 3
-
 /**
- * Drops one socket and resolves when it reports closed.
+ * Drops one socket and resolves when it reports closed, reporting whether there
+ * was anything left to drop.
  *
  * @since 1.0.0
  * @category constructors
  */
-export const dropWebSocket = async (socket: DroppableSocket, mode: DropMode = "abrupt"): Promise<void> => {
-  if (socket.readyState === CLOSED) return
+export const dropWebSocket = async (socket: DroppableSocket, mode: DropMode = "abrupt"): Promise<DropReport> => {
+  const stateBefore = socket.readyState
+  if (stateBefore === SocketState.closed) return { stateBefore, cut: false }
   const closed = new Promise<void>((resolve) => {
     socket.once("close", () => resolve())
   })
@@ -48,6 +79,7 @@ export const dropWebSocket = async (socket: DroppableSocket, mode: DropMode = "a
   else if (typeof socket.terminate === "function") socket.terminate()
   else socket.close(1006)
   await closed
+  return { stateBefore, cut: true }
 }
 
 /**
@@ -63,8 +95,14 @@ export interface TrackedWebSockets {
   readonly sockets: ReadonlyArray<DroppableSocket>
   /** How many sockets have been constructed. A reconnect is a second one. */
   readonly opened: () => number
+  /**
+   * The most recently constructed socket's `readyState`, or `undefined` when
+   * none has been constructed. A case that means to cut a live connection
+   * asserts on this before it cuts.
+   */
+  readonly latestState: () => number | undefined
   /** Drops the most recently constructed socket. */
-  readonly dropLatest: (mode?: DropMode) => Promise<void>
+  readonly dropLatest: (mode?: DropMode) => Promise<DropReport>
 }
 
 /**
@@ -91,10 +129,11 @@ export const trackingWebSocketConstructor = (credential?: string): TrackedWebSoc
     construct,
     sockets,
     opened: () => sockets.length,
+    latestState: () => sockets[sockets.length - 1]?.readyState,
     dropLatest: async (mode: DropMode = "abrupt") => {
       const socket = sockets[sockets.length - 1]
       if (socket === undefined) throw new Error("dropLatest: no socket has been constructed yet")
-      await dropWebSocket(socket, mode)
+      return await dropWebSocket(socket, mode)
     }
   }
 }

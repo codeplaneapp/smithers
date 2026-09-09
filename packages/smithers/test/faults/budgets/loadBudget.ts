@@ -34,7 +34,12 @@ export const loadBudget = <A>(name: BudgetName): A =>
  * @category models
  */
 export interface MemoryBudget {
-  readonly subscriberFanoutN5: { readonly rssGrowthBytesMax: number }
+  readonly subscriberFanoutN5: {
+    /** The gateway process, sampled by pid: where a fan-out queue would grow. */
+    readonly serverRssGrowthBytesMax: number
+    /** The reading process, named so it cannot be mistaken for the server's. */
+    readonly clientRssGrowthBytesMax: number
+  }
 }
 
 /**

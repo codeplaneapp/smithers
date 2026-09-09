@@ -4,21 +4,28 @@
  *
  * The cursor is the journal sequence the reader last committed, which is why it
  * survives the connection: it names a row in the server's SQLite file, not a
- * position in a socket. The case reads half a run's history, drops the socket
- * for real, reconnects with a second client, and asks for everything after the
- * last sequence it kept.
+ * position in a socket. The case reads part of a run's history, cuts that
+ * reader's socket while the reader still holds it, reconnects with a second
+ * client, and asks for everything after the last sequence it kept.
+ *
+ * The cut has to happen inside the first client's own scope. Collecting the
+ * whole history and slicing it afterwards lets the client's scope close first,
+ * so the drop lands on a socket that is already gone and the case degenerates
+ * into ordinary pagination across two fresh clients. `stateAtDrop` and the drop
+ * report are here so that degeneration fails instead of passing quietly.
  */
 import { Control } from "@smthrs/control"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { type LatencyBudget, loadBudget } from "./budgets/loadBudget.ts"
-import { trackingWebSocketConstructor } from "./harness/dropWebSocket.ts"
+import { SocketState, trackingWebSocketConstructor } from "./harness/dropWebSocket.ts"
 import { emitSignals, launchRun } from "./harness/servedRun.ts"
 import { servedSuite } from "./harness/servedSuite.ts"
 
 const suite = servedSuite("case09")
 const budget = loadBudget<LatencyBudget>("latency")
+const prefix = 20
 
 beforeAll(() => suite.start(), 180_000)
 afterAll(() => suite.stop())
@@ -34,8 +41,9 @@ const history = (runId: string, afterSequence?: number) =>
 describe("case09 reconnect from a durable cursor", () => {
   it("resumes after a dropped socket with no gap and no duplicate", async () => {
     const sockets = trackingWebSocketConstructor(suite.server().token)
+    const credential = suite.server().token
     const runId = await suite.remoteWith(
-      { credential: suite.server().token, sockets },
+      { credential, sockets },
       Effect.gen(function*() {
         const run = yield* launchRun("case09")
         yield* emitSignals(run.runId, 40)
@@ -43,23 +51,35 @@ describe("case09 reconnect from a durable cursor", () => {
       })
     )
 
-    // First reader: takes the first half and keeps its last sequence.
+    // First reader: takes only the prefix and is cut while its connection is
+    // still live. `terminate` destroys the TCP connection without a close
+    // frame, which is what a lost network does.
     const first = await suite.remoteWith(
-      { credential: suite.server().token, sockets },
-      history(runId).pipe(Effect.map((events) => events.slice(0, 20)))
+      { credential, sockets },
+      Effect.gen(function*() {
+        const control = yield* Control.Control
+        const events = yield* control.watch({ runId, follow: false }).pipe(
+          Stream.take(prefix),
+          Stream.runCollect
+        )
+        const stateAtDrop = sockets.latestState()
+        const drop = yield* Effect.promise(() => sockets.dropLatest("abrupt"))
+        return { events: [...events], stateAtDrop, drop }
+      })
     )
-    expect(first.length).toBe(20)
-    const cursor = first[first.length - 1]!.sequence
 
-    // The connection is genuinely cut: `terminate` drops the TCP connection
-    // without a close frame, which is what a lost network does.
+    expect(first.events.length).toBe(prefix)
+    // The fault this case names: a live socket, cut.
+    expect(first.stateAtDrop).toBe(SocketState.open)
+    expect(first.drop).toEqual({ stateBefore: SocketState.open, cut: true })
+
+    const cursor = first.events[first.events.length - 1]!.sequence
     const openedBefore = sockets.opened()
     expect(openedBefore).toBeGreaterThan(0)
-    await sockets.dropLatest("abrupt")
 
     // Second reader: a new connection, told only the cursor.
     const startedAt = performance.now()
-    const rest = await suite.remoteWith({ credential: suite.server().token, sockets }, history(runId, cursor))
+    const rest = await suite.remoteWith({ credential, sockets }, history(runId, cursor))
     const elapsedMs = performance.now() - startedAt
 
     expect(sockets.opened()).toBeGreaterThan(openedBefore)
@@ -69,8 +89,17 @@ describe("case09 reconnect from a durable cursor", () => {
     expect(rest.map((event) => event.sequence)).toEqual(
       rest.map((_, index) => cursor + 1 + index)
     )
-    const seen = new Set([...first, ...rest].map((event) => event.sequence))
-    expect(seen.size).toBe(first.length + rest.length)
+
+    // The union of the two readers is the server's own history up to the last
+    // sequence the second one saw: what the cut interrupted, nothing lost and
+    // nothing seen twice.
+    const union = [...first.events, ...rest].map((event) => event.sequence)
+    expect(new Set(union).size).toBe(union.length)
+    const complete = await suite.remoteWith({ credential, sockets }, history(runId))
+    const last = rest[rest.length - 1]!.sequence
+    expect(union.slice().sort((left, right) => left - right)).toEqual(
+      complete.map((event) => event.sequence).filter((sequence) => sequence <= last)
+    )
     expect(elapsedMs).toBeLessThan(budget.reconnectCursorMaxMs)
   })
 })

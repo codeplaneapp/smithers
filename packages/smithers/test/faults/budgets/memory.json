@@ -1,6 +1,7 @@
 {
   "subscriberFanoutN5": {
-    "rssGrowthBytesMax": 134217728,
-    "comment": "case16: 128 MB maximum resident-set growth over this suite's own baseline for 5 concurrent watch subscribers over 500 journal events. Growth, not an absolute ceiling: this package's fault tier runs every case in one process, so an absolute number would measure the tier rather than this path."
+    "serverRssGrowthBytesMax": 134217728,
+    "clientRssGrowthBytesMax": 134217728,
+    "comment": "case16: 128 MB maximum resident-set growth for 5 concurrent watch subscribers over 500 journal events. serverRssGrowthBytesMax is the one that measures the fan-out: the gateway runs as its own OS process, so subscriber queues and retained histories grow there, and it is sampled by pid while all five readers are still attached. clientRssGrowthBytesMax is the reading process over the same window, named separately so neither side can stand in for the other. Growth over each side's own baseline, not an absolute ceiling: this package's fault tier runs every case in one process and reuses one server per case, so an absolute number would measure the host rather than this path."
   }
 }
