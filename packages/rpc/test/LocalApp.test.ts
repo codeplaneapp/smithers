@@ -32,9 +32,12 @@ import {
   RepoSchema,
   retryAfterOf,
   TARGET_PATTERN,
+  TargetRunFrameSchema,
+  TargetRunMessageSchema,
   TargetSchema,
   withRetryAfter
 } from "../src/LocalApp.ts"
+import { RunReplayResponseSchema, TargetRunEventSchema } from "../src/TargetGraph.ts"
 
 /*
  * The local-app wire model (apps/ui/docs/LOCAL-APP.md "Targets: load and
@@ -280,5 +283,51 @@ describe("the cloud LSP relay contract", () => {
     expect(retryAfterOf(reason)).toBe(2)
     expect(retryAfterOf("access revoked: token expired")).toBeNull()
     expect(retryAfterOf("guest_not_ready: activating (retry after 30 s) ")).toBe(30)
+  })
+})
+
+/*
+ * A WS frame and a recorded run event are the same value: the client parses
+ * what the backend recorded. They were once two hand-written unions, and the
+ * copy here silently stripped `seq` off every frame in flight.
+ */
+describe("TargetRunFrameSchema", () => {
+  const frame = {
+    type: "summary" as const,
+    summary: {
+      total: 3,
+      hit: 1,
+      ran: 2,
+      failed: 0,
+      skipped: 0,
+      durationMs: 4900,
+      ok: true,
+      criticalPath: ["//src:srcs", "//src:typeCheck"]
+    },
+    at: 4,
+    seq: 7
+  }
+
+  test("is the run-event union itself, not a second copy of it", () => {
+    expect(TargetRunFrameSchema).toBe(TargetRunEventSchema)
+  })
+
+  test("a frame carrying every field survives the envelope and the replay envelope unchanged", () => {
+    const envelope = TargetRunMessageSchema.parse({ type: "target-run", runId: "r1", frame })
+    expect(envelope.frame).toEqual(frame)
+    const replay = RunReplayResponseSchema.parse({
+      run: {
+        runId: "r1",
+        repoId: "repo1",
+        label: "//src:typeCheck",
+        labels: ["//src:typeCheck"],
+        status: "done",
+        startedAt: 1,
+        endedAt: 5
+      },
+      events: [frame]
+    })
+    expect(replay.events[0]).toEqual(frame)
+    expect(replay.events[0]).toEqual(envelope.frame)
   })
 })

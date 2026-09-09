@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { AffectedResponseSchema, CiMatrixResponseSchema, RunHistoryResponseSchema, RunReplayResponseSchema, TargetGraphResponseSchema } from "@smthrs/rpc/TargetGraph"
+import { AffectedResponseSchema, CiMatrixResponseSchema, RunHistoryResponseSchema, RunReplayResponseSchema, TARGET_GRAPH_ROUTES, TargetGraphResponseSchema } from "@smthrs/rpc/TargetGraph"
 import { TargetsQueryResponseSchema } from "@smthrs/rpc/LocalApp"
 import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
 import { startLocalServer } from "../server"
@@ -55,6 +55,18 @@ afterAll(async () => {
 })
 
 describe("POST /api/targets/graph", () => {
+  /*
+   * The contract's route table is what the client posts to. A path the table
+   * names but the server never registers is a 404 nobody sees until a card
+   * goes blank, so every value has to reach a handler.
+   */
+  test("every route the contract names is registered here", async () => {
+    for (const path of Object.values(TARGET_GRAPH_ROUTES)) {
+      const response = await post(path, {})
+      expect({ path, status: response.status }).toEqual({ path, status: 400 })
+    }
+  })
+
   test("returns the typed graph and optional plan", async () => {
     const response = await post("/api/targets/graph", { repoId, plan: true, labels: ["//:lint"] })
     expect(response.status).toBe(200)

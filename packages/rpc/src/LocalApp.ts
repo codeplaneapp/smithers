@@ -4,7 +4,7 @@
  * @since 1.0.0
  */
 import { z } from "zod"
-import { NodeTimingSchema, RunSummarySchema } from "./TargetGraph.ts"
+import { type TargetRunEvent, TargetRunEventSchema } from "./TargetGraph.ts"
 
 /*
  * The local-app wire model (apps/ui/docs/LOCAL-APP.md "HTTP and WebSocket
@@ -692,14 +692,6 @@ export type PtySession = z.infer<typeof PtySessionSchema>
  * kinds }` row plus the label split into its package and name.
  */
 /**
- * Shared target kinds used by the host and its clients.
- *
- * @since 1.0.0
- * @category constants
- */
-export const TARGET_KINDS = ["build", "test", "lint", "run", "docs"] as const
-
-/**
  * Validates target definition values at the RPC boundary.
  *
  * @since 1.0.0
@@ -708,6 +700,7 @@ export const TARGET_KINDS = ["build", "test", "lint", "run", "docs"] as const
 export const TargetDefinitionSchema = z.object({
   label: z.string(),
   target: z.string(),
+  /** Open strings: whatever the rule declares, not a closed set the contract pins. */
   kinds: z.array(z.string()),
   package: z.string(),
   name: z.string(),
@@ -763,48 +756,29 @@ export type TargetsQueryResponse = z.infer<typeof TargetsQueryResponseSchema>
 export const TargetRunResponseSchema = z.object({ runId: z.string() })
 
 /*
- * The run-local frame number the backend stamps on every frame it records
- * (@smthrs/rpc/TargetGraph `TargetRunEvent.seq`): 0-based, gap-free, and
- * the ONLY total order replay has, because stdout/stderr/exit/error frames
- * carry no `at` of their own.
+ * One frame on the WS topic `target-run:<runId>` IS one recorded run event:
+ * the client parses what the backend recorded, field for field. The union
+ * lives once, on @smthrs/rpc/TargetGraph `TargetRunEventSchema`; this is the
+ * client-side name for it.
  *
- * It has to be declared HERE too, not only on TargetRunEvent. This is the
- * schema the client parses every WebSocket frame with, and a zod object
- * strips what it does not declare — so while it was absent the ordering key
- * was silently deleted off every frame in flight. Optional, because frames
- * recorded before the backend numbered them have none.
+ * It must stay one schema, not a copy. A zod object strips what it does not
+ * declare, so while the copy here was missing `seq` the ordering key was
+ * silently deleted off every frame in flight. `seq` is the run-local, 0-based,
+ * gap-free frame number and the ONLY total order replay has, because
+ * stdout/stderr/exit/error frames carry no `at` of their own.
  */
-const frameSeq = { seq: z.number().int().nonnegative().optional() }
-
 /** One frame on the WS topic `target-run:<runId>`.
  * @since 1.0.0
  * @category schemas
  */
-export const TargetRunFrameSchema = z.discriminatedUnion("type", [
-  /* `label` attributes the chunk to one graph node when the backend can. */
-  z.object({ type: z.literal("stdout"), data: z.string(), label: z.string().optional(), ...frameSeq }),
-  z.object({ type: z.literal("stderr"), data: z.string(), label: z.string().optional(), ...frameSeq }),
-  z.object({ type: z.literal("exit"), code: z.number().nullable(), ...frameSeq }),
-  z.object({ type: z.literal("error"), message: z.string(), ...frameSeq }),
-  /* The structured run frames (@smthrs/rpc/TargetGraph TargetRunEvent). */
-  z.object({
-    type: z.literal("started"),
-    runId: z.string(),
-    label: z.string(),
-    at: z.number(),
-    labels: z.array(z.string()),
-    ...frameSeq
-  }),
-  z.object({ type: z.literal("node"), node: NodeTimingSchema, at: z.number(), ...frameSeq }),
-  z.object({ type: z.literal("summary"), summary: RunSummarySchema, at: z.number(), ...frameSeq })
-])
+export const TargetRunFrameSchema = TargetRunEventSchema
 /**
  * The decoded value accepted by {@link TargetRunFrameSchema}.
  *
  * @since 1.0.0
  * @category models
  */
-export type TargetRunFrame = z.infer<typeof TargetRunFrameSchema>
+export type TargetRunFrame = TargetRunEvent
 
 /** The server -> client envelope carrying a run frame.
  * @since 1.0.0

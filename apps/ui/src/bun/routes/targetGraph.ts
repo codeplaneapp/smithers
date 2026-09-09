@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { isAbsolute, relative, resolve } from "node:path"
+import { TARGET_GRAPH_ROUTES } from "@smthrs/rpc/TargetGraph"
 import type { NodeSidecar } from "../Node"
 import type { RepoStore } from "../Repos"
 import { json, jsonError, readJson } from "../routes"
@@ -28,7 +29,7 @@ export const registerTargetGraphRoutes = (
   server: Pick<LocalServer, "router">,
   options: TargetGraphRoutesOptions
 ): { readonly stop: () => void } => {
-  server.router.add("POST", "/api/targets/graph", async ({ request }) => {
+  server.router.add("POST", TARGET_GRAPH_ROUTES.graph, async ({ request }) => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const repoId = stringField(parsed.body, "repoId")
@@ -50,7 +51,7 @@ export const registerTargetGraphRoutes = (
     return json(result)
   })
 
-  server.router.add("POST", "/api/targets/runs", async ({ request }) => {
+  server.router.add("POST", TARGET_GRAPH_ROUTES.runs, async ({ request }) => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const repoId = stringField(parsed.body, "repoId")
@@ -60,7 +61,7 @@ export const registerTargetGraphRoutes = (
     return json({ runs: await options.history.list(repoId, repo.path) })
   })
 
-  server.router.add("POST", "/api/targets/runs/replay", async ({ request }) => {
+  server.router.add("POST", TARGET_GRAPH_ROUTES.replay, async ({ request }) => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const runId = stringField(parsed.body, "runId")
@@ -69,7 +70,7 @@ export const registerTargetGraphRoutes = (
     return replay === undefined ? jsonError(404, "run_not_found", `No target run with id ${runId}.`) : json(replay)
   })
 
-  server.router.add("POST", "/api/targets/affected", async ({ request }) => {
+  server.router.add("POST", TARGET_GRAPH_ROUTES.affected, async ({ request }) => {
     const started = Date.now()
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
@@ -88,7 +89,7 @@ export const registerTargetGraphRoutes = (
     }))
   })
 
-  server.router.add("POST", "/api/targets/ci", async ({ request }) => {
+  server.router.add("POST", TARGET_GRAPH_ROUTES.ci, async ({ request }) => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const repoId = stringField(parsed.body, "repoId")
@@ -105,7 +106,7 @@ export const registerTargetGraphRoutes = (
     }))
   })
 
-  server.router.add("POST", "/api/targets/open-source", async ({ request }) => {
+  server.router.add("POST", TARGET_GRAPH_ROUTES.openSource, async ({ request }) => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const repoId = stringField(parsed.body, "repoId")
