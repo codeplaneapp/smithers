@@ -3,6 +3,7 @@ import * as Permission from "@smthrs/capability/Permission"
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -95,6 +96,71 @@ const expectModelError = (value: unknown): ModelError => {
 
 const bodyBytes = (value: HttpClientRequest.HttpClientRequest): ReadonlyArray<number> =>
   value.body._tag === "Uint8Array" ? Array.from(value.body.body) : []
+
+const utf8Length = (value: string): number => new TextEncoder().encode(value).byteLength
+
+// A string that survives an encode/decode round trip has no lone surrogate, so
+// no cap split a code point to produce it.
+const expectWholeCodePoints = (value: string): void => {
+  expect(value).not.toContain("\uFFFD")
+  expect(new TextDecoder().decode(new TextEncoder().encode(value))).toBe(value)
+}
+
+const chunked = (bytes: Uint8Array, size: number): ReadableStream<Uint8Array> => {
+  let offset = 0
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= bytes.byteLength) {
+        controller.close()
+        return
+      }
+      controller.enqueue(bytes.subarray(offset, Math.min(offset + size, bytes.byteLength)))
+      offset += size
+    }
+  })
+}
+
+// One 400 whose body arrives as given, with what reached provider
+// classification captured beside the error, so the raw read cap and the
+// retained-body cap can be checked in bytes independently of each other.
+const failedDiagnostics = async (
+  body: string | ReadableStream<Uint8Array>,
+  sent: HttpClientRequest.HttpClientRequest = request()
+): Promise<{
+  readonly classified: string
+  readonly error: ModelError & { readonly body?: string | undefined; readonly bodyTruncated?: boolean | undefined }
+}> => {
+  let classified = ""
+  const client = HttpClient.make((attempted) =>
+    Effect.succeed(HttpClientResponse.fromWeb(attempted, new Response(body, { status: 400 })))
+  )
+  const layer = RequestExecutor.layer.pipe(
+    Layer.provide(Layer.succeed(KernelHttpClient.HttpClient)(client))
+  )
+  const error = await run(
+    Effect.gen(function*() {
+      const executor = yield* RequestExecutor.RequestExecutor
+      return yield* execute(executor, sent, {
+        classifyError: (_status, text) => {
+          classified = text
+          return new ModelError({ code: "invalid_request", message: "classified" })
+        }
+      }).pipe(Effect.flip)
+    }),
+    layer
+  )
+  return { classified, error: expectModelError(error) }
+}
+
+const transportError = (attempted: HttpClientRequest.HttpClientRequest): HttpClientError.HttpClientError =>
+  new HttpClientError.HttpClientError({
+    reason: new HttpClientError.TransportError({ request: attempted, description: "The session has been destroyed" })
+  })
+
+// Every forked caller gets to run up to its next asynchronous boundary.
+const settle = Effect.gen(function*() {
+  for (let round = 0; round < 8; round += 1) yield* Effect.yieldNow
+})
 
 const NOW = 1_700_000_000_000
 
@@ -974,6 +1040,117 @@ describe("RequestExecutor", () => {
     expect(modelError.body?.length).toBeLessThanOrEqual(16_384)
   })
 
+  it("caps the raw failed body at 64 KiB of UTF-8, not 64 Ki UTF-16 units", async () => {
+    // Two bytes per character, so a unit-counted cap would keep twice the
+    // budget. One under, exactly at, and one over the documented byte limit.
+    const twoByte = "\u00e9"
+    const under = `${twoByte.repeat(32_767)}a`
+    const exact = twoByte.repeat(32_768)
+    const over = `${exact}a`
+    expect([utf8Length(under), utf8Length(exact), utf8Length(over)]).toEqual([65_535, 65_536, 65_537])
+
+    expect((await failedDiagnostics(under)).classified).toBe(under)
+    expect((await failedDiagnostics(exact)).classified).toBe(exact)
+    const capped = (await failedDiagnostics(over)).classified
+    expect(capped).toBe(exact)
+    expect(utf8Length(capped)).toBe(65_536)
+  })
+
+  it("drops a multibyte sequence the raw cap cuts through instead of flushing a replacement character", async () => {
+    // Three-byte characters delivered five bytes at a time, so nearly every
+    // chunk boundary and the cap itself land inside a sequence: 65 536 is one
+    // byte into character 21 846. What is kept is a prefix of what was sent.
+    const threeByte = "\u20ac"
+    const sent = threeByte.repeat(21_846)
+    expect(utf8Length(sent)).toBe(65_538)
+
+    const { classified, error } = await failedDiagnostics(chunked(new TextEncoder().encode(sent), 5))
+
+    expect(classified).toBe(threeByte.repeat(21_845))
+    expect(utf8Length(classified)).toBe(65_535)
+    expectWholeCodePoints(classified)
+    expect(error.body).toBe(threeByte.repeat(5_461))
+    expect(utf8Length(error.body ?? "")).toBe(16_383)
+    expect(error.bodyTruncated).toBe(true)
+  })
+
+  it("cuts a single oversized chunk at the byte limit on a code point boundary", async () => {
+    // One chunk carrying more than the whole budget, offset by a byte so no
+    // limit divides evenly: 65 533 bytes fit, the next emoji would end at
+    // 65 537, and a unit-counted slice would end on half a surrogate pair.
+    const emoji = "\u{1F600}"
+    const sent = `a${emoji.repeat(40_000)}`
+    let pulls = 0
+    const bytes = new TextEncoder().encode(sent)
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1
+        if (pulls === 1) controller.enqueue(bytes)
+        else controller.close()
+      }
+    })
+
+    const { classified, error } = await failedDiagnostics(stream)
+
+    expect(pulls).toBe(1)
+    expect(classified).toBe(`a${emoji.repeat(16_383)}`)
+    expect(utf8Length(classified)).toBe(65_533)
+    expectWholeCodePoints(classified)
+    expect(error.body).toBe(`a${emoji.repeat(4_095)}`)
+    expect(utf8Length(error.body ?? "")).toBe(16_381)
+    expect(error.bodyTruncated).toBe(true)
+  })
+
+  it("keeps 16 KiB of UTF-8 on the error, cut only between code points", async () => {
+    // The retained cap in bytes at one under, exactly at, and one over, plus a
+    // body whose limit falls inside a character: it is cut short rather than
+    // split, and only the bodies the cap bit are marked truncated.
+    const threeByte = "\u20ac"
+    const under = threeByte.repeat(5_461)
+    const exact = `${under}a`
+    const over = `${under}ab`
+    const inside = threeByte.repeat(5_462)
+    expect([under, exact, over, inside].map(utf8Length)).toEqual([16_383, 16_384, 16_385, 16_386])
+
+    const kept = {
+      under: (await failedDiagnostics(under)).error,
+      exact: (await failedDiagnostics(exact)).error,
+      over: (await failedDiagnostics(over)).error,
+      inside: (await failedDiagnostics(inside)).error
+    }
+
+    expect(kept.under.body).toBe(under)
+    expect(kept.under.bodyTruncated).toBeUndefined()
+    expect(kept.exact.body).toBe(exact)
+    expect(kept.exact.bodyTruncated).toBeUndefined()
+    expect(kept.over.body).toBe(exact)
+    expect(utf8Length(kept.over.body ?? "")).toBe(16_384)
+    expect(kept.over.bodyTruncated).toBe(true)
+    expect(kept.inside.body).toBe(under)
+    expect(utf8Length(kept.inside.body ?? "")).toBe(16_383)
+    expect(kept.inside.bodyTruncated).toBe(true)
+    for (const error of Object.values(kept)) expectWholeCodePoints(error.body ?? "")
+  })
+
+  it("caps a redacted non-ASCII body by bytes after scrubbing the credential", async () => {
+    const secret = "credential-before-unicode-cap"
+    const sent = `${secret} ${"\u{1F600}".repeat(6_000)}`
+    expect(utf8Length(sent)).toBeGreaterThan(16_384)
+
+    const { error } = await failedDiagnostics(
+      sent,
+      request("https://provider.test/v1/models", "{}", { authorization: `Bearer ${secret}` })
+    )
+
+    expect(error.body).toBeDefined()
+    expect(error.body).not.toContain(secret)
+    expect(utf8Length(error.body ?? "")).toBeLessThanOrEqual(16_384)
+    expect(utf8Length(error.body ?? "")).toBeGreaterThan(16_380)
+    expectWholeCodePoints(error.body ?? "")
+    expect(error.bodyTruncated).toBe(true)
+    expect(JSON.stringify(error)).not.toContain(secret)
+  })
+
   it("does not inspect reset metadata beyond the response-body depth budget", async () => {
     let nested: unknown = { reset_after: 5 }
     for (let depth = 0; depth < 40; depth += 1) nested = { nested }
@@ -1721,6 +1898,188 @@ describe("RequestExecutor", () => {
     expect(settled.status).toBe(200)
     expect(rebuilds).toBe(1)
     expect(attempts).toEqual(["poisoned", "poisoned", "poisoned", "healthy"])
+  })
+
+  it("shares one rebuild among callers that saw the same dead transport", async () => {
+    // The counter is shared, so once it reaches the bound every request in
+    // flight sees it at once. One of them builds the replacement; the others
+    // wait for it and run on the client it produced, rather than each building
+    // a pool of its own and running on one the host had already closed.
+    const attempts: Array<string> = []
+    let rebuilds = 0
+    const poisoned = HttpClient.make((attempted) => {
+      attempts.push("poisoned")
+      return Effect.fail(transportError(attempted))
+    })
+    const healthy = HttpClient.make((attempted) =>
+      Effect.sync(() => {
+        attempts.push("healthy")
+        return response(attempted, { status: 200, body: "{}" })
+      })
+    )
+
+    const statuses = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const gate = yield* Deferred.make<void>()
+          const executor = yield* RequestExecutor.makeWith({
+            client: poisoned,
+            rebuild: Effect.gen(function*() {
+              rebuilds += 1
+              yield* Deferred.await(gate)
+              return healthy
+            })
+          })
+          const spent = yield* execute(executor, request()).pipe(Effect.flip, Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(120_000)
+          yield* Fiber.join(spent)
+          expect(attempts).toEqual(["poisoned", "poisoned", "poisoned"])
+
+          const left = yield* execute(executor, request()).pipe(Effect.forkChild)
+          const right = yield* execute(executor, request()).pipe(Effect.forkChild)
+          yield* settle
+          // Both observed the bound; only one is building, and neither has
+          // sent anything on the dead client.
+          expect(rebuilds).toBe(1)
+          expect(attempts).toHaveLength(3)
+
+          yield* Deferred.succeed(gate, undefined)
+          return [(yield* Fiber.join(left)).status, (yield* Fiber.join(right)).status]
+        }).pipe(
+          Effect.provide(TestClock.layer()),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true)
+        )
+      )
+    )
+
+    expect(statuses).toEqual([200, 200])
+    expect(rebuilds).toBe(1)
+    expect(attempts).toEqual(["poisoned", "poisoned", "poisoned", "healthy", "healthy"])
+  })
+
+  it("does not count a failure from a client it has already replaced", async () => {
+    // A request still in flight on the old pool fails after the replacement
+    // is in hand. That verdict is about a client nobody uses any more, so it
+    // must not bring the replacement closer to being thrown away in turn.
+    let rebuilds = 0
+    let staleCalls = 0
+    let freshCalls = 0
+
+    const settled = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const stale = yield* Deferred.make<void>()
+          const poisoned = HttpClient.make((attempted) => {
+            staleCalls += 1
+            const failure = Effect.fail(transportError(attempted))
+            // The very first attempt hangs until the test releases it.
+            return staleCalls === 1 ? Deferred.await(stale).pipe(Effect.andThen(failure)) : failure
+          })
+          // The replacement answers, then fails twice, then answers again.
+          const fresh = HttpClient.make((attempted) => {
+            freshCalls += 1
+            return freshCalls === 2 || freshCalls === 3
+              ? Effect.fail(transportError(attempted))
+              : Effect.succeed(response(attempted, { status: 200, body: "{}" }))
+          })
+          const executor = yield* RequestExecutor.makeWith({
+            client: poisoned,
+            rebuild: Effect.sync(() => {
+              rebuilds += 1
+              return fresh
+            })
+          })
+
+          const hung = yield* execute(executor, request()).pipe(Effect.flip, Effect.forkChild)
+          yield* settle
+          expect(staleCalls).toBe(1)
+
+          const spent = yield* execute(executor, request()).pipe(Effect.flip, Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(120_000)
+          expect(expectModelError(yield* Fiber.join(spent)).code).toBe("transport")
+          expect(rebuilds).toBe(0)
+
+          const answered = yield* execute(executor, request()).pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(120_000)
+          expect((yield* Fiber.join(answered)).status).toBe(200)
+          expect(rebuilds).toBe(1)
+
+          // The old pool's verdict arrives late. The hung request retries on
+          // the replacement and meets its two failures there.
+          yield* Deferred.succeed(stale, undefined)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(120_000)
+          expect(expectModelError(yield* Fiber.join(hung)).code).toBe("transport")
+          expect(freshCalls).toBe(3)
+
+          // Two failures on the replacement, not three: no second rebuild.
+          const last = yield* execute(executor, request()).pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(120_000)
+          return (yield* Fiber.join(last)).status
+        }).pipe(
+          Effect.provide(TestClock.layer()),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true)
+        )
+      )
+    )
+
+    expect(settled).toBe(200)
+    expect(rebuilds).toBe(1)
+    expect(freshCalls).toBe(4)
+  })
+
+  it("lets a waiting caller finish the rebuild its holder abandoned", async () => {
+    // Interrupting the caller that holds the replacement releases it. The
+    // count is still at the bound, so the caller waiting behind it builds the
+    // replacement itself rather than running on the dead client or parking.
+    let rebuilds = 0
+    const poisoned = HttpClient.make((attempted) => Effect.fail(transportError(attempted)))
+    const healthy = HttpClient.make((attempted) => Effect.succeed(response(attempted, { status: 200, body: "{}" })))
+
+    const status = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const gate = yield* Deferred.make<void>()
+          const executor = yield* RequestExecutor.makeWith({
+            client: poisoned,
+            rebuild: Effect.gen(function*() {
+              rebuilds += 1
+              yield* Deferred.await(gate)
+              return healthy
+            })
+          })
+          const spent = yield* execute(executor, request()).pipe(Effect.flip, Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(120_000)
+          yield* Fiber.join(spent)
+
+          const holder = yield* execute(executor, request()).pipe(Effect.forkChild)
+          yield* settle
+          expect(rebuilds).toBe(1)
+          const waiter = yield* execute(executor, request()).pipe(Effect.forkChild)
+          yield* settle
+          expect(rebuilds).toBe(1)
+
+          const interrupted = yield* Fiber.interrupt(holder).pipe(Effect.andThen(Fiber.await(holder)))
+          expect(Exit.hasInterrupts(interrupted)).toBe(true)
+          yield* settle
+          expect(rebuilds).toBe(2)
+
+          yield* Deferred.succeed(gate, undefined)
+          return (yield* Fiber.join(waiter)).status
+        }).pipe(
+          Effect.provide(TestClock.layer()),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true)
+        )
+      )
+    )
+
+    expect(status).toBe(200)
+    expect(rebuilds).toBe(2)
   })
 
   it("hands the rebuilt transport the identical request the dead one failed on", async () => {

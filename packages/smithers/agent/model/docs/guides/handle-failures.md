@@ -119,7 +119,10 @@ failures does not immediately rebuild or grant another retry. Before the
 next attempt, the executor runs `rebuildPool`, uses its returned client,
 and resets the counter. With the default two retries, that next attempt
 can be in a later call. Any HTTP response clears the transport-failure
-counter.
+counter. Calls that reach the bound together share one rebuild: the first
+runs `rebuildPool` and the rest wait for its client. A failure reported by a
+client the executor has already replaced does not count against the
+replacement.
 
 ## Read the detail fields
 

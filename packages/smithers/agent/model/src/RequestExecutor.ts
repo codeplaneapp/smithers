@@ -24,6 +24,7 @@ import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as Headers from "effect/unstable/http/Headers"
 import type * as HttpClientError from "effect/unstable/http/HttpClientError"
@@ -462,6 +463,19 @@ const redactBody = (
     Array.from(secretValues(request, redactedNames)).sort((left, right) => right.length - left.length)
   )
 
+const encoder = new TextEncoder()
+
+// The budgets are documented in bytes, and a string's `length` counts UTF-16
+// code units: an emoji is one unit of four bytes, so a unit-counted cap keeps
+// up to twice what it promises. This is the longest prefix whose UTF-8 encoding
+// fits, cut only between code points — `encodeInto` never writes a partial
+// character, so the byte it stops at is a boundary.
+const utf8Prefix = (value: string, limit: number): string => {
+  if (value.length * 3 <= limit) return value
+  const { read } = encoder.encodeInto(value, new Uint8Array(limit))
+  return read === value.length ? value : value.slice(0, read)
+}
+
 const responseBody = (
   body: string | undefined,
   request: HttpClientRequest.HttpClientRequest,
@@ -469,36 +483,44 @@ const responseBody = (
 ): { readonly body?: string | undefined; readonly bodyTruncated?: boolean | undefined } => {
   if (body === undefined) return {}
   const redacted = redactBody(body, request, redactedNames)
-  if (redacted.length <= BODY_LIMIT) return { body: redacted }
-  return { body: redacted.slice(0, BODY_LIMIT), bodyTruncated: true }
+  const kept = utf8Prefix(redacted, BODY_LIMIT)
+  if (kept === redacted) return { body: redacted }
+  return { body: kept, bodyTruncated: true }
 }
 
 // A cap on a string the whole body already materialized is not a cap: by the
 // time `response.text` answers, a broken or hostile provider has already made
 // this process allocate every byte it chose to send. This bounds the *read* —
-// the stream is abandoned as soon as the accumulated text reaches
-// `RAW_BODY_LIMIT`, so nothing beyond the limit is ever held, parsed, walked or
-// redacted. A read that fails part way keeps what arrived; a read that fails
-// with nothing has no body, which is what the caller's `undefined` means.
+// bytes are counted before they are decoded, the chunk that crosses
+// `RAW_BODY_LIMIT` is cut at the limit, and the stream is abandoned there, so
+// nothing beyond the limit is ever held, parsed, walked or redacted. A cut that
+// lands inside a multibyte sequence drops the partial sequence rather than
+// flushing it as U+FFFD, so what is kept is a prefix of what was sent. A read
+// that fails part way keeps what arrived; a read that fails with nothing has no
+// body, which is what the caller's `undefined` means.
 const cappedBody = (
   response: HttpClientResponse.HttpClientResponse
 ): Effect.Effect<string | undefined> =>
   Effect.suspend(() => {
     const decoder = new TextDecoder()
     let text = ""
+    let bytes = 0
     return Stream.runForEachWhile(
       response.stream,
       (chunk: Uint8Array) =>
         Effect.sync(() => {
-          text += decoder.decode(chunk, { stream: true })
-          return text.length < RAW_BODY_LIMIT
+          const room = RAW_BODY_LIMIT - bytes
+          const taken = chunk.byteLength > room ? chunk.subarray(0, room) : chunk
+          bytes += taken.byteLength
+          text += decoder.decode(taken, { stream: true })
+          return bytes < RAW_BODY_LIMIT
         })
     ).pipe(
       Effect.as(false),
       Effect.catch(() => Effect.succeed(true)),
       Effect.map((failed) => {
-        text += decoder.decode()
-        return failed && text === "" ? undefined : text.slice(0, RAW_BODY_LIMIT)
+        if (bytes < RAW_BODY_LIMIT) text += decoder.decode()
+        return failed && text === "" ? undefined : text
       })
     )
   })
@@ -524,20 +546,20 @@ const sanitizedField = (
   request: HttpClientRequest.HttpClientRequest,
   redactedNames: ReadonlyArray<string | RegExp>
 ): string | undefined =>
-  value === undefined ? undefined : redactBody(value, request, redactedNames).slice(0, BODY_LIMIT)
+  value === undefined ? undefined : utf8Prefix(redactBody(value, request, redactedNames), BODY_LIMIT)
 
 // HTTP 200 protocol failures need the same redaction and caps as status errors.
 const sanitizeModelError = (error: ModelError, redact: (value: string) => string): ModelError => {
   const field = (value: string | undefined): string | undefined =>
-    value === undefined ? undefined : redact(value).slice(0, BODY_LIMIT)
-  const message = redact(error.message).slice(0, BODY_LIMIT)
+    value === undefined ? undefined : utf8Prefix(redact(value), BODY_LIMIT)
+  const message = utf8Prefix(redact(error.message), BODY_LIMIT)
   const path = field(error.path)
   const resetSource = field(error.resetSource)
   const providerCode = field(error.providerCode)
   const requestId = field(error.requestId)
   const redactedBody = error.body === undefined ? undefined : redact(error.body)
-  const body = redactedBody?.slice(0, BODY_LIMIT)
-  const bodyTruncated = redactedBody !== undefined && redactedBody.length > BODY_LIMIT ? true : error.bodyTruncated
+  const body = redactedBody === undefined ? undefined : utf8Prefix(redactedBody, BODY_LIMIT)
+  const bodyTruncated = redactedBody !== undefined && body !== redactedBody ? true : error.bodyTruncated
   if (
     message === error.message && path === error.path && resetSource === error.resetSource &&
     providerCode === error.providerCode && requestId === error.requestId &&
@@ -859,44 +881,72 @@ export const RequestExecutor: Context.Service<RequestExecutor, RequestExecutor> 
  * @since 0.1.0
  */
 export const makeWith = (transport: Transport): Effect.Effect<RequestExecutor> =>
-  Effect.sync(() => {
+  Effect.gen(function*() {
     let http = transport.client
-    /** Transport failures since the last response of any kind. */
+    /**
+     * Which client `http` is: bumped by every replacement, and stamped on each
+     * attempt so an attempt that was in flight on a client the executor has
+     * since discarded cannot count against the one that replaced it.
+     */
+    let generation = 0
+    /** Transport failures on the current client since its last response of any kind. */
     let failures = 0
+    /**
+     * One replacement at a time. Every request shares the counter, so once it
+     * reaches the bound every request in flight sees it at once; without this
+     * each would build its own replacement and the last one written would win,
+     * with the others' requests running on pools the host had already closed.
+     * The holder rebuilds, and a waiter finding the count already cleared
+     * takes the holder's client instead of building another.
+     */
+    const gate = yield* Semaphore.make(1)
+    const replace = gate.withPermit(
+      Effect.suspend(() =>
+        failures < rebuildAfter
+          ? Effect.void
+          : transport.rebuild.pipe(
+            Effect.map((client) => {
+              http = client
+              generation += 1
+              failures = 0
+            })
+          )
+      )
+    )
 
     const executeOnce = (
       request: HttpClientRequest.HttpClientRequest,
       options: ExecuteOptions
     ): Effect.Effect<HttpClientResponse.HttpClientResponse, RequestError, Scope.Scope> =>
       Effect.gen(function*() {
-        if (failures >= rebuildAfter) {
-          http = yield* transport.rebuild
-          failures = 0
-        }
+        if (failures >= rebuildAfter) yield* replace
+        const client = http
+        const on = generation
         const redactedNames = [...yield* Headers.CurrentRedactedNames, SENSITIVE_NAME]
-        const response = yield* http.execute(request).pipe(
+        const response = yield* client.execute(request).pipe(
           // `model:call` on this model, not a plain `net:*` effect: the same host
           // answers many models and a grant for one is not a grant for the rest.
           KernelHttpClient.withModelCall(options.modelId),
           Effect.provideService(Headers.CurrentRedactedNames, redactedNames),
-          Effect.mapError((error) => mapHttpError(error, redactedNames))
+          Effect.mapError((error) => mapHttpError(error, redactedNames)),
+          // A response of any kind clears the count. Only the transport failing
+          // says the client itself may be the problem; a 429 or a 500 arrived
+          // over a connection that worked. A verdict on a client that has
+          // already been replaced says nothing about its replacement.
+          Effect.tap(() =>
+            Effect.sync(() => {
+              if (on === generation) failures = 0
+            })
+          ),
+          Effect.tapError((error) =>
+            Effect.sync(() => {
+              if (on !== generation) return
+              failures = error instanceof ModelError && error.code === "transport" ? failures + 1 : 0
+            })
+          )
         )
         return yield* statusError(request, redactedNames, options.classifyError)(response)
-      }).pipe(
-        // A response of any kind clears the count. Only the transport failing
-        // says the client itself may be the problem; a 429 or a 500 arrived
-        // over a connection that worked.
-        Effect.tap(() =>
-          Effect.sync(() => {
-            failures = 0
-          })
-        ),
-        Effect.tapError((error) =>
-          Effect.sync(() => {
-            failures = error instanceof ModelError && error.code === "transport" ? failures + 1 : 0
-          })
-        )
-      )
+      })
 
     return RequestExecutor.of({
       execute: Effect.fn("RequestExecutor.execute")((request, options) => retryFailures(executeOnce(request, options)))
