@@ -23,6 +23,7 @@ import { Flow } from "@smthrs/flow"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { isWellFormedUtf16 } from "../internal/Utf16.ts"
 
 /**
  * Where one execution sits in its lineage: which lineage it belongs to, and
@@ -56,7 +57,7 @@ export class InvalidRound extends Schema.TaggedError<InvalidRound>()(
 const invalid = (message: string): InvalidRound => new InvalidRound({ message })
 
 const validLineage = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0 && value.isWellFormed()
+  typeof value === "string" && value.length > 0 && isWellFormedUtf16(value)
 
 const validOrdinal = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0

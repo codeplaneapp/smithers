@@ -18,6 +18,7 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint"
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup"
 import * as Rpc from "effect/unstable/rpc/Rpc"
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
+import { isWellFormedUtf16 } from "./internal/Utf16.ts"
 
 /**
  * Raised before proxy construction when two flow operations share one wire
@@ -100,7 +101,7 @@ export const assertNoCollisions = (
 const ExecutionId = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(4096),
-  Schema.makeFilter((value: string) => value.isWellFormed(), { expected: "well-formed UTF-16 text" })
+  Schema.makeFilter(isWellFormedUtf16, { expected: "well-formed UTF-16 text" })
 )
 
 type ExecutePayload<Payload extends Flow.AnyStructSchema> = Schema.Struct<{
@@ -271,7 +272,7 @@ export const toHttpApiGroup = <const Name extends string, const Flows extends No
 }
 
 const tagToPath = (tag: string): string => {
-  if (!tag.isWellFormed()) throw new InvalidFlowTag(tag)
+  if (!isWellFormedUtf16(tag)) throw new InvalidFlowTag(tag)
   // Routers disagree about whether a percent-encoded slash is decoded before
   // matching. UTF-16 hex is injective, URL-safe, and remains one segment in
   // every adapter while preserving case and normalization distinctions.
