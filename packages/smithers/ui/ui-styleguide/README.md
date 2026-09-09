@@ -86,11 +86,9 @@ revert.
 ### A `meets AA` test fails after you add a rule
 
 Your rule paints a pair that misses 4.5:1 in at least one of the 16 variants.
-The test name is `palette/mode/label`, so it says which. Change the rule, not
-the table. Adding the pair to `KNOWN_CONTRAST_GAPS` in `tests/paintedPairs.ts`
-is only correct when the cause is an upstream token value you cannot reach, and
-the suite asserts that a recorded gap still fails at its recorded ratio, so an
-exemption cannot outlive the defect.
+The test name is `palette/mode/label`, so it says which. Correct the rule or
+the generator's token seed and regenerate. Every audited UI pair must meet AA;
+the table has no UI contrast exemptions.
 
 Any new rule that puts a foreground on a background adds its pair to
 `PAINTED_PAIRS`. A background expression that appears in a rule but not in that

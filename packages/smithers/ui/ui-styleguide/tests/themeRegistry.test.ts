@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { contrastRatio, DEFAULT_THEME_KEY, serializeThemeVariant, themeRegistry } from "../src/index.ts";
 import {
   AA_MINIMUM,
-  KNOWN_CONTRAST_GAPS,
-  KNOWN_RAMP_COLLAPSES,
   KNOWN_ROLE_COLLISIONS,
   KNOWN_TERMINAL_GAPS,
   PAINTED_PAIRS,
@@ -88,31 +86,13 @@ describe("theme registry", () => {
 });
 
 describe("WCAG AA on every pair the stylesheets paint", () => {
-  // Every palette, mode, and pair registers a test. A pair in
-  // `KNOWN_CONTRAST_GAPS` registers the inverse test instead, so its exemption
-  // cannot go stale.
   for (const { key, mode, variant } of variants) {
     for (const pair of PAINTED_PAIRS) {
-      const id = `${key}/${mode}/${pair.label}`;
-      const known = KNOWN_CONTRAST_GAPS.get(id);
-      if (known === undefined) {
-        test(`${id} meets AA`, () => {
-          expect(ratioFor(pair, variant)).toBeGreaterThanOrEqual(AA_MINIMUM);
-        });
-        continue;
-      }
-      test(`${id} is a recorded upstream gap, still failing at ${known}`, () => {
-        const ratio = ratioFor(pair, variant);
-        expect(ratio).toBeLessThan(AA_MINIMUM);
-        expect(ratio).toBeCloseTo(known, 3);
+      test(`${key}/${mode}/${pair.label} meets AA`, () => {
+        expect(ratioFor(pair, variant)).toBeGreaterThanOrEqual(AA_MINIMUM);
       });
     }
   }
-
-  test("no recorded gap names a pair the table no longer paints", () => {
-    const painted = new Set(variants.flatMap(({ key, mode }) => PAINTED_PAIRS.map((p) => `${key}/${mode}/${p.label}`)));
-    for (const id of KNOWN_CONTRAST_GAPS.keys()) expect(painted.has(id)).toBe(true);
-  });
 
   test("every terminal palette is legible on its own background", () => {
     for (const [key, theme] of Object.entries(themeRegistry)) {
@@ -146,12 +126,8 @@ describe("theme vocabulary", () => {
 
   test("every recorded gap names a variant that still exists", () => {
     const ids = new Set(variants.map(({ key, mode }) => `${key}/${mode}`));
-    const validRampIds = new Set<string>();
     const validRoleIds = new Set<string>();
     for (const { key, mode } of variants) {
-      for (let i = 0; i + 1 < TEXT_RAMP.length; i++) {
-        validRampIds.add(`${key}/${mode}/${TEXT_RAMP[i]!} > ${TEXT_RAMP[i + 1]!}`);
-      }
       for (let i = 0; i < SEMANTICS.length; i++) {
         for (let j = i + 1; j < SEMANTICS.length; j++) {
           validRoleIds.add(`${key}/${mode}/${SEMANTICS[i]!}=${SEMANTICS[j]!}`);
@@ -159,7 +135,6 @@ describe("theme vocabulary", () => {
       }
     }
     for (const id of KNOWN_TERMINAL_GAPS.keys()) expect(ids.has(id), id).toBe(true);
-    for (const id of KNOWN_RAMP_COLLAPSES) expect(validRampIds.has(id), id).toBe(true);
     for (const id of KNOWN_ROLE_COLLISIONS) expect(validRoleIds.has(id), id).toBe(true);
   });
 
@@ -169,7 +144,7 @@ describe("theme vocabulary", () => {
         const [stronger, weaker] = [TEXT_RAMP[i]!, TEXT_RAMP[i + 1]!];
         const id = `${key}/${mode}/${stronger} > ${weaker}`;
         const graded = contrastRatio(variant[stronger], variant.bg) > contrastRatio(variant[weaker], variant.bg);
-        expect(graded, id).toBe(!KNOWN_RAMP_COLLAPSES.has(id));
+        expect(graded, id).toBe(true);
       }
     }
   });

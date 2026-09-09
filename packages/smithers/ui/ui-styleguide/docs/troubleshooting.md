@@ -155,13 +155,25 @@ after. See [Theming](./theming.md).
 
 ### Text is hard to read in Solarized
 
-Known, measured, and recorded. Solarized light ships body text at 4.13:1 on its
-own background, below the 4.5:1 threshold, because the generator takes
-`editor.foreground` raw for `--text`. All four of its text tokens also collapse
-onto one color, so the text ramp is flat.
+Regenerate older theme files with `scripts/generate-theme-registry.ts`. The
+current Solarized UI text ramp meets AA on every audited background in both
+modes. Host overrides introduce new pairs and need their own contrast audit.
+The terminal palette preserves upstream colors; its light foreground remains
+at 4.13:1 and is outside the UI AA guarantee.
 
-The values live in generator output and cannot be fixed here. See
-[Where the palettes come from](./concepts/palette-sources.md).
+### Theme generation reports an unreachable contrast target
+
+```text
+unreachable/light/textPlaceholder: target 4.5:1, achieved 1.0000:1
+```
+
+The search exhausted its foreground mix without meeting the target on every
+background. The error identifies the palette, mode, token, target ratio, and
+lowest achieved ratio. Correct the seed or surface recipe in the generator,
+then regenerate and run the package tests. Generation validates every palette
+before writing any files.
+
+See [Where the palettes come from](./concepts/palette-sources.md).
 
 ## Related
 

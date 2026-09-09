@@ -1,6 +1,6 @@
 /**
  * Every (foreground, background) pair the shipped stylesheets actually paint,
- * plus the palettes that still miss WCAG AA on one of them.
+ * measured at WCAG AA for every selectable palette.
  *
  * The package's central claim is that any `data-palette` a user can select is
  * accessible. Proving that needs a table, not a spot check: the previous suite
@@ -181,99 +181,11 @@ export function ratioFor(pair: PaintedPair, variant: ThemeVariantTokens): number
 }
 
 /**
- * Pairs that still miss AA, as `palette/mode/label`.
- *
- * Every entry traces to one upstream seed this package cannot re-seed:
- * `packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts` takes `editor.foreground` raw for
- * `--text` and the terminal foreground, applies its contrast ratchet only to
- * the three secondary tokens, and gives up silently at `amount === 1` instead
- * of failing. `src/themes/*.ts` are byte-for-byte generator output guarded by
- * `tests/generatedThemes.test.ts`, so re-seeding them means changing the
- * generator, which lives outside this package.
- *
- * The suite asserts both directions: nothing outside this list may fail, and
- * nothing inside it may pass. Fixing the generator therefore forces the entry
- * out rather than leaving a stale exemption behind.
- */
-export const KNOWN_CONTRAST_GAPS: ReadonlyMap<string, number> = new Map([
-  ["solarized/light/text on bg", 4.1296],
-  ["solarized/light/text on surface", 4.3819],
-  ["solarized/light/text on surface2", 4.1193],
-  ["solarized/light/text on surface3", 4.4546],
-  ["solarized/light/textMuted on bg", 4.1296],
-  ["solarized/light/textMuted on surface", 4.3819],
-  ["solarized/light/textMuted on surface2", 4.1193],
-  ["solarized/light/textMuted on surface3", 4.4546],
-  ["solarized/light/textFaint on bg", 4.1296],
-  ["solarized/light/textFaint on surface", 4.3819],
-  ["solarized/light/textFaint on surface2", 4.1193],
-  ["solarized/light/textFaint on surface3", 4.4546],
-  ["solarized/light/textPlaceholder on bg", 4.1296],
-  ["solarized/light/textPlaceholder on surface", 4.3819],
-  ["solarized/light/textPlaceholder on surface2", 4.1193],
-  ["solarized/light/textPlaceholder on surface3", 4.4546],
-  ["solarized/light/text on hover", 4.1193],
-  ["solarized/light/textMuted on hover", 4.1193],
-  ["solarized/light/text on the neutral active fill", 3.8499],
-  ["solarized/light/text on the glass topbar over bg", 4.3432],
-  ["solarized/light/text on the saturated glass topbar over bg", 4.3394],
-  ["solarized/light/textMuted on the glass topbar over bg", 4.3432],
-  ["solarized/light/textMuted on the saturated glass topbar over bg", 4.3394],
-  ["solarized/light/textFaint on the glass topbar over bg", 4.3432],
-  ["solarized/light/textFaint on the saturated glass topbar over bg", 4.3394],
-  ["solarized/light/textPlaceholder on the glass topbar over bg", 4.3432],
-  ["solarized/light/textPlaceholder on the saturated glass topbar over bg", 4.3394],
-  ["solarized/light/codeText on codeBg", 4.1296],
-  ["solarized/light/inverseText on inverseBg", 4.1296],
-  ["solarized/dark/text on surface", 4.3939],
-  ["solarized/dark/text on surface2", 4.1596],
-  ["solarized/dark/text on surface3", 3.9251],
-  ["solarized/dark/textMuted on surface", 4.3939],
-  ["solarized/dark/textMuted on surface2", 4.1596],
-  ["solarized/dark/textMuted on surface3", 3.9251],
-  ["solarized/dark/textFaint on surface", 4.3939],
-  ["solarized/dark/textFaint on surface2", 4.1596],
-  ["solarized/dark/textFaint on surface3", 3.9251],
-  ["solarized/dark/textPlaceholder on surface", 4.3939],
-  ["solarized/dark/textPlaceholder on surface2", 4.1596],
-  ["solarized/dark/textPlaceholder on surface3", 3.9251],
-  ["solarized/dark/text on hover", 4.1596],
-  ["solarized/dark/textMuted on hover", 4.1596],
-  ["solarized/dark/text on the neutral active fill", 3.8358],
-  ["solarized/dark/text on the glass topbar over bg", 4.4463],
-  ["solarized/dark/text on the saturated glass topbar over bg", 4.3832],
-  ["solarized/dark/textMuted on the glass topbar over bg", 4.4463],
-  ["solarized/dark/textMuted on the saturated glass topbar over bg", 4.3832],
-  ["solarized/dark/textFaint on the glass topbar over bg", 4.4463],
-  ["solarized/dark/textFaint on the saturated glass topbar over bg", 4.3832],
-  ["solarized/dark/textPlaceholder on the glass topbar over bg", 4.4463],
-  ["solarized/dark/textPlaceholder on the saturated glass topbar over bg", 4.3832],
-]);
-
-/**
  * Terminal palettes whose own foreground misses AA on their own background.
- * Same upstream cause: the generator applies no ratchet to `terminal.foreground`.
+ * Terminal colors preserve upstream fidelity separately from the UI AA guarantee.
  */
 export const KNOWN_TERMINAL_GAPS: ReadonlyMap<string, number> = new Map([
   ["solarized/light", 4.1296],
-]);
-
-/**
- * Variants whose secondary-text ramp is flat rather than graded, as
- * `palette/mode/<more prominent> > <less prominent>`.
- *
- * `secondaryText()` in the generator raises its mix amount until the value
- * clears its target, and at `amount === 1` `mix(text, bg, 1) === text`, so it
- * returns the base foreground with no failure signal.
- */
-export const KNOWN_RAMP_COLLAPSES: ReadonlySet<string> = new Set([
-  "one/dark/text > textMuted",
-  "solarized/light/text > textMuted",
-  "solarized/light/textMuted > textFaint",
-  "solarized/light/textFaint > textPlaceholder",
-  "solarized/dark/text > textMuted",
-  "solarized/dark/textMuted > textFaint",
-  "solarized/dark/textFaint > textPlaceholder",
 ]);
 
 /**

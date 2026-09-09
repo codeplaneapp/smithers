@@ -77,30 +77,24 @@ raised, its dark `brand` was nudged from `#8b78e6` to `#8e7ce8` to clear
 `.livelog-event` and `.livelog-node` are legible on it. The test suite pins both
 of its serialized token strings.
 
-## The recorded upstream gaps
+## UI contrast and upstream fidelity
 
-Four lists in
+The generator adjusts the UI foreground against all four surface elevations
+before deriving the text ramp. Primary text targets 5.25:1; muted, faint, and
+placeholder text target 5:1, 4.75:1, and 4.5:1. Every search verifies its final
+result and throws with the palette, mode, token, target, and achieved ratio if
+it cannot succeed. All palettes are validated before files are written.
+Solarized's former 52 UI contrast exemptions and collapsed text ramp are
+removed. The same correction gives One dark a distinct primary/muted step.
+
+Two lists in
 [the audited pair table](https://github.com/smithersai/smithers/blob/main/packages/smithers/ui/ui-styleguide/tests/paintedPairs.ts)
-enumerate what still fails. Every entry traces to the generator, and every one of
-them is a generated palette.
+record behavior separate from the UI text contrast guarantee:
 
-- **`KNOWN_CONTRAST_GAPS`** is 52 entries, all Solarized. The generator takes
-  `editor.foreground` raw for `--text` and for the terminal `foreground`,
-  applying its contrast ratchet only to the three secondary text tokens.
-  Solarized light therefore ships body text at 4.13:1 on its own `--bg`.
-- **`KNOWN_TERMINAL_GAPS`** is Solarized light, at the same 4.13:1, for the same
-  reason.
-- **`KNOWN_RAMP_COLLAPSES`** is seven flat spots in the four-step text ramp. The
-  generator's `secondaryText()` raises its mix amount until the value clears its
-  target, and at `amount === 1`, `mix(text, bg, 1) === text`, so it returns the
-  base foreground with no failure signal. Solarized collapses all four text
-  tokens onto one color in both modes; `one` dark collapses the first two.
-- **`KNOWN_ROLE_COLLISIONS`** is Rose Pine, which gives `success` and `info` the
-  same hex in both modes, so a passing state and an informational state are
-  indistinguishable.
-
-A fifth cause has no list of its own: the generator's `contrast()` runs on
-rounded channels, so its ratchet stops one step early.
+- `KNOWN_TERMINAL_GAPS` pins Solarized light at 4.13:1. Terminal colors retain
+  upstream fidelity and use the original editor foreground as a fallback.
+- `KNOWN_ROLE_COLLISIONS` pins Rose Pine's shared `success` and `info` hex in
+  both modes. Contrast alone does not distinguish these semantic roles.
 
 Consumer token overrides can improve contrast in a host document; see
 [Override a token](../guides/override-a-token.md). The generator's `--check`

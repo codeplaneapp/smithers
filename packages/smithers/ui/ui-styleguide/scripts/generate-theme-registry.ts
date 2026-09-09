@@ -30,6 +30,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { secondaryText } from "./secondaryText.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const pierre = realpathSync(resolve(root, "packages/smithers/ui/node_modules/@pierre/diffs"));
@@ -111,16 +112,6 @@ function opaque(value: string | null | undefined, fallback: string): string {
   return value && /^#[\da-f]{6}(?:ff)?$/i.test(value) ? value.slice(0, 7) : fallback;
 }
 
-function secondaryText(text: string, bg: string, backgrounds: string[], initialAmount: number, target: number): string {
-  let amount = initialAmount;
-  let value = mix(text, bg, amount);
-  while (amount < 1 && backgrounds.some((background) => contrast(value, background) < target)) {
-    amount = Math.min(1, amount + 0.01);
-    value = mix(text, bg, amount);
-  }
-  return value;
-}
-
 async function load(id: string): Promise<UpstreamTheme> {
   const modulePath = requireFromPierre.resolve(`@shikijs/themes/${id}`);
   return (await import(modulePath)).default as UpstreamTheme;
@@ -160,14 +151,23 @@ function terminal(theme: UpstreamTheme, bg: string, text: string, semantic: Reco
 function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string) {
   const c = theme.colors;
   const bg = opaque(c["editor.background"], mode === "dark" ? "#111111" : "#ffffff");
-  const text = opaque(c["editor.foreground"], mode === "dark" ? "#eeeeee" : "#222222");
+  const foreground = opaque(c["editor.foreground"], mode === "dark" ? "#eeeeee" : "#222222");
   // Dark surfaces rise by mixing foreground into the editor background. Light
   // surfaces follow the existing zinc semantics: the page background sits one
   // step below a near-white card, inset fills darken from that card, and
   // overlays return to white.
-  const surface = mode === "dark" ? mix(text, bg, 0.055) : mix("#ffffff", bg, 0.75);
-  const surface2 = mode === "dark" ? mix(text, bg, 0.095) : mix(text, surface, 0.055);
-  const surface3 = mode === "dark" ? mix(text, bg, 0.135) : "#ffffff";
+  const surface = mode === "dark" ? mix(foreground, bg, 0.055) : mix("#ffffff", bg, 0.75);
+  const surface2 = mode === "dark" ? mix(foreground, bg, 0.095) : mix(foreground, surface, 0.055);
+  const surface3 = mode === "dark" ? mix(foreground, bg, 0.135) : "#ffffff";
+  const textBackgrounds = [bg, surface, surface2, surface3];
+  // Leave room for the 5:1 muted token and a visible step below primary text.
+  // Surfaces keep their upstream seed so correcting text does not move the
+  // backgrounds being measured or change unrelated semantic colors.
+  const text = secondaryText(mode === "light" ? "#000000" : "#ffffff", foreground, textBackgrounds, 0, 5.25, {
+    palette: name,
+    mode,
+    token: "text",
+  });
   const nightOwlSeeds =
     mode === "dark"
       ? { success: "#addb67", danger: "#ef5350", warning: "#ecc48d", info: "#82aaff" }
@@ -207,15 +207,18 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
   ) as Record<string, string>;
   const t = rgb(text);
   const s = rgb(surface);
-  const textBackgrounds = [bg, surface, surface2, surface3];
   const rgba = (channels: Rgb, alpha: number) => `rgba(${channels.join(",")},${alpha})`;
   const tokens = {
     colorScheme: mode,
     bg,
     text,
-    textMuted: secondaryText(text, bg, textBackgrounds, 0.68, 5),
-    textFaint: secondaryText(text, bg, textBackgrounds, mode === "dark" ? 0.65 : 0.56, 4.75),
-    textPlaceholder: secondaryText(text, bg, textBackgrounds, 0.46, 4.5),
+    textMuted: secondaryText(text, bg, textBackgrounds, 0.68, 5, { palette: name, mode, token: "textMuted" }),
+    textFaint: secondaryText(text, bg, textBackgrounds, mode === "dark" ? 0.65 : 0.56, 4.75, {
+      palette: name,
+      mode,
+      token: "textFaint",
+    }),
+    textPlaceholder: secondaryText(text, bg, textBackgrounds, 0.46, 4.5, { palette: name, mode, token: "textPlaceholder" }),
     surface,
     surface2,
     surface3,
@@ -243,7 +246,7 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
         ? "0 4px 12px rgb(var(--shadow-rgb) / 0.45), 0 16px 48px rgb(var(--shadow-rgb) / 0.50)"
         : "0 4px 12px rgb(var(--shadow-rgb) / 0.10), 0 16px 48px rgb(var(--shadow-rgb) / 0.14)",
   };
-  return { tokens, terminal: terminal(theme, bg, text, semantic) };
+  return { tokens, terminal: terminal(theme, bg, foreground, semantic) };
 }
 
 /**
@@ -277,6 +280,7 @@ const literal = (value: unknown, indent = 0): string => {
 
 const check = process.argv.includes("--check");
 const stale: string[] = [];
+const outputs: { file: string; source: string }[] = [];
 
 for (const [name, label, shikiDark, shikiLight] of specs) {
   const [darkSource, lightSource] = await Promise.all([load(shikiDark), load(shikiLight)]);
@@ -294,7 +298,7 @@ for (const [name, label, shikiDark, shikiLight] of specs) {
   const source = `// Generated by packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts from @shikijs/themes 3.23.0. Do not edit.\nimport type { SmithersTheme } from "../SmithersTheme.ts";\n\nexport const ${name}: SmithersTheme = ${literal(record)};\n`;
   const file = resolve(outputDir, `${name}.ts`);
   if (!check) {
-    writeFileSync(file, source);
+    outputs.push({ file, source });
     continue;
   }
   let current: string | undefined;
@@ -313,3 +317,6 @@ if (check && stale.length > 0) {
   );
   process.exit(1);
 }
+
+// Validate every palette before writing any generated output.
+for (const { file, source } of outputs) writeFileSync(file, source);

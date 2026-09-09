@@ -1,12 +1,12 @@
 ---
 title: "The contrast budget"
-description: "Every foreground and background pair the shipped rules paint is measured at WCAG AA across all eight palettes in both modes, and the failures that remain are named."
+description: "Every foreground and background pair the shipped rules paint is required to meet WCAG AA across all eight palettes in both modes."
 sidebar:
   order: 1
 ---
 
-The package makes one central claim: any palette a user can select is
-accessible. Eight palettes times two modes is 16 token sets, and a person
+The package makes one central claim: every audited UI text pair in any selectable palette
+meets WCAG AA at 4.5:1 or higher. Eight palettes times two modes is 16 token sets, and a person
 picking Solarized at random is not opting out of legible text. That claim is
 what shapes the token values, the tint percentages, and several rules that are
 conspicuously absent from the sheet.
@@ -108,16 +108,25 @@ written percentage bypasses the audited list.
 `--code-text` in every palette. Every rule that sets a background that is not
 the page background sets a color too.
 
-## Recorded gaps cannot go stale
+## UI text has no contrast exemptions
 
-Some pairs still fail. They are listed by name in `KNOWN_CONTRAST_GAPS`,
-`KNOWN_TERMINAL_GAPS`, `KNOWN_RAMP_COLLAPSES`, and `KNOWN_ROLE_COLLISIONS`, all
-with their measured ratios, and every one traces to a generated palette. See
+Every audited UI pair must meet 4.5:1 in every palette and mode, including
+Solarized. The generator preserves the upstream surface seeds and adjusts
+primary text toward black or white until it reaches 5.25:1 on `bg`, `surface`,
+`surface2`, and `surface3`. This leaves room for the secondary ramp's targets:
+5:1 for muted text, 4.75:1 for faint text, and 4.5:1 for placeholders.
+
+Each search checks every background before accepting its result. Exhaustion
+throws an error naming the palette, mode, token, target, and achieved minimum
+ratio. All palettes are validated before any output file is written. The suite
+also measures the actual active fills and both glass topbar composites.
+
+Terminal and syntax colors preserve upstream fidelity separately from this UI
+AA guarantee. Solarized light's terminal foreground remains at 4.13:1; its
+measured exception is pinned in `KNOWN_TERMINAL_GAPS`. Rose Pine's shared
+success/info colors remain in `KNOWN_ROLE_COLLISIONS`. These lists must name
+only existing variants whose recorded behavior still holds. See
 [Where the palettes come from](./palette-sources.md).
-
-The suite asserts both directions: nothing outside the lists may fail, and
-nothing inside them may pass. Fixing the upstream cause therefore forces the
-entry out of the list rather than leaving a stale exemption behind.
 
 ## The same discipline in your own rules
 
