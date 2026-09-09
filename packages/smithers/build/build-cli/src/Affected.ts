@@ -3,7 +3,7 @@
  */
 import * as Input from "@smthrs/targets/Input"
 import * as Target from "@smthrs/targets/Target"
-import { minimatch } from "minimatch"
+import { Minimatch } from "minimatch"
 import * as Path from "node:path"
 import * as ContainedProcess from "./internal/ContainedProcess.ts"
 import type { PackageIndex } from "./PackageIndex.ts"
@@ -100,19 +100,25 @@ const globalPath = (path: string): boolean =>
   !path.includes("/") || path.startsWith(".smithers/") || Path.posix.basename(path) === "PACKAGE.ts" ||
   /(^|\/)(?:[^/]*lock[^/]*|package\.json|tsconfig[^/]*\.json|\.npmrc|\.yarnrc[^/]*|\.gitignore)$/.test(path)
 
-const matches = (input: Input.Declared, packagePath: string, path: string): boolean => {
+const compileInput = (
+  input: Input.Declared,
+  packagePath: string,
+  glob: (pattern: string) => Minimatch
+): (path: string) => boolean => {
   switch (input._tag) {
-    case "File":
-      return Input.resolvePath(packagePath, input.path) === path
+    case "File": {
+      const resolved = Input.resolvePath(packagePath, input.path)
+      return (path) => resolved === path
+    }
     case "Glob": {
-      const pattern = Input.resolvePath(packagePath, input.pattern)
-      return minimatch(path, pattern, { dot: true }) &&
-        !input.exclude.some((exclude) => minimatch(path, Input.resolvePath(packagePath, exclude), { dot: true }))
+      const pattern = glob(Input.resolvePath(packagePath, input.pattern))
+      const excludes = input.exclude.map((exclude) => glob(Input.resolvePath(packagePath, exclude)))
+      return (path) => pattern.match(path) && !excludes.some((exclude) => exclude.match(path))
     }
     // These input forms include ambient repository state and workspace membership.
     case "GitDiff":
     case "PnpmWorkspace":
-      return true
+      return () => true
   }
 }
 
@@ -133,27 +139,44 @@ export const select = (index: PackageIndex, pattern: string, paths: ReadonlyArra
   const rows = index.targets()
   const selected = index.resolve(pattern)
   const reasons = new Map<string, Set<string>>()
-  const visit = (target: Target.AnyTarget, path: string, seen: Set<Target.AnyTarget>): boolean => {
-    if (seen.has(target)) return false
-    seen.add(target)
+  const globs = new Map<string, Minimatch>()
+  const glob = (pattern: string): Minimatch => {
+    let compiled = globs.get(pattern)
+    if (compiled === undefined) {
+      compiled = new Minimatch(pattern, { dot: true })
+      globs.set(pattern, compiled)
+    }
+    return compiled
+  }
+  const entries = new Map<Target.AnyTarget, {
+    readonly metadata: Target.Metadata
+    readonly packagePath: string
+    readonly matchesBase: (path: string) => boolean
+  }>()
+  const entry = (target: Target.AnyTarget) => {
+    let value = entries.get(target)
+    if (value !== undefined) return value
     const metadata = Target.metadata(target)
     const packagePath = index.ownerOf(target) ?? ""
-    // Package membership also catches new files, implicit compiler inputs and config lookups.
-    if (packagePath !== "" && path.startsWith(`${packagePath}/`)) return true
-    const views = metadata.kinds.map((kind) => metadata.forKind(kind))
-    const inputs = [...metadata.inputs, ...views.flatMap((view) => view.inputs)]
-    if (inputs.some((input) => matches(input, packagePath, path))) return true
-    // Subtree dependencies and verb-specific edges may select roots without direct imports.
-    const selectors = [...metadata.dependencySelectors, ...views.flatMap((view) => view.dependencySelectors)]
-    const dependencies = [
-      ...metadata.dependencies,
-      ...views.flatMap((view) => view.dependencies),
-      ...selectors.flatMap((selector) =>
-        index.resolve(`${selector.pattern}:${selector.target}`).map((row) => row.target)
-      )
-    ]
-    if (metadata.inputs.length === 0 && metadata.dependencies.length === 0) return true
-    return dependencies.some((dependency) => visit(dependency, path, seen))
+    const packagePrefix = packagePath === "" ? undefined : `${packagePath}/`
+    const inputs = metadata.inputs.map((input) => compileInput(input, packagePath, glob))
+    const matches = new Map<string, boolean>()
+    value = {
+      metadata,
+      packagePath,
+      matchesBase: (path) => {
+        let result = matches.get(path)
+        if (result === undefined) {
+          // Membership catches new files, implicit compiler inputs and config lookups.
+          result = packagePrefix !== undefined && path.startsWith(packagePrefix) ||
+            inputs.some((input) => input(path))
+          matches.set(path, result)
+        }
+        return result
+      }
+    }
+    entries.set(target, value)
+    return value
   }
   const implementationRoots = productionSourceRoots().map((source) =>
     Path.relative(index.root, source.directory).replaceAll("\\", "/")
@@ -163,22 +186,67 @@ export const select = (index: PackageIndex, pattern: string, paths: ReadonlyArra
     globalPath(path) || implementationRoots.some((directory) => path === directory || path.startsWith(`${directory}/`))
   )
   // An unowned file may be an ambient input; conservatively invalidate the graph.
-  const unknown = normalized.filter((path) =>
-    !rows.some((row) =>
-      row.packagePath !== "" && path.startsWith(`${row.packagePath}/`) ||
-      Target.metadata(row.target).inputs.some((input) => matches(input, row.packagePath, path))
-    )
-  )
-  for (const row of selected) {
-    const causes = global.length + unknown.length > 0 ?
-      [...global, ...unknown] :
-      normalized.filter((path) => visit(row.target, path, new Set()))
-    if (causes.length > 0) reasons.set(row.label, new Set(causes))
+  const ownership = normalized.length === 0 ? [] : rows.map((row) => entry(row.target))
+  const unknown = normalized.filter((path) => !ownership.some((value) => value.matchesBase(path)))
+  const conservative = global.length + unknown.length > 0
+  if (conservative) {
+    for (const row of selected) reasons.set(row.label, new Set([...global, ...unknown]))
+  } else if (normalized.length > 0) {
+    const direct = new Map<Target.AnyTarget, (path: string) => boolean>()
+    const reverse = new Map<Target.AnyTarget, Set<Target.AnyTarget>>()
+    const selectors = new Map<string, ReadonlyArray<Target.AnyTarget>>()
+    const pending = selected.map((row) => row.target)
+    // Index the selected closure once, including private and verb-specific edges.
+    for (let cursor = 0; cursor < pending.length; cursor++) {
+      const target = pending[cursor]!
+      if (direct.has(target)) continue
+      const value = entry(target)
+      const metadata = value.metadata
+      const views = metadata.kinds.map((kind) => metadata.forKind(kind))
+      const inputs = views.flatMap((view) => view.inputs).map((input) => compileInput(input, value.packagePath, glob))
+      direct.set(target, (path) =>
+        value.matchesBase(path) || inputs.some((input) => input(path)) ||
+        metadata.inputs.length === 0 && metadata.dependencies.length === 0)
+      const dependencies = new Set([
+        ...metadata.dependencies,
+        ...views.flatMap((view) => view.dependencies)
+      ])
+      for (const selector of [...metadata.dependencySelectors, ...views.flatMap((view) => view.dependencySelectors)]) {
+        const label = `${selector.pattern}:${selector.target}`
+        let resolved = selectors.get(label)
+        if (resolved === undefined) {
+          resolved = index.resolve(label).map((row) => row.target)
+          selectors.set(label, resolved)
+        }
+        for (const dependency of resolved) dependencies.add(dependency)
+      }
+      for (const dependency of dependencies) {
+        let dependents = reverse.get(dependency)
+        if (dependents === undefined) reverse.set(dependency, dependents = new Set())
+        dependents.add(target)
+        pending.push(dependency)
+      }
+    }
+    for (const path of normalized) {
+      const affected = new Set<Target.AnyTarget>()
+      for (const [target, matches] of direct) if (matches(path)) affected.add(target)
+      // Set iteration includes newly added dependents and visits each target/path once,
+      // even when several selected roots share dependencies or the graph has a cycle.
+      for (const target of affected) {
+        for (const dependent of reverse.get(target) ?? []) affected.add(dependent)
+      }
+      for (const row of selected) {
+        if (!affected.has(row.target)) continue
+        let causes = reasons.get(row.label)
+        if (causes === undefined) reasons.set(row.label, causes = new Set())
+        causes.add(path)
+      }
+    }
   }
   return {
     pattern,
     files: normalized,
-    conservative: global.length + unknown.length > 0,
+    conservative,
     globalInputs: [...new Set([...global, ...unknown])].sort(),
     targets: selected.filter((row) => reasons.has(row.label)).map((row) => ({
       label: row.label,
