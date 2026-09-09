@@ -223,10 +223,12 @@ deterministic rather than a missing-layer defect.
 
 Package-manager children use `extendEnv: false`. They receive deterministic
 locale/color settings, selected bootstrap and network variables, and variables
-explicitly referenced as `${NAME}` in the project `.npmrc`.
+explicitly referenced as `${NAME}` in live values of the project `.npmrc`.
+Blank lines and lines beginning with `;` or `#` are ignored when selecting variables.
 
-Literal auth tokens, passwords, key files, and certificate fields in `.npmrc`
-are refused. Placeholders that reference process-control names such as
+Literal auth tokens, passwords, client keys (`key`), one-time passwords (`otp`),
+key files, and certificate files in `.npmrc` are refused. Placeholders that
+reference process-control names such as
 `NODE_*`, `NPM_CONFIG_*`, `PNPM_*`, `BUN_*`, loader variables, or shell startup
 variables are also refused. User and global npm configuration paths are forced
 to the null device.

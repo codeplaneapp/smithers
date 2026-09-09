@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Schema from "effect/Schema"
+import { execFileSync } from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -404,6 +405,40 @@ describe("PackageManager.storeRoot", () => {
     })
   })
 
+  it("forwards placeholders only from live .npmrc values", async () => {
+    await withFixture("package-manager-env-comments", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      await Fs.writeFile(
+        NodePath.join(root, ".npmrc"),
+        [
+          "  ; _authToken=${LEGACY_SECRET}",
+          "  # proxy=${PROXY_CREDENTIAL}",
+          "${KEY_SECRET}=unused",
+          "${BARE_SECRET}",
+          "",
+          "//registry.example/:_authToken=${NPM_TOKEN}"
+        ].join("\n"),
+        "utf8"
+      )
+      await writeExecutable(executable, "process.stdout.write(JSON.stringify(process.env))")
+      const manager = await makePnpm(root, executable, {
+        environment: {
+          PATH: process.env.PATH,
+          LEGACY_SECRET: "comment-only",
+          PROXY_CREDENTIAL: "comment-only",
+          KEY_SECRET: "key-only",
+          BARE_SECRET: "not-a-setting",
+          NPM_TOKEN: "live-token"
+        }
+      })
+      const observed = JSON.parse(await Effect.runPromise(manager.version)) as Record<string, unknown>
+      expect(observed.NPM_TOKEN).toBe("live-token")
+      for (const name of ["LEGACY_SECRET", "PROXY_CREDENTIAL", "KEY_SECRET", "BARE_SECRET"]) {
+        expect(observed).not.toHaveProperty(name)
+      }
+    })
+  })
+
   it.each([false, true])(
     "refuses an unresolved Windows pnpm.cmd shim before spawning (shim present: %s)",
     async (present) => {
@@ -613,16 +648,32 @@ describe("PackageManager.storeRoot", () => {
     })
   })
 
-  it("refuses .npmrc references that can mutate the child runtime", async () => {
+  it.each([
+    "BASH_ENV",
+    "BUN_INSTALL",
+    "CDPATH",
+    "COREPACK_ROOT",
+    "DENO_DIR",
+    "DYLD_INSERT_LIBRARIES",
+    "ENV",
+    "GIT_SSH_COMMAND",
+    "GLOBIGNORE",
+    "LD_PRELOAD",
+    "NODE_OPTIONS",
+    "NPM_CONFIG_REGISTRY",
+    "PNPM_HOME",
+    "SHELLOPTS",
+    "ld_preload"
+  ])("refuses .npmrc references that can mutate the child runtime: %s", async (name) => {
     await withFixture("package-manager-env-control", async (root) => {
       const executable = NodePath.join(root, "pnpm.mjs")
-      await Fs.writeFile(NodePath.join(root, ".npmrc"), "registry=${NODE_OPTIONS}\n", "utf8")
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), `registry=\${${name}}\n`, "utf8")
       await writeExecutable(executable, "process.stdout.write('9.15.0\\n')")
       const manager = await makePnpm(root, executable, {
-        environment: { PATH: process.env.PATH, NODE_OPTIONS: "--inspect" }
+        environment: { PATH: process.env.PATH, [name]: "test-control-value" }
       })
       await expect(Effect.runPromise(manager.version)).rejects.toThrow(
-        /process-control environment variable NODE_OPTIONS/
+        `process-control environment variable ${name}`
       )
     })
   })
@@ -802,6 +853,40 @@ const digestOver = (fileSystem: FileSystem.FileSystem, root: string) =>
   )
 
 describe("PackageManager file reads", () => {
+  it("refuses a directory at .npmrc", async () => {
+    await withFixture("package-manager-npmrc-directory", async (root) => {
+      await Fs.mkdir(NodePath.join(root, ".npmrc"))
+      await expect(Effect.runPromise(
+        PackageManager.npmrcDigest(root).pipe(Effect.provide(NodeServices.layer))
+      )).rejects.toThrow(/expected a regular file/)
+    })
+  })
+
+  it.skipIf(process.platform === "win32")("refuses a FIFO lockfile before opening it", async () => {
+    await withFixture("package-manager-lockfile-fifo", async (root) => {
+      execFileSync("mkfifo", [NodePath.join(root, "pnpm-lock.yaml")], { timeout: 5_000 })
+      await expect(Effect.runPromise(
+        PackageManager.lockfileDigest(root, "pnpm-lock.yaml").pipe(Effect.provide(NodeServices.layer))
+      )).rejects.toThrow(/expected a regular file/)
+    })
+  }, 5_000)
+
+  it.skipIf(process.platform === "win32")("refuses a directory swapped in before opening a lockfile", async () => {
+    await withFixture("package-manager-lockfile-directory-swap", async (root) => {
+      const lockfile = NodePath.join(root, "pnpm-lock.yaml")
+      await Fs.writeFile(lockfile, "lockfileVersion: '9.0'\n", "utf8")
+      const fileSystem = await hookedFileSystem({
+        afterStat: async () => {
+          await Fs.rm(lockfile)
+          await Fs.mkdir(lockfile)
+        }
+      })
+      const error = await digestOver(fileSystem, root)
+      expect(error.code).toBe("lockfile_unreadable")
+      expect(error.message).toMatch(/expected a regular file/)
+    })
+  })
+
   it("refuses a lockfile whose inode is replaced between the stat and the open", async () => {
     await withFixture("package-manager-inode-swap", async (root) => {
       const lockfile = NodePath.join(root, "pnpm-lock.yaml")
@@ -931,10 +1016,52 @@ describe("PackageManager project configuration", () => {
     })
   })
 
+  it.each([
+    "key=\"-----BEGIN PRIVATE KEY-----\\nfixture-key\\n-----END PRIVATE KEY-----\"",
+    "//registry.example/:key=literal-key",
+    "otp=123456",
+    "_auth=base64",
+    "_password=pw",
+    "//registry.example/:_password=pw",
+    "certfile=./cert.pem",
+    "keyfile=./key.pem",
+    "token=literal-token",
+    "_authToken =x"
+  ])("refuses literal credential setting %s for digests and child execution", async (line) => {
+    await withFixture("package-manager-credential", async (root) => {
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), `${line}\n`, "utf8")
+      const error = await npmrcRefusal(root)
+      expect(error.code).toBe("unsafe_configuration")
+      expect(error.message).toMatch(/embeds a credential/)
+      const executable = NodePath.join(root, "pnpm.mjs")
+      const marker = NodePath.join(root, "spawned")
+      await writeExecutable(
+        executable,
+        `import { writeFileSync } from "node:fs"\nwriteFileSync(${JSON.stringify(marker)}, "yes")`
+      )
+      const manager = await makePnpm(root, executable)
+      await expect(Effect.runPromise(manager.version)).rejects.toThrow(/embeds a credential/)
+      await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
+    })
+  })
+
+  it.each(["monkey", "mytoken", "some_auth", "keyfile-extra"])(
+    "matches credential setting names as a whole: %s",
+    async (name) => {
+      await withFixture("package-manager-credential-name", async (root) => {
+        await Fs.writeFile(NodePath.join(root, ".npmrc"), `${name}=ordinary-value\n`, "utf8")
+        expect(await npmrcValue(root)).toMatch(/^[0-9a-f]{64}$/)
+      })
+    }
+  )
+
   it("accepts a placeholder the way npm's ini parser reads it", async () => {
     await withFixture("package-manager-placeholder", async (root) => {
       for (
         const line of [
+          "_password=${NPM_PASSWORD}",
+          "key=${NPM_KEY}",
+          "otp=${NPM_OTP}",
           "//registry.example/:_authToken=${NPM_TOKEN}",
           "//registry.example/:_authToken=\"${NPM_TOKEN}\"",
           "//registry.example/:_authToken='${NPM_TOKEN}'",

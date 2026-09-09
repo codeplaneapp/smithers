@@ -687,9 +687,11 @@ const managerEnvironment = (
     const present = yield* fs.exists(path).pipe(
       Effect.mapError((cause) => unreadable("manifest_unreadable", path, cause))
     )
-    const npmrc = present
-      ? yield* boundedText(fs, "manifest_unreadable", options.projectRoot, path, maximumNpmrcBytes)
-      : ""
+    const npmrc = parseNpmrc(
+      present
+        ? yield* boundedText(fs, "manifest_unreadable", options.projectRoot, path, maximumNpmrcBytes)
+        : ""
+    )
     if (hasEmbeddedNpmCredential(npmrc)) {
       return yield* Effect.fail(
         new PackageManagerError({
@@ -699,7 +701,9 @@ const managerEnvironment = (
       )
     }
     const referenced = new Set<string>()
-    for (const match of npmrc.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) referenced.add(match[1]!)
+    for (const [, value] of npmrc) {
+      for (const match of value.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) referenced.add(match[1]!)
+    }
     const windows = options.platform.os === "win32"
     // A null prototype, because the loop below decides what to forward by
     // asking whether a name is already set. On an object literal every
@@ -1305,6 +1309,21 @@ export const linkedTreeManifest = (input: {
     return JSON.stringify(["smithers-build/linked-tree-manifest/v1", ...values])
   }).pipe(Effect.flatMap(digestText))
 
+/** Parses live settings once for credential refusal and environment selection. */
+const parseNpmrc = (text: string): Array<readonly [name: string, value: string]> => {
+  const settings: Array<readonly [name: string, value: string]> = []
+  for (const raw of text.split("\n")) {
+    const line = raw.trim()
+    if (line.length === 0 || line.startsWith("#") || line.startsWith(";")) continue
+    const separator = line.indexOf("=")
+    if (separator < 0) continue
+    // npm's ini parser strips one layer of surrounding quotes, so a quoted
+    // placeholder grants the same variable as the bare placeholder.
+    settings.push([line.slice(0, separator).trim(), unquoted(line.slice(separator + 1).trim())])
+  }
+  return settings
+}
+
 /**
  * Reports whether `.npmrc` embeds a credential instead of referring to an
  * environment variable.
@@ -1321,8 +1340,8 @@ export const linkedTreeManifest = (input: {
  *
  * @private
  */
-const hasEmbeddedNpmCredential = (text: string): boolean => {
-  const credential = /(_auth|_authtoken|_password|token|certfile|keyfile)\s*=/i
+const hasEmbeddedNpmCredential = (settings: ReadonlyArray<readonly [name: string, value: string]>): boolean => {
+  const credential = /(?:^|:)(?:_auth|_authtoken|_password|token|key|keyfile|certfile|otp)$/i
   const environment = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/
   // A URL carrying userinfo is a literal credential no matter what the setting
   // is called. `registry=`, a scoped registry, `proxy=`, and `https-proxy=` are
@@ -1330,17 +1349,9 @@ const hasEmbeddedNpmCredential = (text: string): boolean => {
   // without this the file passes the check and its password is digested into
   // install key material.
   const userinfoUrl = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/@\s]+@/
-  return text.split("\n").some((raw) => {
-    const line = raw.trim()
-    if (line.length === 0 || line.startsWith("#") || line.startsWith(";")) return false
-    const separator = line.indexOf("=")
-    if (separator < 0) return false
-    // npm's ini parser strips one layer of surrounding quotes, so the quoted
-    // placeholder is the same declaration as the bare one and refusing it told
-    // the author to do what they had already done.
-    const value = unquoted(line.slice(separator + 1).trim())
+  return settings.some(([name, value]) => {
     if (userinfoUrl.test(value)) return true
-    if (!credential.test(line.slice(0, separator + 1))) return false
+    if (!credential.test(name)) return false
     return !environment.test(value)
   })
 }
@@ -1376,7 +1387,7 @@ export const npmrcDigest = (
     )
     if (!present) return null
     const text = yield* boundedText(fs, "manifest_unreadable", projectRoot, path, maximumNpmrcBytes)
-    if (hasEmbeddedNpmCredential(text)) {
+    if (hasEmbeddedNpmCredential(parseNpmrc(text))) {
       return yield* Effect.fail(
         new PackageManagerError({
           code: "unsafe_configuration",
