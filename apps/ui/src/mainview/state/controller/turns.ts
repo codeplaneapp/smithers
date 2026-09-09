@@ -443,6 +443,20 @@ export const createTurnController = (
         reason: entry.reason
       }))
 
+  // Retries keep their transcript id, so its previous backend run must finish
+  // cancelling before that id can launch again. The map also fences final
+  // frames from the cancelled run while a retry holds the turn seat.
+  const pendingCancellations = new Map<string, Promise<void>>()
+  const cancelTurn = (turnId: string): void => {
+    if (pendingCancellations.has(turnId)) return
+    const pending = agent.cancelTurn(turnId)
+    pendingCancellations.set(turnId, pending)
+    const settled = () => { pendingCancellations.delete(turnId) }
+    // Handle rejection even when no retry is waiting; a queued launch still
+    // observes the original rejection through its ordinary failure handler.
+    void pending.then(settled, settled)
+  }
+
   const launchLeg = (
     turnId: string,
     messages: ReadonlyArray<AgentChatMessage>,
@@ -453,6 +467,8 @@ export const createTurnController = (
      */
     keepTail = 1
   ): void => {
+    const turn = ctx.activeTurn
+    if (turn === undefined || turn.id !== turnId) return
     /*
      * §4.13: the client re-sent the whole transcript every turn, so a long
      * conversation crossed the boundary's body limit and then stayed dead —
@@ -470,11 +486,13 @@ export const createTurnController = (
       },
       keepTail
     )
-    void agent
-      .startTurn(request)
+    const cancellation = pendingCancellations.get(turnId)
+    const started = cancellation === undefined
+      ? agent.startTurn(request)
+      : cancellation.then(() => ctx.activeTurn === turn ? agent.startTurn(request) : undefined)
+    void started
       .then((result) => {
-        if (result.status !== "error" || ctx.activeTurn?.id !== turnId) return
-        const turn = ctx.activeTurn
+        if (result?.status !== "error" || ctx.activeTurn !== turn) return
         ctx.activeTurn = undefined
         // §1: a leg that never started still ends a turn that launched a
         // run, and a claim streamed before the launch is already on screen.
@@ -490,8 +508,7 @@ export const createTurnController = (
         settleTurnBilling()
       })
       .catch(() => {
-        if (ctx.activeTurn?.id !== turnId) return
-        const turn = ctx.activeTurn
+        if (ctx.activeTurn !== turn) return
         ctx.activeTurn = undefined
         settleRunClaims(turn)
         store.dispatch({
@@ -578,7 +595,7 @@ export const createTurnController = (
     const result = await ctx.commands.executeForAgent({ name: call.name, arguments: call.args }).catch((error: unknown) =>
       `failed: ${error instanceof Error ? error.message : String(error)}`
     )
-    if (ctx.activeTurn?.id !== turn.id) return
+    if (ctx.activeTurn !== turn) return
     /*
      * Wave 12 §1: a real launch arms the deterministic claim surface for the
      * rest of this turn. A refusal or a chooser route launched nothing, so
@@ -662,7 +679,7 @@ export const createTurnController = (
 
   const subscribeToAgent = (): void => {
     const unsubscribe = agent.subscribe((frame: AgentTurnFrame) => {
-      if (frame.runId !== ctx.activeTurn?.id) return
+      if (frame.runId !== ctx.activeTurn?.id || pendingCancellations.has(frame.runId)) return
       if (frame.type === "card" || frame.type === "card.update") {
         handleCardFrame(frame)
         return
@@ -930,8 +947,9 @@ export const createTurnController = (
   }
 
   const reset = (): void => {
-    if (ctx.activeTurn !== undefined) void agent.cancelTurn(ctx.activeTurn.id)
+    const turn = ctx.activeTurn
     ctx.activeTurn = undefined
+    if (turn !== undefined) cancelTurn(turn.id)
     ctx.stopWorkflowPumps()
     store.dispatch({ type: "conversation.reset", actor: "user" })
   }
@@ -940,8 +958,8 @@ export const createTurnController = (
     if (ctx.activeTurn === undefined) return
     const turn = ctx.activeTurn
     const turnId = turn.id
-    void agent.cancelTurn(turnId)
     ctx.activeTurn = undefined
+    cancelTurn(turnId)
     /*
      * §1: stopping does not un-launch the run, so the claim surface still
      * belongs to the client. Anything the model streamed before the tool call
@@ -1081,23 +1099,23 @@ export const createTurnController = (
       askClass: undefined,
       claimBuffer: ""
     }
+    const turn = ctx.activeTurn
     store.dispatch({ type: "chain.turn.resumed", actor: "system", turnId: lineage })
     void agent
       .startTurn({ runId: lineage, messages: contextMessages(), instructions: "" })
       .then((result) => {
-        if (result.status === "error") {
-          const turn = ctx.activeTurn
+        if (result.status === "error" && ctx.activeTurn === turn) {
           ctx.activeTurn = undefined
           store.dispatch({
             type: "message.response.failed",
             actor: "system",
-            turnId: turn?.id ?? lineage,
+            turnId: lineage,
             message: result.message
           })
         }
       })
       .catch(() => {
-        if (ctx.activeTurn?.id !== lineage) return
+        if (ctx.activeTurn !== turn) return
         ctx.activeTurn = undefined
         store.dispatch({
           type: "message.response.failed",
