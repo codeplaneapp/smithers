@@ -7,6 +7,7 @@ import type { Provenance } from "./reuse.ts"
 
 const maxFileBytes = 512_000
 const maxPageBytes = 300_000
+const assessmentPolicy = "exact-single-line-ascii-boundary-trim-v1"
 const fail = (code: WikiError["code"], message: string) => new WikiError({ code, message })
 export const digest = (text: string) => Effect.gen(function*() {
   const crypto = yield* Crypto.Crypto
@@ -77,12 +78,10 @@ export const operations = (options: { readonly root: string; readonly output: st
       for (const citation of section.citations) {
         const source = page.evidence.sources.find((entry) => entry.path === citation.path)
         const lines = source?.text.split("\n") ?? []
-        const tail = lines.slice(citation.line - 1).join("\n")
-        const offset = tail.indexOf(citation.quote)
-        const count = citation.quote.split("\n").length
-        // Exact quotes may start inside their claimed first line, but never on
-        // a later line or in source that the reviewer was not shown.
-        if (!source || citation.line < 1 || citation.line > lines.length || !citation.quote.trim() || offset < 0 || offset >= (lines[citation.line - 1]?.length ?? 0) || !Array.from({ length: count }, (_, index) => citation.line + index).every((line) => visibleLine(page.evidence, citation.path, line))) {
+        // Preserve the raw receipt. Boundary padding is not part of the selected
+        // fragment; interior bytes, the source line and excerpt must stay exact.
+        const fragment = citation.quote.replace(/^[ \t]+|[ \t]+$/g, "")
+        if (!source || !Number.isSafeInteger(citation.line) || citation.line < 1 || citation.line > lines.length || !fragment || /[\r\n]/.test(fragment) || !lines[citation.line - 1]!.includes(fragment) || !visibleLine(page.evidence, citation.path, citation.line)) {
           return yield* Effect.fail(fail("review-failed", `Review citation is not exact source evidence: ${page.evidence.spec.id}/${section.id}`))
         }
       }
@@ -105,7 +104,7 @@ export const operations = (options: { readonly root: string; readonly output: st
     const sourceRevision = `sha256:${inputDigest}`
     const rendered = yield* Effect.forEach(pages, (page) => Effect.gen(function*() {
       const { evidence, review, reviewer } = page
-      const reviewDigest = review ? yield* digest(canonical({ policy: 2, inputDigest: evidence.inputDigest, contentDigest: evidence.contentDigest, reviewer, review })) : null
+      const reviewDigest = review ? yield* digest(canonical({ policy: 3, assessmentPolicy, inputDigest: evidence.inputDigest, contentDigest: evidence.contentDigest, reviewer, review })) : null
       const status = review === null ? "unreviewed" : review.sections.every((section) => section.verdict === "supported") ? "verified" : "needs-changes"
       const header = `---\nsmithers_generated: true\nschema_version: 1\nsource_revision: ${JSON.stringify(sourceRevision)}\ninput_digest: ${evidence.inputDigest}\ncontent_digest: ${evidence.contentDigest}\nverification_status: ${status}\nreview_digest: ${reviewDigest ?? "null"}\n---\n\n`
       const notice = `> ${evidence.spec.kind === "intent" ? "Product intent; this page does not assert implementation." : "Current behavior from the captured source snapshot."} ${status === "verified" ? "Model-reviewed against the cited source; this is not a formal proof or deployment receipt." : "Semantic review has not passed. Treat explanations as a draft."}\n\n`
@@ -117,7 +116,7 @@ export const operations = (options: { readonly root: string; readonly output: st
         sources: evidence.sources.map(({ path, digest }) => ({ path, digest })), verification: { status, reviewer, reviewDigest, review,
           ...(provenance[evidence.spec.id] ? { provenance: provenance[evidence.spec.id] } : {}) } }
     }))
-    const snapshot = { schemaVersion: 1, digestPolicy: "canonical-json-v2", sourceRevision, sourceKind: "content-addressed-working-tree", inputDigest, verification, pages: rendered }
+    const snapshot = { schemaVersion: 1, digestPolicy: "canonical-json-v2", assessmentPolicy, sourceRevision, sourceKind: "content-addressed-working-tree", inputDigest, verification, pages: rendered }
     const files: Record<string, string> = { "snapshot.json": JSON.stringify(snapshot, null, 2) + "\n" }
     for (const page of pages) for (const source of page.evidence.sources) files[`sources/${source.path}`] = source.text
     for (const page of rendered) files[`pages/${page.id}.md`] = page.body

@@ -7,7 +7,7 @@ const page = (spec: Omit<PageSpec, "inputs" | "excerpts">, inputs: readonly Inpu
   excerpts: Object.fromEntries(inputs.filter((input): input is Exclude<Input, string> => typeof input !== "string").map(([path, ...ranges]) => [path, ranges.map(([start, end]) => ({ start, end }))]))
 })
 const runtime: Input = ["packages/smithers/flows/src/Runtime.ts", [150, 223]]
-const operations: Input = ["flows/wiki/operations.ts", [36, 177]]
+const operations: Input = ["flows/wiki/operations.ts", [37, 176]]
 const ui = "apps/ui/AGENTS.md"
 const flowDocs = "packages/smithers/flows/flow/docs/README.md"
 const agentDocs = "packages/smithers/agent/docs/README.md"
@@ -18,7 +18,7 @@ export const pages: readonly PageSpec[] = [
   page({ id: "start-here", title: "Start here", purpose: "Find the owning layer and follow work through Smithers.", kind: "current", document: "factory/wiki/pages/start-here.md", related: ["flows", "runtime", "build-graph", "product-ui", "coding-progression"] }, [
     flowDocs, runtime, agentDocs, "packages/smithers/build/targets/docs/README.md", ui, bun, node,
     ["packages/smithers/agent/src/AgentAction.ts", [253, 302], [390, 430]],
-    ["flows/wiki/operations.ts", [94, 139]], "apps/ui/docs/ONBOARDING.md"
+    ["flows/wiki/operations.ts", [93, 138]], "apps/ui/docs/ONBOARDING.md"
   ]),
   page({ id: "flows", title: "Flows, actions and replay", purpose: "Declare a typed capability once and attach its Effect implementation.", kind: "current", document: "factory/wiki/pages/flows.md", related: ["runtime", "agent", "build-graph"] }, [
     flowDocs, ["packages/smithers/flows/flow/src/Action/Action.ts", [109, 241]],
@@ -38,7 +38,7 @@ export const pages: readonly PageSpec[] = [
   page({ id: "storage", title: "Journal and durable stores", purpose: "Use existing persisted execution facts instead of another coding ledger.", kind: "current", document: "factory/wiki/pages/storage.md", related: ["runtime", "flows", "wiki-generation"] }, [
     runtime, bun, node, "packages/smithers/flows/journal/docs/README.md", "packages/smithers/flows/run-store/docs/README.md",
     ["packages/smithers/flows/database/src/DurableWriter.ts", [64, 106], [208, 310]],
-    ["packages/smithers/flows/flow/src/Action/Action.ts", [109, 241]], ["flows/wiki/operations.ts", [94, 145]]
+    ["packages/smithers/flows/flow/src/Action/Action.ts", [109, 241]], ["flows/wiki/operations.ts", [93, 144]]
   ]),
   page({ id: "build-graph", title: "Dependency-bound build targets", purpose: "Declare the exact code and documentation inputs that invalidate an output.", kind: "current", document: "factory/wiki/pages/build-graph.md", related: ["wiki-generation", "flows", "runtime"] }, [
     "packages/smithers/build/targets/docs/reference/filegroup.md", ["packages/smithers/build/targets/src/Filegroup.ts", [25, 91], [185, 283]],
@@ -53,7 +53,7 @@ export const pages: readonly PageSpec[] = [
     ui, "apps/ui/docs/ONBOARDING.md", ["apps/ui/src/mainview/cards/RunTrace.ts", [20, 108], [154, 221], [279, 305], [510, 576]],
     ["apps/ui/src/mainview/cards/RunTraceCard.tsx", [66, 416]], "apps/ui/src/mainview/runtime/FrameHistory.ts",
     ["apps/ui/src/mainview/state/controller/runs.ts", [393, 424], [448, 462]], ["apps/ui/src/mainview/flows/entries/runs.ts", [184, 220]],
-    "apps/ui/docs/workbench-lanes/runs.md", ["flows/wiki/operations.ts", [94, 145]]
+    "apps/ui/docs/workbench-lanes/runs.md", ["flows/wiki/operations.ts", [93, 144]]
   ]),
   page({ id: "wiki-generation", title: "How this wiki stays accountable", purpose: "Separate source freshness, semantic review and human intent.", kind: "current", document: "factory/wiki/pages/wiki-generation.md", related: ["build-graph", "runtime", "coding-direction"] }, [
     "flows/wiki/schema.ts", "flows/wiki/workflow.ts", "flows/wiki/evidence.ts", "flows/wiki/operations.ts", "flows/wiki/runtime.ts", "flows/wiki/PACKAGE.ts", "flows/wiki/main.ts", "factory/wiki/catalog.ts", "flows/wiki/reuse.ts"

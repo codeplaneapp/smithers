@@ -86,6 +86,34 @@ test("semantic gate requires complete exact citations and refuses false freshnes
   await assert.rejects(run(f.ops.write([page], "verified")), /Source changed during review/)
 })
 
+test("citation boundary padding does not alter raw receipts or loosen source matching", async (t) => {
+  const f = await fixture(t)
+  await writeFile(join(f.root, "src/answer.ts"), "// hidden evidence\n   * The answer is 42.\n// unrelated visible evidence\n")
+  const spec = { ...f.spec, excerpts: { "src/answer.ts": [{ start: 2, end: 3 }] } }
+  const evidence = await run(f.ops.collect(spec))
+  const quote = "\t     * The answer is 42. \t"
+  const review = { sections: supported(evidence).sections.map((section) => ({ ...section, citations: [{ path: "src/answer.ts", line: 2, quote }] })) }
+  const page = { evidence, review, reviewer: "scripted-test" }
+  assert.equal(await run(f.ops.assess(page)), page, "assessment must preserve the original model object")
+  for (const citation of [
+    { path: "src/answer.ts", line: 3, quote },
+    { path: "src/answer.ts", line: 1, quote: " // hidden evidence " },
+    { path: "src/missing.ts", line: 2, quote },
+    { path: "src/answer.ts", line: 2, quote: "* The  answer is 42." },
+    { path: "src/answer.ts", line: 2, quote: "* The answer is 43." },
+    { path: "src/answer.ts", line: 2, quote: "\u00a0* The answer is 42." },
+    { path: "src/answer.ts", line: 2, quote: "\t " },
+    { path: "src/answer.ts", line: 2, quote: "* The answer is 42.\n" },
+    { path: "src/answer.ts", line: 2, quote: "\r* The answer is 42." }
+  ]) await assert.rejects(run(f.ops.assess({ ...page, review: { sections: review.sections.map((section) => ({ ...section, citations: [citation] })) } })), /exact source/)
+  await run(f.ops.write([page], "verified"))
+  const snapshot = JSON.parse(await readFile(join(f.output, "current.json"), "utf8"))
+  assert.equal(snapshot.assessmentPolicy, "exact-single-line-ascii-boundary-trim-v1")
+  assert.equal(snapshot.pages[0].verification.review.sections[0].citations[0].quote, quote)
+  assert.equal(await readFile(join(f.output, snapshot.directory, "sources/src/answer.ts"), "utf8"), "// hidden evidence\n   * The answer is 42.\n// unrelated visible evidence\n")
+  assert.equal((await run(f.ops.check([spec], true))).verification, "verified")
+})
+
 test("uncertain review persists an honest preview and cannot succeed as verified", async (t) => {
   const f = await fixture(t), evidence = await run(f.ops.collect(f.spec))
   const review = { sections: supported(evidence).sections.map((section) => ({ ...section, verdict: "uncertain" as const })) }
