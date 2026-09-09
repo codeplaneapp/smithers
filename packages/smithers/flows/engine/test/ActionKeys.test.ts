@@ -2,11 +2,17 @@
 
 import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
+import { DerivedKey } from "@smthrs/keys"
 import { Node } from "@smthrs/plan"
-import { Effect, Exit, Layer, Result, Schedule, Schema, SchemaRepresentation, Scope } from "effect"
+import { Effect, Exit, Layer, Schedule, Schema, Scope, Tracer } from "effect"
 import type * as Crypto from "effect/Crypto"
+import * as SchemaRepresentation from "effect/SchemaRepresentation"
+import { vi } from "vitest"
+import { actionKey } from "../src/FlowEngine/ActionKey.ts"
 import { FlowEngine } from "../src/index.ts"
-import { key, withCrypto } from "./Crypto.ts"
+import { withCrypto } from "./Crypto.ts"
+
+vi.mock("effect/SchemaRepresentation", { spy: true })
 
 const effect = (name: string, body: () => Effect.Effect<void, unknown, Crypto.Crypto>) =>
   it.effect(name, () => withCrypto(body()))
@@ -34,6 +40,65 @@ const provideHost = <A, E>(
   )
 
 describe("action execution keys", () => {
+  effect("pins the compact declaration digest in a run-scoped string key", () =>
+    Effect.gen(function*() {
+      const action = Action.make({
+        name: "ActionKeys/fixture",
+        success: Schema.String,
+        idempotencyKey: "row",
+        execute: Effect.succeed("ok")
+      })
+      // Intentional key-bytes break, following the schema-folding change in issue #120.
+      expect(yield* actionKey(action, "run", 1, undefined, "scope"))
+        .toBe("key1_5ba06eea63e4a5187bb73bb4ea7951e5048014dd09e18c33d7408b80dc4bc124")
+    }))
+
+  effect("memoizes declaration digests by both schema ASTs across action instances", () =>
+    Effect.gen(function*() {
+      const success = Schema.Struct({ value: Schema.String })
+      const error = Schema.Struct({ reason: Schema.String })
+      const make = () =>
+        Action.make({
+          name: "ActionKeys/memoized",
+          success,
+          error,
+          idempotencyKey: "row",
+          execute: Effect.succeed({ value: "ok" })
+        })
+      const representation = vi.spyOn(SchemaRepresentation, "toRepresentation")
+      try {
+        const first = yield* actionKey(make(), "run", 1, undefined, "scope")
+        const calls = representation.mock.calls.length
+        expect(calls).toBeGreaterThan(0)
+        expect(yield* actionKey(make(), "run", 2, undefined, "scope")).toBe(first)
+        expect(representation.mock.calls.length).toBe(calls)
+      } finally {
+        representation.mockRestore()
+      }
+    }))
+
+  effect("does not create a named actionKey span on repeated dispatch", () => {
+    const spans: Array<string> = []
+    const tracer = Tracer.make({
+      span(options) {
+        spans.push(options.name)
+        return new Tracer.NativeSpan(options)
+      }
+    })
+    const action = Action.make({
+      name: "ActionKeys/untraced",
+      success: Schema.Void,
+      idempotencyKey: "row",
+      execute: Effect.void
+    })
+    return Effect.gen(function*() {
+      yield* action
+      yield* action
+      expect(spans).toContain("caller")
+      expect(spans).not.toContain("FlowEngine.actionKey")
+    }).pipe(provideHost, Effect.withSpan("caller"), Effect.withTracer(tracer))
+  })
+
   effect("namespaces string idempotency keys by action name so distinct actions never collide", () => {
     // Issue #9: `chargeCard` and `sendEmail` both declaring
     // `idempotencyKey: "order-123"` must NOT share a step key — otherwise the
@@ -471,85 +536,78 @@ describe("action execution keys", () => {
     }
   )
 
-  effect("keeps ordinal action keys isolated by run and never by action name", () =>
+  effect("distinguishes a caller object that spells the string form's encoding (B3)", () =>
     Effect.gen(function*() {
-      const ordinal = (run: string, attempt: number) => `ordinal/${run}/compensable/${attempt}`
-      expect(ordinal("run-a", 1)).not.toBe(ordinal("run-b", 1))
-      expect(ordinal("run-a", 1)).not.toBe(ordinal("run-a", 2))
-      expect(ordinal("run-a", 1)).not.toContain("action-name")
-    }))
-
-  effect("distinguishes a caller object that spells the string form's encoding (B3)", () => {
-    // The string form builds `{action, idempotencyKey, declaration}` and the
-    // object form uses the caller's object verbatim. With no tag naming which
-    // form produced the input, a caller object that spells the string form's
-    // encoding — the shape a caller reaches for when copying the engine's own
-    // encoding to get a rename-stable key — digested byte-identically, shared
-    // one attempt row and one cache row, and replayed the string form's
-    // recorded outcome under its own schema. This is the fourth corner of the
-    // suite: name namespacing, schema folding, and rename stability are
-    // already covered above.
-    let declaredRuns = 0
-    let spelledRuns = 0
-    const success = Schema.String
-    const declaration = {
-      success: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(success.ast)),
-      error: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(Schema.Never.ast))
-    }
-    const declared = Action.make({
-      name: "ActionKeys/charge",
-      success,
-      idempotencyKey: "order-7",
-      execute: Effect.sync(() => {
-        declaredRuns++
-        return "declared"
+      // The string form builds `{action, idempotencyKey, declaration}` and the
+      // object form uses the caller's object verbatim. With no tag naming which
+      // form produced the input, a caller object that spells the string form's
+      // encoding — the shape a caller reaches for when copying the engine's own
+      // encoding to get a rename-stable key — digested byte-identically, shared
+      // one attempt row and one cache row, and replayed the string form's
+      // recorded outcome under its own schema. This is the fourth corner of the
+      // suite: name namespacing, schema folding, and rename stability are
+      // already covered above.
+      let declaredRuns = 0
+      let spelledRuns = 0
+      const success = Schema.String
+      const declaration = yield* Schema.decodeUnknownEffect(DerivedKey)({
+        success: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(success.ast)),
+        error: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(Schema.Never.ast))
       })
-    })
-    const spelled = Action.make({
-      name: "ActionKeys/spells-the-string-form",
-      success,
-      idempotencyKey: {
-        action: "ActionKeys/charge",
+      const declared = Action.make({
+        name: "ActionKeys/charge",
+        success,
         idempotencyKey: "order-7",
-        declaration
-      },
-      execute: Effect.sync(() => {
-        spelledRuns++
-        return "spelled"
-      })
-    })
-    const flowActionDeclaration = Action.make("ActionKeys/form-aliasing/action", {
-      payload: { run: Schema.String },
-      success: Schema.String
-    })
-    const flow = Flow.make("ActionKeys/form-aliasing", {
-      payload: { run: Schema.String },
-      success: Schema.String,
-      body: (payload) => flowActionDeclaration.call(payload)
-    })
-    const layer = Layer.mergeAll(
-      flowActionDeclaration.toLayer(() =>
-        Effect.gen(function*() {
-          const first = yield* declared
-          const second = yield* spelled
-          return `${first}:${second}`
+        execute: Effect.sync(() => {
+          declaredRuns++
+          return "declared"
         })
-      ),
-      Interpreter.layer(flow)
-    ).pipe(
-      Layer.provideMerge(Action.layerImplementations)
-    ).pipe(
-      Layer.provideMerge(FlowEngine.layerMemory)
-    )
+      })
+      const spelled = Action.make({
+        name: "ActionKeys/spells-the-string-form",
+        success,
+        idempotencyKey: {
+          action: "ActionKeys/charge",
+          idempotencyKey: "order-7",
+          declaration
+        },
+        execute: Effect.sync(() => {
+          spelledRuns++
+          return "spelled"
+        })
+      })
+      const flowActionDeclaration = Action.make("ActionKeys/form-aliasing/action", {
+        payload: { run: Schema.String },
+        success: Schema.String
+      })
+      const flow = Flow.make("ActionKeys/form-aliasing", {
+        payload: { run: Schema.String },
+        success: Schema.String,
+        body: (payload) => flowActionDeclaration.call(payload)
+      })
+      const layer = Layer.mergeAll(
+        flowActionDeclaration.toLayer(() =>
+          Effect.gen(function*() {
+            const first = yield* declared
+            const second = yield* spelled
+            return `${first}:${second}`
+          })
+        ),
+        Interpreter.layer(flow)
+      ).pipe(
+        Layer.provideMerge(Action.layerImplementations)
+      ).pipe(
+        Layer.provideMerge(FlowEngine.layerMemory)
+      )
 
-    return Effect.gen(function*() {
-      // Before the form tag this returned "declared:declared" with
-      // `spelledRuns === 0`: the second dispatch never ran.
-      expect(yield* flow.execute({ run: "one" }, { executionId: "run-form-aliasing" })).toBe("declared:spelled")
-      expect(declaredRuns).toBe(1)
-      expect(spelledRuns).toBe(1)
-    }).pipe(Effect.provide(layer))
-  })
+      return yield* Effect.gen(function*() {
+        // Before the form tag this returned "declared:declared" with
+        // `spelledRuns === 0`: the second dispatch never ran.
+        expect(yield* flow.execute({ run: "one" }, { executionId: "run-form-aliasing" })).toBe("declared:spelled")
+        expect(declaredRuns).toBe(1)
+        expect(spelledRuns).toBe(1)
+      }).pipe(Effect.provide(layer))
+    }))
 
   effect("classifies tagged infrastructure interrupts for retry exhaustion", () => {
     const action = Action.make({

@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import type * as SchemaAST from "effect/SchemaAST"
 import type * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaRepresentation from "effect/SchemaRepresentation"
 
@@ -150,16 +151,45 @@ export const uncanonicalKey = (
     )
   })
 
-/**
- * A deterministic JSON form of an action's declared success and error
- * schemas, derived from the schema ASTs through effect's stable
- * `SchemaRepresentation` document form. Folded into string-form sealed keys
- * so a changed declaration misses instead of decoding a stale cached row
- * under the new schema (issue #120).
- */
-const declarationDigest = (action: Action.AnyWithProps): Schema.JsonObject => ({
-  success: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(action.successSchema.ast)),
-  error: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(action.errorSchema.ast))
+// Schema ASTs are immutable and shared by separately constructed actions.
+// Weak keys keep discarded declarations collectible. Cache only successful
+// hashes so a failed Crypto operation can be retried with a working service.
+const declarations = new WeakMap<SchemaAST.AST, WeakMap<SchemaAST.AST, StoredKey>>()
+
+/** SHA-256 of the canonical success/error declaration document (issue #120). */
+const declarationDigest = Effect.fnUntraced(function*(action: Action.AnyWithProps) {
+  const success = action.successSchema.ast
+  const error = action.errorSchema.ast
+  let errors = declarations.get(success)
+  const cached = errors?.get(error)
+  if (cached !== undefined) return cached
+  const digest = yield* Schema.decodeUnknownEffect(DerivedKey)({
+    success: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(success)),
+    error: SchemaRepresentation.toJson(SchemaRepresentation.toRepresentation(error))
+  })
+  if (errors === undefined) {
+    errors = new WeakMap()
+    declarations.set(success, errors)
+  }
+  errors.set(error, digest)
+  return digest
+})
+
+const boundaries = new WeakMap<object, { readonly document: string; readonly digest: StoredKey }>()
+
+/** Hash the validated boundary once per distinct metadata document. */
+const boundaryDigest = Effect.fnUntraced(function*(metadata: unknown) {
+  const boundary = fileBoundary(metadata)
+  if (boundary === undefined) return undefined
+  // Metadata is caller-owned and may mutate. The decoded JSON snapshot is a
+  // cheap equality check, never hash input: DerivedKey still canonicalizes
+  // the descriptor, so object property order cannot change its identity.
+  const document = JSON.stringify(boundary)
+  const cached = boundaries.get(metadata as object)
+  if (cached?.document === document) return cached.digest
+  const digest = yield* Schema.decodeUnknownEffect(DerivedKey)(boundary)
+  boundaries.set(metadata as object, { document, digest })
+  return digest
 })
 
 /**
@@ -170,7 +200,7 @@ const declarationDigest = (action: Action.AnyWithProps): Schema.JsonObject => ({
  * @since 0.1.0
  * @slop
  */
-export const actionKey = Effect.fn("FlowEngine.actionKey")(function*(
+export const actionKey = Effect.fnUntraced(function*(
   action: Action.AnyWithProps,
   executionId: string,
   ordinal: number,
@@ -190,7 +220,10 @@ export const actionKey = Effect.fn("FlowEngine.actionKey")(function*(
     // the declaration changes the digest of every persisted string-key row
     // from before this fix; those keys were unsafe to replay across schema
     // changes, so the break is intentional (same precedent as the
-    // name-namespacing fix).
+    // name-namespacing fix). Compact declaration and boundary SHA-256 keys
+    // intentionally change those bytes again under the same precedent. A
+    // boundary also re-keys the object form; boundary-free object keys retain
+    // their encoding.
     // The two forms build `input` from different material, so the form itself
     // is key input. Without it a caller object that spells the string form's
     // `{action, idempotencyKey, declaration}` encoding — the shape a caller
@@ -207,7 +240,7 @@ export const actionKey = Effect.fn("FlowEngine.actionKey")(function*(
       ? {
         action: action.name,
         idempotencyKey: action.idempotencyKey,
-        declaration: declarationDigest(action)
+        declaration: yield* declarationDigest(action)
       }
       : action.idempotencyKey
     // The cacheability-gating boundary descriptor is cache key input
@@ -218,7 +251,7 @@ export const actionKey = Effect.fn("FlowEngine.actionKey")(function*(
     // the read-set material `ActionPersistence` gates cacheability on
     // (issue #57): the descriptor derived from `action.metadata` overrides
     // any caller-supplied `boundary` field.
-    const boundary = fileBoundary(action.metadata)
+    const boundary = yield* boundaryDigest(action.metadata)
     // The caller-owned object can carry material canonicalization
     // rejects; the typed `SchemaError` propagates to the dispatch site
     // (issue #151) instead of being discarded through `Result.getOrThrow`.

@@ -1,6 +1,6 @@
 // Deep reviewed and polished by a human on 2026-08-10.
 
-import type * as Crypto from "effect/Crypto"
+import * as Crypto from "effect/Crypto"
 /**
  * Issue #75: a sealed action's cache key omitted the two pieces of key
  * material the Step Keys spec calls mandatory — the resolved layers and the
@@ -93,6 +93,66 @@ const sonnet: Action.CacheEnvironment = {
 }
 
 describe("sealed cache keys fold the resolved environment (issue #75)", () => {
+  effect("pins compact declaration and boundary digests in sealed key bytes", () =>
+    Effect.gen(function*() {
+      // Intentional key-bytes break, following the schema-folding change in issue #120.
+      expect(yield* keyUnder(sealed("order-123"), sonnet)).toBe(
+        "key1_473bad0add0fa0b2995bbabffafdeaa8dc0df4e0be0c72e861da2e5d951c5db7"
+      )
+      expect(yield* keyUnder(sealed({ operation: "stable" }), sonnet)).toBe(
+        "key1_1ff577a43eb9d96de10e62a98d4a65b45d6743e192f3660e45b28b058d4b5db4"
+      )
+    }))
+
+  effect("hashes an unchanged boundary document only once", () =>
+    Effect.gen(function*() {
+      const crypto = yield* Crypto.Crypto
+      const documents: Array<string> = []
+      const action = Action.make({
+        name: "CacheEnvironmentKeys/memoized-boundary",
+        idempotencyKey: "row",
+        metadata: { ...hermeticMetadata },
+        execute: Effect.void
+      })
+      const observed = {
+        ...crypto,
+        digest: (...args: Parameters<typeof crypto.digest>) => {
+          documents.push(new TextDecoder().decode(args[1]))
+          return crypto.digest(...args)
+        }
+      }
+      yield* Effect.gen(function*() {
+        yield* keyUnder(action, sonnet)
+        expect(documents.filter((document) => document.includes("src/input.ts"))).toHaveLength(1)
+        yield* keyUnder(action, sonnet)
+        expect(documents.filter((document) => document.includes("src/input.ts"))).toHaveLength(1)
+      }).pipe(Effect.provideService(Crypto.Crypto, observed))
+    }))
+
+  effect("rechecks mutable boundary metadata before reusing its digest", () =>
+    Effect.gen(function*() {
+      const metadata = {
+        readSet: [{ path: "src/input.ts", digest: "d1" }],
+        writeSet: ["out/artifact"],
+        boundaryMode: "hard"
+      }
+      const action = Action.make({
+        name: "CacheEnvironmentKeys/mutable-boundary",
+        success: Schema.Void,
+        idempotencyKey: "row",
+        metadata,
+        execute: Effect.void
+      })
+      const first = yield* keyUnder(action, sonnet)
+      expect(yield* keyUnder(action, sonnet)).toBe(first)
+      metadata.readSet[0]!.digest = "d2"
+      expect(yield* keyUnder(action, sonnet)).not.toBe(first)
+      metadata.readSet[0]!.digest = "d1"
+      expect(yield* keyUnder(action, sonnet)).toBe(first)
+      metadata.boundaryMode = "invalid"
+      expect(yield* keyUnder(action, sonnet)).not.toBe(first)
+    }))
+
   it("validates complete cache environments", () => {
     expect(Schema.decodeUnknownSync(Action.CacheEnvironment)(sonnet)).toEqual(sonnet)
     expect(() =>
