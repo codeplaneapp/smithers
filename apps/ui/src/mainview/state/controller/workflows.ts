@@ -1,8 +1,8 @@
 import { WORKFLOW_PROVISION_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
-import { isFlowNotFound } from "./gateway"
-import { resolveTargetRepo } from "../RepoContext"
+import { isFlowNotFound, type GatewayWorkspaceBinding } from "./gateway"
+import { gatewayBindingFor, resolveTargetRepo } from "../RepoContext"
 import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
 
 /**
@@ -37,13 +37,14 @@ export interface WorkflowController {
   /** The refusal a $0 balance answers a launch with, already in the transcript; undefined when work may start. */
   readonly workflowBalanceGuard: () => string | undefined
   readonly workflowTargetRepo: (preferred?: string) => { readonly repo: string } | { readonly error: string }
-  readonly provisionWorkspace: (repo: string) => Promise<true | string>
+  readonly provisionWorkspace: (repo: string, binding?: GatewayWorkspaceBinding) => Promise<true | string>
   readonly upsertRunCard: (args: {
     readonly runId: string
     readonly repo: string
     readonly workflow: string
     readonly title: string
     readonly firstStep: string
+    readonly workspaceId?: string
     readonly input?: Record<string, unknown>
     /** The run's kind (prototype, implement); absent for every other run. */
     readonly kind?: string
@@ -53,6 +54,7 @@ export interface WorkflowController {
     readonly workflow: string
     readonly input: Record<string, unknown>
     readonly title: string
+    readonly binding?: GatewayWorkspaceBinding
     readonly kind?: string
   }) => Promise<{ readonly runId: string } | LaunchRefusal>
   /** A decision made on the workspace approvals inbox, for a gate whose own card never landed. */
@@ -162,7 +164,7 @@ export const createWorkflowController = (
     return { description: input.trim() }
   }
 
-  const provisionWorkspaceImpl = async (repo: string): Promise<true | string> => {
+  const provisionWorkspaceImpl = async (repo: string, binding: GatewayWorkspaceBinding): Promise<true | string> => {
     // A 409 means mid-provision: poll to a bounded deadline, never stampede.
     const deadline = Date.now() + RUN_POLL_MS * 36
     for (;;) {
@@ -171,7 +173,7 @@ export const createWorkflowController = (
         const response = await boundedFetch(`${baseUrl}${WORKFLOW_PROVISION_PATH}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ repo })
+          body: JSON.stringify({ repo, ...binding })
         })
         if (!response.ok) {
           return await errorMessageOf(response, "The workspace couldn't be prepared.")
@@ -201,13 +203,16 @@ export const createWorkflowController = (
     }
   }
 
-  const provisionWorkspace = (repo: string): Promise<true | string> =>
-    withToast(
-      `flow.provision.${repo}`,
+  const provisionWorkspace = (repo: string, requestedBinding?: GatewayWorkspaceBinding): Promise<true | string> => {
+    const binding = requestedBinding ?? gatewayBindingFor(store, repo)
+    if ("error" in binding) return Promise.resolve(binding.error)
+    return withToast(
+      `flow.provision.${repo}.${binding.workspaceId ?? "legacy"}`,
       `Preparing your ${repo} workspace…`,
       "Workspace ready",
-      () => provisionWorkspaceImpl(repo)
+      () => provisionWorkspaceImpl(repo, binding)
     )
+  }
 
   const upsertRunCard = (args: {
     readonly runId: string
@@ -215,6 +220,7 @@ export const createWorkflowController = (
     readonly workflow: string
     readonly title: string
     readonly firstStep: string
+    readonly workspaceId?: string
     readonly input?: Record<string, unknown>
     readonly kind?: string
   }): string => {
@@ -230,6 +236,7 @@ export const createWorkflowController = (
       ordinal: existing?.ordinal ?? nextTranscriptOrdinal(),
       payload: {
         repo: args.repo,
+        ...(args.workspaceId === undefined ? held?.workspaceId === undefined ? {} : { workspaceId: held.workspaceId } : { workspaceId: args.workspaceId }),
         runId: args.runId,
         workflow: args.workflow,
         phase: "running",
@@ -268,9 +275,10 @@ export const createWorkflowController = (
     readonly workflow: string
     readonly input: Record<string, unknown>
     readonly title: string
+    readonly binding?: GatewayWorkspaceBinding
     readonly kind?: string
   }): Promise<{ readonly runId: string } | LaunchRefusal> => {
-    const launch = await gateway.launch(args.repo, args.workflow, args.input)
+    const launch = await gateway.launch(args.repo, args.workflow, args.input, args.binding)
     if (launch.status !== "ok") return { message: launch.message, ...(launch.code === undefined ? {} : { code: launch.code }) }
     const { runId } = launch.value
     upsertRunCard({
@@ -279,6 +287,7 @@ export const createWorkflowController = (
       workflow: args.workflow,
       title: args.title,
       firstStep: `Started ${args.workflow} on ${args.repo} (run ${runId}).`,
+      ...(launch.value.workspaceId === undefined ? {} : { workspaceId: launch.value.workspaceId }),
       input: args.input,
       ...(args.kind === undefined ? {} : { kind: args.kind })
     })
@@ -364,7 +373,9 @@ export const createWorkflowController = (
     if ("error" in target) return target.error
     if ("ask" in target) return askWhichRepo(description, target.ask)
     const repo = target.repo
-    const provisioned = await provisionWorkspace(repo)
+    const binding = gatewayBindingFor(store, repo)
+    if ("error" in binding) return binding.error
+    const provisioned = await provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
     /*
      * No pre-flight `listWorkflows` gate here. The live gateway populates
@@ -376,6 +387,7 @@ export const createWorkflowController = (
      */
     const launched = await launchWorkflow({
       repo,
+      binding,
       workflow: "create-workflow",
       input: { prompt: description },
       title: `Creating a flow: ${repo}`
@@ -396,9 +408,11 @@ export const createWorkflowController = (
     const target = workflowTargetRepo(repoArg)
     if ("error" in target) return target.error
     const repo = target.repo
-    const provisioned = await provisionWorkspace(repo)
+    const binding = gatewayBindingFor(store, repo)
+    if ("error" in binding) return binding.error
+    const provisioned = await provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
-    const list = await gateway.listFlows(repo)
+    const list = await gateway.listFlows(repo, binding)
     if (list.status !== "ok") return list.message
     const workflows = list.value.map((flow) => ({ key: flow.flowId, description: flow.description }))
     const existing = store.collections.cards.get(`workflow-list-${repo}`)
@@ -446,13 +460,16 @@ export const createWorkflowController = (
     const target = workflowTargetRepo(repoArg)
     if ("error" in target) return target.error
     const repo = target.repo
-    const provisioned = await provisionWorkspace(repo)
+    const binding = gatewayBindingFor(store, repo)
+    if ("error" in binding) return binding.error
+    const provisioned = await provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
     // Launch first (the gateway's registry is lazy — see createWorkflow); a
     // genuine miss comes back as the gateway's own NOT_FOUND, and only then
     // is it worth naming what the workspace does have.
     const launched = await launchWorkflow({
       repo,
+      binding,
       workflow: name,
       input,
       title: `${name} — ${repo}`
@@ -461,7 +478,7 @@ export const createWorkflowController = (
       // The miss is read off the wire's own shape (FlowNotFound's code), never off its prose.
       if (!isFlowNotFound(launched.code)) return launched.message
       // A genuine miss: only now is it worth naming what the workspace has.
-      const list = await gateway.listFlows(repo)
+      const list = await gateway.listFlows(repo, binding)
       const available = list.status === "ok"
         ? list.value.map((flow) => flow.flowId).slice(0, 8).join(", ")
         : ""

@@ -40,6 +40,7 @@ import {
   callGateway,
   DEFAULT_CLOUD_API_BASE_URL,
   ensureGateway,
+  isGatewayWorkspaceId,
   fetchCloudToken,
   GatewaySessionRegistry,
   isRelayRepoName,
@@ -2143,7 +2144,11 @@ const handleWorkflowProvision = async (request: Request, env: WorkerEnv): Promis
   if (repo === undefined) {
     return json(400, { status: "error", message: "Body must be { repo } as owner/repo." })
   }
-  const outcome = await ensureGateway(env, session.login, repo)
+  const workspaceId = (body as { workspaceId?: unknown }).workspaceId
+  if (workspaceId !== undefined && !isGatewayWorkspaceId(workspaceId)) {
+    return json(400, { status: "error", message: "workspaceId must be a canonical workspace UUID." })
+  }
+  const outcome = await ensureGateway(env, session.login, repo, false, workspaceId)
   switch (outcome.status) {
     case "ready":
       // The token NEVER leaves the server: the answer names the gateway and
@@ -2152,6 +2157,7 @@ const handleWorkflowProvision = async (request: Request, env: WorkerEnv): Promis
         status: "ready",
         repo,
         gatewayId: outcome.record.gatewayId,
+        ...(outcome.record.workspaceId === undefined ? {} : { workspaceId: outcome.record.workspaceId }),
         expiresAt: new Date(outcome.record.expiresAt).toISOString()
       })
     case "provisioning":
@@ -2195,12 +2201,17 @@ const handleWorkflowRpc = async (request: Request, env: WorkerEnv): Promise<Resp
   if (repo === undefined || procedure === "") {
     return json(400, { status: "error", message: "Body must be { repo, procedure, payload? }." })
   }
+  const workspaceId = candidate?.workspaceId
+  if (workspaceId !== undefined && !isGatewayWorkspaceId(workspaceId)) {
+    return json(400, { status: "error", message: "workspaceId must be a canonical workspace UUID." })
+  }
   const mount = GATEWAY_PROCEDURE_MOUNTS[procedure]
   if (mount === undefined) {
     return json(400, { status: "error", message: `The workflow seam does not relay ${procedure}.` })
   }
   const call = await callGateway(env, session.login, repo, mount, {
     method: "POST",
+    workspaceId,
     text: encodeGatewayRequest(procedure, candidate?.payload),
     replayable: !NON_REPLAYABLE_GATEWAY_PROCEDURES.includes(procedure)
   })

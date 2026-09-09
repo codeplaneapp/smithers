@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import type { AgentChatMessage, FetchLike } from "@smthrs/rpc/NativeAgent"
+import { gatewayBindingFor } from "../RepoContext"
 import { createGatewaySeam } from "./gateway"
 import type { CommandRegistry } from "../../flows/Commands"
 import type { NativeRepositories } from "../../native/NativeBridge"
@@ -304,6 +305,7 @@ export const createControllerContext = (
    */
   ctx.gateway = createGatewaySeam({
     baseUrl: ctx.baseUrl,
+    bindingFor: (repo, runId) => gatewayBindingFor(ctx.store, repo, runId),
     fetch: (url, init) => ctx.boundedFetch(url, init),
     errorMessageOf: (response, fallback) => ctx.errorMessageOf(response, fallback)
   })

@@ -24,6 +24,7 @@ import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import type { RunSummaryRow } from "./gateway"
 import type { WorkflowController } from "./workflows"
+import { gatewayBindingFor } from "../RepoContext"
 
 export interface RunsController {
   readonly listRuns: (args: {
@@ -185,15 +186,18 @@ export const createRunsController = (
     const target = repoForRun(runId, repoArg)
     if ("error" in target) return target.error
     const repo = target.repo
-    const provisioned = await workflows.provisionWorkspace(repo)
+    const binding = gatewayBindingFor(store, repo, runId)
+    if ("error" in binding) return binding.error
+    const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
-    const summary = await gateway.run(repo, runId)
+    const summary = await gateway.run(repo, runId, binding)
     if (summary.status !== "ok") return summary.message
     if (summary.value === undefined) return `There's no run ${runId} on ${repo}.`
     const row = summary.value
     workflows.upsertRunCard({
       runId,
       repo,
+      ...binding,
       workflow: row.flowId,
       title: `${row.flowId} — ${repo}`,
       firstStep: `Watching ${row.flowId} (run ${runId}).`
@@ -233,10 +237,13 @@ export const createRunsController = (
       return `This run's launch input isn't recorded on this client, so there's nothing faithful to rerun — start the flow fresh with flow.run ${card.payload.workflow}.`
     }
     const repo = card.payload.repo
-    const provisioned = await workflows.provisionWorkspace(repo)
+    const binding = gatewayBindingFor(store, repo, runId)
+    if ("error" in binding) return binding.error
+    const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
     const launched = await workflows.launchWorkflow({
       repo,
+      binding,
       workflow: card.payload.workflow,
       input: card.payload.input,
       title: `${card.payload.workflow} — ${repo}`

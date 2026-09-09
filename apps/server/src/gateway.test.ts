@@ -14,6 +14,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import {
   callGateway,
   clearMemoryGatewayRecords,
+  GatewaySessionRegistry,
   ensureGateway,
   seedMemoryGatewayRecord
 } from "./gateway"
@@ -922,5 +923,100 @@ describe("wave 11 — the /api/workflow/* routes", () => {
         expect(calls.filter((call) => call.url.includes("/gateway"))).toHaveLength(1)
       }
     )
+  })
+})
+
+describe("owning workspace routing", () => {
+  const first = "83e75ae5-0920-4000-8000-000000000001"
+  const second = "83e75ae5-0920-4000-8000-000000000002"
+  const repo = "codeplanesmithers/smithers-demo"
+  const provision = (call: RelayCall): Response => {
+    const workspaceId = (call.body as { workspace_id?: string } | undefined)?.workspace_id
+    return json(200, {
+      base_url: `https://api.smithers-cloud.test/api/gateways/${workspaceId ?? "legacy"}`,
+      token: GATEWAY_TOKEN,
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      gateway_id: workspaceId ?? "legacy",
+      ...(workspaceId === undefined ? {} : { workspace_id: workspaceId })
+    })
+  }
+
+  test("partitions legacy and two owning workspaces without exposing their credentials", async () => {
+    await withRelay({ provision }, async (calls) => {
+      for (const workspaceId of [undefined, first, second, first, undefined]) {
+        const response = await worker.fetch(signedIn("/api/workflow/provision", {
+          method: "POST", body: JSON.stringify({ repo, workspaceId })
+        }), env())
+        expect(response.status).toBe(200)
+        const result = await response.json() as Record<string, unknown>
+        expect(result.status).toBe("ready")
+        expect(result.workspaceId).toBe(workspaceId)
+        expect(result.gatewayId).toBe(workspaceId ?? "legacy")
+        expect(JSON.stringify(result)).not.toContain(GATEWAY_TOKEN)
+      }
+      const provisions = calls.filter((call) => call.url.endsWith("/gateway"))
+      expect(provisions.map((call) => call.body)).toEqual([undefined, { workspace_id: first }, { workspace_id: second }])
+      const response = await worker.fetch(signedIn("/api/workflow/rpc", {
+        method: "POST", body: JSON.stringify({ repo, workspaceId: first, procedure: "List", payload: { _tag: "flows" } })
+      }), env())
+      expect(response.status).toBe(200)
+      expect(calls.at(-1)?.url).toContain(`/api/gateways/${first}/`)
+    })
+  })
+
+  test("refuses a legacy or mismatched provision response instead of falling back to a different checkout", async () => {
+    for (const returned of [undefined, second]) {
+      await withRelay({ provision: (call) => provision({ ...call, body: returned === undefined ? undefined : { workspace_id: returned } }) }, async () => {
+        const result = await ensureGateway(env(), "codeplanesmithers", repo, false, first)
+        expect(result.status).toBe("unavailable")
+      })
+    }
+  })
+
+  test("does not retry an unconfigured coding host as a normal startup delay", async () => {
+    await withRelay({ provision: () => json(409, { code: "coding_host_unavailable", message: "Stage the registered coding host." }) }, async () => {
+      const result = await ensureGateway(env(), "codeplanesmithers", repo, false, first)
+      expect(result).toEqual({ status: "unavailable", detail: "Stage the registered coding host." })
+    })
+  })
+
+  test("rejects malformed bindings before provisioning and keeps read-only requests read-only", async () => {
+    await withRelay({}, async (calls) => {
+      for (const workspaceId of ["../other", first.toUpperCase(), "00000000-0000-0000-0000-000000000000", null]) {
+        const result = await worker.fetch(signedIn("/api/workflow/rpc", {
+          method: "POST", body: JSON.stringify({ repo, workspaceId, procedure: "List", payload: { _tag: "flows" } })
+        }), env())
+        expect(result.status).toBe(400)
+      }
+      const result = await callGateway(env(), "codeplanesmithers", repo, "/rpc", {
+        method: "POST", text: "{}", provision: false, workspaceId: first
+      })
+      expect(result.status).toBe("unavailable")
+      expect(calls.filter((call) => call.url.endsWith("/gateway"))).toHaveLength(0)
+    })
+  })
+})
+
+test("durable gateway cache keeps owning workspace records separate across worker restarts", async () => {
+  const stored = new Map<string, unknown>()
+  const registry = new GatewaySessionRegistry({ storage: {
+    get: async <T>(key: string): Promise<T | undefined> => stored.get(key) as T | undefined,
+    put: async (key, value) => { stored.set(key, value) }
+  } })
+  const environment = env({ GATEWAY_SESSIONS: { idFromName: (login) => login, get: () => registry } })
+  const workspaceId = "83e75ae5-0920-4000-8000-000000000003"
+  await withRelay({ provision: (call) => json(200, {
+    base_url: "https://api.smithers-cloud.test/api/gateways/bound", token: GATEWAY_TOKEN,
+    gateway_id: "bound", expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    ...(call.body as { workspace_id?: string } | undefined)
+  }) }, async (calls) => {
+    expect((await ensureGateway(environment, "codeplanesmithers", "o/r", false, workspaceId)).status).toBe("ready")
+    expect((await ensureGateway(environment, "codeplanesmithers", "o/r")).status).toBe("ready")
+    clearMemoryGatewayRecords()
+    const restored = await ensureGateway(environment, "codeplanesmithers", "o/r", false, workspaceId)
+    expect(restored.status).toBe("ready")
+    if (restored.status === "ready") expect(restored.record.workspaceId).toBe(workspaceId)
+    expect(stored.size).toBe(2)
+    expect(calls.filter((call) => call.url.endsWith("/gateway"))).toHaveLength(2)
   })
 })

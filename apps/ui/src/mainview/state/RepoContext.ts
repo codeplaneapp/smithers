@@ -119,3 +119,30 @@ export const resolveOpenRepo = (store: AppStore): { readonly repo: Repo } | { re
   const active = activeRepoOf(store.session(), store.collections.repos.values())
   return active === undefined ? { error: "Open a repository first." } : { repo: active }
 }
+
+/** Exact Plue workspace selection for the gateway; UI frame IDs are unrelated. */
+export type GatewayBinding = { readonly workspaceId?: string } | { readonly error: string }
+export const gatewayBindingFor = (store: AppStore, repo: string, runId?: string): GatewayBinding => {
+  if (runId !== undefined) {
+    const card = store.collections.cards.get(`flow-run-${runId}`)
+    if (card?.kind === "run-trace") {
+      if (card.payload.repo !== repo) return { error: "The run belongs to another repository." }
+      // An older card with no workspaceId is deliberately unbound. Changing
+      // the selected copy must never redirect an existing run's operations.
+      return card.payload.workspaceId === undefined ? {} : { workspaceId: card.payload.workspaceId }
+    }
+  }
+  const key = store.session().activeRepoKey
+  const selection = key == null ? null : parseRepoSelection(key)
+  if (selection === null || !("repoId" in selection) || selection.repoId !== repo || selection.copyId === undefined) return {}
+  const copy = store.collections.workingCopies.get(selection.copyId)
+  if (copy === undefined || copy.repoId !== repo) {
+    return { error: "The selected working copy is no longer available for this repository." }
+  }
+  if (copy.kind !== "workspace") return {}
+  const workspace = copy.workspaceId === undefined ? undefined : store.collections.cloudWorkspaces.get(copy.workspaceId)
+  if (workspace === undefined || workspace.repoId !== repo) {
+    return { error: "The selected cloud workspace is no longer available for this repository." }
+  }
+  return { workspaceId: workspace.id }
+}

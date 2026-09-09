@@ -37,7 +37,8 @@ export const GatewayConfig = Schema.Struct({
   workspace: Workspace,
   host: Schema.String,
   port: Schema.Number,
-  protocolVersion: Schema.String
+  protocolVersion: Schema.String,
+  capabilities: Schema.optionalKey(Schema.Array(Schema.String))
 })
 
 /**
@@ -78,7 +79,8 @@ export type GatewayStatus = typeof GatewayStatus.Type
 export const GatewayHealth = Schema.Struct({
   workspaceHash: Schema.String,
   gatewayId: Schema.String,
-  protocolVersion: Schema.String
+  protocolVersion: Schema.String,
+  capabilities: Schema.optionalKey(Schema.Array(Schema.String))
 })
 
 /**

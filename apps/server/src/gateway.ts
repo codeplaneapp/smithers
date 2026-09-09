@@ -62,6 +62,7 @@ export interface GatewayRecord {
   readonly baseUrl: string
   readonly token: string
   readonly vmId: string | null
+  readonly workspaceId?: string
   readonly expiresAt: number
   /** Half-life cadence (§5): re-resolve at the midpoint of the issued window. */
   readonly renewAfter: number
@@ -74,6 +75,7 @@ interface GatewayRecordRow {
   readonly baseUrl: string
   readonly token: string
   readonly vmId: string | null
+  readonly workspaceId?: string
   readonly expiresAt: number
   readonly renewAfter: number
   readonly provisionedAt?: number
@@ -101,8 +103,8 @@ export interface GatewaySessionNamespace {
 export class GatewaySessionRegistry {
   constructor(private readonly ctx: { readonly storage: GatewaySessionStorage }) {}
 
-  private key(repo: string): string {
-    return `gateway:${repo}`
+  private key(repo: string, workspaceId?: string): string {
+    return `gateway:${workspaceRecordKey(repo, workspaceId)}`
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -111,19 +113,19 @@ export class GatewaySessionRegistry {
     const url = new URL(request.url)
     if (url.pathname === "/record" && request.method === "GET") {
       const repo = url.searchParams.get("repo") ?? ""
-      const record = await this.ctx.storage.get<GatewayRecordRow>(this.key(repo))
+      const record = await this.ctx.storage.get<GatewayRecordRow>(this.key(repo, url.searchParams.get("workspace_id") ?? undefined))
       return answer({ record: record ?? null })
     }
     if (url.pathname === "/record" && request.method === "PUT") {
       const body = (await request.json().catch(() => undefined)) as
-        | { repo?: unknown; record?: unknown }
+        | { repo?: unknown; workspaceId?: unknown; record?: unknown }
         | undefined
       if (
         typeof body?.repo !== "string" || body.repo === "" || typeof body.record !== "object" || body.record === null
       ) {
         return new Response("bad request", { status: 400 })
       }
-      await this.ctx.storage.put(this.key(body.repo), body.record)
+      await this.ctx.storage.put(this.key(body.repo, typeof body.workspaceId === "string" ? body.workspaceId : undefined), body.record)
       return answer({ ok: true })
     }
     return new Response("not found", { status: 404 })
@@ -172,19 +174,24 @@ const memoryRecords = new Map<string, GatewayRecord>()
  * unreadable and a review of the seam holding the user's Cloud token could not
  * be read.
  */
-const recordKey = (login: string, repo: string): string => `${login}\u0000${repo}`
+const workspaceRecordKey = (repo: string, workspaceId?: string): string =>
+  workspaceId === undefined ? repo : `${repo}\u0000${workspaceId}`
+export const isGatewayWorkspaceId = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) &&
+  value !== "00000000-0000-0000-0000-000000000000"
+const recordKey = (login: string, repo: string, workspaceId?: string): string => `${login}\u0000${workspaceRecordKey(repo, workspaceId)}`
 
-const readRecord = async (env: GatewayEnv, login: string, repo: string): Promise<GatewayRecord | undefined> => {
+const readRecord = async (env: GatewayEnv, login: string, repo: string, workspaceId?: string): Promise<GatewayRecord | undefined> => {
   const namespace = env.GATEWAY_SESSIONS
-  if (namespace === undefined) return memoryRecords.get(recordKey(login, repo))
+  if (namespace === undefined) return memoryRecords.get(recordKey(login, repo, workspaceId))
   try {
     const stub = namespace.get(namespace.idFromName(login))
     const response = await stub.fetch(
-      new Request(`https://gateway-sessions.internal/record?repo=${encodeURIComponent(repo)}`)
+      new Request(`https://gateway-sessions.internal/record?repo=${encodeURIComponent(repo)}${workspaceId === undefined ? "" : `&workspace_id=${encodeURIComponent(workspaceId)}`}`)
     )
     const body = (await response.json().catch(() => undefined)) as { record?: GatewayRecordRow | null } | undefined
     const record = body?.record
-    if (record === undefined || record === null) return undefined
+    if (record === undefined || record === null || record.workspaceId !== workspaceId) return undefined
     // A record written before this field existed is old by definition, so it
     // has already earned the right to be re-provisioned on a tunnel failure.
     return { ...record, provisionedAt: typeof record.provisionedAt === "number" ? record.provisionedAt : 0 }
@@ -218,7 +225,7 @@ const writeRecord = async (
 ): Promise<string | undefined> => {
   const namespace = env.GATEWAY_SESSIONS
   if (namespace === undefined) {
-    memoryRecords.set(recordKey(login, repo), record)
+    memoryRecords.set(recordKey(login, repo, record.workspaceId), record)
     return undefined
   }
   try {
@@ -227,7 +234,7 @@ const writeRecord = async (
       new Request("https://gateway-sessions.internal/record", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repo, record })
+        body: JSON.stringify({ repo, workspaceId: record.workspaceId, record })
       })
     )
     if (response.ok) {
@@ -252,7 +259,7 @@ export const clearMemoryGatewayRecords = (): void => {
  * re-provisioning out of. Tests cannot wait out a real half-life.
  */
 export const seedMemoryGatewayRecord = (login: string, repo: string, record: GatewayRecord): void => {
-  memoryRecords.set(recordKey(login, repo), record)
+  memoryRecords.set(recordKey(login, repo, record.workspaceId), record)
 }
 
 export type CloudTokenOutcome =
@@ -345,7 +352,8 @@ const provisionGateway = async (
   env: GatewayEnv,
   login: string,
   repo: string,
-  cloudToken: string
+  cloudToken: string,
+  workspaceId?: string
 ): Promise<ProvisionOutcome | { readonly status: "cloud_token_rejected" }> => {
   const base = env.SMITHERS_CLOUD_API_BASE_URL?.trim() || DEFAULT_CLOUD_API_BASE_URL
   let response: Response
@@ -353,7 +361,14 @@ const provisionGateway = async (
     response = await fetchWithDeadline(
       "Smithers Cloud",
       new URL(`/api/repos/${repo}/gateway`, base).toString(),
-      { method: "POST", headers: { authorization: `Bearer ${cloudToken}` } },
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${cloudToken}`,
+          ...(workspaceId === undefined ? {} : { "content-type": "application/json" })
+        },
+        ...(workspaceId === undefined ? {} : { body: JSON.stringify({ workspace_id: workspaceId }) })
+      },
       upstreamTimeoutMs(env)
     )
   } catch (error) {
@@ -383,9 +398,10 @@ const provisionGateway = async (
     return { status: "cloud_token_rejected" }
   }
   if (response.status === 409) {
+    const refusal = await response.json().catch(() => undefined) as { code?: unknown; message?: unknown } | undefined
     return {
-      status: "provisioning",
-      detail: `The workspace for ${repo} is still being prepared.`
+      status: refusal?.code === "coding_host_unavailable" ? "unavailable" : "provisioning",
+      detail: typeof refusal?.message === "string" ? refusal.message : `The workspace for ${repo} is still being prepared.`
     }
   }
   if (response.status === 404) {
@@ -428,6 +444,7 @@ const provisionGateway = async (
       expires_at?: unknown
       gateway_id?: unknown
       vm_id?: unknown
+      workspace_id?: unknown
     }
     | undefined
   if (
@@ -435,7 +452,8 @@ const provisionGateway = async (
     typeof body.base_url !== "string" ||
     typeof body.token !== "string" ||
     typeof body.gateway_id !== "string" ||
-    typeof body.expires_at !== "string"
+    typeof body.expires_at !== "string" ||
+    body.workspace_id !== workspaceId
   ) {
     return { status: "unavailable", detail: "Provisioning answered in a shape the gateway seam did not understand." }
   }
@@ -443,6 +461,7 @@ const provisionGateway = async (
   const now = Date.now()
   const record: GatewayRecord = {
     gatewayId: body.gateway_id,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
     baseUrl: body.base_url,
     token: body.token,
     vmId: typeof body.vm_id === "string" ? body.vm_id : null,
@@ -468,15 +487,16 @@ export const ensureGateway = async (
   env: GatewayEnv,
   login: string,
   repo: string,
-  force = false
+  force = false,
+  workspaceId?: string
 ): Promise<ProvisionOutcome> => {
   // The routes refuse a malformed repo before reaching here; the seam refuses
   // it again so no caller can spend the Cloud token on an unintended path.
-  if (!isRelayRepoName(repo)) {
+  if (!isRelayRepoName(repo) || (workspaceId !== undefined && !isGatewayWorkspaceId(workspaceId))) {
     return { status: "unavailable", detail: `${repo} is not a repository this seam can address.` }
   }
   if (!force) {
-    const cached = await readRecord(env, login, repo)
+    const cached = await readRecord(env, login, repo, workspaceId)
     if (cached !== undefined && Date.now() < cached.renewAfter) {
       return { status: "ready", record: cached }
     }
@@ -486,7 +506,7 @@ export const ensureGateway = async (
     if (cloudToken.status === "not_found") return { status: "no_cloud_token", detail: cloudToken.detail }
     return { status: "unavailable", detail: cloudToken.detail }
   }
-  const first = await provisionGateway(env, login, repo, cloudToken.token)
+  const first = await provisionGateway(env, login, repo, cloudToken.token, workspaceId)
   if (first.status !== "cloud_token_rejected") return first
   // The vaulted Cloud token was rejected (plue-side expiry/revocation): the
   // door re-exchanges from the vaulted GitHub token, so one fresh mint may
@@ -497,7 +517,7 @@ export const ensureGateway = async (
       ? { status: "no_cloud_token", detail: reminted.detail }
       : { status: "unavailable", detail: reminted.detail }
   }
-  const second = await provisionGateway(env, login, repo, reminted.token)
+  const second = await provisionGateway(env, login, repo, reminted.token, workspaceId)
   if (second.status === "cloud_token_rejected") {
     return { status: "unavailable", detail: "Smithers Cloud rejected a freshly minted identity token." }
   }
@@ -570,6 +590,7 @@ export const callGateway = async (
      * stale-record signal as `unavailable` instead of re-provisioning.
      */
     readonly provision?: boolean
+    readonly workspaceId?: string
   }
 ): Promise<GatewayCallOutcome> => {
   // The relay addresses the gateway's own mounts and nothing else. Without
@@ -606,7 +627,7 @@ export const callGateway = async (
     }
   }
   if (init.provision === false) {
-    const record = await readRecord(env, login, repo)
+    const record = await readRecord(env, login, repo, init.workspaceId)
     if (record === undefined || Date.now() >= record.renewAfter) {
       return { status: "unavailable", detail: "No live workspace holds an answer for this read." }
     }
@@ -624,7 +645,7 @@ export const callGateway = async (
     }
     return { status: "ok", response }
   }
-  const gateway = await ensureGateway(env, login, repo)
+  const gateway = await ensureGateway(env, login, repo, false, init.workspaceId)
   if (gateway.status !== "ready") return gateway
   let response = await attempt(gateway.record)
   /*
@@ -647,7 +668,7 @@ export const callGateway = async (
       return { status: "ok", response }
     }
     if (response !== undefined) await response.body?.cancel()
-    const renewed = await ensureGateway(env, login, repo, true)
+    const renewed = await ensureGateway(env, login, repo, true, init.workspaceId)
     // Losing the headers does not establish whether the command was accepted.
     // Renew for subsequent callers, but preserve that uncertainty even if
     // renewal fails: its outcome says nothing about the original command.

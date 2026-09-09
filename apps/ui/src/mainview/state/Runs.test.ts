@@ -795,3 +795,56 @@ describe("typed coding launch and plan inspection", () => {
     expect(missing).toMatchObject({ status: "form", fields: ["changeId"] })
   })
 })
+
+describe("workspace-bound run cards", () => {
+  const workspaceId = "83e75ae5-0920-4000-8000-000000000001"
+  const selectWorkspace = async (store: Awaited<ReturnType<typeof webStore>>) => {
+    await store.dispatch({
+      type: "workspace.updated", actor: "system", workspace: {
+        id: workspaceId, repoId: REPO, name: "Coding", status: "running", targetBookmark: "main",
+        provisioningStage: null, suspendedAt: null, createdAt: null, head: null
+      }
+    }).isPersisted.promise
+    await settle(2)
+    store.dispatch({ type: "repo.selected", actor: "user", id: `${REPO}#workspace:${workspaceId}` })
+    expect(store.session().activeRepoKey).toBe(`${REPO}#workspace:${workspaceId}`)
+  }
+
+  for (const command of ["flow.run", "runs.open"] as const) {
+    test(`${command} keeps its owning workspace across selection changes during provision and later resumption`, async () => {
+      const store = await webStore()
+      const double = relay({ runs: [{ runId: "run-1", flowId: "review-pr", status: "completed" }] })
+      const fetch = double.services.fetchImpl!
+      const controller = createAppController(store, unavailableRepositories, silentAgent(), {
+        ...double.services,
+        fetchImpl: async (input, init) => {
+          const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+          if (url.endsWith("/api/workflow/provision")) {
+            store.dispatch({ type: "repo.selected", actor: "user", id: REPO })
+          }
+          return fetch(input, init)
+        }
+      })
+      await signIn(store)
+      await selectWorkspace(store)
+      const result = await controller.commands.run(command, command === "flow.run" ? "review-pr" : "run-1")
+      expect(result.status).toBe("executed")
+      expect(store.collections.cards.get("flow-run-run-1")).toMatchObject({ kind: "run-trace", payload: { workspaceId } })
+      expect(store.session().activeRepoKey).toBe(REPO)
+      for (const call of double.calls.filter((call) => call.path.startsWith("/api/workflow/"))) {
+        expect(call.body).toMatchObject({ workspaceId })
+      }
+      await controller.commands.run("runs.resume", "run-1")
+      const resumed = double.calls.find((call) => (call.body as { procedure?: string })?.procedure === "Resume")
+      expect(resumed?.body).toMatchObject({ workspaceId })
+      if (command === "flow.run") {
+        const rerun = await controller.commands.run("runs.rerun", "run-1")
+        expect(rerun.status).toBe("executed")
+        expect(store.collections.cards.get("flow-run-run-2")).toMatchObject({ payload: { workspaceId } })
+        const launches = double.calls.filter((call) => (call.body as { procedure?: string })?.procedure === "Run")
+        expect(launches).toHaveLength(2)
+        for (const launch of launches) expect(launch.body).toMatchObject({ workspaceId })
+      }
+    })
+  }
+})

@@ -744,6 +744,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("run-trace"),
     payload: z.object({
       repo: z.string(),
+      /** Owning Plue gateway binding; omission identifies a legacy unbound run. */
+      workspaceId: z.string().uuid().optional(),
       runId: z.string(),
       workflow: z.string(),
       phase: z.enum([

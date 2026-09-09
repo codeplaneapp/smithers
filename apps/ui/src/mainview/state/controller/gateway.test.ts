@@ -259,3 +259,42 @@ describe("the run projections", () => {
     expect((await seam.approvalsInbox("o/r")).status).toBe("error")
   })
 })
+
+describe("owning workspace binding", () => {
+  test("pins Plan, approval and Run to the original selection and records it for the run", async () => {
+    const first = "83e75ae5-0920-4000-8000-000000000001"
+    let selected = first
+    const calls: Array<{ procedure: string; workspaceId?: string }> = []
+    const seam = createGatewaySeam({
+      baseUrl: "https://app.test",
+      bindingFor: () => ({ workspaceId: selected }),
+      fetch: async (_url, init) => {
+        const body = JSON.parse(String(init?.body))
+        calls.push(body)
+        selected = "83e75ae5-0920-4000-8000-000000000002"
+        return new Response(JSON.stringify({ ok: true, payload: body.procedure === "Plan"
+          ? { planId: "plan", digest: "digest", envelope: {} }
+          : body.procedure === "Run" ? { runId: "run" } : {} }))
+      },
+      errorMessageOf: async (_response, fallback) => fallback
+    })
+    expect(await seam.launch("o/r", "coding", { plan: {} })).toEqual({ status: "ok", value: { runId: "run", workspaceId: first } })
+    expect(calls.map((call) => call.workspaceId)).toEqual([first, first, first])
+    expect(calls.map((call) => call.procedure)).toEqual(["Plan", "Approval.Submit", "Run"])
+  })
+
+  test("routes run projections and approvals by their run identity and refuses an invalid binding before transport", async () => {
+    const ids: Array<string | undefined> = []
+    let requests = 0
+    const seam = createGatewaySeam({
+      baseUrl: "https://app.test",
+      bindingFor: (_repo, runId) => { ids.push(runId); return { error: "The run belongs to another repository." } },
+      fetch: async () => { requests += 1; return new Response() },
+      errorMessageOf: async (_response, fallback) => fallback
+    })
+    expect((await seam.runEvents("o/r", "run-1")).status).toBe("error")
+    expect((await seam.cancel("o/r", "run-1")).status).toBe("error")
+    expect(ids).toEqual(["run-1", "run-1"])
+    expect(requests).toBe(0)
+  })
+})

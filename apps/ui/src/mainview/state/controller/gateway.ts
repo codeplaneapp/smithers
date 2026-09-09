@@ -50,9 +50,15 @@ export interface FlowSummary {
 
 export type { ApprovalRow, ControlEvent, NodeOutputRow, RunSummaryRow, TranscriptRow }
 
+/** The owning Plue workspace; omission addresses the legacy repo gateway. */
+export interface GatewayWorkspaceBinding {
+  readonly workspaceId?: string
+}
+
 /** How the seam reaches the relay. */
 export interface GatewayTransport {
   readonly baseUrl: string
+  readonly bindingFor?: (repo: string, runId?: string) => GatewayWorkspaceBinding | { readonly error: string }
   readonly fetch: (url: string, init?: RequestInit) => Promise<Response>
   readonly errorMessageOf: (response: Response, fallback: string) => Promise<string>
 }
@@ -136,14 +142,19 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
   const call = async (
     repo: string,
     procedure: string,
-    payload: unknown
+    payload: unknown,
+    binding?: GatewayWorkspaceBinding
   ): Promise<GatewayResult<unknown>> => {
+    const candidate = asRecord(payload)
+    const runId = candidate.runId ?? asRecord(candidate.selector).runId ?? asRecord(candidate.target).runId
+    const target = binding ?? transport.bindingFor?.(repo, typeof runId === "string" ? runId : undefined) ?? {}
+    if ("error" in target) return { status: "error", message: target.error }
     let body: { ok?: unknown; payload?: unknown; error?: unknown; message?: unknown } | undefined
     try {
       const response = await transport.fetch(`${baseUrl}${WORKFLOW_RPC_PATH}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repo, procedure, payload })
+        body: JSON.stringify({ repo, procedure, payload, ...target })
       })
       if (!response.ok) {
         return { status: "error", message: await errorMessageOf(response, "The workspace didn't answer.") }
@@ -168,15 +179,15 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
   }
 
   /** One projection snapshot, by selector. */
-  const projection = (repo: string, selector: unknown): Promise<GatewayResult<unknown>> =>
-    call(repo, "Projection.Snapshot", { selector })
+  const projection = (repo: string, selector: unknown, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<unknown>> =>
+    call(repo, "Projection.Snapshot", { selector }, binding)
 
   return {
     call,
 
     /** Every flow the workspace has discovered. */
-    listFlows: async (repo: string): Promise<GatewayResult<ReadonlyArray<FlowSummary>>> =>
-      map(await call(repo, "List", { _tag: "flows" }), (value) => {
+    listFlows: async (repo: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<FlowSummary>>> =>
+      map(await call(repo, "List", { _tag: "flows" }, binding), (value) => {
         const items = asRecord(value).items
         return (Array.isArray(items) ? items : [])
           .map((entry) => asRecord(entry))
@@ -199,9 +210,12 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     launch: async (
       repo: string,
       flowId: string,
-      input: Record<string, unknown>
-    ): Promise<GatewayResult<{ readonly runId: string }>> => {
-      const planned = await call(repo, "Plan", { flowId, input })
+      input: Record<string, unknown>,
+      requestedBinding?: GatewayWorkspaceBinding
+    ): Promise<GatewayResult<{ readonly runId: string; readonly workspaceId?: string }>> => {
+      const binding = requestedBinding ?? transport.bindingFor?.(repo) ?? {}
+      if ("error" in binding) return { status: "error", message: binding.error }
+      const planned = await call(repo, "Plan", { flowId, input }, binding)
       if (planned.status !== "ok") return planned
       const card = asRecord(planned.value)
       const planId = typeof card.planId === "string" ? card.planId : undefined
@@ -214,7 +228,7 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
         scope: "run",
         idempotencyKey: `approve:${planId}`,
         decision: "approve"
-      })
+      }, binding)
       if (approved.status !== "ok") return approved
       const started = await call(repo, "Run", {
         _tag: "Plan",
@@ -222,17 +236,17 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
         digest,
         envelope: card.envelope,
         idempotencyKey: `run:${planId}`
-      })
+      }, binding)
       if (started.status !== "ok") return started
       const runId = asRecord(started.value).runId
       return typeof runId === "string"
-        ? { status: "ok", value: { runId } }
+        ? { status: "ok", value: { runId, ...binding } }
         : { status: "error", message: "The run started but the workspace didn't name it — ask me to check." }
     },
 
     /** One run's summary, including its diagnosis. */
-    run: async (repo: string, runId: string): Promise<GatewayResult<RunSummaryRow | undefined>> =>
-      decodeRunSummaryRow(await projection(repo, { _tag: "run-summary", runId })),
+    run: async (repo: string, runId: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<RunSummaryRow | undefined>> =>
+      decodeRunSummaryRow(await projection(repo, { _tag: "run-summary", runId }, binding)),
 
     /** Every gate this run has asked for, decided ones included. */
     approvals: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
