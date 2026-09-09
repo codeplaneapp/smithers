@@ -34,6 +34,19 @@ async function read<T>(env: BugWorkerEnv, key: string): Promise<T | null> {
   const value = await env.BUGS.get(key);
   return value === null ? null : JSON.parse(value) as T;
 }
+/** Persisted readiness must satisfy the publication contract before sending mail. */
+function parseReady(value: string): Ready {
+  const ready: unknown = JSON.parse(value);
+  if (!ready || typeof ready !== "object" || !("appUrl" in ready) || typeof ready.appUrl !== "string"
+    || !("completedAt" in ready) || typeof ready.completedAt !== "string" || !Number.isFinite(Date.parse(ready.completedAt))) {
+    throw new Error("Invalid readiness record");
+  }
+  const url = new URL(ready.appUrl);
+  if (url.protocol !== "https:" || !["smithers.sh", "app.smithers.sh", "canary.smithers.sh"].includes(url.hostname) || url.username || url.password || url.port) {
+    throw new Error("Invalid readiness app URL");
+  }
+  return { appUrl: ready.appUrl, completedAt: ready.completedAt };
+}
 /** Distinct nominations recorded for a repository; one accepted POST is one nomination. */
 async function nominations(env: BugWorkerEnv, name: string) {
   return Number(await env.BUGS.get(`repo-nominations:${name}`)) || 0;
@@ -64,33 +77,50 @@ async function list(env: BugWorkerEnv, keyPrefix: string, cursor?: string, limit
   return env.BUGS.list({ prefix: keyPrefix, limit, ...(cursor ? { cursor } : {}) });
 }
 
-/** Bounded delivery, with per-recipient receipts and provider deduplication on retries. */
+const maxNotificationAttempts = 3;
+/** Bounded delivery, with receipts, a failure budget, and provider deduplication. */
 async function notify(env: BugWorkerEnv, deps: BugWorkerDeps, name: string, ready: Ready, cursor?: string) {
   if (!env.RESEND_API_KEY || !env.NOTIFICATION_FROM) return { pending: true, reason: "email_not_configured" };
   const page = await list(env, `repo-subscriber:${name}:`, cursor);
   let sent = 0;
   let failed = 0;
   for (const key of page.keys) {
-    if (await env.BUGS.get(`repo-notified:${key.name}`)) continue;
-    const email = await env.BUGS.get(key.name);
-    if (!email) continue;
     try {
-      const response = await deps.fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json",
-          "idempotency-key": `smithers-ready-${await hash(key.name)}`,
-        },
-        body: JSON.stringify({
-          from: env.NOTIFICATION_FROM, to: [email], subject: `${name} is ready in Smithers`,
-          text: `You asked to be notified when ${name} was smithered. It is now supported in Smithers and available to everyone.\n\nOpen in Smithers: ${ready.appUrl}\n\nThis is the one-time notification you requested at smithers.sh.`,
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) { failed++; continue; }
-      await env.BUGS.put(`repo-notified:${key.name}`, ready.completedAt);
-      sent++;
-    } catch { failed++; }
+      if (await env.BUGS.get(`repo-notified:${key.name}`)) continue;
+      const failureKey = `repo-notification-failure:${key.name}`;
+      const failure = await read<{ attempts: number }>(env, failureKey);
+      if (failure && failure.attempts >= maxNotificationAttempts) continue;
+      const email = await env.BUGS.get(key.name);
+      if (!email) continue;
+      let error: string | undefined;
+      try {
+        const response = await deps.fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json",
+            "idempotency-key": `smithers-ready-${await hash(key.name)}`,
+          },
+          body: JSON.stringify({
+            from: env.NOTIFICATION_FROM, to: [email], subject: `${name} is ready in Smithers`,
+            text: `You asked to be notified when ${name} was smithered. It is now supported in Smithers and available to everyone.\n\nOpen in Smithers: ${ready.appUrl}\n\nThis is the one-time notification you requested at smithers.sh.`,
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) error = `Email provider returned HTTP ${response.status}`;
+        else {
+          await env.BUGS.put(`repo-notified:${key.name}`, ready.completedAt);
+          sent++;
+        }
+      } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
+      if (error !== undefined) {
+        const attempts = (failure?.attempts ?? 0) + 1;
+        await env.BUGS.put(failureKey, JSON.stringify({ attempts, terminal: attempts >= maxNotificationAttempts, failedAt: new Date(deps.now()).toISOString(), error }));
+        failed++;
+      }
+    } catch (error) {
+      failed++;
+      console.error(`repo-notification ${key.name} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return { sent, failed, pending: failed > 0 || !page.list_complete, cursor: page.list_complete ? null : page.cursor };
 }
@@ -205,12 +235,18 @@ export async function retryRepoNotifications(env: BugWorkerEnv, deps: BugWorkerD
   const cursor = await env.BUGS.get("repo-notification-sweep") || undefined;
   const page = await list(env, "repo-ready:", cursor, 2);
   for (const key of page.keys) {
-    const ready = await read<Ready>(env, key.name);
-    if (!ready) continue;
-    const name = key.name.slice("repo-ready:".length);
-    const cursorKey = `repo-notification-cursor:${name}`;
-    const result = await notify(env, deps, name, ready, await env.BUGS.get(cursorKey) || undefined);
-    if ("failed" in result && result.failed === 0) await env.BUGS.put(cursorKey, result.cursor || "");
+    try {
+      const value = await env.BUGS.get(key.name);
+      if (value === null) continue;
+      const ready = parseReady(value);
+      const name = key.name.slice("repo-ready:".length);
+      const cursorKey = `repo-notification-cursor:${name}`;
+      const result = await notify(env, deps, name, ready, await env.BUGS.get(cursorKey) || undefined);
+      // Failed recipients are revisited after the scan wraps, never by pinning a page.
+      if ("cursor" in result) await env.BUGS.put(cursorKey, result.cursor || "");
+    } catch (error) {
+      console.error(`repo-notification ${key.name} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   await env.BUGS.put("repo-notification-sweep", page.list_complete ? "" : page.cursor || "");
 }

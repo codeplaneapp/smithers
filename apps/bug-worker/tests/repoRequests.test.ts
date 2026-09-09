@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createBugWorker } from "../src/worker.ts";
 import { repoName } from "../src/repoRequests.ts";
 import { memoryKv } from "./helpers/memoryKv.ts";
@@ -10,20 +10,21 @@ function fixture() {
   env.REPO_COMPLETIONS = memoryRepoCompletions(env);
   const calls: { url: string; init?: RequestInit }[] = [];
   let emailStatus = 200;
+  let recipientStatus: ((email: string) => number) | undefined;
   let github: unknown = { private: false, license: { spdx_id: "MIT" } };
   let githubStatus = 200;
   const worker = createBugWorker({ now: () => 1788500000000, fetch: (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, init });
     if (url.includes("api.github.com")) return Response.json(github, { status: githubStatus });
-    return Response.json({ id: "email-1" }, { status: url.includes("resend") ? emailStatus : 200 });
+    return Response.json({ id: "email-1" }, { status: url.includes("resend") ? recipientStatus?.(JSON.parse(String(init?.body)).to[0]) ?? emailStatus : 200 });
   }) as typeof fetch });
   const call = (body?: unknown, route = "", admin = false, ip = "203.0.113.1") => worker.fetch(new Request(`https://bug.smithers.sh/api/repo-requests${route}`, {
     method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip, ...(admin ? { "x-bug-admin": "test-admin" } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }), env);
   const complete = () => call({ repo: "owner/repo", appUrl: "https://app.smithers.sh/repos/owner/repo" }, "/complete", true);
-  return { env, worker, calls, call, complete, emailStatus: (value: number) => { emailStatus = value; }, github: (value: unknown, status = 200) => { github = value; githubStatus = status; } };
+  return { env, worker, calls, call, complete, recipientStatus: (value: (email: string) => number) => { recipientStatus = value; }, emailStatus: (value: number) => { emailStatus = value; }, github: (value: unknown, status = 200) => { github = value; githubStatus = status; } };
 }
 
 describe("public repository requests", () => {
@@ -173,6 +174,93 @@ describe("public repository requests", () => {
     expect(emails[0]!.init!.headers).toEqual(emails[2]!.init!.headers);
     await f.complete();
     expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(4);
+  });
+  test("a permanent rejection cannot starve later pages and reaches terminal state", async () => {
+    const f = fixture();
+    const ready = { appUrl: "https://app.smithers.sh/repos/owner/repo", completedAt: "2026-01-01T00:00:00.000Z" };
+    await f.env.BUGS.put("repo-ready:owner/repo", JSON.stringify(ready));
+    for (let i = 0; i < 51; i++) {
+      await f.env.BUGS.put(`repo-subscriber:owner/repo:${String(i).padStart(3, "0")}`, `user${i}@example.com`);
+    }
+    f.recipientStatus((email) => email === "user0@example.com" ? 422 : 200);
+    await f.worker.scheduled({}, f.env);
+    expect(await f.env.BUGS.get("repo-notification-cursor:owner/repo")).toBe("50");
+    await f.worker.scheduled({}, f.env);
+    expect(await f.env.BUGS.get("repo-notified:repo-subscriber:owner/repo:050")).toBe(ready.completedAt);
+    expect(await f.env.BUGS.get("repo-notification-cursor:owner/repo")).toBe("");
+    for (let i = 0; i < 6; i++) await f.worker.scheduled({}, f.env);
+    const emails = f.calls.filter((call) => call.url.includes("resend"));
+    expect(emails).toHaveLength(53);
+    expect(emails.filter((call) => JSON.parse(String(call.init?.body)).to[0] === "user0@example.com")).toHaveLength(3);
+    expect((await f.env.BUGS.list!({ prefix: "repo-notified:" })).keys).toHaveLength(50);
+    expect(JSON.parse((await f.env.BUGS.get("repo-notification-failure:repo-subscriber:owner/repo:000"))!)).toMatchObject({ attempts: 3, terminal: true });
+  });
+  test("a transient failure is retried on the next sweep and receipted", async () => {
+    const f = fixture();
+    await f.env.BUGS.put("repo-ready:owner/repo", JSON.stringify({ appUrl: "https://app.smithers.sh/repo", completedAt: "2026-01-01T00:00:00.000Z" }));
+    await f.env.BUGS.put("repo-subscriber:owner/repo:one", "one@example.com");
+    f.emailStatus(500);
+    await f.worker.scheduled({}, f.env);
+    expect(await f.env.BUGS.get("repo-notification-cursor:owner/repo")).toBe("");
+    expect(await f.env.BUGS.get("repo-notified:repo-subscriber:owner/repo:one")).toBeNull();
+    f.emailStatus(200);
+    await f.worker.scheduled({}, f.env);
+    await f.worker.scheduled({}, f.env);
+    expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(2);
+    expect(await f.env.BUGS.get("repo-notified:repo-subscriber:owner/repo:one")).toBe("2026-01-01T00:00:00.000Z");
+  });
+  test.each(["{", "null", "[]", "{}", '{"appUrl":7,"completedAt":true}', '{"appUrl":"https://evil.com","completedAt":"2026-01-01"}', '{"appUrl":"https://app.smithers.sh/repo","completedAt":"invalid"}'])("skips and logs corrupt readiness %s while advancing the sweep", async (corrupt) => {
+    const f = fixture();
+    const log = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const ready = JSON.stringify({ appUrl: "https://app.smithers.sh/repo", completedAt: "2026-01-01T00:00:00.000Z" });
+      await f.env.BUGS.put("repo-ready:a/bad", corrupt);
+      await f.env.BUGS.put("repo-subscriber:a/bad:one", "bad@example.com");
+      for (const name of ["b/good", "z/good"]) {
+        await f.env.BUGS.put(`repo-ready:${name}`, ready);
+        await f.env.BUGS.put(`repo-subscriber:${name}:one`, `${name[0]}@example.com`);
+      }
+      await f.worker.scheduled({}, f.env);
+      expect(log).toHaveBeenCalled();
+      expect(log.mock.calls.some((args) => String(args[0]).includes("repo-ready:a/bad"))).toBe(true);
+      expect(await f.env.BUGS.get("repo-notified:repo-subscriber:b/good:one")).not.toBeNull();
+      expect(await f.env.BUGS.get("repo-notification-sweep")).toBe("2");
+      await f.worker.scheduled({}, f.env);
+      expect(await f.env.BUGS.get("repo-notified:repo-subscriber:z/good:one")).not.toBeNull();
+      expect(await f.env.BUGS.get("repo-notification-sweep")).toBe("");
+      expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(2);
+    } finally { log.mockRestore(); }
+  });
+  test.each(["readiness", "subscriber", "cursor"])("isolates a %s KV failure and retries after recovery", async (site) => {
+    const f = fixture();
+    const log = spyOn(console, "error").mockImplementation(() => {});
+    const get = f.env.BUGS.get.bind(f.env.BUGS);
+    const put = f.env.BUGS.put.bind(f.env.BUGS);
+    try {
+      for (const name of ["a/bad", "b/good", "z/good"]) {
+        await put(`repo-ready:${name}`, JSON.stringify({ appUrl: "https://app.smithers.sh/repo", completedAt: "2026-01-01T00:00:00.000Z" }));
+        await put(`repo-subscriber:${name}:one`, `${name[0]}@example.com`);
+      }
+      f.env.BUGS.get = async (key) => {
+        if (key === (site === "readiness" ? "repo-ready:a/bad" : site === "subscriber" ? "repo-subscriber:a/bad:one" : "")) throw new Error("KV offline");
+        return get(key);
+      };
+      f.env.BUGS.put = async (key, value, options) => {
+        if (site === "cursor" && key === "repo-notification-cursor:a/bad") throw new Error("KV offline");
+        return put(key, value, options);
+      };
+      await f.worker.scheduled({}, f.env);
+      expect(log.mock.calls.some((args) => String(args[0]).includes("a/bad"))).toBe(true);
+      expect(await get("repo-notified:repo-subscriber:b/good:one")).not.toBeNull();
+      expect(await get("repo-notification-sweep")).toBe("2");
+      f.env.BUGS.get = get;
+      f.env.BUGS.put = put;
+      await f.worker.scheduled({}, f.env);
+      await f.worker.scheduled({}, f.env);
+      expect(await get("repo-notified:repo-subscriber:a/bad:one")).not.toBeNull();
+      expect(await get("repo-notified:repo-subscriber:z/good:one")).not.toBeNull();
+      expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(3);
+    } finally { log.mockRestore(); }
   });
   test("missing email configuration leaves delivery pending and succeeds after configuration", async () => {
     const f = fixture();

@@ -115,17 +115,31 @@ completion. No emails are sent during development tests. Delivery uses the
 [Resend send endpoint](https://resend.com/docs/api-reference/emails/send-email)
 and [idempotency keys](https://resend.com/docs/dashboard/emails/idempotency-keys).
 Receipts skip already-sent messages; a cron runs every ten minutes to retry
-failed sends and catch signups concurrent with completion. Without provider
-configuration the subscriptions remain pending, and completion reports
+failed sends and catch signups concurrent with completion. Each invocation
+visits at most two repositories and one page of 50 subscribers per repository.
+Subscriber cursors advance after every page regardless of delivery failures.
+Full scans repeat, retrying unreceipted recipients on their next visit until
+three failed delivery attempts have been recorded. The third failure records
+a terminal state under `repo-notification-failure:<subscriber-key>` with
+`attempts`, `terminal`, `failedAt`, and `error`; subsequent delivery calls skip
+that recipient. This budget applies to provider errors, network failures, and
+failed receipt writes. It is shared by scheduled and manual delivery. An
+operator can remove the failure record to permit retries after resolving the
+cause. KV consistency or failed failure-record writes can allow extra attempts.
+Corrupt readiness records and repository-specific storage errors are skipped
+and logged with the affected key, so healthy repositories continue and the
+global cursor advances. Future full scans revisit those records.
+
+Without provider configuration the subscriptions remain pending, and completion reports
 `email_not_configured`. Always supply both email variables on redeploy so
 Alchemy does not remove the bindings.
 
 Maintainers can also call `POST /api/repo-requests/notify` with `x-bug-admin`
 and `{ "repo": "owner/repo" }`. A batch handles up to 50 subscriptions and
 returns `sent`, `failed`, `pending`, and a next `cursor`. Pass that cursor in
-the next call; retry the same page on failures. Completion remains visible
-if sending fails. The cron keeps separate sweep and subscriber cursors and handles at most two
-repositories per invocation to stay within Worker subrequest limits.
+the next call even when some sends fail. Restart from the first page after
+the cursor is null to revisit retryable failures. Completion remains visible
+if sending fails. The cron keeps separate sweep and subscriber cursors.
 
 KV is eventually consistent. New requests, readiness, and counts may take up
 to a minute to reach other locations; the page loads the most nominated list
@@ -140,8 +154,8 @@ Email addresses never appear in public responses. They live under
 `repo-subscriber:<owner/repo>:<sha256(email)>`, separate from public metadata
 under `repo-request:`, counts under `repo-nominations:`, the leaderboard under
 `repo-nominations-top`, and completion under
-`repo-ready:`. Notification receipts use `repo-notified:`, forks use
-`repo-fork:`, and claims use `repo-claim:`.
+`repo-ready:`. Notification receipts use `repo-notified:`, failure records use
+`repo-notification-failure:`, forks use `repo-fork:`, and claims use `repo-claim:`.
 
 Completion uses the `REPO_COMPLETIONS` Durable Object binding, keyed by the
 normalized repository name. A storage transaction commits the first URL;
