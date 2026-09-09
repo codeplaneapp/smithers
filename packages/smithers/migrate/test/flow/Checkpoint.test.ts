@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -398,6 +399,20 @@ describe("Checkpoint.take on git", () => {
       expect(() => readFileSync(join(root, "flows/demo/flow.ts"), "utf8")).toThrow()
       // The dirty file the unit never claimed is untouched by the restore.
       expect(readFileSync(join(root, "unrelated.txt"), "utf8")).toBe("operator work, edited again\n")
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("removes a nonempty directory at a path checkpointed as absent", () =>
+    Effect.gen(function*() {
+      const root = gitProject("absent-directory")
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx", "b.txt"]))
+      write(root, "workflow.jsx", "after\n")
+      write(root, "b.txt/nested.txt", "unexpected directory contents\n")
+
+      const restored = yield* Checkpoint.restore(root, ref, ["workflow.jsx", "b.txt"])
+
+      expect(restored).toEqual(["b.txt", "workflow.jsx"])
+      expect(existsSync(join(root, "b.txt"))).toBe(false)
+      expect(readFileSync(join(root, "workflow.jsx"), "utf8")).toBe("old workflow\n")
     }).pipe(Effect.provide(platform)))
 
   it.effect("restores exact bytes for a target that existed before migration", () =>

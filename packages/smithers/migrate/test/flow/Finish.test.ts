@@ -189,6 +189,92 @@ describe("MigrateFlow.postconditions", () => {
 })
 
 describe("MigrateFlow.finish", () => {
+  for (const verification of [passing, null]) {
+    it.effect(`restores edits and an unexpected target directory when verification is ${verification === null ? "absent" : "passing"}`, () =>
+      Effect.gen(function*() {
+        const root = copyFixture("jsx-single")
+        const chosen = options(root)
+        const outline = {
+          ...yield* outlineOf(root, chosen, "workflow:simple-workflow"),
+          sources: ["a.txt"],
+          targets: ["b.txt"]
+        }
+        writeFileSync(join(root, "a.txt"), "before\n")
+        const checkpoint = yield* Checkpoint.take({
+          root,
+          unit: outline.id,
+          files: owned(outline),
+          backupDir: join(root, ".smithers-migrate", "backup"),
+          allowNoVcs: true,
+          treeExclude: [".smithers-migrate"]
+        })
+        writeFileSync(join(root, "a.txt"), "after\n")
+        mkdirSync(join(root, "b.txt"))
+        const settled = yield* Effect.result(MigrateFlow.finish({
+          options: chosen,
+          outline,
+          checkpoint,
+          runStateRoots: [],
+          result: verification === null ? null : answered(outline.id, ["a.txt", "b.txt"]),
+          verification,
+          failure: "the agent gave up",
+          repairRounds: 0
+        }))
+
+        expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("before\n")
+        expect(existsSync(join(root, "b.txt"))).toBe(false)
+        if (verification === null) {
+          expect(settled).toMatchObject({ _tag: "Success", success: { status: "failed" } })
+        } else {
+          expect(settled).toMatchObject({
+            _tag: "Failure",
+            failure: { code: "io", message: "could not read b.txt while comparing it to the checkpoint" }
+          })
+          const pending = JSON.parse(readFileSync(join(root, ".smithers-migrate", "pending-unit.json"), "utf8"))
+          expect(pending.rollback.restored).toEqual(["a.txt", "b.txt"])
+        }
+      }).pipe(Effect.provide(platform)))
+  }
+
+  it.effect("keeps executions-only run-state roots narrow beside a pre-existing config file", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      mkdirSync(join(root, ".smithers", "executions"), { recursive: true })
+      writeFileSync(join(root, ".smithers", "executions", "before.log"), "existing execution\n")
+      writeFileSync(join(root, ".smithers", "smithers.config.ts"), "export default {}\n")
+      const chosen = options(root, { acknowledgeRunState: true })
+      const scanned = yield* MigrateFlow.scan(chosen)
+      const runStateRoots = MigrateFlow.runStateRoots(scanned)
+      expect(runStateRoots).toEqual([".smithers/executions"])
+      const outline = MigrateFlow.outlines(scanned, chosen).find((entry) => entry.id === "workflow:simple-workflow")!
+      const checkpoint = yield* Checkpoint.take({
+        root,
+        unit: outline.id,
+        files: owned(outline),
+        backupDir: join(root, ".smithers-migrate", "backup"),
+        allowNoVcs: true,
+        runStateRoots,
+        treeExclude: [".smithers-migrate", ".flows"]
+      })
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), golden)
+
+      const outcome = yield* MigrateFlow.finish({
+        options: chosen,
+        outline,
+        checkpoint,
+        runStateRoots,
+        result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
+        verification: passing,
+        repairRounds: 0
+      })
+
+      expect(outcome.unresolved).toEqual([])
+      expect(outcome.status).toBe("migrated")
+      expect(readFileSync(join(root, ".smithers", "smithers.config.ts"), "utf8")).toBe("export default {}\n")
+      expect(readFileSync(join(root, ".smithers", "executions", "before.log"), "utf8")).toBe("existing execution\n")
+    }).pipe(Effect.provide(platform)))
+
   it.effect("reports out-of-set damage even when verification failed before checks ran", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")
@@ -212,6 +298,7 @@ describe("MigrateFlow.finish", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: [],
         result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
         verification: {
           ...passing,
@@ -261,6 +348,7 @@ describe("MigrateFlow.finish", () => {
           options: chosen,
           outline,
           checkpoint,
+          runStateRoots: [],
           result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
           verification: passing,
           repairRounds: 0
@@ -296,6 +384,7 @@ describe("MigrateFlow.finish", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: [],
         result: null,
         verification: null,
         failure: "the agent gave up",
@@ -341,6 +430,7 @@ describe("MigrateFlow.finish verifies the tree it leaves behind", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: [],
         result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
         verification: passing,
         repairRounds: 0
@@ -374,6 +464,7 @@ describe("MigrateFlow.finish verifies the tree it leaves behind", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: [],
         result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
         verification: {
           ...passing,
@@ -411,6 +502,7 @@ describe("MigrateFlow.finish verifies the tree it leaves behind", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: [],
         result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
         verification: passing,
         repairRounds: 0
@@ -445,6 +537,7 @@ describe("MigrateFlow.finish verifies the tree it leaves behind", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: MigrateFlow.runStateRoots(scanned),
         result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
         verification: passing,
         repairRounds: 0
@@ -484,6 +577,7 @@ describe("MigrateFlow.finish, after the archive has moved the tree", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: [],
         result: answered(outline.id, []),
         verification: passing,
         repairRounds: 0
@@ -549,6 +643,7 @@ describe("MigrateFlow.finish, after the archive has moved the tree", () => {
         options: chosen,
         outline,
         checkpoint,
+        runStateRoots: [],
         result: answered(outline.id, []),
         verification: passing,
         repairRounds: 0

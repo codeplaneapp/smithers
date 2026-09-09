@@ -498,6 +498,8 @@ export const finishAction = Action.make("smithers/migrate-v1/Finish", {
     options: Options.MigrateOptions,
     outline: Transform.UnitOutline,
     checkpoint: Checkpoint.Ref,
+    /** The exact roots used when taking this checkpoint. */
+    runStateRoots: Schema.Array(Schema.String),
     /** Absent when the agent itself failed and there is no rewrite to judge. */
     result: Schema.NullOr(Transform.UnitResult),
     verification: Schema.NullOr(Report.VerificationResult),
@@ -737,8 +739,8 @@ export const postconditions = (
  * before. A verification of the tree before the archive would vouch for a
  * tree nobody ends up with.
  *
- * Everything after the tree is read runs inside one restoring scope: an
- * exception anywhere in the checks, the archive, or the final verification
+ * Every fallible operation runs inside one restoring scope: an exception
+ * in the initial comparisons, the checks, the archive, or the final verification
  * puts the unit's files back before it propagates. Without it a failing
  * archive would leave a half-moved tree and no report, because the failure
  * escapes the flow and `WriteReport` never runs.
@@ -762,33 +764,6 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
     const root = options.root
     const owned = [...new Set([...outline.sources, ...outline.targets])].sort()
     const ownedSet = new Set(owned)
-    // What the unit really did, read from the tree rather than from what it
-    // said. The agent's own `changedFiles` is advisory: a unit that edits a
-    // file it never declares is exactly the unit whose declaration is wrong,
-    // so the declaration cannot be what the report is built from.
-    const changedOwned = yield* Checkpoint.diff(root, checkpoint, owned)
-    const wholeTree = yield* Checkpoint.treeDiff(root, checkpoint)
-    const beyond = wholeTree.filter((file) => !ownedSet.has(file.path))
-    // The install this unit ran rewrites the project's lockfile, so that write
-    // is the tool's own and no unit is blamed for it. It is still the unit's
-    // report's business: the exemption is from the refusal, not from the
-    // record, and it is anchored to the exact root paths an install writes.
-    const installed = beyond.filter((file) => Checkpoint.generated.includes(file.path))
-    const outside = beyond.filter((file) => !Checkpoint.generated.includes(file.path))
-    const outsideCheck: Checks.CheckResult = {
-      name: "no write outside the unit's file set",
-      ok: outside.length === 0,
-      findings: outside.map((file) => ({
-        file: file.path,
-        line: 1,
-        message: file.change === "added"
-          ? "the unit added a file it does not own; rollback deleted it after preserving a recovery copy"
-          : `the unit ${file.change} a file it does not own; put it back with \`${checkpoint.restore}\``
-      }))
-    }
-    const changed = [...changedOwned, ...outside, ...installed].sort((left, right) =>
-      left.path < right.path ? -1 : left.path > right.path ? 1 : 0
-    )
     // What a failure undoes is read from the tree at the moment it fails, not
     // from anything computed here: the archive runs below, and a set fixed
     // before it cannot put back what it moved. A file the unit added outside
@@ -802,10 +777,49 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
     })
 
     return yield* Effect.gen(function*() {
-      const sources = yield* Checkpoint.sources(checkpoint)
-      const failed = verification === null || Verify.verdict(verification) === "fail"
+      // An agent that failed needs restoration, not comparisons of its output.
+      if (verification === null) {
+        const rollback = yield* putBack
+        return canonical({
+          payload,
+          status: "failed",
+          changedFiles: [],
+          checks: [],
+          rollback,
+          now: yield* Clock.currentTimeMillis
+        })
+      }
 
-      if (failed) {
+      // What the unit really did, read from the tree rather than from what it
+      // said. The agent's own `changedFiles` is advisory: a unit that edits a
+      // file it never declares is exactly the unit whose declaration is wrong,
+      // so the declaration cannot be what the report is built from.
+      const changedOwned = yield* Checkpoint.diff(root, checkpoint, owned)
+      const wholeTree = yield* Checkpoint.treeDiff(root, checkpoint)
+      const beyond = wholeTree.filter((file) => !ownedSet.has(file.path))
+      // The install this unit ran rewrites the project's lockfile, so that write
+      // is the tool's own and no unit is blamed for it. It is still the unit's
+      // report's business: the exemption is from the refusal, not from the
+      // record, and it is anchored to the exact root paths an install writes.
+      const installed = beyond.filter((file) => Checkpoint.generated.includes(file.path))
+      const outside = beyond.filter((file) => !Checkpoint.generated.includes(file.path))
+      const outsideCheck: Checks.CheckResult = {
+        name: "no write outside the unit's file set",
+        ok: outside.length === 0,
+        findings: outside.map((file) => ({
+          file: file.path,
+          line: 1,
+          message: file.change === "added"
+            ? "the unit added a file it does not own; rollback deleted it after preserving a recovery copy"
+            : `the unit ${file.change} a file it does not own; put it back with \`${checkpoint.restore}\``
+        }))
+      }
+      const changed = [...changedOwned, ...outside, ...installed].sort((left, right) =>
+        left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+      )
+
+      const sources = yield* Checkpoint.sources(checkpoint)
+      if (Verify.verdict(verification) === "fail") {
         const rollback = yield* putBack
         return canonical({
           payload,
@@ -820,7 +834,7 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
       const checkpointFiles: Checks.CheckpointFiles = {
         sources,
         digests: new Map(checkpoint.digests.map((entry) => [entry.path, entry.digest] as const)),
-        runStateRoots: [...new Set(outline.runStatePaths.map(parentOf).filter((entry) => entry !== ""))],
+        runStateRoots: payload.runStateRoots,
         owned
       }
       const checks = [
@@ -943,11 +957,6 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
       )
     ))
   })
-
-const parentOf = (file: string): string => {
-  const index = file.lastIndexOf("/")
-  return index <= 0 ? "" : file.slice(0, index)
-}
 
 /**
  * One entry per path: what the archive did to a path is the last word on it,
@@ -1342,6 +1351,7 @@ export const unit = Flow.make(unitTag, {
             options,
             outline,
             checkpoint,
+            runStateRoots,
             result,
             verification,
             repairRounds
@@ -1357,6 +1367,7 @@ export const unit = Flow.make(unitTag, {
             options,
             outline,
             checkpoint,
+            runStateRoots,
             result: null,
             verification: null,
             failure,
