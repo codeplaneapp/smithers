@@ -33,11 +33,16 @@ module load. A consumer cannot add a sixth code by assigning to the table.
 
 ## What closure buys the caller
 
-A closed union makes a `switch` over `error.code` exhaustive, so the compiler
-finds every caller that needs a new branch on the day a code is added. It also
-makes `hasSmithersErrorShape` meaningful across package copies: the refinement
-validates the code against the documented vocabulary, so an error carrying a
-code this build has never heard of is refused rather than narrowed. See
+A closed union permits an explicit exhaustiveness check in a `switch` over
+`error.code`. A default branch that assigns the remaining code to `never`
+fails type checking when a new code lacks a case. A returning fallback alone
+does not provide that check. See the
+[quickstart example](/quickstart/#check-exhaustiveness-explicitly).
+
+The closed union also makes `hasSmithersErrorShape` meaningful across package
+copies: the refinement validates the code against the documented vocabulary,
+so an error carrying a code this build has never heard of is refused rather
+than narrowed. See
 [Detect an error across module copies](/guides/detect-an-error-across-module-copies/).
 
 The cost is that adding a code is a deliberate edit in two files, not a string

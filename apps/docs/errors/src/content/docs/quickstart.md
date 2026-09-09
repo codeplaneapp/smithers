@@ -64,12 +64,46 @@ parseChunkLength(0)
 // "Fix the request: Telegram chunk maxLength must be an integer between 1 and 4096."
 ```
 
-`error.code` narrows to the five documented literals, so a `switch` over it is
-exhaustive and adding a code makes an unhandled branch a type error.
+`error.code` narrows to the five documented literals. This example deliberately
+keeps a fallback branch: any code without its own case returns the integration
+failure message. Adding a code does not make this switch fail type checking.
 
 `summary` is the message without the appended documentation URL. Use it
 wherever the URL would be noise, such as a form field or a chat reply.
 `message` keeps the URL, which is what a stack trace and an operator want.
+
+## Check exhaustiveness explicitly
+
+A closed union makes an explicit exhaustiveness check possible. Handle every
+code and assign the remaining value to `never` in the default branch:
+
+```ts
+import type { SmithersErrorCode } from "@smthrs/errors"
+
+const describeCode = (code: SmithersErrorCode): string => {
+  switch (code) {
+    case "INVALID_INPUT":
+      return "The request is invalid."
+    case "INTEGRATION_ERROR":
+      return "An integration call failed."
+    case "TELEGRAM_API_ERROR":
+      return "A Telegram Bot API call failed."
+    case "TELEGRAM_INIT_DATA_INVALID":
+      return "Telegram Mini App initData did not authenticate."
+    case "UNSUPPORTED":
+      return "The runtime lacks a required primitive."
+    default: {
+      const unhandled: never = code
+      return unhandled
+    }
+  }
+}
+```
+
+After all five cases return, `code` narrows to `never`. If a code is added to
+`SmithersErrorCode` without a matching case here, the assignment to `unhandled`
+fails type checking. The explicit `never` check provides that guarantee; the
+closed union alone does not.
 
 ## Log it without leaking a credential
 
