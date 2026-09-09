@@ -2,12 +2,14 @@ import { afterEach, describe, expect, test } from "bun:test"
 import {
   allowlistStateVerdict,
   auditOutcome,
+  DEFAULT_PROBE_LOGIN,
   invalidLogins,
   inviteRunSummary,
   inviteWriteVerdict,
   isCi,
   parseAllowlistRead,
   parseLogins,
+  PROBE_REQUESTER,
   readPathFor
 } from "./invite-verdict.ts"
 
@@ -42,11 +44,13 @@ interface FakeOptions {
   readonly writeIsALie?: boolean
   /** Serve no admin audit read-back, as the canary identity worker does. */
   readonly noAuditDoor?: boolean
+  /** Answer the audit door with this raw body instead of the log it kept. */
+  readonly auditBody?: string
 }
 
 const identityDouble = (options: FakeOptions = {}) => {
   const allowlist = new Set(options.allowlisted ?? [])
-  const audit: Array<{ login: string; action: string; requester: string }> = []
+  const audit: Array<{ login: string; action: string; requester: string; timestamp: string }> = []
   const received: Array<Recorded> = []
   const server = Bun.serve({
     port: 0,
@@ -74,17 +78,23 @@ const identityDouble = (options: FakeOptions = {}) => {
         if (options.writeStatus !== undefined) {
           return new Response(JSON.stringify({ error: "requester_required" }), { status: options.writeStatus })
         }
-        const write = body as { login: string; action: string; requester: string }
+        const write = body as { login: string; action: string; requester: string; timestamp: string }
         if (options.writeIsALie !== true) {
           if (write.action === "add") allowlist.add(write.login)
           else allowlist.delete(write.login)
         }
-        audit.push({ login: write.login, action: write.action, requester: write.requester })
+        audit.push({
+          login: write.login,
+          action: write.action,
+          requester: write.requester,
+          timestamp: write.timestamp
+        })
         return Response.json({ applied: true }, { status: 201 })
       }
 
       if (url.pathname === "/api/identity/admin/audit") {
         if (options.noAuditDoor === true) return new Response(JSON.stringify({ error: "Not found" }), { status: 404 })
+        if (options.auditBody !== undefined) return new Response(options.auditBody, { status: 200 })
         return Response.json({ entries: audit })
       }
 
@@ -168,13 +178,74 @@ describe("invite-verdict", () => {
     expect(refused.detail).toContain("unattributed")
   })
 
-  test("the audit outcome needs both the login and the requester", () => {
-    expect(
-      auditOutcome(200, "[{\"login\":\"p\",\"requester\":\"canary-invite-probe\"}]", "p", "canary-invite-probe").state
-    ).toBe("ok")
-    expect(auditOutcome(200, "[{\"login\":\"p\",\"requester\":\"someone-else\"}]", "p", "canary-invite-probe").state)
-      .toBe("fail")
-    expect(auditOutcome(500, "boom", "p", "canary-invite-probe").state).toBe("fail")
+  /*
+   * The probe's login IS its requester by default, so a check that looks for
+   * the two strings anywhere in the body passes on any single row naming
+   * `canary-invite-probe` — including a removal by a different admin. Every
+   * case below is one entry short of the invite that was actually written.
+   */
+  describe("the audit outcome names one entry written by this run", () => {
+    const SINCE = "2026-09-05T12:00:00.000Z"
+    const expected = {
+      login: DEFAULT_PROBE_LOGIN,
+      requester: PROBE_REQUESTER,
+      action: "add",
+      since: SINCE
+    }
+    const log = (...entries: ReadonlyArray<Record<string, unknown>>): string => JSON.stringify({ entries })
+    const invite = { login: DEFAULT_PROBE_LOGIN, requester: PROBE_REQUESTER, action: "add", timestamp: SINCE }
+
+    test("the invite this run wrote passes", () => {
+      expect(auditOutcome(200, log(invite), expected).state).toBe("ok")
+      // A bare array is the other shape the undocumented door could answer.
+      expect(auditOutcome(200, JSON.stringify([invite]), expected).state).toBe("ok")
+      // An entry stamped by the door's own clock, a moment later, still counts.
+      expect(auditOutcome(200, log({ ...invite, timestamp: "2026-09-05T12:00:03.000Z" }), expected).state).toBe("ok")
+    })
+
+    test("a removal by a different admin does not pass because the login is also the requester", () => {
+      const outcome = auditOutcome(200, log({ ...invite, requester: "wrong-admin", action: "remove" }), expected)
+      expect(outcome.state).toBe("fail")
+      expect(outcome.detail).toContain(PROBE_REQUESTER)
+    })
+
+    test("a wrong requester, a wrong action and an unrelated row each fail", () => {
+      expect(auditOutcome(200, log({ ...invite, requester: "someone-else" }), expected).state).toBe("fail")
+      expect(auditOutcome(200, log({ ...invite, action: "remove" }), expected).state).toBe("fail")
+      expect(auditOutcome(200, log({ ...invite, login: "alice" }), expected).state).toBe("fail")
+      expect(auditOutcome(200, log(), expected).state).toBe("fail")
+    })
+
+    test("the login, requester and action must meet in ONE entry", () => {
+      const split = log(
+        { login: DEFAULT_PROBE_LOGIN, requester: "wrong-admin", action: "add", timestamp: SINCE },
+        { login: "alice", requester: PROBE_REQUESTER, action: "add", timestamp: SINCE }
+      )
+      expect(auditOutcome(200, split, expected).state).toBe("fail")
+    })
+
+    test("an entry from an earlier run is stale, and says so", () => {
+      const outcome = auditOutcome(200, log({ ...invite, timestamp: "2026-09-05T11:00:00.000Z" }), expected)
+      expect(outcome.state).toBe("fail")
+      expect(outcome.detail).toContain("from an earlier run")
+    })
+
+    test("an entry with no timestamp cannot be tied to this run", () => {
+      const { timestamp: _dropped, ...undated } = invite
+      expect(auditOutcome(200, log(undated), expected).state).toBe("fail")
+    })
+
+    test("a malformed body fails rather than matching text", () => {
+      expect(auditOutcome(200, "not json", expected).state).toBe("fail")
+      expect(auditOutcome(200, "null", expected).state).toBe("fail")
+      expect(auditOutcome(200, JSON.stringify({ entries: "canary-invite-probe add" }), expected).state).toBe("fail")
+      // The raw text names every required value, and still proves nothing.
+      expect(auditOutcome(200, `${DEFAULT_PROBE_LOGIN} ${PROBE_REQUESTER} add ${SINCE}`, expected).state).toBe("fail")
+    })
+
+    test("a non-200 answer fails", () => {
+      expect(auditOutcome(500, "boom", expected).state).toBe("fail")
+    })
   })
 
   test("a run that asserted nothing is red, credentialed or not", () => {
@@ -216,7 +287,12 @@ describe("invite-verdict", () => {
   test("a deployment with no audit door is unavailable, not a failure", () => {
     // The canary identity worker answers 404 here; attribution is still
     // enforced where it is written, so this must not red the run.
-    const outcome = auditOutcome(404, "{\"error\":\"Not found\"}", "p", "canary-invite-probe")
+    const outcome = auditOutcome(404, "{\"error\":\"Not found\"}", {
+      login: DEFAULT_PROBE_LOGIN,
+      requester: PROBE_REQUESTER,
+      action: "add",
+      since: new Date().toISOString()
+    })
     expect(outcome.state).toBe("unavailable")
     expect(outcome.detail).toContain("no admin audit read-back")
   })
@@ -327,6 +403,68 @@ describe("invite-probe.ts against a stateful identity double", () => {
     expect(live.audit.every((entry) => entry.requester === "canary-invite-probe")).toBe(true)
     const writes = live.received.filter((entry) => entry.method === "POST")
     expect(writes.every((entry) => entry.adminToken === "admin-123")).toBe(true)
+  })
+
+  test("an audit door that answers a differently attributed row fails the attribution check", async () => {
+    // The probe's login is also its requester, so this row names both — and
+    // records a removal by somebody else. It is not the invite this run wrote.
+    live = identityDouble({
+      auditBody: JSON.stringify({
+        entries: [{
+          login: "canary-invite-probe",
+          requester: "wrong-admin",
+          action: "remove",
+          timestamp: new Date().toISOString()
+        }]
+      })
+    })
+    const result = await runProbe(["--identity", live.origin, "--admit-probe-login"], {
+      IDENTITY_SERVICE_TOKEN: "service-123",
+      IDENTITY_ADMIN_TOKEN: "admin-123"
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("FAIL: the invite is attributed in the audit log")
+    // The round trip itself still ran and still cleaned up.
+    expect(result.stdout).toContain("ok: the invited login is admitted")
+    expect([...live.allowlist]).toEqual([])
+  })
+
+  test("an audit door that replays an earlier run's entry fails: it is not this invitation", async () => {
+    live = identityDouble({
+      auditBody: JSON.stringify({
+        entries: [{
+          login: "canary-invite-probe",
+          requester: "canary-invite-probe",
+          action: "add",
+          timestamp: new Date(Date.now() - 3_600_000).toISOString()
+        }]
+      })
+    })
+    const result = await runProbe(["--identity", live.origin, "--admit-probe-login"], {
+      IDENTITY_SERVICE_TOKEN: "service-123",
+      IDENTITY_ADMIN_TOKEN: "admin-123"
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("from an earlier run")
+  })
+
+  test("a flag with no value is refused before any network call", async () => {
+    live = identityDouble({ allowlisted: ["alice"] })
+    const result = await runProbe(["--identity", live.origin, "--logins", "alice", "--probe-login"], {
+      IDENTITY_SERVICE_TOKEN: "service-123"
+    })
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("--probe-login needs a value")
+    expect(live.received).toEqual([])
+  })
+
+  test("a flag that swallows the next flag is refused, not defaulted", async () => {
+    live = identityDouble({ allowlisted: ["alice"] })
+    const result = await runProbe(["--identity", "--logins", "alice"], { IDENTITY_SERVICE_TOKEN: "service-123" })
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("--identity needs a value")
+    expect(result.stdout).toContain("--logins")
+    expect(live.received).toEqual([])
   })
 
   test("a deployment with no audit door still passes: the CN-23 assertion does not depend on it", async () => {

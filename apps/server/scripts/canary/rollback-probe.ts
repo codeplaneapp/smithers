@@ -28,6 +28,7 @@
  *   CANARY_RECEIPT_PATH    defaults to ../../deploy-receipts/latest.json
  */
 import { readFileSync } from "node:fs"
+import { argReader } from "./CanaryArgs.ts"
 import {
   deployedVerdict,
   parseDeployedVersions,
@@ -40,10 +41,15 @@ import {
 const DEFAULT_ACCOUNT_ID = "dd3525a4132493566aeb38de533c8827"
 const DEFAULT_API_BASE = "https://api.cloudflare.com/client/v4"
 
-const argOf = (name: string): string | undefined => {
-  const index = process.argv.indexOf(name)
-  return index === -1 ? undefined : process.argv[index + 1]
-}
+const argv = process.argv.slice(2)
+/*
+ * Exit 2, not 1: a flag left empty is a mistake in this invocation, not a
+ * verdict about the deployment, and it is refused before the first fetch.
+ */
+const argOf = argReader(argv, (detail) => {
+  console.error(`FAIL: ${detail}`)
+  process.exit(2)
+})
 
 const receiptPath = argOf("--receipt") ?? process.env.CANARY_RECEIPT_PATH ??
   new URL("../../deploy-receipts/latest.json", import.meta.url).pathname

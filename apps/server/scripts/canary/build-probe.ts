@@ -32,7 +32,6 @@ import {
   buildShaFromHtml,
   buildShaVerdict,
   expectedShaFromReceipt,
-  flagValue,
   hasFlag,
   HTML_AGREEMENT_COVERAGE,
   htmlAgreementVerdict,
@@ -40,10 +39,18 @@ import {
   resolveOrigin
 } from "./BuildStamp.ts"
 import type { BuildStamp } from "./BuildStamp.ts"
+import { argReader } from "./CanaryArgs.ts"
 import { DEFAULT_APP_DOCUMENT_PATH } from "../../src/appDocument.ts"
 
 const argv = process.argv.slice(2)
-const flag = (name: string): string | undefined => flagValue(argv, name)
+/*
+ * Exit 2, not 1: a flag the operator left empty is a mistake in this
+ * invocation, and it must never be read as a verdict about the deployment.
+ */
+const flag = argReader(argv, (detail) => {
+  console.error(`FAIL: ${detail}`)
+  process.exit(2)
+})
 /*
  * The escape hatch for the single deploy that introduces the stamp, and for
  * nothing else. It downgrades unstamped HTML from a failure to a skip; it

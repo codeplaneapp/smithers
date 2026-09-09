@@ -11,7 +11,7 @@
  */
 import type { Server } from "bun"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ALERT_TITLE, type ProbeReport } from "./uptime-checks.ts"
@@ -80,7 +80,7 @@ const origin = (): string => `http://localhost:${String(server.port)}`
 const runProbe = async (
   extraArgs: ReadonlyArray<string>,
   env: Record<string, string> = {}
-): Promise<{ exitCode: number; stdout: string }> => {
+): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
   const child = Bun.spawn(
     ["bun", join(scriptsDir, "uptime-probe.ts"), origin(), "--gap-ms", "1", ...extraArgs],
     {
@@ -100,26 +100,47 @@ const runProbe = async (
       }
     }
   )
-  const stdout = await new Response(child.stdout).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text()
+  ])
   const exitCode = await child.exited
-  return { exitCode, stdout }
+  return { exitCode, stdout, stderr }
 }
 
 const runReport = async (
   extraArgs: ReadonlyArray<string>
-): Promise<{ exitCode: number; stdout: string }> => {
+): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
   const child = Bun.spawn(["bun", join(scriptsDir, "uptime-report.ts"), ...extraArgs], {
     cwd: serverDir,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, GITHUB_OUTPUT: "" }
   })
-  const stdout = await new Response(child.stdout).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text()
+  ])
   const exitCode = await child.exited
-  return { exitCode, stdout }
+  return { exitCode, stdout, stderr }
 }
 
 describe("uptime-probe.ts against a live HTTP origin", () => {
+  /*
+   * `--json --samples 3` used to write the report to a file called
+   * "--samples". Exit 2, never 1: an empty flag is a mistake in the
+   * invocation, not a verdict about the deployment, and nothing is fetched.
+   */
+  test("a flag whose value is the next flag is refused before anything is probed", async () => {
+    const report = join(workDir, "never-written.json")
+    const result = await runProbe(["--json", "--samples", "3"])
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("--json needs a value")
+    expect(result.stderr).toContain("--samples")
+    expect(existsSync(report)).toBe(false)
+    expect(existsSync("--samples")).toBe(false)
+  })
+
   test("a healthy origin exits 0 and writes a report naming every check", async () => {
     mode = "healthy"
     const jsonPath = join(workDir, "healthy.json")
@@ -216,6 +237,13 @@ describe("uptime-probe.ts against a live HTTP origin", () => {
 
 describe("uptime-report.ts", () => {
   const runUrl = "https://github.com/smithersai/smithers/actions/runs/7"
+
+  test("a --report flag with no value is refused before any file is written", async () => {
+    const result = await runReport(["--report", "--body-out", join(workDir, "body.md")])
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("--report needs a value")
+    expect(existsSync(join(workDir, "body.md"))).toBe(false)
+  })
 
   test("the workflow captures a failing verdict under bash -e before running the alert", async () => {
     const workflow = readFileSync(join(serverDir, "../../.github/workflows/canary.yml"), "utf8")

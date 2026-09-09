@@ -120,9 +120,17 @@ bun scripts/canary/invite-probe.ts --admit-probe-login
 ```
 
 It reads `canary-invite-probe` (absent), invites it, reads it back (**this is
-the CN-23 assertion**), checks the audit log names the login and the requester
-`canary-invite-probe`, then withdraws it and reads it back absent. The
-withdrawal is in a `finally`, so it runs even after a failed check.
+the CN-23 assertion**), checks the audit log, then withdraws it and reads it
+back absent. The withdrawal is in a `finally`, so it runs even after a failed
+check.
+
+The audit check requires **one entry** recording all four facts together: the
+login, the requester `canary-invite-probe`, the action `add`, and a timestamp
+at or after the write this run made (5s of clock slack). The probe's login is
+also its requester, so a check that looked for the two names anywhere in the
+response passed on any row mentioning `canary-invite-probe` — including a
+removal by another admin, and including a row left by an earlier run. A door
+that answers 404 or 405 is still reported as a skip, never as a pass.
 
 Two properties make this safe to run after a deploy:
 

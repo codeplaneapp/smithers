@@ -227,6 +227,20 @@ describe("rollback-verdict", () => {
 })
 
 describe("rollback-probe.ts against a Cloudflare API double", () => {
+  /*
+   * Exit 2, never 1: an empty flag is a mistake in the invocation, and a 1
+   * would read as a verdict about the deployment. Nothing is fetched.
+   */
+  test("a flag with no value is refused before Cloudflare is called", async () => {
+    live = cloudflareDouble()
+    const result = await runProbe(["--receipt", receiptFile(realReceipt(VERSION_B)), "--api-base"], {
+      CLOUDFLARE_API_TOKEN: "cf-token-123"
+    })
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("--api-base needs a value")
+    expect(live.paths).toEqual([])
+  })
+
   test("a real deploy receipt whose version is live and has a predecessor passes", async () => {
     live = cloudflareDouble()
     const result = await runProbe(["--receipt", receiptFile(realReceipt(VERSION_B)), "--api-base", live.base], {

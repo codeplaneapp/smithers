@@ -65,6 +65,15 @@ export const parseBuildStamp = (fetched: FetchedStamp): BuildStamp | string => {
       fetched.body.replace(/\s+/g, " ").trim().slice(0, 80)
     }`
   }
+  /*
+   * `JSON.parse` answers null, a number or an array for bodies that are valid
+   * JSON without being a stamp, and reading a field off null throws. A total
+   * function cannot throw where it promised a diagnostic, so the shape is
+   * checked before any field is read.
+   */
+  if (typeof parsed !== "object" || parsed === null) {
+    return `GET ${BUILD_STAMP_PATH} answered 200 with a body that is not a build stamp`
+  }
   const stamp = parsed as { gitSha?: unknown; builtAt?: unknown; worker?: unknown }
   if (typeof stamp.gitSha !== "string" || typeof stamp.builtAt !== "string") {
     return `GET ${BUILD_STAMP_PATH} answered 200 with a body that is not a build stamp`
@@ -257,6 +266,10 @@ export const expectedShaFromReceipt = (receiptJson: string): ReceiptClaim => {
   } catch {
     return { kind: "none", reason: "the deploy receipt is not JSON" }
   }
+  /* Same as above: a receipt of `null` is JSON, and reading dryRun off it throws. */
+  if (typeof parsed !== "object" || parsed === null) {
+    return { kind: "none", reason: "the deploy receipt records no usable gitSha" }
+  }
   const receipt = parsed as { gitSha?: unknown; dryRun?: unknown; gitDirty?: unknown }
   if (receipt.dryRun === true) {
     return {
@@ -270,20 +283,13 @@ export const expectedShaFromReceipt = (receiptJson: string): ReceiptClaim => {
   return { kind: "sha", gitSha: receipt.gitSha, gitDirty: receipt.gitDirty === true }
 }
 
+/*
+ * Reading `--name value` is not a build-stamp concern: it lives in
+ * CanaryArgs.ts, where every canary shell shares one parser.
+ */
+
 /** Is the boolean flag `--name` present? */
 export const hasFlag = (argv: ReadonlyArray<string>, name: string): boolean => argv.includes(name)
-
-/**
- * The value of `--name`, or undefined. A flag whose value is missing or is
- * itself a flag reads as absent, so `--sha --max-drift 3` cannot silently
- * grade the deployment against the string "--max-drift".
- */
-export const flagValue = (argv: ReadonlyArray<string>, name: string): string | undefined => {
-  const at = argv.indexOf(name)
-  if (at === -1) return undefined
-  const value = argv[at + 1]
-  return value === undefined || value.startsWith("--") ? undefined : value
-}
 
 /**
  * The origin to probe: the first positional argument, then $CANARY_URL, then

@@ -49,6 +49,7 @@
  * the one line in this lane that no test can reach.
  */
 import { writeFileSync } from "node:fs"
+import { argReader } from "./CanaryArgs.ts"
 import {
   type Check,
   REQUEST_TIMEOUT_MS,
@@ -61,31 +62,30 @@ import {
 import { parseLogins } from "./invite-verdict.ts"
 
 const args = process.argv.slice(2)
-const flagValue = (name: string): string | undefined => {
-  const index = args.indexOf(name)
-  return index === -1 ? undefined : args[index + 1]
+/*
+ * Exit 2, not 1. Exit 1 means "the canary failed", which a caller may read as
+ * a statement about the deployment. A flag left empty is a statement about
+ * this invocation, and it must never be mistaken for a verdict. The refusal
+ * happens before the first fetch and before the report is written.
+ *
+ * Explicitly typed so TypeScript treats every call as terminating control flow.
+ */
+const refuseInvocation: (detail: string) => never = (detail) => {
+  console.error(`FAIL: ${detail}`)
+  process.exit(2)
 }
+const flagValue = argReader(args, refuseInvocation)
 const positive = (name: string, fallback: number): number => {
   const raw = flagValue(name)
   if (raw === undefined) return fallback
   const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    console.error(`FAIL: ${name} must be a positive number, got ${raw}`)
-    process.exit(2)
-  }
+  if (!Number.isFinite(parsed) || parsed <= 0) refuseInvocation(`${name} must be a positive number, got ${raw}`)
   return parsed
 }
 
-/*
- * Exit 2, not 1. Exit 1 means "the canary failed", which a caller may read as
- * a statement about the deployment. A misconfigured target is a statement
- * about this invocation, and it must never be mistaken for a verdict.
- */
+/* A misconfigured target is refused the same way, and for the same reason. */
 const resolved = resolveProbeOrigin(args, { CANARY_URL: process.env.CANARY_URL })
-if ("error" in resolved) {
-  console.error(`FAIL: ${resolved.error}`)
-  process.exit(2)
-}
+if ("error" in resolved) refuseInvocation(resolved.error)
 const origin = resolved.origin
 const cookie = args.includes("--no-turn") ? undefined : process.env.CANARY_SESSION_COOKIE
 const expectedSessionLogin = (process.env.CANARY_SESSION_LOGIN ?? process.env.SMITHERS_E2E_USER)?.trim()

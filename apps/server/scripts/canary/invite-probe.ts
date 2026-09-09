@@ -51,6 +51,7 @@
  *   CANARY_ALLOWLIST_LOGINS the roster, a comma list; a repository variable, not a secret
  *   CANARY_PROBE_LOGIN      overrides the designated probe identity
  */
+import { argReader } from "./CanaryArgs.ts"
 import {
   ALLOW_INCONCLUSIVE_FLAG,
   allowlistStateVerdict,
@@ -69,17 +70,22 @@ import {
 
 const DEFAULT_IDENTITY_URL = "https://smithers-cloud-identity.willcory10.workers.dev"
 
-const argOf = (name: string): string | undefined => {
-  const index = process.argv.indexOf(name)
-  return index === -1 ? undefined : process.argv[index + 1]
-}
+const argv = process.argv.slice(2)
+/*
+ * Exit 2, not 1: a flag left empty is a mistake in this invocation, not a
+ * verdict about the allowlist, and it is refused before any read or write.
+ */
+const argOf = argReader(argv, (detail) => {
+  console.error(`FAIL: ${detail}`)
+  process.exit(2)
+})
 
 const identity = argOf("--identity") ?? process.env.IDENTITY_UPSTREAM_URL ?? DEFAULT_IDENTITY_URL
 const readPath = argOf("--read-path") ?? DEFAULT_READ_PATH
 const probeLogin = argOf("--probe-login") ?? process.env.CANARY_PROBE_LOGIN ?? DEFAULT_PROBE_LOGIN
 const roster = parseLogins(argOf("--logins") ?? process.env.CANARY_ALLOWLIST_LOGINS)
-const admitProbeLogin = process.argv.includes("--admit-probe-login")
-const allowInconclusive = process.argv.includes(ALLOW_INCONCLUSIVE_FLAG)
+const admitProbeLogin = argv.includes("--admit-probe-login")
+const allowInconclusive = argv.includes(ALLOW_INCONCLUSIVE_FLAG)
 const serviceToken = process.env.IDENTITY_SERVICE_TOKEN?.trim() ?? ""
 const adminToken = process.env.IDENTITY_ADMIN_TOKEN?.trim() ?? ""
 
@@ -132,17 +138,23 @@ const readAllowlist = async (login: string) => {
   }
 }
 
+/*
+ * The timestamp is returned as well as sent: it is what correlates the audit
+ * entry read back below with THIS invocation, so a row left by an earlier run
+ * cannot stand in for a write that never landed.
+ */
 const writeAllowlist = async (login: string, action: "add" | "remove") => {
   const target = new URL("/api/identity/admin/allowlist", identity).toString()
+  const timestamp = new Date().toISOString()
   try {
     const response = await fetch(target, {
       method: "POST",
       headers: { "content-type": "application/json", "x-smithers-admin-token": adminToken },
-      body: JSON.stringify({ login, action, requester: PROBE_REQUESTER, timestamp: new Date().toISOString() })
+      body: JSON.stringify({ login, action, requester: PROBE_REQUESTER, timestamp })
     })
-    return { status: response.status, body: await response.text() }
+    return { status: response.status, body: await response.text(), timestamp }
   } catch (error) {
-    return { status: 0, body: error instanceof Error ? error.message : String(error) }
+    return { status: 0, body: error instanceof Error ? error.message : String(error), timestamp }
   }
 }
 
@@ -195,7 +207,12 @@ if (!admitProbeLogin) {
     const auditTarget = new URL("/api/identity/admin/audit", identity).toString()
     try {
       const audit = await fetch(auditTarget, { headers: { "x-smithers-admin-token": adminToken } })
-      const outcome = auditOutcome(audit.status, await audit.text(), probeLogin, PROBE_REQUESTER)
+      const outcome = auditOutcome(audit.status, await audit.text(), {
+        login: probeLogin,
+        requester: PROBE_REQUESTER,
+        action: "add",
+        since: written.timestamp
+      })
       if (outcome.state === "unavailable") skip("the invite is attributed in the audit log", outcome.detail)
       else check("the invite is attributed in the audit log", outcome.state === "ok", outcome.detail)
     } catch (error) {

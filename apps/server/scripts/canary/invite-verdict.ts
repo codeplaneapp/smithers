@@ -153,7 +153,69 @@ export type AuditOutcome =
   | { readonly state: "fail"; readonly detail: string }
   | { readonly state: "unavailable"; readonly detail: string }
 
-export const auditOutcome = (status: number, body: string, login: string, requester: string): AuditOutcome => {
+/**
+ * What this invocation wrote, and therefore what one audit entry must record.
+ *
+ * `since` is the timestamp the probe attributed its own write with. It is what
+ * makes the check a statement about THIS run: without it, a row left behind by
+ * an earlier invocation satisfies the assertion even when the write under test
+ * never landed.
+ */
+export interface AuditExpectation {
+  readonly login: string
+  readonly requester: string
+  readonly action: string
+  readonly since: string
+}
+
+/**
+ * The audit door may record its own receipt time rather than echoing the
+ * timestamp the probe sent, and the two clocks are not the same clock. A few
+ * seconds of slack keeps that from reading as a stale entry; it is far shorter
+ * than the interval between scheduled runs, so a previous run's row is still
+ * refused.
+ */
+const AUDIT_CLOCK_SKEW_MS = 5_000
+
+/**
+ * The entries of an audit response, or undefined when the body carries no
+ * entry list. The door is undocumented (it answers 404 on the canary), so both
+ * plausible shapes are accepted — a bare array and `{ entries: [...] }` — and
+ * anything else is reported rather than guessed at.
+ */
+const auditEntries = (parsed: unknown): ReadonlyArray<Record<string, unknown>> | undefined => {
+  const listed = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { entries?: unknown }).entries)
+    ? (parsed as { entries: ReadonlyArray<unknown> }).entries
+    : undefined
+  if (listed === undefined) return undefined
+  return listed.filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+}
+
+/** Does one entry record this login, by this requester, taking this action? */
+const attributes = (entry: Record<string, unknown>, expected: AuditExpectation): boolean =>
+  entry.login === expected.login && entry.requester === expected.requester &&
+  typeof entry.action === "string" && entry.action.trim().toLowerCase() === expected.action.toLowerCase()
+
+/** Was the entry written by this invocation rather than an earlier one? */
+const notBefore = (entry: Record<string, unknown>, sinceMs: number): boolean => {
+  if (typeof entry.timestamp !== "string") return false
+  const at = Date.parse(entry.timestamp)
+  return Number.isFinite(at) && at >= sinceMs - AUDIT_CLOCK_SKEW_MS
+}
+
+/**
+ * Read the invite's attribution back out of the audit log.
+ *
+ * One entry has to carry all four facts at once: the login, the requester, the
+ * `add` action, and a timestamp from this invocation. Searching the raw
+ * response text for the login and the requester separately is not enough,
+ * because the probe's default login IS its requester (`canary-invite-probe`):
+ * a single row naming that login satisfied both substring tests, so a removal
+ * attributed to a different admin used to read as a passing invite.
+ */
+export const auditOutcome = (status: number, body: string, expected: AuditExpectation): AuditOutcome => {
   if (status === 404 || status === 405) {
     return {
       state: "unavailable",
@@ -162,12 +224,46 @@ export const auditOutcome = (status: number, body: string, login: string, reques
     }
   }
   if (status !== 200) return { state: "fail", detail: `HTTP ${status} ${preview(body)}` }
-  const named = body.includes(login) && body.includes(requester)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body) as unknown
+  } catch {
+    return { state: "fail", detail: `HTTP 200 but the audit body is not JSON: ${preview(body)}` }
+  }
+  const entries = auditEntries(parsed)
+  if (entries === undefined) {
+    return {
+      state: "fail",
+      detail:
+        `HTTP 200 but the audit body carries no entry list (an array, or an object with an "entries" array): ${
+          preview(body)
+        }`
+    }
+  }
+  const sinceMs = Date.parse(expected.since)
+  if (!Number.isFinite(sinceMs)) {
+    return {
+      state: "fail",
+      detail: `the invite was written with an unusable timestamp (${expected.since}), so no audit entry can be tied to this run`
+    }
+  }
+  const attributed = entries.filter((entry) => attributes(entry, expected))
+  if (attributed.some((entry) => notBefore(entry, sinceMs))) {
+    return {
+      state: "ok",
+      detail:
+        `the audit log records ${expected.action} of ${expected.login} by requester ${expected.requester} at or after ${expected.since}`
+    }
+  }
+  const stale = attributed.length > 0
+    ? ` ${attributed.length} entry(s) name that login, requester and action, but none is timestamped at or after ${expected.since}, so they are from an earlier run.`
+    : ""
   return {
-    state: named ? "ok" : "fail",
-    detail: named
-      ? `the audit log names ${login} and requester ${requester}`
-      : `the audit log does not name both ${login} and requester ${requester}: ${preview(body)}`
+    state: "fail",
+    detail:
+      `the audit log records no single entry with login ${expected.login}, requester ${expected.requester} and action ${expected.action} from this run.${stale} Body: ${
+        preview(body)
+      }`
   }
 }
 

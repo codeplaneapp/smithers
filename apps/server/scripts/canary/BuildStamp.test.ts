@@ -7,7 +7,6 @@ import {
   buildShaFromHtml,
   buildShaVerdict,
   expectedShaFromReceipt,
-  flagValue,
   hasFlag,
   HTML_AGREEMENT_COVERAGE,
   htmlAgreementVerdict,
@@ -15,6 +14,7 @@ import {
   resolveOrigin
 } from "./BuildStamp.ts"
 import type { BuildStamp } from "./BuildStamp.ts"
+import { readFlag } from "./CanaryArgs.ts"
 import { DEFAULT_APP_DOCUMENT_PATH } from "../../src/appDocument.ts"
 
 /*
@@ -70,6 +70,19 @@ describe("parseBuildStamp", () => {
     expect(parseBuildStamp({ status: 200, body: "{\"nope\":1}" })).toBe(
       `GET ${BUILD_STAMP_PATH} answered 200 with a body that is not a build stamp`
     )
+  })
+
+  /*
+   * `null`, a number and an array are all valid JSON. Reading gitSha off them
+   * used to throw a TypeError out of a parser documented as total, so the
+   * probe crashed instead of naming the unusable body.
+   */
+  test("a 200 whose JSON is not an object fails instead of throwing", () => {
+    for (const body of ["null", "3", "[]", "\"abc1234\""]) {
+      expect(parseBuildStamp({ status: 200, body })).toBe(
+        `GET ${BUILD_STAMP_PATH} answered 200 with a body that is not a build stamp`
+      )
+    }
   })
 
   test("a stamp whose sha is not a sha fails", () => {
@@ -264,6 +277,19 @@ describe("expectedShaFromReceipt", () => {
   test("a receipt that is not JSON claims nothing", () => {
     expect(expectedShaFromReceipt("<html>").kind).toBe("none")
   })
+
+  /*
+   * `null`, a number and an array are all valid JSON. Reading a field off them
+   * used to throw a TypeError out of a parser documented as total, so the
+   * probe crashed instead of reporting an unusable receipt.
+   */
+  test("JSON that is not an object claims nothing instead of throwing", () => {
+    for (const body of ["null", "3", "\"abc1234\"", "[]"]) {
+      const claim = expectedShaFromReceipt(body)
+      expect(claim.kind).toBe("none")
+      if (claim.kind === "none") expect(claim.reason).toContain("no usable gitSha")
+    }
+  })
 })
 
 describe("argument resolution", () => {
@@ -281,31 +307,18 @@ describe("argument resolution", () => {
     expect(resolveOrigin(["https://canary.smithers.sh/"], {})).toBe("https://canary.smithers.sh")
   })
 
-  test("a flag reads its value", () => {
-    expect(flagValue(["--sha", "abc1234", "--max-drift", "3"], "--max-drift")).toBe("3")
-  })
-
-  /*
-   * The dangerous case: a flag with no value would otherwise swallow the next
-   * flag and grade the deployment against a string that is not a sha.
-   */
-  test("a flag with no value reads as absent, never as the next flag", () => {
-    expect(flagValue(["--sha", "--max-drift", "3"], "--sha")).toBeUndefined()
-    expect(flagValue(["--sha"], "--sha")).toBeUndefined()
-    expect(flagValue([], "--sha")).toBeUndefined()
-  })
-
   test("a boolean flag is present only when it is passed", () => {
     expect(hasFlag(["--allow-unstamped-html"], "--allow-unstamped-html")).toBe(true)
     expect(hasFlag(["--sha", "abc1234"], "--allow-unstamped-html")).toBe(false)
   })
 
   /*
-   * --sha must not swallow the boolean flag that follows it, or the probe
-   * would grade the deployment against the string "--allow-unstamped-html".
+   * Reading `--name value` lives in CanaryArgs.ts now, shared by every canary
+   * shell; CanaryArgs.test.ts holds the cases where --sha would otherwise
+   * swallow the flag that follows it.
    */
-  test("the boolean flag is not eaten by a preceding value flag", () => {
-    expect(flagValue(["--sha", "--allow-unstamped-html"], "--sha")).toBeUndefined()
+  test("a value flag never hides the boolean flag that follows it", () => {
+    expect(readFlag(["--sha", "--allow-unstamped-html"], "--sha").state).toBe("no-value")
     expect(hasFlag(["--sha", "--allow-unstamped-html"], "--allow-unstamped-html")).toBe(true)
   })
 })
@@ -372,8 +385,11 @@ describe("the probe's exit code moves with the deployment", () => {
         stdout: "pipe",
         stderr: "pipe"
       })
-      const stdout = await new Response(proc.stdout).text()
-      return { exitCode: await proc.exited, stdout }
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text()
+      ])
+      return { exitCode: await proc.exited, stdout, stderr }
     } finally {
       server.stop(true)
     }
@@ -383,6 +399,17 @@ describe("the probe's exit code moves with the deployment", () => {
     `<!DOCTYPE html><html><head><meta name="${BUILD_STAMP_META}" content="${SERVED_SHA}"><title>Smithers</title></head><body><div id="root"></div></body></html>`
   const UNSTAMPED_HTML =
     `<!DOCTYPE html><html><head><title>Smithers</title></head><body><div id="root"></div></body></html>`
+
+  /*
+   * Exit 2, never 1: an empty flag is a mistake in the invocation, and a 1
+   * would read as a verdict about the deployment.
+   */
+  test("a flag with no value exits 2 without grading the deployment", async () => {
+    const result = await runProbe(STAMPED_HTML, ["--max-drift"])
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("--max-drift needs a value")
+    expect(result.stdout).not.toContain("CN-1 PASS")
+  })
 
   test("a correctly stamped bundle exits 0", async () => {
     const result = await runProbe(STAMPED_HTML)

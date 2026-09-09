@@ -19,13 +19,15 @@
  * opens an issue rather than passing silently.
  */
 import { readFileSync, writeFileSync } from "node:fs"
+import { argReader } from "./CanaryArgs.ts"
 import { ALERT_TITLE, alertAction, coerceReport, renderAlertBody } from "./uptime-checks.ts"
 
 const args = process.argv.slice(2)
-const flagValue = (name: string): string | undefined => {
-  const index = args.indexOf(name)
-  return index === -1 ? undefined : args[index + 1]
-}
+/* A flag left empty is refused before the report is read or any file written. */
+const flagValue = argReader(args, (detail) => {
+  console.error(`uptime-report.ts: ${detail}`)
+  process.exit(2)
+})
 
 const reportPath = flagValue("--report")
 if (reportPath === undefined) {
