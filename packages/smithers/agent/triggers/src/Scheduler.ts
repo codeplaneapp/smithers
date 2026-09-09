@@ -257,6 +257,34 @@ export interface Options {
   readonly pollInterval?: Duration.Input | undefined
   readonly runPollInterval?: Duration.Input | undefined
   /**
+   * How many triggers one tick processes at the same time. Defaults to
+   * {@link defaultConcurrency}. Triggers are independent once claimed, so a
+   * launch waiting on a parked plan holds one slot, not the tick.
+   */
+  readonly concurrency?: number | undefined
+  /**
+   * How long one `Runner.start` may take before the launch is abandoned with
+   * `runner_timeout`. Defaults to four minutes: above the Control adapter's
+   * bounded parked-approval retries and below the five-minute reservation
+   * lease, so an abandoned launch still owns its reservation and re-arms the
+   * occurrence itself. The next tick retries it under the same idempotency
+   * key. A deadline above the lease is allowed; a start that answers after
+   * its lease is reconciled as a late launch.
+   */
+  readonly startTimeout?: Duration.Input | undefined
+  /**
+   * How long one `Runner.isActive` may take. Defaults to thirty seconds. A
+   * timeout is an inspection failure: the monitor retries and then detaches,
+   * retaining the durable owner.
+   */
+  readonly inspectTimeout?: Duration.Input | undefined
+  /**
+   * How long one `Runner.cancel` may take. Defaults to thirty seconds. A
+   * timeout fails the supersede, which restores the prior run as active and
+   * queues the replacement.
+   */
+  readonly cancelTimeout?: Duration.Input | undefined
+  /**
    * The name this scheduler records its heartbeat under, so a listing can say
    * which host last polled the store. Defaults to {@link defaultHost}.
    */
@@ -271,6 +299,31 @@ export interface Options {
  * @since 1.0.0-rc.0
  */
 export const defaultHost = "local"
+
+/**
+ * How many triggers one tick processes at the same time when its options name
+ * no `concurrency`.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultConcurrency = 4
+
+const deadline = <A>(
+  effect: Effect.Effect<A, TriggerError>,
+  limit: Duration.Duration,
+  what: string
+): Effect.Effect<A, TriggerError> =>
+  Effect.timeoutOrElse(effect, {
+    duration: limit,
+    orElse: () =>
+      Effect.fail(
+        new TriggerError({
+          code: "runner_timeout",
+          message: `${what} did not answer within ${Duration.toMillis(limit)} ms`
+        })
+      )
+  })
 
 /**
  * Scheduler operations.
@@ -356,12 +409,27 @@ export const make = (
 ): Effect.Effect<Service, TriggerError, Runner | Scope.Scope | TriggerStore> =>
   Effect.gen(function*() {
     const parentScope = yield* Effect.scope
-    const runner = yield* Runner
     const store = yield* TriggerStore
     const active = yield* Ref.make<ReadonlyMap<string, Active>>(new Map())
     const observedAt = yield* Ref.make<ReadonlyMap<string, number>>(new Map())
     const semaphore = yield* Semaphore.make(1)
     const runPollInterval = yield* duration(options.runPollInterval ?? "15 seconds", "runPollInterval")
+    const concurrency = options.concurrency ?? defaultConcurrency
+    if (!Number.isInteger(concurrency) || concurrency < 1) {
+      return yield* Effect.fail(invalidOption("concurrency", "a positive integer"))
+    }
+    const startTimeout = yield* duration(options.startTimeout ?? "4 minutes", "startTimeout")
+    const inspectTimeout = yield* duration(options.inspectTimeout ?? "30 seconds", "inspectTimeout")
+    const cancelTimeout = yield* duration(options.cancelTimeout ?? "30 seconds", "cancelTimeout")
+    // Every runner call carries a deadline. A runtime that never answers used
+    // to hold the launch, and the tick waiting on it, for the life of the
+    // scope with nothing written down.
+    const provided = yield* Runner
+    const runner: RunnerService = {
+      start: (input) => deadline(provided.start(input), startTimeout, `Runner.start for ${input.idempotencyKey}`),
+      isActive: (runId) => deadline(provided.isActive(runId), inspectTimeout, `Runner.isActive for run ${runId}`),
+      cancel: (runId) => deadline(provided.cancel(runId), cancelTimeout, `Runner.cancel for run ${runId}`)
+    }
 
     // The watermark only moves forward, and only past occurrences this process
     // finished dispatching. Advancing it before the work is what silently lost
@@ -594,7 +662,12 @@ export const make = (
                 return
               }
               if (!preserveBuffered) {
-                if (runId !== undefined) {
+                // A start that answered too late is ambiguous: the runtime may
+                // hold the run. Keep the occurrence pending exactly as when the
+                // launched result failed to persist, so the next tick retries
+                // under the same idempotency key and the runtime's durable
+                // deduplication answers with the same run.
+                if (runId !== undefined || error.code === "runner_timeout") {
                   yield* isolate(
                     { triggerId: trigger.id },
                     "launch compensation",
@@ -800,11 +873,6 @@ export const make = (
         )
       )
 
-    const claimAndDispatch = (
-      trigger: Registered,
-      occurrence: number
-    ): Effect.Effect<void, TriggerError> => withRevisionRefresh(trigger, (current) => claimOnce(current, occurrence))
-
     // The store reads, claims, and clears a buffer in one transaction. A
     // dispatch failure happens after that commit, so this process can safely
     // re-arm the occurrence before it reports the failure.
@@ -901,9 +969,12 @@ export const make = (
 
     const processTrigger = (
       trigger: Registered,
-      now: number
+      refreshed = false
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
+        // Each trigger reads the clock itself. One instant captured before the
+        // tick fanned out aged by every launch that finished ahead of it.
+        const now = yield* Clock.currentTimeMillis
         const running = yield* resolveActive(trigger)
         // Disable prevents future claims, not recovery of an already active
         // occurrence (including a plan waiting for a human decision).
@@ -912,14 +983,39 @@ export const make = (
         const due = yield* dueOccurrences(trigger, now)
         let dispatched: number | undefined
         let interrupted = false
+        let stale = false
         for (const occurrence of due.occurrences) {
           const settledHere = yield* attempted(
             { triggerId: trigger.id },
             `dispatch of occurrence ${occurrence}`,
-            claimAndDispatch(trigger, occurrence)
+            claimOnce(trigger, occurrence).pipe(
+              Effect.catch((error) =>
+                error.code === "revision_mismatch"
+                  ? Effect.sync(() => {
+                    stale = true
+                  })
+                  : Effect.fail(error)
+              )
+            )
           )
+          if (stale) break
           if (settledHere && !interrupted) dispatched = occurrence
           if (!settledHere) interrupted = true
+        }
+        if (stale) {
+          // The occurrences were computed from a declaration the store has
+          // since replaced, so the schedule decision is what went stale: a
+          // trigger edited to fire at noon owes nothing for the hourly
+          // boundary its old cron produced. Keep the boundary already
+          // dispatched, re-read once, and decide again from the refreshed cron
+          // and watermark. A second mismatch waits for the next tick, which
+          // reads again anyway. A buffered occurrence is store state rather
+          // than a computed decision, so `resumePending` retries it as is.
+          if (dispatched !== undefined) yield* observe(trigger.id, dispatched)
+          if (refreshed) return
+          const current = yield* store.get(trigger.id)
+          if (Option.isNone(current) || current.value.revision === trigger.revision) return
+          return yield* processTrigger(current.value, true)
         }
         if (!interrupted) return yield* observe(trigger.id, due.watermark)
         if (dispatched !== undefined) yield* observe(trigger.id, dispatched)
@@ -929,16 +1025,18 @@ export const make = (
 
     const runOnce = semaphore.withPermits(1)(
       Effect.gen(function*() {
-        const now = yield* Clock.currentTimeMillis
         // The heartbeat is observability, not dispatch: a store that cannot
         // record it is logged and the tick goes on, so a listing's "nothing is
         // listening" can never be caused by the row that reports it.
         yield* isolate({ host }, "heartbeat", store.heartbeat(host))
         const triggers = yield* store.list()
+        // Triggers are independent once claimed: the store fences each claim
+        // on its own row. Walking them in series let one launch waiting on a
+        // parked plan hold every trigger after it for the whole wait.
         yield* Effect.forEach(
           triggers,
-          (trigger) => isolate({ triggerId: trigger.id }, "tick", processTrigger(trigger, now)),
-          { discard: true }
+          (trigger) => isolate({ triggerId: trigger.id }, "tick", processTrigger(trigger)),
+          { concurrency, discard: true }
         )
       })
     )

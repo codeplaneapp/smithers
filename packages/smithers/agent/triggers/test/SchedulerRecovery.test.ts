@@ -154,7 +154,12 @@ describe("Scheduler recovery", () => {
             return "shared-run"
           })
       })
-      const scheduler = yield* Scheduler.make().pipe(Effect.provideService(Scheduler.Runner, runner.service))
+      // The start answers after its reservation lease. The default start
+      // deadline abandons a launch before the lease can expire, so this
+      // scenario needs a deadline above it.
+      const scheduler = yield* Scheduler.make({ startTimeout: "10 minutes" }).pipe(
+        Effect.provideService(Scheduler.Runner, runner.service)
+      )
       yield* TestClock.setTime(hour)
       yield* scheduler.runOnce
       expect(runner.cancelled).toEqual([])

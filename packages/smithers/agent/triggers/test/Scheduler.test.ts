@@ -5,6 +5,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
@@ -1083,5 +1084,266 @@ describe("Scheduler heartbeat", () => {
       )
     )
     expect(listed).toBe(1)
+  })
+})
+
+// One tick used to walk its triggers in series and wait on every launch, so a
+// runtime that never answered for one trigger held every trigger after it, and
+// the tick itself, for the life of the scope. Dispatch is now bounded on both
+// axes: independent triggers run concurrently and every runner call carries a
+// deadline whose failure keeps the durable state a retry needs.
+describe("Scheduler tick dispatch", () => {
+  const named = (id: string, overlap: Trigger["overlap"] = "skip"): Trigger => ({ ...trigger(overlap), id })
+
+  const settle = Effect.gen(function*() {
+    for (let round = 0; round < 8; round++) yield* Effect.yieldNow
+  })
+
+  const provideStore = <A, E>(effect: Effect.Effect<A, E, TriggerStore.TriggerStore>) =>
+    effect.pipe(Effect.provide(TestTriggers.layer), Effect.provide(TestClock.layer()))
+
+  // "a" waits two minutes for its runner; "z" is alphabetically behind it and
+  // used to wait the same two minutes for a launch that had nothing to do with
+  // it.
+  const slowFirst = (concurrency: number | undefined) =>
+    Effect.runPromise(
+      provideStore(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* TriggerStore.TriggerStore
+            const fixture = runnerFixture()
+            yield* seed(store, named("a"), fixture, "completed")
+            yield* seed(store, named("z"), fixture, "completed")
+            const runner = Scheduler.makeRunner({
+              ...fixture.service,
+              start: (input) =>
+                input.idempotencyKey.startsWith("a:")
+                  ? Effect.sleep("2 minutes").pipe(Effect.andThen(fixture.service.start(input)))
+                  : fixture.service.start(input)
+            })
+            const scheduler = yield* Scheduler.make({ concurrency }).pipe(
+              Effect.provideService(Scheduler.Runner, runner)
+            )
+            yield* TestClock.setTime(hour)
+            const tick = yield* Effect.forkScoped(scheduler.runOnce)
+            yield* settle
+            const beforeAdjust = fixture.starts.map((start) => start.idempotencyKey)
+            yield* TestClock.adjust("2 minutes")
+            yield* Fiber.join(tick)
+            return { beforeAdjust, after: fixture.starts.map((start) => start.idempotencyKey) }
+          })
+        )
+      )
+    )
+
+  it("launches a later trigger while an earlier one is still waiting on its runner", async () => {
+    const { after, beforeAdjust } = await slowFirst(undefined)
+    expect(beforeAdjust).toEqual([`z:${new Date(hour).toISOString()}`])
+    expect(after).toEqual([`z:${new Date(hour).toISOString()}`, `a:${new Date(hour).toISOString()}`])
+  })
+
+  it("serializes triggers when concurrency is one", async () => {
+    const { after, beforeAdjust } = await slowFirst(1)
+    expect(beforeAdjust).toEqual([])
+    expect(after).toEqual([`a:${new Date(hour).toISOString()}`, `z:${new Date(hour).toISOString()}`])
+  })
+
+  it("refuses a concurrency that is not a positive integer and a deadline that is not finite and positive", async () => {
+    const failures = await Effect.runPromise(
+      Effect.all([
+        Effect.flip(Effect.scoped(Scheduler.make({ concurrency: 0 }))),
+        Effect.flip(Effect.scoped(Scheduler.make({ concurrency: 1.5 }))),
+        Effect.flip(Effect.scoped(Scheduler.make({ startTimeout: 0 }))),
+        Effect.flip(Effect.scoped(Scheduler.make({ inspectTimeout: Number.POSITIVE_INFINITY }))),
+        Effect.flip(Effect.scoped(Scheduler.make({ cancelTimeout: -1 })))
+      ]).pipe(
+        Effect.provide(TestTriggers.layer),
+        Effect.provideService(Scheduler.Runner, Scheduler.makeNoopRunner())
+      )
+    )
+    expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
+      ["invalid_options", "concurrency"],
+      ["invalid_options", "concurrency"],
+      ["invalid_options", "startTimeout"],
+      ["invalid_options", "inspectTimeout"],
+      ["invalid_options", "cancelTimeout"]
+    ])
+    expect(failures[0]?.message).toBe("concurrency must be a positive integer")
+  })
+
+  // The runtime may or may not hold the run after a start that never answered,
+  // so the occurrence is neither failed nor forgotten: it stays pending under
+  // the same idempotency key, and the runtime's durable deduplication decides.
+  it("abandons a start that never answers and retries the occurrence under the same key", async () => {
+    const results: Array<TriggerStore.Result> = []
+    const fixture = runnerFixture()
+    let hung = false
+    const outcome = await Effect.runPromise(
+      provideTest(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* TriggerStore.TriggerStore
+            yield* seed(store, trigger(), fixture, "completed")
+            const runner = Scheduler.makeRunner({
+              ...fixture.service,
+              start: (input) =>
+                Effect.suspend(() => {
+                  if (hung) return fixture.service.start(input)
+                  hung = true
+                  fixture.starts.push(input)
+                  return Effect.never
+                })
+            })
+            const scheduler = yield* Scheduler.make({ startTimeout: "1 minute" }).pipe(
+              Effect.provideService(Scheduler.Runner, runner)
+            )
+            yield* TestClock.setTime(hour)
+            const tick = yield* Effect.forkScoped(scheduler.runOnce)
+            yield* settle
+            yield* TestClock.adjust("1 minute")
+            yield* settle
+            const finished = tick.pollUnsafe() !== undefined
+            const active = yield* store.activeRun("hourly")
+            const held = yield* store.inspect("hourly")
+            yield* scheduler.runOnce
+            return {
+              finished,
+              activeAfterTimeout: active,
+              pendingAfterTimeout: held.pendingAt,
+              activeAfterRetry: yield* store.activeRun("hourly"),
+              history: (yield* store.history({ triggerId: "hourly" })).items
+                .filter((item) => item.occurrence === hour)
+                .map((item) => [item.outcome, item.runId])
+            }
+          })
+        ),
+        results
+      )
+    )
+    expect(outcome.finished).toBe(true)
+    expect(outcome.activeAfterTimeout._tag).toBe("None")
+    expect(outcome.pendingAfterTimeout).toBe(hour)
+    expect(results.map((result) => result.outcome)).not.toContain("failed")
+    expect(fixture.starts.map((start) => start.idempotencyKey)).toEqual([
+      `hourly:${new Date(hour).toISOString()}`,
+      `hourly:${new Date(hour).toISOString()}`
+    ])
+    expect(outcome.activeAfterRetry).toEqual(Option.some("run-2"))
+    expect(outcome.history).toEqual([["launched", "run-2"]])
+  })
+
+  // An inspection that never answers is an inspection failure like any other:
+  // the monitor retries, then detaches and leaves the durable owner in place.
+  it("treats an inspection that never answers as a failed inspection", async () => {
+    const fixture = runnerFixture()
+    let inspections = 0
+    const active = await Effect.runPromise(
+      provideStore(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* TriggerStore.TriggerStore
+            yield* seed(store, trigger(), fixture, "completed")
+            const runner = Scheduler.makeRunner({
+              ...fixture.service,
+              isActive: () =>
+                Effect.suspend(() => {
+                  inspections++
+                  return Effect.never
+                })
+            })
+            const scheduler = yield* Scheduler.make({
+              runPollInterval: "1 second",
+              inspectTimeout: "10 seconds"
+            }).pipe(Effect.provideService(Scheduler.Runner, runner))
+            yield* TestClock.setTime(hour)
+            yield* scheduler.runOnce
+            yield* settle
+            yield* TestClock.adjust("1 minute")
+            yield* settle
+            return yield* store.activeRun("hourly")
+          })
+        )
+      )
+    )
+    expect(inspections).toBe(4)
+    expect(active).toEqual(Option.some("run-1"))
+  })
+
+  // The claim already replaced the prior run with the replacement's
+  // reservation. A cancellation that never answers fails the supersede the
+  // same way a refused one does: the prior run stays active and the
+  // replacement is queued, instead of the tick waiting forever.
+  it("restores the prior run when its cancellation never answers", async () => {
+    const fixture = runnerFixture()
+    const outcome = await Effect.runPromise(
+      provideStore(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* TriggerStore.TriggerStore
+            yield* seed(store, trigger("supersede"), fixture)
+            const runner = Scheduler.makeRunner({ ...fixture.service, cancel: () => Effect.never })
+            const scheduler = yield* Scheduler.make({ cancelTimeout: "10 seconds" }).pipe(
+              Effect.provideService(Scheduler.Runner, runner)
+            )
+            yield* TestClock.setTime(hour)
+            const tick = yield* Effect.forkScoped(scheduler.runOnce)
+            yield* settle
+            yield* TestClock.adjust("10 seconds")
+            yield* settle
+            return {
+              finished: tick.pollUnsafe() !== undefined,
+              active: yield* store.activeRun("hourly"),
+              pending: yield* store.takePending("hourly")
+            }
+          })
+        )
+      )
+    )
+    expect(outcome.finished).toBe(true)
+    expect(outcome.active).toEqual(Option.some("seed"))
+    expect(outcome.pending).toEqual(Option.some(hour))
+    expect(fixture.starts).toHaveLength(0)
+  })
+
+  // The occurrence was computed from the hourly cron the tick listed. By the
+  // time it claims, the trigger fires at noon, so the 01:00 boundary is owed
+  // by nobody; retrying that claim under the new revision launched it anyway.
+  it("recomputes due occurrences from the refreshed declaration on a revision mismatch", async () => {
+    const fixture = runnerFixture()
+    const edited: Trigger = { ...trigger("skip", "one"), id: "edited" }
+    const claims: Array<number> = []
+    await Effect.runPromise(
+      provideStore(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* TriggerStore.TriggerStore
+            yield* seed(store, edited, fixture, "completed")
+            let reregistered = false
+            const racing = TriggerStore.TriggerStore.of({
+              ...store,
+              claimFire: (fire) =>
+                Effect.gen(function*() {
+                  claims.push(fire.expectedRevision)
+                  if (!reregistered) {
+                    reregistered = true
+                    yield* store.register({ ...edited, cron: "0 12 * * *" })
+                  }
+                  return yield* store.claimFire(fire)
+                })
+            })
+            const scheduler = yield* Scheduler.make().pipe(
+              Effect.provideService(TriggerStore.TriggerStore, racing),
+              Effect.provideService(Scheduler.Runner, fixture.service)
+            )
+            yield* TestClock.setTime(hour)
+            yield* scheduler.runOnce
+            yield* TestClock.setTime(12 * hour)
+            yield* scheduler.runOnce
+          })
+        )
+      )
+    )
+    expect(claims).toEqual([1, 2])
+    expect(fixture.starts.map((start) => start.idempotencyKey)).toEqual([`edited:${new Date(12 * hour).toISOString()}`])
   })
 })

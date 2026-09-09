@@ -643,6 +643,10 @@ const parkedAttempts: number
 interface Options {
   readonly pollInterval?: Duration.Input | undefined
   readonly runPollInterval?: Duration.Input | undefined
+  readonly concurrency?: number | undefined
+  readonly startTimeout?: Duration.Input | undefined
+  readonly inspectTimeout?: Duration.Input | undefined
+  readonly cancelTimeout?: Duration.Input | undefined
   readonly host?: string | undefined
 }
 
@@ -651,6 +655,7 @@ interface Service {
 }
 
 const defaultHost: string
+const defaultConcurrency: number
 ```
 
 `pollInterval` defaults to one minute and paces the tick loop.
@@ -658,6 +663,34 @@ const defaultHost: string
 Both must be finite, positive Effect durations; zero polls a CPU-tight loop and
 an infinite interval never completes, and both are refused with
 `invalid_options` and `TriggerError.path` naming the field.
+
+`concurrency` is how many triggers one tick processes at the same time. It
+defaults to `defaultConcurrency`, which is 4, and must be a positive integer;
+anything else is refused with `invalid_options` at `concurrency`. Triggers are
+independent once claimed, because the store fences every claim on its own row,
+so a launch waiting on a parked plan holds one slot rather than every trigger
+listed after it. Each trigger reads the clock when its own processing starts,
+not once for the tick.
+
+`startTimeout`, `inspectTimeout`, and `cancelTimeout` bound one `Runner.start`,
+`Runner.isActive`, and `Runner.cancel` call. They default to four minutes,
+thirty seconds, and thirty seconds, must be finite, positive Effect durations,
+and are refused with `invalid_options` naming the field. The start default
+outlasts `layerControlRunner`'s bounded parked-approval retries and stays below
+the five-minute reservation lease, so an abandoned launch still owns its
+reservation. A deadline above the lease is allowed; a start that answers after
+its lease is reconciled as a late launch. A call that exceeds its deadline is
+interrupted and fails with `runner_timeout`:
+
+- A start that times out is ambiguous, because the runtime may hold the run.
+  The occurrence is neither failed nor forgotten: the reservation is released
+  and the occurrence stays pending, so the next tick retries it under the same
+  `idempotencyKey` and the runtime's durable deduplication answers with the
+  same run. The tick waits at most `startTimeout` for one launch.
+- An inspection that times out is an inspection failure: the monitor retries
+  and then detaches, retaining the durable owner.
+- A cancellation that times out fails the supersede: the prior run is restored
+  as active and the replacement is queued.
 
 `host` is the name every tick records its heartbeat under through
 `TriggerStore.heartbeat`, so a listing can say which host last polled the
@@ -915,21 +948,22 @@ testing the protocol rather than the implementation.
 `TriggerError.code` is stable. Branch on the code instead of parsing the
 message.
 
-| Code                      | Raised when                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `unknown_trigger`         | A claim, result, pending-state, active-run, or inspect operation requires a trigger row that does not exist. |
-| `trigger_disabled`        | A claim reads a disabled trigger inside its transaction.                                                     |
-| `stale_owner`             | A result or compensation no longer owns a permissible fire transition.                                       |
-| `revision_mismatch`       | `ClaimFire.expectedRevision` differs from the revision read by the claim transaction.                        |
-| `invalid_schedule`        | `Schedule.make` cannot decode the schedule declaration.                                                      |
-| `invalid_trigger`         | `Trigger.make` cannot decode a trigger, or SQL registration receives input with no JSON representation.      |
-| `invalid_options`         | A cron occurrence limit, a history page limit, or a scheduler polling interval violates its contract.        |
-| `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                                    |
-| `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                                   |
-| `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.           |
-| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.       |
-| `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.                    |
-| `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.           |
+| Code                      | Raised when                                                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `unknown_trigger`         | A claim, result, pending-state, active-run, or inspect operation requires a trigger row that does not exist.            |
+| `trigger_disabled`        | A claim reads a disabled trigger inside its transaction.                                                                |
+| `stale_owner`             | A result or compensation no longer owns a permissible fire transition.                                                  |
+| `revision_mismatch`       | `ClaimFire.expectedRevision` differs from the revision read by the claim transaction.                                   |
+| `invalid_schedule`        | `Schedule.make` cannot decode the schedule declaration.                                                                 |
+| `invalid_trigger`         | `Trigger.make` cannot decode a trigger, or SQL registration receives input with no JSON representation.                 |
+| `invalid_options`         | A cron occurrence limit, a history page limit, or a scheduler interval, deadline, or concurrency violates its contract. |
+| `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                                               |
+| `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                                              |
+| `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.                      |
+| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.                  |
+| `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.                               |
+| `runner_timeout`          | A `Runner.start`, `isActive`, or `cancel` call exceeded `startTimeout`, `inspectTimeout`, or `cancelTimeout`.           |
+| `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.                      |
 
 `TriggerError.path` optionally identifies the offending declaration or option
 as a dotted field path. Schema and option failures set it when they can locate
@@ -1014,11 +1048,12 @@ selects `none`, `one`, or `all`, and every policy answers to the bound. In
 particular, `one` fails with `catch_up_bound_exceeded` when it owes an
 occurrence and `maxCatchUp` is 0.
 
-`Scheduler.Options.pollInterval` and `runPollInterval` must be finite, positive
-Effect durations. Invalid values fail with `invalid_options` and identify the
-field in `TriggerError.path`. `Scheduler.parkedAttempts` is 8. If the eighth
-Control attempt remains parked awaiting approval, the launch fails with
-`runner`.
+`Scheduler.Options.pollInterval`, `runPollInterval`, `startTimeout`,
+`inspectTimeout`, and `cancelTimeout` must be finite, positive Effect
+durations, and `concurrency` must be a positive integer. Invalid values fail
+with `invalid_options` and identify the field in `TriggerError.path`.
+`Scheduler.parkedAttempts` is 8. If the eighth Control attempt remains parked
+awaiting approval, the launch fails with `runner`.
 
 A bound breach logs a warning and abandons catch-up. On the first poll after
 restart, that includes the current occurrence; scheduling resumes at a later

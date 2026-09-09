@@ -72,8 +72,13 @@ Three refusals come out of that read, and each names one thing to do:
 | `trigger_disabled`  | The row exists and `enabled` is false.                                               |
 | `revision_mismatch` | Somebody re-registered the trigger. Re-read the row and decide again.                |
 
-The scheduler answers `revision_mismatch` by refreshing once and retrying once.
-One retry is enough, because the next tick reads again anyway.
+The scheduler answers `revision_mismatch` by re-reading the row once and
+deciding again from it. The occurrences it was claiming were computed from the
+old declaration, so it does not retry them: it recomputes what is due from the
+refreshed cron, timezone, and watermark, and a trigger edited to fire at noon
+owes nothing for the hourly boundary its old cron produced. A buffered
+occurrence is store state rather than a computed decision, so its resumption is
+retried as is. One refresh is enough, because the next tick reads again anyway.
 
 ## A claim that wins hands back work, or a decision
 

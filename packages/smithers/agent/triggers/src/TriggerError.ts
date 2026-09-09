@@ -32,6 +32,7 @@ export const TriggerErrorCode = Schema.Literals([
   "verification_failed",
   "catch_up_bound_exceeded",
   "runner",
+  "runner_timeout",
   "store"
 ])
 

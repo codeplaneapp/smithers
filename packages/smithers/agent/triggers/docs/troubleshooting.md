@@ -60,8 +60,11 @@ input, since a getter can produce different values or throw on a later read.
 - A cron occurrence limit was not a non-negative safe integer. `path` is
   `"limit"`, and the message repeats the value it received, including `NaN` and
   `Infinity`.
-- A scheduler interval was not a finite, positive Effect duration. `path` is
-  `"pollInterval"` or `"runPollInterval"`.
+- A scheduler interval or deadline was not a finite, positive Effect duration.
+  `path` is `"pollInterval"`, `"runPollInterval"`, `"startTimeout"`,
+  `"inspectTimeout"`, or `"cancelTimeout"`.
+- A scheduler `concurrency` was not a positive integer. `path` is
+  `"concurrency"`.
 - A `TriggerStore.history` limit was not a positive safe integer. `path` is
   `"limit"`. Zero is refused here because a zero-row page can never carry a
   cursor.
@@ -124,8 +127,9 @@ built from a stale copy is refused rather than obeyed.
 the row. Somebody re-registered the trigger between the read and the claim.
 
 **What to change.** Re-read the trigger and decide again. The scheduler already
-does this: it refreshes once and retries once, which is enough because the next
-tick reads again anyway.
+does this: it refreshes once and recomputes what is due from the refreshed
+declaration rather than retrying the occurrence the old one produced, which is
+enough because the next tick reads again anyway.
 
 ## verification_failed
 
@@ -174,6 +178,21 @@ at `runPollInterval`, capped at one minute. Exhaustion detaches the monitor;
 subsequent ticks inspect the retained owner again. Restore Control access to
 resume completion detection. The default run poll interval is fifteen seconds.
 An inspection outage does not record a failed run or cancel it.
+
+## runner_timeout
+
+**What happened.** One `Runner.start`, `isActive`, or `cancel` call exceeded
+`startTimeout`, `inspectTimeout`, or `cancelTimeout`. The defaults are four
+minutes, thirty seconds, and thirty seconds. The call was interrupted.
+
+**What to change.** Nothing is lost. A start that timed out leaves the
+occurrence pending, so the next tick retries it under the same `idempotencyKey`
+and a runtime that did start the run answers with the same run id. An
+inspection that timed out is retried like any inspection failure. A
+cancellation that timed out restores the prior run as active and queues the
+replacement. If the runtime is healthy and merely slow, raise the deadline in
+`Scheduler.Options`; a parked plan needs a `startTimeout` above the two minutes
+`parkedAttempts` allows.
 
 ## store
 
