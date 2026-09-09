@@ -2,7 +2,7 @@ import { Badge, Button, Input, KpiStat, Skeleton, StatusPill } from "@smthrs/ui"
 import type { TargetDetail, TargetRunState, TargetsViewMode } from "@smthrs/rpc/Cards"
 import { TARGET_RUN_STATES, TARGETS_VIEW_MODES } from "@smthrs/rpc/Cards"
 import type { RunRecord } from "@smthrs/rpc/TargetGraph"
-import { Fragment } from "react"
+import { Fragment, useMemo } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 import { timeLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
@@ -288,14 +288,18 @@ export const TargetsCardBody = ({
   const { repoId, repoName, status, targets, warnings, highlighted, view, runs, starred } = card.payload
   /* Copy rule (apps/DESIGN.md §9): the root workspace is the repository, never the "." path token. */
   const workspaceLabel = (workspace: string): string => (workspace === "." ? repoName : workspace)
-  const facts = { starred }
-  const flat = targetRows(targets, runs, facts)
-  const rows = groupRows(flat, facts)
+  /*
+   * The table is the expensive part of the card (a repository's targets run to
+   * the hundreds), and it is a pure function of the payload — so it is derived
+   * once per payload, not once per render of whatever else moved.
+   */
+  const flat = useMemo(() => targetRows(targets, runs, { starred }), [targets, runs, starred])
+  const rows = useMemo(() => groupRows(flat, { starred }), [flat, starred])
   const mode = viewMode(view, rows)
-  const strip = patternRuns(targets)
-  const shown = filterRows(rows, view, mode)
-  const kinds = kindsOf(targets)
-  const workspaces = workspacesOf(targets)
+  const strip = useMemo(() => patternRuns(targets), [targets])
+  const shown = useMemo(() => filterRows(rows, view, mode), [rows, view, mode])
+  const kinds = useMemo(() => kindsOf(targets), [targets])
+  const workspaces = useMemo(() => workspacesOf(targets), [targets])
   const selectedRow = view?.selected === undefined ? undefined : flat.find((row) => row.target.label === view.selected)
   const expanded = new Set(view?.expanded ?? [])
 

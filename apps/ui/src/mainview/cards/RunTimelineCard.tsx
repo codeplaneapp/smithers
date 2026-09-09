@@ -8,7 +8,7 @@
  * replays the recorded events into this card and the graph overlay.
  */
 import { Button, EmptyState, KpiStat, StatusPill } from "@smthrs/ui"
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import type { NodeTiming } from "@smthrs/rpc/TargetGraph"
 import { timeLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
@@ -65,7 +65,11 @@ export const RunTimelineCardBody = ({
   }
   const axis = extent ?? timelineExtent(nodes)
   const critical = new Set(summary?.criticalPath ?? [])
-  const rows = [...nodes].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.label.localeCompare(b.label))
+  /* One sort per node set, not one per render of the card around it. */
+  const rows = useMemo(
+    () => [...nodes].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.label.localeCompare(b.label)),
+    [nodes]
+  )
 
   return (
     <div className="run-timeline-card" data-testid={`run-timeline-${runId}`}>

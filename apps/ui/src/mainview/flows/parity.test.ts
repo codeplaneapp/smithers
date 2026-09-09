@@ -336,19 +336,40 @@ describe("launch-law parity: every affordance is a command", () => {
     expect(app).toContain("runCommandArgs(\"chat.copy-message\"")
     expect(app).toContain("runCommandArgs(\"toast.dismiss\"")
     expect(app).toContain("runCommandArgs(\n")
-    expect(app).toContain("\"approval.approve\"")
-    expect(app).toContain("\"approval.deny\"")
-    expect(app).toContain("runCommandArgs(\"card.maximize\"")
-    expect(app).toContain("runCommand(\"frame.back\"")
-    expect(app).toContain("runCommand(\"frame.forward\"")
-    expect(app).toContain("runCommand(\"frame.fork\"")
-    expect(app).toContain("runCommandArgs(\"tab.card\"")
-    expect(files["../tabs/CardTabBody.tsx"]).toContain("runCommandArgs(\"tab.card\"")
-    expect(app).toContain("runCommandArgs(\"connector.add\"")
-    expect(app).toContain("runCommandArgs(\"flow.run\"")
     const connectors = files["../ConnectorsSurface.tsx"]
     expect(connectors).toContain("runCommandArgs(\"connector.downgrade\"")
     expect(connectors).toContain("runCommandArgs(\"connector.remove\"")
+  })
+
+  /*
+   * A card's acts are bound in ONE place (cards/CardActions.ts) that the
+   * transcript and a card tab both spread, so the two copies cannot drift —
+   * the tab used to keep its own and had no frame controls at all. Both call
+   * sites are pinned here, so deleting the shared binding fails loudly.
+   */
+  test("every card act is bound once, and both card surfaces use that binding", () => {
+    const actions = read("../cards/CardActions.ts")
+    expect(actions).toContain("\"approval.approve\"")
+    expect(actions).toContain("\"approval.deny\"")
+    expect(actions).toContain("runCommandArgs(\"admin.grant.confirm\"")
+    expect(actions).toContain("runCommandArgs(\"admin.grant.cancel\"")
+    expect(actions).toContain("runCommandArgs(\"admin.queue.approve\"")
+    expect(actions).toContain("runCommandArgs(\"card.maximize\"")
+    expect(actions).toContain("runCommand(\"card.minimize\"")
+    expect(actions).toContain("runCommand(\"frame.back\"")
+    expect(actions).toContain("runCommand(\"frame.forward\"")
+    expect(actions).toContain("runCommand(\"frame.fork\"")
+    expect(actions).toContain("runCommandArgs(\"tab.card\"")
+    expect(actions).toContain("runCommand(\"auth.sign-in\"")
+    expect(actions).toContain("runCommandArgs(\"connector.add\"")
+    expect(actions).toContain("runCommandArgs(\"flow.run\"")
+    expect(actions).toContain("runCommandArgs(\"flow.run.stop\"")
+    expect(actions).toContain("runCommandArgs(\"flow.run.retry\"")
+    expect(actions).toContain("runCommandArgs(\"flow.repo.choose\"")
+    expect(actions).toContain("runCommandArgs(\"wiki.edit\"")
+    for (const surface of ["../App.tsx", "../tabs/CardTabBody.tsx"] as const) {
+      expect(files[surface]).toContain("cardActions(controller)")
+    }
   })
 
   /*

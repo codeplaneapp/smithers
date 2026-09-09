@@ -28,9 +28,10 @@ import {
   Workflow
 } from "lucide-react"
 import { BacklinksPanel, OutlineView } from "@smthrs/ui/vault"
-import { lazy, Suspense, useRef, useState } from "react"
+import { lazy, Suspense, useMemo, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
 import { CardView } from "./ChatCards"
+import { cardActions } from "./cards/CardActions"
 import { TriggerListCardBody } from "./cards/TriggersCard"
 import { WorkflowListCardBody } from "./cards/WorkflowCards"
 import { Composer } from "./Composer"
@@ -214,7 +215,14 @@ function App() {
     )
   const canListTriggers = controller.commands.find("triggers.list") !== undefined
   const canShowFactory = controller.commands.find("factory.show") !== undefined
-  const worldDocuments = [...worldDocumentRows].sort((left, right) => left.path.localeCompare(right.path))
+  /*
+   * A stable array: CardView is memoized, and re-sorting the same rows into a
+   * fresh array on every render would re-render every card body regardless.
+   */
+  const worldDocuments = useMemo(
+    () => [...worldDocumentRows].sort((left, right) => left.path.localeCompare(right.path)),
+    [worldDocumentRows]
+  )
   const pendingWorldDelete = worldDocuments.find(
     (document) => document.id === (session.pendingWorldDeleteId ?? null)
   )
@@ -284,10 +292,19 @@ function App() {
    * (repo.welcome, controller/onboarding.ts), whose maintain and contribute
    * doors render the sign-in step when it is needed. Reads and chat work.
    */
-  const exploringRepo = identity?.state === "signed-out" && controller.bootstrap?.host === "cloud"
+  /*
+   * The host, named once, because the sign-in message and the gate below both
+   * read it. `AppBootstrap.host` is exactly "cloud" or "local", so on every
+   * real host `cloudHost` and the gate's `host !== "local"` are the same
+   * answer; they part only where there is no bootstrap at all (a harness),
+   * and there the empty transcript is the pinned behaviour — a build that
+   * cannot name its host has no sign-in to offer and no opening read to give.
+   */
+  const cloudHost = controller.bootstrap?.host === "cloud"
+  const exploringRepo = identity?.state === "signed-out" && cloudHost
     ? catalogRepositoryOf(session.activeRepoKey, repositoryRows)
     : null
-  const authMessage: Message | undefined = identity?.state === "signed-out" && controller.bootstrap?.host === "cloud"
+  const authMessage: Message | undefined = identity?.state === "signed-out" && cloudHost
     ? exploringRepo === null
       ? {
         id: "auth-state",
@@ -385,6 +402,12 @@ function App() {
   })
   // Admin chrome follows the same capability-filtered registry as every act.
   const isAdmin = controller.commands.find("admin.devtools") !== undefined
+  /*
+   * One binding object for every card in the transcript, and the same one a
+   * card tab spreads (cards/CardActions.ts). Built against the controller, not
+   * this render, so a card whose record did not change can bail out.
+   */
+  const actions = cardActions(controller)
 
   /*
    * §2a″ (wave 12 §4): auth is a conversation STATE, and a state shows only
@@ -547,36 +570,11 @@ function App() {
                   <CardView
                     key={entry.card.id}
                     card={entry.card}
-                    onDecideApproval={(id, decision) =>
-                      controller.runCommandArgs(
-                        decision === "approved" ? "approval.approve" : "approval.deny",
-                        id
-                      )}
-                    onGrantConfirm={(id) => controller.runCommandArgs("admin.grant.confirm", id)}
-                    onGrantCancel={(id) => controller.runCommandArgs("admin.grant.cancel", id)}
-                    onQueueApprove={(login) => controller.runCommandArgs("admin.queue.approve", login)}
                     maximized={session.maximizedCardId === entry.card.id}
-                    onMaximize={(id) => controller.runCommandArgs("card.maximize", id)}
-                    onMinimize={() => controller.runCommand("card.minimize")}
-                    onFrameBack={() => controller.runCommand("frame.back")}
-                    onFrameForward={() => controller.runCommand("frame.forward")}
-                    onForkFrame={() => controller.runCommand("frame.fork")}
-                    onOpenInTab={(id) => controller.runCommandArgs("tab.card", id)}
-                    onConnectGitHub={() => controller.runCommand("auth.sign-in")}
-                    onConnectLocal={() => controller.runCommandArgs("connector.add", "read")}
-                    onRunWorkflow={(name) => controller.runCommandArgs("flow.run", name)}
-                    onStopRun={(id) => controller.runCommandArgs("flow.run.stop", id)}
-                    onRetryRun={(id) => controller.runCommandArgs("flow.run.retry", id)}
-                    onChooseWorkflowRepo={(name) => controller.runCommandArgs("flow.repo.choose", name)}
                     debugVerbose={session.verbose === true}
                     signedOut={identity?.state === "signed-out"}
                     worldDocuments={worldDocuments}
-                    onChangeWorldDocument={(id, body) => controller.runCommandArgs("wiki.edit", `${id} ${JSON.stringify(body)}`)}
-        onAttachWorldEditor={controller.attachWorldEditor}
-                    onRunCommand={(name, commandArgs) =>
-                      commandArgs === undefined
-                        ? controller.runCommand(name)
-                        : controller.runCommandArgs(name, commandArgs)}
+                    {...actions}
                   />
                 ) :
                 entry.message.act !== undefined ?

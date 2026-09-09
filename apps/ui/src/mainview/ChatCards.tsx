@@ -8,7 +8,7 @@
  */
 import { Button, StatusPill } from "@smthrs/ui"
 import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "lucide-react"
-import { useRef } from "react"
+import { memo, useRef } from "react"
 import type { CardActions } from "./cards/CardFamily"
 import { pillStatus, renderCardBody } from "./cards/CardRenderers"
 import type { Card } from "./state/AppState"
@@ -26,7 +26,14 @@ export interface CardViewProps extends CardActions {
   readonly onOpenInTab: (id: string) => void
 }
 
-export function CardView({
+/*
+ * Memoized: App renders the whole transcript on every streaming token, and a
+ * card whose props are unchanged has nothing new to draw. Every callback comes
+ * from cards/CardActions.ts, built once per controller, so the default shallow
+ * comparison actually bails out — the only cards that re-render are the ones
+ * whose record, maximized state, verbose flag or world documents changed.
+ */
+export const CardView = memo(function CardView({
   card,
   maximized,
   onDecideApproval,
@@ -208,4 +215,4 @@ export function CardView({
       </section>
     </>
   )
-}
+})
