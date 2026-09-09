@@ -57,6 +57,12 @@ closed `code` (`invalid_payload`, `spawn_failed`, `timed_out`, `signaled`,
 child, the `signal` itself, so a caller decides what to do without parsing
 stderr.
 
+`Exec.cacheDirectoryToken` in argv resolves to the absolute host cache directory
+immediately before spawn, after workspace confinement checks. Its path is
+independent of the child `cwd`. Append cache filenames directly to the token;
+do not prepend a relative path from the working directory. `DepsLint` uses
+this token for both writing its generated knip config and passing `--config`.
+
 `ExecSandbox` anchors write grants at the canonical workspace root. A write
 with a symbolic link in any component below that root is refused, including
 internal and dangling links and missing outputs below linked ancestors. File

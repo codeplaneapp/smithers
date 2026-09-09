@@ -26,10 +26,11 @@ import * as Secret from "./Secret.ts"
 import * as SecretProxy from "./SecretProxy.ts"
 
 /**
- * Placeholder resolved to the host cache directory immediately before spawn.
+ * Placeholder resolved to the absolute host cache directory immediately before spawn.
  *
  * Keeping the real directory out of an action payload prevents workspace
- * placement from becoming step-key material.
+ * placement from becoming step-key material. The substituted path is independent
+ * of the child working directory.
  *
  * @category constants
  * @since 0.1.0
@@ -1192,7 +1193,7 @@ export const run = (
         const cacheRoot = resolveWorkspacePath(options.workspaceRoot, cacheDirectory)
         const substitute = (value: string): string =>
           resolveScriptToken(
-            value.replaceAll(cacheDirectoryToken, cacheDirectory).replaceAll(runtimeBinToken, process.execPath)
+            value.replaceAll(cacheDirectoryToken, cacheRoot).replaceAll(runtimeBinToken, process.execPath)
           )
         const [executable, ...args] = payload.argv
         const resolved: Payload = {

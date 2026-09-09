@@ -7,7 +7,6 @@ import * as Node from "@smthrs/plan/Node"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { createHash } from "node:crypto"
-import * as NodePath from "node:path"
 import * as Exec from "./Exec.ts"
 import * as Input from "./Input.ts"
 import * as PackageManager from "./PackageManager.ts"
@@ -125,7 +124,6 @@ export const DepsLint = Target.make("DepsLint", {
     }
     const config = knipConfig(attrs)
     const configPath = `${Exec.cacheDirectoryToken}/knip-${fingerprint(config)}.json`
-    const fromCwd = NodePath.posix.relative(attrs.cwd, configPath)
     return Target.runTool({
       cwd: ".",
       argv: Runtime.evaluate(attrs.runtime, writeProgram, [configPath, config])
@@ -133,7 +131,7 @@ export const DepsLint = Target.make("DepsLint", {
       Node.bindPlanned((written) =>
         Target.runTool({
           cwd: attrs.cwd,
-          argv: PackageManager.exec(attrs.packageManager, ["knip", "--dependencies", "--config", fromCwd]),
+          argv: PackageManager.exec(attrs.packageManager, ["knip", "--dependencies", "--config", configPath]),
           after: written
         })
       )

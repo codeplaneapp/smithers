@@ -165,6 +165,24 @@ describe("run", () => {
     expect(await Fs.readFile(NodePath.join(root, ".flows.txt"), "utf8")).toBe("ok")
   })
 
+  it("substitutes the checked cache root when the child runs in a subdirectory", async () => {
+    await Fs.mkdir(NodePath.join(root, "sub"))
+    const exit = await run(
+      { workspaceRoot: root, cacheDirectory: ".flows" },
+      payload([
+        "node",
+        "-e",
+        `const fs = require('node:fs');
+         fs.mkdirSync(require('node:path').dirname(process.argv[1]), { recursive: true });
+         fs.writeFileSync(process.argv[1], 'ok');`,
+        `${Exec.cacheDirectoryToken}/probe.txt`
+      ], "sub")
+    )
+    expect(Exit.isSuccess(exit)).toBe(true)
+    expect(await Fs.readdir(NodePath.join(root, "sub"))).toEqual([])
+    expect(await Fs.readFile(NodePath.join(root, ".flows", "probe.txt"), "utf8")).toBe("ok")
+  })
+
   /**
    * The gap this closes: substitution ran before anything validated the
    * directory it substituted. `normalizeCacheDirectory` settles the lexical
