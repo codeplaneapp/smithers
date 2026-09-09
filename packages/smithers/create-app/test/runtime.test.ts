@@ -1,18 +1,27 @@
 /**
  * `materializeFlow` is where a flow file's declaration and its resolved
  * `AGENT.ts` meet, so what it names and in which order it stacks the system
- * teaching is the contract. The end-to-end path through `layerFor` is covered
- * by the cached-model suite; this one pins the parts that a run would only
- * reveal indirectly.
+ * teaching is the contract. `layerFor` must also carry declared budgets into
+ * the real host and refuse cells and runs at those boundaries.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { describe, expect, it } from "@effect/vitest"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as EventSink from "@smthrs/agent/EventSink"
 import * as Capability from "@smthrs/capability/Capability"
+import { Interpreter } from "@smthrs/flow"
+import type * as AgentEvent from "@smthrs/harness/AgentEvent"
+import * as FlowBinding from "@smthrs/harness/FlowBinding"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { defineAgent, defineFlow, defineSandbox, defineTools, type ToolsGrant, type ToolsSpec } from "../src/app.ts"
 import { emptyRegistry, LayerError, layerFor, materializeFlow } from "../src/runtime.ts"
+import { preparedRequest } from "../src/testing.ts"
 
 const spec = defineFlow({
   description: "Answers a topic in one line.",
@@ -44,40 +53,46 @@ describe("materializeFlow", () => {
 })
 
 describe("layer inputs", () => {
-  it("projects the two layer files onto the sandbox limits the host takes", () => {
-    // The mapping is asserted through the specs rather than through the built
-    // layer, which keeps no readable record of what it was given.
-    const sandbox = defineSandbox({ limits: { heapBytes: 1024, interruptChecks: 10, wallClockMs: 5 } })
-    expect(sandbox.limits.heapBytes).toBe(1024)
-    expect(defineAgent({ seat: "s", system: [], limits: { calls: 4 } }).limits?.calls).toBe(4)
-    expect(defineTools({ sources: [] }).sources).toEqual([])
-  })
-
-  it("composes a host whether or not the agent layer declares budgets", () => {
-    const seats = { resolve: () => Effect.die("unused") as never }
-    const sandbox = defineSandbox({ limits: { heapBytes: 1024, interruptChecks: 10, wallClockMs: 5 } })
-    const crypto = NodeCrypto.layer
-    // Declared budgets and defaulted budgets are two different limit records,
-    // and only building both proves the fallbacks are wired.
-    expect(
-      layerFor({
-        agent: defineAgent({ seat: "s", system: [], limits: { calls: 4 }, maxFrames: 3 }),
-        sandbox,
-        tools: defineTools({ sources: [] }),
-        seats,
-        crypto
-      })
-    ).toBeDefined()
-    expect(
-      layerFor({
-        agent: defineAgent({ seat: "s", system: [] }),
-        sandbox,
-        tools: defineTools({ sources: [] }),
-        seats,
-        crypto
-      })
-    ).toBeDefined()
-  })
+  for (
+    const { name, declaredAgent, sandbox, limits, maxFrames } of [
+      {
+        name: "explicit",
+        declaredAgent: defineAgent({ seat: "s", system: [], limits: { calls: 4 }, maxFrames: 3 }),
+        sandbox: defineSandbox({ limits: { heapBytes: 1024, interruptChecks: 10, wallClockMs: 5 } }),
+        limits: { calls: 4, memoryBytes: 1024, steps: 10, totalMs: 5 },
+        maxFrames: 3
+      },
+      {
+        name: "zero",
+        declaredAgent: defineAgent({ seat: "s", system: [], limits: { calls: 0 }, maxFrames: 0 }),
+        sandbox: defineSandbox({ limits: { heapBytes: 0, interruptChecks: 0, wallClockMs: 0 } }),
+        limits: { calls: 0, memoryBytes: 0, steps: 0, totalMs: 0 },
+        maxFrames: 0
+      },
+      {
+        name: "omitted",
+        declaredAgent: defineAgent({ seat: "s", system: [] }),
+        sandbox: defineSandbox({ limits: {} }),
+        limits: { calls: 16, memoryBytes: undefined, steps: undefined, totalMs: undefined },
+        maxFrames: 8
+      }
+    ]
+  ) {
+    it(`projects ${name} budgets onto the built AgentAction.Host`, async () => {
+      const host = await Effect.runPromise(
+        AgentAction.Host.pipe(Effect.provide(layerFor({
+          agent: declaredAgent,
+          sandbox,
+          tools: defineTools({ sources: [] }),
+          seats: { resolve: () => Effect.die("host inspection must not resolve a seat") },
+          crypto: NodeCrypto.layer
+        })))
+      )
+      expect(host.limits).toStrictEqual(limits)
+      expect(host.maxFrames).toBe(maxFrames)
+      expect(host.flows).toEqual([])
+    })
+  }
 
   it("shows a cell an empty catalog", async () => {
     const registry = emptyRegistry()
@@ -85,6 +100,92 @@ describe("layer inputs", () => {
     expect(await Effect.runPromise(registry.visible())).toEqual([])
     expect(Option.isNone(await Effect.runPromise(registry.getOption("anything")))).toBe(true)
   })
+})
+
+describe("runtime budget boundaries", () => {
+  for (const exceedsCalls of [true, false]) {
+    it(`refuses a flow at its ${exceedsCalls ? "call and frame" : "frame"} budget`, async () => {
+      let modelCalls = 0
+      const toolCalls: Array<number> = []
+      const events: Array<AgentEvent.AgentEvent> = []
+      const tool = FlowBinding.make({
+        flow: {
+          name: "test/tick",
+          input: Schema.Struct({ index: Schema.Number }),
+          output: Schema.Number,
+          capabilities: [],
+          effects: undefined
+        },
+        handler: ({ index }) =>
+          Effect.sync(() => {
+            toolCalls.push(index)
+            return index
+          })
+      })
+      // The over-budget cell would complete if its second call were admitted.
+      // The other cell stays within the call budget but never completes, so
+      // only the frame budget prevents another model request.
+      const cell = exceedsCalls
+        ? `for (let index = 0; index < 2; index++) await ctx.call("test/tick", { index });
+           await ctx.done({ answer: "over budget" })`
+        : `await ctx.call("test/tick", { index: 0 })`
+      const model = Model.make({
+        stream: () =>
+          Stream.suspend(() => {
+            modelCalls++
+            return Stream.fromIterable([
+              ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+              ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: "```cell\n" + cell + "\n```" }),
+              ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+              ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+            ])
+          })
+      })
+      const declaredAgent = defineAgent({ seat: "test:scripted", system: [], limits: { calls: 1 }, maxFrames: 2 })
+      const materialized = materializeFlow("budget", spec, declaredAgent)
+      const host = layerFor({
+        agent: declaredAgent,
+        sandbox: defineSandbox({ limits: { heapBytes: 32 * 1024 * 1024, wallClockMs: 10_000 } }),
+        tools: defineTools({ sources: [FlowBinding.source("test", [tool])] }),
+        seats: { resolve: () => Effect.succeed({ model, route: { prepare: () => Effect.succeed(preparedRequest) } }) },
+        crypto: NodeCrypto.layer
+      })
+      const runtime = Layer.mergeAll(materialized.action.layer, Interpreter.layer(materialized.flow)).pipe(
+        Layer.provideMerge(host)
+      )
+      const exit = await Effect.runPromise(
+        materialized.flow.execute({ topic: "budgets" }, { executionId: `budget/${exceedsCalls}` }).pipe(
+          Effect.provide(runtime),
+          Effect.provideService(EventSink.EventSink, {
+            emit: (event) =>
+              Effect.sync(() => {
+                events.push(event)
+              })
+          }),
+          Effect.exit
+        )
+      )
+
+      expect(modelCalls).toBe(2)
+      expect(toolCalls).toEqual([0, 0])
+      expect(exit).toMatchObject({ _tag: "Failure" })
+      expect(JSON.stringify(exit)).toContain("FramesExhausted")
+      expect(JSON.stringify(exit)).toContain("ended without a completed answer after 2 frames")
+      const outcomes = events.filter((event) => event._tag === "cell-settled").map((event) => event.outcome)
+      expect(outcomes).toHaveLength(2)
+      if (exceedsCalls) {
+        for (const outcome of outcomes) {
+          expect(outcome).toMatchObject({
+            _tag: "rejected",
+            code: "limit_exceeded",
+            message: "This cell exceeded its limit of 1 flow calls"
+          })
+        }
+      } else {
+        expect(outcomes.every((outcome) => outcome._tag === "settled")).toBe(true)
+      }
+    })
+  }
 })
 
 /**
