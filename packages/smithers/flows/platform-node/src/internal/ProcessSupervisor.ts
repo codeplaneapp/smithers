@@ -20,6 +20,10 @@ import { source } from "./SupervisorProgram.ts"
 const startupMs = 5000
 const deliveryMs = 500
 const exitAllowanceMs = 2500
+// Host-wide process observations can exceed a socket-delivery deadline on a
+// loaded machine. Keep verification bounded without mistaking that delay for
+// an unclean exit; an unknown observation still never counts as success.
+const verificationMs = 2500
 const targets = new WeakMap<ChildProcessHandle, Control>()
 
 /**
@@ -372,7 +376,7 @@ export const prepare = (
       yield* bounded(wait(control.ended.promise, "kill", command.command), deliveryMs, "kill", command.command).pipe(
         Effect.ignore
       )
-      const deadline = Date.now() + deliveryMs
+      const deadline = Date.now() + verificationMs
       for (;;) {
         const observed = grouped ? snapshot() : undefined
         settled = !control.cleanupFailed && (!requireCleanupReceipt || control.cleanupAcknowledged) && (grouped
@@ -384,7 +388,17 @@ export const prepare = (
             failure(
               "kill",
               command.command,
-              new Error("Process cleanup could not be verified; its ledger record is retained")
+              new Error("Process cleanup could not be verified; its ledger record is retained", {
+                cause: {
+                  fault: control.fault,
+                  cleanupFailed: control.cleanupFailed,
+                  cleanupRequired: requireCleanupReceipt,
+                  cleanupAcknowledged: control.cleanupAcknowledged,
+                  targetDone: control.targetDone,
+                  ownerObserved: observed !== undefined,
+                  members: observed?.members
+                }
+              })
             )
           )
         }

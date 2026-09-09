@@ -47,6 +47,7 @@ interface Settings {
   readonly stop?: "exit" | "ignore" | "open-channel" | "cleanup-error"
   readonly snapshot?: "empty" | "survivor" | "own-group" | "owner"
   readonly endOnDisconnect?: boolean
+  readonly snapshotUnavailableAfterExitMs?: number
 }
 
 /**
@@ -59,6 +60,7 @@ const fixture = (settings: Settings = {}) => {
   const accepted = promise<void>()
   let peer: Net.Socket | undefined
   let ownerDone = false
+  let ownerEndedAt = 0
   let referenced = true
   let unrefs = 0
   let rawKills = 0
@@ -68,12 +70,13 @@ const fixture = (settings: Settings = {}) => {
   const paths: Array<string> = []
   const endOwner = () => {
     ownerDone = true
+    ownerEndedAt = Date.now()
     owner.resolve(ExitCode(0))
   }
   const send = (message: unknown) => peer?.write(JSON.stringify(message) + "\n")
   const system: Cleanup.System = {
     platform: "darwin",
-    snapshot: () => ({
+    snapshot: () => ownerDone && Date.now() - ownerEndedAt < (settings.snapshotUnavailableAfterExitMs ?? 0) ? undefined : ({
       ownGroup: settings.snapshot === "own-group" ? 900_001 : 900_002,
       members: settings.snapshot === "survivor"
         ? [{ pid: 900_003, startedAtMs: 1, zombie: false }]
@@ -376,6 +379,19 @@ describe("failed process preparation", () => {
 })
 
 describe("failed process shutdown", () => {
+  it("waits for a real empty-group observation after a transient host probe outage", async () => {
+    const host = fixture({ snapshotUnavailableAfterExitMs: 800 })
+    try {
+      const result = await run(host)
+      expect(Exit.isSuccess(result.outcome)).toBe(true)
+      expect(result.live).toEqual([])
+      expect(host.rawKills).toBe(0)
+      expect(host.unrefs).toBe(0)
+    } finally {
+      host.dispose()
+    }
+  })
+
   it("releases an unactivated owner immediately without launching its target or signalling a raw pid", async () => {
     const host = fixture({ snapshot: "owner" })
     try {

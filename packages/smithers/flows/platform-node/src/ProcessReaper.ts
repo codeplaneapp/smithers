@@ -194,7 +194,7 @@ export const defaultPsExecutable = "/bin/ps"
 const psTimeoutMs = 5000
 
 /** A live-release probe has its own short bound within the shutdown deadline. */
-const cleanupProbeTimeoutMs = 500
+const cleanupProbeTimeoutMs = 2000
 
 /**
  * One fixed-path snapshot supplies group membership, start identities and our
