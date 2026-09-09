@@ -8,10 +8,9 @@
  *
  * @since 0.1.0
  */
-import type * as ScorerRunner from "@smthrs/scorers/Runner"
+import * as ScorerRunner from "@smthrs/scorers/Runner"
 import * as Sampling from "@smthrs/scorers/Sampling"
 import * as Scorer from "@smthrs/scorers/Scorer"
-import { ScorerError, type ScorerErrorCode } from "@smthrs/scorers/ScorerError"
 import type * as ScoreStore from "@smthrs/scorers/ScoreStore"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -216,25 +215,6 @@ const inconclusive = (request: ScoreRequest, reason: string, at: string): Observ
   }
 }
 
-/**
- * Names what actually went wrong.
- *
- * A scorer that threw a `TypeError` is a bug in the scorer and an unreachable
- * judge is an outage. A fixed sentence made the two observations identical, so
- * a permanently broken scorer kept producing inconclusive observations, which
- * no gate reads as a result, with nothing to debug from. The summary is bounded
- * because it reaches a CI log and a committed report.
- */
-const inconclusiveReason = (what: string, cause: Cause.Cause<unknown>): string => {
-  const summary = String(Cause.squash(cause))
-  return `${what}: ${boundedReason(summary)}`
-}
-
-const inconclusiveCode = (cause: Cause.Cause<unknown>): ScorerErrorCode => {
-  const failure = Cause.squash(cause)
-  return failure instanceof ScorerError ? failure.code : "inconclusive"
-}
-
 // A case failure always locates itself. An executor that named the offending
 // value keeps its own path; one that named nothing still gets the case, because
 // a failure with no path leaves a caller nothing to branch on but prose.
@@ -349,13 +329,7 @@ const executeInline = (job: ScoreJob): Effect.Effect<ScoreObservation> =>
     Effect.catchCause((cause) =>
       Cause.hasInterrupts(cause)
         ? Effect.interrupt
-        : Effect.succeed({
-          ...job.observation,
-          kind: "inconclusive" as const,
-          code: inconclusiveCode(cause),
-          reason: inconclusiveReason("Scorer execution failed", cause),
-          at: job.at
-        })
+        : Effect.succeed(ScorerRunner.inconclusive(job, cause))
     )
   )
 
@@ -396,15 +370,21 @@ export const makeInline = (): ScoreBatchRunner => {
  */
 export const layerInline: Layer.Layer<Runner> = Layer.succeed(Runner)(makeInline())
 
-const score = (
+interface ScoreContext {
+  readonly at: string
+  readonly runId: string
+  readonly sampleId: string
+  readonly concurrency: number
+}
+
+const buildJobs = (
   cases: ReadonlyArray<CaseResult>,
   suite: Suite,
-  scorer: ScoreBatchRunner,
-  concurrency: number,
-  at: string,
-  runId: string,
-  sampleId: string
-): Effect.Effect<ReadonlyArray<CaseResult>, EvalError> =>
+  { at, runId, sampleId, concurrency }: ScoreContext
+): Effect.Effect<
+  { readonly requests: ReadonlyArray<ScoreRequest>; readonly jobs: ReadonlyArray<ScoreJob> },
+  EvalError
+> =>
   Effect.gen(function*() {
     // `cases` is the result of one `Effect.forEach` over `suite.cases`, so the
     // two arrays are index-aligned by construction; nothing here has to look a
@@ -440,7 +420,6 @@ const score = (
       { concurrency }
     )
     const requests = sampled.filter((request): request is ScoreRequest => request !== undefined)
-    if (requests.length === 0) return cases
     const jobs: Array<ScoreJob> = requests.map((request, index) => ({
       identity: tupleKey(
         suite.name,
@@ -452,120 +431,140 @@ const score = (
         `${index}`
       ),
       observation: { targetStepKey: request.stepKey, scorerKey: scorerKeyOf(request.binding) },
-      score: request.binding.scorer.score(request.input),
+      score: Effect.suspend(() => request.binding.scorer.score(request.input)),
       at: Date.parse(at)
     }))
-    const runBatchCorrelated = scorer.runBatchCorrelated
-    let results: ReadonlyArray<ScoreObservation>
-    let correlated = false
-    if (runBatchCorrelated !== undefined) {
-      correlated = true
-      const batchResults = yield* runBatchCorrelated(jobs, { concurrency }).pipe(
-        Effect.catchCause((cause) =>
-          Cause.hasInterrupts(cause)
-            ? Effect.interrupt
-            : Effect.succeed(
-              jobs.map((job) => ({
-                identity: job.identity,
-                observation: {
-                  ...job.observation,
-                  kind: "inconclusive" as const,
-                  code: "inconclusive" as const,
-                  reason: inconclusiveReason("Scorer batch failed", cause),
-                  at: job.at
-                }
-              }))
-            )
+    return { requests, jobs }
+  })
+
+const batchFallback = (
+  jobs: ReadonlyArray<ScoreJob>,
+  cause: Cause.Cause<unknown>
+): Effect.Effect<ReadonlyArray<ScoreObservation>> =>
+  Cause.hasInterrupts(cause)
+    ? Effect.interrupt
+    : Effect.succeed(jobs.map((job) => ScorerRunner.inconclusive(job, cause)))
+
+const scoreCorrelated = (
+  jobs: ReadonlyArray<ScoreJob>,
+  scorer: ScoreBatchRunner,
+  runBatchCorrelated: NonNullable<ScoreBatchRunner["runBatchCorrelated"]>,
+  { concurrency }: ScoreContext
+): Effect.Effect<ReadonlyArray<ScoreObservation>, EvalError> =>
+  Effect.gen(function*() {
+    const batchResults = yield* Effect.suspend(() => runBatchCorrelated.call(scorer, jobs, { concurrency })).pipe(
+      Effect.catchCause((cause) =>
+        batchFallback(jobs, cause).pipe(
+          Effect.map((observations) =>
+            observations.map((observation, index) => ({
+              identity: jobs[index]!.identity,
+              observation
+            }))
+          )
         )
       )
-      if (batchResults.length !== jobs.length) {
+    )
+    if (batchResults.length !== jobs.length) {
+      return yield* Effect.fail(
+        new EvalError({
+          code: "scorer_protocol",
+          message:
+            `Correlated scorer batch returned ${batchResults.length} results for ${jobs.length} jobs; a batch runner must return exactly one result per job identity`,
+          path: "runBatchCorrelated"
+        })
+      )
+    }
+    const jobIndexByIdentity = new Map(jobs.map((job, index) => [job.identity, index] as const))
+    const byIdentity = new Map<string, ScoreObservation>()
+    let unknown: { readonly identity: string; readonly index: number } | undefined
+    for (const [index, result] of batchResults.entries()) {
+      const jobIndex = jobIndexByIdentity.get(result.identity)
+      if (jobIndex !== undefined && byIdentity.has(result.identity)) {
         return yield* Effect.fail(
           new EvalError({
             code: "scorer_protocol",
             message:
-              `Correlated scorer batch returned ${batchResults.length} results for ${jobs.length} jobs; a batch runner must return exactly one result per job identity`,
-            path: "runBatchCorrelated"
+              `Correlated scorer batch returned duplicate identity '${result.identity}' for job ${jobIndex} at result index ${index}`,
+            path: `runBatchCorrelated[${index}]`
           })
         )
       }
-      const jobIndexByIdentity = new Map(jobs.map((job, index) => [job.identity, index] as const))
-      const byIdentity = new Map<string, ScoreObservation>()
-      let unknown: { readonly identity: string; readonly index: number } | undefined
-      for (const [index, result] of batchResults.entries()) {
-        const jobIndex = jobIndexByIdentity.get(result.identity)
-        if (jobIndex !== undefined && byIdentity.has(result.identity)) {
-          return yield* Effect.fail(
-            new EvalError({
-              code: "scorer_protocol",
-              message:
-                `Correlated scorer batch returned duplicate identity '${result.identity}' for job ${jobIndex} at result index ${index}`,
-              path: `runBatchCorrelated[${index}]`
-            })
-          )
-        }
-        if (jobIndex === undefined) unknown = { identity: result.identity, index }
-        byIdentity.set(result.identity, result.observation)
-      }
-      if (unknown !== undefined) {
-        const missingJobIndex = jobs.findIndex((job) => !byIdentity.has(job.identity))
-        const missingIdentity = jobs[missingJobIndex]!.identity
-        return yield* Effect.fail(
-          new EvalError({
-            code: "scorer_protocol",
-            message:
-              `Correlated scorer batch returned unknown identity '${unknown.identity}' at result index ${unknown.index}; job ${missingJobIndex} identity '${missingIdentity}' is absent`,
-            path: `runBatchCorrelated[${unknown.index}]`
-          })
-        )
-      }
-      results = jobs.map((job) => byIdentity.get(job.identity)!)
-    } else {
-      const pairIndexes = new Map<string, number>()
-      for (const [index, job] of jobs.entries()) {
-        const pair = tupleKey(job.observation.targetStepKey, job.observation.scorerKey)
-        const previous = pairIndexes.get(pair)
-        if (previous !== undefined) {
-          const first = requests[previous]!
-          const second = requests[index]!
-          return yield* Effect.fail(
-            new EvalError({
-              code: "ambiguous_score_job",
-              message:
-                `Cannot attribute score jobs for cases '${first.case}' and '${second.case}': both use step key '${job.observation.targetStepKey}' and scorer ${
-                  label(second.binding)
-                }. Give each case its own step key, or provide a batch runner that implements runBatchCorrelated`,
-              path: "runBatch"
-            })
-          )
-        }
-        pairIndexes.set(pair, index)
-      }
-      results = yield* scorer.runBatch(jobs, { concurrency }).pipe(
-        Effect.catchCause((cause) =>
-          Cause.hasInterrupts(cause)
-            ? Effect.interrupt
-            : Effect.succeed(
-              jobs.map((job) => ({
-                ...job.observation,
-                kind: "inconclusive" as const,
-                code: "inconclusive" as const,
-                reason: inconclusiveReason("Scorer batch failed", cause),
-                at: job.at
-              }))
-            )
-        )
+      if (jobIndex === undefined) unknown = { identity: result.identity, index }
+      byIdentity.set(result.identity, result.observation)
+    }
+    if (unknown !== undefined) {
+      const missingJobIndex = jobs.findIndex((job) => !byIdentity.has(job.identity))
+      const missingIdentity = jobs[missingJobIndex]!.identity
+      return yield* Effect.fail(
+        new EvalError({
+          code: "scorer_protocol",
+          message:
+            `Correlated scorer batch returned unknown identity '${unknown.identity}' at result index ${unknown.index}; job ${missingJobIndex} identity '${missingIdentity}' is absent`,
+          path: `runBatchCorrelated[${unknown.index}]`
+        })
       )
-      if (results.length !== jobs.length) {
+    }
+    return jobs.map((job) => byIdentity.get(job.identity)!)
+  })
+
+const scoreOrderOnly = (
+  jobs: ReadonlyArray<ScoreJob>,
+  requests: ReadonlyArray<ScoreRequest>,
+  scorer: ScoreBatchRunner,
+  { concurrency }: ScoreContext
+): Effect.Effect<ReadonlyArray<ScoreObservation>, EvalError> =>
+  Effect.gen(function*() {
+    const pairIndexes = new Map<string, number>()
+    for (const [index, job] of jobs.entries()) {
+      const pair = tupleKey(job.observation.targetStepKey, job.observation.scorerKey)
+      const previous = pairIndexes.get(pair)
+      if (previous !== undefined) {
+        const first = requests[previous]!
+        const second = requests[index]!
         return yield* Effect.fail(
           new EvalError({
-            code: "scorer_protocol",
+            code: "ambiguous_score_job",
             message:
-              `Scorer batch returned ${results.length} observations for ${jobs.length} jobs; a batch runner must return exactly one observation per job, in order`,
+              `Cannot attribute score jobs for cases '${first.case}' and '${second.case}': both use step key '${job.observation.targetStepKey}' and scorer ${
+                label(second.binding)
+              }. Give each case its own step key, or provide a batch runner that implements runBatchCorrelated`,
             path: "runBatch"
           })
         )
       }
+      pairIndexes.set(pair, index)
     }
+    const results = yield* Effect.suspend(() => scorer.runBatch(jobs, { concurrency })).pipe(
+      Effect.catchCause((cause) => batchFallback(jobs, cause))
+    )
+    if (results.length !== jobs.length) {
+      return yield* Effect.fail(
+        new EvalError({
+          code: "scorer_protocol",
+          message:
+            `Scorer batch returned ${results.length} observations for ${jobs.length} jobs; a batch runner must return exactly one observation per job, in order`,
+          path: "runBatch"
+        })
+      )
+    }
+    return results
+  })
+
+const score = (
+  cases: ReadonlyArray<CaseResult>,
+  suite: Suite,
+  scorer: ScoreBatchRunner,
+  context: ScoreContext
+): Effect.Effect<ReadonlyArray<CaseResult>, EvalError> =>
+  Effect.gen(function*() {
+    const { requests, jobs } = yield* buildJobs(cases, suite, context)
+    if (requests.length === 0) return cases
+    const runBatchCorrelated = scorer.runBatchCorrelated
+    const protocol = runBatchCorrelated === undefined ? "runBatch" : "runBatchCorrelated"
+    const results = yield* runBatchCorrelated === undefined
+      ? scoreOrderOnly(jobs, requests, scorer, context)
+      : scoreCorrelated(jobs, scorer, runBatchCorrelated, context)
+    const { at } = context
     const observations: Array<Observation> = []
     for (const [index, request] of requests.entries()) {
       const result = results[index]!
@@ -573,7 +572,7 @@ const score = (
         return yield* Effect.fail(
           new EvalError({
             code: "scorer_protocol",
-            message: correlated
+            message: protocol === "runBatchCorrelated"
               ? `Correlated scorer batch identity '${
                 jobs[index]!.identity
               }' returned step '${result.targetStepKey}' and scorer '${result.scorerKey}' where job ${index} asked for scorer '${
@@ -582,7 +581,7 @@ const score = (
               : `Scorer batch returned an observation for '${result.scorerKey}' at step '${result.targetStepKey}' where job ${index} asked for '${
                 scorerKeyOf(request.binding)
               }' at step '${request.stepKey}'; results must stay aligned with their jobs`,
-            path: `${correlated ? "runBatchCorrelated" : "runBatch"}[${index}]`
+            path: `${protocol}[${index}]`
           })
         )
       }
@@ -664,7 +663,7 @@ export const run = (
       concurrency: suite.concurrency,
       discard: false
     })
-    const scored = yield* score(cases, suite, scorer, suite.concurrency, at, runId, sampleId)
+    const scored = yield* score(cases, suite, scorer, { concurrency: suite.concurrency, at, runId, sampleId })
     return {
       runId,
       suite: suite.name,
@@ -683,9 +682,14 @@ export const run = (
  * @category layers
  * @since 0.1.0
  */
-export const layerNoop: Layer.Layer<Runner> = Layer.succeed(Runner)({
-  runBatch: () =>
-    Effect.fail(
-      new EvalError({ code: "scorer_unavailable", message: "No scorer batch runner is available" })
-    )
+export const layerNoop: Layer.Layer<Runner> = Layer.sync(Runner)(() => {
+  const unavailable = new EvalError({ code: "scorer_unavailable", message: "No scorer batch runner is available" })
+  return {
+    runBatch: () => Effect.fail(unavailable),
+    runBatchCorrelated: (jobs) =>
+      Effect.succeed(jobs.map((job) => ({
+        identity: job.identity,
+        observation: ScorerRunner.inconclusive(job, unavailable)
+      })))
+  }
 })

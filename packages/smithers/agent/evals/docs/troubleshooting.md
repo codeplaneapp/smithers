@@ -118,9 +118,10 @@ Two wiring mistakes fail outside the `EvalError` channel:
 ## Symptoms
 
 - Every score is inconclusive. Read the observation's `reason`. A
-  `Scorer execution failed: ...` reason names a scorer that threw, a
-  `Scorer batch failed: ...` reason names a batch runner that failed, and a
-  reason about a score outside [0, 1] or an unusable observation kind names a
+  `Scorer execution was inconclusive: ...` reason names a scorer or batch
+  runner that failed. `<uncoercible cause>` means its failure could not be
+  converted to text. Failure reasons use the scorers package's 1024-byte limit.
+  A reason about a score outside [0, 1] or an unusable observation kind names a
   scorer that returned a bad result. A suite provided `Runner.layerNoop` also
   lands here.
 - A binding graded nothing. The execution's `target` is not the exact flow

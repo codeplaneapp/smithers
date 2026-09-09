@@ -136,6 +136,13 @@ not finite and inside [0, 1] becomes an inconclusive observation naming the
 scorer and the offending value; the run's own timestamp, not the adapter's, is
 what reaches the observation.
 
+Both adapter methods retain their receiver and receive the suite's concurrency.
+Scorer callbacks execute inside their job effects. A callback that throws
+synchronously or a batch that fails produces inconclusive observations; failure
+text is bounded and safe to convert. Interruption still cancels the run.
+`layerNoop` returns identity-correlated inconclusive results, including when
+cases share a step key and scorer, without invoking scorer callbacks.
+
 ## Determinism and limits
 
 - `Runner.run` takes `runId` and `at` from the caller and stamps every

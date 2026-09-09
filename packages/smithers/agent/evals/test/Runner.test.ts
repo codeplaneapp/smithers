@@ -155,6 +155,221 @@ describe("Runner", () => {
     expect(result.cases.map((caseResult) => caseResult.case)).toEqual(["slow", "fast"])
   })
 
+  it("suspends synchronous scorer callback throws inside each job", async () => {
+    const broken = Scorer.make({
+      id: "packages/smithers/agent/evals/test/Runner/synchronous-throw",
+      version: "1",
+      score: () => {
+        throw new TypeError("synchronous scorer crash")
+      }
+    })
+    const suite = await suiteOf("synchronous-throw", [Binding.make({ scorer: broken, appliesTo: target })])
+    const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(succeeding)))
+    expect(result.observations).toMatchObject([{
+      kind: "inconclusive",
+      reason: expect.stringContaining("synchronous scorer crash")
+    }])
+  })
+
+  it.each([false, true])("preserves adapter receivers and forwards concurrency (correlated=%s)", async (correlated) => {
+    class OrderOnly implements Runner.ScoreBatchRunner {
+      resultScore = 0.75
+      seenConcurrency: number | undefined
+
+      runBatch(jobs: ReadonlyArray<Runner.ScoreJob>, options?: { readonly concurrency?: number | undefined }) {
+        this.seenConcurrency = options?.concurrency
+        return Effect.succeed(jobs.map((job) => ({
+          ...job.observation,
+          kind: "score" as const,
+          score: this.resultScore,
+          at: job.at
+        })))
+      }
+    }
+    class Correlated extends OrderOnly {
+      runBatchCorrelated(
+        jobs: ReadonlyArray<Runner.ScoreJob>,
+        options?: { readonly concurrency?: number | undefined }
+      ) {
+        return this.runBatch(jobs, options).pipe(
+          Effect.map((observations) =>
+            observations.map((observation, index) => ({ identity: jobs[index]!.identity, observation })).reverse()
+          )
+        )
+      }
+    }
+    const scorer = correlated ? new Correlated() : new OrderOnly()
+    const suite = await Effect.runPromise(Suite.make({
+      name: "receiver",
+      concurrency: 2,
+      bindings: [binding],
+      cases: [{ name: "one", input: 1 }, { name: "two", input: 2 }]
+    }))
+    const result = await Effect.runPromise(
+      Runner.run(suite, { ...runOptions, scorer }).pipe(
+        Effect.provide(
+          executorFor((suiteCase) =>
+            Effect.succeed({ output: suiteCase.input, stepKey: suiteCase.name, latencyMs: 0, target })
+          )
+        )
+      )
+    )
+    expect(scorer.seenConcurrency).toBe(2)
+    expect(result.observations).toMatchObject([
+      { case: "one", kind: "score", score: 0.75 },
+      { case: "two", kind: "score", score: 0.75 }
+    ])
+  })
+
+  it.each([false, true])("guards uncoercible batch failures (correlated=%s)", async (correlated) => {
+    const fail = () =>
+      Effect.fail({
+        toString() {
+          throw new Error("uncoercible cause")
+        }
+      })
+    const scorer: Runner.ScoreBatchRunner = {
+      runBatch: fail,
+      ...(correlated ? { runBatchCorrelated: fail } : {})
+    }
+    const suite = await suiteOf("uncoercible", [binding], [{ name: "one", input: 1 }, { name: "two", input: 2 }])
+    const result = await Effect.runPromise(
+      Runner.run(suite, { ...runOptions, scorer }).pipe(
+        Effect.provide(
+          executorFor((suiteCase) =>
+            Effect.succeed({ output: suiteCase.input, stepKey: suiteCase.name, latencyMs: 0, target })
+          )
+        )
+      )
+    )
+    expect(result.observations).toMatchObject([
+      { case: "one", kind: "inconclusive", reason: expect.stringContaining("<uncoercible cause>") },
+      { case: "two", kind: "inconclusive", reason: expect.stringContaining("<uncoercible cause>") }
+    ])
+  })
+
+  it("keeps shared-step jobs inconclusive under the noop layer without calling scorers", async () => {
+    let scorerCalls = 0
+    const unavailable = Scorer.make({
+      id: "packages/smithers/agent/evals/test/Runner/noop",
+      version: "1",
+      score: () => {
+        scorerCalls += 1
+        return Effect.succeed({ score: 1 })
+      }
+    })
+    const suite = await suiteOf("shared-noop", [Binding.make({ scorer: unavailable, appliesTo: target })], [
+      { name: "one", input: 1 },
+      { name: "two", input: 2 }
+    ])
+    const result = await Effect.runPromise(
+      Runner.run(suite, runOptions).pipe(
+        Effect.provide(succeeding),
+        Effect.provide(Runner.layerNoop)
+      )
+    )
+    expect(scorerCalls).toBe(0)
+    expect(result.observations).toMatchObject([
+      {
+        case: "one",
+        stepKey: "step",
+        kind: "inconclusive",
+        reason: expect.stringContaining("No scorer batch runner is available")
+      },
+      {
+        case: "two",
+        stepKey: "step",
+        kind: "inconclusive",
+        reason: expect.stringContaining("No scorer batch runner is available")
+      }
+    ])
+  })
+
+  it.each(["targets", "scorers", "inline-default"] as const)(
+    "measures active %s jobs and preserves order",
+    async (phase) => {
+      const limit = phase === "inline-default" ? 1 : 2
+      const indexes = [0, 1, 2, 3]
+      const started = indexes.map(() => Deferred.makeUnsafe<void>())
+      const release = indexes.map(() => Deferred.makeUnsafe<void>())
+      const active = new Set<number>()
+      const completed: number[] = []
+      let maximum = 0
+      const work = (index: number) =>
+        Effect.gen(function*() {
+          active.add(index)
+          maximum = Math.max(maximum, active.size)
+          yield* Deferred.succeed(started[index]!, void 0)
+          yield* Deferred.await(release[index]!)
+          active.delete(index)
+          completed.push(index)
+          return { score: index / 4 }
+        })
+      const measured = Scorer.make({
+        id: `packages/smithers/agent/evals/test/Runner/concurrency-${phase}`,
+        version: "1",
+        score: ({ input }) => work(input as number)
+      })
+      const suite = await Effect.runPromise(Suite.make({
+        name: "concurrency",
+        concurrency: limit,
+        bindings: [phase === "targets" ? binding : Binding.make({ scorer: measured, appliesTo: target })],
+        cases: indexes.map((index) => ({ name: String(index), input: index }))
+      }))
+      const executor = executorFor((suiteCase) =>
+        (phase === "targets" ? work(suiteCase.input as number) : Effect.void).pipe(
+          Effect.as({ output: suiteCase.input, stepKey: suiteCase.name, latencyMs: 0, target })
+        )
+      )
+      const jobs = indexes.map((index) => ({
+        identity: String(index),
+        observation: { targetStepKey: String(index), scorerKey: measured.scorerKey },
+        score: work(index),
+        at: 0
+      }))
+      const result = await Effect.runPromise(
+        Effect.gen(function*() {
+          const effect = phase === "inline-default"
+            ? Runner.makeInline().runBatch(jobs).pipe(
+              Effect.map((observations) => observations.map((item) => item.targetStepKey))
+            )
+            : Runner.run(suite, runOptions).pipe(
+              Effect.provide(executor),
+              Effect.map((run) => {
+                expect(run.cases.map((item) => item.case)).toEqual(indexes.map(String))
+                if (phase === "scorers") {
+                  expect(run.observations).toMatchObject(indexes.map((index) => ({ kind: "score", score: index / 4 })))
+                }
+                return run.observations.map((item) => item.case)
+              })
+            )
+          const fiber = yield* effect.pipe(Effect.forkChild())
+          for (let index = 0; index < limit; index++) yield* Deferred.await(started[index]!)
+          yield* Effect.yieldNow
+          expect([...active]).toEqual(indexes.slice(0, limit))
+          for (let index = limit; index < indexes.length; index++) {
+            expect(yield* Deferred.isDone(started[index]!)).toBe(false)
+          }
+          // With two slots, hold job 0 while jobs 1, 2 and 3 finish in the other slot.
+          for (let index = limit - 1; index < indexes.length; index++) {
+            yield* Deferred.succeed(release[index]!, void 0)
+            if (index + 1 < indexes.length) {
+              yield* Deferred.await(started[index + 1]!)
+              yield* Effect.yieldNow
+              expect(active.size).toBe(limit)
+            }
+          }
+          if (limit === 2) yield* Deferred.succeed(release[0]!, void 0)
+          return yield* Fiber.join(fiber)
+        }).pipe(Effect.scoped, Effect.timeout("5 seconds"))
+      )
+      expect(maximum).toBe(limit)
+      expect(active.size).toBe(0)
+      expect(completed).toEqual(limit === 2 ? [1, 2, 3, 0] : indexes)
+      expect(result).toEqual(indexes.map(String))
+    }
+  )
+
   // `Runner.run` used to declare the batch-runner service in its requirements
   // while resolving it with `Effect.serviceOption`, so the in-process path was
   // unreachable and every suite had to hand-copy an adapter to satisfy a type.
@@ -217,6 +432,16 @@ describe("Runner", () => {
     )
   })
 
+  it("keeps the noop order-only adapter unavailable", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function*() {
+        const scorer = yield* Runner.Runner
+        return yield* Effect.flip(scorer.runBatch([]))
+      }).pipe(Effect.provide(Runner.layerNoop))
+    )
+    expect(error).toMatchObject({ code: "scorer_unavailable", message: "No scorer batch runner is available" })
+  })
+
   it("bounds the cause it copies into a public reason", async () => {
     const suite = await suiteOf("bounded", [binding])
     const scorer = { runBatch: () => Effect.fail("x".repeat(5000)) }
@@ -224,7 +449,9 @@ describe("Runner", () => {
       Runner.run(suite, { ...runOptions, scorer }).pipe(Effect.provide(succeeding))
     )
     const observation = result.observations[0]
-    expect(observation?.kind === "inconclusive" && observation.reason.endsWith("[truncated]")).toBe(true)
+    expect(observation?.kind === "inconclusive" && observation.reason).toBe(
+      `Scorer execution was inconclusive: ${"x".repeat(5000)}`.slice(0, 1024)
+    )
     expect(observation?.kind === "inconclusive" && observation.reason.length).toBeLessThan(2100)
   })
 
