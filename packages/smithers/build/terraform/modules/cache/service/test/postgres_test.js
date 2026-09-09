@@ -8,7 +8,9 @@
  * that, and only that.
  *
  * It is skipped unless SMITHERS_CACHE_TEST_DATABASE_URL names a database, so
- * `bun test` needs no service:
+ * `bun test` needs no service. The `//packages/smithers/build:cacheServicePostgres`
+ * target runs it with a digest-pinned Postgres declared as a service; this is
+ * the manual equivalent:
  *
  *   docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=test \
  *     -e POSTGRES_DB=smithers_build_cache_test --name smithers-build-cache-test postgres:17.6-alpine

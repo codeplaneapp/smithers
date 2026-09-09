@@ -282,10 +282,22 @@ another's result. The two release functions select their candidates
 never reports a count it did not take. `storage.js` states the assumptions in
 full.
 
-Set `SMITHERS_CACHE_TEST_DATABASE_URL` to run the same storage against a real
-Postgres, which is the only thing that checks the locking statements and the
-schema rather than a fake of them. Point it at a throwaway database: setup
-drops and recreates every `smithers_build_` object the migration defines.
+`postgres_test.js` runs the same storage against a real Postgres, which is the
+only thing that checks the locking statements and the schema rather than a
+fake of them. It skips itself unless `SMITHERS_CACHE_TEST_DATABASE_URL` names
+a database. The `cacheServicePostgres` target supplies one: a `postgres`
+container pinned by digest, declared as a service, published on loopback port
+55434, with the URL in the target's environment. The suite therefore runs under
+`smithers-build test` and in the CI lane that invokes the package graph, and a
+statement Postgres rejects fails the build rather than a deployed cache.
+
+```sh
+smithers-build test //packages/smithers/build:cacheServicePostgres
+```
+
+To run it by hand instead, set `SMITHERS_CACHE_TEST_DATABASE_URL` to a
+throwaway database: setup drops and recreates every `smithers_build_` object
+the migration defines.
 
 ```sh
 docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=test \
