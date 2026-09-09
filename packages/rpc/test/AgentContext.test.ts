@@ -178,6 +178,33 @@ describe("renderAgentRuntimeContext", () => {
     expect(rendered).toContain("Captured: unknown")
     expect(rendered).toContain("running INSIDE the Smithers product")
   })
+
+  /*
+   * The guided introduction while it runs (apps/ui docs/ONBOARDING.md): the
+   * model must answer a mid-tutorial message against the lesson transcript
+   * the user has actually seen — chatter defers to the lesson, real work
+   * skips the tutorial through onboarding.act finish.
+   */
+  test("an in-progress tutorial is stated with its transcript and the defer-or-skip rule", () => {
+    const rendered = renderAgentRuntimeContext(
+      contextFixture({
+        onboarding: {
+          step: 6,
+          stepCount: 15,
+          transcript: ["Hello. I’m Smithers.", "You can talk directly to me. Try it now."]
+        }
+      })
+    )
+    expect(rendered).toContain("Onboarding tutorial: IN PROGRESS — the user is on lesson 7 of 15")
+    expect(rendered).toContain("hands the lesson back")
+    expect(rendered).toContain("onboarding.act finish")
+    expect(rendered).toContain("    | You can talk directly to me. Try it now.")
+    expect(AgentRuntimeContextSchema.safeParse(contextFixture({
+      onboarding: { step: 6, stepCount: 15, transcript: ["Hello."] }
+    })).success).toBe(true)
+    // A finished tutorial (or a boundary built before the field) renders nothing.
+    expect(renderAgentRuntimeContext(contextFixture())).not.toContain("Onboarding tutorial")
+  })
 })
 
 describe("composeAgentInstructions", () => {

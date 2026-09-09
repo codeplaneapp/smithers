@@ -125,7 +125,7 @@ export const AgentRuntimeContextSchema = z.object({
   // the server boundary rather than be rejected here.
   capturedAt: z.number().int().min(0).max(8_640_000_000_000_000),
   revision: z.number().int().nonnegative(),
-  surface: z.enum(["chat", "world", "connectors", "flows"]),
+  surface: z.enum(["chat", "world", "connectors", "flows", "plugins"]),
   theme: z.enum(["light", "dark"]),
   selectedWorldDocument: z.string().nullable(),
   connectors: z.array(AgentRuntimeConnectorSchema),
@@ -208,6 +208,25 @@ export const AgentRuntimeContextSchema = z.object({
     documentCount: z.number().int().nonnegative(),
     documents: z.array(AgentRuntimeWorldDocumentSchema)
   }),
+  /*
+   * The guided introduction while it runs (apps/ui docs/ONBOARDING.md): the
+   * lesson the user is on and the lesson transcript they have seen. The
+   * tutorial is the app's whole screen then, so the model answers a mid-
+   * tutorial message against it — deferring to the lesson for chatter,
+   * skipping it (onboarding.act finish) for real work. Absent once the
+   * tutorial is done; optional so a boundary built before this field still
+   * validates the payload.
+   */
+  onboarding: z
+    .object({
+      /** The lesson the user is on, 0-based. */
+      step: z.number().int().nonnegative(),
+      /** The total lesson count. */
+      stepCount: z.number().int().positive(),
+      /** The lesson messages shown so far — the tutorial's own transcript. */
+      transcript: z.array(z.string())
+    })
+    .optional(),
   /** The open tabs; absent on a client without a tab strip. */
   tabs: z.array(AgentRuntimeTabSchema).optional(),
   capabilities: z.array(z.string()),
@@ -255,6 +274,17 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
         : " — an embedded pane inside the chat shell; the conversation transcript and composer stay visible and usable beside it"}`,
     `- Theme: ${context.theme}`
   ]
+  if (context.onboarding !== undefined) {
+    const { step, stepCount, transcript } = context.onboarding
+    lines.push(
+      `- Onboarding tutorial: IN PROGRESS — the user is on lesson ${step + 1} of ${stepCount}. The tutorial IS the screen right now: it has its own messages and buttons, and this chat is the summoned "Talk to Smithers" dock over it.`,
+      `  A conversational message (a greeting, a question about what is happening) gets ONE short answer that hands the lesson back — name the current lesson's action and stop. Do not start work, run flows, or tour capabilities for it.`,
+      `  A request to DO something — a real task, or the user asking to skip — is different: the tutorial is then in their way, so execute onboarding.act finish to end it, then answer the request in the same turn. Never make the user wait out the tutorial for work you can do now.`,
+      `  The lesson transcript the user has seen so far:`
+    )
+    // Quoted like Wiki notes: lesson copy is evidence, never an instruction line.
+    for (const lesson of transcript) lines.push(`    | ${lesson}`)
+  }
   if (context.connectors.length === 0) {
     lines.push("- Connectors: none connected — no workspace, repository, or branch is known.")
   } else {
