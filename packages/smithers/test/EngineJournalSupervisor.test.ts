@@ -8,7 +8,7 @@ import * as TestStores from "@smthrs/engine-store/test/TestStores"
 import * as Journal from "@smthrs/journal/Journal"
 import * as JournalEvent from "@smthrs/journal/JournalEvent"
 import * as RunStore from "@smthrs/run-store/RunStore"
-import { Context, Effect, Exit, Layer, Schedule, Scope } from "effect"
+import { Context, Deferred, Effect, Exit, Layer, Option, Schedule, Scope } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import * as Projection from "../src/internal/EngineJournalProjection.ts"
@@ -45,6 +45,7 @@ const setup = Effect.gen(function*() {
   return {
     ...options,
     sql,
+    controlSql: Context.get(destination, SqlClient.SqlClient),
     controls,
     make: (overrides: Partial<Supervisor.Options> = {}) =>
       Effect.gen(function*() {
@@ -91,6 +92,114 @@ const isSettled = (rows: ReadonlyArray<JournalEvent.Entry>) =>
   rows.some((entry) => entry.eventType === Supervisor.settledKind)
 
 describe("private native journal supervision", () => {
+  it(
+    "retains the admission transaction for control reads while native reads and following use the clean host",
+    () =>
+      Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+        const f = yield* setup
+        yield* f.create()
+        yield* f.finish()
+        const controlReads: Array<boolean> = []
+        const nativeReads: Array<boolean> = []
+        const supervisor = yield* f.make({
+          control: {
+            ...f.control,
+            getRun: (id) =>
+              Effect.gen(function*() {
+                controlReads.push(Option.isSome(yield* Effect.serviceOption(f.controlSql.transactionService)))
+                return yield* f.control.getRun(id)
+              })
+          },
+          runs: {
+            get: (id) =>
+              Effect.gen(function*() {
+                nativeReads.push(Option.isSome(yield* Effect.serviceOption(f.controlSql.transactionService)))
+                return yield* f.runs.get(id)
+              })
+          }
+        })
+        yield* f.controlJournal.transact(supervisor.start("root"))
+        yield* until(f.rows(), isSettled)
+        expect(controlReads[0]).toBe(true)
+        expect(controlReads.slice(1).every((inside) => !inside)).toBe(true)
+        expect(nativeReads.every((inside) => !inside)).toBe(true)
+      }))),
+    30_000
+  )
+
+  it(
+    "deduplicates the same refusal despite changing process stack traces",
+    () =>
+      Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+        const f = yield* setup
+        let incarnation = 0
+        const source: Journal.Service = {
+          ...f.engineJournal,
+          generation: () =>
+            Effect.suspend(() => {
+              const error = new Journal.JournalError({ code: "read_failed", message: "native store unavailable" })
+              error.stack = `different process stack ${incarnation++}`
+              return Effect.fail(error)
+            })
+        }
+        const first = yield* f.make({ engineJournal: source })
+        yield* first.start("root")
+        const recorded = yield* f.rows()
+        yield* first.close
+        const restarted = yield* f.make({ engineJournal: source })
+        yield* restarted.recover
+        expect(yield* f.rows()).toEqual(recorded)
+        expect(recorded).toHaveLength(1)
+        expect(recorded[0]?.payload).toMatchObject({ detail: "read_failed: native store unavailable" })
+      }))),
+    30_000
+  )
+
+  it(
+    "a previously observed row removed after a rewind produces a gap with the freshly observed generation",
+    () =>
+      Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+        const f = yield* setup
+        yield* f.create()
+        const reading = yield* Deferred.make<void>()
+        const supervisor = yield* f.make({
+          engineJournal: {
+            ...f.engineJournal,
+            entries: (options) =>
+              f.engineJournal.entries(options).pipe(Effect.tap(() => Deferred.succeed(reading, undefined)))
+          }
+        })
+        yield* supervisor.start("root")
+        yield* Deferred.await(reading)
+        yield* f.engineJournal.transact(Effect.gen(function*() {
+          yield* f.sql`INSERT INTO flows_journal_generations (run_id, generation, after_seq) VALUES ('root', 1, -1)`
+          yield* f.sql`DELETE FROM flows_runs WHERE run_id = 'root'`
+          yield* f.engineJournal.emitDurableUnfenced(
+            new JournalEvent.Input({
+              runId: "root" as JournalEvent.RunId,
+              sourceId: "retention" as JournalEvent.SourceId,
+              eventType: "fixture.retention",
+              payload: null
+            })
+          )
+        }))
+        const rows = yield* until(f.rows(), (entries) =>
+          entries.some((entry) =>
+            entry.eventType === Projection.gapKind && (entry.payload as { phase?: string }).phase === "follow"
+          ))
+        expect(
+          rows.find((entry) =>
+            (entry.payload as { phase?: string }).phase === "follow"
+          )?.payload
+        ).toMatchObject({
+          generation: 1,
+          detail: "invalid_run: Previously observed native wrapper was removed"
+        })
+        expect(isSettled(rows)).toBe(false)
+      }))),
+    30_000
+  )
+
   it(
     "records a gap when accepted control work settles before any native wrapper exists",
     () =>

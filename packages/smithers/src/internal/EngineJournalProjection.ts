@@ -46,6 +46,8 @@ const producer = (identity: ReadonlyArray<unknown>): JournalEvent.SourceId =>
 /**
  * The caller establishes ownership of the native root. This helper reads only
  * that root and its durable child edges; it never guesses ancestry from IDs.
+ * Run its reads outside any native transaction context so they cannot observe
+ * the caller's uncommitted writes. The host supervisor supplies a clean context.
  * No durable cursor is introduced: restarting rereads pages and exact source
  * identities deduplicate against the destination journal's existing index.
  * @since 1.0.0
@@ -101,9 +103,10 @@ export const make = (options: Options) =>
       Effect.gen(function*() {
         const runId = executionId as JournalEvent.RunId
         for (;;) {
-          // Read generation and the page in one source transaction. Copy only
-          // after releasing it; a control write never holds an engine DB lock.
-          const read = yield* options.engineJournal.transact(Effect.gen(function*() {
+          // A native rewind advances generation atomically with truncation.
+          // Bracket the page with that monotone generation instead of taking
+          // Journal.transact's BEGIN IMMEDIATE write lock for read-side work.
+          const read = yield* Effect.gen(function*() {
             const generation = options.engineJournal.generation === undefined
               ? { generation: 0, afterSeq: -1 }
               : yield* options.engineJournal.generation(runId)
@@ -114,24 +117,33 @@ export const make = (options: Options) =>
               ...(after < 0 ? {} : { after: after as JournalEvent.Seq }),
               limit: pageSize
             }))
-            return { generation, after, page }
-          })).pipe(Effect.tapError((error) =>
-            // The transaction or generation read can fail before a page exists.
+            const current = options.engineJournal.generation === undefined
+              ? { generation: 0, afterSeq: -1 }
+              : yield* options.engineJournal.generation(runId)
+            return {
+              generation,
+              after,
+              page,
+              stable: current.generation === generation.generation && current.afterSeq === generation.afterSeq
+            }
+          }).pipe(Effect.tapError((error) =>
+            // Either generation read can fail before a stable page exists.
             // Do not invent a current generation from the last successful read.
             gap(executionId, null, {
               reason: error.code,
-              phase: "source-transaction",
+              phase: "source-generation",
               lastObservedGeneration: positions.get(executionId)?.generation ?? null,
               afterSequence: positions.get(executionId)?.sequence ?? -1
             })
           ))
+          if (!read.stable) continue
           const { generation, after, page } = read
           if (generation.generation > 0 && positions.get(executionId)?.generation !== generation.generation) {
             yield* gap(executionId, generation.generation, { reason: "rewound", afterSequence: generation.afterSeq })
           }
           if (page._tag === "Failure") {
             const error = page.failure
-            if (error.code !== "compacted" || error.checkpointSeq === undefined || error.checkpointSeq <= after) {
+            if (error.code !== "compacted" || error.checkpointSeq === undefined || error.checkpointSeq <= after + 1) {
               // A storage/decode/sink failure remains an error. The owning control
               // run must not report a complete projection after this refusal.
               yield* gap(executionId, generation.generation, { reason: error.code, afterSequence: after })
@@ -139,9 +151,11 @@ export const make = (options: Options) =>
             }
             yield* gap(executionId, generation.generation, {
               reason: "compacted",
-              throughSequence: error.checkpointSeq
+              throughSequence: error.checkpointSeq - 1
             })
-            positions.set(executionId, { generation: generation.generation, sequence: error.checkpointSeq })
+            // Compaction removes strictly below the checkpoint. Its own event
+            // survives and must be copied by the next exclusive-cursor read.
+            positions.set(executionId, { generation: generation.generation, sequence: error.checkpointSeq - 1 })
             continue
           }
           let cursor = after
@@ -161,10 +175,18 @@ export const make = (options: Options) =>
                 throughSequence: entry.seq - 1
               })
             }
-            yield* copy(entry, generation.generation)
+            yield* copy(entry, generation.generation).pipe(Effect.catch((error) =>
+              error.code === "invalid_event"
+                ? gap(executionId, generation.generation, {
+                  reason: error.code,
+                  fromSequence: entry.seq,
+                  throughSequence: entry.seq
+                })
+                : Effect.fail(error)
+            ))
             cursor = entry.seq
-            // Advance only after the destination's durable receipt. A lost ack
-            // retries the exact event, never skips to the end of a fetched page.
+            // Advance only after a durable event or exact omission gap receipt.
+            // A storage refusal/lost ack retries the event, never skips the page.
             positions.set(executionId, { generation: generation.generation, sequence: cursor })
           }
           if (!page.success.hasMore) return

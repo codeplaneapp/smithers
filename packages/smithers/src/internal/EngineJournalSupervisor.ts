@@ -4,6 +4,7 @@
  */
 import type * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import type * as ControlRuntime from "@smthrs/control/ControlRuntime"
+import type { RunSummary } from "@smthrs/control/ControlSchema"
 import * as Sha256 from "@smthrs/crypto/Sha256"
 import type * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { RunState } from "@smthrs/engine-store/RunState"
@@ -98,8 +99,19 @@ export const make = (options: Options) =>
         })
       ).pipe(Effect.asVoid)
     }
-    const report = (id: string, generation: number | null, phase: string, cause: Cause.Cause<unknown>) =>
-      Cause.hasInterruptsOnly(cause) ? Effect.void : gap(id, generation, phase, Cause.pretty(cause)).pipe(
+    const report = (id: string, generation: number | null, phase: string, cause: Cause.Cause<unknown>) => {
+      const failure = Cause.squash(cause)
+      const code = typeof failure === "object" && failure !== null && "code" in failure
+        ? String(failure.code)
+        : "unknown"
+      const detail = failure instanceof Error
+        ? failure.message
+        : typeof failure === "string"
+        ? failure
+        : "Unexpected observation failure"
+      // Both producer identity and payload stay stable across processes. Putting
+      // changing stacks under a stable producer would cause idempotency conflicts.
+      return Cause.hasInterruptsOnly(cause) ? Effect.void : gap(id, generation, phase, `${code}: ${detail}`).pipe(
         Effect.catchCause((failure) =>
           Effect.logWarning("Engine observation could not be recorded", {
             runId: id,
@@ -110,38 +122,37 @@ export const make = (options: Options) =>
           })
         )
       )
+    }
 
-    const root = (id: string) =>
-      Effect.gen(function*() {
-        const control = yield* options.control.getRun(id)
-        return yield* options.engineJournal.transact(Effect.gen(function*() {
-          const generation = options.engineJournal.generation === undefined ?
-            0 :
-            (yield* options.engineJournal.generation(runId(id))).generation
-          const found = yield* Effect.result(options.runs.get(id))
-          if (found._tag === "Failure") {
-            if (found.failure.code === "not_found_row") return { generation, control, row: undefined }
-            return yield* Effect.fail(found.failure)
-          }
-          const decoded = decodeState(found.success.stateJson)
-          const state = Option.getOrUndefined(decoded)
-          const payload = state?.payload as { readonly planId?: unknown } | null | undefined
-          if (
-            state?.flowName !== "agent/run" || control.planId === undefined || payload?.planId !== control.planId ||
-            state.parentExecutionId !== undefined || (yield* options.engineState.runParents(id)).length !== 0
-          ) {
-            return yield* Effect.fail(
-              new Journal.JournalError({
-                code: "decode_failed",
-                message: "Native execution is not the control run's recorded wrapper"
-              })
-            )
-          }
-          // Forks legitimately copy payload.runId and have row.parentRunId. Neither
-          // is the identity of this wrapper; the native row and plan association are.
-          return { generation, control, row: found.success }
-        }))
-      })
+    const nativeRoot = (id: string, control: RunSummary) =>
+      options.engineJournal.transact(Effect.gen(function*() {
+        const generation = options.engineJournal.generation === undefined ?
+          0 :
+          (yield* options.engineJournal.generation(runId(id))).generation
+        const found = yield* Effect.result(options.runs.get(id))
+        if (found._tag === "Failure") {
+          if (found.failure.code === "not_found_row") return { generation, control, row: undefined }
+          return yield* Effect.fail(found.failure)
+        }
+        const decoded = decodeState(found.success.stateJson)
+        const state = Option.getOrUndefined(decoded)
+        const payload = state?.payload as { readonly planId?: unknown } | null | undefined
+        if (
+          state?.flowName !== "agent/run" || control.planId === undefined || payload?.planId !== control.planId ||
+          state.parentExecutionId !== undefined || (yield* options.engineState.runParents(id)).length !== 0
+        ) {
+          return yield* Effect.fail(
+            new Journal.JournalError({
+              code: "decode_failed",
+              message: "Native execution is not the control run's recorded wrapper"
+            })
+          )
+        }
+        // Forks legitimately copy payload.runId and have row.parentRunId. Neither
+        // is the identity of this wrapper; the native row and plan association are.
+        return { generation, control, row: found.success }
+      }))
+    const root = (id: string) => options.control.getRun(id).pipe(Effect.flatMap((control) => nativeRoot(id, control)))
 
     const settled = (id: string, generation: number) =>
       Effect.gen(function*() {
@@ -190,27 +201,53 @@ export const make = (options: Options) =>
         })
         for (;;) {
           const before = yield* root(id)
+          if (before.row === undefined) {
+            return yield* gap(id, before.generation, "native-root", "Previously observed native wrapper was removed")
+          }
           if (before.generation !== generation) {
             generation = before.generation
             yield* emit(id, generation, startedKind)
           }
-          yield* projection.followUntilSettled(options.runs)
+          yield* projection.followUntilSettled({
+            get: (runId) =>
+              options.runs.get(runId).pipe(Effect.catch((error) =>
+                error.code === "not_found_row"
+                  ? Effect.fail(
+                    new RunStore.RunStoreError({
+                      code: "invalid_run",
+                      method: "get",
+                      message: "Previously observed native wrapper was removed",
+                      cause: error
+                    })
+                  )
+                  : Effect.fail(error)
+              ))
+          })
           const after = yield* root(id)
-          if (
-            after.generation !== generation || after.row === undefined ||
-            !RunStore.isTerminalRunStatus(after.row.status)
-          ) continue
+          if (after.row === undefined) {
+            return yield* gap(id, after.generation, "native-root", "Previously observed native wrapper was removed")
+          }
+          if (after.generation !== generation || !RunStore.isTerminalRunStatus(after.row.status)) {
+            continue
+          }
           // followUntilSettled observed the native terminal commit and drained again.
           yield* emit(id, generation, settledKind)
           return
         }
-      }).pipe(Effect.catchCause((cause) => report(id, initialGeneration, "follow", cause)))
+      }).pipe(Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.void
+        if (options.engineJournal.generation === undefined) return report(id, 0, "follow", cause)
+        return Effect.flatMap(
+          Effect.result(options.engineJournal.generation(runId(id))),
+          (current) => report(id, current._tag === "Success" ? current.success.generation : null, "follow", cause)
+        )
+      }))
 
     const begin = (id: string, generation: number) =>
       gate.withPermits(1)(Effect.gen(function*() {
         const previous = active.get(id)
-      // A delayed older admission callback must not replace a newer observer.
-      if (previous !== undefined && previous.generation >= generation) return
+        // A delayed older admission callback must not replace a newer observer.
+        if (previous !== undefined && previous.generation >= generation) return
         if (previous?.fiber !== undefined) yield* Fiber.interrupt(previous.fiber)
         const entry: Active = { generation }
         active.set(id, entry)
@@ -224,7 +261,10 @@ export const make = (options: Options) =>
 
     const admit = (id: string, allowMissing: boolean) =>
       Effect.gen(function*() {
-        const native = yield* isolated(root(id))
+        // This row can still be uncommitted in the admission transaction.
+        // Keep its read in the caller's control context; isolate native reads only.
+        const control = yield* options.control.getRun(id)
+        const native = yield* isolated(nativeRoot(id, control))
         if (native.row === undefined && !allowMissing) return
         if (yield* settled(id, native.generation)) return
         yield* emit(id, native.generation, startedKind)

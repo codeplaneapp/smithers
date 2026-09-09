@@ -3,6 +3,7 @@ import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import * as TestStores from "@smthrs/engine-store/test/TestStores"
 import * as Journal from "@smthrs/journal/Journal"
 import * as JournalEvent from "@smthrs/journal/JournalEvent"
+import * as SqlJournal from "@smthrs/journal/SqlJournal"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import { Context, Deferred, Effect, Fiber, Layer, Schedule } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -48,6 +49,109 @@ const rows = (journal: Journal.Service) =>
 const record = (entry: JournalEvent.Entry) => entry.payload as Record<string, unknown>
 
 describe("private engine journal projection", () => {
+  it("discards a page crossed by a rewind without acquiring the native write transaction", () =>
+    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const f = yield* setup
+      yield* emit(f.engineJournal, "native-root", { before: true })
+      let rewind = true
+      const source: Journal.Service = {
+        ...f.engineJournal,
+        transact: () =>
+          Effect.fail(new Journal.JournalError({ code: "sink_failed", message: "read side may not take the writer" })),
+        entries: (options) =>
+          f.engineJournal.entries(options).pipe(Effect.tap(() => {
+            if (!rewind) return Effect.void
+            rewind = false
+            return f.engineJournal.transact(Effect.gen(function*() {
+              yield* f
+                .sql`INSERT INTO flows_journal_generations (run_id, generation, after_seq) VALUES ('native-root', 1, -1)`
+              yield* f.sql`UPDATE flows_journal_events SET payload_json = ${
+                JSON.stringify({ after: true })
+              } WHERE run_id = 'native-root' AND seq = 0`
+            })).pipe(Effect.orDie)
+          }))
+      }
+      const projector = yield* Projection.make({ ...f.options, engineJournal: source })
+      yield* projector.catchUp
+      expect((yield* rows(f.controlJournal)).map(record)).toMatchObject([
+        { reason: "rewound", generation: 1 },
+        { generation: 1, payload: { after: true } }
+      ])
+    }))))
+
+  it(
+    "reads the committed native page while an independent writer still holds its transaction",
+    () =>
+      Effect.runPromise(Effect.acquireUseRelease(
+        Effect.promise(() => mkdtemp(join(tmpdir(), "smithers-projection-reader-"))),
+        (directory) =>
+          Effect.scoped(
+            Effect.gen(function*() {
+              const path = join(directory, "native.sqlite")
+              const source = yield* Layer.build(Layer.fresh(TestStores.layerAt(path)))
+              const writer = yield* Layer.build(Layer.fresh(TestStores.layerAt(path)))
+              const destination = yield* Layer.build(Layer.fresh(TestStores.layerAt(":memory:")))
+              const engineJournal = Context.get(source, Journal.Journal)
+              const controlJournal = Context.get(destination, Journal.Journal)
+              yield* emit(engineJournal, "native-root", { committed: true })
+              const entered = yield* Deferred.make<void>()
+              const release = yield* Deferred.make<void>()
+              const writerJournal = Context.get(writer, Journal.Journal)
+              const held = yield* Effect.forkScoped(writerJournal.transact(Effect.gen(function*() {
+                yield* emit(writerJournal, "native-root", { uncommitted: true }, "writer")
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+              })))
+              yield* Deferred.await(entered)
+              const projector = yield* Projection.make({
+                engineJournal,
+                controlJournal,
+                engineState: Context.get(source, DurableEngineState.DurableEngineState),
+                controlRunId: "control-root",
+                executionId: "native-root"
+              })
+              yield* projector.catchUp.pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
+              expect((yield* rows(controlJournal)).map(record)).toMatchObject([{ payload: { committed: true } }])
+              yield* Fiber.join(held)
+              yield* projector.catchUp
+              expect((yield* rows(controlJournal)).map(record)).toMatchObject([
+                { payload: { committed: true } },
+                { payload: { uncommitted: true } }
+              ])
+            }).pipe(Effect.provide(NodeCrypto.layer))
+          ),
+        (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true }))
+      )),
+    30_000
+  )
+
+  it("records an exact omission for a destination size refusal and continues into later events and children", () =>
+    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const f = yield* setup
+      const bounded = yield* Layer.build(
+        SqlJournal.layer({ capacity: 1024, overflow: "reject", maxEntryBytes: 1024 }).pipe(
+          Layer.provide(TestStores.databaseAt(":memory:")),
+          Layer.provide(NodeCrypto.layer)
+        )
+      )
+      const controlJournal = Context.get(bounded, Journal.Journal)
+      yield* emit(f.engineJournal, "native-root", { large: "x".repeat(2048) }, "large")
+      yield* emit(f.engineJournal, "native-root", { next: true }, "small")
+      yield* f.engineState.recordRunParent("child", "native-root")
+      yield* emit(f.engineJournal, "child", { child: true })
+      const projector = yield* Projection.make({ ...f.options, controlJournal })
+      yield* projector.catchUp
+      const projected = yield* rows(controlJournal)
+      expect(projected.map(record)).toMatchObject([
+        { reason: "invalid_event", fromSequence: 0, throughSequence: 0 },
+        { sequence: 1, payload: { next: true } },
+        { executionId: "child", payload: { child: true } }
+      ])
+      const restarted = yield* Projection.make({ ...f.options, controlJournal })
+      yield* restarted.catchUp
+      expect(yield* rows(controlJournal)).toEqual(projected)
+    }))))
+
   it("copies native outcomes and recorded child edges, ignores prefix lookalikes, and deduplicates a restart", () =>
     Effect.runPromise(Effect.scoped(Effect.gen(function*() {
       const f = yield* setup
@@ -133,36 +237,39 @@ describe("private engine journal projection", () => {
   it("reports compacted and missing sequences without inventing native completion", () =>
     Effect.runPromise(Effect.scoped(Effect.gen(function*() {
       const f = yield* setup
+      const owner = { hostId: "host", pid: 42, nonce: "nonce" }
+      yield* f.runs.create("native-root", JSON.stringify({ version: 1, flowName: "fixture", payload: {} }))
+      yield* f
+        .sql`UPDATE flows_runs SET status = 'running', owner_host_id = ${owner.hostId}, owner_pid = ${owner.pid}, owner_nonce = ${owner.nonce}, heartbeat_at_ms = 1 WHERE run_id = 'native-root'`
       yield* emit(f.engineJournal, "native-root", { value: 0 }, "zero")
       yield* emit(f.engineJournal, "native-root", { value: 1 }, "one")
       yield* emit(f.engineJournal, "native-root", { value: 2 }, "two")
-      yield* f.sql`DELETE FROM flows_journal_events WHERE run_id = 'native-root' AND seq = 1`
-      const source: Journal.Service = {
-        ...f.engineJournal,
-        entries: (options) =>
-          options.after === undefined ?
-            Effect.fail(
-              new Journal.JournalError({
-                code: "compacted",
-                message: "prefix removed",
-                checkpointSeq: 0 as JournalEvent.Seq
-              })
-            )
-            : f.engineJournal.entries(options)
-      }
-      const projector = yield* Projection.make({ ...f.options, engineJournal: source })
+      yield* emit(f.engineJournal, "native-root", { value: 3 }, "three")
+      yield* f.engineJournal.checkpoint({
+        runId: "native-root" as JournalEvent.RunId,
+        seq: 1 as JournalEvent.Seq,
+        state: null
+      }, owner)
+      expect((yield* f.engineJournal.compact({ runId: "native-root" as JournalEvent.RunId }, owner)).deleted).toBe(1)
+      yield* f.sql`DELETE FROM flows_journal_events WHERE run_id = 'native-root' AND seq = 2`
+      const projector = yield* Projection.make(f.options)
       yield* projector.catchUp
       const projected = yield* rows(f.controlJournal)
       expect(projected.map((entry) => entry.eventType)).toEqual([
         Projection.gapKind,
+        Projection.eventKind,
         Projection.gapKind,
         Projection.eventKind
       ])
       expect(projected.map(record)).toMatchObject([
         { reason: "compacted", throughSequence: 0 },
-        { reason: "sequence-gap", fromSequence: 1, throughSequence: 1 },
-        { sequence: 2, payload: { value: 2 } }
+        { sequence: 1, payload: { value: 1 } },
+        { reason: "sequence-gap", fromSequence: 2, throughSequence: 2 },
+        { sequence: 3, payload: { value: 3 } }
       ])
+      const restarted = yield* Projection.make(f.options)
+      yield* restarted.catchUp
+      expect(yield* rows(f.controlJournal)).toEqual(projected)
     }))))
 
   it("pages beyond one batch and follows newly recorded children", () =>
@@ -260,15 +367,16 @@ describe("private engine journal projection", () => {
       expect(record(projected[1]!)).toMatchObject({ payload: { real: true } })
     }))))
 
-  it.each(["generation", "transaction"] as const)(
-    "records a %s refusal without guessing the current generation",
+  it.each([1, 2] as const)(
+    "records a refusal of generation read %i without guessing the current generation",
     (phase) =>
       Effect.runPromise(Effect.scoped(Effect.gen(function*() {
         const f = yield* setup
         const refusal = Effect.fail(new Journal.JournalError({ code: "read_failed", message: "storage unavailable" }))
+        let reads = 0
         const source: Journal.Service = {
           ...f.engineJournal,
-          ...(phase === "generation" ? { generation: () => refusal } : { transact: () => refusal })
+          generation: (id) => ++reads === phase ? refusal : f.engineJournal.generation!(id)
         }
         const projector = yield* Projection.make({ ...f.options, engineJournal: source })
         expect((yield* Effect.result(projector.catchUp))._tag).toBe("Failure")
@@ -276,7 +384,7 @@ describe("private engine journal projection", () => {
           executionId: "native-root",
           generation: null,
           reason: "read_failed",
-          phase: "source-transaction",
+          phase: "source-generation",
           lastObservedGeneration: null,
           afterSequence: -1
         }])
