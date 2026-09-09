@@ -1412,6 +1412,7 @@ export const execute = async (
     labelByKey: ReadonlyMap<string, string>,
     signal: AbortSignal | undefined
   ): AgentSession.GateRunner => ({
+    reportIdentity: (identity) => labelByKey.get(identity) ?? identity,
     run: (gateIdentities, overlay, round) =>
       Effect.tryPromise({
         try: async () => {

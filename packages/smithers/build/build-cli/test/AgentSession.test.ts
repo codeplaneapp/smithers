@@ -465,7 +465,11 @@ describe("Agent.Diff", () => {
     const rekeyed = scripted([{ purpose: "diff", edits: [{ path: "src/gen.ts", contents: "v1\n" }] }])
     await Effect.runPromise(
       AgentSession.runAgentDiff(
-        runtimeOf({ sessions: rekeyed, gates: AgentFake.makeScriptedGateRunner([[green]]), verdicts }),
+        runtimeOf({
+          sessions: rekeyed,
+          gates: AgentFake.makeScriptedGateRunner([[{ ...green, gate: "Vitest#other" }]]),
+          verdicts
+        }),
         diffPayload({ gateIdentities: ["Vitest#other"] })
       )
     )
@@ -1322,5 +1326,303 @@ describe("session envelope", () => {
     expect(AgentSession.verdictKey({ ...base, agentIdentity: "x" })).not.toBe(key)
     expect(AgentSession.verdictKey({ ...base, mode: "fix" })).not.toBe(key)
     expect(AgentSession.verdictKey({ ...base, gateIdentities: ["g2"] })).not.toBe(key)
+  })
+})
+
+describe("standalone store regressions", () => {
+  for (const kind of ["lint", "diff", "pr"] as const) {
+    it.each(["contents", "paths"])(`${kind} rekeys when rendered data %s change`, async (change) => {
+      await write("src/a.ts", "changed\n")
+      await write("context.txt", "first context")
+      await write("other.txt", "other context")
+      const verdicts = AgentSession.makeMemoryVerdictStore()
+      const run = (
+        sessions: AgentSession.SessionFactory,
+        dataFiles: ReadonlyArray<string>
+      ): Effect.Effect<AgentTarget.LintReport | AgentTarget.PrResult, AgentTarget.LintError | AgentTarget.PrError> => {
+        const runtime = runtimeOf({
+          sessions,
+          verdicts,
+          dataFiles,
+          gates: AgentFake.makeScriptedGateRunner([[green]]),
+          prOpener: { open: () => Effect.succeed("https://example.test/pr/1") }
+        })
+        return kind === "lint"
+          ? AgentSession.runAgentLint(runtime, lintPayload())
+          : kind === "diff"
+          ? AgentSession.runAgentDiff(runtime, diffPayload())
+          : AgentSession.runAgentPr(runtime, diffPayload())
+      }
+      await Effect.runPromise(run(scripted([{}]), ["context.txt"]))
+      if (change === "contents") await write("context.txt", "second context")
+      const second = scripted([{}])
+      await Effect.runPromise(run(second, [change === "paths" ? "other.txt" : "context.txt"]))
+      expect(second.spawns()).toBe(1)
+    })
+  }
+
+  it.each(["diff", "pr"] as const)("%s rekeys after narrowing the write-set", async (kind) => {
+    const verdicts = AgentSession.makeMemoryVerdictStore()
+    const run = (sessions: AgentSession.SessionFactory, changes: ReadonlyArray<string>) => {
+      const runtime = runtimeOf({
+        sessions,
+        verdicts,
+        gates: AgentFake.makeScriptedGateRunner([[green]]),
+        prOpener: { open: () => Effect.succeed("https://example.test/pr/1") }
+      })
+      return kind === "diff" ?
+        AgentSession.runAgentDiff(runtime, diffPayload({ changes }))
+        : AgentSession.runAgentPr(runtime, diffPayload({ changes }))
+    }
+    await Effect.runPromise(run(scripted([{ edits: [{ path: "src/a.ts", contents: "a" }] }]), ["src/**"]))
+    const second = scripted([{ edits: [{ path: "src/b.ts", contents: "b" }] }])
+    const result = await Effect.runPromise(run(second, ["src/b.ts"]))
+    expect(result.edits).toEqual([{ path: "src/b.ts", contents: "b" }])
+    expect(second.spawns()).toBe(1)
+  })
+
+  it("rekeys when the candidate round policy changes", async () => {
+    const verdicts = AgentSession.makeMemoryVerdictStore()
+    for (const maxRounds of [3, 1]) {
+      const sessions = scripted([{}])
+      await Effect.runPromise(
+        AgentSession.runAgentDiff(
+          runtimeOf({ sessions, verdicts, gates: AgentFake.makeScriptedGateRunner([[green]]) }),
+          diffPayload({ maxRounds })
+        )
+      )
+      expect(sessions.spawns()).toBe(1)
+    }
+  })
+
+  it("revalidates cached edits against the current write-set", async () => {
+    const verdicts: AgentSession.AgentVerdictStore = {
+      get: () =>
+        Effect.succeed(
+          JSON.stringify({
+            vacuous: false,
+            rounds: 1,
+            diff: "outside",
+            edits: [{ path: "docs/readme.md", contents: "outside" }],
+            gateReport: [green]
+          })
+        ),
+      put: () => Effect.void
+    }
+    const result = await Effect.runPromise(Effect.result(AgentSession.runAgentDiff(
+      runtimeOf({ sessions: scripted([]), verdicts }),
+      diffPayload()
+    )))
+    expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "smithers-build/AgentWriteEscape" } })
+  })
+
+  it.each([
+    { name: "empty", identities: ["Vitest#gate"], report: [] },
+    { name: "partial", identities: ["Vitest#gate", "Vitest#other"], report: [green] },
+    { name: "unknown", identities: ["Vitest#gate"], report: [{ ...green, gate: "Vitest#other" }] },
+    { name: "duplicate", identities: ["Vitest#gate"], report: [green, green] },
+    { name: "duplicate request", identities: ["Vitest#gate", "Vitest#gate"], report: [green] }
+  ])("rejects a $name gate report before caching or opening a PR", async ({ identities, report }) => {
+    let puts = 0
+    let opens = 0
+    const result = await Effect.runPromise(Effect.result(AgentSession.runAgentPr(
+      runtimeOf({
+        sessions: scripted([{}]),
+        gates: AgentFake.makeScriptedGateRunner([report]),
+        verdicts: {
+          get: () => Effect.succeed(undefined),
+          put: () =>
+            Effect.sync(() => {
+              puts++
+            })
+        },
+        prOpener: {
+          open: () =>
+            Effect.sync(() => {
+              opens++
+              return "https://example.test/pr/1"
+            })
+        }
+      }),
+      diffPayload({ gateIdentities: identities })
+    )))
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: {
+        _tag: "smithers-build/AgentSessionError",
+        phase: "gate",
+        message: expect.stringContaining("gate protocol")
+      }
+    })
+    expect(puts).toBe(0)
+    expect(opens).toBe(0)
+  })
+
+  it("publishes 16 concurrent different-length verdicts without temp collisions", async () => {
+    const directory = NodePath.join(root, "verdicts")
+    const store = AgentSession.makeFileVerdictStore(directory)
+    const values = Array.from({ length: 16 }, (_, i) => JSON.stringify({ text: "x".repeat(i * 8192), i }))
+    const results = await Promise.allSettled(values.map((value) => Effect.runPromise(store.put("same", value))))
+    expect(results.filter((result) => result.status === "rejected")).toEqual([])
+    expect(values).toContain(await Effect.runPromise(store.get("same")))
+    expect(await Fs.readdir(directory)).toEqual(["same.json"])
+  })
+
+  it("treats malformed JSON in the file store as a miss", async () => {
+    await write("verdicts/broken.json", "{broken")
+    expect(await Effect.runPromise(AgentSession.makeFileVerdictStore(NodePath.join(root, "verdicts")).get("broken")))
+      .toBeUndefined()
+  })
+
+  it("does not overwrite an out-of-workspace hard-link alias", async () => {
+    const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-victim-"))
+    try {
+      const victim = NodePath.join(outside, "victim.txt")
+      await Fs.writeFile(victim, "original")
+      await Fs.link(victim, NodePath.join(root, "src/allowed.txt"))
+      const applier = AgentSession.makeLocalWriteSetApplier(root)
+      const overlay = await Effect.runPromise(
+        applier.apply([{ path: "src/allowed.txt", contents: "replacement" }], ["src/**"])
+      )
+      await Effect.runPromise(applier.commit(overlay))
+      expect(await Fs.readFile(victim, "utf8")).toBe("original")
+      expect(await read("src/allowed.txt")).toBe("replacement")
+    } finally {
+      await Fs.rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it.each(["parent", "destination"])("rechecks a symlinked %s at deferred commit", async (component) => {
+    const applier = AgentSession.makeLocalWriteSetApplier(root)
+    const overlay = await Effect.runPromise(applier.apply([{ path: "src/a.ts", contents: "escaped" }], ["src/**"]))
+    await write("outside/a.ts", "original")
+    if (component === "parent") {
+      await Fs.rename(NodePath.join(root, "src"), NodePath.join(root, "saved-src"))
+      await Fs.symlink(NodePath.join(root, "outside"), NodePath.join(root, "src"))
+    } else {
+      await Fs.unlink(NodePath.join(root, "src/a.ts"))
+      await Fs.symlink(NodePath.join(root, "outside/a.ts"), NodePath.join(root, "src/a.ts"))
+    }
+    const result = await Effect.runPromise(Effect.result(applier.commit(overlay)))
+    expect(result).toMatchObject({ _tag: "Failure", failure: { phase: "apply" } })
+    expect(await read("outside/a.ts")).toBe("original")
+  })
+})
+
+describe("deferred candidate identity", () => {
+  it("rejects a destination replaced by a different regular inode", async () => {
+    const applier = AgentSession.makeLocalWriteSetApplier(root)
+    const overlay = await Effect.runPromise(applier.apply([{ path: "src/a.ts", contents: "candidate" }], ["src/**"]))
+    await write("src/replacement.ts", "new owner")
+    await Fs.rename(NodePath.join(root, "src/replacement.ts"), NodePath.join(root, "src/a.ts"))
+    const result = await Effect.runPromise(Effect.result(applier.commit(overlay)))
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { phase: "apply", message: expect.stringContaining("changed") }
+    })
+    expect(await read("src/a.ts")).toBe("new owner")
+  })
+})
+
+describe("cached candidate confinement", () => {
+  it("checks a real cached candidate again after a destination becomes a symlink", async () => {
+    const verdicts = AgentSession.makeMemoryVerdictStore()
+    await Effect.runPromise(AgentSession.runAgentDiff(
+      runtimeOf({
+        sessions: scripted([{ edits: [{ path: "src/a.ts", contents: "candidate" }] }]),
+        verdicts,
+        gates: AgentFake.makeScriptedGateRunner([[green]])
+      }),
+      diffPayload()
+    ))
+    await Fs.unlink(NodePath.join(root, "src/a.ts"))
+    await Fs.symlink(NodePath.join(root, "docs/readme.md"), NodePath.join(root, "src/a.ts"))
+    const result = await Effect.runPromise(Effect.result(AgentSession.runAgentDiff(
+      runtimeOf({ sessions: scripted([]), verdicts }),
+      diffPayload()
+    )))
+    expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "smithers-build/AgentWriteEscape" } })
+    expect(await read("docs/readme.md")).toBe("readme\n")
+  })
+})
+
+describe("gate report identity mapping", () => {
+  it("validates mapped labels on production and cache replay", async () => {
+    const verdicts = AgentSession.makeMemoryVerdictStore()
+    for (const replay of [false, true]) {
+      const sessions = scripted(replay ? [] : [{}])
+      const gates = AgentFake.makeScriptedGateRunner(replay ? [] : [[{ gate: "//pkg:test", status: "green" }]])
+      const result = await Effect.runPromise(
+        AgentSession.runAgentDiff(
+          runtimeOf({
+            sessions,
+            verdicts,
+            gates: { ...gates, reportIdentity: (identity) => identity === "digest" ? "//pkg:test" : identity }
+          }),
+          diffPayload({ gateIdentities: ["digest"] })
+        )
+      )
+      expect(result.gateReport).toEqual([{ gate: "//pkg:test", status: "green" }])
+      expect(sessions.spawns()).toBe(replay ? 0 : 1)
+    }
+  })
+
+  it("accepts an empty gate report for an empty requested set", async () => {
+    const result = await Effect.runPromise(AgentSession.runAgentDiff(
+      runtimeOf({ sessions: scripted([{}]) }),
+      diffPayload({ gateIdentities: [] })
+    ))
+    expect(result.gateReport).toEqual([])
+  })
+
+  it("rejects ambiguous report mappings", async () => {
+    const result = await Effect.runPromise(Effect.result(AgentSession.runAgentDiff(
+      runtimeOf({
+        sessions: scripted([{}]),
+        gates: { run: () => Effect.succeed([green]), reportIdentity: () => green.gate }
+      }),
+      diffPayload({ gateIdentities: ["first", "second"] })
+    )))
+    expect(result).toMatchObject({ _tag: "Failure", failure: { phase: "gate" } })
+  })
+
+  it("rejects incomplete cached gate reports", async () => {
+    const result = await Effect.runPromise(Effect.result(AgentSession.runAgentDiff(
+      runtimeOf({
+        sessions: scripted([]),
+        verdicts: {
+          get: () => Effect.succeed(JSON.stringify({ vacuous: false, rounds: 1, diff: "", edits: [], gateReport: [] })),
+          put: () => Effect.void
+        }
+      }),
+      diffPayload()
+    )))
+    expect(result).toMatchObject({ _tag: "Failure", failure: { phase: "gate" } })
+  })
+})
+
+describe("atomic candidate publication", () => {
+  it("preserves executable permissions and removes temporary siblings", async () => {
+    await Fs.chmod(NodePath.join(root, "src/a.ts"), 0o755)
+    const applier = AgentSession.makeLocalWriteSetApplier(root)
+    const overlay = await Effect.runPromise(
+      applier.apply([{ path: "src/a.ts", contents: "replacement" }, { path: "src/new/file.ts", contents: "new" }], [
+        "src/**"
+      ])
+    )
+    await Effect.runPromise(applier.commit(overlay))
+    expect((await Fs.stat(NodePath.join(root, "src/a.ts"))).mode & 0o777).toBe(0o755)
+    expect(await read("src/new/file.ts")).toBe("new")
+    expect((await Fs.readdir(NodePath.join(root, "src"))).sort()).toEqual(["a.ts", "new"])
+  })
+
+  it("cleans up only its temporary file when rename fails", async () => {
+    await Fs.mkdir(NodePath.join(root, "verdicts/key.json"), { recursive: true })
+    await write("verdicts/unrelated.tmp", "owned elsewhere")
+    const result = await Effect.runPromise(
+      Effect.result(AgentSession.makeFileVerdictStore(NodePath.join(root, "verdicts")).put("key", "{}"))
+    )
+    expect(result).toMatchObject({ _tag: "Failure", failure: { phase: "cache" } })
+    expect((await Fs.readdir(NodePath.join(root, "verdicts"))).sort()).toEqual(["key.json", "unrelated.tmp"])
   })
 })

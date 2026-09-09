@@ -510,6 +510,34 @@ If any selected pool member uses Codex, server names must match
 | `PrOpener`                 | `{ open(candidate) => Effect<string, AgentSessionError> }`                | Opens an accepted candidate as a pull request.                                             |
 | `unavailablePrOpener`      | `PrOpener`                                                                | A typed refusal naming the integration point.                                              |
 
+
+Standalone verdict keys are versioned. They include the rendered prompt (with
+payload values, declared write-set, data file names and rendered contents), diff,
+agent identity, execution mode, gate identities, MCP declarations, and candidate
+round limit. Changing these inputs invalidates a cached candidate. Cache replay
+validates the gate report and passes cached edits through `WriteSetApplier.apply`
+with the current write-set before returning them.
+
+`GateRunner.run` must return exactly one report entry for each requested identity.
+Missing, duplicate, and unknown identities fail with `AgentSessionError`, phase
+`gate`, and a `gate protocol` message before caching or opening a PR. Runners that
+report display labels supply `reportIdentity(identity)` to map each requested
+identity to its report label. The mapping must be unique. Without it, report
+labels must equal the requested identities. An empty report is valid only for
+an empty requested set.
+
+`makeFileVerdictStore` treats unreadable or malformed JSON entries as cache misses.
+Each put writes an exclusively created temporary sibling, syncs and closes it,
+then renames it into place. Concurrent puts of the same key each succeed; the
+last rename determines the stored value.
+
+`makeLocalWriteSetApplier` rechecks path components and their device/inode identity
+before committing a deferred overlay. Symlinks and replaced components refuse the
+commit. File contents are published through a unique temporary sibling and rename,
+so replacing an allowed hard link does not modify its other aliases. Existing
+file permissions are preserved. Multi-file commits are not transactional, and
+callers must serialize concurrent workspace directory mutations with commits.
+
 ### Running a target
 
 | Export                | Signature                                                                                                                           | What it is                                                                        |

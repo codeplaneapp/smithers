@@ -41,7 +41,7 @@ import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { minimatch } from "minimatch"
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
@@ -870,6 +870,53 @@ const overlayOf = (
       .join("\n")
 })
 
+/** Publishes a complete file without mutating an existing hard-linked inode. */
+const publishFile = async (path: string, contents: string, mode?: number): Promise<void> => {
+  const temporary = `${path}.tmp-${process.pid}-${randomBytes(12).toString("hex")}`
+  const handle = await Fs.open(temporary, "wx", mode)
+  try {
+    try {
+      await handle.writeFile(contents, "utf8")
+      if (mode !== undefined) await handle.chmod(mode)
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await Fs.rename(temporary, path)
+  } finally {
+    await Fs.rm(temporary, { force: true })
+  }
+}
+
+/** Checks each component, including the root, without following symlinks. */
+const editPathState = async (
+  workspaceRoot: string,
+  path: string
+): Promise<ReadonlyMap<string, NodeFs.Stats | undefined>> => {
+  const failure = editPathFailure(path)
+  if (failure !== undefined) throw new Error(`candidate edit path ${JSON.stringify(path)} ${failure}`)
+  const state = new Map<string, NodeFs.Stats | undefined>()
+  let prefix = workspaceRoot
+  for (const segment of ["", ...path.split("/")]) {
+    prefix = NodePath.join(prefix, segment)
+    let stat: NodeFs.Stats | undefined
+    try {
+      stat = await Fs.lstat(prefix)
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause
+    }
+    if (stat?.isSymbolicLink()) {
+      throw new Error(`candidate edit ${JSON.stringify(path)} travels through a symlink at ${prefix}`)
+    }
+    if (stat !== undefined && !(prefix === NodePath.join(workspaceRoot, path) ? stat.isFile() : stat.isDirectory())) {
+      throw new Error(`candidate edit ${JSON.stringify(path)} has a non-regular path component at ${prefix}`)
+    }
+    state.set(prefix, stat)
+    if (stat === undefined) break
+  }
+  return state
+}
+
 /**
  * The thin in-lane write-set applier: mechanical path validation, minimatch
  * write-set confinement, and refusal of any symlinked path component.
@@ -877,75 +924,87 @@ const overlayOf = (
  * @category constructors
  * @since 0.1.0
  */
-export const makeLocalWriteSetApplier = (workspaceRoot: string): WriteSetApplier => ({
-  apply: (edits, writeSet, base) =>
-    Effect.tryPromise({
-      try: async () => {
-        const files = new Map<string, string | null>(base?.files ?? [])
-        for (const edit of edits) {
-          const failure = editPathFailure(edit.path)
-          if (failure !== undefined) {
-            throw new AgentTarget.AgentWriteEscape({
-              path: edit.path,
-              writeSet: [...writeSet],
-              message: `candidate edit path ${JSON.stringify(edit.path)} ${failure}`
-            })
-          }
-          if (!matchesAny(edit.path, writeSet)) {
-            throw new AgentTarget.AgentWriteEscape({
-              path: edit.path,
-              writeSet: [...writeSet],
-              message: `candidate edit ${JSON.stringify(edit.path)} is outside the declared write-set`
-            })
-          }
-          // Symlink discipline: an edit must not travel through a symlinked
-          // component, or replacing "inside the write-set" with "anywhere the
-          // link points" would defeat the confinement.
-          const segments = edit.path.split("/")
-          let prefix = workspaceRoot
-          for (const segment of segments) {
-            prefix = NodePath.join(prefix, segment)
-            let stat
-            try {
-              stat = await Fs.lstat(prefix)
-            } catch {
-              break
-            }
-            if (stat.isSymbolicLink()) {
+export const makeLocalWriteSetApplier = (workspaceRoot: string): WriteSetApplier => {
+  const states = new WeakMap<CandidateOverlay, ReadonlyMap<string, NodeFs.Stats | undefined>>()
+  return ({
+    apply: (edits, writeSet, base) =>
+      Effect.tryPromise({
+        try: async () => {
+          const files = new Map<string, string | null>(base?.files ?? [])
+          for (const edit of edits) {
+            const failure = editPathFailure(edit.path)
+            if (failure !== undefined) {
               throw new AgentTarget.AgentWriteEscape({
                 path: edit.path,
                 writeSet: [...writeSet],
-                message: `candidate edit ${JSON.stringify(edit.path)} travels through a symlink at ${
-                  NodePath.relative(workspaceRoot, prefix)
-                }`
+                message: `candidate edit path ${JSON.stringify(edit.path)} ${failure}`
               })
             }
+            if (!matchesAny(edit.path, writeSet)) {
+              throw new AgentTarget.AgentWriteEscape({
+                path: edit.path,
+                writeSet: [...writeSet],
+                message: `candidate edit ${JSON.stringify(edit.path)} is outside the declared write-set`
+              })
+            }
+            files.set(edit.path, edit.contents)
           }
-          files.set(edit.path, edit.contents)
-        }
-        return overlayOf(workspaceRoot, files)
-      },
-      catch: (cause) => cause instanceof AgentTarget.AgentWriteEscape ? cause : sessionError("apply", cause)
-    }),
-  commit: (overlay) =>
-    Effect.tryPromise({
-      try: async () => {
-        const written: Array<string> = []
-        for (const [path, contents] of [...overlay.files.entries()].sort(([a], [b]) => a < b ? -1 : 1)) {
-          const absolute = NodePath.join(workspaceRoot, path)
-          if (contents === null) {
-            await Fs.rm(absolute, { force: true })
-          } else {
-            await Fs.mkdir(NodePath.dirname(absolute), { recursive: true })
-            await Fs.writeFile(absolute, contents, "utf8")
+          const state = new Map<string, NodeFs.Stats | undefined>()
+          for (const path of files.keys()) {
+            if (!matchesAny(path, writeSet)) {
+              throw new AgentTarget.AgentWriteEscape({
+                path,
+                writeSet: [...writeSet],
+                message: `candidate edit ${JSON.stringify(path)} is outside the declared write-set`
+              })
+            }
+            try {
+              for (const [prefix, stat] of await editPathState(workspaceRoot, path)) state.set(prefix, stat)
+            } catch (cause) {
+              throw new AgentTarget.AgentWriteEscape({ path, writeSet: [...writeSet], message: messageOf(cause) })
+            }
           }
-          written.push(path)
-        }
-        return written
-      },
-      catch: (cause) => sessionError("apply", cause)
-    })
-})
+          const overlay = overlayOf(workspaceRoot, files)
+          states.set(overlay, state)
+          return overlay
+        },
+        catch: (cause) => cause instanceof AgentTarget.AgentWriteEscape ? cause : sessionError("apply", cause)
+      }),
+    commit: (overlay) =>
+      Effect.tryPromise({
+        try: async () => {
+          const written: Array<string> = []
+          const expected = states.get(overlay)
+          // Validate the entire deferred overlay before the first write. An
+          // ordinary replacement is rejected too, not just a new symlink.
+          for (const path of overlay.files.keys()) {
+            for (const [prefix, stat] of await editPathState(workspaceRoot, path)) {
+              if (expected?.has(prefix)) {
+                const previous = expected.get(prefix)
+                if (previous?.dev !== stat?.dev || previous?.ino !== stat?.ino) {
+                  throw new Error(`candidate edit ${JSON.stringify(path)} changed before commit at ${prefix}`)
+                }
+              }
+            }
+          }
+          for (const [path, contents] of [...overlay.files.entries()].sort(([a], [b]) => a < b ? -1 : 1)) {
+            const absolute = NodePath.join(workspaceRoot, path)
+            const state = await editPathState(workspaceRoot, path)
+            if (contents === null) {
+              await Fs.rm(absolute, { force: true })
+            } else {
+              await Fs.mkdir(NodePath.dirname(absolute), { recursive: true })
+              await editPathState(workspaceRoot, path)
+              await publishFile(absolute, contents, state.get(absolute)?.mode)
+            }
+            written.push(path)
+          }
+          return written
+        },
+        catch: (cause) => sessionError("apply", cause)
+      })
+  })
+}
 
 /**
  * Runs the declared gates against the exact candidate tree of one round.
@@ -959,6 +1018,8 @@ export const makeLocalWriteSetApplier = (workspaceRoot: string): WriteSetApplier
  * @since 0.1.0
  */
 export interface GateRunner {
+  /** Maps an execution identity to its report label; defaults to the identity itself. */
+  readonly reportIdentity?: (gateIdentity: string) => string
   readonly run: (
     gateIdentities: ReadonlyArray<string>,
     overlay: CandidateOverlay,
@@ -1023,6 +1084,7 @@ export interface VerdictKeyMaterial {
  */
 export const verdictKey = (material: VerdictKeyMaterial): string =>
   createHash("sha256").update(JSON.stringify({
+    version: 2,
     agentIdentity: material.agentIdentity,
     diffDigest: material.diffDigest,
     gateIdentities: material.gateIdentities,
@@ -1059,7 +1121,9 @@ export const makeFileVerdictStore = (directory: string): AgentVerdictStore => ({
     Effect.tryPromise({
       try: async () => {
         try {
-          return await Fs.readFile(NodePath.join(directory, `${key}.json`), "utf8")
+          const value = await Fs.readFile(NodePath.join(directory, `${key}.json`), "utf8")
+          JSON.parse(value)
+          return value
         } catch {
           return undefined
         }
@@ -1071,8 +1135,7 @@ export const makeFileVerdictStore = (directory: string): AgentVerdictStore => ({
       try: async () => {
         await Fs.mkdir(directory, { recursive: true })
         const path = NodePath.join(directory, `${key}.json`)
-        await Fs.writeFile(`${path}.tmp`, value, "utf8")
-        await Fs.rename(`${path}.tmp`, path)
+        await publishFile(path, value)
       },
       catch: (cause) => sessionError("cache", cause)
     })
@@ -1458,18 +1521,6 @@ export const runAgentLint = (
     }
     const promptText = yield* readPrompt(runtime.workspaceRoot, payload.promptPath, payload.packageDirectory)
     const session = yield* runtime.sessions.open(payload.agent)
-    const key = verdictKey({
-      kind: "lint",
-      diffDigest: slice.digest,
-      promptDigest: digestText(promptText),
-      agentIdentity: session.identity,
-      mode: payload.mode,
-      gateIdentities: []
-    })
-    if (payload.mode === "check") {
-      const cached = cachedValue(yield* runtime.verdicts.get(key), decodeLintReport)
-      if (cached !== undefined) return cached
-    }
     const purpose = payload.mode === "check" ? "lint" as const : "fix" as const
     const instruction = payload.mode === "check"
       ? "Review ONLY the diff slice below against the prompt above. Report findings; propose no edits."
@@ -1480,6 +1531,18 @@ export const runAgentLint = (
     const prompt = yield* boundedPrompt(
       `${promptText}\n\n${instruction}\n\n${envelopeContract}${filesSection}\n\n=== DIFF SLICE ===\n\n${slice.patch}`
     )
+    const key = verdictKey({
+      kind: "lint",
+      diffDigest: slice.digest,
+      promptDigest: digestText(prompt),
+      agentIdentity: session.identity,
+      mode: payload.mode,
+      gateIdentities: []
+    })
+    if (payload.mode === "check") {
+      const cached = cachedValue(yield* runtime.verdicts.get(key), decodeLintReport)
+      if (cached !== undefined) return cached
+    }
     const envelope = yield* session.run({ purpose, prompt })
     // `info` findings are advisory: they travel in the report and the log,
     // never in the verdict. A lint is red on warning and error only, or the
@@ -1522,6 +1585,25 @@ export const runAgentLint = (
     return { vacuous: false, files: slice.files, findings: advisory, fixed }
   })
 
+/** Every declared gate must have exactly one result under its mapped identity. */
+const validateGateReport = (
+  runner: GateRunner,
+  identities: ReadonlyArray<string>,
+  report: ReadonlyArray<AgentTarget.GateReportEntry>
+): Effect.Effect<void, AgentTarget.AgentSessionError> =>
+  Effect.try({
+    try: () => {
+      const expected = identities.map((identity) => runner.reportIdentity?.(identity) ?? identity)
+      const remaining = new Set(expected)
+      if (remaining.size !== expected.length) throw new Error("gate protocol: duplicate requested report identities")
+      for (const entry of report) {
+        if (!remaining.delete(entry.gate)) throw new Error(`gate protocol: unknown or duplicate gate ${entry.gate}`)
+      }
+      if (remaining.size !== 0) throw new Error(`gate protocol: missing gates ${[...remaining].join(", ")}`)
+    },
+    catch: (cause) => sessionError("gate", cause)
+  })
+
 /** The bounded candidate/gate loop shared by Agent.Diff and Agent.Pr. */
 const runCandidateLoop = (
   runtime: AgentRuntime,
@@ -1538,16 +1620,6 @@ const runCandidateLoop = (
     const promptText = yield* readPrompt(runtime.workspaceRoot, payload.promptPath, payload.packageDirectory)
     const session = yield* runtime.sessions.open(payload.agent, payload.mcp)
     const sortedValues = Object.fromEntries(Object.entries(values).sort(([a], [b]) => a < b ? -1 : 1))
-    const key = verdictKey({
-      kind,
-      diffDigest: slice.digest,
-      promptDigest: digestText(`${promptText}\u0000${JSON.stringify(sortedValues)}`),
-      agentIdentity: session.identity,
-      mode: "produce",
-      gateIdentities: payload.gateIdentities
-    })
-    const cached = cachedValue(yield* runtime.verdicts.get(key), decodeDiffResult)
-    if (cached !== undefined) return cached
     const valuesSection = Object.keys(sortedValues).length === 0
       ? ""
       : `\n\n=== PAYLOAD INPUTS ===\n\n${JSON.stringify(sortedValues, null, 2)}`
@@ -1558,6 +1630,24 @@ const runCandidateLoop = (
     const basePrompt = `${promptText}${valuesSection}\n\n` +
       "Produce complete-file candidate edits that accomplish the task, confined to this write-set: " +
       `${JSON.stringify(payload.changes)}.\n\n${envelopeContract}${filesSection}${sliceSection}`
+    yield* boundedPrompt(basePrompt)
+    const key = verdictKey({
+      kind,
+      diffDigest: slice.digest,
+      promptDigest: digestText(JSON.stringify({ prompt: basePrompt, maxRounds: payload.maxRounds, mcp: payload.mcp })),
+      agentIdentity: session.identity,
+      mode: "produce",
+      gateIdentities: payload.gateIdentities
+    })
+    const cached = cachedValue(yield* runtime.verdicts.get(key), decodeDiffResult)
+    if (
+      cached !== undefined && !cached.vacuous && cached.rounds > 0 && cached.rounds <= payload.maxRounds &&
+      cached.gateReport.every((entry) => entry.status === "green")
+    ) {
+      yield* validateGateReport(runtime.gates, payload.gateIdentities, cached.gateReport)
+      const overlay = yield* runtime.writeSets.apply(cached.edits, payload.changes)
+      return { ...cached, diff: overlay.render() }
+    }
     let overlay: CandidateOverlay | undefined
     let report: ReadonlyArray<AgentTarget.GateReportEntry> = []
     let prompt = basePrompt
@@ -1568,6 +1658,7 @@ const runCandidateLoop = (
       const envelope = yield* session.run({ purpose: "diff", prompt: bounded })
       overlay = yield* runtime.writeSets.apply(envelope.edits, payload.changes, overlay)
       report = yield* runtime.gates.run(payload.gateIdentities, overlay, round)
+      yield* validateGateReport(runtime.gates, payload.gateIdentities, report)
       if (report.every((entry) => entry.status === "green")) {
         const result: AgentTarget.DiffResult = {
           vacuous: false,
