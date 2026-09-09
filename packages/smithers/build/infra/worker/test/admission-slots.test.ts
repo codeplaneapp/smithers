@@ -6,6 +6,7 @@ import {
   type ContentStore,
   createHandler,
   type DeleteFence,
+  maxConcurrentActionCachePublications,
   maxConcurrentArtifactTransfers,
   maxConcurrentCacheRequests
 } from "../protocol.ts"
@@ -168,13 +169,207 @@ describe("admission slots survive a failed hand-off to the response body", () =>
     }
 
     // Every slot is now owned by an undrained body.
-    const refused = await handler(request("/healthz"))
+    const refused = await handler(request("/cas/findMissing"))
     expect(refused.status).toBe(429)
 
     await held[0]?.text()
-    const admitted = await handler(request("/healthz"))
-    expect(admitted.status).toBe(200)
+    const admitted = await handler(request("/cas/findMissing"))
+    expect(admitted.status).toBe(405)
 
     await Promise.all(held.slice(1).map((response) => response.text()))
+  })
+})
+
+
+describe("admitted request cancellation and deadlines", () => {
+  const dependencies = {
+    actionCache: new EmptyActionCache(),
+    contentStore: unreadableContentStore,
+    readTokenHash,
+    writeTokenHash: tokenHash
+  }
+
+  it("cancels aborted admitted uploads and returns all publication permits", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const handler = createHandler(dependencies)
+    const aborters: Array<AbortController> = []
+    const streams: Array<ReadableStream<Uint8Array>> = []
+    const cancellations = vi.fn()
+    const uploads = Array.from({ length: maxConcurrentActionCachePublications }, () => {
+      const aborter = new AbortController()
+      aborters.push(aborter)
+      const body = new ReadableStream<Uint8Array>({ cancel: cancellations })
+      streams.push(body)
+      return handler(new Request(`https://cache.test/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body,
+        signal: aborter.signal,
+        duplex: "half"
+      } as RequestInit))
+    })
+    try {
+      await vi.waitFor(() => expect(streams.every((body) => body.locked)).toBe(true))
+      aborters.forEach((aborter) => aborter.abort())
+      await vi.waitFor(() => expect(cancellations).toHaveBeenCalledTimes(maxConcurrentActionCachePublications))
+      expect((await Promise.all(uploads)).map((response) => response.status)).toEqual([503, 503, 503, 503])
+      const next = await handler(new Request(`https://cache.test/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: "{}"
+      }))
+      expect(next.status).toBe(201)
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it("keeps 64 public readiness callers outside authenticated cache admission", async () => {
+    let release!: () => void
+    const health = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const handler = createHandler({ ...dependencies, health })
+    const calls = Array.from({ length: maxConcurrentCacheRequests }, () =>
+      handler(new Request("https://cache.test/healthz")))
+    try {
+      await vi.waitFor(() => expect(health).toHaveBeenCalledTimes(1))
+      const response = await handler(new Request(`https://cache.test/ac/${keyDigest}`, {
+        headers: { authorization: "Bearer a-reader-that-never-publishes" }
+      }))
+      expect(response.status).toBe(404)
+    } finally {
+      release()
+      await Promise.all(calls)
+    }
+  })
+
+  it("bounds readiness waits without multiplying an uncancellable backend probe", async () => {
+    vi.useFakeTimers()
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    let release!: () => void
+    const health = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const handler = createHandler({ ...dependencies, health })
+    let settled = 0
+    try {
+      const first = handler(new Request("https://cache.test/healthz")).then((response) => {
+        settled += 1
+        return response
+      })
+      await vi.advanceTimersByTimeAsync(30_001)
+      expect(settled).toBe(1)
+      expect((await first).status).toBe(503)
+      for (let index = 0; index < 3; index += 1) {
+        const retry = handler(new Request("https://cache.test/healthz"))
+        await vi.advanceTimersByTimeAsync(30_001)
+        expect((await retry).status).toBe(503)
+      }
+      expect(health).toHaveBeenCalledTimes(1)
+      release()
+      await vi.advanceTimersByTimeAsync(0)
+      const recovered = handler(new Request("https://cache.test/healthz"))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(health).toHaveBeenCalledTimes(2)
+      release()
+      expect((await recovered).status).toBe(200)
+    } finally {
+      release?.()
+      vi.useRealTimers()
+      errors.mockRestore()
+    }
+  })
+})
+
+describe("bounded dependency work", () => {
+  it("aborts coalesced readiness only after its last caller leaves", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    let cancellation: AbortSignal | undefined
+    const health = vi.fn((signal?: AbortSignal) => new Promise<void>((_resolve, reject) => {
+      cancellation = signal
+      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+    }))
+    const handler = createHandler({
+      actionCache: new EmptyActionCache(), contentStore: unreadableContentStore,
+      readTokenHash, writeTokenHash: tokenHash, health
+    })
+    const firstAbort = new AbortController()
+    const lastAbort = new AbortController()
+    try {
+      const first = handler(new Request("https://cache.test/healthz", { signal: firstAbort.signal }))
+      const last = handler(new Request("https://cache.test/healthz", { signal: lastAbort.signal }))
+      await vi.waitFor(() => expect(health).toHaveBeenCalledTimes(1))
+      firstAbort.abort()
+      expect((await first).status).toBe(503)
+      expect(cancellation?.aborted).toBe(false)
+      lastAbort.abort()
+      expect((await last).status).toBe(503)
+      expect(cancellation?.aborted).toBe(true)
+      const retryAbort = new AbortController()
+      const retry = handler(new Request("https://cache.test/healthz", { signal: retryAbort.signal }))
+      await vi.waitFor(() => expect(health).toHaveBeenCalledTimes(2))
+      retryAbort.abort()
+      expect((await retry).status).toBe(503)
+      const preAborted = await handler(new Request("https://cache.test/healthz", { signal: retryAbort.signal }))
+      expect(preAborted.status).toBe(503)
+      expect(health).toHaveBeenCalledTimes(2)
+    } finally {
+      firstAbort.abort()
+      lastAbort.abort()
+      errors.mockRestore()
+    }
+  })
+
+  it("releases timed-out request slots while bounding uncancellable storage and cleaning late bodies", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const releases: Array<(value: { body: BodyInit } | null) => void> = []
+    const signals: Array<AbortSignal | undefined> = []
+    const get = vi.fn((_digest: string, signal?: AbortSignal) => {
+      signals.push(signal)
+      return new Promise<{ body: BodyInit } | null>((resolve) => releases.push(resolve))
+    })
+    const handler = createHandler({
+      actionCache: new EmptyActionCache(), contentStore: { ...unreadableContentStore, get },
+      readTokenHash, writeTokenHash: tokenHash
+    })
+    try {
+      const aborter = new AbortController()
+      const aborted = handler(new Request(`https://cache.test/cas/${digest}`, {
+        headers: { authorization: `Bearer ${token}` }, signal: aborter.signal
+      }))
+      await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+      aborter.abort()
+      expect((await aborted).status).toBe(503)
+      expect(signals[0]?.aborted).toBe(true)
+
+      vi.useFakeTimers()
+      let settled = false
+      const timedOut = handler(request(`/cas/${digest}`)).then((response) => {
+        settled = true
+        return response
+      })
+      // Authentication uses native crypto, so wait for the dependency to start
+      // before advancing its clock.
+      await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+      await vi.advanceTimersByTimeAsync(30_001)
+      expect(settled).toBe(true)
+      expect((await timedOut).status).toBe(503)
+      expect(signals[1]?.aborted).toBe(true)
+      expect((await handler(request(`/cas/${digest}`))).status).toBe(503)
+      expect(get).toHaveBeenCalledTimes(2)
+      expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(404)
+
+      const cancelled = vi.fn()
+      releases[0]?.({ body: new ReadableStream({ cancel: cancelled }) })
+      releases[1]?.(null)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(cancelled).toHaveBeenCalledTimes(1)
+      const retry = handler(request(`/cas/${digest}`))
+      await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(3))
+      releases[2]?.({ body: "artifact" })
+      const response = await retry
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe("artifact")
+    } finally {
+      vi.useRealTimers()
+      errors.mockRestore()
+    }
   })
 })

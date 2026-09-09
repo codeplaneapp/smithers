@@ -113,7 +113,8 @@ the production custom domain.
 ## Verify the service
 
 `GET` and `HEAD /healthz` are public readiness probes. They check D1 and R2,
-return no cache state, and coalesce successful probes for one second:
+return no cache state, and coalesce successful probes for one second. They
+do not consume cache request slots:
 
 ```sh
 curl --fail-with-body https://build.smithers.sh/healthz
@@ -195,6 +196,18 @@ ends: a `PUT` body is buffered inside the slot, and a `GET` slot is held by
 the response body until the client drains or cancels it. Excess work returns
 `429` with `Retry-After: 1` and its request body is cancelled without waiting
 for a hostile cancellation promise.
+
+Admitted request bodies have a 10-second idle deadline and a 60-second total
+deadline. Storage operations and readiness checks have a 30-second deadline.
+During these waits, request aborts cancel body readers and release request
+permits promptly; aborts and deadlines return `503`. Storage adapters receive an optional
+`AbortSignal`. Operations that ignore cancellation retain separate per-method
+permits until they settle, bounded by the corresponding route ceiling (64 for
+action reads, deletes, and artifact presence checks; four for action
+publications; eight for `findMissing`; two for artifact gets or puts).
+Readiness retains at most one backend probe.
+While an uncancellable operation occupies every dependency permit, retries
+return `503`; they cannot accumulate more backend work.
 
 Malformed input returns `400`, unsupported content types return `415`, and
 oversized input returns `413`. Unsupported methods return `405`. An internal

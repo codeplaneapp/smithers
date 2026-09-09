@@ -1616,3 +1616,102 @@ describe("remote-cache hardening", () => {
     await Promise.all([held[1]?.body?.cancel(), readmitted.body?.cancel()])
   })
 })
+
+describe("admitted body deadlines", () => {
+  it.each([false, true])("bounds an admitted body with periodic progress: %s", async (progress) => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const body = new ReadableStream<Uint8Array>({
+      start(value) { controller = value },
+      cancel
+    })
+    const handler = makeHandler()
+    let settled = false
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] })
+    try {
+      const pending = handler(request(`/ac/${keyDigest}`, {
+        method: "PUT", body, headers: { "content-type": "application/json" }, duplex: "half"
+      } as RequestInit)).then((response) => {
+        settled = true
+        return response
+      })
+      await vi.waitFor(() => expect(body.locked).toBe(true))
+      if (progress) {
+        for (let index = 0; index < 7; index += 1) {
+          await vi.advanceTimersByTimeAsync(8_000)
+          expect(settled).toBe(false)
+          controller.enqueue(textEncoder.encode(" "))
+          await vi.advanceTimersByTimeAsync(0)
+        }
+        await vi.advanceTimersByTimeAsync(4_001)
+      } else {
+        await vi.advanceTimersByTimeAsync(10_001)
+      }
+      expect(settled).toBe(true)
+      expect((await pending).status).toBe(503)
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(body.locked).toBe(false)
+      expect((await handler(jsonRequest(`/ac/${keyDigest}`, {}, { method: "PUT" }))).status).toBe(201)
+    } finally {
+      vi.useRealTimers()
+      errors.mockRestore()
+    }
+  })
+})
+
+describe("admitted body cancellation edges", () => {
+  it.each(["GET", "PUT"])("does not start work for a pre-aborted %s", async (method) => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const cancel = vi.fn()
+    const get = vi.fn(async () => null)
+    const memory = new MemoryActionCache()
+    const handler = makeHandler({ actionCache: {
+      get, put: (key, publication) => memory.put(key, publication),
+      delete: (key, fence) => memory.delete(key, fence)
+    } })
+    const aborter = new AbortController()
+    aborter.abort()
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    try {
+      const response = await handler(request(`/ac/${keyDigest}`, {
+        method, signal: aborter.signal, headers: { "content-type": "application/json" },
+        ...(method === "PUT" ? { body, duplex: "half" } : {})
+      } as RequestInit))
+      expect(response.status).toBe(503)
+      expect(get).not.toHaveBeenCalled()
+      expect(body.locked).toBe(false)
+      if (method === "PUT") expect(cancel).toHaveBeenCalledTimes(1)
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it.each(["synchronous read failure", "total deadline between reads"])("releases the reader after %s", async (failure) => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    let now = 0
+    const time = vi.spyOn(performance, "now").mockImplementation(() => now)
+    const cancel = vi.fn(async () => undefined)
+    const releaseLock = vi.fn()
+    const read = vi.fn(() => {
+      if (failure === "synchronous read failure") throw new Error("reader failed")
+      // Microtask-only producers can advance elapsed time without giving the
+      // timer queue a turn. The total deadline must be checked between reads.
+      now = 60_001
+      return Promise.resolve({ done: false, value: textEncoder.encode(" ") })
+    })
+    try {
+      const response = await makeHandler()(rawRequest(`/ac/${keyDigest}`, {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: { getReader: () => ({ read, cancel, releaseLock }) }
+      }))
+      expect(response.status).toBe(503)
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(releaseLock).toHaveBeenCalledTimes(1)
+    } finally {
+      time.mockRestore()
+      errors.mockRestore()
+    }
+  })
+})

@@ -164,6 +164,12 @@ export const maxConcurrentArtifactTransfers = 2
  */
 export const healthCacheMilliseconds = 1000
 
+// Body progress and total duration are bounded independently. Dependencies
+// get their own deadline because the platform stores may ignore cancellation.
+const bodyIdleMilliseconds = 10_000
+const bodyTotalMilliseconds = 60_000
+const dependencyMilliseconds = 30_000
+
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false })
 
@@ -209,12 +215,13 @@ export interface ActionCachePublication {
  * @since 0.1.0
  */
 export interface ActionCache {
-  readonly get: (keyDigest: string) => Promise<string | null>
+  readonly get: (keyDigest: string, signal?: AbortSignal) => Promise<string | null>
   readonly put: (
     keyDigest: string,
-    publication: ActionCachePublication
+    publication: ActionCachePublication,
+    signal?: AbortSignal
   ) => Promise<Publication>
-  readonly delete: (keyDigest: string, fence: DeleteFence | null) => Promise<boolean>
+  readonly delete: (keyDigest: string, fence: DeleteFence | null, signal?: AbortSignal) => Promise<boolean>
 }
 
 /**
@@ -234,13 +241,14 @@ export interface ContentObject {
  * @since 0.1.0
  */
 export interface ContentStore {
-  readonly get: (digest: string) => Promise<ContentObject | null>
-  readonly has: (digest: string) => Promise<boolean>
+  readonly get: (digest: string, signal?: AbortSignal) => Promise<ContentObject | null>
+  readonly has: (digest: string, signal?: AbortSignal) => Promise<boolean>
   readonly put: (
     digest: string,
-    bytes: Uint8Array<ArrayBuffer>
+    bytes: Uint8Array<ArrayBuffer>,
+    signal?: AbortSignal
   ) => Promise<"inserted" | "present">
-  readonly presentDigests: (digests: ReadonlyArray<string>) => Promise<ReadonlySet<string>>
+  readonly presentDigests: (digests: ReadonlyArray<string>, signal?: AbortSignal) => Promise<ReadonlySet<string>>
 }
 
 /**
@@ -264,7 +272,7 @@ export interface ProtocolDependencies {
    * credential digest.
    */
   readonly writeTokenHash: string
-  readonly health?: () => Promise<void>
+  readonly health?: (signal?: AbortSignal) => Promise<void>
   readonly maxArtifactBytes?: number
 }
 
@@ -328,6 +336,82 @@ const discardBody = (body: ReadableStream<Uint8Array> | null): Promise<void> => 
   return Promise.resolve()
 }
 
+/** Stop waiting promptly, and pass cancellation to dependencies that support it. */
+const boundedWait = <A>(
+  start: (signal: AbortSignal) => Promise<A>,
+  signal: AbortSignal | undefined,
+  milliseconds: number
+): Promise<A> =>
+  new Promise((resolve, reject) => {
+    const controller = new AbortController()
+    let settled = false
+    const cleanup = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", abort)
+    }
+    const stop = (): void => {
+      settled = true
+      cleanup()
+      reject(new Error("cache operation cancelled or timed out"))
+      controller.abort()
+    }
+    const abort = (): void => stop()
+    const timer = setTimeout(stop, milliseconds)
+    signal?.addEventListener("abort", abort, { once: true })
+    if (signal?.aborted === true) {
+      stop()
+      return
+    }
+    let pending: Promise<A>
+    try {
+      pending = start(controller.signal)
+    } catch (cause) {
+      cleanup()
+      reject(cause)
+      return
+    }
+    pending.then((value) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }, (cause: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(cause)
+    })
+  })
+
+/**
+ * A timeout returns the request permit, but an uncancellable store operation
+ * retains this separate permit until it actually settles. Retries therefore
+ * cannot accumulate unlimited abandoned work or publication buffers.
+ */
+const boundedOperation = <Args extends Array<unknown>, A>(
+  operation: (...args: [...Args, AbortSignal?]) => Promise<A>,
+  maximum: number,
+  discard?: (value: A) => void
+): (signal: AbortSignal | undefined, ...args: Args) => Promise<A> => {
+  let active = 0
+  return (signal, ...args) =>
+    boundedWait(
+      async (cancellation) => {
+        if (active >= maximum) throw new Error("cache dependency is still occupied")
+        active += 1
+        try {
+          const value = await operation(...args, cancellation)
+          if (cancellation.aborted) discard?.(value)
+          return value
+        } finally {
+          active -= 1
+        }
+      },
+      signal,
+      dependencyMilliseconds
+    )
+}
+
 const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
   const contentLength = request.headers.get("content-length")
   let declaredLength: number | null = null
@@ -374,9 +458,12 @@ const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
   let bytes = new Uint8Array(declaredLength ?? Math.min(initialBodyBufferBytes, limit))
   let length = 0
   let chunks = 0
+  const deadline = performance.now() + bodyTotalMilliseconds
   try {
     while (true) {
-      const chunk = await reader.read()
+      const remaining = deadline - performance.now()
+      if (remaining <= 0) throw new Error("request body deadline exceeded")
+      const chunk = await boundedWait(() => reader.read(), request.signal, Math.min(bodyIdleMilliseconds, remaining))
       if (chunk.done) break
       chunks += 1
       if (chunks > maxBodyChunks) {
@@ -822,7 +909,7 @@ const handleActionCache = async (
   }
   if (request.method === "GET") {
     await discardBody(request.body)
-    const body = await actionCache.get(keyDigest)
+    const body = await actionCache.get(keyDigest, request.signal)
     return body === null
       ? empty(404)
       : new Response(validateStoredActionBody(keyDigest, body), {
@@ -833,7 +920,7 @@ const handleActionCache = async (
   if (request.method === "PUT") {
     const publication = await readPublication(request, keyDigest)
     if (!publication.ok) return publication.response
-    const result = await actionCache.put(keyDigest, publication.publication)
+    const result = await actionCache.put(keyDigest, publication.publication, request.signal)
     if (result === "inserted") return json(201, { keyDigest })
     if (result === "identical") return empty(200)
     if (result === "conflict") return empty(409)
@@ -871,7 +958,7 @@ const handleActionCache = async (
       }
       fence = { runId, eventSeq: parsedEventSeq }
     }
-    const deleted = await actionCache.delete(keyDigest, fence)
+    const deleted = await actionCache.delete(keyDigest, fence, request.signal)
     if (typeof deleted !== "boolean") throw new Error("action cache returned an invalid deletion outcome")
     return empty(deleted ? 200 : 404)
   }
@@ -891,13 +978,13 @@ const handleArtifact = async (
   }
   if (request.method === "HEAD") {
     await discardBody(request.body)
-    const present = await contentStore.has(digest)
+    const present = await contentStore.has(digest, request.signal)
     if (typeof present !== "boolean") throw new Error("content store returned an invalid presence outcome")
     return empty(present ? 200 : 404)
   }
   if (request.method === "GET") {
     await discardBody(request.body)
-    const object = await contentStore.get(digest)
+    const object = await contentStore.get(digest, request.signal)
     return object === null
       ? empty(404)
       : new Response(validatedContentBody(object), {
@@ -925,7 +1012,7 @@ const handleArtifact = async (
     if (!body.ok) return body.response
     const measured = await sha256Hex(body.bytes)
     if (measured !== digest) return json(400, { error: `bytes digest to ${measured}` })
-    const result = await contentStore.put(digest, body.bytes)
+    const result = await contentStore.put(digest, body.bytes, request.signal)
     if (result === "inserted") return empty(201)
     if (result === "present") return empty(200)
     throw new Error("content store returned an invalid publication outcome")
@@ -1001,7 +1088,7 @@ const handleFindMissing = async (
   // snapshot above: a store that assigned into the array it was handed while
   // its promise was pending could otherwise put a digest the client never
   // asked for into `missing`.
-  const present = await contentStore.presentDigests(Object.freeze([...requested]))
+  const present = await contentStore.presentDigests(Object.freeze([...requested]), request.signal)
   if (!(present instanceof Set)) throw new Error("content store returned an invalid digest set")
   const requestedSet = new Set(requested)
   for (const digest of present) {
@@ -1067,7 +1154,7 @@ export const describeFailure = (cause: unknown): string => {
 interface NormalizedProtocolDependencies {
   readonly actionCache: ActionCache
   readonly contentStore: ContentStore
-  readonly health: () => Promise<void>
+  readonly health: (signal?: AbortSignal) => Promise<void>
   readonly maxArtifactBytes: number
   readonly readTokenHash: string
   readonly writeTokenHash: string
@@ -1172,29 +1259,37 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
 
   return Object.freeze({
     actionCache: Object.freeze({
-      get: serviceMethod<[keyDigest: string], Promise<string | null>>(action, "get", "actionCache"),
+      get: serviceMethod<[keyDigest: string, signal?: AbortSignal], Promise<string | null>>(
+        action,
+        "get",
+        "actionCache"
+      ),
       put: serviceMethod<
-        [keyDigest: string, publication: ActionCachePublication],
+        [keyDigest: string, publication: ActionCachePublication, signal?: AbortSignal],
         Promise<Publication>
       >(action, "put", "actionCache"),
       delete: serviceMethod<
-        [keyDigest: string, fence: DeleteFence | null],
+        [keyDigest: string, fence: DeleteFence | null, signal?: AbortSignal],
         Promise<boolean>
       >(action, "delete", "actionCache")
     }),
     contentStore: Object.freeze({
-      get: serviceMethod<[digest: string], Promise<ContentObject | null>>(content, "get", "contentStore"),
-      has: serviceMethod<[digest: string], Promise<boolean>>(content, "has", "contentStore"),
+      get: serviceMethod<[digest: string, signal?: AbortSignal], Promise<ContentObject | null>>(
+        content,
+        "get",
+        "contentStore"
+      ),
+      has: serviceMethod<[digest: string, signal?: AbortSignal], Promise<boolean>>(content, "has", "contentStore"),
       put: serviceMethod<
-        [digest: string, bytes: Uint8Array<ArrayBuffer>],
+        [digest: string, bytes: Uint8Array<ArrayBuffer>, signal?: AbortSignal],
         Promise<"inserted" | "present">
       >(content, "put", "contentStore"),
       presentDigests: serviceMethod<
-        [digests: ReadonlyArray<string>],
+        [digests: ReadonlyArray<string>, signal?: AbortSignal],
         Promise<ReadonlySet<string>>
       >(content, "presentDigests", "contentStore")
     }),
-    health: health as () => Promise<void>,
+    health: health as (signal?: AbortSignal) => Promise<void>,
     maxArtifactBytes: maxArtifactBytes as number,
     readTokenHash,
     writeTokenHash
@@ -1212,7 +1307,44 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
  */
 export const createHandler = (dependencies: ProtocolDependencies) => {
   const normalized = normalizeDependencies(dependencies)
-  const { actionCache, contentStore, health, maxArtifactBytes, readTokenHash, writeTokenHash } = normalized
+  const { maxArtifactBytes, readTokenHash, writeTokenHash } = normalized
+  const actionGet = boundedOperation<[string], string | null>(normalized.actionCache.get, maxConcurrentCacheRequests)
+  const actionPut = boundedOperation<[string, ActionCachePublication], Publication>(
+    normalized.actionCache.put,
+    maxConcurrentActionCachePublications
+  )
+  const actionDelete = boundedOperation<[string, DeleteFence | null], boolean>(
+    normalized.actionCache.delete,
+    maxConcurrentCacheRequests
+  )
+  const contentGet = boundedOperation<[string], ContentObject | null>(
+    normalized.contentStore.get,
+    maxConcurrentArtifactTransfers,
+    (object) => {
+      if (object?.body instanceof ReadableStream) void discardBody(object.body)
+    }
+  )
+  const contentHas = boundedOperation<[string], boolean>(normalized.contentStore.has, maxConcurrentCacheRequests)
+  const contentPut = boundedOperation<[string, Uint8Array<ArrayBuffer>], "inserted" | "present">(
+    normalized.contentStore.put,
+    maxConcurrentArtifactTransfers
+  )
+  const contentPresent = boundedOperation<[ReadonlyArray<string>], ReadonlySet<string>>(
+    normalized.contentStore.presentDigests,
+    maxConcurrentFindMissingRequests
+  )
+  const health = boundedOperation<[], void>(normalized.health, 1)
+  const actionCache: ActionCache = {
+    get: (key, signal) => actionGet(signal, key),
+    put: (key, publication, signal) => actionPut(signal, key, publication),
+    delete: (key, fence, signal) => actionDelete(signal, key, fence)
+  }
+  const contentStore: ContentStore = {
+    get: (digest, signal) => contentGet(signal, digest),
+    has: (digest, signal) => contentHas(signal, digest),
+    put: (digest, bytes, signal) => contentPut(signal, digest, bytes),
+    presentDigests: (digests, signal) => contentPresent(signal, digests)
+  }
   const digestBytes = (digest: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(
       { length: digest.length / 2 },
@@ -1225,26 +1357,33 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
   let activeActionCachePublications = 0
   let activeArtifactTransfers = 0
   let activeFindMissingRequests = 0
-  let healthInFlight: Promise<void> | null = null
+  let healthInFlight: {
+    readonly promise: Promise<void>
+    readonly controller: AbortController
+    waiters: number
+  } | null = null
   let lastHealthyAt = Number.NEGATIVE_INFINITY
-  const ready = (): Promise<void> => {
+  const ready = async (signal: AbortSignal): Promise<void> => {
+    if (signal?.aborted === true) throw new Error("readiness request cancelled")
     const now = performance.now()
-    if (now >= lastHealthyAt && now - lastHealthyAt < healthCacheMilliseconds) {
-      return Promise.resolve()
-    }
-    if (healthInFlight !== null) return healthInFlight
-    const current = Promise.resolve()
-      .then(health)
-      .then(() => {
+    if (now >= lastHealthyAt && now - lastHealthyAt < healthCacheMilliseconds) return
+    if (healthInFlight === null) {
+      const controller = new AbortController()
+      const promise = health(controller.signal).then(() => {
         lastHealthyAt = performance.now()
-      })
-      .finally(() => {
-        // Only this probe ever occupies the slot: a concurrent caller joins
-        // it rather than starting another.
+      }).finally(() => {
         healthInFlight = null
       })
-    healthInFlight = current
-    return current
+      healthInFlight = { promise, controller, waiters: 0 }
+    }
+    const current = healthInFlight
+    current.waiters += 1
+    try {
+      await boundedWait(() => current.promise, signal, dependencyMilliseconds)
+    } finally {
+      current.waiters -= 1
+      if (current.waiters === 0) current.controller.abort()
+    }
   }
 
   return async (request: Request): Promise<Response> => {
@@ -1261,21 +1400,21 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
     // it holds; the request's own `finally` must then leave them alone.
     let streaming = false
     try {
+      if (url.pathname === "/healthz") {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          await discardBody(request.body)
+          return methodNotAllowed("GET, HEAD")
+        }
+        await discardBody(request.body)
+        await ready(request.signal)
+        return request.method === "HEAD" ? empty(200) : json(200, { ok: true })
+      }
       if (activeCacheRequests >= maxConcurrentCacheRequests) {
         await discardBody(request.body)
         return busy("too many simultaneous cache requests")
       }
       activeCacheRequests += 1
       try {
-        if (url.pathname === "/healthz") {
-          if (request.method !== "GET" && request.method !== "HEAD") {
-            await discardBody(request.body)
-            return methodNotAllowed("GET, HEAD")
-          }
-          await discardBody(request.body)
-          await ready()
-          return request.method === "HEAD" ? empty(200) : json(200, { ok: true })
-        }
         const credential = await presentedCredential(request, expectedWriteTokenHash, expectedReadTokenHash)
         if (credential === "none") {
           await discardBody(request.body)
