@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
+import type { AgentTurnFrame, StartAgentTurnRequest, StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
 import { createWebAgent } from "./WebAgent"
 
 const request: StartAgentTurnRequest = {
@@ -319,5 +319,75 @@ describe("createWebAgent", () => {
       { runId: "run-1", type: "card", card: statusCard },
       { runId: "run-1", type: "done" }
     ])
+  })
+
+  /*
+   * A tool loop continues the SAME runId: state/controller/turns.ts awaits the
+   * tool and calls launchLeg, which can land inside the `done` frame's own
+   * listener. The leg must be admitted, and Stop must still reach its stream.
+   */
+  test("a continuation leg re-POSTing the runId from the done frame is admitted and keeps its cancel handle", async () => {
+    let turns = 0
+    let continuationSignal: AbortSignal | null | undefined
+    const agent = createWebAgent({
+      fetchImpl: async (input, init) => {
+        if (String(input).endsWith("/cancel")) return new Response("{}", { status: 200 })
+        turns += 1
+        if (turns === 1) return ndjsonResponse([{ runId: "run-1", type: "done" }])
+        continuationSignal = init?.signal
+        return new Response(new ReadableStream<Uint8Array>({ start: () => {} }), { status: 200 })
+      }
+    })
+    let continuation: Promise<StartAgentTurnResult> | undefined
+    agent.subscribe((frame) => {
+      if (frame.type !== "done" || continuation !== undefined) return
+      continuation = agent.startTurn(request)
+    })
+
+    expect(await agent.startTurn(request)).toEqual({ status: "started" })
+    await flush()
+    expect(await continuation).toEqual({ status: "started" })
+
+    await agent.cancelTurn("run-1")
+    expect(continuationSignal?.aborted).toBe(true)
+  })
+
+  test("a replacement turn keeps the runId while the previous leg's stream teardown is still settling", async () => {
+    let releaseTeardown = (): void => {}
+    const teardown = new Promise<void>((resolve) => {
+      releaseTeardown = () => resolve()
+    })
+    const signals: Array<AbortSignal> = []
+    let turns = 0
+    const agent = createWebAgent({
+      fetchImpl: async (input, init) => {
+        if (String(input).endsWith("/cancel")) return new Response("{}", { status: 200 })
+        if (init?.signal != null) signals.push(init.signal)
+        turns += 1
+        const first = turns === 1
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              if (!first) return
+              controller.enqueue(new TextEncoder().encode(`${JSON.stringify({ runId: "run-1", type: "done" })}\n`))
+            },
+            // The first leg's reader.cancel() stays pending until the test releases it.
+            cancel: () => (first ? teardown : undefined)
+          }),
+          { status: 200 }
+        )
+      }
+    })
+
+    expect(await agent.startTurn(request)).toEqual({ status: "started" })
+    await flush()
+    expect(await agent.startTurn(request)).toEqual({ status: "started" })
+
+    releaseTeardown()
+    await flush()
+    // The old leg's teardown settled, but the replacement still owns run-1.
+    expect((await agent.startTurn(request)).status).toBe("error")
+    await agent.cancelTurn("run-1")
+    expect(signals[1]?.aborted).toBe(true)
   })
 })

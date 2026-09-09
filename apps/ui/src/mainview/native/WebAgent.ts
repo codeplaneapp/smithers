@@ -9,9 +9,9 @@ export interface WebAgentOptions {
   /** Same origin by default; override for tests or a deployed boundary. */
   readonly baseUrl?: string
   readonly fetchImpl?: FetchLike
-  /** The turn route; the local app serves CHAT_TURN_PATH. */
+  /** The turn route; defaults to the shared TURN_PATH. */
   readonly turnPath?: string
-  /** The cancel route; the local app serves CHAT_CANCEL_PATH. */
+  /** The cancel route; defaults to the shared CANCEL_PATH. */
   readonly cancelPath?: string
 }
 
@@ -123,15 +123,16 @@ const streamFrames = async (
         continue
       }
       if (!isAgentTurnFrame(parsed) || parsed.runId !== expectedRunId) continue
-      publish(parsed)
       if (parsed.type === "done") {
         settled = true
-        // Release the turn's cancel handle BEFORE the stream teardown
-        // settles: a tool-loop continuation leg re-POSTs this runId the
-        // moment the terminal frame is published, and must not meet a
-        // stale "already running" from this agent's own map.
+        // Release the turn's cancel handle BEFORE the terminal frame is
+        // published: a tool-loop continuation leg re-POSTs this runId from
+        // its own `done` listener, and must not meet a stale "already
+        // running" from this agent's map. Publishing first refused that leg
+        // outright.
         onTerminal?.()
       }
+      publish(parsed)
     }
     if (done || settled) break
   }
@@ -140,7 +141,9 @@ const streamFrames = async (
     await reader.cancel().catch(() => {})
   } else {
     // The stream ended without a terminal frame: the turn died server-side
-    // (upstream disconnect). That is an honest failure, never a silent stall.
+    // (upstream disconnect). That is an honest failure, never a silent stall,
+    // and it releases the handle first for the same reason a `done` frame does.
+    onTerminal?.()
     publish({
       runId: expectedRunId,
       type: "done",
@@ -155,9 +158,12 @@ const streamFrames = async (
  * NDJSON AgentTurnFrames.
  */
 /*
- * The local app's chat backend (LOCAL-APP.md): ControllerBoot composes it
- * against the local origin's /api/chat/turn and /api/chat/cancel. The
- * default paths are the product Worker's /api/agent seam.
+ * Every host composes this on the default /api/agent seam (Runtime.ts passes
+ * a fetch and nothing else): the product Worker serves TURN_PATH and
+ * CANCEL_PATH, and so does the local app's own boundary (LOCAL-APP.md), which
+ * additionally aliases the older /api/chat pair. `turnPath` and `cancelPath`
+ * exist for a test or a boundary that moves the routes; nothing in the app
+ * passes them.
  */
 export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
   const baseUrl = options.baseUrl ?? ""
@@ -179,6 +185,17 @@ export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
       const abortController = new AbortController()
       // Registered before the request so a stop pressed while still connecting aborts it.
       activeTurns.set(request.runId, abortController)
+      /*
+       * The map is keyed by runId, but the entry belongs to THIS leg. A
+       * continuation that re-POSTs the same runId owns the key from that
+       * moment, so this leg's teardown (which settles later, once the reader
+       * is cancelled) must never delete the replacement's cancel handle:
+       * doing so left a live stream Stop could not abort locally, and one
+       * that no longer refused a duplicate.
+       */
+      const release = (): void => {
+        if (activeTurns.get(request.runId) === abortController) activeTurns.delete(request.runId)
+      }
       let response: Response
       try {
         response = await fetchImpl(`${baseUrl}${turnPath}`, {
@@ -188,7 +205,7 @@ export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
           body: JSON.stringify(request)
         })
       } catch (error) {
-        activeTurns.delete(request.runId)
+        release()
         // A cancelled connect is the user's own doing, not a failed turn to report.
         if (abortController.signal.aborted) return { status: "started" }
         return {
@@ -199,7 +216,7 @@ export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
         }
       }
       if (!response.ok || response.body === null) {
-        activeTurns.delete(request.runId)
+        release()
         if (response.ok) return { status: "error", message: "The Smithers web agent returned no response stream." }
         const body = (await response.text().catch(() => "")).trim()
         const refusal = turnRefusal(response.status, body)
@@ -209,7 +226,7 @@ export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
           ...(refusal === undefined ? {} : { refusal })
         }
       }
-      void streamFrames(response.body, request.runId, publish, () => activeTurns.delete(request.runId))
+      void streamFrames(response.body, request.runId, publish, release)
         .catch((error: unknown) => {
           if (abortController.signal.aborted) return
           publish({
@@ -220,7 +237,7 @@ export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
               : "The Smithers web agent stream failed."
           })
         })
-        .finally(() => activeTurns.delete(request.runId))
+        .finally(release)
       return { status: "started" }
     },
     cancelTurn: async (runId) => {
