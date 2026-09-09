@@ -11,8 +11,9 @@ import type { AppStore } from "../AppStore"
  * The secrets seam (SecretsSeam.ts) through the real command path:
  * /secrets.list reads GET /api/repos/{owner}/{repo}/agent-environment and
  * surfaces the "secrets" card with each secret's metadata (name, hosts,
- * match headers, updated time) and never a value. Failures are honest
- * strings, never throws; signed out, the agent door names the sign-in step.
+ * match headers, updated time) and a model-readable result, never secret
+ * values. Failures are honest strings, never throws; signed out, the agent
+ * door names the sign-in step.
  */
 
 const memoryStorage = (): StorageApi => {
@@ -45,9 +46,9 @@ const json = (status: number, body: unknown): Response =>
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-type Failure = "get-500" | "get-403" | "get-throw" | "malformed"
+type Failure = "empty" | "get-500" | "get-403" | "get-throw" | "malformed"
 
-/** The platform double: plue's AgentEnvironmentResponse, secrets as metadata rows with no value field. */
+/** The platform double: plue's AgentEnvironmentResponse plus an unexpected secret value to verify metadata-only parsing. */
 const backend = (failure?: Failure) => {
   const requests: Array<{ readonly method: string; readonly url: string }> = []
   const services: AppServices = {
@@ -65,9 +66,10 @@ const backend = (failure?: Failure) => {
       return json(200, {
         setup_script: "bun install",
         env: [{ name: "CI", value: "1" }],
-        secrets: [
+        secrets: failure === "empty" ? [] : [
           {
             name: "NPM_TOKEN",
+            value: "DO_NOT_EXPOSE_SECRET_BYTES",
             hosts: ["registry.npmjs.org"],
             match_headers: ["authorization"],
             updated_at: "2026-08-01T00:00:00.000Z"
@@ -138,11 +140,17 @@ const secretsCard = (store: AppStore, repo = "will/flows") => {
 }
 
 describe("secrets seam — secrets.list", () => {
-  test("surfaces the secrets card from the agent-environment answer: name, hosts, header, updated time, no value", async () => {
+  test("surfaces the secrets card from the agent-environment answer: name, hosts, header, updated time, no secret value", async () => {
     const { store, controller, requests } = await freshController()
     await ready(store)
     const outcome = await controller.commands.run("secrets.list")
     expect(outcome.status).toBe("executed")
+    const value = outcome.status === "executed" ? outcome.value : undefined
+    for (const text of ["will/flows", "NPM_TOKEN", "registry.npmjs.org", "authorization", "2026-08-01T00:00:00.000Z", "SETUP_ONLY"]) {
+      expect(value).toContain(text)
+    }
+    expect(value).not.toContain("DO_NOT_EXPOSE_SECRET_BYTES")
+    expect(value).not.toContain("bun install")
     await settled()
 
     expect(requests).toEqual([{ method: "GET", url: "/api/repos/will/flows/agent-environment" }])
@@ -157,8 +165,17 @@ describe("secrets seam — secrets.list", () => {
       { name: "SETUP_ONLY", hosts: [], matchHeaders: [], updatedAt: "2026-08-02T00:00:00.000Z" }
     ])
     // The environment's vars and setup script are the env card's, not this one's.
+    expect(JSON.stringify(card)).not.toContain("DO_NOT_EXPOSE_SECRET_BYTES")
     expect(JSON.stringify(card)).not.toContain("bun install")
     expect(JSON.stringify(card)).not.toContain("\"CI\"")
+  })
+
+  test("the agent receives an explicit empty secrets list", async () => {
+    const { store, controller } = await freshController("empty")
+    await ready(store)
+    const outcome = await controller.commands.runForAgent("secrets.list")
+    expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe("No secrets in will/flows.")
   })
 
   test("an explicit owner/repo argument targets that repository", async () => {
@@ -186,6 +203,12 @@ describe("secrets seam — secrets.list", () => {
     await ready(store)
     const outcome = await controller.commands.runForAgent("secrets.list")
     expect(outcome.status).toBe("executed")
+    const value = outcome.status === "executed" ? outcome.value : undefined
+    for (const text of ["will/flows", "NPM_TOKEN", "registry.npmjs.org", "authorization", "2026-08-01T00:00:00.000Z", "SETUP_ONLY"]) {
+      expect(value).toContain(text)
+    }
+    expect(value).not.toContain("DO_NOT_EXPOSE_SECRET_BYTES")
+    expect(value).not.toContain("bun install")
     expect(requests).toHaveLength(1)
     expect(secretsCard(store)?.payload.secrets.map((secret) => secret.name)).toEqual(["NPM_TOKEN", "SETUP_ONLY"])
   })

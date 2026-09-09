@@ -139,14 +139,17 @@ const LANDINGS = "/api/repos/will/flows/landings"
 const STATUSES = "/api/repos/will/flows/commits/chg-b/statuses"
 
 describe("landings seam — prs.list", () => {
-  test("surfaces the pr-list card from the platform answer, skipping malformed rows", async () => {
+  test.each(["run", "runForAgent"] as const)("surfaces the pr-list card from the platform answer, skipping malformed rows (%s)", async (door) => {
     const { store, controller } = await ready(
       backend({
         [LANDINGS]: json(200, [landing(3, "open"), { nonsense: true }, landing(4, "queued")])
       })
     )
-    const outcome = await controller.commands.run("prs.list")
+    const outcome = await controller.commands[door]("prs.list")
     expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe(
+      "Pull requests · will/flows\n#3 Wire the seam 3 · open\n#4 Wire the seam 4 · queued"
+    )
     await settled()
     const card = store.collections.cards.get("prs-will/flows")
     if (card === undefined || card.kind !== "pr-list") throw new Error("expected the pr-list card")
@@ -169,6 +172,13 @@ describe("landings seam — prs.list", () => {
         updatedAt: "2026-08-11T10:00:00.000Z"
       }
     ])
+  })
+
+  test("the agent receives an explicit empty PR list", async () => {
+    const { controller } = await ready(backend({ [LANDINGS]: json(200, []) }))
+    const outcome = await controller.commands.runForAgent("prs.list")
+    expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe("No pull requests in will/flows.")
   })
 
   test("a 500 answers the platform's message as the honest error, and no card appears", async () => {
@@ -201,7 +211,7 @@ describe("landings seam — prs.list", () => {
 })
 
 describe("landings seam — prs.view", () => {
-  test("surfaces the pr card with body, reviews, and newest-per-context checks", async () => {
+  test.each(["run", "runForAgent"] as const)("surfaces the pr card with body, reviews, and newest-per-context checks (%s)", async (door) => {
     const { store, controller } = await ready(
       backend({
         [`${LANDINGS}/3`]: json(200, landing(3, "open")),
@@ -216,8 +226,13 @@ describe("landings seam — prs.view", () => {
       })
     )
     // The card-row arg shape: "<number> <owner/repo>" through splitTrailingRepo.
-    const outcome = await controller.commands.run("prs.view", "3 will/flows")
+    const outcome = await controller.commands[door]("prs.view", "3 will/flows")
     expect(outcome.status).toBe("executed")
+    const value = outcome.status === "executed" ? outcome.value : undefined
+    for (const text of ["will/flows", "#3 Wire the seam 3 · open", "will", "The **stack** description.", "approve", "Ship it", "ci/test · success", "ci/lint · failure"]) {
+      expect(value).toContain(text)
+    }
+    expect(value).not.toContain("pending")
     await settled()
     const card = store.collections.cards.get("pr-will/flows-3")
     if (card === undefined || card.kind !== "pr") throw new Error("expected the pr card")
@@ -574,4 +589,19 @@ describe("landings seam — prs.create", () => {
       expect(outcome.error).toBe("Pull request #7 was opened, but couldn't be re-read: re-read exploded")
     }
   })
+})
+
+test("PR detail bounds the model value while retaining the card body", async () => {
+  const body = "large PR body ".repeat(2_000)
+  const { store, controller } = await ready(backend({
+    [`${LANDINGS}/3`]: json(200, { ...landing(3, "open"), body })
+  }))
+  const outcome = await controller.commands.runForAgent("prs.view", "3")
+  expect(outcome.status).toBe("executed")
+  const value = outcome.status === "executed" ? outcome.value : undefined
+  expect(value).toContain("#3 Wire the seam 3 · open")
+  expect(value).toContain("[truncated]")
+  expect(value?.length).toBeLessThanOrEqual(16_000)
+  const card = store.collections.cards.get("pr-will/flows-3")
+  expect(card?.kind === "pr" ? card.payload.prBody : undefined).toBe(body)
 })

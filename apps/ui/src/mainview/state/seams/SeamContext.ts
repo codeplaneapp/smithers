@@ -2,8 +2,12 @@
  * The context a domain seam factory receives from the controller: the tapped
  * fetch, the store, and the transcript helpers. Seams own one backend domain
  * each (issues, landings, keys, …), dispatch typed transitions, and answer
- * the command contract — an honest error string, or void on success. Cards
- * carry the substance; a seam never returns raw payloads to the transcript.
+ * the [flow result contract](../../flows/entries/Declare.ts): an honest error
+ * string, void for success without data, or { readonly value: string } for
+ * success with data. Model-invocable reads must return a bounded value built
+ * from the same parsed payload as their card: the model reads the value,
+ * never the card. See [FilesSeam](./FilesSeam.ts) for a read example.
+ * Cards carry the human presentation; raw backend payloads are not results.
  */
 import { isRecord } from "@smthrs/canonical/Record"
 import type { AppStore } from "../AppStore"
@@ -19,6 +23,13 @@ export interface SeamContext {
   readonly actor: () => "user" | "smithers"
   /** The next transcript ordinal — new cards surface at the end, never mid-history. */
   readonly nextOrdinal: () => number
+}
+
+/** A bounded model-readable answer; the card retains the full parsed payload. */
+export const readResult = (value: string): { readonly value: string } => {
+  const cap = 16_000
+  const suffix = "\n[truncated]"
+  return { value: value.length <= cap ? value : value.slice(0, cap - suffix.length) + suffix }
 }
 
 /**

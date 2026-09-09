@@ -10,11 +10,11 @@ import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import { fetchAllBookmarks } from "./BookmarksSeam"
 import type { SeamContext } from "./SeamContext"
-import { readErrorMessage } from "./SeamContext"
+import { readErrorMessage, readResult } from "./SeamContext"
 
 export interface LandingsSeam {
-  readonly listLandings: (repo?: string) => Promise<string | void>
-  readonly viewLanding: (number: number, repo?: string) => Promise<string | void>
+  readonly listLandings: (repo?: string) => Promise<string | { readonly value: string }>
+  readonly viewLanding: (number: number, repo?: string) => Promise<string | { readonly value: string }>
   readonly createLanding: (
     title: string,
     repo?: string,
@@ -287,7 +287,7 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
     repo: string,
     number: number,
     stateOverride?: string
-  ): Promise<string | void> => {
+  ): Promise<string | { readonly value: string }> => {
     let response: Response
     try {
       response = await ctx.http(`${landingsUrl(repo)}/${number}`)
@@ -305,6 +305,16 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
       fetchReviews(repo, number),
       fetchChecks(repo, landing.changeIds.at(-1))
     ])
+    const payload = {
+      repo,
+      number,
+      title: landing.title,
+      state: stateOverride ?? landing.state,
+      author: landing.author,
+      prBody: landing.body,
+      reviews,
+      checks
+    }
     upsert({
       id: `pr-${repo}-${number}`,
       kind: "pr",
@@ -312,17 +322,15 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
       status: "active",
       createdAt: Date.now(),
       ordinal: ctx.nextOrdinal(),
-      payload: {
-        repo,
-        number,
-        title: landing.title,
-        state: stateOverride ?? landing.state,
-        author: landing.author,
-        prBody: landing.body,
-        reviews,
-        checks
-      }
+      payload
     })
+    return readResult([
+      `${payload.repo} · #${payload.number} ${payload.title} · ${payload.state}`,
+      `Author: ${payload.author ?? "unknown"}`,
+      payload.prBody,
+      ...payload.reviews.map((review) => `Review by ${review.author ?? "unknown"} · ${review.type}:\n${review.reviewBody}`),
+      ...payload.checks.map((check) => `Check: ${check.context} · ${check.state}`)
+    ].join("\n"))
   }
 
   return {
@@ -364,6 +372,9 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
         ordinal: ctx.nextOrdinal(),
         payload: { repo, landings }
       })
+      return readResult(landings.length === 0
+        ? `No pull requests in ${repo}.`
+        : `Pull requests · ${repo}\n${landings.map((landing) => `#${landing.number} ${landing.title} · ${landing.state}`).join("\n")}`)
     },
 
     viewLanding: async (number, repoArg) => {
@@ -446,7 +457,7 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
       // The one detail door: the created landing surfaces as the same "pr"
       // card every other read lands on.
       const refreshError = await surfaceLanding(repo, created.number)
-      if (refreshError === undefined) return
+      if (typeof refreshError !== "string") return
       return `Pull request #${created.number} was opened, but couldn't be re-read: ${refreshError}`
     },
 
@@ -481,7 +492,7 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
       const landed = parseLandingDetail(await response.json().catch(() => undefined))
       const state = landed?.state ?? "queued"
       const refreshError = await surfaceLanding(repo, number, state)
-      if (refreshError === undefined) return
+      if (typeof refreshError !== "string") return
       // The land itself succeeded, so a failed re-read must not report
       // failure. State the queued truth from the land answer plus whatever
       // the transcript already knows about this PR.
@@ -533,7 +544,7 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
         return readErrorMessage(response, `The review on #${number} couldn't be posted.`)
       }
       const refreshError = await surfaceLanding(repo, number)
-      if (refreshError === undefined) return
+      if (typeof refreshError !== "string") return
       return `The review on #${number} was posted, but the pull request couldn't be re-read: ${refreshError}`
     }
   }

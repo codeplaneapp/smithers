@@ -19,13 +19,13 @@
  */
 import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
-import { readErrorMessage } from "./SeamContext"
+import { readErrorMessage, readResult } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
 export interface IssuesSeam {
   /** Renders the list card and answers the rows as text (the model reads the value, never the card). */
-  readonly listIssues: (filter: "open" | "closed" | "all", repo?: string) => Promise<string | void | { readonly value: string }>
-  readonly viewIssue: (number: number, repo?: string) => Promise<string | void>
+  readonly listIssues: (filter: "open" | "closed" | "all", repo?: string) => Promise<string | { readonly value: string }>
+  readonly viewIssue: (number: number, repo?: string) => Promise<string | { readonly value: string }>
   readonly createIssue: (title: string, repo?: string) => Promise<string | void>
   readonly setIssueState: (
     number: number,
@@ -145,6 +145,10 @@ const parseDetail = (
   }
 }
 
+/** One row formatter for imported and GitHub-source issue results. */
+const issueRowValue = (issue: IssueListRow, source = issue.source): string =>
+  `#${issue.number} ${issue.title} · ${issue.state}${source === "github" ? " · GitHub" : ""}`
+
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
 export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
@@ -221,7 +225,7 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
   const listFromGithubSource = async (
     repo: string,
     filter: "open" | "closed" | "all"
-  ): Promise<string | void> => {
+  ): Promise<string | { readonly value: string }> => {
     let response: Response
     try {
       response = await ctx.http(githubSourceIssuesPath(repo, filter))
@@ -250,10 +254,13 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
       ordinal: ctx.nextOrdinal(),
       payload: { repo, filter, issues }
     })
+    return readResult(issues.length === 0
+      ? `No ${filter === "all" ? "" : `${filter} `}issues in ${repo} (read from GitHub).`
+      : issues.map((issue) => issueRowValue(issue, "github")).join("\n"))
   }
 
   /** Fetches the issue AND its comments, then upserts the detail card. */
-  const showIssue = async (repo: string, number: number): Promise<string | void> => {
+  const showIssue = async (repo: string, number: number): Promise<string | { readonly value: string }> => {
     let issueResponse: Response
     try {
       issueResponse = await ctx.http(`${issuesPath(repo)}/${number}`)
@@ -311,6 +318,15 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
       ordinal: ctx.nextOrdinal(),
       payload
     })
+    return readResult([
+      `${payload.repo} · #${payload.number} ${payload.title} · ${payload.state}`,
+      `Author: ${payload.author ?? "unknown"}`,
+      `Labels: ${payload.labels.join(", ") || "none"}`,
+      ...(payload.linear ? [`Linear: ${payload.linear.identifier} · ${payload.linear.url}`] : []),
+      payload.issueBody,
+      ...payload.comments.map((comment) =>
+        `Comment by ${comment.author ?? "unknown"}${comment.createdAt ? ` · ${comment.createdAt}` : ""}:\n${comment.commentBody}`)
+    ].join("\n"))
   }
 
   /** Re-fetch after a successful mutation; a refresh failure still states the mutation happened. */
@@ -369,11 +385,9 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
         ordinal: ctx.nextOrdinal(),
         payload: { repo, filter, issues, ...(github.meta === undefined ? {} : { github: github.meta }) }
       })
-      return {
-        value: issues.length === 0
-          ? `No ${filter === "all" ? "" : `${filter} `}issues in ${repo}${github.meta?.refusal ? ` (GitHub: ${github.meta.refusal})` : ""}.`
-          : issues.map((issue) => `#${issue.number} ${issue.title} · ${issue.state}${issue.source === "github" ? " · GitHub" : ""}`).join("\n")
-      }
+      return readResult(issues.length === 0
+        ? `No ${filter === "all" ? "" : `${filter} `}issues in ${repo}${github.meta?.refusal ? ` (GitHub: ${github.meta.refusal})` : ""}.`
+        : issues.map((issue) => issueRowValue(issue)).join("\n"))
     },
 
     viewIssue: async (number, explicitRepo) => {

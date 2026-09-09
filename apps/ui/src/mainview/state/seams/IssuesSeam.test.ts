@@ -289,7 +289,7 @@ describe("issues seam — the list", () => {
 })
 
 describe("issues seam — the detail", () => {
-  test("issues.view fetches the issue AND its comments and upserts the detail card", async () => {
+  test.each(["run", "runForAgent"] as const)("issues.view fetches the issue AND its comments and upserts the detail card (%s)", async (door) => {
     const { store, controller } = await issuesController(
       backend({
         "GET /api/repos/will/flows/issues/7": json(200, wireIssue(7)),
@@ -299,8 +299,12 @@ describe("issues seam — the detail", () => {
         ])
       })
     )
-    const outcome = await controller.commands.run("issues.view", "7")
+    const outcome = await controller.commands[door]("issues.view", "7")
     expect(outcome.status).toBe("executed")
+    const value = outcome.status === "executed" ? outcome.value : undefined
+    for (const text of ["will/flows", "#7 Fix the flake 7 · open", "ana", "It **flakes** on CI.", "bug", "bob", "First!", "2026-08-11T10:00:00Z"]) {
+      expect(value).toContain(text)
+    }
     await settled()
     const card = cardOfKind(store, "issue-will/flows-7", "issue")
     expect(card.payload).toEqual({
@@ -314,6 +318,21 @@ describe("issues seam — the detail", () => {
       comments: [{ author: "bob", commentBody: "First!", createdAt: "2026-08-11T10:00:00Z" }]
     })
   })
+})
+
+test("issue detail bounds the model value while retaining the card body", async () => {
+  const body = "large issue body ".repeat(2_000)
+  const { store, controller } = await issuesController(backend({
+    "GET /api/repos/will/flows/issues/7": json(200, wireIssue(7, { body })),
+    "GET /api/repos/will/flows/issues/7/comments": json(200, [])
+  }))
+  const outcome = await controller.commands.runForAgent("issues.view", "7")
+  expect(outcome.status).toBe("executed")
+  const value = outcome.status === "executed" ? outcome.value : undefined
+  expect(value).toContain("#7 Fix the flake 7 · open")
+  expect(value).toContain("[truncated]")
+  expect(value?.length).toBeLessThanOrEqual(16_000)
+  expect(cardOfKind(store, "issue-will/flows-7", "issue").payload.issueBody).toBe(body)
 })
 
 describe("issues seam — mutations re-fetch so the card states the new truth", () => {
@@ -454,6 +473,9 @@ describe("issues seam — source-only fallback (repo not imported)", () => {
     )
     const outcome = await controller.commands.run("issues.list")
     expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe(
+      "#12 Upstream bug 12 · open · GitHub\n#15 Upstream bug 15 · closed · GitHub"
+    )
     await settled()
     const card = cardOfKind(store, "issues-will/flows", "issue-list")
     expect(card.title).toBe("Issues · will/flows")
@@ -481,6 +503,18 @@ describe("issues seam — source-only fallback (repo not imported)", () => {
     ])
     expect(calls).toContain("GET /api/repos/will/flows/issues?state=open")
     expect(calls).toContain("GET /api/user/github-repos/will/flows/issues?state=open")
+  })
+
+  test.each(["open", "closed", "all"])("empty source list answers a value for %s", async (filter) => {
+    const { controller } = await issuesController(backend({
+      "GET /api/repos/will/flows/issues": json(404, { message: "repository not found" }),
+      "GET /api/user/github-repos/will/flows/issues": json(200, [])
+    }))
+    const outcome = await controller.commands.runForAgent("issues.list", filter)
+    expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe(
+      `No ${filter === "all" ? "" : `${filter} `}issues in will/flows (read from GitHub).`
+    )
   })
 
   test("issues.list all asks the GitHub source with state=all — only Plue rejects state=all", async () => {

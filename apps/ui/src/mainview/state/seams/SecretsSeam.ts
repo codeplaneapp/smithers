@@ -10,9 +10,10 @@ import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import { readEnvironment } from "./EnvironmentSeam"
 import type { SeamContext } from "./SeamContext"
+import { readResult } from "./SeamContext"
 
 export interface SecretsSeam {
-  readonly listSecrets: (repo?: string) => Promise<string | void>
+  readonly listSecrets: (repo?: string) => Promise<string | { readonly value: string }>
 }
 
 export const createSecretsSeam = (ctx: SeamContext): SecretsSeam => {
@@ -21,7 +22,7 @@ export const createSecretsSeam = (ctx: SeamContext): SecretsSeam => {
    * on every list. Leaving it at its old ordinal would answer the command with
    * a silent no-op.
    */
-  const listSecrets = async (repo?: string): Promise<string | void> => {
+  const listSecrets = async (repo?: string): Promise<string | { readonly value: string }> => {
     const target = resolveTargetRepo(ctx.store, repo)
     if ("error" in target) return target.error
     const config = await readEnvironment(ctx, target.repo)
@@ -45,6 +46,13 @@ export const createSecretsSeam = (ctx: SeamContext): SecretsSeam => {
       }
     }
     ctx.dispatch({ type: "card.upsert", actor: ctx.actor(), card })
+    return readResult(card.payload.secrets.length === 0
+      ? `No secrets in ${card.payload.repo}.`
+      : [
+        `Secrets · ${card.payload.repo}`,
+        ...card.payload.secrets.map((secret) =>
+          `${secret.name} · hosts: ${secret.hosts.join(", ") || "none"} · headers: ${secret.matchHeaders.join(", ") || "none"} · updated: ${secret.updatedAt ?? "unknown"}`)
+      ].join("\n"))
   }
 
   return { listSecrets }
