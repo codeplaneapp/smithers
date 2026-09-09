@@ -6,9 +6,15 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await expect(page.locator(".guide-lesson h1, .guide-sigil")).toHaveCount(0)
   await expect(page.getByTestId("composer-input")).toBeHidden()
   await expect(page.getByRole("navigation", { name: "Installed capabilities" })).toBeHidden()
+  const greeting = await page.locator('[data-message-step="0"]').elementHandle()
   await page.getByRole("button", { name: "Let’s begin" }).click()
+  await expect(page.getByRole("log", { name: "Onboarding chat history" }).locator("article")).toHaveCount(2)
+  expect(await greeting?.evaluate(node => node.isConnected)).toBe(true)
+  await expect(page.locator('[data-message-step="1"]')).toContainText("I can speak to you normally like this")
+  await expect(page.locator(".guide-action-current")).toHaveCSS("animation-name", "guide-actions-in")
   await page.getByRole("button", { name: "Continue", exact: true }).click()
-  await expect(page.getByText("Hello from your notification corner", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Send me a notification" }).click()
+  await expect(page.getByText("You can keep working", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
   await page.getByLabel("How did you hear about Smithers?").fill('A friend called "Sam" ')
   await expect(page.getByLabel("How did you hear about Smithers?")).toHaveAttribute(
@@ -19,6 +25,7 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await page.getByLabel("What would you love to build?").focus()
   await page.reload()
   await expect(page.getByLabel("How did you hear about Smithers?")).toHaveValue('A friend called "Sam" ')
+  await expect(page.locator(".guide-transcript article")).toHaveCount(4)
   await page.getByRole("button", { name: "Continue, with or without answers" }).click()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
   await page.getByRole("button", { name: "Run dark-mode flow" }).click()
@@ -81,17 +88,25 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   await page.goto("/")
   const shell = page.locator(".guide-shell")
   await expect(shell).toHaveAttribute("data-step", "0")
-  await expect(page.locator(".guide-actions .guide-primary .guide-button-key")).toHaveText("↵ Enter")
+  await expect(page.locator(".guide-action-current .guide-actions .guide-primary .guide-button-key")).toHaveText("↵ Enter")
   for (let step = 1; step <= 3; step++) {
     await page.keyboard.press(step % 2 ? "Enter" : "ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
-    await expect(page.locator(".guide-dialogue > p")).toHaveCount(1)
+    await expect(page.locator(".guide-dialogue > p")).toHaveCount(step + 1)
+    if (step === 2) {
+      await expect(page.getByRole("button", { name: "Send me a notification" }).locator("kbd")).toHaveText("N")
+      await page.keyboard.press("n")
+      await expect(page.getByText("You can keep working", { exact: true })).toBeVisible()
+      await expect(shell).toHaveAttribute("data-step", "2")
+    }
     if (step < 15) {
-      await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
-      await expect(page.locator(".guide-back .guide-button-key")).toHaveText("←")
+      await expect(page.locator(".guide-action-current .guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
+      await expect(page.locator(".guide-action-current .guide-back .guide-button-key")).toHaveText("←")
     }
   }
+  await page.keyboard.press("Tab")
+  await expect(page.getByRole("log", { name: "Onboarding chat history" })).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(page.getByLabel("How did you hear about Smithers?")).toBeFocused()
   await page.keyboard.type("A friend told me")
@@ -105,10 +120,10 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
     await page.keyboard.press("ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
-    await expect(page.locator(".guide-dialogue > p")).toHaveCount(1)
+    await expect(page.locator(".guide-dialogue > p")).toHaveCount(step + 1)
     if (step < 15) {
-      await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
-      await expect(page.locator(".guide-back .guide-button-key")).toHaveText("←")
+      await expect(page.locator(".guide-action-current .guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
+      await expect(page.locator(".guide-action-current .guide-back .guide-button-key")).toHaveText("←")
     }
   }
   await page.keyboard.press("ArrowLeft")
@@ -123,10 +138,10 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
     await page.keyboard.press("ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
-    await expect(page.locator(".guide-dialogue > p")).toHaveCount(1)
+    await expect(page.locator(".guide-dialogue > p")).toHaveCount(step + 1)
     if (step < 15) {
-      await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
-      await expect(page.locator(".guide-back .guide-button-key")).toHaveText("←")
+      await expect(page.locator(".guide-action-current .guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
+      await expect(page.locator(".guide-action-current .guide-back .guide-button-key")).toHaveText("←")
     }
   }
   await page.keyboard.press("Control+k")

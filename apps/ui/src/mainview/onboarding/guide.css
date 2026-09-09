@@ -1032,3 +1032,29 @@
 .guide-pr .guide-text-button { margin-bottom: 18px; }
 .guide-pr small { display: block; }
 .guide-review-accepted { flex-basis: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; overflow-wrap: anywhere; }
+
+/* One stable transcript; only the newly appended message enters. */
+.guide-transcript {
+  display: grid;
+  gap: 16px;
+  max-height: min(48dvh, 440px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
+  margin: -10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--g-line) transparent;
+}
+.guide-transcript:focus-visible { outline: 2px solid var(--g-accent); outline-offset: 4px; }
+.guide-transcript .guide-dialogue { animation: guide-rise 400ms ease both; }
+.guide-transcript .guide-dialogue[data-current="false"] .guide-word { animation: none; opacity: 1; }
+.guide-action-transition { display: grid; }
+.guide-action-current, .guide-action-retiring { grid-area: 1 / 1; min-width: 0; }
+.guide-action-current { animation: guide-actions-in 260ms 120ms ease both; }
+.guide-action-retiring { animation: guide-actions-out 120ms ease both; pointer-events: none; }
+@keyframes guide-actions-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes guide-actions-out { to { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) {
+  .guide-action-retiring { display: none; }
+  .guide-action-current, .guide-transcript .guide-dialogue { animation: none; }
+}

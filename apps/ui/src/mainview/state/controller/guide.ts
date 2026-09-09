@@ -103,22 +103,6 @@ export function createGuideController(ctx: ControllerContext) {
       default:
         return `Unknown onboarding action: ${action}`
     }
-    if (action === "next" && guide.step === 2) {
-      ctx.store.dispatch({
-        type: "toast.shown",
-        actor: "system",
-        key: "guide-introduction",
-        title: "Hello from your notification corner",
-      })
-      ctx.store.dispatch({
-        type: "toast.resolved",
-        actor: "system",
-        key: "guide-introduction",
-        status: "ok",
-        title: "Hello from your notification corner",
-        detail: "A tutorial example. You can keep working; I'll bring updates to you.",
-      })
-    }
     await ctx.store.dispatch({ type: "guide.changed", actor: ctx.commandActor, guide }).isPersisted.promise
   }
   return { guideAct }

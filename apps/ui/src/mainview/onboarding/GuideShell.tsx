@@ -1,3 +1,4 @@
+import { AnimatedGuideActions } from "./AnimatedGuideActions"
 import { guideForwardAction } from "./navigation"
 import { useLiveQuery } from "@tanstack/react-db"
 import { useRef, useState, type ReactNode, type CSSProperties } from "react"
@@ -80,7 +81,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const { data: toasts } = useLiveQuery(controller.store.collections.toasts)
   const guide = sessions[0]?.guide ?? initialGuide()
   const stage = guide.step
-  const body = lessons[stage]!
+  const lastScrolledStep = useRef(-1)
   const opener = useRef<HTMLButtonElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
   // Transient save acknowledgement only; field values and progression live in the store.
@@ -172,7 +173,10 @@ export function GuideShell({ children }: { children: ReactNode }) {
           // Text editing retains arrows/Enter. Enter on a focused button retains its native action.
           if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
           if (event.key === "Enter" && target?.closest("button, a")) return
-          if (event.key === "ArrowRight" || event.key === "Enter") {
+          if (stage === 2 && event.key.toLowerCase() === "n") {
+            event.preventDefault()
+            if (!event.repeat) runCommandGuide("notify")
+          } else if (event.key === "ArrowRight" || event.key === "Enter") {
             event.preventDefault()
             if (event.repeat) return
             if (stage === 7 || stage === 15) runCommandOpen()
@@ -232,27 +236,38 @@ export function GuideShell({ children }: { children: ReactNode }) {
         </nav>
       )}
       <main className="guide-main" inert={guide.conversationOpen ? true : undefined}>
-        <section key={stage} className="guide-lesson" aria-label={`Lesson ${stage + 1}`}>
-          <div className="guide-dialogue smithers-control" data-controlled={stage < 7 || stage === 10}>
-            <div className="guide-speaker">
-              <span />
-              SMITHERS
-            </div>
-            <p aria-live="polite" aria-atomic="true">
-              <span>{body.split(" ").map((word, index, words) => {
-                const pauses = words.slice(0, index).filter(part => /[.!?]$/.test(part)).length
-                return <span key={index} className="guide-word" style={{ "--word-delay": `${index * .065 + pauses * .35}s` } as CSSProperties}>{word}{" "}</span>
-              })}</span>
-            </p>
-            {stage === 2 && (
-              <button
-                className="guide-text-button"
-                data-flow="onboarding.act"
-                onClick={() => runCommandGuide("notify")}
+        <section className="guide-lesson" aria-label={`Lesson ${stage + 1}`}>
+          <div
+            className="guide-transcript"
+            role="log"
+            aria-label="Onboarding chat history"
+            aria-live="polite"
+            aria-relevant="additions"
+            tabIndex={0}
+            ref={(node) => {
+              if (node && lastScrolledStep.current !== stage) {
+                lastScrolledStep.current = stage
+                requestAnimationFrame(() => { node.scrollTop = node.scrollHeight })
+              }
+            }}
+          >
+            {lessons.slice(0, stage + 1).map((message, messageStep) => (
+              <article
+                key={messageStep}
+                className="guide-dialogue smithers-control"
+                data-message-step={messageStep}
+                data-current={messageStep === stage}
+                data-controlled={messageStep === stage && (stage < 7 || stage === 10)}
               >
-                Send me a notification {keyHint("Tab ↵")}
-              </button>
-            )}
+                <div className="guide-speaker"><span />SMITHERS</div>
+                <p>
+                  {message.split(" ").map((word, index, words) => {
+                    const pauses = words.slice(0, index).filter(part => /[.!?]$/.test(part)).length
+                    return <span key={index} className="guide-word" style={{ "--word-delay": `${index * .065 + pauses * .35}s` } as CSSProperties}>{word}{" "}</span>
+                  })}
+                </p>
+              </article>
+            ))}
           </div>
           {stage === 3 && (
             <form
@@ -441,6 +456,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </div>
             </div>
           )}
+          <AnimatedGuideActions step={stage}>
           {stage === 15 && (
             <div className="guide-start-actions">
               {guide.acceptedPracticeTitle && <p className="guide-review-accepted"><Check size={14} /> Practice accepted: “{guide.acceptedPracticeTitle}”</p>}
@@ -463,6 +479,11 @@ export function GuideShell({ children }: { children: ReactNode }) {
             </div>
           )}
           <div className="guide-actions">
+            {stage === 2 && (
+              <button className="guide-text-button" aria-keyshortcuts="N" data-flow="onboarding.act" onClick={() => runCommandGuide("notify")}>
+                Send me a notification {keyHint("N")}
+              </button>
+            )}
             {stage === 3 ? (
               <button type="submit" form="guide-profile" aria-keyshortcuts="Enter ArrowRight" className="guide-primary" data-flow="onboarding.act">
                 Continue, with or without answers {keyHint()}
@@ -520,7 +541,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </button>
             )}
           </div>
-
+          </AnimatedGuideActions>
         </section>
       </main>
       <footer className="guide-footer">
