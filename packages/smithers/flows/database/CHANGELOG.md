@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- The defect channel now demands the same `SqlError` provenance the typed
+  channel does, so an application `Effect.die` whose message quotes lock text
+  is no longer replayed. A driver rollback failure still qualifies: Effect's
+  transaction wrapper runs `Effect.orDie` over a step whose error channel is
+  `SqlError`, so the defect carries one.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Breaking Changes
@@ -53,8 +59,7 @@
   and a parallel non-database failure is no longer discarded.
 - A typed failure must carry an Effect `SqlError` in its cause chain to be
   retried, so an application error whose message quotes database text is no
-  longer replayed. The Effect 4.0.0-rc.108 rollback defect stays matched on the
-  defect channel.
+  longer replayed. A rollback defect stays matched on the defect channel.
 - `fromSqlError` and `isRetryableWriteError` read one classifier, so the whole
   SQLite busy vocabulary normalizes to `busy` instead of retrying under a code
   that reports `unknown`, and an I/O failure that carries a busy cause beneath

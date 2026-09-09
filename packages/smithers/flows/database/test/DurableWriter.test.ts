@@ -18,6 +18,15 @@ const unknownSqlError = (cause: unknown): SqlError.SqlError =>
     reason: new SqlError.UnknownError({ cause })
   })
 
+/**
+ * The defect a driver rollback failure actually reaches a caller as.
+ *
+ * Effect's transaction wrapper runs `Effect.orDie(options.rollback(conn))`
+ * (effect/unstable/sql/SqlClient.ts), and `rollback` fails with `SqlError`, so
+ * the value on the defect channel is that `SqlError` — never a bare `Error`.
+ */
+const rollbackDefect = (): SqlError.SqlError => unknownSqlError(new Error("cannot rollback - no transaction is active"))
+
 // Mimics the real client's transaction shape: `withTransaction` provides the
 // client's transaction service, which is how `write` detects nesting.
 const retryTransaction = SqlClient.TransactionConnection(-1)
@@ -517,7 +526,7 @@ describe("DurableWriter", () => {
           Effect.suspend(() => {
             attempts += 1
             return attempts < 3
-              ? Effect.die(new Error("cannot rollback - no transaction is active"))
+              ? Effect.die(rollbackDefect())
               : retrySql.withTransaction(effect)
           })
       } as unknown as SqlClient.SqlClient
@@ -536,7 +545,7 @@ describe("DurableWriter", () => {
   it.effect("keeps an exhausted retryable driver failure on the defect channel", () =>
     Effect.gen(function*() {
       let attempts = 0
-      const defect = new Error("cannot rollback - no transaction is active")
+      const defect = rollbackDefect()
       const defectSql = {
         ...retrySql,
         withTransaction: <A, E, R>(_effect: Effect.Effect<A, E, R>) =>
@@ -749,7 +758,7 @@ describe("DurableWriter", () => {
       let attempts = 0
       const mixed = Cause.combine(
         Cause.fail(new Error("application failed")),
-        Cause.die(new Error("cannot rollback - no transaction is active"))
+        Cause.die(rollbackDefect())
       )
       const writer = DurableWriter.make(retrySql, publicRetryOptions)
       const program = Effect.gen(function*() {
@@ -816,6 +825,27 @@ describe("DurableWriter", () => {
       yield* Effect.exit(writer.write(Effect.suspend(() => {
         attempts += 1
         return Effect.fail(new Error(`${message} by application policy`))
+      })))
+
+      expect(attempts).toBe(1)
+    }))
+
+  // The defect channel reads the same provenance the typed channel does. It
+  // used to match on text alone, so an application `Effect.die` that merely
+  // quoted lock text spent the whole retry budget.
+  it.effect.each([
+    "database is locked",
+    "database is busy",
+    "could not serialize access",
+    "deadlock detected",
+    "cannot rollback - no transaction is active"
+  ])("does not retry an application defect containing %s", (message) =>
+    Effect.gen(function*() {
+      let attempts = 0
+      const writer = DurableWriter.make(retrySql, publicRetryOptions)
+      yield* Effect.exit(writer.write(Effect.suspend(() => {
+        attempts += 1
+        return Effect.die(new Error(`${message} by application policy`))
       })))
 
       expect(attempts).toBe(1)

@@ -20,6 +20,9 @@
 import { Cause, Duration, Effect, Metric, Schedule } from "effect"
 import * as SqlError from "effect/unstable/sql/SqlError"
 import * as DatabaseMetrics from "../DatabaseMetrics.ts"
+// Type-only, so the module graph stays one-way: `DurableWriter` imports this
+// file at runtime, this file borrows only its code union.
+import type * as DurableWriter from "../DurableWriter.ts"
 
 /**
  * Configuration for write retries.
@@ -147,10 +150,14 @@ export const isIoCause = (cause: unknown): boolean =>
 /**
  * The stable category a structured SQL failure normalizes to.
  *
+ * Every code `DurableWriter.DatabaseError` reports except `unsupported`, which
+ * a refused open raises before any statement runs and no classifier here can
+ * produce. Derived rather than restated so the two cannot drift.
+ *
  * @category models
  * @since 1.0.0
  */
-export type SqlFailureCode = "busy" | "constraint" | "io" | "unknown"
+export type SqlFailureCode = Exclude<DurableWriter.DatabaseErrorCode, "unsupported">
 
 /**
  * Classifies a structured SQL error once, for both the retry decision and the
@@ -178,47 +185,7 @@ export const classifySqlError = (error: SqlError.SqlError): SqlFailureCode =>
     ? "busy"
     : "unknown"
 
-/**
- * Returns whether a failure represents a transient write conflict in either
- * the SQLite or the Postgres vocabulary. The failure may be
- * the structured SQL error itself or a domain error wrapping one — the walk
- * follows `cause` chains (and a `SqlError`'s reason cause) either way, so the
- * outermost `DurableWriter.write` still replays a transaction whose failing
- * savepoint a nested store already normalized into its own error type.
- * Constraint, syntax, and arbitrary application errors are deliberately never
- * retried, and neither is an I/O failure with a busy cause beneath it: the
- * classification {@link classifySqlError} makes is the whole decision.
- *
- * @category guards
- * @since 0.1.0
- */
-export const isRetryableWriteError = (error: unknown): boolean => {
-  const seen = new Set<unknown>()
-  let current = error
-  while (typeof current === "object" && current !== null && !seen.has(current)) {
-    seen.add(current)
-    const sqlError = sqlErrorOf(current)
-    if (sqlError !== undefined) {
-      return classifySqlError(sqlError) === "busy"
-    }
-    const next = readProperty(current, "cause")
-    if (next === Uninspectable) return false
-    current = next
-  }
-  return false
-}
-
-/**
- * A defect is retryable on the same terms a typed failure is: a busy cause the
- * driver threw raw, and never an I/O failure that happens to carry one.
- *
- * rc.108 can throw its rollback failure as a raw defect, before a `SqlError`
- * exists to provide provenance, which is why the defect channel is read at all.
- * Typed failures never get that exception.
- */
-const isRetryableDefect = (defect: unknown): boolean => isBusyCause(defect) && !isIoCause(defect)
-
-/** Finds the structured SQL failure, if any, in a typed failure chain. */
+/** Finds the structured SQL failure, if any, in a cause chain. */
 const findSqlError = (error: unknown): SqlError.SqlError | undefined => {
   const seen = new Set<unknown>()
   let current = error
@@ -233,6 +200,28 @@ const findSqlError = (error: unknown): SqlError.SqlError | undefined => {
     current = next
   }
   return undefined
+}
+
+/**
+ * Returns whether a failure represents a transient write conflict in either
+ * the SQLite or the Postgres vocabulary. The failure may be
+ * the structured SQL error itself or a domain error wrapping one — the walk
+ * follows `cause` chains (and a `SqlError`'s reason cause) either way, so the
+ * outermost `DurableWriter.write` still replays a transaction whose failing
+ * savepoint a nested store already normalized into its own error type.
+ * Constraint, syntax, and arbitrary application errors are deliberately never
+ * retried, and neither is an I/O failure with a busy cause beneath it: the
+ * classification {@link classifySqlError} makes is the whole decision.
+ *
+ * A defect is judged by this same function, so a raw throw qualifies only when
+ * it carries a `SqlError` too.
+ *
+ * @category guards
+ * @since 0.1.0
+ */
+export const isRetryableWriteError = (error: unknown): boolean => {
+  const sqlError = findSqlError(error)
+  return sqlError !== undefined && classifySqlError(sqlError) === "busy"
 }
 
 /** Returns whether one typed reason carries an I/O failure. */
@@ -253,8 +242,15 @@ interface ClassifiedCause<E> {
  * parallel cause that pairs a busy SQL failure with an application error was
  * retried or not depending on which half arrived first. A write that raced two
  * effects is exactly where that shape comes from, so the whole reason list is
- * scanned instead. Typed failures are scanned before defects so a cause that
- * carries both is classified with the provenance a `SqlError` gives.
+ * scanned instead.
+ *
+ * Both channels are then read under one rule: the first pass vetoes on I/O,
+ * the second admits a busy conflict, and neither cares which channel carries
+ * it. The defect channel is read at all because a transaction whose BEGIN or
+ * ROLLBACK fails reaches the caller through Effect's own
+ * `Effect.orDie(options.rollback(conn))`, which dies with the `SqlError` that
+ * step failed with. It is not a licence to replay an application defect whose
+ * message happens to quote database text.
  */
 const classifyCause = <E>(cause: Cause.Cause<E>): ClassifiedCause<E> => {
   for (const reason of cause.reasons) {
@@ -266,12 +262,10 @@ const classifyCause = <E>(cause: Cause.Cause<E>): ClassifiedCause<E> => {
     }
   }
   for (const reason of cause.reasons) {
-    if (Cause.isFailReason(reason) && isRetryableWriteError(reason.error)) {
-      return { cause, retryable: true }
-    }
-  }
-  for (const reason of cause.reasons) {
-    if (Cause.isDieReason(reason) && isRetryableDefect(reason.defect)) {
+    if (
+      (Cause.isFailReason(reason) && isRetryableWriteError(reason.error)) ||
+      (Cause.isDieReason(reason) && isRetryableWriteError(reason.defect))
+    ) {
       return { cause, retryable: true }
     }
   }

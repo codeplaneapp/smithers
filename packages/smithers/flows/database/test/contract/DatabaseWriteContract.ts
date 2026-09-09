@@ -122,12 +122,11 @@ const firstDifferingByte = (actual: Uint8Array, expected: Uint8Array): number =>
 export const describeContract = (harness: Harness): void => {
   describe(`DurableWriter.write contract (${harness.label})`, () => {
     // Both concurrent cases run as real assertions on every harness. A
-    // multi-connection SQLite harness trips Effect's upstream `BEGIN`-failure
-    // rollback defect ("cannot rollback - no transaction is active",
-    // Effect-TS/effect#7235, fixed upstream by #7236 and first released in
-    // effect@4.0.0-rc.109; this workspace pins rc.108, so it is still live), but
-    // `withWriteRetry` classifies that defect as transient write contention
-    // and retries it, so the contract holds regardless.
+    // multi-connection SQLite harness used to trip Effect's upstream
+    // `BEGIN`-failure rollback defect ("cannot rollback - no transaction is
+    // active", Effect-TS/effect#7235), fixed upstream by #7236 and released in
+    // effect@4.0.0-rc.109; the pinned rc.112 surfaces that contention as a
+    // typed `SqlError` instead, which the assertion below pins.
     it.live("does not lose an update when two writers read-modify-write one row concurrently", () =>
       Effect.gen(function*() {
         const result = yield* harness.run((context) =>
@@ -283,6 +282,32 @@ export const describeContract = (harness: Harness): void => {
             })
           )
 
+          expect(SqlError.isSqlError(error)).toBe(true)
+          expect(WriteRetry.isRetryableWriteError(error)).toBe(true)
+        }))
+
+      // The retry classifier once matched lock text on the defect channel with
+      // no `SqlError` to back it, because an older Effect threw the
+      // `BEGIN`-failure rollback raw. The pinned version fails typed, so the
+      // exception was removed; this assertion is what keeps it removed.
+      it.effect("surfaces a transaction that loses the write lock as a typed SqlError", () =>
+        Effect.gen(function*() {
+          const exit = yield* harness.run((context) =>
+            Effect.gen(function*() {
+              yield* context.a.sql`CREATE TABLE begin_rows (id INTEGER PRIMARY KEY)`
+              yield* context.a.sql.unsafe("BEGIN EXCLUSIVE")
+              return yield* Effect.exit(
+                context.b.sql.withTransaction(context.b.sql`INSERT INTO begin_rows (id) VALUES (1)`)
+              ).pipe(
+                Effect.ensuring(context.a.sql.unsafe("ROLLBACK").pipe(Effect.orDie))
+              )
+            })
+          )
+
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (!Exit.isFailure(exit)) return
+          expect(Result.isSuccess(Cause.findDefect(exit.cause))).toBe(false)
+          const error = Result.getOrUndefined(Cause.findError(exit.cause))
           expect(SqlError.isSqlError(error)).toBe(true)
           expect(WriteRetry.isRetryableWriteError(error)).toBe(true)
         }))

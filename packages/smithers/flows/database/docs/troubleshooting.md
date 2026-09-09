@@ -190,11 +190,10 @@ propagate to the outermost `write`.
 
 ### An application error is retried unexpectedly
 
-It is not. A typed failure must carry an Effect `SqlError` in its cause chain
-to qualify. If you are seeing replays, the effect inside `write` is genuinely
-failing with a database error. The exception is a raw rollback defect the
-driver throws before a `SqlError` exists, which is matched on the defect
-channel alone.
+It is not. A failure must carry an Effect `SqlError` in its cause chain to
+qualify, on the defect channel as much as the typed one. If you are seeing
+replays, the effect inside `write` is genuinely failing with a database error.
+An `Effect.die` whose message merely quotes lock text is never replayed.
 
 ### `unsupported` from a write that should have worked
 
