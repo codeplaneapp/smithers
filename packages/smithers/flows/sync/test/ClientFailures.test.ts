@@ -391,6 +391,26 @@ describe("SyncClient failure paths", () => {
       expect(readsBeforeTimeAdvanced).toBe(1)
     }))
 
+  it.effect("fails without reopening an empty completed subscription window", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const client = stubClient({
+        subscribe: () => {
+          calls++
+          // Bound the pre-fix loop so the regression fails without a timeout.
+          return calls <= 3 ? Stream.empty : Stream.fail(new SyncError({ code: "closed", message: "probe limit" }))
+        }
+      })
+      const before = yield* client.progress
+      const failure = yield* Effect.flip(client.subscribe({ scope, cursors: [] }).pipe(Stream.runDrain))
+      expect(calls).toBe(1)
+      expect(failure).toMatchObject({
+        code: "protocol_violation",
+        message: "Subscription window closed without frames"
+      })
+      expect(yield* client.progress).toEqual(before)
+    }))
+
   // A whole-workspace subscription merges every covered run, so one compacted
   // run used to take the whole subscription down: the refusal was untyped, the
   // client retried only `transport_failed`, and every resubscribe carried the
@@ -413,7 +433,10 @@ describe("SyncClient failure paths", () => {
             )
             : Effect.succeed({
               entries: [entry("compacted", 13), entry("healthy", 0)],
-              cursors: [],
+              cursors: [
+                { generation: 0, runId: compacted, afterSeq: seq(13) },
+                { generation: 0, runId: runId("healthy"), afterSeq: seq(0) }
+              ],
               done: true
             })
         }

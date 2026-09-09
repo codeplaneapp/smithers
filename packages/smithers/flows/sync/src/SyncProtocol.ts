@@ -64,7 +64,9 @@ export type Scope = typeof Scope.Type
  *
  * `generation` identifies the run's current history after rewinds. Requests may
  * omit it for persisted generation-zero cursors. Server responses must include
- * it, and clients refuse its absence; persist a returned generation with its sequence.
+ * it in exactly one cursor for every run represented in Read entries. Clients
+ * refuse missing cursor rows or generations before delivery; persist a returned
+ * generation with its sequence.
  * Sequence ordering is meaningful only within one generation.
  *
  * @category models

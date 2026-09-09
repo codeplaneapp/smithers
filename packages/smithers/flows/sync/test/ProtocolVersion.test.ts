@@ -1,7 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Stream from "effect/Stream"
+import * as SyncClient from "../src/SyncClient.ts"
+import type * as SyncProtocol from "../src/SyncProtocol.ts"
 import * as SyncServer from "../src/SyncServer.ts"
 import * as TestSocket from "../src/test/TestSocket.ts"
 import * as TestSync from "../src/test/TestSync.ts"
@@ -103,4 +106,73 @@ for (const bootstrap of [true, false]) {
         expect(yield* client.cursors).toEqual([{ runId, afterSeq: 2, generation: 0 }])
       }).pipe(Effect.provide(TestSync.layerTest))
     ))
+}
+
+for (const generation of [0, 5]) {
+  for (const rows of ["missing", "partially missing", "foreign-only", "duplicate"] as const) {
+    it.effect(`refuses ${rows} read cursor rows at generation ${generation} before application`, () =>
+      Effect.gen(function*() {
+        const otherRun = "other-run" as JournalEvent.RunId
+        const cursors = [otherRun, runId].map((runId) => ({
+          runId,
+          afterSeq: 5 as JournalEvent.Seq,
+          generation
+        }))
+        const responseCursors = cursors.map((cursor) => ({ ...cursor, afterSeq: 6 as JournalEvent.Seq }))
+        const entries = cursors.map(({ runId }) =>
+          new JournalEvent.Entry({
+            runId,
+            seq: 6 as JournalEvent.Seq,
+            eventId: `${runId}-6`,
+            sourceId,
+            sourceSeq: 6 as JournalEvent.SourceSeq,
+            emittedAtMs: 6,
+            eventType: "event",
+            payload: null,
+            meta: null
+          })
+        )
+        let applications = 0
+        let requested: SyncProtocol.WorkspaceCursor = []
+        const client = yield* SyncClient.make({
+          client: {
+            "Sync.Read": (request: SyncProtocol.ReadRequest) => {
+              requested = request.cursors
+              return Effect.succeed({
+                entries,
+                cursors: rows === "missing" ?
+                  []
+                  : rows === "partially missing" ?
+                  responseCursors.slice(0, 1)
+                  : rows === "foreign-only"
+                  ? [{ ...responseCursors[0]!, runId: "foreign" as JournalEvent.RunId }]
+                  : [...responseCursors, responseCursors[0]!],
+                done: true
+              })
+            },
+            "Sync.Subscribe": () => Stream.never
+          } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
+        })
+        const before = yield* client.progress
+        const exit = yield* Effect.exit(
+          client.subscribe({
+            scope: { _tag: "Workspace" },
+            cursors,
+            apply: () =>
+              Effect.sync(() => {
+                applications++
+              })
+          }).pipe(Stream.take(2), Stream.runDrain)
+        )
+        expect(applications).toBe(0)
+        expect(yield* client.progress).toEqual(before)
+        expect(yield* client.cursors).toEqual([])
+        expect(requested).toEqual(cursors)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(exit.cause.reasons.find((reason) => reason._tag === "Fail")?.error)
+            .toMatchObject({ code: "protocol_violation" })
+        }
+      }))
+  }
 }

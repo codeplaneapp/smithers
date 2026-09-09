@@ -160,7 +160,12 @@ describe("sync admission integrity", () => {
       }
       const remote = yield* SyncClient.make({
         client: {
-          "Sync.Read": () => Effect.succeed({ entries: [historic], cursors: [], done: true })
+          "Sync.Read": () =>
+            Effect.succeed({
+              entries: [historic],
+              cursors: [{ runId: historic.runId, afterSeq: historic.seq, generation: 0 }],
+              done: true
+            })
         } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
       })
       expect(

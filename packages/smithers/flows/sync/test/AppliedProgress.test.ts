@@ -26,7 +26,7 @@ const make = () =>
       "Sync.Read": (request: Protocol.ReadRequest) =>
         Effect.succeed({
           entries: entries.filter((entry) => entry.seq > (request.cursors[0]?.afterSeq ?? -1)),
-          cursors: [],
+          cursors: [{ generation: 0, runId, afterSeq: 1 as JournalEvent.Seq }],
           done: true
         }),
       "Sync.Subscribe": () => Stream.never

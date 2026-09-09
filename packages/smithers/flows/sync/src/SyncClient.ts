@@ -320,14 +320,9 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
  * The first semantic inconsistency of a catch-up page, or `undefined` for a
  * consistent one.
  *
- * The live path has admitted, never trusted, its frames since it was written;
- * the bootstrap path took every schema-valid page on faith, so a compromised
- * or buggy server could hand a run-scoped subscription an entry for a
- * different run and move that run's cursor in a client that never asked about
- * it. These are the same four questions {@link frameViolation} asks, put to a
- * page: is every entry inside the scope the caller asked for, does each run's
- * sequence ascend strictly, is every entry above the cursor the request
- * carried, and does the response echo one cursor per run.
+ * Every entry must belong to the requested scope, ascend strictly within its
+ * run, and lie above the requested cursor. Every entry-bearing run must have
+ * exactly one response cursor with an explicit generation matching the request.
  *
  * Strictly-above-the-cursor is also what makes an incomplete page CONVERGE: a
  * page that carries entries but moves no cursor would be re-read forever.
@@ -339,7 +334,9 @@ const pageViolation = (
 ): SyncError | undefined => {
   const violation = (message: string): SyncError =>
     new SyncError({ code: "protocol_violation", message, cause: "invalid_read_page" })
+  const generations = new Set<JournalEvent.RunId>()
   for (const cursor of response.cursors) {
+    generations.add(cursor.runId)
     if (cursor.generation === undefined) return violation("Read response lacks a generation")
     const previous = requested.get(cursor.runId)
     if (previous !== undefined && (previous.generation ?? 0) !== cursor.generation) {
@@ -365,6 +362,9 @@ const pageViolation = (
     }
     highest.set(entry.runId, entry.seq)
   }
+  for (const runId of highest.keys()) {
+    if (!generations.has(runId)) return violation(`Read page lacks a generation cursor for run ${runId}`)
+  }
   const duplicate = duplicateCursorRunId(response.cursors)
   return duplicate === undefined ? undefined : violation(`Read page echoed run ${duplicate} more than once`)
 }
@@ -381,20 +381,22 @@ const pageViolation = (
  * therefore retain the last admitted entry rather than incorrectly
  * acknowledging the server's whole page.
  *
- * Server responses are admitted, never trusted, on BOTH paths. A frame or
- * bootstrap page whose encoded entries exceed `maxFrameBytes` is refused with
- * `frame_too_large`; a frame or page that carries another run's entry,
- * repeats or reorders a sequence, or serves an entry at or below the cursor
- * the request carried is refused as a protocol violation before any cursor
- * moves; and an incomplete bootstrap page that makes no progress fails typed
- * instead of re-reading forever.
+ * A frame or bootstrap page whose encoded entries exceed `maxFrameBytes` is
+ * refused with `frame_too_large`. Out-of-scope entries, repeated or reordered
+ * sequences, and missing response generations fail with `protocol_violation`
+ * before delivery. Each entry-bearing run in a Read page must have exactly one
+ * explicit generation cursor, and every entry must be above the requested
+ * cursor. Live frames instead drop already-covered entries and deliver only
+ * the suffix above the cursor. An incomplete bootstrap page with no entries
+ * or a completed subscription window with no frames fails with
+ * `protocol_violation` instead of reopening immediately.
  *
  * A live follow that loses its transport reconnects under
  * {@link reconnectPolicy}, resuming from the acknowledged cursors; the failure
  * cause is logged before the retry folds it. The follow spends a credit window
  * of {@link defaultCredit} frames per subscription round and replenishes it by
- * resubscribing from the cursors it has acknowledged, so an entry is never
- * re-read and the round-trip cost does not scale with the run's traffic.
+ * resubscribing from the cursors it has acknowledged. Already-covered entries
+ * are not delivered again; the round-trip cost scales with credit windows.
  *
  * A `compacted` refusal fails closed unless `SubscribeOptions.onResync`
  * restores the missing prefix and returns its exact cursor. Snapshot fetching
@@ -585,7 +587,7 @@ export const make = ({
           return Stream.flatMap(Stream.fromIterable(entries), (entry) => deliver(frame.runId, entry, generation))
         }
 
-        const livePage = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
+        const livePage = (onFrame: () => void): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
           Stream.unwrap(
             Effect.sync(() =>
               client["Sync.Subscribe"]({
@@ -605,6 +607,7 @@ export const make = ({
                 : Effect.succeed(frame)
             ),
             Stream.flatMap((frame) => {
+              onFrame()
               switch (frame._tag) {
                 case "Entries":
                   return batch(frame)
@@ -617,10 +620,22 @@ export const make = ({
           )
 
         const live = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
-          Stream.concat(
-            livePage(),
-            Stream.unwrap(Effect.sync(live))
-          )
+          Stream.unwrap(Effect.sync(() => {
+            let receivedFrame = false
+            return Stream.concat(
+              livePage(() => {
+                receivedFrame = true
+              }),
+              Stream.unwrap(Effect.sync(() =>
+                receivedFrame ? live() : Stream.fail(
+                  new SyncError({
+                    code: "protocol_violation",
+                    message: "Subscription window closed without frames"
+                  })
+                )
+              ))
+            )
+          }))
 
         // The retry re-runs the whole follow from the acknowledged cursors,
         // and its schedule resets once entries flow again, so a long-lived
@@ -673,7 +688,7 @@ export const make = ({
                       deliver(
                         entry.runId,
                         entry,
-                        generations.get(entry.runId) ?? 0
+                        generations.get(entry.runId)!
                       )
                   )
                   if (response.done) return Stream.concat(page, follow())

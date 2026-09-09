@@ -4,6 +4,7 @@ description: "Every public export of @smthrs/sync: the wire protocol, the read-p
 ---
 
 ```ts
+import { JournalEvent } from "@smthrs/journal"
 import { RunCatalog, SyncClient, SyncServer } from "@smthrs/sync"
 import { Effect, Layer } from "effect"
 
@@ -11,7 +12,7 @@ const serverLayer = SyncServer.layer.pipe(Layer.provide(RunCatalog.layerStatic([
 
 const follow = Effect.gen(function*() {
   const sync = yield* SyncClient.Sync
-  return sync.subscribe({ scope: { _tag: "Run", runId: "build-42" }, cursors: [] })
+  return sync.subscribe({ scope: { _tag: "Run", runId: "build-42" as JournalEvent.RunId }, cursors: [] })
 })
 ```
 
@@ -146,12 +147,15 @@ A subscription replays through `Sync.Read` until the server reports `done`,
 then follows through `Sync.Subscribe` in credit windows, replenishing each
 window by resubscribing from its matching delivered or applied progress.
 
-Server responses are admitted, never trusted, on both paths. A frame or page
-whose encoded entries exceed `maxFrameBytes` is refused with
-`frame_too_large`; one that carries another run's entry, repeats or reorders a
-sequence, or serves an entry at or below the cursor the request carried is
-refused as a `protocol_violation` before any cursor moves; and an incomplete
-page that makes no progress fails typed instead of re-reading forever.
+A frame or page whose encoded entries exceed `maxFrameBytes` is refused with
+`frame_too_large`. Out-of-scope entries, repeated or reordered sequences, and
+missing response generations fail with `protocol_violation` before delivery.
+Each run represented in a `Sync.Read` page's entries must have exactly one
+cursor with an explicit generation matching the request, and every entry must
+be above the requested cursor. Live frames instead drop already-covered
+entries and deliver only the suffix above the cursor. An incomplete bootstrap
+page with no entries or a completed subscription window with no frames fails
+with `protocol_violation` instead of reopening immediately.
 
 Transport, authentication, and reconnect are handled here rather than left to
 the application. A live follow that loses its transport reconnects under

@@ -45,7 +45,7 @@ describe("SyncClient cursors", () => {
             reads.push(request.cursors)
             return Effect.succeed({
               entries: [entry("duplicate", 5)],
-              cursors: [],
+              cursors: [{ runId: runId("duplicate"), afterSeq: seq(5), generation: 0 }],
               done: true
             })
           },
@@ -79,7 +79,11 @@ describe("SyncClient cursors", () => {
           page === 1
             ? {
               entries: [entry("zeta", 0), entry("alpha", 3), entry("mid", 1)],
-              cursors: [],
+              cursors: [
+                { runId: runId("zeta"), afterSeq: seq(0), generation: 0 },
+                { runId: runId("alpha"), afterSeq: seq(3), generation: 0 },
+                { runId: runId("mid"), afterSeq: seq(1), generation: 0 }
+              ],
               done: true
             }
             : { entries: [], cursors: [], done: true }
@@ -109,7 +113,7 @@ describe("SyncClient cursors", () => {
             reads.push(request.cursors)
             return Effect.succeed({
               entries: reads.length === 1 ? [entry("run", 0), entry("run", 1)] : [entry("run", 2)],
-              cursors: [],
+              cursors: [{ runId: runId("run"), afterSeq: seq(reads.length === 1 ? 1 : 2), generation: 0 }],
               done: true
             })
           },
@@ -144,7 +148,7 @@ describe("SyncClient cursors", () => {
             reads.push(request.cursors)
             return Effect.succeed({
               entries: [entry("ahead", reads.length === 1 ? 4 : 10)],
-              cursors: [],
+              cursors: [{ runId: runId("ahead"), afterSeq: seq(reads.length === 1 ? 4 : 10), generation: 0 }],
               done: true
             })
           },
@@ -180,7 +184,7 @@ describe("SyncClient cursors", () => {
               entries: warmReads.length === 1
                 ? [entry("rebuild", 0), entry("rebuild", 1)]
                 : [entry("rebuild", 2)],
-              cursors: [],
+              cursors: [{ runId: runId("rebuild"), afterSeq: seq(warmReads.length === 1 ? 1 : 2), generation: 0 }],
               done: true
             })
           },
@@ -198,7 +202,11 @@ describe("SyncClient cursors", () => {
         client: {
           "Sync.Read": (request: SyncProtocol.ReadRequest) => {
             freshReads.push(request.cursors)
-            return Effect.succeed({ entries: [entry("rebuild", 1)], cursors: [], done: true })
+            return Effect.succeed({
+              entries: [entry("rebuild", 1)],
+              cursors: [{ runId: runId("rebuild"), afterSeq: seq(1), generation: 0 }],
+              done: true
+            })
           },
           "Sync.Subscribe": () => Stream.empty
         } as unknown as Parameters<typeof SyncClient.make>[0]["client"]

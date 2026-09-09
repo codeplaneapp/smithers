@@ -22,7 +22,12 @@ for (const live of [false, true]) {
       )
       const remote = yield* SyncClient.make({
         client: {
-          "Sync.Read": () => Effect.succeed({ entries: live ? [] : entries, cursors: [], done: true }),
+          "Sync.Read": () =>
+            Effect.succeed({
+              entries: live ? [] : entries,
+              cursors: live ? [] : [{ generation: 0, runId, afterSeq: 1 as JournalEvent.Seq }],
+              done: true
+            }),
           "Sync.Subscribe": () =>
             Stream.succeed({ generation: 0, _tag: "Entries", runId, fromSeq: 0, toSeq: 1, entries })
         } as unknown as Parameters<typeof SyncClient.make>[0]["client"]

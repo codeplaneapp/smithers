@@ -48,7 +48,7 @@ const server = (options: { floor?: number; target?: JournalEvent.RunId } = {}) =
         if (after < floor) return Effect.fail(compacted(floor, options.target))
         return Effect.succeed({
           entries: [3, 4, 5].filter((value) => value > after).map(entry),
-          cursors: [],
+          cursors: [restored(5)],
           done: true
         })
       }),
