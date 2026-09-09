@@ -41,27 +41,32 @@ a non-sealed tier or an `expected` boundary prevents shared-cache admission.
 
 ## The install boundaries
 
-| Action                                   | Tier           | Boundary   | Reads                              | Writes                                     | Cache-admissible |
-| ---------------------------------------- | -------------- | ---------- | ---------------------------------- | ------------------------------------------ | ---------------- |
-| `smithers-build/install/measure`         | `sealed`       | `expected` | `.npmrc`, every supported lockfile | none                                       | No               |
-| `smithers-build/install/fetch/{manager}` | `sealed`       | `expected` | the manager's lockfile, `.npmrc`   | `TreeArtifact` at `.flows/store/<manager>` | No               |
-| `smithers-build/install/link`            | `irreversible` | `expected` | `package.json`                     | root and nested `node_modules` trees       | No               |
+| Action                              | Tier           | Boundary   | Reads                                                                                                                                                                 | Writes                                          | Cache-admissible |
+| ----------------------------------- | -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ---------------- |
+| `smithers-build/install/measure`    | `sealed`       | `expected` | `.npmrc`; `bun.lock`; `pnpm-lock.yaml`; `.pnpmfile.cjs`; `pnpm-workspace.yaml`                                                                                        | none                                            | No               |
+| `smithers-build/install/fetch/pnpm` | `sealed`       | `expected` | `pnpm-lock.yaml`; `.npmrc`; `.pnpmfile.cjs`; `pnpm-workspace.yaml`                                                                                                    | `TreeArtifact` at `.flows/store/pnpm`           | No               |
+| `smithers-build/install/fetch/bun`  | `sealed`       | `expected` | `bun.lock`; `.npmrc`                                                                                                                                                  | `TreeArtifact` at `.flows/store/bun`            | No               |
+| `smithers-build/install/link`       | `irreversible` | `expected` | `.npmrc`; `bun.lock`; `pnpm-lock.yaml`; `.pnpmfile.cjs`; `pnpm-workspace.yaml`; `package.json`; `Glob`: `**/package.json` (exclude `**/node_modules/**`, `.flows/**`) | `Glob`: `**/node_modules`, `**/node_modules/**` | No               |
+
+Measure reports content: the lockfile digest, the credential-free project
+`.npmrc` digest, and the pnpm hook and workspace manifest digests when present.
+Manager version and host platform belong to the `PackageManager` and `Runtime`
+services. Measure uses an `expected` boundary and remeasures each run, so a
+cross-run cache cannot substitute another checkout's measurement.
 
 Fetch is shaped as the potentially shareable half, but it is not shared today.
-The absolute-root package-manager process can open the lockfile and `.npmrc`
+The absolute-root package-manager process can open the lockfile and configuration
 after the parent verifies them, and the current observer cannot freeze those
-paths or prove there were no undeclared effects. Calling that boundary `hard`
-would be a false hermeticity claim.
+paths or prove there were no undeclared effects. Its `expected` boundary prevents
+shared-cache admission. Only pnpm has a live implementation; Bun refuses execution.
 
-Measure is not admissible because it reports the host's package-manager version,
-which no declared read set covers. A restored measurement would carry the version
-of whichever machine recorded it first into every downstream key.
-
-Link is not admissible because a `node_modules` tree is a graph of links into a
-local store. Restoring one from another machine would produce a tree pointing at
-nothing. Link declares no write on purpose: the current boundary contract turns
-every declared write into materialized artifact evidence, so naming
-`node_modules` would cache the tree it is forbidden to cache.
+Link declares writes to root and nested `node_modules` trees for conflict
+ordering. Its `irreversible` tier prevents shared-cache admission regardless of
+boundary mode; a non-sealed write declaration does not publish file artifacts.
+The tree contains links into a host-local store, and ignored dependency trees
+are outside normal workspace snapshots, so Link cannot promise rollback.
+A completed attempt can replay within its run; a new run reconciles the tree
+again. An uncertain interrupted attempt requires operator reconciliation.
 
 ## The shared exec action
 
@@ -151,9 +156,8 @@ declared confinement is enforced or the target fails closed. Nothing logs
 A target declares a policy in its `sandbox` attr: `{}` for the default
 confinement, `{ network: "loopback" }`, `{ network: true }`, or the `"none"`
 opt-out. The workspace declaration's `sandboxes` option names the mechanisms
-those policies resolve to, and a workspace that declares none leaves
-build-target confinement off, because the catalog's declared inputs are what a
-sandbox exposes and a workspace has to declare them completely first.
+those policies resolve to. Without a declared mechanism, the host selects its
+native mechanism. `S.Sandbox.None()` also disables confinement.
 
 Under confinement a tool may read its declared read set and nothing else under
 the workspace: the target's expanded declared inputs, the outputs of every
@@ -165,12 +169,19 @@ output file opens the directory it lives in, because a file cannot be bound
 before it exists and a tool that writes by rename needs the directory. The
 network is closed unless the policy opens it.
 
-| Host    | Mechanism                                                                                                                                                                                                                                                                                                     |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Linux   | bubblewrap. The host root is bound read-only, a tmpfs covers the workspace, the declared set is bound on top, the tmpfs is remounted read-only, and the network namespace is unshared. A `loopback` request is refused because bubblewrap cannot expose host loopback without granting the full host network. |
-| macOS   | seatbelt. Reads under the workspace are denied except the declared set, writes are denied except the declared set and the private tmp, and the network is denied except what the policy opens. The operating system and toolchain outside the workspace stay readable.                                        |
-| Docker  | `docker run` with a read-only root, the declared set mounted at its host paths, and `--network none`. Declared with `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`; the image supplies the toolchain. The only mechanism on Windows.                                                                 |
-| Windows | Nothing native. A confined target without a Docker declaration fails closed.                                                                                                                                                                                                                                  |
+| Host    | Mechanism                                                                                                                                                                                                                                                                                                                                                     |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux   | bubblewrap. An empty root exposes enumerated runtime paths and declared grants. A tmpfs covers the workspace, the declared set is bound on top, the root and workspace are remounted read-only, and the network namespace is unshared. A `loopback` request is refused because bubblewrap cannot expose host loopback without granting the full host network. |
+| macOS   | seatbelt. Host reads are denied except enumerated runtime paths, declared reads and writes, private tmp, and explicit external-read grants. Writes and network access are denied except what the policy opens.                                                                                                                                                |
+| Docker  | `docker run` with a read-only root, the declared set mounted at its host paths, and `--network none`. Declared with `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`; the image supplies the toolchain. The only mechanism on Windows.                                                                                                                 |
+| Windows | Nothing native. A confined target without a Docker declaration fails closed.                                                                                                                                                                                                                                                                                  |
+
+Native confinement restricts host reads as well as workspace access. It is not
+blanket host-file isolation: enumerated runtime paths remain exposed, and
+explicit external-read grants can expose paths outside the workspace, including
+the destinations of declared symlinks. Known home credentials are denied even
+under broad runtime grants unless explicitly granted. Docker exposes declared
+host mounts and supplies its toolchain from the image.
 
 The mechanism is selected per host: bubblewrap on Linux, seatbelt on macOS,
 Docker where declared. A Linux host without `bwrap`, a Windows host without
@@ -183,13 +194,9 @@ A target declaring `services` must also declare `{ network: "loopback" }` or
 Since Linux refuses loopback-only access, a cross-platform service consumer
 must explicitly opt into the full network.
 
-An undeclared read **under the workspace** is missing or refused, and an
-undeclared write fails at the kernel. Native sandboxes leave host files outside
-the workspace readable, including `.ssh`, `.aws`, and `SMITHERS_HOME` outside
-hidden roots. Their private `HOME` redirects writes without hiding the original
-home. Linux also hides `/tmp`. Host-installed tools and their undeclared
-library/SDK/store dependencies need those reads today; use a Docker image with
-only the required host mounts when host-file read isolation is required.
+An undeclared workspace read is missing or refused, and an undeclared write
+fails at the kernel. Native host reads outside the admitted runtime and explicit
+grants are also refused; redirecting `HOME` alone would not enforce that boundary.
 
 For denied operations, the witness is the tool's own error text; the failure carries the paths that text names and
 which side of the boundary each fell on:
@@ -200,10 +207,10 @@ sandbox: note.txt is outside the declared write set
 sandbox: seatbelt, network none, 3 read path(s), 2 write path(s)
 ```
 
-Reads outside the workspace are not scoped on any mechanism. The workspace
-tree is what the content key covers; the loader, the interpreters, and the
-package manager live outside it, and the toolchain identity that names them is
-the `nix:<hash>` layer of a declared [Nix environment](environments.md).
+The workspace tree is what the content key covers. Host toolchain identity
+belongs to the `nix:<hash>` layer of a declared
+[Nix environment](environments.md); runtime read grants do not make those paths
+workspace inputs.
 
 A `PACKAGE.ts` file is not sandboxed, and it is not meant to be. It is
 executable TypeScript evaluated in the CLI process: it can import any host

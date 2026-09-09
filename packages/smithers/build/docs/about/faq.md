@@ -61,26 +61,16 @@ separate outward-action gate. The per-target status is on each page under
 
 ## Are actions sandboxed?
 
-Yes, where a policy asks for it. On the `PACKAGE.ts` surface every target is
-confined unless it declares `sandbox: "none"` or the workspace selects
-`S.Sandbox.None()`. The mechanism is bubblewrap on Linux, seatbelt on macOS, and Docker
-where the workspace declares an image. Inside the workspace, reads are
-limited to admitted inputs, dependency outputs, and tool support paths such as
-`node_modules`; writes are limited to admitted outputs and private scratch
-paths. Networking is closed unless the policy explicitly opens it.
-
-Yes, where a policy asks for it. A target declares `sandbox`, and
-`sandbox: "none"` is the opt-out. The workspace declaration's `sandboxes`
-option names the mechanisms available, with `default` as the one a target that
-asks for confinement without naming another gets: bubblewrap on Linux, Docker
-where the workspace declares an image. Native bubblewrap and seatbelt confinement **does not hide host files outside
-the workspace** (apart from Linux's private `/tmp`). The real home's `.ssh`,
-`.aws`, and `SMITHERS_HOME` remain readable when outside those hidden roots.
-Redirecting `HOME` does not prevent a tool from opening their original paths.
-These mechanisms constrain workspace reads, host writes, and network access;
-they are not host-secret read isolation. Docker exposes only its declared host
-mounts and uses the image's toolchain, so choose it when that isolation is
-required. A host that cannot enforce a declared confinement fails the target closed. See
+Yes. `ExecSandbox` enforces per-target confinement with bubblewrap on Linux,
+seatbelt on macOS, or Docker where declared; a host that cannot enforce it
+fails the target closed. `sandbox: "none"` or `S.Sandbox.None()` disables it.
+Workspace reads are scoped to admitted inputs, dependency outputs, and tool
+support paths; writes are scoped to admitted outputs, declared changes, and
+private scratch. Networking is closed unless the policy opens it. Native host reads are restricted to enumerated runtime paths and
+admitted paths, including explicit external-read grants and declared symlink
+destinations. Known home credentials are denied unless explicitly granted.
+This is not blanket host-file isolation. Docker exposes declared host mounts
+and uses the image's toolchain. See
 [Actions and boundaries](../concepts/actions-and-boundaries.md#hermeticity).
 
 ## Is `node_modules` cached?

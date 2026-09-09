@@ -52,22 +52,27 @@ See [Target definitions and targets](../concepts/targets.md) and
 
 ## Comparison
 
-|                   | smithers build                                                                                                         | Bazel                                               | Turborepo                                      | nx                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------- | ------------------------------------------ |
-| Build file        | `PACKAGE.ts`, plain TypeScript                                                                                         | `BUILD.bazel`, Starlark                             | `turbo.json` plus package scripts              | `project.json` plus plugins                |
-| Unit of work      | Target: a target call exported by name                                                                                 | Target: a target call with a `name` attribute       | Task: a package script                         | Target: an executor invocation             |
-| Dependency edges  | Direct `import` between `PACKAGE.ts` files                                                                             | `deps` attribute holding label strings              | Inferred from `package.json` plus `dependsOn`  | Inferred from imports plus explicit config |
-| Input declaration | `file()`, `glob()`, `gitDiff()`                                                                                        | `srcs`, `glob()`                                    | Package directory hashing, `inputs` globs      | Named input sets                           |
-| Sandboxing        | Per-action: bubblewrap on Linux, seatbelt on macOS, Docker where declared; reads and writes scoped to the declared set | Per-action sandbox                                  | None                                           | None                                       |
-| Cache key         | sha256 over target id, canonicalized attrs, input digests, and dependency keys                                         | Action digest over declared inputs and command line | Hash over package files, dependencies, and env | Hash over inputs and project graph         |
-| Remote cache      | HTTP `/ac` read-through for CLI results; `/ac` and `/cas` services for the engine step cache                           | gRPC remote execution API                           | Vercel Remote Cache                            | Nx Cloud                                   |
-| Language          | TypeScript                                                                                                             | Starlark                                            | JSON                                           | JSON plus TypeScript plugins               |
+|                   | smithers build                                                                                                                       | Bazel                                               | Turborepo                                      | nx                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---------------------------------------------- | ------------------------------------------ |
+| Build file        | `PACKAGE.ts`, plain TypeScript                                                                                                       | `BUILD.bazel`, Starlark                             | `turbo.json` plus package scripts              | `project.json` plus plugins                |
+| Unit of work      | Target: a target call exported by name                                                                                               | Target: a target call with a `name` attribute       | Task: a package script                         | Target: an executor invocation             |
+| Dependency edges  | Direct `import` between `PACKAGE.ts` files                                                                                           | `deps` attribute holding label strings              | Inferred from `package.json` plus `dependsOn`  | Inferred from imports plus explicit config |
+| Input declaration | `file()`, `glob()`, `gitDiff()`                                                                                                      | `srcs`, `glob()`                                    | Package directory hashing, `inputs` globs      | Named input sets                           |
+| Sandboxing        | Per-target `ExecSandbox`: workspace and network confinement; native runtime and explicit external-read grants; Docker where declared | Per-action sandbox                                  | None                                           | None                                       |
+| Cache key         | sha256 over target id, canonicalized attrs, input digests, and dependency keys                                                       | Action digest over declared inputs and command line | Hash over package files, dependencies, and env | Hash over inputs and project graph         |
+| Remote cache      | HTTP `/ac` read-through for CLI results; `/ac` and `/cas` services for the engine step cache                                         | gRPC remote execution API                           | Vercel Remote Cache                            | Nx Cloud                                   |
+| Language          | TypeScript                                                                                                                           | Starlark                                            | JSON                                           | JSON plus TypeScript plugins               |
 
 smithers build takes Bazel's target model and label grammar, Turborepo's presentation
 and workspace assumptions, and the Smithers engine's keying and durability model.
-Actions run under a per-host sandbox scoped to the declared read and write
-sets, and a declared confinement the host cannot enforce fails the target
-rather than running it unconfined. See
+`ExecSandbox` scopes workspace reads and writes to admitted paths and closes
+networking unless the policy opens it. Native bubblewrap and seatbelt also
+restrict host reads, while exposing enumerated runtime paths and explicit
+external-read grants, including declared symlink destinations. Known home
+credentials are denied unless explicitly granted; this is not blanket host-file
+isolation. Docker exposes declared host mounts and uses the image's toolchain.
+An unenforceable confinement fails the target closed. `sandbox: "none"` or
+`S.Sandbox.None()` disables confinement. See
 [Actions and boundaries](../concepts/actions-and-boundaries.md).
 
 ## The three packages

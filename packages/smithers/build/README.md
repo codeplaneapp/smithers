@@ -21,19 +21,30 @@ outside a failed target's dependent cone. Successful cacheable results are
 stored as bounded JSON under `<cacheDirectory>/cache`; a configured HTTPS
 remote adds a read-through `/ac` tier.
 
-This is not a sandbox. Tools run directly in the workspace, so an effects
-declaration is analysis and cache metadata rather than proof that the process
-read and wrote only those paths. The executor revalidates declared inputs
-before cache admission and after execution, and verifies declared outputs
-before reporting or caching success. It does not claim Bazel-style hermeticity
-without the sandbox evidence needed to support that claim.
+Target tools run through `ExecSandbox`: bubblewrap on Linux, seatbelt on macOS,
+or Docker where declared. Confinement scopes workspace reads and writes to
+admitted paths and closes networking unless the policy opens it; a host that
+cannot enforce the policy fails the target closed. `sandbox: "none"` or
+`S.Sandbox.None()` disables confinement. Native host reads are restricted but
+include enumerated runtime paths and explicit external-read grants, including
+declared symlink destinations. Known home credentials are denied unless
+explicitly granted; this is not blanket host-file isolation. Docker exposes
+declared host mounts and uses the image's toolchain. See
+[Actions and boundaries](docs/concepts/actions-and-boundaries.md#hermeticity).
+
+Effects declarations also supply analysis and cache metadata. The executor
+revalidates declared inputs before cache admission and after execution, and
+verifies declared outputs before reporting or caching success. The install
+actions below retain `expected` boundaries and are not admitted to the shared
+engine cache.
 
 ## Dependency installation
 
 Installation is one round of three actions:
 
-1. `measure` records the content an install is keyed on: the lockfile digest
-   and the credential-free project `.npmrc` digest. The manager version and the
+1. `measure` records the content an install is keyed on: the lockfile digest,
+   the credential-free project `.npmrc` digest, and the pnpm hook and workspace
+   manifest digests when present. The manager version and the
    host platform are not content; they come from the `PackageManager` and
    `Runtime` services, which hold the host to what the workspace declared.
 2. A manager-specific `fetch` populates `.flows/store/<manager>`. The manager

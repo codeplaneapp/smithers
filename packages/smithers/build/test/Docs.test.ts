@@ -12,6 +12,9 @@
  * source change moves the gate rather than a reviewer's memory of it. Prose
  * that no invariant can be derived from stays outside this file.
  */
+import { Flow } from "@smthrs/flow"
+import * as FileSet from "@smthrs/plan/FileSet"
+import * as Context from "effect/Context"
 import * as Fs from "node:fs"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
@@ -130,6 +133,78 @@ describe("packages/smithers/build prose", () => {
       }
     }
   })
+
+  for (const action of [Install.Measure, Install.FetchPnpm, Install.FetchBun, Install.Link]) {
+    it(`documents the declared boundary of ${action.name}`, () => {
+      const declaration = Context.getUnsafe(action.annotations, Flow.EffectsDeclaration)
+      const code = (value: string): string => "`" + value + "`"
+      const entries = (values: ReadonlyArray<FileSet.Entry>): string =>
+        values.length === 0 ? "none" : values.map((entry) => {
+          if (typeof entry === "string") return code(entry)
+          if (entry._tag === "TreeArtifact") return `${code(entry._tag)} at ${code(entry.path)}`
+          const excludes = entry.exclude?.length ? ` (exclude ${entry.exclude.map(code).join(", ")})` : ""
+          return `${code(entry._tag)}: ${entry.include.map(code).join(", ")}${excludes}`
+        }).join("; ")
+      const page = read("docs/concepts/actions-and-boundaries.md").split("## The install boundaries\n")[1]?.split(
+        "\n## "
+      )[0]
+      expect(page, "install boundaries section").toBeDefined()
+      const rows = page!.split("\n").filter((line) => line.split("|")[1]?.trim() === code(action.name))
+      expect(rows, `one boundary row for ${action.name}`).toHaveLength(1)
+      expect(rows[0]!.split("|").slice(1, -1).map((cell) => cell.trim())).toEqual([
+        code(action.name),
+        code(action.tier),
+        code(declaration.boundaryMode),
+        entries(FileSet.expandReads(declaration.reads)),
+        entries(FileSet.expand(declaration.writes)),
+        "No"
+      ])
+    })
+  }
+
+  it("does not describe Measure as reporting a host manager version", () => {
+    expect(Object.keys(Install.Content.fields)).not.toContain("version")
+    for (const paragraph of read("docs/concepts/actions-and-boundaries.md").split(/\n{2,}/)) {
+      if (!/\bmeasure\b/i.test(paragraph)) continue
+      expect(paragraph).not.toMatch(/reports?\s+(?:the\s+)?(?:host['’]s\s+)?package[- ]manager(?:['’]s)?\s+version/i)
+    }
+  })
+
+  it("does not explain Link cache exclusion by an absent write declaration", () => {
+    expect(Context.getUnsafe(Install.Link.annotations, Flow.EffectsDeclaration).writes.length).toBeGreaterThan(0)
+    expect(read("docs/concepts/actions-and-boundaries.md")).not.toMatch(/link\s+declares?\s+no\s+writes?/i)
+  })
+
+  for (
+    const file of [
+      "docs/about/faq.md",
+      "docs/about/what-is-smithers-build.md",
+      "docs/concepts/actions-and-boundaries.md",
+      "README.md"
+    ]
+  ) {
+    it(`qualifies native confinement and host access in ${file}`, () => {
+      // Native confinement changed to an allowlist. Keep the prose tied to
+      // that implementation, including the runtime and external-read grants.
+      const source = read("targets/src/ExecSandbox.ts")
+      expect(source).toContain("\"--tmpfs\",\n    \"/\"")
+      expect(source).toContain("(deny file-read*)")
+      expect(source).toContain("runtimeReads(hostFacts)")
+      expect(source).toContain("confinement.externalReads")
+      const page = read(file).replace(/\s+/g, " ")
+      expect(page).toContain("ExecSandbox")
+      expect(page).toMatch(/enumerated (?:system\/)?runtime paths/i)
+      expect(page).toMatch(/explicit external[- ]read grants/i)
+      expect(page).toMatch(/credentials.*(?:denied|closed).*unless explicitly granted/i)
+      expect(page).toMatch(/not blanket host-file isolation/i)
+      expect(page).toMatch(/Docker.*image.*toolchain/i)
+      expect(page).toMatch(/fails? (?:the target )?closed/i)
+      expect(page).not.toMatch(/this is not a sandbox|tools run directly in the workspace/i)
+      expect(page).not.toMatch(
+        /does not hide host files|leave host files outside the workspace readable|reads outside the workspace are not scoped|remain readable|(?:all|any) host files (?:are |stay )?(?:hidden|inaccessible)/i
+      )
+    })
+  }
 
   it("keeps the deploy recipe on the variable names the deployment reads", () => {
     // The verifier pair moved from `alchemy.run.ts` into `deployment.ts`, so
