@@ -16,10 +16,10 @@
  * summary does not record, so runs.list says that instead of silently
  * dropping the filter.
  */
-import type { TraceFilter } from "../../cards/RunTrace"
+import type { TraceFilter, TraceView } from "../../cards/RunTrace"
 import { traceFromJournal } from "../../cards/RunTrace"
-import type { Card } from "../AppState"
 import type { CommandResult } from "../../flows/Flows"
+import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import type { RunSummaryRow } from "./gateway"
 import type { WorkflowController } from "./workflows"
@@ -47,6 +47,8 @@ export interface RunsController {
   readonly traceFilter: (runId: string, filter: TraceFilter) => CommandResult
   /** `runs.trace.select <runId> <nodeId> [seq]`: the trace's selection and scrub cursor; leaves live tail. */
   readonly traceSelect: (runId: string, nodeId: string, seq?: number) => CommandResult
+  readonly traceView: (runId: string, view: TraceView) => CommandResult
+  readonly traceLive: (runId: string) => CommandResult
   readonly stopAllRuns: (repo?: string) => Promise<CommandResult>
   readonly listApprovals: (repo?: string) => Promise<CommandResult>
   readonly openApproval: (runId: string) => Promise<CommandResult>
@@ -370,7 +372,12 @@ export const createRunsController = (
   const traceFilter = (runId: string, filter: TraceFilter): CommandResult => {
     const card = runCardFor(runId)
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
-    patchRunCard(runId, { filter })
+    store.dispatch({
+      type: "card.updated",
+      actor: ctx.commandActor,
+      id: card.id,
+      patch: { payload: { ...card.payload, filter } }
+    })
     return { value: `trace-filter run=${runId} filter=${filter}` }
   }
 
@@ -379,11 +386,58 @@ export const createRunsController = (
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
     // The node must be one the journal in hand folds to; a made-up id selects nothing, so say so.
     const { workflow, phase, kind, events } = card.payload
-    const model = traceFromJournal({ runId, flowId: workflow, status: phase, ...(kind === undefined ? {} : { kind }) }, events ?? [])
+    const latest = (events ?? []).reduce(
+      (max, record) => typeof record.sequence === "number" ? Math.max(max, record.sequence) : max,
+      0
+    )
+    const cursorSeq = seq ?? card.payload.cursorSeq ?? latest
+    if (!Number.isSafeInteger(cursorSeq) || cursorSeq < 0 || cursorSeq > latest) {
+      return `Run ${runId} has no recorded journal sequence ${cursorSeq}.`
+    }
+    const records = (events ?? []).filter((record) =>
+      typeof record.sequence === "number" && record.sequence <= cursorSeq
+    )
+    const model = traceFromJournal({
+      runId,
+      flowId: workflow,
+      status: cursorSeq < latest ? "running" : phase,
+      ...(kind === undefined ? {} : { kind })
+    }, records)
     if (!model.rows.some((span) => span.id === nodeId)) return `Run ${runId} has no trace node ${nodeId}.`
     // A selection is the reader's focus: it leaves live tail (§2) until the reader resumes it.
-    patchRunCard(runId, { selection: nodeId, liveTail: false, ...(seq === undefined ? {} : { cursorSeq: seq }) })
+    store.dispatch({
+      type: "card.updated",
+      actor: ctx.commandActor,
+      id: card.id,
+      patch: { payload: { ...card.payload, selection: nodeId, liveTail: false, cursorSeq } }
+    })
     return { value: `trace-select run=${runId} node=${nodeId}${seq === undefined ? "" : ` seq=${seq}`}` }
+  }
+
+  const traceView = (runId: string, view: TraceView): CommandResult => {
+    const card = runCardFor(runId)
+    if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
+    store.dispatch({
+      type: "card.updated",
+      actor: ctx.commandActor,
+      id: card.id,
+      patch: { payload: { ...card.payload, traceView: view } }
+    })
+    return { value: `trace-view run=${runId} view=${view}` }
+  }
+
+  const traceLive = (runId: string): CommandResult => {
+    const card = runCardFor(runId)
+    if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
+    const { selection: _selection, cursorSeq: _cursorSeq, ...payload } = card.payload
+    // card.updated merges payload fields. Replace the card to remove the cursor
+    // durably: undefined patch values would disappear in the JSON journal.
+    store.dispatch({
+      type: "card.upsert",
+      actor: ctx.commandActor,
+      card: { ...card, payload: { ...payload, liveTail: true } }
+    })
+    return { value: `trace-live run=${runId}` }
   }
 
   /** Stop every live run card's run — one workspace's, when named. Each cancel is durable; the cards settle from the pump. */
@@ -398,9 +452,9 @@ export const createRunsController = (
      * filter — never just the runs this client happens to hold cards for.
      * With no inbox open, the client's live cards are the only known set.
      */
-    const inboxes = ([...store.collections.cards.values()].filter(
+    const inboxes = [...store.collections.cards.values()].filter(
       (card) => card.kind === "run-list" && (repoArg === undefined || card.payload.repo === repoArg)
-    ) as Array<Extract<Card, { kind: "run-list" }>>)
+    ) as Array<Extract<Card, { kind: "run-list" }>>
     const live: Array<{ readonly repo: string; readonly runId: string }> = inboxes.length > 0
       ? inboxes.flatMap((card) =>
         card.payload.runs
@@ -429,7 +483,9 @@ export const createRunsController = (
       }
     }
     return {
-      value: `stop-all stopped=${stopped} of ${live.length}${firstRefusal === undefined ? "" : ` — first refusal: ${firstRefusal}`}`
+      value: `stop-all stopped=${stopped} of ${live.length}${
+        firstRefusal === undefined ? "" : ` — first refusal: ${firstRefusal}`
+      }`
     }
   }
 
@@ -493,10 +549,16 @@ export const createRunsController = (
     if ("error" in target) return target.error
     const repo = target.repo
     const alreadyOpen = [...store.collections.cards.values()].filter(
-      (card) => store.approvalRequest(card.id) !== undefined && card.kind === "approval" && card.payload.runId === runId && card.payload.decision === undefined
+      (card) =>
+        store.approvalRequest(card.id) !== undefined && card.kind === "approval" && card.payload.runId === runId &&
+        card.payload.decision === undefined
     )
     if (alreadyOpen.length > 0) {
-      return { value: `${alreadyOpen.length} approval card${alreadyOpen.length === 1 ? " is" : "s are"} already open for run ${runId}.` }
+      return {
+        value: `${alreadyOpen.length} approval card${
+          alreadyOpen.length === 1 ? " is" : "s are"
+        } already open for run ${runId}.`
+      }
     }
     const provisioned = await workflows.provisionWorkspace(repo)
     if (provisioned !== true) return provisioned
@@ -540,6 +602,8 @@ export const createRunsController = (
     showRunEvents,
     traceFilter,
     traceSelect,
+    traceView,
+    traceLive,
     stopAllRuns,
     listApprovals,
     openApproval

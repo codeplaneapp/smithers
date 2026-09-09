@@ -1,11 +1,8 @@
 /*
- * The run trace (factory spec 06, mocks #s5 and #s6): the run card's body,
- * built the way a debugger and a distributed tracer show a recursive program.
- * A call tree on the left (run → frame → cell → call), a waterfall on top with
- * one bar per span on a shared time axis, and on the right the selected span's
- * details: a cell's source and prints, a call's input and settlement, a model
- * call's tokens, the seat, and every other field the journal bound at that
- * span.
+ * The run card starts with a cheap explanation of each recorded turn. A
+ * selection opens that turn's recursive call tree and recorded details; the
+ * timeline view exposes the full tree and waterfall. Both are the same
+ * embedded card, and neither manufactures historical values from live state.
  *
  * The model is RunTrace.ts's fold over the run card's `events` (the
  * `run-events` projection the pump keeps current while the run is live). A
@@ -13,23 +10,24 @@
  * kind prototype wears the never-promoted banner and the narrower filter set
  * (§3); nothing else differs here.
  *
- * Every view fact lives in the card payload (§5): `filter`, `selection`,
- * `cursorSeq` and `liveTail`. The chips and the rows dispatch the registered
- * hidden flows `runs.trace.filter` and `runs.trace.select` (§6), so the
- * keyboard, the click and the slash door change the same record. This
- * component holds no state of its own.
+ * Every view fact lives in the card payload: `traceView`, `filter`,
+ * `selection`, `cursorSeq` and `liveTail`. Buttons and agent/slash requests
+ * enter the same runs.trace.* flows with their actor recorded. This component
+ * holds no state of its own.
  */
 import { EmptyState, StatusPill } from "@smthrs/ui"
-import { timeLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
+import { timeLabel } from "../Timestamps"
 import {
   durationWords,
   spanMatches,
+  spanPath,
   type TraceFilter,
   traceFiltersFor,
   traceFromJournal,
   type TraceModel,
   type TraceSpan,
+  turnNarratives,
   waterfallGeometry
 } from "./RunTrace"
 
@@ -53,7 +51,8 @@ const json = (value: unknown): string => {
   }
 }
 
-const sequenceOf = (record: Record<string, unknown>): number => typeof record.sequence === "number" ? record.sequence : 0
+const sequenceOf = (record: Record<string, unknown>): number =>
+  typeof record.sequence === "number" ? record.sequence : 0
 
 /**
  * The trace the card shows: the whole journal, or the journal up to the scrub
@@ -105,10 +104,23 @@ export const RunTraceBody = ({
 }) => {
   const { runId, phase, kind } = card.payload
   const model = traceOf(card)
+  const view = card.payload.traceView ?? "turns"
   const filters = traceFiltersFor(kind)
   const filter: TraceFilter = filters.some(([id]) => id === card.payload.filter) ? card.payload.filter ?? "all" : "all"
-  const rows = model.rows.filter((span) => span.kind === "run" || spanMatches(span, filter))
   const selected = selectedSpan(card, model)
+  const path = spanPath(model, selected.id)
+  const frame = path.find((span) => span.kind === "frame")
+  const frameIndex = frame === undefined ? -1 : model.rows.findIndex((span) => span.id === frame.id)
+  const scopeEnd = frame === undefined
+    ? -1
+    : model.rows.findIndex((span, index) => index > frameIndex && span.depth <= frame.depth)
+  const scope = frameIndex < 0 ? model.rows : model.rows.slice(frameIndex, scopeEnd < 0 ? undefined : scopeEnd)
+  const rows = (view === "timeline" ? model.rows : scope).filter((span) =>
+    span.kind === "run" || spanMatches(span, filter)
+  )
+  const turns = turnNarratives(model).filter((turn) => spanMatches(turn.frame, filter))
+  // Following a run is cheap. The debugger appears only after an explicit selection or timeline request.
+  const inspecting = view === "timeline" || card.payload.selection !== undefined
   const wall = model.extent.end - model.extent.start
   return (
     <div className="run-trace" data-testid={`run-trace-${runId}`} data-kind={kind}>
@@ -120,6 +132,20 @@ export const RunTraceBody = ({
         ) :
         null}
       <div className="run-trace-bar" role="group" aria-label="Trace filters">
+        <div className="run-trace-views" role="group" aria-label="Trace presentation">
+          {(["turns", "timeline"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className="run-trace-filter"
+              data-flow="runs.trace.view"
+              aria-pressed={view === mode}
+              onClick={() => onRunCommand("runs.trace.view", `${runId} ${mode}`)}
+            >
+              {mode === "turns" ? "Turns" : "Timeline"}
+            </button>
+          ))}
+        </div>
         {filters.map(([id, label]) => (
           <button
             key={id}
@@ -141,75 +167,166 @@ export const RunTraceBody = ({
               model.counts.running > 0 ? ` · ${model.counts.running} running` : ""
             }${model.counts.failed > 0 ? ` · ${model.counts.failed} failed` : ""} · t = ${durationWords(wall)}`}
         </span>
-      </div>
-      <div className="run-trace-body">
-        <ol className="run-trace-tree" aria-label="Call tree">
-          {rows.map((span) => (
-            <li key={span.id}>
+        {card.payload.liveTail === false ?
+          (
+            <>
+              {card.payload.cursorSeq !== undefined
+                ? <span className="run-trace-cursor">At #{card.payload.cursorSeq}</span>
+                : null}
               <button
                 type="button"
-                className="run-trace-node"
-                data-flow="runs.trace.select"
-                data-trace-span={span.id}
-                data-kind={span.kind}
-                data-status={span.status}
-                data-depth={span.depth}
-                aria-selected={selected.id === span.id}
-                style={{ paddingLeft: `${0.25 + span.depth * 0.875}rem` }}
-                onClick={() => onRunCommand("runs.trace.select", `${runId} ${span.id}`)}
+                className="run-trace-filter"
+                data-flow="runs.trace.live"
+                onClick={() => onRunCommand("runs.trace.live", runId)}
               >
-                <span className="run-trace-dot" data-status={span.status} aria-hidden />
-                <span className="run-trace-label">{span.label}</span>
-                <span className="run-trace-duration">{durationOf(span, model) ?? ""}</span>
+                Latest
               </button>
-            </li>
-          ))}
-        </ol>
-        <div className="run-trace-detail">
-          {model.counts.spans === 0 ?
-            (
-              <EmptyState
-                description={`No journal yet. The run is ${phase}; spans appear as the workspace records them.`}
-                data-testid={`run-trace-empty-${runId}`}
-              />
-            ) :
-            (
-              <ol className="run-trace-waterfall" aria-label="Waterfall">
-                {rows.filter((span) => span.kind !== "run").map((span) => {
-                  const bar = waterfallGeometry(span, model.extent)
-                  const instant = span.endedAt !== undefined && span.endedAt <= span.startedAt
-                  const summary = `${span.label} · ${span.status}${durationOf(span, model) === undefined ? "" : ` · ${durationOf(span, model)}`}`
-                  return (
-                    <li key={span.id} className="run-trace-water-row" data-trace-bar={span.id} data-status={span.status}>
-                      <span className="run-trace-water-label">{span.label}</span>
-                      <span className="run-trace-track">
-                        <button
-                          type="button"
-                          className="run-trace-water-bar"
-                          data-flow="runs.trace.select"
-                          data-instant={instant}
-                          data-open={span.endedAt === undefined}
-                          aria-label={summary}
-                          aria-pressed={selected.id === span.id}
-                          title={summary}
-                          style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
-                          onClick={() => onRunCommand("runs.trace.select", `${runId} ${span.id}`)}
-                        />
-                      </span>
-                    </li>
-                  )
-                })}
-              </ol>
-            )}
-          <SpanPane span={selected} model={model} runId={runId} />
-        </div>
+            </>
+          ) :
+          null}
       </div>
+      {view === "turns" ?
+        (
+          <ol className="run-turns" aria-label="Turn explanations">
+            {turns.map((turn) => (
+              <li key={turn.frame.id}>
+                <button
+                  type="button"
+                  className="run-turn"
+                  data-flow="runs.trace.select"
+                  data-turn={turn.number}
+                  aria-pressed={card.payload.selection !== undefined && frame?.id === turn.frame.id}
+                  title={turn.source === "model" ? "Recorded model text" : "Recorded journal activity"}
+                  onClick={() => onRunCommand("runs.trace.select", `${runId} ${turn.frame.id}`)}
+                >
+                  <span className="run-turn-number">{turn.number}</span>
+                  <span className="run-turn-text">{turn.text}</span>
+                  <span className="run-trace-duration">{durationOf(turn.frame, model) ?? ""}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) :
+        null}
+      {model.counts.spans === 0 && !inspecting
+        ? (
+          <EmptyState
+            description={`No journal yet. The run is ${phase}; turns appear as the workspace records them.`}
+            data-testid={`run-trace-empty-${runId}`}
+          />
+        )
+        : null}
+      {inspecting ?
+        (
+          <>
+            <nav className="run-trace-path" aria-label="Recorded call path">
+              {path.map((ancestor, index) => (
+                <span key={ancestor.id}>
+                  {index > 0 ? <span aria-hidden>{" / "}</span> : null}
+                  <button
+                    type="button"
+                    data-flow="runs.trace.select"
+                    aria-current={ancestor.id === selected.id ? "location" : undefined}
+                    onClick={() => onRunCommand("runs.trace.select", `${runId} ${ancestor.id}`)}
+                  >
+                    {ancestor.label}
+                  </button>
+                </span>
+              ))}
+            </nav>
+            <div className="run-trace-body">
+              <ol className="run-trace-tree" aria-label="Call tree">
+                {rows.map((span) => (
+                  <li key={span.id}>
+                    <button
+                      type="button"
+                      className="run-trace-node"
+                      data-flow="runs.trace.select"
+                      data-trace-span={span.id}
+                      data-kind={span.kind}
+                      data-status={span.status}
+                      data-depth={span.depth}
+                      aria-selected={selected.id === span.id}
+                      style={{ paddingLeft: `${0.25 + span.depth * 0.875}rem` }}
+                      onClick={() => onRunCommand("runs.trace.select", `${runId} ${span.id}`)}
+                    >
+                      <span className="run-trace-dot" data-status={span.status} aria-hidden />
+                      <span className="run-trace-label">{span.label}</span>
+                      <span className="run-trace-duration">{durationOf(span, model) ?? ""}</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <div className="run-trace-detail">
+                {model.counts.spans === 0 ?
+                  (
+                    <EmptyState
+                      description={`No journal yet. The run is ${phase}; spans appear as the workspace records them.`}
+                      data-testid={`run-trace-empty-${runId}`}
+                    />
+                  ) :
+                  (
+                    <ol className="run-trace-waterfall" aria-label="Waterfall">
+                      {rows.filter((span) => span.kind !== "run").map((span) => {
+                        const bar = waterfallGeometry(span, model.extent)
+                        const instant = span.endedAt !== undefined && span.endedAt <= span.startedAt
+                        const summary = `${span.label} · ${span.status}${
+                          durationOf(span, model) === undefined ? "" : ` · ${durationOf(span, model)}`
+                        }`
+                        return (
+                          <li
+                            key={span.id}
+                            className="run-trace-water-row"
+                            data-trace-bar={span.id}
+                            data-status={span.status}
+                          >
+                            <span className="run-trace-water-label">{span.label}</span>
+                            <span className="run-trace-track">
+                              <button
+                                type="button"
+                                className="run-trace-water-bar"
+                                data-flow="runs.trace.select"
+                                data-instant={instant}
+                                data-open={span.endedAt === undefined}
+                                aria-label={summary}
+                                aria-pressed={selected.id === span.id}
+                                title={summary}
+                                style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
+                                onClick={() => onRunCommand("runs.trace.select", `${runId} ${span.id}`)}
+                              />
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  )}
+                <SpanPane span={selected} model={model} runId={runId} />
+                {selected.detail.childRunId !== undefined && selected.detail.childRunId !== "" &&
+                    !/\s/.test(selected.detail.childRunId) ?
+                  (
+                    <button
+                      type="button"
+                      className="run-trace-filter"
+                      data-flow="runs.open"
+                      onClick={() => onRunCommand("runs.open", `${selected.detail.childRunId} ${card.payload.repo}`)}
+                    >
+                      Inspect child run
+                    </button>
+                  ) :
+                  null}
+              </div>
+            </div>
+          </>
+        ) :
+        null}
     </div>
   )
 }
 
 /** The selected span's facts, and nothing the journal did not record. */
-const SpanPane = ({ span, model, runId }: { readonly span: TraceSpan; readonly model: TraceModel; readonly runId: string }) => {
+const SpanPane = (
+  { span, model, runId }: { readonly span: TraceSpan; readonly model: TraceModel; readonly runId: string }
+) => {
   const { detail } = span
   const duration = durationOf(span, model)
   return (
@@ -242,7 +359,8 @@ const SpanPane = ({ span, model, runId }: { readonly span: TraceSpan; readonly m
             </>
           ) :
           null}
-        {detail.usage !== undefined && (detail.usage.inputTokens !== undefined || detail.usage.outputTokens !== undefined) ?
+        {detail.usage !== undefined &&
+            (detail.usage.inputTokens !== undefined || detail.usage.outputTokens !== undefined) ?
           (
             <>
               <dt>tokens</dt>
@@ -276,7 +394,9 @@ const SpanPane = ({ span, model, runId }: { readonly span: TraceSpan; readonly m
   )
 }
 
-const Block = ({ title, text, alert = false }: { readonly title: string; readonly text: string; readonly alert?: boolean }) => (
+const Block = (
+  { title, text, alert = false }: { readonly title: string; readonly text: string; readonly alert?: boolean }
+) => (
   <div className="run-trace-block">
     <h5>{title}</h5>
     <pre className="run-trace-code" {...(alert ? { role: "alert" } : {})}>{text}</pre>

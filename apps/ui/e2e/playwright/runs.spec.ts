@@ -43,7 +43,7 @@ const summaryRow = (status: string) => ({
 })
 
 /** Install the server double: signed in as the scoped-down user, one loaded repo, one gateway that accepts everything. */
-const serve = async (page: Page): Promise<{ rpc: Array<RpcCall> }> => {
+const serve = async (page: Page, journal: ReadonlyArray<Record<string, unknown>> = []): Promise<{ rpc: Array<RpcCall> }> => {
   const rpc: Array<RpcCall> = []
   let planned: { flowId: string; input: unknown } | undefined
   /** The engine's own accounting: a steer the gateway took is pending until the next turn. */
@@ -122,6 +122,8 @@ const serve = async (page: Page): Promise<{ rpc: Array<RpcCall> }> => {
             return rows("approvals", [])
           case "transcript":
             return rows("transcript", [])
+          case "run-events":
+            return rows("run-events", journal)
           default:
             return rows(String(selector._tag), [])
         }
@@ -154,7 +156,7 @@ test("T1: launch a fixture flow, steer it, stop it, and see it in the run inbox"
   await page.goto("/")
 
   // Launch: /flow.run provisions the workspace, plans, and runs — the card tracks the run.
-  await send(page, "/flow.run review-pr")
+  await send(page, `/flow.run review-pr ${REPO}`)
   const runCardId = `flow-run-${RUN_ID}`
   const card = page.getByTestId(`card-${runCardId}`)
   await expect(card).toBeVisible({ timeout: 15_000 })
@@ -171,7 +173,7 @@ test("T1: launch a fixture flow, steer it, stop it, and see it in the run inbox"
   await expect(card).toContainText("steering pending")
 
   // The run inbox: /runs.list renders the workspace's runs, this one among them.
-  await send(page, "/runs.list")
+  await send(page, `/runs.list ${REPO}`)
   const runListCardId = `run-list-${REPO}`
   const inbox = page.getByTestId(`card-${runListCardId}`)
   await expect(inbox).toBeVisible()
@@ -188,4 +190,52 @@ test("T1: launch a fixture flow, steer it, stop it, and see it in the run inbox"
   const cancel = rpc.find((call) => call.procedure === "Cancel")!
   expect(cancel.payload.runId).toBe(RUN_ID)
   await expect(card).toContainText("Cancelled.")
+})
+
+test("T1: turn explanations lead to durable historical inspection in the same embedded frame", async ({ page }) => {
+  const record = (sequence: number, kind: string, payload: Record<string, unknown>) => ({ sequence, kind, occurredAt: 1000 + sequence, payload })
+  const journal = [
+    record(1, "control.agent.turn-opened", { seat: "test-model" }),
+    record(2, "control.agent.model-settled", { text: "I’ll read the existing implementation before changing it." }),
+    record(3, "control.agent.cell-produced", { language: "ts", text: "await ctx.call('files.read', { path: 'src/index.ts' })" }),
+    record(4, "control.agent.cell-call-started", { flowName: "files.read", input: { path: "src/index.ts" } })
+  ]
+  await serve(page, journal)
+  await page.goto("/")
+  await send(page, `/runs.open run-e2e ${REPO}`)
+  const card = page.getByTestId(`card-flow-run-${RUN_ID}`)
+  await expect(card.getByRole("list", { name: "Turn explanations" })).toContainText("I’ll read the existing implementation")
+  await expect(card.getByRole("list", { name: "Call tree" })).toHaveCount(0)
+  await expect(card).toHaveAttribute("data-maximized", "false")
+  await expect(page.getByTestId("composer-input")).toBeVisible()
+
+  await card.locator("[data-turn='1']").click()
+  await card.locator("[data-trace-span='call-1']").click()
+  const pane = card.getByTestId(`run-trace-pane-${RUN_ID}`)
+  await expect(pane).toContainText("src/index.ts")
+  await expect(card).toContainText("At #4")
+  journal.push(record(5, "control.agent.cell-call-settled", { flowName: "files.read", outcome: "success", value: "later recorded content" }))
+
+  // Reload keeps the selected historical input and does not show a later value.
+  await page.reload()
+  await expect(pane).toHaveAttribute("data-span", "call-1")
+  await expect(pane).not.toContainText("later recorded content")
+  await expect(card).toContainText("At #4")
+  const path = card.getByRole("navigation", { name: "Recorded call path" })
+  await expect(path).toContainText("frame 1")
+  await expect(path).toContainText("cell · ts")
+
+  await card.evaluate((element) => element.setAttribute("data-node-proof", "preserved"))
+  await card.getByTestId(`card-maximize-flow-run-${RUN_ID}`).click()
+  await expect(card).toHaveAttribute("data-node-proof", "preserved")
+  await expect(card).toHaveAttribute("data-maximized", "true")
+  await expect(page.getByTestId("composer-input")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(card).toHaveAttribute("data-maximized", "false")
+  await card.getByRole("button", { name: "Latest", exact: true }).click()
+  await expect(card.getByRole("list", { name: "Call tree" })).toHaveCount(0)
+  await card.locator("[data-turn='1']").click()
+  await card.locator("[data-trace-span='call-1']").click()
+  await expect(pane).toContainText("later recorded content")
+  await expect(card).toContainText("At #5")
 })

@@ -247,11 +247,11 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/HistoryCard.tsx": 2,
       "../cards/RunTimelineCard.tsx": 1,
       /*
-       * The run trace (spec 06 §6): the filter chips (runs.trace.filter), the
-       * tree rows and the waterfall bars (both runs.trace.select), all through
-       * onRunCommand; the view state lives in the card payload, never here.
+       * The run trace: filters, presentation, live return, turn rows,
+       * breadcrumbs, tree rows, timeline bars and the recorded child link.
+       * Every button enters onRunCommand and persists in the same card.
        */
-      "../cards/RunTraceCard.tsx": 3,
+      "../cards/RunTraceCard.tsx": 8,
       /*
        * Lane runs: the run inbox's Open per row, its All/status filter chips,
        * and the Stop-all footer (all through onRunCommand), plus the

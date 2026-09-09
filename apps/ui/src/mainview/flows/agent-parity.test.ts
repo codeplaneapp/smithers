@@ -77,9 +77,6 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
   "target.graph.focus": "the graph drawer's own selection; the agent opens the graph focused with target.graph [label]",
   "target.graph.filter": "the graph canvas' own toolbar; the agent opens the graph focused with target.graph [label]",
   "target.run.scrub": "the replay slider is the human's gesture (time travel)",
-  // The run trace's reader gestures (factory spec 06 §6).
-  "runs.trace.filter": "a view filter is the reader's gesture",
-  "runs.trace.select": "selection and scrub are the reader's focus",
   "target.source.open": "opens the declaration in the human's editor — a handoff off the app",
   "admin.reset": "destroys the whole store with no undo; the confirm dialog is the only door",
   "admin.reset.ask": "opens the human's confirm dialog for the reset",
@@ -98,6 +95,10 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
 
 /** The policy table's agent rows (agent-parity.md): the args exercised and whether the act confirms. */
 const AGENT_ROWS: ReadonlyArray<{ readonly name: string; readonly args?: string; readonly confirm: boolean }> = [
+  { name: "runs.trace.filter", args: "run-1 failed", confirm: false },
+  { name: "runs.trace.select", args: "run-1 frame-1", confirm: false },
+  { name: "runs.trace.view", args: "run-1 turns", confirm: false },
+  { name: "runs.trace.live", args: "run-1", confirm: false },
   { name: "chat.clear", confirm: true },
   { name: "tab.terminal", confirm: false },
   { name: "tab.harness", args: "claude", confirm: true },

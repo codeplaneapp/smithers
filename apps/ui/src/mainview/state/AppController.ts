@@ -210,6 +210,8 @@ export interface AppController {
   readonly showRunEvents: RunsController["showRunEvents"]
   readonly traceFilter: RunsController["traceFilter"]
   readonly traceSelect: RunsController["traceSelect"]
+  readonly traceView: RunsController["traceView"]
+  readonly traceLive: RunsController["traceLive"]
   readonly stopAllRuns: RunsController["stopAllRuns"]
   readonly listApprovals: RunsController["listApprovals"]
   readonly openApproval: RunsController["openApproval"]
@@ -1267,6 +1269,8 @@ export const createAppController = (
     showRunEvents: runs.showRunEvents,
     traceFilter: runs.traceFilter,
     traceSelect: runs.traceSelect,
+    traceView: runs.traceView,
+    traceLive: runs.traceLive,
     stopAllRuns: runs.stopAllRuns,
     listApprovals: runs.listApprovals,
     openApproval: runs.openApproval,
@@ -1619,6 +1623,8 @@ export const createAppController = (
     showRunEvents: runs.showRunEvents,
     traceFilter: runs.traceFilter,
     traceSelect: runs.traceSelect,
+    traceView: runs.traceView,
+    traceLive: runs.traceLive,
     stopAllRuns: runs.stopAllRuns,
     listApprovals: runs.listApprovals,
     openApproval: runs.openApproval,

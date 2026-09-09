@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { durationWords, isTraceFilter, spanMatches, traceFiltersFor, traceFromJournal, waterfallGeometry } from "./RunTrace"
+import { durationWords, isTraceFilter, spanMatches, spanPath, traceFiltersFor, traceFromJournal, turnNarratives, waterfallGeometry } from "./RunTrace"
 import type { JournalRecord } from "./RunTrace"
 
 /*
@@ -37,6 +37,38 @@ const JOURNAL: ReadonlyArray<JournalRecord> = [
 const RUN = { runId: "run-1", flowId: "implement", status: "running", kind: "implement" }
 
 describe("the trace model", () => {
+  test("turn explanations use recorded prose and fall back to actual calls without presenting code or truncated metadata as intent", () => {
+    const model = traceFromJournal(RUN, JOURNAL)
+    expect(turnNarratives(model).map(({ number, text, source }) => ({ number, text, source }))).toEqual([
+      { number: 1, text: "read the README, then run the tests", source: "model" },
+      { number: 2, text: "Calls: files.edit", source: "calls" }
+    ])
+    const code = traceFromJournal(RUN, [
+      at(1, "control.agent.turn-opened", {}, 1),
+      at(2, "control.agent.model-settled", { text: "```ts\nconst result = 1\n```\nI’ll check the failing assertion.\nMore detail." }, 2),
+      at(3, "control.agent.turn-opened", {}, 3),
+      at(4, "control.agent.model-settled", { text: { truncated: true, bytes: 99999, digest: "d" } }, 4),
+      at(5, "control.agent.turn-opened", {}, 5),
+      at(6, "control.agent.model-settled", { text: "const result = await ctx.call('read')" }, 6)
+    ])
+    expect(turnNarratives(code).map(({ text }) => text)).toEqual(["I’ll check the failing assertion.", "Turn opened", "Turn opened"])
+    expect(turnNarratives(traceFromJournal(RUN, []))).toEqual([])
+  })
+
+  test("selection ancestry is recorded, and only a successful agent/spawn result establishes a child run edge", () => {
+    const model = traceFromJournal(RUN, [
+      at(1, "control.agent.turn-opened", {}, 1),
+      at(2, "control.agent.cell-produced", { text: "await ctx.call('agent/spawn')" }, 2),
+      at(3, "control.agent.cell-call-started", { flowName: "agent/spawn", input: { flow: "review" } }, 3),
+      at(4, "control.agent.cell-call-settled", { flowName: "agent/spawn", outcome: "success", value: { child: "run-1/child/review" } }, 4),
+      at(5, "control.agent.cell-call-started", { flowName: "files.read" }, 5),
+      at(6, "control.agent.cell-call-settled", { flowName: "files.read", outcome: "success", value: { child: "unrelated" } }, 6)
+    ])
+    expect(spanPath(model, "call-1").map((span) => span.id)).toEqual(["run:run-1", "frame-1", "cell-2", "call-1"])
+    expect(model.rows.find((span) => span.id === "call-1")?.detail.childRunId).toBe("run-1/child/review")
+    expect(model.rows.find((span) => span.id === "call-2")?.detail.childRunId).toBeUndefined()
+    expect(spanPath(model, "unrecorded").map((span) => span.id)).toEqual(["run:run-1"])
+  })
   test("nests the journal as run → frame → cell → call, pairing settlements by flow name", () => {
     const model = traceFromJournal(RUN, JOURNAL)
     const { root } = model

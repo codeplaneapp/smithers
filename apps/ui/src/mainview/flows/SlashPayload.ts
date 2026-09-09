@@ -257,6 +257,14 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok({ runId, nodeId, seq })
   },
   "runs.events": (args) => required("runId", args, "runs.events needs a run id"),
+  "runs.trace.live": (args) => required("runId", args, "runs.trace.live needs a run id"),
+  "runs.trace.view": (args) => {
+    const [runId, view, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.trace.view needs a run id")
+    if (view !== "turns" && view !== "timeline") return no("runs.trace.view needs turns or timeline")
+    if (rest.length > 0) return no("runs.trace.view takes a run id and one view")
+    return ok({ runId, view })
+  },
   "runs.steps": (args) => required("runId", args, "runs.steps needs a run id"),
   "approvals.list": (args) => repoOnly("approvals.list", args),
   "flow.run.stop-all": (args) => repoOnly("flow.run.stop-all", args),

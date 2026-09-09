@@ -5,12 +5,16 @@
  */
 import { Schema } from "effect"
 import { line, text } from "../FlowForms"
-import { flow } from "./Declare"
 import type { FlowEntry, Namespace } from "../registry"
+import { flow } from "./Declare"
 import type { CommandActions } from "./Declare"
 
 /** The `runs` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
-export const namespace: Namespace = { id: "runs", label: "Runs", summary: "The runs on your workspace: open, resume, steer, stop" }
+export const namespace: Namespace = {
+  id: "runs",
+  label: "Runs",
+  summary: "The runs on your workspace: open, resume, steer, stop"
+}
 
 /** The `runs` flows registered as one aggregator block. */
 export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
@@ -162,15 +166,14 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    * and the row / bar selection. Hidden from the palette but registered, so
    * the click, the keyboard and the slash door all dispatch through the
    * registry, and the state they change lives in the card payload (§5), never
-   * in the component. User-only for the spec's reasons.
+   * in the component. These reads are available to the agent in the same
+   * embedded card; they never maximize a surface.
    */
   flow({
     name: "runs.trace.filter",
     summary: "Filter a run's trace: all, running, failed, model, flow, forks or messages",
     runtime: ["cloud"],
     hidden: true,
-    userOnly: true,
-    userOnlyReason: "a view filter is the reader's gesture",
     args: "<runId> <all|running|failed|model|flow|forks|messages>",
     input: Schema.Struct({
       runId: Schema.String,
@@ -183,11 +186,27 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Select a node of a run's trace, optionally scrubbing to a journal seq",
     runtime: ["cloud"],
     hidden: true,
-    userOnly: true,
-    userOnlyReason: "selection and scrub are the reader's focus",
     args: "<runId> <nodeId> [seq]",
     input: Schema.Struct({ runId: Schema.String, nodeId: Schema.String, seq: Schema.optional(Schema.Number) }),
     handler: ({ runId, nodeId, seq }) => actions.traceSelect(runId, nodeId, seq)
+  }),
+  flow({
+    name: "runs.trace.view",
+    summary: "Show a run's turn explanations or full execution timeline in its embedded card",
+    runtime: ["cloud"],
+    hidden: true,
+    args: "<runId> <turns|timeline>",
+    input: Schema.Struct({ runId: Schema.String, view: Schema.Literals(["turns", "timeline"]) }),
+    handler: ({ runId, view }) => actions.traceView(runId, view)
+  }),
+  flow({
+    name: "runs.trace.live",
+    summary: "Return a run's trace to its latest recorded turn",
+    runtime: ["cloud"],
+    hidden: true,
+    args: "<runId>",
+    input: Schema.Struct({ runId: Schema.String }),
+    handler: ({ runId }) => actions.traceLive(runId)
   }),
   flow({
     /* The raw journal is a debug surface; the controller gates it on verbose. */

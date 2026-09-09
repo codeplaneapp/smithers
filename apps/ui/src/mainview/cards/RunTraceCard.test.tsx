@@ -62,6 +62,7 @@ const runCard = (
     steps: [],
     result: null,
     lastSeq: 1,
+    traceView: "timeline",
     ...overrides
   }
 })
@@ -106,6 +107,37 @@ const click = (element: Element | null): void => {
 }
 
 describe("the run card as a trace", () => {
+  test("the default view is a cheap turn list and expands recorded detail only after a persisted selection", () => {
+    const { host, dispatched } = renderTrace({ events: JOURNAL, traceView: undefined })
+    expect(host.querySelector("[aria-label='Turn explanations']")?.textContent).toContain("Calls: target.run")
+    expect(host.querySelector("[aria-label='Call tree']")).toBeNull()
+    expect(host.querySelector("[data-testid='run-trace-pane-run-1']")).toBeNull()
+    click(host.querySelector("[data-turn='1']"))
+    expect(dispatched).toEqual([{ name: "runs.trace.select", args: "run-1 frame-1" }])
+    expect(host.querySelector("[aria-label='Call tree']")).toBeNull()
+
+    const selected = renderTrace({ events: JOURNAL, traceView: "turns", selection: "call-1", liveTail: false, cursorSeq: 8 })
+    expect([...selected.host.querySelectorAll("[data-trace-span]")].map((row) => row.getAttribute("data-trace-span"))).toEqual(["frame-1", "cell-2", "call-1"])
+    expect(selected.host.querySelector("[aria-label='Recorded call path']")?.textContent).toContain("run run-1 · prototype / frame 1")
+    expect(selected.host.querySelector("[role='alert']")?.textContent).toBe("12 fps at 500 nodes")
+    click(selected.host.querySelector("[data-flow='runs.trace.live']"))
+    expect(selected.dispatched).toEqual([{ name: "runs.trace.live", args: "run-1" }])
+    expect(selected.host.textContent).toContain("At #8")
+  })
+
+  test("a historical cursor hides later output and child navigation until the result was recorded", () => {
+    const events = [
+      stamp(1, "control.agent.turn-opened", {}, 1),
+      stamp(2, "control.agent.cell-call-started", { flowName: "agent/spawn", input: { flow: "review" } }, 2),
+      stamp(3, "control.agent.cell-call-settled", { flowName: "agent/spawn", outcome: "success", value: { child: "run-1/child/review" } }, 3)
+    ]
+    const before = renderTrace({ events, traceView: "turns", selection: "call-1", cursorSeq: 2, liveTail: false })
+    expect(before.host.querySelector("[data-flow='runs.open']")).toBeNull()
+    expect(before.host.querySelector("[data-testid='run-trace-pane-run-1']")?.textContent).not.toContain("run-1/child/review")
+    const after = renderTrace({ events, traceView: "turns", selection: "call-1", cursorSeq: 3, liveTail: false })
+    click(after.host.querySelector("[data-flow='runs.open']"))
+    expect(after.dispatched).toEqual([{ name: "runs.open", args: "run-1/child/review smithersai/smithers" }])
+  })
   test("a run of kind prototype wears the never-promoted banner, offers all | messages | failed, and has no Steer row", () => {
     const { host } = renderRun({ kind: "prototype", events: JOURNAL })
     expect(host.querySelector("[data-testid='run-trace-run-1']")).not.toBeNull()

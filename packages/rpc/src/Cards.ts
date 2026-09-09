@@ -814,7 +814,9 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       /** The tree's active filter (factory spec 06 §2, §3); `all` when absent. */
       filter: z.enum(["all", "running", "failed", "model", "flow", "forks", "messages"]).optional(),
       /** Whether the trace follows the newest frame (factory spec 06 §2); true when absent. A select turns it off. */
-      liveTail: z.boolean().optional()
+      liveTail: z.boolean().optional(),
+      /** Progressive inspection uses one card: a cheap turn list by default, the full timeline on demand. */
+      traceView: z.enum(["turns", "timeline"]).optional()
     })
   }),
   /* The workspace's workflows as an embedded card (flow.list). */

@@ -532,6 +532,20 @@ describe("the run card's facets — transcript, follow, and the verbose events t
 })
 
 describe("the run trace's reader gestures and the pump's tail (spec 06 §5, §6)", () => {
+  test("an incomplete agent request renders the view form with the known run prefilled", async () => {
+    const store = await webStore()
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), relay().services)
+    await signIn(store)
+    const result = await controller.commands.runForAgent("runs.trace.view", "run-8")
+    expect(result).toMatchObject({ status: "form", flow: "runs.trace.view", fields: ["view"] })
+    const form = store.collections.cards.get("form-runs.trace.view")
+    expect(form?.kind === "flow-form" && form.payload).toMatchObject({
+      flow: "runs.trace.view", via: "agent", draft: { runId: "run-8" }, given: { runId: "run-8" }
+    })
+    expect(form?.kind === "flow-form" && form.payload.fields.find((field) => field.name === "view")?.options?.map((option) => option.value))
+      .toEqual(["turns", "timeline"])
+  })
+
   test("runs.open builds the run-trace card under the flow-run id, on live tail, and the pump keeps its journal current", async () => {
     const store = await webStore()
     const journal: Array<Record<string, unknown>> = [
@@ -579,11 +593,27 @@ describe("the run trace's reader gestures and the pump's tail (spec 06 §5, §6)
     expect(said(invented)).toBe("Run run-8 has no trace node call-9.")
     card = store.collections.cards.get("flow-run-run-8")
     expect(card?.kind === "run-trace" && card.payload.selection).toBe("call-1")
+    // A sequence before this call, or beyond the journal, cannot quietly select current data.
+    expect(said(await controller.commands.run("runs.trace.select", "run-8 call-1 1"))).toContain("no trace node call-1")
+    expect(said(await controller.commands.run("runs.trace.select", "run-8 call-1 3"))).toContain("no recorded journal sequence 3")
+    await controller.commands.runForAgent("runs.trace.view", "run-8 timeline")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "run-trace" && card.payload.traceView).toBe("timeline")
+    expect([...store.collections.transitions.values()].filter((record) => record.type === "card.updated").at(-1)?.actor).toBe("smithers")
 
     // A re-open keeps the reader's view (§5): filter, selection, cursor and live tail survive.
     await controller.commands.run("runs.open", "run-8")
     card = store.collections.cards.get("flow-run-run-8")
-    expect(card?.kind === "run-trace" && card.payload).toMatchObject({ selection: "call-1", liveTail: false, cursorSeq: 2, filter: "failed" })
+    expect(card?.kind === "run-trace" && card.payload).toMatchObject({ selection: "call-1", liveTail: false, cursorSeq: 2, filter: "failed", traceView: "timeline" })
+    await controller.commands.runForAgent("runs.trace.live", "run-8")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "run-trace" && card.payload).toMatchObject({ liveTail: true, filter: "failed", traceView: "timeline" })
+    expect(card?.kind === "run-trace" && card.payload.cursorSeq).toBeUndefined()
+    expect(card?.kind === "run-trace" && card.payload.selection).toBeUndefined()
+    // Omitting seq now pins the record in hand; a later settlement must not change that inspected value.
+    await controller.commands.runForAgent("runs.trace.select", "run-8 call-1")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "run-trace" && card.payload.cursorSeq).toBe(2)
   })
 
   test("both gestures need the run's card first", async () => {
@@ -593,6 +623,8 @@ describe("the run trace's reader gestures and the pump's tail (spec 06 §5, §6)
     await signIn(store)
     expect(said(await controller.commands.run("runs.trace.filter", "run-9 failed"))).toContain("runs.open run-9")
     expect(said(await controller.commands.run("runs.trace.select", "run-9 frame-1"))).toContain("runs.open run-9")
+    expect(said(await controller.commands.run("runs.trace.view", "run-9 turns"))).toContain("runs.open run-9")
+    expect(said(await controller.commands.run("runs.trace.live", "run-9"))).toContain("runs.open run-9")
   })
 })
 

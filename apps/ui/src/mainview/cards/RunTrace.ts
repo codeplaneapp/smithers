@@ -48,6 +48,8 @@ export interface SpanDetail {
   readonly input?: unknown
   /** A call's settled value, a model's text, or a resolved text. */
   readonly output?: string
+  /** A detached child's recorded execution id; only the agent/spawn result establishes this edge. */
+  readonly childRunId?: string
   /** A failure's message. */
   readonly message?: string
   readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number }
@@ -125,7 +127,10 @@ const textOf = (value: unknown): string | undefined => {
 }
 
 /** The payload fields the pane does not already show by name. */
-const restOf = (payload: Record<string, unknown>, shown: ReadonlyArray<string>): Record<string, unknown> | undefined => {
+const restOf = (
+  payload: Record<string, unknown>,
+  shown: ReadonlyArray<string>
+): Record<string, unknown> | undefined => {
   const rest: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(payload)) {
     if (shown.includes(key) || key === "at" || key === "journalVersion") continue
@@ -144,7 +149,10 @@ const builder = (
 ): Builder => ({ id, kind, label, status, startedAt, children: [], detail })
 
 /** A settlement takes the oldest open call with its flow name; an unnamed one takes the oldest open call. */
-const takeOpenCall = (open: Array<{ readonly flowName: string; readonly span: Builder }>, flowName: string | undefined) => {
+const takeOpenCall = (
+  open: Array<{ readonly flowName: string; readonly span: Builder }>,
+  flowName: string | undefined
+) => {
   if (flowName === undefined) return open.shift()
   const found = open.findIndex((call) => call.flowName === flowName)
   return found < 0 ? undefined : open.splice(found, 1)[0]
@@ -206,24 +214,38 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
         closeFrame(at)
         frames += 1
         seat = asString(payload.seat) ?? seat
-        frame = builder(`frame-${frames}`, "frame", `frame ${frames}${seat === undefined ? "" : ` · ${seat}`}`, "running", at, {
-          ...opened,
-          ...(seat === undefined ? {} : { seat }),
-          fields: restOf(payload, ["seat"])
-        })
+        frame = builder(
+          `frame-${frames}`,
+          "frame",
+          `frame ${frames}${seat === undefined ? "" : ` · ${seat}`}`,
+          "running",
+          at,
+          {
+            ...opened,
+            ...(seat === undefined ? {} : { seat }),
+            fields: restOf(payload, ["seat"])
+          }
+        )
         root.children.push(frame)
         break
       }
       case "control.agent.model-settled": {
         const usage = asRecord(payload.usage)
         const duration = asNumber(payload.durationMillis)
-        const span = builder(`model-${record.sequence ?? at}`, "model", "model", "completed", duration === undefined ? at : at - duration, {
-          ...opened,
-          ...(seat === undefined ? {} : { seat }),
-          output: textOf(payload.text),
-          usage: { inputTokens: asNumber(usage.inputTokens), outputTokens: asNumber(usage.outputTokens) },
-          fields: restOf(payload, ["text", "usage", "durationMillis"])
-        })
+        const span = builder(
+          `model-${record.sequence ?? at}`,
+          "model",
+          "model",
+          "completed",
+          duration === undefined ? at : at - duration,
+          {
+            ...opened,
+            ...(seat === undefined ? {} : { seat }),
+            output: textOf(payload.text),
+            usage: { inputTokens: asNumber(usage.inputTokens), outputTokens: asNumber(usage.outputTokens) },
+            fields: restOf(payload, ["text", "usage", "durationMillis"])
+          }
+        )
         span.endedAt = at
         ;(frame ?? root).children.push(span)
         break
@@ -231,11 +253,18 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
       case "control.agent.cell-produced": {
         closeCell(at, "completed")
         const language = asString(payload.language)
-        cell = builder(`cell-${record.sequence ?? at}`, "cell", `cell${language === undefined ? "" : ` · ${language}`}`, "running", at, {
-          ...opened,
-          source: textOf(payload.text),
-          fields: restOf(payload, ["text", "language"])
-        })
+        cell = builder(
+          `cell-${record.sequence ?? at}`,
+          "cell",
+          `cell${language === undefined ? "" : ` · ${language}`}`,
+          "running",
+          at,
+          {
+            ...opened,
+            source: textOf(payload.text),
+            fields: restOf(payload, ["text", "language"])
+          }
+        )
         ;(frame ?? root).children.push(cell)
         break
       }
@@ -259,16 +288,27 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
         settled.span.status = failed ? "failed" : "completed"
         settled.span.detail = {
           ...settled.span.detail,
-          ...(failed ? { message: textOf(payload.message) } : { output: textOf(payload.value) })
+          ...(failed ? { message: textOf(payload.message) } : { output: textOf(payload.value) }),
+          ...(!failed && settled.flowName === "agent/spawn" && asString(asRecord(payload.value).child) !== undefined
+            ? { childRunId: asString(asRecord(payload.value).child) }
+            : {})
         }
         break
       }
       case "control.agent.cell-printed": {
         if (cell === undefined) {
-          parent().children.push(builder(`printed-${record.sequence ?? at}`, "event", "printed", "completed", at, { ...opened, printed: textOf(payload.text) }))
+          parent().children.push(
+            builder(`printed-${record.sequence ?? at}`, "event", "printed", "completed", at, {
+              ...opened,
+              printed: textOf(payload.text)
+            })
+          )
           break
         }
-        cell.detail = { ...cell.detail, printed: [cell.detail.printed, textOf(payload.text)].filter((text) => text !== undefined).join("\n") }
+        cell.detail = {
+          ...cell.detail,
+          printed: [cell.detail.printed, textOf(payload.text)].filter((text) => text !== undefined).join("\n")
+        }
         break
       }
       case "control.agent.cell-settled": {
@@ -276,7 +316,10 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
         break
       }
       case "control.agent.resolved": {
-        const span = builder(`resolved-${record.sequence ?? at}`, "resolved", "resolved", "completed", at, { ...opened, output: textOf(payload.text) })
+        const span = builder(`resolved-${record.sequence ?? at}`, "resolved", "resolved", "completed", at, {
+          ...opened,
+          output: textOf(payload.text)
+        })
         span.endedAt = at
         ;(frame ?? root).children.push(span)
         break
@@ -284,10 +327,17 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
       case "control.approval.requested": {
         const requestId = asString(payload.requestId) ?? `approval-${record.sequence ?? at}`
         const question = asString(payload.question)
-        const span = builder(`approval-${requestId}`, "approval", `approval${question === undefined ? "" : ` · ${question}`}`, "waiting", at, {
-          ...opened,
-          fields: restOf(payload, ["question", "requestId", "payload", "runId"])
-        })
+        const span = builder(
+          `approval-${requestId}`,
+          "approval",
+          `approval${question === undefined ? "" : ` · ${question}`}`,
+          "waiting",
+          at,
+          {
+            ...opened,
+            fields: restOf(payload, ["question", "requestId", "payload", "runId"])
+          }
+        )
         approvals.set(requestId, span)
         ;(frame ?? root).children.push(span)
         break
@@ -296,7 +346,9 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
       case "control.approval.denied": {
         const decided = kind === "control.approval.approved" ? "approved" : "denied"
         const key = asString(payload.tokenId) ?? asString(payload.requestId)
-        const span = key === undefined ? [...approvals.values()].find((entry) => entry.status === "waiting") : approvals.get(key)
+        const span = key === undefined
+          ? [...approvals.values()].find((entry) => entry.status === "waiting")
+          : approvals.get(key)
         if (span === undefined) break
         span.status = decided
         span.endedAt = at
@@ -313,10 +365,17 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
       }
       default: {
         if (!kind.startsWith("control.")) break
-        const span = builder(`event-${record.sequence ?? at}`, "event", kind.slice("control.".length), "completed", at, {
-          ...opened,
-          fields: restOf(payload, [])
-        })
+        const span = builder(
+          `event-${record.sequence ?? at}`,
+          "event",
+          kind.slice("control.".length),
+          "completed",
+          at,
+          {
+            ...opened,
+            fields: restOf(payload, [])
+          }
+        )
         span.endedAt = at
         parent().children.push(span)
       }
@@ -352,7 +411,9 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
     start = Math.min(start, span.startedAt)
     end = Math.max(end, span.endedAt ?? span.startedAt)
   }
-  const extent = ordered.length === 0 || !Number.isFinite(start) ? { start: 0, end: 0 } : { start, end: Math.max(end, start) }
+  const extent = ordered.length === 0 || !Number.isFinite(start)
+    ? { start: 0, end: 0 }
+    : { start, end: Math.max(end, start) }
   return {
     root: frozenRoot,
     rows,
@@ -372,7 +433,10 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
  * @param span the span
  * @param extent the axis
  */
-export const waterfallGeometry = (span: TraceSpan, extent: TraceExtent): { readonly left: number; readonly width: number } => {
+export const waterfallGeometry = (
+  span: TraceSpan,
+  extent: TraceExtent
+): { readonly left: number; readonly width: number } => {
   const width = Math.max(extent.end - extent.start, 1)
   const from = span.startedAt
   const to = span.endedAt ?? extent.end
@@ -405,7 +469,15 @@ export const spanMatches = (span: TraceSpan, filter: TraceFilter): boolean => {
 /** The tree's filters, in the slash grammar's words (spec 06 §6: `runs.trace.filter <runId> <filter>`). */
 export type TraceFilter = "all" | "running" | "failed" | "model" | "flow" | "forks" | "messages"
 
-export const TRACE_FILTER_IDS: ReadonlyArray<TraceFilter> = ["all", "running", "failed", "model", "flow", "forks", "messages"]
+export const TRACE_FILTER_IDS: ReadonlyArray<TraceFilter> = [
+  "all",
+  "running",
+  "failed",
+  "model",
+  "flow",
+  "forks",
+  "messages"
+]
 
 const FILTER_LABELS: Readonly<Record<TraceFilter, string>> = {
   all: "all",
@@ -431,7 +503,76 @@ export const traceFiltersFor = (kind: string | undefined): ReadonlyArray<readonl
     : (["all", "running", "failed", "model", "flow", "forks"] as const)).map((id) => [id, FILTER_LABELS[id]] as const)
 
 /** Whether a filter word is one the trace knows. */
-export const isTraceFilter = (value: string): value is TraceFilter => (TRACE_FILTER_IDS as ReadonlyArray<string>).includes(value)
+export const isTraceFilter = (value: string): value is TraceFilter =>
+  (TRACE_FILTER_IDS as ReadonlyArray<string>).includes(value)
+
+/** The two presentations of the same persisted run card. */
+export type TraceView = "turns" | "timeline"
+
+/** A concise projection of one recorded turn, never a generated claim about intent or correctness. */
+export interface TurnNarrative {
+  readonly frame: TraceSpan
+  readonly number: number
+  readonly text: string
+  readonly source: "model" | "calls" | "journal"
+}
+
+/** The first prose line outside fenced code, bounded for the cheap turn list. Full text stays in the model span. */
+const proseLine = (text: string | undefined): string | undefined => {
+  if (text === undefined) return undefined
+  let fence: string | undefined
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim()
+    const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0]
+    if (marker !== undefined) {
+      if (fence === undefined) fence = marker
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = undefined
+      continue
+    }
+    if (fence !== undefined || trimmed === "") continue
+    // A code-only response or the journal's truncated-field object is not explanatory prose.
+    if (/^(?:[\[{]|(?:const|let|var|await|import|export|function|return)\b)/.test(trimmed)) return undefined
+    const words = trimmed.replace(/^#{1,6}\s+|^[-*+]\s+|^>\s+/, "").replace(/\s+/g, " ")
+    if (words === "") continue
+    return words.length <= 180 ? words : `${words.slice(0, 179).trimEnd()}…`
+  }
+  return undefined
+}
+
+/** One cheap line per turn; falls back to actual call names when the model recorded only code. */
+export const turnNarratives = (model: TraceModel): ReadonlyArray<TurnNarrative> =>
+  model.root.children.filter((span) => span.kind === "frame").map((frame, index) => {
+    const text = frame.children.filter((span) => span.kind === "model").map((span) => proseLine(span.detail.output))
+      .find((value) => value !== undefined)
+    if (text !== undefined) return { frame, number: index + 1, text, source: "model" }
+    const names: Array<string> = []
+    const walk = (span: TraceSpan): void => {
+      if (span.kind === "call" && !names.includes(span.label)) names.push(span.label)
+      for (const child of span.children) walk(child)
+    }
+    walk(frame)
+    return names.length > 0
+      ? {
+        frame,
+        number: index + 1,
+        text: `Calls: ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}`,
+        source: "calls"
+      }
+      : { frame, number: index + 1, text: "Turn opened", source: "journal" }
+  })
+
+/** The recorded ancestry of a selection, for breadcrumbs and the selected turn's scoped call tree. */
+export const spanPath = (model: TraceModel, id: string): ReadonlyArray<TraceSpan> => {
+  const visit = (span: TraceSpan): ReadonlyArray<TraceSpan> | undefined => {
+    if (span.id === id) return [span]
+    for (const child of span.children) {
+      const path = visit(child)
+      if (path !== undefined) return [span, ...path]
+    }
+    return undefined
+  }
+  return visit(model.root) ?? [model.root]
+}
 
 /** A duration in the trace's units: milliseconds under a second, seconds under a minute, minutes and seconds after. */
 export const durationWords = (ms: number): string => {

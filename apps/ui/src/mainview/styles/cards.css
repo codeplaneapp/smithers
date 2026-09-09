@@ -1970,6 +1970,23 @@
 	flex-direction: column;
 	gap: 0.375rem;
 	font-size: 0.75rem;
+	container-type: inline-size;
+}
+.run-trace-views { display: flex; gap: 0.25rem; margin-right: 0.5rem; }
+.run-trace-views [aria-pressed="true"] { color: var(--text); border-color: currentColor; }
+.run-turns { list-style: none; padding: 0; margin: 0; max-height: 22rem; overflow: auto; }
+.run-turn { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; gap: 0.5rem; align-items: baseline; width: 100%; padding: 0.625rem 0.375rem; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.run-turn[aria-pressed="true"] { background: var(--accent-soft); }
+.run-turn-number { color: var(--muted-foreground); font-family: var(--font-mono); text-align: right; }
+.run-turn-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-trace-path { padding: 0.375rem; overflow-wrap: anywhere; color: var(--muted-foreground); }
+.run-trace-path button { padding: 0.125rem; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.run-trace-path [aria-current="location"] { color: var(--text); }
+.run-turn:focus-visible, .run-trace-path button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.run-trace-cursor { font-family: var(--font-mono); color: var(--muted-foreground); }
+@container (max-width: 40rem) {
+	.run-trace-body { grid-template-columns: minmax(0, 1fr); }
+	.run-trace-tree { max-height: 12rem; }
 }
 .run-trace-banner {
 	margin: 0;

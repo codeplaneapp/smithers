@@ -249,6 +249,8 @@ export const createWorkflowController = (
           : {
             ...(held.facet === undefined ? {} : { facet: held.facet }),
             ...(held.filter === undefined ? {} : { filter: held.filter }),
+            ...(held.traceView === undefined ? {} : { traceView: held.traceView }),
+            ...(held.events === undefined ? {} : { events: held.events }),
             ...(held.selection === undefined ? {} : { selection: held.selection }),
             ...(held.cursorSeq === undefined ? {} : { cursorSeq: held.cursorSeq }),
             ...(held.liveTail === undefined ? {} : { liveTail: held.liveTail })
