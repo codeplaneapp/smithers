@@ -7,8 +7,10 @@ expects. Client fixtures do not establish deployment readiness.
 The Wiki uses the existing conversation card, Markdown editor, frame graph and
 `worldDocuments` TanStack DB collection. Opening a repository page shows a concise
 outline and its recorded source/revision. The Document button exposes the same
-Milkdown editor used elsewhere in the app. Maximize presents the same component;
-the composer remains visible. The existing `wiki`, `wiki.open`, `wiki.graph`, and
+Milkdown editor used elsewhere in the app. Maximize presents the same component.
+The embedded conversation test host retains its composer; shell visibility follows
+[the current onboarding brief](../ONBOARDING.md), with Command-K conversation
+hidden by default. The existing `wiki`, `wiki.open`, `wiki.graph`, and
 `wiki.new-note` doors now embed for humans as well as Smithers.
 
 ## New app flow APIs
@@ -148,6 +150,7 @@ acknowledgement containment, account revocation, deletion/slug reuse, and histor
 fork fencing. `WikiFlows.test.ts` checks schema forms and actor parity. The
 Chromium Wiki test edits through the real Milkdown adapter, reloads persisted
 state and view, and checks unchanged component identity on maximize/restore with
-the composer visible. Backend native/Postgres tests and proxy bounds tests are
+the composer visible in that test host. The current shell separately owns
+Command-K visibility and keyboard focus. Backend native/Postgres tests and proxy bounds tests are
 owned by their respective implementations; browser fixtures do not substitute
 for a deployed two-client canary.
