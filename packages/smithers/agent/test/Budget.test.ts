@@ -1070,6 +1070,7 @@ describe("admission while usage is being committed", () => {
       expect(failureOf(yield* Effect.exit(budget.check("next")))).toMatchObject({
         _tag: "flows/agent/BudgetAccountingUnavailable", phase: "record"
       })
+      expect(yield* budget.usage).toEqual({ tokens: 85, calls: 2, largestCall: 60 })
       yield* budget.record("second", { totalTokens: 25 })
       expect(yield* budget.usage).toEqual({ tokens: 85, calls: 2, largestCall: 60 })
       expect((yield* budget.check("next"))._tag).toBe("proceed")

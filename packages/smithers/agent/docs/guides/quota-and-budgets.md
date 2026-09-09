@@ -166,6 +166,8 @@ A paid record waiting for that permit can be cancelled, but its unrecorded
 spend remains pending and blocks new spending. A record already inside a
 journal transaction uses that transaction directly instead of waiting behind
 an outside writer that may itself need the transaction to commit.
+Recover the account before opening that transaction; the model boundary's
+scoped reservation already does this before dispatch.
 A failed or interrupted usage write remains pending. For a sealed result,
 retry that step with the same usage to finish the write. An unsealed invocation has no replayable model result;
 retrying the provider is not a repair for its failed usage write. New,

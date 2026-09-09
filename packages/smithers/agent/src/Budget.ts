@@ -1315,10 +1315,11 @@ export const make = (
               return yield* run.admission.withPermits(1)(write)
             }).pipe(Effect.onError(() => Effect.gen(function*() {
               if (entered) return
-              const current = yield* Ref.get(run.state)
-              if (!current.counted.has(stepKey) && !run.pending.has(stepKey)) {
-                run.pending.set(stepKey, unavailable("record", runId, "a paid model step could not enter usage accounting"))
-              }
+              const pending = run.pending.get(stepKey) ??
+                unavailable("record", runId, "a paid model step could not enter usage accounting")
+              // Cancellation must retain the known cost as well as its key.
+              // This synchronous transition also detects conflicting retries.
+              yield* account(run, runId, stepKey, spent, pending).pipe(Effect.ignore)
             })))
           }), stepKey),
       usage: withRecovered((run) => Effect.map(Ref.get(run.state), summarize)),
