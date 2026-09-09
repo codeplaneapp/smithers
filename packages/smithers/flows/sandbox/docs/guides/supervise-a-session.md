@@ -58,10 +58,25 @@ ping it hands in with `Effect.tapError` and applies its own redaction.
 
 ## Supervise a transport
 
-```ts
-import { SandboxSupervision } from "@smthrs/sandbox"
+`SandboxSupervision.layer` accepts a `RemoteChildProcessSpawner.Provider`.
+For a lifecycle provider, use `Sandbox.commandProvider` to acquire the session
+and expose its command, ping, and kill operations. Declare only capabilities
+that the acquired session supports; container sessions support both below.
 
-const spawner = SandboxSupervision.layer(provider, {
+```ts
+import { ContainerSandbox, Sandbox, SandboxSupervision } from "@smthrs/sandbox"
+import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+
+// Supply the host spawner that runs the container CLI.
+declare const hostSpawner: ChildProcessSpawner["Service"]
+
+const provider = ContainerSandbox.make({ spawner: hostSpawner, image: "node:22" })
+const session = "run:01J..."
+const commandProvider = Sandbox.commandProvider(provider, {
+  session,
+  provides: { ping: true, kill: true }
+})
+const spawner = SandboxSupervision.layer(commandProvider, {
   interval: "10 seconds",
   tolerance: 2
 })
@@ -92,7 +107,7 @@ Two properties are worth relying on:
 ## Report a retirement somewhere useful
 
 ```ts
-const supervised = SandboxSupervision.layer(provider, {
+const supervised = SandboxSupervision.layer(commandProvider, {
   interval: "10 seconds",
   reporter: {
     unhealthy: (event) => recordSandboxDeath(event)
