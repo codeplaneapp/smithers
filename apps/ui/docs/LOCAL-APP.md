@@ -157,6 +157,11 @@ awaiting termination; its admission/lifetime and parser buffering remain
 under review. Do not treat server shutdown as a verified descendant-process
 drain or a complete bound on every subprocess output path.
 
+Target run requests reserve an inert run and write its initial journal record
+before enabling attachment or the one-second auto-start timer. If journal
+initialization fails, the request returns HTTP 500, releases the reservation,
+and never starts the target. Reservations count toward the active-run limit.
+
 Target history acknowledges frames only after their journal append succeeds.
 On the first append failure, list/replay return `run.journal` (or the listed
 record's `journal`) with `state: "degraded"` and `error`; later frames for that

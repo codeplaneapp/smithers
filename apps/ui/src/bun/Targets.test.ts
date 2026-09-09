@@ -206,6 +206,52 @@ describe("createTargetRunner", () => {
     }
   }
 
+  test("an unarmed reservation never spawns, even on attach; arming enables auto-start once", async () => {
+    const dir = await scratch()
+    const cli = join(dir, "reserved-cli.js")
+    await writeFile(cli, "console.log(\"reserved\")")
+    const sink = collect()
+    const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 10 })
+    try {
+      const run = runner.reserve({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
+      expect(runner.attach(run.runId)).toBe(false)
+      await Bun.sleep(50)
+      expect(run.status).toBe("pending")
+      expect(sink.frames).toEqual([])
+      expect(runner.arm(run.runId)).toBe(true)
+      expect(runner.arm(run.runId)).toBe(false)
+      await sink.exited(run.runId)
+      expect(run.status).toBe("done")
+      expect(sink.frames.filter((entry) => entry.frame.type === "started")).toHaveLength(1)
+      expect(runner.arm(run.runId)).toBe(false)
+      expect(runner.arm("nope")).toBe(false)
+    } finally {
+      runner.stop()
+    }
+  })
+
+  test("cancelling an unarmed reservation releases capacity without publishing frames", async () => {
+    const dir = await scratch()
+    const sink = collect()
+    const runner = createTargetRunner({ publish: sink.publish, cli: join(dir, "never.js"), autoStartMs: 10, maxActiveRuns: 1, maxRetainedRuns: 1 })
+    const input = { repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar }
+    try {
+      const run = runner.reserve(input)
+      expect(() => runner.reserve(input)).toThrow("At most 1 target runs")
+      expect(runner.cancel(run.runId)).toBe(true)
+      expect(runner.get(run.runId)).toBeUndefined()
+      expect(runner.arm(run.runId)).toBe(false)
+      expect(runner.attach(run.runId)).toBe(false)
+      expect(runner.cancel(run.runId)).toBe(false)
+      const next = runner.reserve(input)
+      expect(runner.cancel(next.runId)).toBe(true)
+      await Bun.sleep(50)
+      expect(sink.frames).toEqual([])
+    } finally {
+      runner.stop()
+    }
+  })
+
   test("attach starts the child; stdout, stderr and the exit code stream to the topic", async () => {
     const dir = await scratch()
     // A build-system workspace: the runner uses the bare-label form here (see runArgv).

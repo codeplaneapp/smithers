@@ -261,8 +261,8 @@ export class TargetRunCapacityError extends Error {
 }
 
 export interface TargetRunner {
-  /** Registers a run; the child starts on `attach`, or after `autoStartMs`. */
-  readonly start: (run: {
+  /** Registers an inert run. Persist its journal before calling `arm`. */
+  readonly reserve: (run: {
     readonly repoId: string
     readonly repo: string
     readonly workspace: string
@@ -273,8 +273,13 @@ export interface TargetRunner {
     readonly verb?: string
     readonly pattern?: string
     readonly node: NodeSidecar; readonly edges?: ReadonlyArray<GraphEdge> }) => TargetRun
-  /** A subscriber is listening: spawn now if not yet started. */
+  /** Enables attach and schedules auto-start once; false if no longer pending or already armed. */
+  readonly arm: (runId: string) => boolean
+  /** Reserves and arms immediately for callers without a journal initialization step. */
+  readonly start: TargetRunner["reserve"]
+  /** A subscriber is listening: spawn now if armed and not yet started. */
   readonly attach: (runId: string) => boolean
+  /** Releases an unarmed reservation silently; cancels an armed run with terminal frames. */
   readonly cancel: (runId: string) => boolean
   /** Cancel pending runs and kill running children before revocation succeeds. */
   readonly revokeRepo: (repoId: string) => Promise<void>
@@ -535,6 +540,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   interface Live {
     readonly run: TargetRun
     readonly node: NodeSidecar
+    armed: boolean
     child: ReturnType<typeof Bun.spawn> | undefined
     timer: ReturnType<typeof setTimeout> | undefined
     readonly edges: ReadonlyArray<GraphEdge>
@@ -587,7 +593,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   }
 
   const spawn = (live: Live): void => {
-    if (live.run.status !== "pending") return
+    if (!live.armed || live.run.status !== "pending") return
     if (live.timer !== undefined) clearTimeout(live.timer)
     live.timer = undefined
     live.run.status = "running"
@@ -644,35 +650,50 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       })
   }
 
+  const reserve: TargetRunner["reserve"] = ({ repoId, repo, workspace, label, node, edges = [], kinds = [], verb, pattern }) => {
+    const active = [...runs.values()].filter((live) => live.run.status === "pending" || live.run.status === "running")
+    if (active.length >= maxActiveRuns) {
+      throw new TargetRunCapacityError(`At most ${maxActiveRuns} target runs may execute at once.`)
+    }
+    while (runs.size >= maxRetainedRuns) {
+      const settled = [...runs].find(([, live]) => live.run.status !== "pending" && live.run.status !== "running")
+      if (settled === undefined) {
+        throw new TargetRunCapacityError(`At most ${maxRetainedRuns} target runs may be retained.`)
+      }
+      runs.delete(settled[0])
+    }
+    const startedAt = Date.now()
+    const isPattern = verb !== undefined && pattern !== undefined
+    const title = isPattern ? `${verb} ${pattern}` : label
+    const labels = title.split(/\s+/).filter((part) => part.startsWith("//"))
+    const run: TargetRun = {
+      runId: crypto.randomUUID(), repoId, repo, workspace, label: title, labels, startedAt, status: "pending", exitCode: null,
+      ...(isPattern ? { verb, pattern } : {})
+    }
+    const live: Live = { run, armed: false, node, edges, kinds, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, summaryEmitted: false, nextSeq: 0 }
+    runs.set(run.runId, live)
+    return run
+  }
+
+  const arm: TargetRunner["arm"] = (runId) => {
+    const live = runs.get(runId)
+    if (live === undefined || live.armed || live.run.status !== "pending") return false
+    live.armed = true
+    live.timer = setTimeout(() => spawn(live), options.autoStartMs ?? 1000)
+    return true
+  }
+
   return {
-    start: ({ repoId, repo, workspace, label, node, edges = [], kinds = [], verb, pattern }) => {
-      const active = [...runs.values()].filter((live) => live.run.status === "pending" || live.run.status === "running")
-      if (active.length >= maxActiveRuns) {
-        throw new TargetRunCapacityError(`At most ${maxActiveRuns} target runs may execute at once.`)
-      }
-      while (runs.size >= maxRetainedRuns) {
-        const settled = [...runs].find(([, live]) => live.run.status !== "pending" && live.run.status !== "running")
-        if (settled === undefined) {
-          throw new TargetRunCapacityError(`At most ${maxRetainedRuns} target runs may be retained.`)
-        }
-        runs.delete(settled[0])
-      }
-      const startedAt = Date.now()
-      const isPattern = verb !== undefined && pattern !== undefined
-      const title = isPattern ? `${verb} ${pattern}` : label
-      const labels = title.split(/\s+/).filter((part) => part.startsWith("//"))
-      const run: TargetRun = {
-        runId: crypto.randomUUID(), repoId, repo, workspace, label: title, labels, startedAt, status: "pending", exitCode: null,
-        ...(isPattern ? { verb, pattern } : {})
-      }
-      const live: Live = { run, node, edges, kinds, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, summaryEmitted: false, nextSeq: 0 }
-      runs.set(run.runId, live)
-      live.timer = setTimeout(() => spawn(live), options.autoStartMs ?? 1000)
+    reserve,
+    arm,
+    start: (input) => {
+      const run = reserve(input)
+      arm(run.runId)
       return run
     },
     attach: (runId) => {
       const live = runs.get(runId)
-      if (live === undefined) return false
+      if (live === undefined || !live.armed) return false
       spawn(live)
       return true
     },
@@ -680,6 +701,10 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       const live = runs.get(runId)
       if (live === undefined) return false
       if (live.run.status === "pending") {
+        if (!live.armed) {
+          runs.delete(runId)
+          return true
+        }
         if (live.timer !== undefined) clearTimeout(live.timer)
         live.run.status = "failed"
         emit(live.run, { type: "error", message: "Cancelled before it started." })

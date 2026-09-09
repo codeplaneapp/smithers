@@ -1,9 +1,12 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ReposResponseSchema, TargetRunMessageSchema, TargetsQueryResponseSchema } from "@smthrs/rpc/LocalApp"
 import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
+import { createRepositoryAuthority } from "../RepositoryAuthority"
+import { Router } from "../routes"
+import { registerRepoTargetRoutes } from "./repoTargets"
 import { startLocalServer } from "../server"
 import type { LocalServer } from "../server"
 
@@ -383,3 +386,52 @@ describe("/api/targets/run pattern runs", () => {
     expect((await post("/api/targets/run", { repoId: "nope", verb: "ci", pattern: "//..." })).status).toBe(404)
   })
 })
+
+for (const kind of ["pattern", "targetId"] as const) {
+  test(`${kind} journal initialization failure never spawns and releases the run`, async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "smithers-journal-failure-")))
+    const router = new Router()
+    const routes = registerRepoTargetRoutes({ router, publish: () => {}, onMessage: () => () => {} }, {
+      node: Promise.resolve({ path: process.execPath, version: "v22.19.0" }),
+      authority: createRepositoryAuthority(),
+      allowManualRepositoryPaths: true,
+      cli
+    })
+    const request = async (path: string, body: unknown): Promise<Response> => {
+      const route = router.match("POST", path)!
+      const request = new Request(`http://localhost${path}`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+      })
+      return route.handler({ request, url: new URL(request.url), params: route.params })
+    }
+    const initialize = spyOn(routes.history, "start")
+    const spawn = spyOn(Bun, "spawn")
+    try {
+      await mkdir(join(dir, ".smithers"))
+      await writeFile(join(dir, ".smithers", "WORKSPACE.ts"), "export const Workspace = {}")
+      await mkdir(join(dir, ".flows"))
+      // A file is a deterministic ENOTDIR even when the test runs as root.
+      await writeFile(join(dir, ".flows", "ui"), "not a directory")
+      await routes.restored
+      const { repo } = await (await request("/api/repo/open", { path: dir })).json() as { repo: { id: string } }
+      const queried = TargetsQueryResponseSchema.parse(await (await request("/api/targets/query", { repoId: repo.id })).json())
+      const body = kind === "pattern"
+        ? { repoId: repo.id, verb: "test", pattern: "//..." }
+        : { repoId: repo.id, targetId: queried.targets[0]!.id }
+      spawn.mockClear()
+      // The host converts this rejected handler into HTTP 500.
+      await expect(request("/api/targets/run", body)).rejects.toThrow("ENOTDIR")
+      expect(initialize).toHaveBeenCalledTimes(1)
+      const run = initialize.mock.calls[0]![0]
+      await Bun.sleep(1200) // Beyond the production runner's one-second auto-start.
+      expect(spawn.mock.calls.filter(([argv]) => Array.isArray(argv) && argv[1] === cli && argv[2] !== "graph")).toHaveLength(0)
+      expect(routes.runner.get(run.runId)).toBeUndefined()
+      expect(await routes.history.replay(run.runId)).toBeUndefined()
+    } finally {
+      routes.stop()
+      initialize.mockRestore()
+      spawn.mockRestore()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+}

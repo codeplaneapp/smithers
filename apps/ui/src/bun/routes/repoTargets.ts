@@ -325,7 +325,7 @@ export const registerRepoTargetRoutes = (
       }
       let run
       try {
-        run = runner.start({
+        run = runner.reserve({
           repoId,
           repo: repo.path,
           workspace,
@@ -338,7 +338,13 @@ export const registerRepoTargetRoutes = (
         if (error instanceof TargetRunCapacityError) return jsonError(429, error.code, error.message)
         throw error
       }
-      await history.start(run)
+      try {
+        await history.start(run)
+      } catch (error) {
+        runner.cancel(run.runId)
+        throw error
+      }
+      runner.arm(run.runId)
       return json({ runId: run.runId })
     }
     if (repoId === undefined || targetId === undefined) {
@@ -399,7 +405,7 @@ export const registerRepoTargetRoutes = (
     }
     let run
     try {
-      run = runner.start({
+      run = runner.reserve({
         repoId,
         repo: repo.path,
         workspace,
@@ -414,7 +420,13 @@ export const registerRepoTargetRoutes = (
       }
       throw error
     }
-    await history.start(run)
+    try {
+      await history.start(run)
+    } catch (error) {
+      runner.cancel(run.runId)
+      throw error
+    }
+    runner.arm(run.runId)
     return json({ runId: run.runId })
   })
 
