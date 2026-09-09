@@ -112,6 +112,8 @@ describe.skipIf(!available)("MicrosandboxSandbox against a real microVM", () => 
         })
         const violations = yield* SandboxConformance.check(provider, {
           session,
+          // Real VM provisioning keeps its previous allowance; ordinary checks default to 10 seconds.
+          checkTimeout: "240 seconds",
           provides: { ping: true }
         })
         expect(violations).toEqual([])
