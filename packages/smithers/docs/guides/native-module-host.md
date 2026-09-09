@@ -94,3 +94,11 @@ arbitrary executable registrations. Catalog discovery alone does not provide
 an implementation for a named delegate, and a successful flow result does not
 prove an external deployment or check passed. Those require actual recorded
 receipts from their owning actions.
+
+The native runtime's final registration receives the native execution journal. ModuleAuthority intentionally records root budget usage there; AgentSession control transitions use the separate captured control journal. Shared root budget accumulators have host-scoped ownership, without an arbitrary root-count cap. Authority validation wraps registered execution outside the action retry ladder: a refusal settles as a failure instead of being silently retried as an action.
+
+Detached module children are currently unsupported. Module work must remain under its approved active root and that root's shared budget lifetime. The executable catalog is frozen for the host's lifetime. Updating a discovered module requires a configured-host restart; stale descriptor/delegate digests refuse adoption until then. An ordinary CLI with no matching module catalog leaves parked module roots untouched.
+
+The shared private native composition selects existing Node or Bun adapters, including their own SQLite drivers and HTTP servers. See [native host composition](../../NATIVE-CONTROL.md) for platform and lifetime boundaries.
+
+Native ModuleRegistration also receives the existing AgentAction.Host service. The composition builds it from the same guarded filesystem/shell/memory sources, registry and finite cell limits used by AgentSession. A recipe can therefore register an AgentAction layer without constructing another tool stack. Existing registrations that do not consume Host remain valid.

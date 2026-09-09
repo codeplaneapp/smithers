@@ -112,7 +112,6 @@ export const make = (catalog: Effect.Effect<Executable.Catalog>) =>
     // holds it until all handlers release it; later acquisition recovers the
     // existing journal's usage, including after a process restart.
     const budgets = yield* RcMap.make({
-      capacity: 256,
       lookup: (rootId: string) =>
         Effect.gen(function*() {
           const { envelope } = yield* owner(rootId)

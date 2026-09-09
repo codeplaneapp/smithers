@@ -458,7 +458,8 @@
     "@smthrs/time-travel": "1.0.0-rc.0",
     "@smthrs/triggers": "1.0.0-rc.0",
     "effect": "4.0.0-rc.112",
-    "incur": "0.5.1"
+    "incur": "0.5.1",
+    "@effect/platform-bun": "4.0.0-rc.112"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.2",

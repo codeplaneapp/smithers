@@ -5,17 +5,18 @@
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import type { ApprovalAuthority, Control, ControlExecutor, ControlSchema } from "@smthrs/control"
-import { ControlClient, ControlLive, ControlRuntime } from "@smthrs/control"
+import { ControlClient, ControlRuntime } from "@smthrs/control"
 import type { Journal } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import type * as McpClient from "@smthrs/mcp/McpClient"
-import { NotificationQueue } from "@smthrs/notifications"
 import { Registry } from "@smthrs/registry"
+import type { NotificationQueue } from "@smthrs/notifications"
 import { Layer } from "effect"
 import type { HttpClient } from "effect/unstable/http/HttpClient"
 import type { RpcSerialization } from "effect/unstable/rpc/RpcSerialization"
 import type { Socket } from "effect/unstable/socket/Socket"
 import * as ExecutorOwnership from "./ExecutorOwnership.ts"
+import * as LocalControl from "./internal/LocalControl.ts"
 
 /**
  * Everything the durable layers need to know before any flag is parsed.
@@ -104,28 +105,6 @@ export const engineMemory: Engine = {
   journal: TestJournal.layer().pipe(Layer.orDie)
 }
 
-const layerLocal = (
-  registry: Layer.Layer<Registry.Registry>,
-  engine: Engine,
-  executor:
-    | Layer.Layer<
-      ControlExecutor.ControlExecutor,
-      never,
-      ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
-    >
-    | undefined
-) =>
-  (executor === undefined ? ControlLive.layer : ControlLive.layer.pipe(Layer.provide(executor))).pipe(
-    Layer.provide([
-      engine.runtime,
-      engine.journal,
-      // The real queue, over the same journal the control plane writes to.
-      // `layerNoop` dropped every notification on the floor.
-      NotificationQueue.layer.pipe(Layer.provide(engine.journal)),
-      registry
-    ])
-  )
-
 const rpcUrl = (remote: string): string => {
   const url = new URL(remote)
   if (!url.pathname.endsWith("/rpc")) {
@@ -176,9 +155,9 @@ export const layer = (
     >
     | undefined
 ): Layer.Layer<Control.Control, never, HttpClient | RpcSerialization | Socket> =>
-  Layer.merge(
-    config.remote === undefined
-      ? layerLocal(registry, engine, executor)
-      : ControlClient.layer({ url: rpcUrl(config.remote), credential: config.credential }),
-    ExecutorOwnership.layer(config.remote === undefined && executor !== undefined)
-  )
+  config.remote === undefined
+    ? LocalControl.layer(registry, engine, executor)
+    : Layer.merge(
+      ControlClient.layer({ url: rpcUrl(config.remote), credential: config.credential }),
+      ExecutorOwnership.layer(false)
+    )

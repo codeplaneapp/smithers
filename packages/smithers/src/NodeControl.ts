@@ -3,98 +3,31 @@
  *
  * @since 0.1.0
  */
-import { NodeCrypto, NodeHttpClient, NodeHttpServer, NodeServices, NodeSocket } from "@effect/platform-node"
-import type * as Undici from "@effect/platform-node/Undici"
-import * as Agent from "@smthrs/agent/Agent"
-import * as AgentSession from "@smthrs/agent/AgentSession"
-import * as Budget from "@smthrs/agent/Budget"
-import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
-import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
-import * as Seat from "@smthrs/agent/Seat"
-import * as SeatResolver from "@smthrs/agent/SeatResolver"
-import * as StandardFlows from "@smthrs/agent/StandardFlows"
-import * as WorkspaceObservation from "@smthrs/agent/WorkspaceObservation"
-import { CapabilityPattern } from "@smthrs/capability/Capability"
-import { Rule } from "@smthrs/capability/Permission"
-import {
-  ApprovalAuthority,
-  Control,
-  ControlExecutor,
-  ControlRpcs,
-  ControlRuntime,
-  ControlServer,
-  SqlControlRuntime,
-  SystemFlows
-} from "@smthrs/control"
-import * as DurableWriter from "@smthrs/database/DurableWriter"
-import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
-import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
-import { Action, FlowRuntime } from "@smthrs/flow"
-import * as NodeFlowsRuntime from "@smthrs/flows/NodeRuntime"
-import type * as GatewayServer from "@smthrs/gateway/GatewayServer"
-import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
-import * as GatewayProjections from "@smthrs/gateway/Projections"
-import type * as FlowBinding from "@smthrs/harness/FlowBinding"
-import type * as Sandbox from "@smthrs/harness/Sandbox"
-import * as NodeJj from "@smthrs/jj/node/NodeJj"
-import { SqlJournal } from "@smthrs/journal"
+import { NodeHttpClient, NodeHttpServer, NodeServices, NodeSocket } from "@effect/platform-node"
+import { Control, ControlRpcs, ControlRuntime, ControlServer } from "@smthrs/control"
+
+
 import * as Journal from "@smthrs/journal/Journal"
-import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
-import * as GrantStore from "@smthrs/kernel/GrantStore"
-import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
-import * as Workspace from "@smthrs/kernel/Workspace"
 import type * as McpClient from "@smthrs/mcp/McpClient"
-import * as McpFlows from "@smthrs/mcp/McpFlows"
 import * as MemoryError from "@smthrs/memory/MemoryError"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
-import * as Recall from "@smthrs/memory/Recall"
-import type * as ModelError from "@smthrs/model/ModelError"
-import * as OpenAIChatGPT from "@smthrs/model/OpenAIChatGPT"
-import * as RequestExecutor from "@smthrs/model/RequestExecutor"
-import * as Route from "@smthrs/model/Route"
 import type { NotificationQueue } from "@smthrs/notifications"
-import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
-import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
-import * as Descriptor from "@smthrs/registry/Descriptor"
-import * as Discovery from "@smthrs/registry/Discovery"
-import * as Executable from "@smthrs/registry/Executable"
 import * as Registry from "@smthrs/registry/Registry"
-import { Ownership, RunStore } from "@smthrs/run-store"
-import * as Checkpoints from "@smthrs/std/Checkpoints"
-import * as Container from "@smthrs/std/Container"
-import * as NativeSearch from "@smthrs/std/NativeSearch"
-import * as TestRunner from "@smthrs/std/TestRunner"
-import * as RunCatalog from "@smthrs/sync/RunCatalog"
-import * as SyncAuth from "@smthrs/sync/SyncAuth"
-import * as SyncServer from "@smthrs/sync/SyncServer"
-import * as WorkspaceShare from "@smthrs/sync/WorkspaceShare"
-import type { FileSystem, Path, Result } from "effect"
-import { Context, Effect, Exit, Layer, Redacted, Scope, Semaphore } from "effect"
-import * as Deferred from "effect/Deferred"
+import { Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { randomUUID } from "node:crypto"
-import { chmodSync, existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
-import { hostname } from "node:os"
-import { join, resolve } from "node:path"
 import * as Application from "./Application.ts"
 import * as CliError from "./CliError.ts"
-import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
-import * as HistoryWorkspace from "./history/Workspace.ts"
+import { native } from "./internal/NodeControlHost.ts"
+import type { EngineDurable, ModuleRegistration } from "./internal/NativeControl.ts"
 import * as CommandStatus from "./internal/CommandStatus.ts"
-import * as ControlDatabase from "./internal/ControlDatabase.ts"
-import * as ControlDatabasePath from "./internal/ControlDatabasePath.ts"
-import * as ExecutionDatabasePath from "./internal/ExecutionDatabasePath.ts"
-import * as ModuleAuthority from "./internal/ModuleAuthority.ts"
 import * as Output from "./Output.ts"
 import * as Project from "./Project.ts"
-import * as Providers from "./Providers.ts"
 import * as Serve from "./Serve.ts"
 
 /**
@@ -297,6 +230,11 @@ const websocketLayer = (remote: string, credential: string | undefined) => {
   )
 }
 
+export type { EngineDurable, ModuleRegistration } from "./internal/NativeControl.ts"
+export { seatResolver, layerSeatResolver, testRunner, checkpointStore, testFlows } from "./internal/NativeEquipment.ts"
+
+export { rebuildableTransport } from "./internal/NodeControlHost.ts"
+
 /**
  * The flow sources a local CLI discovers: the project `flows/` directory, whose
  * per-directory layout is the convention in
@@ -308,10 +246,7 @@ const websocketLayer = (remote: string, credential: string | undefined) => {
  * @category constructors
  * @since 0.1.0
  */
-export const projectSources = (root: string): ReadonlyArray<Descriptor.Source> => [
-  { source: "project", root: join(root, "flows"), naming: "path" }
-]
-
+export const projectSources = native.projectSources
 /**
  * The raw host platform: Node's own services plus the descriptor-relative,
  * no-follow filesystem the kernel needs underneath it. `NodeServices` alone is
@@ -334,8 +269,7 @@ export const projectSources = (root: string): ReadonlyArray<Descriptor.Source> =
  * @category layers
  * @since 0.1.0
  */
-export const layerHostPlatform = Layer.provideMerge(AtomicFileSystem.layer, NodeServices.layer)
-
+export const layerHostPlatform = native.layerHostPlatform
 /**
  * The local CLI's real permission store.
  *
@@ -348,20 +282,7 @@ export const layerHostPlatform = Layer.provideMerge(AtomicFileSystem.layer, Node
  * @category layers
  * @since 1.0.0
  */
-export const layerGrantStore = (root: string): Layer.Layer<GrantStore.GrantStore> =>
-  GrantStore.layer({
-    attended: false,
-    rules: [
-      new Rule({
-        effect: "allow",
-        pattern: new CapabilityPattern({ action: "*", resource: "*" })
-      })
-    ]
-  }).pipe(
-    Layer.provide(Workspace.layer(resolve(root))),
-    Layer.orDie
-  )
-
+export const layerGrantStore = native.layerGrantStore
 /**
  * The kernel-guarded platform over one workspace root: every filesystem
  * operation resolved, authorized, re-resolved, and executed relative to a
@@ -385,15 +306,7 @@ export const layerGrantStore = (root: string): Layer.Layer<GrantStore.GrantStore
  * @category layers
  * @since 0.1.0
  */
-export const layerGuardedPlatform = (
-  root: string,
-  grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root)
-) =>
-  Layer.orDie(KernelFileSystem.layer).pipe(
-    Layer.provide([Workspace.layer(root), grants]),
-    Layer.provideMerge(layerHostPlatform)
-  )
-
+export const layerGuardedPlatform = native.layerGuardedPlatform
 /**
  * Provides the workspace observer the run's mutation accounting is measured
  * with: one pruned walk of the workspace root, taken at both ends of every
@@ -411,9 +324,7 @@ export const layerGuardedPlatform = (
  * @category layers
  * @since 0.1.0
  */
-export const layerObserver = (root: string): Layer.Layer<WorkspaceObservation.Observer> =>
-  WorkspaceObservation.layer(root).pipe(Layer.provide(layerHostPlatform))
-
+export const layerObserver = native.layerObserver
 /**
  * Provides the Node-backed flow registry the local CLI discovers flows with.
  *
@@ -427,22 +338,7 @@ export const layerObserver = (root: string): Layer.Layer<WorkspaceObservation.Ob
  * @category layers
  * @since 0.1.0
  */
-export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
-  const platform = layerGuardedPlatform(root)
-  const discovery = Discovery.layer.pipe(Layer.provide(platform))
-  return Registry.layer({ sources: projectSources(root) }).pipe(
-    Layer.provide([discovery, platform]),
-    // A project with no `flows/` directory simply has no flows. Every other
-    // discovery failure, such as an unreadable root or malformed entry, is a startup
-    // defect rather than a silent empty catalog.
-    Layer.catch((error) =>
-      error.code === "root_missing"
-        ? Registry.layerFromDescriptors([]).pipe(Layer.provide(platform))
-        : Layer.effect(Registry.Registry)(Effect.die(error))
-    )
-  )
-}
-
+export const layerRegistry = native.layerRegistry
 /**
  * Where a local CLI keeps its control-plane database.
  *
@@ -452,8 +348,7 @@ export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
  * @category constructors
  * @since 0.1.0
  */
-export const databasePath = ControlDatabasePath.databasePath
-
+export const databasePath = native.databasePath
 /**
  * Where the durable flow engine keeps executions, attempts, cache entries,
  * and wake state. The control plane has a separate connection and schema in
@@ -465,95 +360,7 @@ export const databasePath = ControlDatabasePath.databasePath
  * @category constructors
  * @since 0.1.0
  */
-export const executionDatabasePath = ExecutionDatabasePath.executionDatabasePath
-
-/**
- * `Application.Engine` plus the shared database seam the Node composition
- * hangs additional stores off; the memory store reuses the same connection
- * the runtime and journal commit against.
- *
- * Pass the same value to every local consumer. Building its component layers
- * independently can open multiple writers; the complete composition
- * materializes them once and reuses the captured services.
- *
- * @category models
- * @since 0.1.0
- */
-export interface EngineDurable extends Application.Engine {
-  readonly stores: Layer.Layer<DurableWriter.DurableWriter | SqlClient | RunStore.RunStore>
-}
-
-/**
- * Acquires one durable graph and projects its live services back into layers.
- *
- * Nested `Layer.provide` calls build with independent memo maps, so merely
- * passing the same layer value to the runtime, journal, executor, and memory
- * store still opened one SQLite connection per consumer. Building the merged
- * graph in the caller's scope first gives every consumer the same live service
- * values, and closing that scope closes the sole connection.
- */
-const materializeEngine = (engine: EngineDurable): Effect.Effect<EngineDurable, never, Scope.Scope> =>
-  Effect.map(
-    Layer.build(Layer.mergeAll(engine.runtime, engine.journal, engine.stores)),
-    (services) => ({
-      runtime: Layer.succeed(
-        ControlRuntime.ControlRuntime,
-        Context.get(services, ControlRuntime.ControlRuntime)
-      ),
-      journal: Layer.succeed(Journal.Journal, Context.get(services, Journal.Journal)),
-      stores: Layer.mergeAll(
-        Layer.succeed(DurableWriter.DurableWriter, Context.get(services, DurableWriter.DurableWriter)),
-        Layer.succeed(SqlClient, Context.get(services, SqlClient)),
-        Layer.succeed(RunStore.RunStore, Context.get(services, RunStore.RunStore))
-      )
-    })
-  )
-
-/**
- * The reserved system catalog in the durable runtime's flow shape.
- *
- * The reserved verbs make no model calls of their own, so there is nothing for
- * a ceiling to bound and `Descriptor.budgetUnbounded` says so by name rather
- * than by an unlabelled `{}`.
- */
-const systemFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = SystemFlows.catalog.map((entry) => ({
-  flowId: entry.flowId,
-  description: `Reserved ${entry.verb} system flow`,
-  deployClass: entry.deployClass,
-  envelope: { capabilities: [], flows: [], budget: Descriptor.budgetUnbounded }
-}))
-
-/**
- * Projects one discovered flow into the durable runtime's flow shape.
- *
- * The budget travels with the capabilities because it is enforced the same way
- * they are: `layerExecutor` hands `Budget.layerFromEnvelope` to `AgentSession`,
- * which builds one budget per run out of the approved card's envelope. A
- * hardcoded `{}` here made that enforcement bind nothing on the shipped CLI,
- * however carefully a flow declared its ceilings. `Descriptor.budgetOf` answers
- * the undeclared case with `budgetUnbounded`, so a flow that names no ceiling
- * still runs and a flow that names one is held to it.
- */
-const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.MemoryFlow => ({
-  flowId: descriptor.name,
-  description: descriptor.description,
-  deployClass: false,
-  executionDigest: Descriptor.executionDigest(descriptor),
-  envelope: {
-    capabilities: descriptor.capabilities,
-    flows: descriptor.flows,
-    budget: Descriptor.budgetOf(descriptor)
-  }
-})
-
-// Configuring the CLI's gateway token delegates the local operator's supported
-// decisions to that gateway's authenticated identity. This is a host policy,
-// not an authorization rule for arbitrary bearer or agent principals.
-const gatewayApprovalAuthority = Effect.runSync(ApprovalAuthority.make([
-  { principal: { id: "local", kind: "operator" }, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] },
-  { principal: NodeGateway.bearerPrincipal, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] }
-]))
-
+export const executionDatabasePath = native.executionDatabasePath
 /**
  * Provides the durable local engine: `SqlControlRuntime` and the production
  * SQL journal, both over one SQLite file under the project root.
@@ -575,627 +382,7 @@ const gatewayApprovalAuthority = Effect.runSync(ApprovalAuthority.make([
  * @category layers
  * @since 0.1.0
  */
-export const engineDurable = (
-  root: string,
-  registry?: Layer.Layer<Registry.Registry> | undefined,
-  authority: Pick<Application.Config, "approvalAuthority" | "principal" | "credential"> = {}
-): EngineDurable => {
-  const file = databasePath(root)
-  const authorization = {
-    principal: authority.principal,
-    approvalAuthority: authority.approvalAuthority ??
-      (authority.credential === undefined || authority.credential === ""
-        ? ApprovalAuthority.local
-        : gatewayApprovalAuthority)
-  }
-  // One real process identity per local control plane. A constant pid made two
-  // CLIs on one host appear to own the same fence and allowed the loser to
-  // re-drive work claimed by the winner.
-  const owner = Object.freeze({ hostId: hostname(), pid: process.pid, nonce: randomUUID() })
-  const database = ControlDatabase.layer(file).pipe(Layer.orDie)
-  // A control plane that cannot open its own database has nothing to serve, so
-  // a failed open, migration, or journal start is a startup defect rather than
-  // a typed control-plane error every command would have to carry.
-  // The control and native engines both use RunStore over different databases.
-  // Its exported layer is a singleton: a shared memo map must not reuse the
-  // control instance inside the native engine, whose state is versioned.
-  const stores = Layer.mergeAll(SqlJournal.layer({ capacity: 1024, overflow: "reject" }), Layer.fresh(RunStore.layer))
-    .pipe(
-      Layer.provideMerge(database),
-      Layer.orDie
-    )
-  const runtime = registry === undefined
-    ? SqlControlRuntime.layer({ ...authorization, owner }).pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
-    : Layer.effect(ControlRuntime.ControlRuntime)(
-      Effect.gen(function*() {
-        const registryService = yield* Registry.Registry
-        return yield* SqlControlRuntime.make({
-          ...authorization,
-          owner,
-          loadFlows: () =>
-            registryService.list().pipe(
-              Effect.map((discovered) => [...systemFlows, ...discovered.map(durableFlow)])
-            )
-        })
-      })
-    ).pipe(Layer.provide([stores, NodeCrypto.layer, registry]), Layer.orDie)
-  return {
-    runtime,
-    journal: stores,
-    stores
-  }
-}
-
-const apiKeyVariable: Readonly<Record<string, string>> = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  openrouter: "OPENROUTER_API_KEY"
-}
-
-/**
- * How the `openai` provider authenticates. `api-key` is the default and the
- * only mode the other providers have. `chatgpt` routes the same seat strings
- * to the ChatGPT-subscription backend on the codex CLI's OAuth session, so a
- * lane opts in through the environment without respelling any seat: the
- * journaled seat, its context window, and its committed price stay identical.
- */
-const openaiAuthVariable = "SMITHERS_OPENAI_AUTH"
-
-/**
- * The Node seat resolver: it turns a `provider:modelId` seat into a live model
- * route, with the API key read from the given environment, usually
- * `process.env`, passed in as a value so nothing below this composition touches
- * the process directly.
- *
- * A seat with no separator is a bare model id on the Anthropic route, which is
- * the one provider convention this host assumes.
- *
- * `SMITHERS_OPENAI_AUTH=chatgpt` swaps the `openai` provider's credential source
- * from `OPENAI_API_KEY` to the codex CLI's ChatGPT session
- * (`$CODEX_HOME/auth.json`); the token store is shared across every seat that
- * resolves against the same file so its refresh stays single-flight.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const seatResolver = (
-  environment: Readonly<Record<string, string | undefined>>,
-  executor: RequestExecutor.RequestExecutor
-): SeatResolver.Service => {
-  const codexStores = new Map<string, CodexAuth.Store>()
-  const codexStore = (file: string): CodexAuth.Store => {
-    let store = codexStores.get(file)
-    if (store === undefined) {
-      store = CodexAuth.make({ file, executor })
-      codexStores.set(file, store)
-    }
-    return store
-  }
-  return SeatResolver.make({
-    resolve: (seat) =>
-      Effect.gen(function*() {
-        const separator = seat.indexOf(":")
-        const provider = separator < 0 ? "anthropic" : seat.slice(0, separator)
-        const modelId = Seat.modelIdOf(seat)
-        // The OpenAI-compatible Chat Completions providers are routed by
-        // table (`Providers.compatible`): the origin, the exact path, and the
-        // key variables read in order. `Object.hasOwn`, so `constructor:x`
-        // finds no inherited function.
-        if (Object.hasOwn(Providers.compatible, provider)) {
-          const entry = Providers.compatible[provider]!
-          const found = Providers.compatibleKey(provider, environment)
-          if (found === undefined) {
-            return yield* new Seat.SeatUnresolved({
-              seat,
-              message: `Set ${entry.variables.join(" or ")} to run the ${seat} seat`
-            })
-          }
-          return yield* seatOf(
-            Route.openaiChatCompatible({
-              id: provider,
-              baseUrl: entry.baseUrl,
-              path: entry.path,
-              apiKey: Redacted.make(found.key)
-            }),
-            executor,
-            seat,
-            modelId
-          )
-        }
-        const variable = apiKeyVariable[provider]
-        if (variable === undefined) {
-          return yield* new Seat.SeatUnresolved({
-            seat,
-            message: `No route is configured for the ${provider} provider`
-          })
-        }
-        // An empty value is treated exactly like an unset variable, the same
-        // convention the key variables follow below.
-        const configured = Environment_.read(environment, openaiAuthVariable)
-        const authMode = provider === "openai" && configured !== undefined && configured !== ""
-          ? configured
-          : "api-key"
-        if (authMode !== "api-key" && authMode !== "chatgpt") {
-          return yield* new Seat.SeatUnresolved({
-            seat,
-            message: `${openaiAuthVariable} must be "api-key" or "chatgpt" to run the ${seat} seat`
-          })
-        }
-        if (authMode === "chatgpt") {
-          // The ChatGPT mode needs a provisioned session, not an API key: the
-          // refusal names the store so a detached lane fails before spending.
-          const file = CodexAuth.locate(environment)
-          if (!existsSync(file)) {
-            return yield* new Seat.SeatUnresolved({
-              seat,
-              message: `Sign in with \`codex login\` to run the ${seat} seat: no ChatGPT credentials at ${file}`
-            })
-          }
-          return yield* seatOf(
-            OpenAIChatGPT.make({ auth: codexStore(file).auth({ modelId }) }),
-            executor,
-            seat,
-            modelId
-          )
-        }
-        const key = environment[variable]
-        if (key === undefined || key.length === 0) {
-          return yield* new Seat.SeatUnresolved({
-            seat,
-            message: `Set ${variable} to run the ${seat} seat`
-          })
-        }
-        // The provider routes have distinct body types, so each branch is
-        // erased into the seat shape on its own rather than through a union.
-        // OpenRouter is the OpenAI Responses surface at a different origin, so
-        // its seats spell the model as `openrouter:vendor/model` and route
-        // through the compatible constructor.
-        return yield* provider === "anthropic"
-          ? seatOf(Route.anthropic({ apiKey: Redacted.make(key) }), executor, seat, modelId)
-          : provider === "openrouter"
-          ? seatOf(
-            Route.openaiResponsesCompatible({
-              id: "openrouter",
-              baseUrl: "https://openrouter.ai/api",
-              apiKey: Redacted.make(key)
-            }),
-            executor,
-            seat,
-            modelId
-          )
-          : seatOf(Route.openai({ apiKey: Redacted.make(key) }), executor, seat, modelId)
-      })
-  })
-}
-
-const seatOf = <Body, Frame, Event, State>(
-  configured: Result.Result<Route.Route<Body, Frame, Event, State>, ModelError.ModelError>,
-  executor: RequestExecutor.RequestExecutor,
-  seat: string,
-  modelId: string
-): Effect.Effect<Seat.Seat, Seat.SeatUnresolved> =>
-  Effect.gen(function*() {
-    const routeConfig = yield* Effect.fromResult(configured).pipe(
-      Effect.mapError((error) => new Seat.SeatUnresolved({ seat, message: error.message }))
-    )
-    const model = yield* Route.toModel(routeConfig).pipe(
-      Effect.provideService(RequestExecutor.RequestExecutor, executor)
-    )
-    return Seat.make({
-      id: seat,
-      modelId,
-      model,
-      route: FlowEngineLike.routeResolver(routeConfig),
-      contextWindowTokens: SeatResolver.contextWindowTokensFor(modelId)
-    })
-  })
-
-/**
- * Provides {@link seatResolver} over the composition's request dispatcher.
- *
- * @category layers
- * @since 0.1.0
- */
-export const layerSeatResolver = (
-  environment: Readonly<Record<string, string | undefined>>
-): Layer.Layer<SeatResolver.SeatResolver, never, RequestExecutor.RequestExecutor> =>
-  Layer.effect(SeatResolver.SeatResolver)(
-    Effect.gen(function*() {
-      const executor = yield* RequestExecutor.RequestExecutor
-      return seatResolver(environment, executor)
-    })
-  )
-
-/**
- * The explicit sandbox budget every locally executed cell runs under. Never
- * unlimited: an unbounded QuickJS cell can hang the frame.
- */
-const cellLimits: Sandbox.Limits = {
-  memoryBytes: 256 * 1024 * 1024,
-  steps: 50_000_000
-}
-
-/**
- * The repository's own test invocation, as this host declares it.
- *
- * `TestRun` is a declaration flow: a caller selects *which* tests, never *how*
- * to run them, so the composition has to supply the how. This host reads it off
- * the environment, which is the same place it reads a seat's credentials, and
- * the only field that decides anything is the command. The rest describe where
- * that command runs.
- *
- * `undefined` means this host knows of no runner, and then the `test` flow is
- * not bound at all. That is the rule the r91 wave broke in the other direction:
- * `StandardFlows.tests` existed, the cell contract's doctrine assumed it, and
- * no composition offered it, so all 45 graded runs saw zero `test` calls. A
- * flow no composition offers is a flow that does not exist, and a flow bound
- * over a declaration that can only refuse is worse, because the catalog then
- * advertises a call whose every answer is "not configured".
- *
- * @category constructors
- * @since 0.1.0
- */
-export const testRunner = (
-  environment: Readonly<Record<string, string | undefined>>,
-  root: string
-): TestRunner.Runner | undefined => {
-  const command = Environment_.read(environment, "SMITHERS_TEST_COMMAND")?.trim()
-  if (command === undefined || command === "") return undefined
-  const container = Environment_.read(environment, "SMITHERS_TEST_CONTAINER")?.trim()
-  const cwd = Environment_.read(environment, "SMITHERS_TEST_CWD")?.trim()
-  const timeout = Number(Environment_.read(environment, "SMITHERS_TEST_TIMEOUT_MS"))
-  return {
-    command,
-    // The runner's directory and the repository's are the same path until a
-    // container gives the tree a second name; `root` stays the host's, because
-    // that is where a baseline worktree is checked out from.
-    cwd: cwd === undefined || cwd === "" ? root : cwd,
-    root,
-    ...(container === undefined || container === "" ? {} : { container }),
-    ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {})
-  }
-}
-
-/**
- * Where this host pins the trees a run checkpoints, and where a container sees
- * them.
- *
- * The same two paths {@link testRunner} reads, for the same reason: a
- * checkpoint is materialized as a directory under the repository, and a
- * container reaches that directory through the mount it already has.
- * `SMITHERS_TEST_CWD` is the container's name for the repository when there is
- * one, and the workspace root is the host's. A host that declares neither
- * still pins, and pins on one path under both names.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const checkpointStore = (
-  environment: Readonly<Record<string, string | undefined>>,
-  root: string
-): Checkpoints.GitOptions => {
-  const cwd = Environment_.read(environment, "SMITHERS_TEST_CWD")?.trim()
-  return { root, ...(cwd === undefined || cwd === "" ? {} : { cwd }) }
-}
-
-/**
- * The `test` flow's binding source, or none when this host declares no runner.
- *
- * Named rather than spread inline because the r91 wave's whole finding about
- * this flow is that the *composition* was the untried link: the flow, its
- * declaration and its handler were all tested, and no test asked whether any
- * host offered them. This is that question, in the one place it can be asked
- * without booting a run.
- *
- * The runner's container is added to the same context, so the suite reaches the
- * image through the transport `bash` already uses.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const testFlows = (
-  services: Context.Context<KernelChildProcessSpawner.ChildProcessSpawner | Path.Path>,
-  container: Container.Container,
-  runner: TestRunner.Runner | undefined
-): ReadonlyArray<FlowBinding.Source> =>
-  runner === undefined ? [] : [
-    StandardFlows.tests(
-      Context.add(
-        Context.add(services, TestRunner.TestRunner, TestRunner.make(runner)),
-        Container.Container,
-        container
-      )
-    )
-  ]
-
-/**
- * A replaceable HTTP transport over Undici, given a way to acquire a dispatcher.
- *
- * `RequestExecutor` asks a host for two things: the client to use now, and an
- * effect that builds another. A retry ladder repairs a failure by
- * waiting and a destroyed HTTP/2 session is the failure waiting does not
- * repair. Undici's dispatcher *is* the connection pool, so on Node the
- * replacement is a new one.
- *
- * Each dispatcher is acquired in a scope forked off the caller's, and the
- * previous scope is closed the moment the next dispatcher is in hand, so a run
- * that rebuilds many times still holds exactly one pool and the caller's own
- * teardown closes the last of them. The *first* client is built by this same
- * code rather than taken from `NodeHttpClient.layerUndici`, so the client the
- * executor starts on and the client a rebuild produces are made the same way
- * and owned the same way.
- *
- * `acquire` is a parameter so a test can hand it a scripted dispatcher; the
- * production caller passes `NodeHttpClient.makeDispatcher`.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const rebuildableTransport = (
-  acquire: Effect.Effect<Undici.Dispatcher, never, Scope.Scope>
-): Effect.Effect<RequestExecutor.Transport, never, Scope.Scope> =>
-  Effect.gen(function*() {
-    const scope = yield* Scope.Scope
-    const gate = yield* Semaphore.make(1)
-    let held: Scope.Closeable | undefined = undefined
-    const rebuild = gate.withPermit(Effect.gen(function*() {
-      const owned = yield* Scope.fork(scope)
-      const client = yield* NodeHttpClient.makeUndici.pipe(
-        Effect.provideServiceEffect(NodeHttpClient.Dispatcher, acquire),
-        Effect.provideService(Scope.Scope, owned)
-      )
-      const previous = held
-      held = owned
-      if (previous !== undefined) yield* Scope.close(previous, Exit.void)
-      return client
-    }))
-    return { client: yield* rebuild, rebuild }
-  })
-
-/** The production executor: an Undici agent the run may replace. */
-const rebuildableUndici: Effect.Effect<RequestExecutor.RequestExecutor, never, Scope.Scope> = Effect.flatMap(
-  rebuildableTransport(NodeHttpClient.makeDispatcher),
-  RequestExecutor.makeWith
-)
-
-/** The production model transport, replaceable only at the composition boundary. */
-const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer.effect(
-  RequestExecutor.RequestExecutor,
-  rebuildableUndici
-)
-
-/**
- * Trusted module registration over the existing host services and catalog.
- * This is the same final-phase registration accepted by the flow runtime.
- * @category models
- * @since 1.0.0
- */
-export type ModuleRegistration = Layer.Layer<
-  Executable.Catalog,
-  never,
-  | Executable.Registration
-  | Exclude<Effect.Services<ReturnType<typeof AgentSession.make>>, Scope.Scope>
-  | FileSystem.FileSystem
-  | Path.Path
-  | KernelChildProcessSpawner.ChildProcessSpawner
-  | Budget.Budget
-  | QuotaPolicy.QuotaClassifier
->
-
-/**
- * Provides the production run executor: the `@smthrs/agent` composition root
- * over the durable control stores, the local flow registry, and the standard
- * host capabilities: filesystem and shell through the kernel's guarded
- * layers, durable memory over the control database, approval and steering
- * wired back into the control plane by the session itself.
- *
- * The durable engine is built through `@smthrs/flows/NodeRuntime`, whose
- * final registration phase constructs `AgentSession`. This is deliberate:
- * the executor cannot accept a launch until the engine database is migrated,
- * its stores and sweepers are live, and the agent flow body has been
- * registered. The resulting engine state is durable, and no launch can race
- * ahead of that durability-sensitive startup order.
- *
- * @category layers
- * @since 0.1.0
- */
-const executorFromEngine = (
-  registry: Layer.Layer<Registry.Registry>,
-  engine: EngineDurable,
-  root: string,
-  environment: Readonly<Record<string, string | undefined>>,
-  /**
-   * MCP servers to connect at startup, each projected into the run's flow
-   * catalog by `@smthrs/mcp/McpFlows`, one more source alongside filesystem,
-   * shell, and memory below. Empty by default: a host that names none behaves
-   * exactly as it always has.
-   */
-  mcpServers: ReadonlyArray<McpClient.ConnectOptions> = [],
-  grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root),
-  requestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = layerRequestExecutor,
-  quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerDefault(),
-  executionRoot: string = root,
-  /**
-   * Trusted native registrations using the existing executable catalog.
-   * Built in the engine's registration phase with the guarded host platform;
-   * every registered handler restores its owning approved control envelope.
-   */
-  modules?: ModuleRegistration
-): Layer.Layer<
-  ControlExecutor.ControlExecutor,
-  never,
-  ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
-> => {
-  const workspaceRoot = resolve(executionRoot)
-  const canExecute = (runId: string) => Effect.sync(() => HistoryWorkspace.canExecute(root, workspaceRoot, runId))
-  // The same guarded platform the registry discovers under: kernel FileSystem
-  // over descriptor-relative atomic access, with the Node service bundle
-  // (Path, raw spawner, crypto) merged through. `grants` is passed rather than
-  // defaulted so the filesystem and the shell below it can never end up asking
-  // two different stores.
-  const platform = layerGuardedPlatform(workspaceRoot, grants)
-  // Permission checks do not contain a process after its CLI owner crashes.
-  // Keep one durable ledger under the shell, native search/test runners and
-  // MCP connections, and reap only verified children of dead owners before
-  // exposing the spawner. The registration phase receives the engine journal
-  // from NodeFlowsRuntime.layer, so these records survive this process.
-  const contained = ProcessReaper.layerSpawner().pipe(
-    Layer.provideMerge(platform),
-    Layer.provideMerge(ProcessReaper.layer()),
-    Layer.provide(ProcessLedger.layer({ hostId: hostname(), ownerPid: process.pid }))
-  )
-  const guarded = KernelChildProcessSpawner.layer.pipe(
-    Layer.provide(grants),
-    Layer.provideMerge(contained)
-  )
-  const memory = MemoryStore.layer.pipe(Layer.provide(engine.stores), Layer.orDie)
-  // AgentSession installs the effective budget from the approved card around
-  // each `agent.run`. No card exists while this executor layer is built, so
-  // unbounded is the only honest construction-time budget. The provider is
-  // discarded after it closes `Agent.layer`; every run installs
-  // `Budget.layerFromEnvelope` directly around the call. The quota layer is
-  // the same policy the session installs for the run.
-  const sessionAgent = Agent.layer.pipe(
-    // eslint-disable-next-line no-restricted-syntax -- no envelope exists until AgentSession starts a run
-    Layer.provide(Layer.mergeAll(quotaPolicy, Budget.layerUnbounded()))
-  )
-  // The dispatcher must live as long as the executor. A model captures this
-  // service and uses it after seat resolution has returned.
-  //
-  // It also has to be replaceable. A retry ladder repairs a failure by waiting,
-  // and an HTTP/2 session the peer has destroyed is the failure waiting does not
-  // repair: every attempt that reuses the pool holding it fails identically, and
-  // r92 of the SWE-bench full benchmark spent ten `transport` retries and $0.85
-  // proving it on two instances. Undici's `Agent` *is* the pool, and
-  // `makeDispatcher` acquires a fresh one, so the honest rebuild here is a new
-  // agent in a scope of its own. The previous one is closed as soon as the new
-  // one is in hand, so a run that rebuilds many times still holds one pool.
-  const registration = Layer.effect(ControlExecutor.ControlExecutor)(
-    Effect.gen(function*() {
-      const filesystemServices = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
-      const shellServices = yield* Effect.context<
-        KernelChildProcessSpawner.ChildProcessSpawner | Path.Path
-      >()
-      const memoryServices = yield* Effect.context<MemoryStore.MemoryStore | Recall.Recall>()
-      const nativeSearch = NativeSearch.make(Context.merge(filesystemServices, shellServices))
-      // `test` is offered exactly when this host can say how the repository
-      // runs its tests. The declaration carries the container too, so the
-      // runner reaches the same transport `bash` does.
-      const runner = testRunner(environment, root)
-      const container = Container.makeCommand()
-      // Each configured server is a startup-time connection the operator
-      // opted into by naming it, the same way `memory` below is: a server
-      // that fails to spawn dies the executor loudly (`Effect.orDie`) rather
-      // than running silently short of the tools it was configured to have.
-      const mcp = yield* Effect.forEach(mcpServers, (server) => Effect.orDie(McpFlows.connected(server)))
-      const catalogReady = yield* Deferred.make<Executable.Catalog>()
-      const catalog = modules === undefined ? undefined : Context.get(
-        yield* Layer.build(modules.pipe(
-          // No approved card exists at registration. ModuleAuthority installs
-          // the shared, journal-backed approved Budget at each handler entry.
-          // eslint-disable-next-line no-restricted-syntax -- construction-time dependency only
-          Layer.provide(Budget.layerUnbounded()),
-          Layer.provide(Action.layerImplementations),
-          Layer.provide(
-            Layer.succeed(FlowRuntime.FlowRuntime, yield* ModuleAuthority.make(Deferred.await(catalogReady)))
-          )
-        )),
-        Executable.Catalog
-      )
-      if (catalog !== undefined) yield* Deferred.succeed(catalogReady, catalog)
-      const session = AgentSession.make({
-        canExecute,
-        flows: [
-          StandardFlows.filesystem(filesystemServices, nativeSearch),
-          StandardFlows.shell(shellServices, container),
-          StandardFlows.memory(memoryServices),
-          ...testFlows(shellServices, container, runner),
-          ...mcp
-        ],
-        limits: cellLimits,
-        quotaPolicy,
-        budget: Budget.layerFromEnvelope
-      })
-      // Lifecycle, steering and approval belong to the control journal. The
-      // registration phase otherwise inherits the engine's separate journal.
-      // Select only Journal: an unmaterialized engine.journal layer can also
-      // provide the control RunStore, which must not replace the native one.
-      const controlJournal = yield* Journal.Journal.pipe(Effect.provide(engine.journal))
-      return yield* (catalog === undefined ? session : session.pipe(
-        Effect.provideService(Executable.Catalog, catalog)
-      )).pipe(Effect.provideService(Journal.Journal, controlJournal))
-    })
-  ).pipe(
-    Layer.provide([
-      guarded,
-      memory,
-      Recall.layerNoop,
-      quotaPolicy,
-      sessionAgent,
-      // The run's mutation accounting is measured rather than declared, and
-      // this is what measures it: without an observer in the composition the
-      // controller falls back to what a frame's calls claimed about
-      // themselves, which is blind to every `bash` write. It runs on the host
-      // platform rather than on `platform`, for the reasons `layerObserver`
-      // states.
-      layerObserver(workspaceRoot),
-      // Where a run's checkpoints live. Without it `ctx.checkpoint()` and
-      // `ctx.base` answer `checkpoint_unavailable`, honestly, and the run
-      // takes its readings on the live tree. This is the difference
-      // between a run that can prove fails-before without reverting its own
-      // work and one that cannot.
-      Checkpoints.layerGit(checkpointStore(environment, workspaceRoot)),
-      layerSeatResolver(environment).pipe(Layer.provide(requestExecutor))
-    ])
-  )
-  const nativeRuntime = NodeFlowsRuntime.layer(
-    {
-      filename: executionDatabasePath(root),
-      workspaceRoot,
-      // The machine's own name, for the same reason `engineDurable` stamps
-      // it: `sameHostPidProbe` compares `hostId` before it trusts a pid, and
-      // a constant made every row in every process table look local. Two
-      // checkouts inside one container and the host they are bind-mounted
-      // from share this file with disjoint pid namespaces, so under a
-      // constant the probe answered about the wrong process table, and a row
-      // whose owner was alive elsewhere read as dead here.
-      owner: { hostId: hostname() },
-      // Two terminals over one project are two engine processes over one
-      // `.flows/engine.db`, so "one engine process at a time" was never true
-      // and a stub answering `false` let each steal the other's running rows
-      // 30 seconds after any heartbeat stall. The probe asks the process
-      // table instead, and answers only about this host: a run recorded on
-      // another host is left to the lease, which `RunStore.steal` verifies.
-      isAlive: Ownership.sameHostPidProbe,
-      canExecute: (row) => canExecute(row.runId)
-    },
-    StepBoundary.layer,
-    WorkspaceSandbox.layerFileSystem(),
-    registration
-  ).pipe(
-    Layer.provide([platform, NodeCrypto.layer, NodeJj.layerAt(workspaceRoot)]),
-    Layer.tap(() =>
-      Effect.sync(() => {
-        if (process.platform === "win32") return
-        const file = executionDatabasePath(root)
-        for (const sqliteFile of [file, `${file}-wal`, `${file}-shm`]) {
-          if (existsSync(sqliteFile)) chmodSync(sqliteFile, 0o600)
-        }
-      })
-    ),
-    // Failure to open or migrate the local execution engine is a startup
-    // defect, just like the control database above: no command can execute
-    // honestly without this composition.
-    Layer.orDie
-  )
-  // The runtime exposes its stores for native registrations. Only the
-  // executor crosses back into the control composition: leaking the native
-  // Journal or RunStore here silently redirects ControlLive to engine.db.
-  return Layer.effect(ControlExecutor.ControlExecutor)(ControlExecutor.ControlExecutor).pipe(
-    Layer.provide(nativeRuntime)
-  )
-}
-
+export const engineDurable = native.engineDurable
 /**
  * Builds the executor over one captured control-store graph. Materializing
  * before native registration prevents the shared RunStore layer from being
@@ -1203,13 +390,8 @@ const executorFromEngine = (
  * @category layers
  * @since 1.0.0
  */
-export const layerExecutor = (
-  ...[registry, engine, ...options]: Parameters<typeof executorFromEngine>
-): ReturnType<typeof executorFromEngine> =>
-  Layer.unwrap(Effect.map(
-    materializeEngine(engine),
-    (materialized) => executorFromEngine(registry, materialized, ...options)
-  ))
+export const layerExecutor = native.layerExecutor
+const materializeEngine = native.materializeEngine
 
 /**
  * Provides the application-selected Control implementation with Node HTTP and
@@ -1225,28 +407,10 @@ const layerControlFromEngine = (
   engine: EngineDurable,
   modules?: ModuleRegistration
 ) => {
-  const remote = applicationConfig.remote ?? "http://127.0.0.1"
-  const root = applicationConfig.root ?? process.cwd()
-  const executor = applicationConfig.remote === undefined
-    ? layerExecutor(
-      registry,
-      engine,
-      root,
-      process.env,
-      applicationConfig.mcpServers ?? [],
-      undefined,
-      undefined,
-      undefined,
-      applicationConfig.executionRoot ?? root,
-      modules
-    )
-    : undefined
-  return Application.layer(applicationConfig, registry, engine, executor).pipe(
-    Layer.provide([
-      NodeHttpClient.layerUndici,
-      websocketLayer(remote, applicationConfig.credential),
-      RpcSerialization.layerNdjson
-    ])
+  if (applicationConfig.remote === undefined) return native.layerControlFromEngine(applicationConfig, registry, engine, modules)
+  const remote = applicationConfig.remote
+  return Application.layer(applicationConfig, registry, engine).pipe(
+    Layer.provide([NodeHttpClient.layerUndici, websocketLayer(remote, applicationConfig.credential), RpcSerialization.layerNdjson])
   )
 }
 
@@ -1331,29 +495,7 @@ export const layer = (applicationConfig: Application.Config, modules?: ModuleReg
   const compose = (engine: EngineDurable) => {
     const control = layerControlFromEngine(applicationConfig, registry, engine, modules)
     const gatewayHost = applicationConfig.remote === undefined
-      ? Layer.effect(
-        Serve.GatewayHost,
-        Effect.gen(function*() {
-          const controlService = yield* Control.Control
-          const journalService = yield* Journal.Journal
-          return Serve.GatewayHost.of({
-            launch: (health, options, gatewayRoot) =>
-              Layer.launch(
-                layerGateway(
-                  health,
-                  options,
-                  gatewayRoot,
-                  engine,
-                  Layer.succeed(Journal.Journal, journalService)
-                )
-              ).pipe(
-                Effect.provideService(Control.Control, controlService),
-                Effect.provide(NodeServices.layer),
-                Effect.orDie
-              )
-          })
-        })
-      ).pipe(Layer.provide([control, engine.journal]))
+      ? native.layerGatewayHost(engine, control)
       : Layer.effect(
         Serve.GatewayHost,
         Effect.map(Control.Control, (controlService) =>
@@ -1459,14 +601,7 @@ const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryErro
  * @category layers
  * @since 1.0.0
  */
-export const layerMemory = (
-  root: string,
-  engine: EngineDurable = engineDurable(root)
-): Layer.Layer<MemoryStore.MemoryStore> =>
-  MemoryStore.layer.pipe(
-    Layer.provide([engine.stores, NodeCrypto.layer]),
-    Layer.orDie
-  )
+export const layerMemory = native.layerMemory
 
 const defaultServerOptions: ServerOptions = { host: "127.0.0.1", port: 3000 }
 
@@ -1529,30 +664,7 @@ export const layerServer = (
  * @category layers
  * @since 1.0.0
  */
-export const layerGateway = (
-  health: GatewayServer.Health,
-  options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: defaultServerOptions.port },
-  root: string,
-  engine: EngineDurable = engineDurable(root, undefined, options),
-  journal: Layer.Layer<Journal.Journal> = engine.journal
-) => {
-  const host = options.host ?? "127.0.0.1"
-  if (!Serve.isLoopback(host) && options.listen !== true) {
-    throw new Error(`Refusing non-loopback gateway bind ${host} without an explicit --listen opt-in`)
-  }
-  const gateway = NodeGateway.layer(health, options).pipe(
-    Layer.provide([
-      GatewayProjections.layer,
-      SyncServer.layer.pipe(Layer.provide([journal, RunCatalog.layerNoop])),
-      SyncAuth.layer.pipe(Layer.provide(WorkspaceShare.layerNoop))
-    ])
-  )
-  // Those three supplied layers discharge every gateway input except Control.
-  // Some upstream layer combinators currently widen that input to `any`, which
-  // would make every caller look incomplete even though the runtime graph is
-  // closed. Preserve the exact boundary this composition actually exposes.
-  return gateway
-}
+export const layerGateway = native.layerGateway
 
 /**
  * Hosts Control using the alpha's single shared bearer token.

@@ -2,10 +2,12 @@
  * @since 1.0.0
  */
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Layer } from "effect"
 import { GatewayError } from "../GatewayError.ts"
 import type * as GatewayServer from "../GatewayServer.ts"
 import * as NativeGateway from "../internal/NativeGateway.ts"
+
+export { bearerPrincipal } from "../internal/NativeGateway.ts"
 
 /** TCP bind and existing gateway policy options supported by the Bun host.
  * @since 1.0.0
@@ -17,9 +19,16 @@ export type ServerOptions = Pick<NativeGateway.ServerOptions,
 const native = NativeGateway.makeLayer(options => BunHttpServer.layerServer({
   hostname: options.host ?? "127.0.0.1",
   port: options.port ?? 7331
-}).pipe(Layer.catchCause(() => Layer.effectContext(Effect.fail(new GatewayError({
-  code: "bind_failed", message: "The gateway socket could not be bound"
-}))))))
+}).pipe(Layer.catchCause(cause => {
+  const failure = Cause.squash(cause)
+  const code = typeof failure === "object" && failure !== null && "code" in failure ? failure.code : undefined
+  if (Cause.hasInterruptsOnly(cause) || !["EADDRINUSE", "EACCES", "EADDRNOTAVAIL"].includes(String(code))) {
+    return Layer.effectContext(Effect.failCause(cause))
+  }
+  return Layer.effectContext(Effect.fail(new GatewayError({
+    code: "bind_failed", message: "The gateway socket could not be bound"
+  })))
+})))
 
 /** Serves the existing HTTP/WebSocket gateway using Bun.serve in the caller's scope.
  * @since 1.0.0

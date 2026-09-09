@@ -307,6 +307,7 @@ const stack = (options: StackOptions) => {
     promptRunner: options.promptRunner,
     reasoningEffort: options.reasoningEffort
   }).pipe(
+    Layer.provideMerge(Action.layerImplementations),
     Layer.provide(
       options.modules === undefined ? Layer.empty : Layer.merge(
         Layer.succeed(Executable.Catalog, options.modules.catalog),
