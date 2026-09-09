@@ -651,45 +651,202 @@ describe("Scheduler recovery", () => {
     ])
   })
 
-  it("records a monitor failure against the run it was watching", async () => {
+  it.each([1, 4])("keeps a live run durable after %s inspection failures and reattaches", async (failures) => {
     let polls = 0
-    const runner = runnerFixture({
-      isActive: () =>
-        polls++ === 0
-          ? Effect.fail(new TriggerError({ code: "runner", message: "Control could not inspect run" }))
-          : Effect.succeed(false)
-    })
-    const results: Array<TriggerStore.Result> = []
-    await inMemory(
-      Effect.scoped(
-        Effect.gen(function*() {
-          const store = yield* TriggerStore.TriggerStore
-          yield* seedFired(store, trigger("skip", "one"))
-          const recording = TriggerStore.TriggerStore.of({
-            ...store,
-            recordResult: (result) =>
-              Effect.sync(() => {
-                results.push(result)
-              }).pipe(Effect.andThen(store.recordResult(result)))
-          })
-          const scheduler = yield* Scheduler.make().pipe(
-            Effect.provideService(TriggerStore.TriggerStore, recording),
-            Effect.provideService(Scheduler.Runner, runner.service)
-          )
-          yield* TestClock.setTime(hour)
-          yield* scheduler.runOnce
-          yield* Effect.yieldNow
+    const runner = runnerFixture()
+    const inspecting = {
+      ...runner.service,
+      isActive: (runId: string) =>
+        Effect.suspend(() => {
+          polls++
+          return polls <= failures
+            ? Effect.fail(new TriggerError({ code: "runner", message: "transient inspection outage" }))
+            : runner.service.isActive(runId)
+        })
+    }
+    await inMemory(Effect.scoped(Effect.gen(function*() {
+      const store = yield* TriggerStore.TriggerStore
+      yield* seedFired(store, trigger("skip", "one"))
+      const scheduler = yield* Scheduler.make({ runPollInterval: "1 second" }).pipe(
+        Effect.provideService(Scheduler.Runner, inspecting)
+      )
+      yield* TestClock.setTime(hour)
+      yield* scheduler.runOnce
+      yield* Effect.yieldNow
+      expect(yield* store.activeRun("hourly")).toEqual(Option.some("run-1"))
+      expect([...runner.active]).toEqual(["run-1"])
+      expect((yield* store.history()).items[0]?.outcome).toBe("launched")
+
+      if (failures === 4) {
+        // Three retries back off by one, two, then four poll intervals.
+        for (const delay of [1_000, 2_000, 4_000]) yield* TestClock.adjust(delay)
+        expect(polls).toBe(4)
+        yield* TestClock.adjust("1 minute")
+        expect(polls).toBe(4)
+        expect(yield* store.activeRun("hourly")).toEqual(Option.some("run-1"))
+        yield* scheduler.runOnce
+        expect(polls).toBe(5)
+      }
+      yield* TestClock.setTime(2 * hour)
+      yield* scheduler.runOnce
+      expect(runner.starts).toHaveLength(1)
+      expect([...runner.active]).toEqual(["run-1"])
+      expect((yield* store.history()).items[0]?.outcome).toBe("skipped")
+
+      runner.active.delete("run-1")
+      yield* TestClock.adjust("1 second")
+      yield* scheduler.runOnce
+      expect(yield* store.activeRun("hourly")).toEqual(Option.none())
+      expect((yield* store.history()).items.find((fire) => fire.occurrence === hour)?.outcome).toBe("completed")
+      expect(runner.cancelled).toEqual([])
+    })))
+  })
+
+  it.each(["typed", "defect"])("retries a %s completion write through tick recovery", async (failure) => {
+    await inMemory(Effect.scoped(Effect.gen(function*() {
+      const store = yield* TriggerStore.TriggerStore
+      yield* seedFired(store, trigger())
+      const runner = runnerFixture()
+      let refuse = true
+      const results: Array<TriggerStore.Result> = []
+      const scheduler = yield* Scheduler.make().pipe(
+        Effect.provideService(Scheduler.Runner, {
+          ...runner.service,
+          isActive: (runId) =>
+            Effect.sync(() => {
+              runner.active.delete(runId)
+              return false
+            })
+        }),
+        Effect.provideService(TriggerStore.TriggerStore, {
+          ...store,
+          recordResult: (result) =>
+            Effect.suspend(() => {
+              results.push(result)
+              if (refuse && result.outcome === "completed") {
+                refuse = false
+                return failure === "typed"
+                  ? Effect.fail(new TriggerError({ code: "store", message: "completion write failed" }))
+                  : Effect.die("completion write defect")
+              }
+              return store.recordResult(result)
+            })
         })
       )
-    )
-    expect(results).toContainEqual({
-      triggerId: "hourly",
-      occurrence: hour,
-      outcome: "failed",
-      error: "Control could not inspect run",
-      runId: "run-1"
-    })
+      yield* TestClock.setTime(hour)
+      yield* scheduler.runOnce
+      yield* Effect.yieldNow
+      expect(yield* store.activeRun("hourly")).toEqual(Option.some("run-1"))
+      expect((yield* store.history()).items[0]?.outcome).toBe("launched")
+      yield* scheduler.runOnce
+      expect(yield* store.activeRun("hourly")).toEqual(Option.none())
+      expect((yield* store.history()).items[0]?.outcome).toBe("completed")
+      expect(results.map((result) => result.outcome)).toEqual(["launched", "completed", "completed"])
+      expect(runner.starts).toHaveLength(1)
+    })))
   })
+
+  it("detaches on inspection interruption and caps defect retries at one minute", async () => {
+    await inMemory(Effect.scoped(Effect.gen(function*() {
+      const store = yield* TriggerStore.TriggerStore
+      yield* seedFired(store, trigger())
+      const runner = runnerFixture()
+      const scheduler = yield* Scheduler.make().pipe(
+        Effect.provideService(Scheduler.Runner, {
+          ...runner.service,
+          isActive: () => Effect.interrupt
+        })
+      )
+      yield* TestClock.setTime(hour)
+      yield* scheduler.runOnce
+      yield* Effect.yieldNow
+      expect(yield* store.activeRun("hourly")).toEqual(Option.some("run-1"))
+      expect((yield* store.history()).items[0]?.outcome).toBe("launched")
+
+      yield* seedFired(store, { ...trigger(), id: "defective" })
+      let polls = 0
+      const retrying = yield* Scheduler.make({ runPollInterval: "1 hour" }).pipe(
+        Effect.provideService(Scheduler.Runner, {
+          ...runner.service,
+          isActive: (runId) =>
+            runId === "run-1" ? runner.service.isActive(runId) : Effect.suspend(() => {
+              polls++
+              return Effect.die("inspection defect")
+            })
+        })
+      )
+      yield* retrying.runOnce
+      expect(polls).toBe(1)
+      for (const expected of [2, 3, 4]) {
+        yield* TestClock.adjust("59 seconds")
+        expect(polls).toBe(expected - 1)
+        yield* TestClock.adjust("1 second")
+        expect(polls).toBe(expected)
+      }
+      yield* TestClock.adjust("1 minute")
+      expect(polls).toBe(4)
+      expect(yield* store.activeRun("defective")).toEqual(Option.some("run-2"))
+      expect([...runner.active]).toEqual(["run-1", "run-2"])
+      expect(runner.cancelled).toEqual([])
+    })))
+  })
+
+  it.each(["typed", "start defect", "record defect", "interrupt"])(
+    "settles the launch acknowledgement on %s and releases the tick semaphore",
+    async (failure) => {
+      await inMemory(Effect.scoped(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        yield* seedFired(store, trigger())
+        yield* seedFired(store, { ...trigger(), id: "z-other", flowId: "healthy" })
+        const runner = runnerFixture()
+        const entered = yield* Deferred.make<void>()
+        const scheduler = yield* Scheduler.make().pipe(
+          Effect.provideService(Scheduler.Runner, {
+            ...runner.service,
+            start: (input) =>
+              input.flowId === "healthy" ?
+                runner.service.start(input) :
+                Deferred.succeed(entered, undefined).pipe(Effect.andThen(
+                  failure === "typed" ?
+                    Effect.fail(new TriggerError({ code: "runner", message: "launch refused" })) :
+                    failure === "start defect" ?
+                    Effect.die("launch defect") :
+                    failure === "interrupt"
+                    ? Effect.interrupt
+                    : runner.service.start(input)
+                ))
+          }),
+          Effect.provideService(TriggerStore.TriggerStore, {
+            ...store,
+            recordResult: (result) =>
+              failure === "record defect" && result.triggerId === "hourly" &&
+                result.outcome === "launched"
+                ? Effect.die("launch record defect")
+                : store.recordResult(result)
+          })
+        )
+        yield* TestClock.setTime(hour)
+        const tick = yield* Effect.forkScoped(scheduler.runOnce)
+        yield* Deferred.await(entered)
+        for (let n = 0; n < 10; n++) yield* Effect.yieldNow
+        const exit = tick.pollUnsafe()
+        expect(exit).toBeDefined()
+        if (failure === "interrupt") {
+          expect(exit?._tag).toBe("Failure")
+          expect(runner.starts).toHaveLength(0)
+        } else {
+          expect(exit?._tag).toBe("Success")
+          expect(runner.starts.filter((input) => input.flowId === "healthy")).toHaveLength(1)
+        }
+        const held = yield* store.inspect("hourly")
+        if (failure === "typed") expect(held.activeRunId).toBeUndefined()
+        else expect(TriggerStore.isReservation(held.activeRunId)).toBe(true)
+        // A second tick must also acquire the permit after a failed child.
+        yield* scheduler.runOnce
+        expect(runner.starts.filter((input) => input.flowId === "healthy")).toHaveLength(1)
+      })))
+    }
+  )
 
   it("skips an occurrence while its own launch is still in flight", async () => {
     const runner = runnerFixture()

@@ -647,7 +647,7 @@ const defaultHost: string
 ```
 
 `pollInterval` defaults to one minute and paces the tick loop.
-`runPollInterval` defaults to one second and paces a launched run's monitor.
+`runPollInterval` defaults to fifteen seconds and paces a launched run's monitor.
 Both must be finite, positive Effect durations; zero polls a CPU-tight loop and
 an infinite interval never completes, and both are refused with
 `invalid_options` and `TriggerError.path` naming the field.
@@ -687,6 +687,18 @@ tick rather than the typed error alone.
 Scope closure detaches every run monitor and cancels nothing. The runs are
 durable and outlive the process; the next incarnation re-attaches to them from
 the store. Cancellation happens only through a `supersede` claim.
+
+An inspection failure logs its cause and retries three times. Retry delays
+start at `runPollInterval`, double each time, and are capped at one minute.
+After exhaustion the monitor detaches, retaining the durable active owner and
+local entry. Later ticks inspect that owner again. Only an inspection that
+reports the run stopped permits a completed result; inspection and completion
+write failures never become failed run outcomes.
+
+Every launch child exit completes its acknowledgement, including defects and
+interruption before launch persistence. The waiting tick observes the full
+cause. Non-interruption failures are logged and isolated so later triggers in
+the same tick can launch; interruption propagates and releases the tick permit.
 
 ## DispatchReader
 

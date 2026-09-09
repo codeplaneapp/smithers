@@ -336,6 +336,26 @@ describe("Scheduler", () => {
     expect(results.filter((result) => result.outcome === "launched")).toHaveLength(1)
   })
 
+  it("polls active runs every fifteen seconds by default", async () => {
+    const runner = runnerFixture()
+    await Effect.runPromise(provideTest(
+      Effect.scoped(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        yield* seed(store, trigger(), runner, "skipped")
+        const scheduler = yield* Scheduler.make().pipe(Effect.provideService(Scheduler.Runner, runner.service))
+        yield* TestClock.setTime(hour)
+        yield* scheduler.runOnce
+        yield* Effect.yieldNow
+        expect(runner.inspected).toEqual(["run-1"])
+        yield* TestClock.adjust("14 seconds")
+        expect(runner.inspected).toEqual(["run-1"])
+        yield* TestClock.adjust("1 second")
+        expect(runner.inspected).toEqual(["run-1", "run-1"])
+      })),
+      []
+    ))
+  })
+
   it("records launch failure and advances to the next occurrence", async () => {
     const results: Array<TriggerStore.Result> = []
     const runner = runnerFixture(1)

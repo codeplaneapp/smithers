@@ -168,6 +168,13 @@ run, or a plan never got approved.
 - `Control could not ...`: the underlying Control call failed. The cause carries
   the original error.
 
+A run inspection error retains the active owner and overlap protection. The
+monitor logs the cause and retries three times with doubling delays starting
+at `runPollInterval`, capped at one minute. Exhaustion detaches the monitor;
+subsequent ticks inspect the retained owner again. Restore Control access to
+resume completion detection. The default run poll interval is fifteen seconds.
+An inspection outage does not record a failed run or cancel it.
+
 ## store
 
 **What happened.** A persistence operation failed, or a `TriggerStore.makeNoop`

@@ -348,7 +348,7 @@ export const make = (
     const active = yield* Ref.make<ReadonlyMap<string, Active>>(new Map())
     const observedAt = yield* Ref.make<ReadonlyMap<string, number>>(new Map())
     const semaphore = yield* Semaphore.make(1)
-    const runPollInterval = yield* duration(options.runPollInterval ?? "1 second", "runPollInterval")
+    const runPollInterval = yield* duration(options.runPollInterval ?? "15 seconds", "runPollInterval")
 
     // The watermark only moves forward, and only past occurrences this process
     // finished dispatching. Advancing it before the work is what silently lost
@@ -418,11 +418,9 @@ export const make = (
       Effect.gen(function*() {
         const local = (yield* Ref.get(active)).get(trigger.id)
         if (local !== undefined) {
-          // A monitored entry is removed by the monitor's own finalizer when
-          // its lifecycle ends, however it ends, so a fiber still in the map is
-          // a live monitor and there is nothing left to ask. An entry without
-          // one was recovered from the store, and only the runtime can say
-          // whether that run is still going.
+          // The finalizer detaches the fiber when monitoring ends. An entry
+          // without a fiber was recovered or could no longer be inspected;
+          // only the runtime can say whether that run is still going.
           if (local.fiber !== undefined) return local
           if (!isReservation(local.runId)) {
             if (yield* stillRunning(local.runId)) return local
@@ -482,6 +480,34 @@ export const make = (
         runId
       })
 
+    // An inspection error is not evidence that a run stopped. Retry three
+    // times, doubling the poll interval up to a minute, then let the next tick
+    // inspect the durable owner again. Interruption must still close the scope.
+    const inspectRun = (triggerId: string, runId: string): Effect.Effect<Option.Option<boolean>, TriggerError> =>
+      Effect.gen(function*() {
+        for (let attempt = 0;; attempt++) {
+          const inspected = yield* runner.isActive(runId).pipe(
+            Effect.map(Option.some),
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause) ?
+                Effect.failCause(cause) :
+                Effect.logWarning("A trigger run inspection failed", cause).pipe(
+                  Effect.annotateLogs({ triggerId, runId, attempt: String(attempt + 1) }),
+                  Effect.as(Option.none<boolean>())
+                )
+            )
+          )
+          if (Option.isSome(inspected)) return inspected
+          if (attempt === 3) {
+            yield* Effect.logWarning("A trigger run monitor detached after inspection retries").pipe(
+              Effect.annotateLogs({ triggerId, runId })
+            )
+            return Option.none<boolean>()
+          }
+          yield* Effect.sleep(Math.min(Duration.toMillis(runPollInterval) * 2 ** attempt, 60_000))
+        }
+      })
+
     const launch = (
       trigger: Registered,
       occurrence: number,
@@ -491,6 +517,7 @@ export const make = (
       Effect.gen(function*() {
         let runId: string | undefined
         let launchRecorded = false
+        let completed = false
         const started = yield* Deferred.make<void, TriggerError>()
         const lifecycle = Effect.gen(function*() {
           runId = yield* runner.start({
@@ -509,7 +536,10 @@ export const make = (
           })
           launchRecorded = true
           yield* Deferred.succeed(started, undefined)
-          while (yield* runner.isActive(runId)) {
+          while (true) {
+            const inspected = yield* inspectRun(trigger.id, runId)
+            if (Option.isNone(inspected)) return
+            if (!inspected.value) break
             yield* Effect.sleep(runPollInterval)
           }
           yield* store.recordResult({
@@ -518,11 +548,14 @@ export const make = (
             outcome: "completed",
             runId
           })
+          completed = true
         }).pipe(
           Effect.catch((error) =>
             Effect.gen(function*() {
               if (launchRecorded) {
-                yield* recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)
+                yield* Effect.logWarning("A trigger run monitor could not persist completion", error).pipe(
+                  Effect.annotateLogs({ triggerId: trigger.id, runId: runId! })
+                )
                 return
               }
               if (error.code === "stale_owner" && runId !== undefined) {
@@ -572,18 +605,36 @@ export const make = (
           // any other scope closure must leave it alone: the next incarnation
           // re-attaches through `resolveActive`. Cancellation is a deliberate
           // act and belongs to `cancelActive` alone.
-          Effect.ensuring(removeActive(trigger.id, occurrence))
+          Effect.ensuring(Effect.suspend(() =>
+            launchRecorded && !completed
+              ? updateActive(trigger.id, occurrence, (entry) => ({ ...entry, fiber: undefined }))
+              : removeActive(trigger.id, occurrence)
+          ))
         )
         const fiber = yield* Effect.forkIn(
-          Effect.scoped(lifecycle),
+          Effect.scoped(lifecycle).pipe(
+            // A defect or interruption before acknowledgement must reach the
+            // waiting tick with its full cause and release the semaphore.
+            Effect.onExit((exit) =>
+              Effect.gen(function*() {
+                yield* Deferred.done(started, exit)
+                if (launchRecorded && exit._tag === "Failure" && !Cause.hasInterrupts(exit.cause)) {
+                  yield* Effect.logWarning("A trigger run monitor failed", exit.cause).pipe(
+                    Effect.annotateLogs({ triggerId: trigger.id, runId: runId! })
+                  )
+                }
+              })
+            )
+          ),
           parentScope,
           { startImmediately: true }
         )
         // The monitor is recorded against the entry this occurrence claimed.
-        // `startImmediately` means a run that settled before its first poll has
-        // already removed that entry by the time this runs, and a fiber with
-        // nothing left to interrupt is not worth putting back.
-        yield* updateActive(trigger.id, occurrence, (entry) => ({ ...entry, fiber }))
+        // `startImmediately` can finish or detach before the fork returns.
+        // Never attach a finished fiber to an entry awaiting tick recovery.
+        if (fiber.pollUnsafe() === undefined) {
+          yield* updateActive(trigger.id, occurrence, (entry) => ({ ...entry, fiber }))
+        }
         yield* Deferred.await(started)
       })
 
