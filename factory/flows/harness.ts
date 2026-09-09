@@ -23,6 +23,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { FlowEngine } from "../../packages/smithers/flows/engine/src/index.ts"
 import { Action, Flow, Interpreter } from "../../packages/smithers/flows/flow/src/index.ts"
+import { libraryPackages } from "../../scripts/workspace-packages.mjs"
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, "../..")
 export const REPORTS_DIR = path.join(REPO_ROOT, "factory/reports")
@@ -70,7 +71,8 @@ const signalProcessTree = (pid: number | undefined, signal: NodeJS.Signals): voi
 export const runProcess = (spec: SpawnSpec): Effect.Effect<TaskResult> =>
   Effect.callback<TaskResult>((resume) => {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(spec.id)) {
-      return Effect.die(new Error(`Unsafe process id: ${JSON.stringify(spec.id)}`))
+      resume(Effect.die(new Error(`Unsafe process id: ${JSON.stringify(spec.id)}`)))
+      return
     }
     fs.mkdirSync(spec.logDir, { recursive: true })
     const startedAt = new Date().toISOString()
@@ -313,7 +315,7 @@ export const shellTaskLayer = ShellTask.toLayer((payload) =>
  * Executes one flow on the in-memory engine with both task implementations
  * attached.
  */
-export const runFlow = <F extends Flow.Flow.AnyWithProps>(
+export const runFlow = <F extends Flow.AnyWithProps>(
   flow: F,
   payload: Record<string, unknown>,
   executionId: string
@@ -351,32 +353,25 @@ export const chunk = <T>(items: ReadonlyArray<T>, size: number): Array<Array<T>>
 }
 
 export interface WorkspacePackage {
+  /** Repository-relative directory, including the packages/ prefix. */
   readonly dir: string
   readonly npmName: string
 }
 
 /** Reads and validates every workspace package identity before it reaches a command argument. */
 export const listWorkspacePackages = (): Array<WorkspacePackage> =>
-  fs
-    .readdirSync(path.join(REPO_ROOT, "packages"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.name)) {
-        throw new Error(`Unsafe workspace package directory: ${JSON.stringify(entry.name)}`)
-      }
-      const manifestPath = path.join(REPO_ROOT, "packages", entry.name, "package.json")
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
-        name?: unknown
-      }
-      const expected = `@smthrs/${entry.name}`
-      if (manifest.name !== expected) {
-        throw new Error(`${manifestPath} must declare the exact package name ${expected}`)
-      }
-      return { dir: entry.name, npmName: expected }
-    })
-    .sort((left, right) => left.dir.localeCompare(right.dir))
+  libraryPackages(REPO_ROOT).map(({ dir, manifest, manifestPath }) => {
+    if (!/^packages\/[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/.test(dir)) {
+      throw new Error(`Unsafe workspace package directory: ${JSON.stringify(dir)}`)
+    }
+    const npmName = manifest.name
+    if (typeof npmName !== "string" || !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(npmName)) {
+      throw new Error(`${manifestPath} must declare a safe npm package name`)
+    }
+    return { dir, npmName }
+  })
 
-/** Lists validated workspace package directory names. */
+/** Lists validated repository-relative workspace package directories. */
 export const listPackages = (): Array<string> => listWorkspacePackages().map((pkg) => pkg.dir)
 
 /** Parses an optional exact `--packages a,b` selection and rejects every ambiguous form. */

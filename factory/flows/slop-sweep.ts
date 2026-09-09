@@ -25,7 +25,7 @@ const progressPath = `${reportPath}.partial`
 const promptFor = (pkg: string): string =>
   [
     `You are doing a mechanical JSDoc tagging sweep in the pnpm workspace ${REPO_ROOT}.`,
-    `Work ONLY inside packages/${pkg}/src.`,
+    `Work ONLY inside ${pkg}/src.`,
     "For every exported declaration (functions, consts, classes, interfaces, type aliases, schemas, data structures) whose JSDoc block does not already contain @humanreviewed, add a line `* @slop` inside the JSDoc block, after any existing @category/@since tags.",
     "If an exported declaration has no JSDoc block, create a minimal block directly above it containing only the @slop tag.",
     "Rules: change comments only — never code, imports, or formatting outside JSDoc blocks. Skip test files (*.test.ts, test/ directories), node_modules, dist, scripts, and generated files. Do not run builds, tests, or linters. Do not touch any other package.",
@@ -34,6 +34,7 @@ const promptFor = (pkg: string): string =>
 
 const packages = listPackages()
 const waves = chunk(packages, WAVE_SIZE)
+const countCommand = `grep -rn "@slop" ${packages.map((pkg) => `${pkg}/src`).join(" ")} 2>/dev/null | wc -l`
 const results: Array<TaskResult> = []
 
 const writeReport = (done: number) => {
@@ -46,7 +47,7 @@ const writeReport = (done: number) => {
     "| --- | --- | --- |",
     ...results.map((r) => `| ${r.id} | ${r.exitCode} | ${path.relative(REPO_ROOT, r.logPath)} |`),
     "",
-    "Verification: `grep -rn \"@slop\" packages/*/src | wc -l`.",
+    `Verification: \`${countCommand}\`.`,
     ""
   ]
   fs.mkdirSync(REPORTS_DIR, { recursive: true })
@@ -67,14 +68,14 @@ for (let index = 0; index < waves.length; index++) {
           wave.map((pkg) => [
             pkg,
             AgentTask.call({
-              id: pkg,
+              id: pkg.replaceAll("/", "."),
               prompt: promptFor(pkg),
               cwd: REPO_ROOT,
               model: MODEL,
               timeoutMs: TIMEOUT_MS,
               logDir,
               completionMarker: "DONE",
-              allowedPaths: [path.join(REPO_ROOT, "packages", pkg, "src")]
+              allowedPaths: [path.join(REPO_ROOT, pkg, "src")]
             })
           ])
         )
@@ -94,7 +95,7 @@ for (let index = 0; index < waves.length; index++) {
   writeReport(results.length)
 }
 
-const slopCount = execSync("grep -rn \"@slop\" packages/*/src 2>/dev/null | wc -l", {
+const slopCount = execSync(countCommand, {
   cwd: REPO_ROOT
 })
   .toString()

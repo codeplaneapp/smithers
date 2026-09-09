@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import { execFileSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { listWorkspacePackages, makeConfinementValidator, runProcess, selectPackages } from "./harness.ts"
+import { libraryPackages } from "../../scripts/workspace-packages.mjs"
+import { listPackages, listWorkspacePackages, makeConfinementValidator, REPO_ROOT, runProcess, selectPackages } from "./harness.ts"
 
 const temporaryRoots: string[] = []
 afterEach(() => {
@@ -15,7 +19,39 @@ describe("factory harness guards", () => {
   test("workspace package identities are read from exact manifests", () => {
     const packages = listWorkspacePackages()
     expect(packages.length).toBeGreaterThan(0)
-    for (const pkg of packages) expect(pkg.npmName).toBe(`@smthrs/${pkg.dir}`)
+    expect(packages.map((pkg) => pkg.dir)).toEqual(libraryPackages().map((pkg) => pkg.dir))
+    expect(listPackages()).toEqual(packages.map((pkg) => pkg.dir))
+    expect(packages).toContainEqual({ dir: "packages/smithers", npmName: "@smthrs/cli" })
+    expect(packages).toContainEqual({ dir: "packages/smthrs-deprecation", npmName: "smthrs" })
+    expect(packages).toContainEqual({ dir: "packages/smithers/flows/flow", npmName: "@smthrs/flow" })
+    for (const pkg of packages) {
+      const manifest = JSON.parse(readFileSync(join(REPO_ROOT, pkg.dir, "package.json"), "utf8"))
+      expect(pkg.npmName).toBe(manifest.name)
+    }
+  })
+
+  test("unsafe process ids fail as defects within the process timeout", async () => {
+    const root = mkdtempSync(join(tmpdir(), "factory-unsafe-id-"))
+    temporaryRoots.push(root)
+    const logDir = join(root, "logs")
+    const result = await Effect.runPromise(
+      runProcess({
+        id: "../unsafe id",
+        command: "true",
+        args: [],
+        cwd: root,
+        timeoutMs: 1_000,
+        logDir
+      }).pipe(Effect.exit, Effect.timeoutOption(1_000))
+    )
+    expect(Option.isSome(result)).toBe(true)
+    if (Option.isNone(result)) throw new Error("unsafe id did not settle within the process timeout")
+    expect(Exit.isFailure(result.value)).toBe(true)
+    if (Exit.isFailure(result.value)) {
+      expect(Cause.hasDies(result.value.cause)).toBe(true)
+      expect(Cause.pretty(result.value.cause)).toContain('Unsafe process id: "../unsafe id"')
+    }
+    expect(existsSync(logDir)).toBe(false)
   })
 
   test("structured arguments are never interpreted by a shell", async () => {

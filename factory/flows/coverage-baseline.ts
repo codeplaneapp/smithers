@@ -47,7 +47,7 @@ const writeReport = (done: number) => {
     "# Coverage baseline",
     "",
     `Started ${startedAt}. ${done}/${packages.length} packages measured, wave size ${WAVE_SIZE}.`,
-    "Command per package: `pnpm --filter @smthrs/<pkg> exec vitest run --coverage`.",
+    "Command per package: `pnpm --filter <manifest-name> exec vitest run --coverage`.",
     "",
     "| Package | Exit | All files (Stmts/Branch/Funcs/Lines) | Log |",
     "| --- | --- | --- | --- |",
@@ -75,7 +75,7 @@ for (let index = 0; index < waves.length; index++) {
             return [
               pkg,
               ShellTask.call({
-                id: pkg,
+                id: pkg.replaceAll("/", "."),
                 command: "pnpm",
                 args: ["--filter", descriptor.npmName, "exec", "vitest", "run", "--coverage"],
                 cwd: REPO_ROOT,
