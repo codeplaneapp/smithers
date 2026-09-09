@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type { QuickJSWASMModule } from "quickjs-emscripten-core"
 import { describe, expect, it } from "vitest"
 import * as Author from "../src/Author.ts"
 import * as Catalog from "../src/Catalog.ts"
@@ -7,6 +8,7 @@ import * as Chain from "../src/Chain.ts"
 import type * as Event from "../src/Event.ts"
 import * as Journal from "../src/Journal.ts"
 import * as Observation from "../src/Observation.ts"
+import * as QuickJsRunner from "../src/QuickJsRunner.ts"
 import * as ScriptRunner from "../src/ScriptRunner.ts"
 import * as Steering from "../src/Steering.ts"
 import * as SubChains from "../src/SubChains.ts"
@@ -645,5 +647,206 @@ describe("Chain crash recovery", () => {
     expect(settled.map((event) => event.key.ordinal)).toEqual([1])
     expect(seen).toHaveLength(1)
     expect(seen[0]?.context).toEqual(["fix TODOs", "[shape] no flow block"])
+  })
+})
+
+describe("Chain recovery bounds", () => {
+  const boundedRun = async (
+    options: Chain.Options,
+    author: Layer.Layer<Author.Author>,
+    initial: ReadonlyArray<Event.Event> = [],
+    runner: Layer.Layer<ScriptRunner.ScriptRunner, ScriptRunner.ScriptFailure> = ScriptRunner.layerInProcess
+  ) => {
+    const events: Array<Event.Event> = [...initial]
+    const journal = Journal.layerNoop({
+      read: Effect.sync(() => [...events]),
+      append: (event) =>
+        Effect.sync(() => {
+          // Bound the reproduction independently of the harness under test.
+          if (events.length - initial.length >= 40) throw new Error("recovery exceeded append bound")
+          events.push(event)
+        })
+    })
+    const outcome = await Effect.runPromise(
+      Chain.run(options).pipe(
+        Effect.provide(Layer.mergeAll(journal, author, Catalog.layer([]), runner))
+      )
+    )
+    return { events, outcome }
+  }
+
+  it.each([0, 4])("parks refused harness payloads with budget %i", async (maxCallsPerLink) => {
+    const options = { goal: "goal", context: ["x".repeat(8_400_000)], maxCallsPerLink }
+    const { events, outcome } = await boundedRun(options, Author.layerNoop())
+    expect(outcome._tag).toBe("Park")
+    expect(outcome).toMatchObject({ reason: { code: "quota" } })
+    const rejected = events.filter((event) => event._tag === "GateRejected")
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]?.observation.kind).toBe("fuel")
+    expect(rejected[0]?.observation.message).toContain(maxCallsPerLink === 0 ? "budget" : "JSON")
+    // A crash after refusal must replay the rejection without appending it again.
+    const resumed = await boundedRun(options, Author.layerNoop(), events.slice(0, -1))
+    expect(resumed).toEqual({ events, outcome })
+  })
+
+  it("checks fuel before inspecting a refused script payload", async () => {
+    let reads = 0
+    const runner = Layer.succeed(ScriptRunner.ScriptRunner)(ScriptRunner.make({
+      run: (_script, handler) =>
+        Effect.gen(function*() {
+          yield* handler({ name: "author", payload: { context: [] } })
+          yield* handler({
+            name: "bad",
+            payload: {
+              get value() {
+                reads++
+                throw new Error("refused")
+              }
+            }
+          })
+          return { _tag: "Done", value: null } as const
+        })
+    }))
+    const { events, outcome } = await boundedRun(
+      { goal: "goal", maxCallsPerLink: 1 },
+      Author.layerFn(() => doneScript),
+      [],
+      runner
+    )
+    expect(outcome).toMatchObject({ _tag: "Park", reason: { code: "quota" } })
+    expect(reads).toBe(0)
+    expect(events.filter((event) => event._tag === "GateRejected").map((event) => event.observation.kind))
+      .toEqual(["fuel"])
+  })
+
+  it("parks an 8.4M-character QuickJS throw within the call budget", async () => {
+    let calls = 0
+    const author = Author.layerFn(() => ++calls === 1 ? flow(`throw "x".repeat(8400000)`) : "invalid")
+    const { events, outcome } = await boundedRun(
+      { goal: "goal", maxCallsPerLink: 4 },
+      author,
+      [],
+      QuickJsRunner.layer()
+    )
+    expect(outcome).toMatchObject({ _tag: "Park", reason: { code: "quota" } })
+    const rejected = events.filter((event): event is Event.GateRejected =>
+      event._tag === "GateRejected" && event.link === 1
+    )
+    expect(rejected.map((event) => event.ordinal)).toEqual([0, 1, 2, 3, 4])
+    expect(rejected.at(-1)?.observation.kind).toBe("fuel")
+    // One LinkAuthored precedes execution; the link appends five
+    // rejections, three rejected-author settlements, and one terminal.
+    expect(events.filter((event) => "link" in event && event.link === 1).map((event) => event._tag)).toEqual([
+      "LinkAuthored",
+      "GateRejected",
+      "GateRejected",
+      "CallSettled",
+      "GateRejected",
+      "CallSettled",
+      "GateRejected",
+      "CallSettled",
+      "GateRejected",
+      "LinkEnded"
+    ])
+  })
+
+  it.each(["script", "handler"])(
+    "caps multi-megabyte %s failures in the journal and author payload",
+    async (source) => {
+      const seen: Array<Author.Input> = []
+      const author = Author.layerFn((input) => {
+        seen.push(input)
+        return seen.length === 1
+          ? flow(source === "script" ? `throw "x".repeat(2000000)` : `await ctx.call("fail", {})`)
+          : doneScript
+      })
+      const { events, outcome } = await runChain({
+        author,
+        entries: [failingEntry("fail", "x".repeat(2_000_000))]
+      })
+      expect(outcome).toEqual({ _tag: "Done", value: "recovered" })
+      const rejected = events.find((event) => event._tag === "GateRejected") as Event.GateRejected
+      expect(rejected.observation.message.length).toBeLessThanOrEqual(8192)
+      expect(rejected.observation.message).toContain("[truncated]")
+      expect(seen[1]?.context.join("\n").length).toBeLessThan(8400)
+      const recovery = events.find((event) => event._tag === "CallSettled" && event.link === 1)
+      expect(JSON.stringify(recovery).length).toBeLessThan(9000)
+    }
+  )
+
+  it("caps an oversized native realm failure before recovering through the author", async () => {
+    // Inject the native failure rather than relying on host stack exhaustion,
+    // which can instead surface as an ordinary rejected realm promise.
+    const module = {
+      newRuntime: () => {
+        throw new Error("native abort: " + "x".repeat(2_000_000))
+      }
+    } as unknown as QuickJSWASMModule
+    const runner = Layer.effect(ScriptRunner.ScriptRunner)(QuickJsRunner.make({}, () => Promise.resolve(module)))
+    const seen: Array<Author.Input> = []
+    const author = Author.layerFn((input) => {
+      seen.push(input)
+      return doneScript
+    })
+    const { events, outcome } = await boundedRun({ goal: "goal", maxLinks: 2 }, author, [], runner)
+    expect(outcome).toMatchObject({ _tag: "Park", reason: { code: "quota" } })
+    const rejected = events.find((event) => event._tag === "GateRejected") as Event.GateRejected
+    expect(rejected.observation.kind).toBe("script_failed")
+    expect(rejected.observation.message).toContain("native abort")
+    expect(rejected.observation.message).toContain("[truncated]")
+    expect(rejected.observation.message.length).toBeLessThanOrEqual(8192)
+    expect(seen[1]?.context.join("\n").length).toBeLessThan(8400)
+    const recovery = events.find((event) => event._tag === "CallSettled" && event.link === 1)
+    expect(JSON.stringify(recovery).length).toBeLessThan(9000)
+  })
+
+  it("caps the combined recovery block including oversized legacy observations", async () => {
+    const initial: Array<Event.Event> = [{ _tag: "ChainStarted", goal: "goal", envelope: null }]
+    for (let ordinal = 0; ordinal < 6; ordinal++) {
+      initial.push({
+        _tag: "GateRejected",
+        link: 0,
+        ordinal,
+        observation: { kind: "shape", message: "x".repeat(10000) }
+      })
+    }
+    const seen: Array<Author.Input> = []
+    const author = Author.layerFn((input) => {
+      seen.push(input)
+      return doneScript
+    })
+    const { outcome, events } = await boundedRun({ goal: "goal" }, author, initial)
+    expect(outcome).toMatchObject({ _tag: "Done" })
+    const block = seen[0]!.context.slice(1)
+    expect(block.join("\n").length).toBeLessThanOrEqual(32768)
+    expect(block.join("\n")).toContain("[truncated]")
+    expect(events.slice(0, initial.length)).toEqual(initial)
+  })
+
+  it("replays settled calls even when the resumed call budget is zero", async () => {
+    const first = await boundedRun({ goal: "goal" }, Author.layerMock([doneScript]))
+    const resumed = await boundedRun({ goal: "goal", maxCallsPerLink: 0 }, Author.layerNoop(), first.events.slice(0, 2))
+    expect(resumed).toEqual(first)
+  })
+
+  it("names Options.context and bounds the payload diff when context changes on resume", async () => {
+    const goal = "goal"
+    const prefix = "x".repeat(10000)
+    const { events } = await boundedRun({ goal, context: [prefix + "old context"] }, Author.layerMock([doneScript]))
+    const error = await Effect.runPromise(
+      Effect.flip(Chain.run({ goal, context: [prefix + "new context"] })).pipe(
+        Effect.provide(Layer.mergeAll(
+          Journal.layerMemory(events.slice(0, 2)),
+          Author.layerNoop(),
+          Catalog.layer([]),
+          ScriptRunner.layerInProcess
+        ))
+      )
+    )
+    expect(error).toMatchObject({ code: "replay_divergence" })
+    expect(error.message).toContain("Options.context")
+    expect(error.message).toContain("old context")
+    expect(error.message).toContain("new context")
+    expect(error.message.length).toBeLessThan(2000)
   })
 })

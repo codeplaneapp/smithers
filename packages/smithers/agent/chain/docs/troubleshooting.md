@@ -21,6 +21,7 @@ fix the cause and resume to re-enter the child's settled prefix.
 | `replay_divergence` | The resumed run's goal or envelope differs from the journaled `ChainStarted`.                                                                                                                               | Run with the same goal and envelope, or start a new chain scope.                                               |
 | `replay_divergence` | A replayed call differs from the journaled one in link, script digest, entry name, or payload.                                                                                                              | Restore the script text and payloads the journal settled; editing one character of a script re-keys its calls. |
 | `replay_divergence` | An entry's current declaration digest differs from the journaled one (a renamed, re-described, or re-capabilitied entry; a redeclared registry flow; a memory-contract upgrade; changed sub-chain budgets). | Restore the declaration the calls settled under, or start a new scope.                                         |
+| `replay_divergence` | `Options.context` changed on resume, changing a settled harness author payload. The error includes bounded journaled and live excerpts.                                                                     | Restore the original context lines, or start a new chain scope.                                                |
 | `invalid_journal`   | A link settled an author call whose result is not a script.                                                                                                                                                 | The journal is not a valid chain history; inspect the settled payload.                                         |
 | `invalid_journal`   | The root chain id contains `/` or matches `<digits>.<digits>`.                                                                                                                                              | Use the empty root id or a name such as `root-a`; derived child scopes are reserved.                           |
 
@@ -69,6 +70,12 @@ A run that ends in `Park` with reason code `quota` hit a budget: `maxLinks`
 observation and then parks, because the link is out of fuel and there is no
 next author to read it. A quota park is terminal and journaled as a
 `LinkEnded`; raising the budget does not replay it.
+
+A harness-built author payload refused by the JSON boundary also journals
+`fuel` and parks with `quota`. Reduce the goal or `Options.context` size and
+start a new scope. Repeated authoring cannot repair this payload. Individual
+observation messages are capped at 8192 code units and their combined
+recovery context at 32768; shortened text includes `[truncated]`.
 
 ## Construction defects
 

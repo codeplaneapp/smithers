@@ -152,6 +152,35 @@ const decodeScript = Schema.decodeUnknownOption(Script.Script)
 const sameJson = (left: typeof Schema.Json.Type, right: typeof Schema.Json.Type): boolean =>
   Digest.canonical(left) === Digest.canonical(right)
 
+// Excerpts start near the mismatch so a long shared prefix cannot hide the
+// changed value. JSON quoting keeps control characters out of diagnostics.
+const payloadDifference = (left: typeof Schema.Json.Type, right: typeof Schema.Json.Type): string => {
+  const journaled = Digest.canonical(left)
+  const live = Digest.canonical(right)
+  let offset = 0
+  while (journaled[offset] === live[offset]) offset++
+  const start = Math.max(0, offset - 64)
+  return `at JSON offset ${offset}: journaled ${JSON.stringify(journaled.slice(start, offset + 256))}; live ${
+    JSON.stringify(live.slice(start, offset + 256))
+  }`
+}
+
+const observationContext = (observations: ReadonlyArray<Observation.Observation>): ReadonlyArray<string> => {
+  const lines: Array<string> = []
+  const marker = "[truncated]"
+  let remaining = 32768 - marker.length
+  for (const observation of observations) {
+    const line = Observation.render(observation)
+    if (line.length >= remaining) {
+      lines.push(line.slice(0, Math.max(0, remaining - 1)) + marker)
+      break
+    }
+    lines.push(line)
+    remaining -= line.length + 1
+  }
+  return lines
+}
+
 type RunError =
   | ChainError
   | Journal.JournalError
@@ -300,20 +329,33 @@ export const run = (options: Options): Effect.Effect<Outcome.RunResult, RunError
         ): Effect.Effect<unknown, RunError | LinkAborted | ApprovalPark> =>
           Effect.gen(function*() {
             const ordinal = counter++
-            const payloadBoundary = ScriptRunner.jsonBoundary(payload)
-            if (payloadBoundary._tag === "Refused") {
-              return yield* reject(
-                ordinal,
-                Observation.make("call_failed", `"${name}" received input that is not JSON-serializable`)
-              )
-            }
-            const jsonPayload = payloadBoundary.value as typeof Schema.Json.Type
             const priorRejection = rejectedPrior.get(ordinal)
             if (priorRejection !== undefined) {
               lastRejection = priorRejection.observation
               return yield* new LinkAborted({ observation: priorRejection.observation })
             }
             const prior = settledPrior.get(ordinal)
+            // Replay is budget-free; every live attempt spends fuel before
+            // inspecting its payload, including attempts the boundary refuses.
+            if (prior === undefined && ordinal >= maxCalls) {
+              return yield* reject(
+                ordinal,
+                Observation.make("fuel", `link ${link} exceeded its budget of ${maxCalls} calls`)
+              )
+            }
+            const payloadBoundary = ScriptRunner.jsonBoundary(payload)
+            if (payloadBoundary._tag === "Refused") {
+              return yield* reject(
+                ordinal,
+                origin === "harness"
+                  ? Observation.make(
+                    "fuel",
+                    "harness author payload exceeds the JSON boundary; cannot recover by authoring"
+                  )
+                  : Observation.make("call_failed", `"${name}" received input that is not JSON-serializable`)
+              )
+            }
+            const jsonPayload = payloadBoundary.value as typeof Schema.Json.Type
             const scriptDigest = origin === "script" ? linkDigest : CallKey.harnessDigest
             if (prior !== undefined) {
               if (prior.key.link !== link || prior.key.scriptDigest !== scriptDigest) {
@@ -332,7 +374,9 @@ export const run = (options: Options): Effect.Effect<Outcome.RunResult, RunError
                 return yield* new ChainError({
                   code: "replay_divergence",
                   message:
-                    `link ${link} call ${ordinal} ("${name}") received a different payload than the journaled call`
+                    `link ${link} call ${ordinal} ("${name}") received a different payload than the journaled call; ${
+                      payloadDifference(prior.payload, jsonPayload)
+                    }${origin === "harness" ? "; check Options.context for this harness author payload" : ""}`
                 })
               }
               // The settled result only replays under the same declaration
@@ -353,12 +397,6 @@ export const run = (options: Options): Effect.Effect<Outcome.RunResult, RunError
                 })
               }
               return prior.result
-            }
-            if (ordinal >= maxCalls) {
-              return yield* reject(
-                ordinal,
-                Observation.make("fuel", `link ${link} exceeded its budget of ${maxCalls} calls`)
-              )
             }
             if (name === authorName) {
               if (Option.isSome(authorize)) {
@@ -513,7 +551,7 @@ export const run = (options: Options): Effect.Effect<Outcome.RunResult, RunError
             context: [
               options.goal,
               ...(options.context ?? []),
-              ...Event.observations(events, link, chainId).map(Observation.render)
+              ...observationContext(Event.observations(events, link, chainId))
             ]
           }).pipe(Effect.catchTag("/chain/Chain/LinkAborted", () => Effect.succeed(undefined)))
           if (attempt === undefined) continue

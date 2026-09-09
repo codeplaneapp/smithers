@@ -41,7 +41,10 @@ A **resume** replays the settled prefix of the current link by ordinal, with
 zero effects, and then runs live. A settled result is served only under the
 same entry declaration it was produced under; a redeclared entry re-keys its
 calls and the resumed chain refuses loudly with `replay_divergence` rather
-than serving a stale result.
+than serving a stale result. Payload divergence includes bounded excerpts
+around the first differing canonical JSON code unit. Harness author
+payload errors also name `Options.context`, which must remain stable when
+resuming a settled author call; it is not pinned separately in `ChainStarted`.
 
 ## Catalog descriptions
 
@@ -66,14 +69,16 @@ Runtime catalog and capability checks still govern every call.
 | 4. Authorization | `Authorize.authorize` | A call whose declared capabilities the host's policy denies, or parks pending approval. |
 
 A rejected call becomes a journaled `GateRejected` observation the next
-author reads, not a crash. Three exceptions are deliberate. A denied model
+author reads, not a crash. Four exceptions are deliberate. A denied model
 seat propagates typed, because routing around a denial by authoring again
 would burn tokens on a chain that cannot author. A required approval parks
 the run in place WITHOUT a `LinkEnded`, so resuming re-executes the link from
 its settled prefix and re-asks the seam under whatever grant now exists. And
 a call rejected by gate 2's per-link budget parks the chain with a `quota`
 reason instead of authoring again: the observation is journaled, but the link
-is out of fuel, so there is no next author to read it.
+is out of fuel, so there is no next author to read it. A harness-built author
+payload refused by the JSON boundary also journals `fuel` and parks with
+`quota`: another author attempt cannot shrink caller-supplied context.
 
 ## Failures
 
@@ -153,6 +158,17 @@ recursion exhausts the host WebAssembly stack rather than QuickJS's own:
 `evalCode` throws a host error the realm can neither see nor catch, the
 realm is left holding live GC objects, and disposing it aborts the module.
 At 256 KiB QuickJS raises its own catchable `stack overflow` instead.
+
+New observation messages are capped at 8192 UTF-16 code units, including a
+`[truncated]` marker when shortened. The harness recovery context retains
+observation lines in journal order up to 32768 code units in total, including
+a truncation marker. This projection also bounds observations from older
+journals without rewriting those events. Goal and `Options.context` are not
+silently truncated; an oversized harness payload parks with `quota`.
+
+Recorded rejections and settled calls replay before the live call budget is
+applied. For live calls, the fuel gate runs before inspecting the payload,
+so JSON refusal cannot bypass `maxCallsPerLink`.
 
 ## The JSON boundary
 

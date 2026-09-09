@@ -56,19 +56,25 @@ export const Observation = Schema.Struct({
 export type Observation = typeof Observation.Type
 
 /**
- * Builds an observation from its kind and message.
+ * Builds an observation, capping its message at 8192 UTF-16 code units
+ * including a truncation marker.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export const make = (kind: Kind, message: string): Observation => ({ kind, message })
+export const make = (kind: Kind, message: string): Observation => ({
+  kind,
+  message: message.length > 8192 ? `${message.slice(0, 8192 - "[truncated]".length)}[truncated]` : message
+})
 
 /**
- * Renders an observation as one context line for the next author call.
+ * Renders an observation as one context line for the next author call,
+ * applying the message cap to older journal entries too.
  *
  * @category projections
  * @since 0.1.0
  * @slop
  */
-export const render = (observation: Observation): string => `[${observation.kind}] ${observation.message}`
+export const render = (observation: Observation): string =>
+  `[${observation.kind}] ${make(observation.kind, observation.message).message}`
