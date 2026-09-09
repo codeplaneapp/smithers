@@ -12,7 +12,11 @@
  *
  * @since 0.1.0
  */
+import * as Arr from "effect/Array"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
@@ -20,7 +24,7 @@ import * as Tracer from "effect/Tracer"
 import * as PersistedQueue from "effect/unstable/persistence/PersistedQueue"
 import * as Action from "./Action/index.ts"
 import * as DurableDeferred from "./DurableDeferred.ts"
-import type { FlowInstance, FlowRuntime } from "./FlowRuntime/index.ts"
+import { annotateWaiting, type FlowInstance, type FlowRuntime } from "./FlowRuntime/index.ts"
 
 /**
  * Type-level identifier used to recognize `DurableQueue` values.
@@ -228,7 +232,10 @@ export const process: <
   >(self: DurableQueue<Payload, Success, Error>, fields: Payload["~type.make.in"], options?: {
     readonly retrySchedule?: Schedule.Schedule<any, PersistedQueue.PersistedQueueError> | undefined
   }) {
-    const payload = yield* Effect.orDie(self.payloadSchema.makeEffect(fields))
+    const payload = yield* self.payloadSchema.makeEffect(fields).pipe(
+      Effect.mapError((issue) => new Schema.SchemaError(issue)),
+      Effect.orDie
+    )
     const queueName = `DurableQueue/${self.name}`
     const queue = yield* PersistedQueue.make({
       name: queueName,
@@ -266,6 +273,7 @@ export const process: <
         })
       ))
 
+    yield* annotateWaiting({ reason: "event", token })
     return yield* DurableDeferred.await(deferred)
   })
 
@@ -282,50 +290,83 @@ const makeWorkerEffect = Effect.fnUntraced(function*<
 >(
   self: DurableQueue<Payload, Success, Error>,
   f: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
-  concurrency: number
+  concurrency: number,
+  maxAttempts: number
 ) {
   const queue = yield* PersistedQueue.make({
     name: `DurableQueue/${self.name}`,
     schema: getQueueSchema(self.payloadSchema)
   })
 
-  const worker = queue.take((item_) => {
-    const item = item_ as {
-      readonly token: DurableDeferred.Token
-      readonly payload: Payload["Type"]
-      readonly traceId: string
-      readonly spanId: string
-      readonly sampled: boolean
-    }
-    return Effect.withSpan(
-      Effect.gen(function*() {
-        // Parse before running the handler. A malformed completion address
-        // cannot strand a handler result that was already produced.
-        const parsed = yield* DurableDeferred.TokenParsed.parse(item.token)
-        const deferred = DurableDeferred.make(parsed.deferredName, {
-          success: self.deferred.successSchema,
-          error: self.deferred.errorSchema
-        })
-        const exit = yield* Effect.exit(f(item.payload))
-        yield* DurableDeferred.done(deferred, {
-          token: item.token,
-          exit
-        })
-      }).pipe(
-        Effect.catchTag("@smthrs/flow/DurableDeferred/TokenInvalid", (error) =>
-          Effect.logError(
-            `DurableQueue "${self.name}" could not complete an item because its token was invalid. ${error.message}`
-          ))
-      ),
-      `DurableQueue/${self.name}/worker`,
-      {
-        captureStackTrace: false,
-        parent: Tracer.externalSpan({
-          traceId: item.traceId,
-          spanId: item.spanId,
-          sampled: item.sampled
-        })
+  const worker = Effect.suspend(() => {
+    let completion:
+      | { readonly token: DurableDeferred.Token; readonly id: string; readonly attempts: number }
+      | undefined
+    return queue.take((item_, metadata) => {
+      const item = item_ as {
+        readonly token: DurableDeferred.Token
+        readonly payload: Payload["Type"]
+        readonly traceId: string
+        readonly spanId: string
+        readonly sampled: boolean
       }
+      return Effect.withSpan(
+        Effect.gen(function*() {
+          // Parse before running the handler. A malformed completion address
+          // cannot strand a handler result that was already produced.
+          const parsed = yield* DurableDeferred.TokenParsed.parse(item.token)
+          const deferred = DurableDeferred.make(parsed.deferredName, {
+            success: self.deferred.successSchema,
+            error: self.deferred.errorSchema
+          })
+          let exit = yield* Effect.exit(f(item.payload))
+          if (Exit.isFailure(exit)) {
+            const [reasons, interrupts] = Arr.partition(
+              exit.cause.reasons,
+              Filter.fromPredicate(Cause.isInterruptReason)
+            )
+            // Match DurableDeferred.into: interruption alone is not a durable
+            // outcome, and must leave the item available without an attempt.
+            if (interrupts.length === exit.cause.reasons.length) {
+              return yield* Effect.failCause(Cause.fromReasons<never>(interrupts))
+            } else if (interrupts.length > 0) {
+              exit = Exit.failCause(Cause.fromReasons(reasons))
+            }
+          }
+          completion = { token: item.token, ...metadata }
+          yield* DurableDeferred.done(deferred, {
+            token: item.token,
+            exit
+          })
+        }).pipe(
+          Effect.catchTag("@smthrs/flow/DurableDeferred/TokenInvalid", (error) =>
+            Effect.logError(
+              `DurableQueue "${self.name}" could not complete an item because its token was invalid. ${error.message}`
+            ))
+        ),
+        `DurableQueue/${self.name}/worker`,
+        {
+          captureStackTrace: false,
+          parent: Tracer.externalSpan({
+            traceId: item.traceId,
+            spanId: item.spanId,
+            sampled: item.sampled
+          })
+        }
+      )
+    }, { maxAttempts }).pipe(
+      Effect.tapCause((cause) => {
+        if (!completion) return Effect.void
+        return Effect.logError("DurableQueue failed to persist or acknowledge a handler result", cause).pipe(
+          Effect.annotateLogs({
+            token: completion.token,
+            itemId: completion.id,
+            attempt: completion.attempts + 1,
+            maxAttempts,
+            exhausted: !Cause.hasInterrupts(cause) && completion.attempts + 1 >= maxAttempts
+          })
+        )
+      })
     )
   }).pipe(
     // A persistently failing take would otherwise consume a core in a tight
@@ -353,7 +394,9 @@ const makeWorkerEffect = Effect.fnUntraced(function*<
  * Create a worker effect that processes items from the durable queue.
  *
  * `concurrency` defaults to one and must be a positive safe integer. It is
- * checked before the persisted queue is opened.
+ * checked before the persisted queue is opened. `maxAttempts` defaults to ten
+ * and is passed to the persisted queue. Completion-write failures can rerun the
+ * handler; side effects must be idempotent. Exhaustion leaves the flow waiting.
  *
  * @throws A `RangeError` when `concurrency` is not a positive safe integer.
  * @category worker
@@ -367,7 +410,10 @@ export const makeWorker: <
 >(
   self: DurableQueue<Payload, Success, Error>,
   f: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
-  options?: { readonly concurrency?: number | undefined } | undefined
+  options?: {
+    readonly concurrency?: number | undefined
+    readonly maxAttempts?: number | undefined
+  } | undefined
 ) => Effect.Effect<
   never,
   never,
@@ -388,6 +434,7 @@ export const makeWorker: <
   f: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
   options?: {
     readonly concurrency?: number | undefined
+    readonly maxAttempts?: number | undefined
   }
 ) => {
   const concurrency = options?.concurrency ?? 1
@@ -396,7 +443,7 @@ export const makeWorker: <
       `DurableQueue.makeWorker: concurrency must be a positive safe integer, and was ${concurrency}.`
     )
   }
-  return makeWorkerEffect(self, f, concurrency)
+  return makeWorkerEffect(self, f, concurrency, options?.maxAttempts ?? 10)
 }
 
 /**
@@ -415,6 +462,7 @@ export const worker: <
   f: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
   options?: {
     readonly concurrency?: number | undefined
+    readonly maxAttempts?: number | undefined
   } | undefined
 ) => Layer.Layer<
   never,
