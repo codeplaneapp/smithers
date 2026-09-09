@@ -80,7 +80,7 @@ export const scriptedSeats = (counts: Record<string, number>, options: { failRev
     })
   })
   return SeatResolver.layer({ resolve: (id) => Effect.succeed(Seat.make({
-    id, model, contextWindowTokens: 200_000,
+    id, modelId: "scripted-release", model, contextWindowTokens: 200_000,
     route: { prepare: () => Effect.succeed({
       routeId: "release-test", protocolId: "release-test", method: "POST", url: "https://example.invalid",
       publicHeaders: {}, body: new TextEncoder().encode("{}"), bodyText: "{}"

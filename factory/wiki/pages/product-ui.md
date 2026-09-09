@@ -1,6 +1,6 @@
 # Embedded UI and recursive inspection
 
-The UI shares registered flows, persisted state, cards and frames across presentation modes. The September 8 onboarding brief supersedes the older always-visible-chat rule: the conversation is a translucent top panel, hidden until Command-K / Control-K opens it. The owning onboarding document distinguishes local rehearsal from live backend work. Maximizing a card remains a presentation change of the same component and state.
+The UI interaction contract calls for shared registered flows, persisted state, cards and frames across presentation modes. The current onboarding brief supersedes the older always-visible-composer rule: the UI and chat history occupy the main view, while Command-K / Control-K summons only a floating composer. The owning onboarding document distinguishes local rehearsal from live backend work. Under the interaction contract, maximizing a card is a presentation change of the same component and state.
 
 ## One flow, three doors
 
@@ -8,7 +8,7 @@ A button, slash command and agent invocation share the same registered action. R
 
 State that a card projects belongs in TanStack DB and changes through the shared actor-tagged transition dispatcher. The UI rules prohibit React effects for application state synchronization. These are contributor requirements; use the owning tests and source to judge compliance of a particular component.
 
-Every required action must have a keyboard path with visible focus and predictable focus movement. The shell controls when conversation is visible; an older embedded-card test is not evidence that the composer must remain visible throughout onboarding.
+Every required action must have a keyboard path with visible focus and predictable focus movement. The shell controls when the composer is visible; an older embedded-card test is not evidence that the composer must remain visible throughout onboarding.
 
 ## Inspect real execution structure
 

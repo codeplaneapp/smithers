@@ -150,7 +150,7 @@ test("real AgentAction review and flow replay use the existing engine", { timeou
       ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
     ])
   }) })
-  const seats = SeatResolver.layer({ resolve: (id) => Effect.succeed(Seat.make({ id, model, contextWindowTokens: 200_000,
+  const seats = SeatResolver.layer({ resolve: (id) => Effect.succeed(Seat.make({ id, modelId: "scripted-wiki", model, contextWindowTokens: 200_000,
     route: { prepare: () => Effect.succeed({ routeId: "wiki-test", protocolId: "wiki-test", method: "POST", url: "https://example.invalid", publicHeaders: {}, body: new TextEncoder().encode("{}"), bodyText: "{}" }) }
   })) })
   const layer = Layer.mergeAll(actionLayers({ root: f.root, output: f.output }), agentLayers(seats, 10_000), Interpreter.layer(Wiki)).pipe(

@@ -4,13 +4,13 @@ This wiki is a repository recipe over ordinary Smithers flows. It adds no wiki d
 
 ## Capture exact public inputs
 
-Each catalog page names its owning Markdown and code files. The collector only reads repository-relative text files, rejects paths outside the source root and refuses common private/runtime paths. Symlink resolution cannot escape that root. The recipe's catalog contains only public engineering source; the private Smithers-Ops vault is never an input.
+Each catalog page names its owning Markdown and explicit supporting source files. The collector only reads repository-relative text files, rejects paths outside the source root and refuses common private/runtime paths. Symlink resolution cannot escape that root. The recipe's catalog contains only public engineering source; the private Smithers-Ops vault is never an input.
 
 Full-file digests and the page specification define each input identity. The snapshot stores complete source files, not just links to a moving branch. Its source revision is a content-addressed working-tree snapshot; it does not claim that the tree matched a Git or JJ commit. Evidence is bounded per file and page. Explicit catalog excerpts reduce reviewer context while preserving original line numbers; edits outside those excerpts still invalidate the whole source identity.
 
 ## Review meaning, not hashes
 
-The preview mode produces an explicitly unreviewed artifact. Verified mode invokes a real `AgentAction` reviewer with the page and its exact source evidence. Every section requires a supported result, an explanation and exact source citations. Quotes occupy a single source line; multiline output uses the agent's existing bounded schema-correction path. Independent page reviews finish before deterministic steps check section coverage and citation integrity.
+The preview mode produces an explicitly unreviewed artifact. Verified mode invokes a real `AgentAction` reviewer with the page and its exact source evidence. With `--reuse-run`, compatible supported reviews may instead come from a terminal run in the same existing engine database. The lookup uses the journal and attempt store, validates the captured policy sources and reviewer ID, and requires identical page, source, and content identities. Current citation checks still run; a changed page or policy requires a new model review. Each incremental page records its origin run and the reused attempt identity, when applicable. Every section requires a supported result, an explanation and exact source citations. Quotes occupy a single source line; multiline output uses the agent's existing bounded schema-correction path. Independent page reviews finish before deterministic steps check section coverage and citation integrity.
 
 The writer checks the source again after review. Changed inputs invalidate the attempt. Unsupported or uncertain sections leave a reviewable artifact and fail the verified flow. A passing model review is recorded evidence, not a formal proof, a passing test suite or a deployment receipt.
 

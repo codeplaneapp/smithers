@@ -6,7 +6,7 @@ The repository Wiki client reuses the existing world-document collection, actor-
 
 A local document keeps its ordinary app revision. Its optional `cloud` metadata separately records the repository, stable Plue page ID, current slug, remote page revision, causal state and pending edits. Reusing a deleted slug cannot make it the same page identity. This distinction matters when restoring historical application state or retrying an edit.
 
-The card starts with an outline and recorded source information. Its selected document and outline/document view are persisted card state. Opening the document uses the existing Markdown editor. Shell visibility follows the current onboarding brief; the embedded conversation test host is not a requirement that chat stay permanently visible.
+The card starts with an outline and recorded source information. Its selected document and outline/document view are persisted card state. Opening the document uses the existing Markdown editor. The onboarding contract keeps chat history in the main UI and summons the composer separately. The embedded conversation test host does not define the shell layout.
 
 ## Persist before sending, acknowledge exact edits
 

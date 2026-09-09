@@ -95,7 +95,7 @@ const result = yield* ImplementPlan.execute({ plan })
 
 The recipe and catalog adapter import no Node or Bun APIs. Deployments inject
 their platform through `@smthrs/flows/Runtime`, `NodeRuntime`, or `BunRuntime`.
-The Node-specific imports in `test/coding.test.ts` only construct test fixtures.
+The test file also uses Node's test runner, assertion helpers, and fixture APIs.
 Do not introduce a Node sidecar as a requirement for a Bun desktop host.
 
 ## Current boundary

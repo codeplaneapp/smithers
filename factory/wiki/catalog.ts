@@ -18,7 +18,7 @@ export const pages: readonly PageSpec[] = [
   page({ id: "start-here", title: "Start here", purpose: "Find the owning layer and follow work through Smithers.", kind: "current", document: "factory/wiki/pages/start-here.md", related: ["flows", "runtime", "build-graph", "product-ui", "coding-progression"] }, [
     flowDocs, runtime, agentDocs, "packages/smithers/build/targets/docs/README.md", ui, bun, node,
     ["packages/smithers/agent/src/AgentAction.ts", [253, 302], [390, 430]],
-    ["flows/wiki/operations.ts", [94, 139]], ["apps/ui/docs/ONBOARDING.md", [1, 6], [38, 53], [59, 63]]
+    ["flows/wiki/operations.ts", [94, 139]], "apps/ui/docs/ONBOARDING.md"
   ]),
   page({ id: "flows", title: "Flows, actions and replay", purpose: "Declare a typed capability once and attach its Effect implementation.", kind: "current", document: "factory/wiki/pages/flows.md", related: ["runtime", "agent", "build-graph"] }, [
     flowDocs, ["packages/smithers/flows/flow/src/Action/Action.ts", [109, 241]],
@@ -50,24 +50,24 @@ export const pages: readonly PageSpec[] = [
     "flows/wiki/workflow.ts", "flows/wiki/runtime.ts", "flows/wiki/evidence.ts", operations, "apps/ui/docs/workbench-lanes/runs.md"
   ]),
   page({ id: "product-ui", title: "Embedded UI and recursive inspection", purpose: "Follow the existing frame, card and dispatcher boundaries.", kind: "current", document: "factory/wiki/pages/product-ui.md", related: ["agent", "storage", "coding-direction", "cloud-wiki"] }, [
-    ui, ["apps/ui/docs/ONBOARDING.md", [1, 6], [38, 53], [59, 63]], ["apps/ui/src/mainview/cards/RunTrace.ts", [20, 108], [175, 221], [510, 576]],
+    ui, "apps/ui/docs/ONBOARDING.md", ["apps/ui/src/mainview/cards/RunTrace.ts", [20, 108], [175, 221], [510, 576]],
     ["apps/ui/src/mainview/cards/RunTraceCard.tsx", [66, 240]], "apps/ui/src/mainview/runtime/FrameHistory.ts",
     "apps/ui/docs/workbench-lanes/runs.md", ["flows/wiki/operations.ts", [94, 145]]
   ]),
   page({ id: "wiki-generation", title: "How this wiki stays accountable", purpose: "Separate source freshness, semantic review and human intent.", kind: "current", document: "factory/wiki/pages/wiki-generation.md", related: ["build-graph", "runtime", "coding-direction"] }, [
-    "flows/wiki/schema.ts", "flows/wiki/workflow.ts", "flows/wiki/evidence.ts", "flows/wiki/operations.ts", "flows/wiki/runtime.ts", "flows/wiki/PACKAGE.ts", "flows/wiki/main.ts"
+    "flows/wiki/schema.ts", "flows/wiki/workflow.ts", "flows/wiki/evidence.ts", "flows/wiki/operations.ts", "flows/wiki/runtime.ts", "flows/wiki/PACKAGE.ts", "flows/wiki/main.ts", "factory/wiki/catalog.ts", "flows/wiki/reuse.ts"
   ]),
   page({ id: "coding-direction", title: "Mythical coding product contract", purpose: "Read the intended lifecycle without confusing it with shipped behavior.", kind: "intent", document: "factory/wiki/pages/coding-direction.md", related: ["product-ui", "wiki-generation", "runtime"] }, [
     "packages/smithers/flows/docs/concepts/runtime-portability.md", ui
   ]),
-  page({ id: "coding-progression", title: "Coding progression and validation", purpose: "Follow exact JJ revisions through fast gates and overlapping slow checks.", kind: "current", document: "flows/coding/README.md", related: ["coding-direction", "flows", "runtime", "wiki-generation"] }, [
+  page({ id: "coding-progression", title: "Coding progression and validation", purpose: "Follow exact JJ revisions through fast gates and overlapping slow checks.", kind: "current", document: "factory/wiki/pages/coding-progression.md", related: ["coding-direction", "flows", "runtime", "wiki-generation"] }, [
     "flows/coding/schema.ts", "flows/coding/workflow.ts", "flows/coding/catalog.ts", "flows/coding/registration.ts", "flows/coding/flow.ts", "flows/test/coding.test.ts", "packages/smithers/flows/core/src/Digest.ts"
   ]),
   page({ id: "cloud-wiki", title: "Collaborative repository Wiki", purpose: "Separate local history, remote revisions, pending edits and semantic truth.", kind: "current", document: "factory/wiki/pages/cloud-wiki.md", related: ["wiki-generation", "product-ui", "storage", "coding-direction"] }, [
     "apps/ui/docs/workbench-lanes/wiki-collaboration.md", "apps/ui/src/mainview/wiki/CloudWiki.ts", "apps/ui/src/mainview/wiki/CloudWikiState.ts",
     ["apps/ui/src/mainview/state/controller/cloud-wiki.ts", [28, 130], [132, 274], [432, 486]],
     ["apps/ui/src/mainview/cards/ConversationCards.tsx", [88, 183]], ["apps/ui/src/mainview/state/AppState.ts", [974, 998]],
-    ["apps/ui/src/mainview/flows/entries/wiki.ts", [36, 84]], ["apps/ui/docs/ONBOARDING.md", [1, 6]],
+    ["apps/ui/src/mainview/flows/entries/wiki.ts", [36, 84]], "apps/ui/docs/ONBOARDING.md",
     "apps/ui/src/mainview/wiki/CloudWiki.test.ts", "apps/ui/src/mainview/wiki/fixtures/yrs-deletion-ack.json"
   ])
 ]

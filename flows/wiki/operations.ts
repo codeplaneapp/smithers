@@ -3,6 +3,7 @@ import { Crypto, Effect, FileSystem, Path, Schema } from "effect"
 import { canonical } from "@smthrs/core/Digest"
 import { Evidence, type ReviewedPage, type PageSpec, type Receipt, WikiError } from "./schema.ts"
 import { reviewEvidence, visibleLine } from "./evidence.ts"
+import type { Provenance } from "./reuse.ts"
 
 const maxFileBytes = 512_000
 const maxPageBytes = 300_000
@@ -88,7 +89,7 @@ export const operations = (options: { readonly root: string; readonly output: st
     }
     return page
   })
-  const write = (pages: readonly ReviewedPage[], mode: "preview" | "verified") => Effect.gen(function*() {
+  const write = (pages: readonly ReviewedPage[], mode: "preview" | "verified", provenance: Readonly<Record<string, Provenance>> = {}) => Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
     if (!pages.length || new Set(pages.map((page) => page.evidence.spec.id)).size !== pages.length) return yield* Effect.fail(fail("invalid-input", "Wiki page ids must be nonempty and unique"))
     const allIds = new Set(pages.map((page) => page.evidence.spec.id))
@@ -113,7 +114,8 @@ export const operations = (options: { readonly root: string; readonly output: st
       const body = header + notice + evidence.markdown + `\n## Related pages\n\n${links}\n\n## Exact source inputs\n\n${sourceLinks}\n`
       return { id: evidence.spec.id, slug: `generated-${evidence.spec.id}`, title: evidence.spec.title, purpose: evidence.spec.purpose, kind: evidence.spec.kind, spec: evidence.spec, body,
         contentDigest: evidence.contentDigest, bodyDigest: yield* digest(body), inputDigest: evidence.inputDigest,
-        sources: evidence.sources.map(({ path, digest }) => ({ path, digest })), verification: { status, reviewer, reviewDigest, review } }
+        sources: evidence.sources.map(({ path, digest }) => ({ path, digest })), verification: { status, reviewer, reviewDigest, review,
+          ...(provenance[evidence.spec.id] ? { provenance: provenance[evidence.spec.id] } : {}) } }
     }))
     const snapshot = { schemaVersion: 1, digestPolicy: "canonical-json-v2", sourceRevision, sourceKind: "content-addressed-working-tree", inputDigest, verification, pages: rendered }
     const files: Record<string, string> = { "snapshot.json": JSON.stringify(snapshot, null, 2) + "\n" }
@@ -189,5 +191,5 @@ export const operations = (options: { readonly root: string; readonly output: st
   })
   const boundary = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.catch((error) => Effect.fail(error instanceof WikiError ? error : fail("io", error instanceof Error ? error.message : String(error)))))
   return { check: (specs: readonly PageSpec[], requireVerified = false) => boundary(check(specs, requireVerified)), collect: (spec: PageSpec) => boundary(collect(spec)), assess,
-    write: (pages: readonly ReviewedPage[], mode: "preview" | "verified") => boundary(write(pages, mode)) }
+    write: (pages: readonly ReviewedPage[], mode: "preview" | "verified", provenance?: Readonly<Record<string, Provenance>>) => boundary(write(pages, mode, provenance)) }
 }

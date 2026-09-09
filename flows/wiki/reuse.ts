@@ -1,0 +1,172 @@
+/** Incremental review over the existing journal and attempt store; no cache database. */
+import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import { Journal as JournalModules } from "@smthrs/flows"
+import * as AttemptStore from "@smthrs/run-store/AttemptStore"
+import * as RunStore from "@smthrs/run-store/RunStore"
+import { Node } from "@smthrs/plan"
+import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { canonical } from "@smthrs/core/Digest"
+import { digest, operations } from "./operations.ts"
+import { Evidence, Input, Receipt, Review, ReviewedPage, WikiError } from "./schema.ts"
+import { Collect, ReviewPage } from "./workflow.ts"
+const { EngineEvent, Journal, JournalEvent } = JournalModules
+
+// These exact captured files define the model's task, output, evidence view and
+// host envelope. Orchestration/receipt validation can change without changing
+// that task; every reused receipt still passes today's deterministic assessment.
+export const policySources = ["flows/wiki/workflow.ts", "flows/wiki/schema.ts", "flows/wiki/evidence.ts", "flows/wiki/runtime.ts"] as const
+const PolicySource = Schema.Struct({ path: Schema.String, digest: Schema.String })
+export const Provenance = Schema.Struct({
+  originRunId: Schema.String, policyDigest: Schema.String, policySources: Schema.Array(PolicySource),
+  reusedFrom: Schema.NullOr(AttemptStore.AttemptId)
+})
+export type Provenance = typeof Provenance.Type
+const Candidate = Schema.Struct({
+  inputDigest: Schema.String, contentDigest: Schema.String, review: Review, reviewer: Schema.String,
+  attempt: AttemptStore.AttemptId, originRunId: Schema.String
+})
+export const Pool = Schema.Struct({
+  policyDigest: Schema.String, policySources: Schema.Array(PolicySource), candidates: Schema.Record(Schema.String, Candidate)
+})
+export type Pool = typeof Pool.Type
+const Selection = Schema.Struct({ review: Schema.NullOr(Review), provenance: Provenance, reason: Schema.String })
+const BoundPage = Schema.Struct({ ...ReviewedPage.fields, provenance: Provenance })
+
+export const Load = Action.make("wiki/load-recorded-reviews", {
+  payload: { priorRunId: Schema.String, reviewer: Schema.String }, success: Pool, error: WikiError
+})
+export const Select = Action.make("wiki/select-recorded-review", {
+  payload: { evidence: Evidence, pool: Pool, reviewer: Schema.String }, success: Selection, error: WikiError
+})
+export const Bind = Action.make("wiki/bind-review-provenance", {
+  payload: { ...ReviewedPage.fields, provenance: Provenance }, success: BoundPage, error: WikiError
+})
+export const Publish = Action.make("wiki/publish-recorded-reviews", {
+  payload: { pages: Schema.Record(Schema.String, BoundPage) }, success: Receipt, error: WikiError, nondeterministic: true
+})
+export const IncrementalWiki = Flow.make("smithers/IncrementalWiki", {
+  payload: Schema.Struct({ ...Input.fields, mode: Schema.Literal("verified"), priorRunId: Schema.String }), success: Receipt,
+  error: Schema.Union([WikiError, AgentAction.AgentFailure]),
+  body: (input) => Node.bindPlanned(Load.call({ priorRunId: input.priorRunId, reviewer: input.reviewer }), (pool) =>
+    Node.bindPlanned(Node.all(Object.fromEntries(input.pages.map((spec, index) => [`page-${index}`, Collect.call({ spec })]))), (evidence) =>
+      Node.bindPlanned(Node.all(Object.fromEntries(input.pages.map((_, index) => [`page-${index}`,
+        Node.bindPlanned(Select.call({ evidence: evidence[`page-${index}`]!, pool, reviewer: input.reviewer }), (selection) =>
+          Node.branch(Node.succeed(selection), {
+            if: (selected) => selected.review !== null,
+            then: (selected) => Node.succeed(selected.review!),
+            else: () => ReviewPage.call({ evidence: evidence[`page-${index}`]! })
+          }).pipe(Node.bindPlanned((review) => Bind.call({ evidence: evidence[`page-${index}`]!, review,
+            reviewer: input.reviewer, provenance: selection.provenance }))))
+      ]))), (pages) => Publish.call({ pages }))))
+})
+
+const fail = (message: string) => new WikiError({ code: "review-failed", message })
+const guarded = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.catch((error) =>
+  Effect.fail(error instanceof WikiError ? error : fail(error instanceof Error ? error.message : String(error)))))
+
+export const reuseOperations = (options: { root: string; output: string }) => {
+  const ops = operations(options)
+  const policy = (reviewer: string) => Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
+    const sources = yield* Effect.forEach(policySources, (file) => Effect.gen(function*() {
+      const text = yield* fs.readFileString(path.resolve(options.root, file))
+      if (new TextEncoder().encode(text).length > 512_000) return yield* Effect.fail(fail(`Review policy source is too large: ${file}`))
+      return { path: file, digest: yield* digest(text) }
+    }))
+    return { policyDigest: yield* digest(canonical({ version: 1, reviewer, sources })), policySources: sources }
+  })
+  const load = ({ priorRunId, reviewer }: { priorRunId: string; reviewer: string }) => guarded(Effect.gen(function*() {
+    const current = yield* policy(reviewer)
+    const empty: Pool = { ...current, candidates: {} }
+    const runStore = yield* RunStore.RunStore
+    const run = yield* runStore.get(priorRunId)
+    if (!RunStore.isTerminalRunStatus(run.status)) return yield* Effect.fail(fail("Only a terminal run can supply recorded reviews"))
+    const journal = yield* Journal.Journal, store = yield* AttemptStore.AttemptStore
+    const ids = new Map<string, AttemptStore.AttemptId>()
+    let after: typeof JournalEvent.Seq.Type | undefined
+    for (let count = 0; count < 4096;) {
+      const page = yield* journal.entries({ runId: JournalEvent.RunId.make(priorRunId), ...(after === undefined ? {} : { after }), limit: 512 })
+      count += page.entries.length
+      for (const entry of page.entries) {
+        if (entry.eventType === EngineEvent.attemptEventType) {
+          const parsed = yield* Schema.decodeUnknownEffect(EngineEvent.AttemptPayload)(entry.payload)
+          if (parsed.executionId !== priorRunId) return yield* Effect.fail(fail("Recorded attempt belongs to another execution"))
+          if (parsed.lifecycle.state === "succeeded") {
+            const { executionId: runId, stepKeyDigest, attempt } = parsed
+            ids.set(`${stepKeyDigest}:${attempt}`, { runId, stepKeyDigest, attempt })
+          }
+        } else if (entry.eventType === "flows.engine.attempt-finished") {
+          // Old runs have incomplete lifecycle markers. Resolve the committed
+          // result from their matching native attempt row rather than invent it.
+          const parsed = Schema.decodeUnknownOption(Schema.Struct({ ...AttemptStore.AttemptId.fields, state: Schema.String }))(entry.payload)
+          if (Option.isSome(parsed) && parsed.value.state === "succeeded" && parsed.value.runId === priorRunId) {
+            const { runId, stepKeyDigest, attempt } = parsed.value
+            ids.set(`${stepKeyDigest}:${attempt}`, { runId, stepKeyDigest, attempt })
+          }
+        }
+      }
+      if (!page.hasMore) break
+      after = page.entries.at(-1)?.seq
+      if (after === undefined || count >= 4096) return yield* Effect.fail(fail("Prior review journal exceeds the bounded lookup; select a smaller run"))
+    }
+    const rows = yield* Effect.forEach([...ids.values()], (id) => store.get(id))
+    const captured = new Map<string, string>()
+    const candidates: Record<string, typeof Candidate.Type> = {}
+    for (const row of rows) {
+      if (Option.isNone(row) || row.value.state !== "succeeded") continue
+      const old = Schema.decodeUnknownOption(ReviewedPage)(row.value.outcome)
+      const collected = Schema.decodeUnknownOption(Evidence)(row.value.outcome)
+      const evidence = Option.isSome(old) ? old.value.evidence : Option.isSome(collected) ? collected.value : undefined
+      if (evidence) for (const source of evidence.sources) {
+        if (!policySources.some((path) => path === source.path)) continue
+        if ((yield* digest(source.text)) !== source.digest || (captured.has(source.path) && captured.get(source.path) !== source.digest)) return empty
+        captured.set(source.path, source.digest)
+      }
+      if (Option.isNone(old) || old.value.reviewer !== reviewer || old.value.review === null || !old.value.review.sections.every((section) => section.verdict === "supported")) continue
+      // The legacy assessor receipt is reusable only when its embedded evidence
+      // is internally intact; the destination also recaptures and reassesses it.
+      if ((yield* digest(old.value.evidence.markdown)) !== old.value.evidence.contentDigest ||
+        (yield* digest(canonical({ policy: 2, spec: old.value.evidence.spec,
+          sources: old.value.evidence.sources.map(({ path, digest }) => ({ path, digest })) }))) !== old.value.evidence.inputDigest ||
+        !(yield* Effect.forEach(old.value.evidence.sources, (source) => digest(source.text).pipe(Effect.map((hash) => hash === source.digest)))).every(Boolean)) continue
+      const inherited = Schema.decodeUnknownOption(BoundPage)(row.value.outcome)
+      if (Option.isSome(inherited) && inherited.value.provenance.policyDigest !== current.policyDigest) continue
+      const id = old.value.evidence.spec.id
+      if (candidates[id]) return empty // Ambiguous successful receipts are never guessed between.
+      candidates[id] = { inputDigest: old.value.evidence.inputDigest, contentDigest: old.value.evidence.contentDigest,
+        review: old.value.review, reviewer,
+        attempt: { runId: priorRunId, stepKeyDigest: row.value.stepKeyDigest, attempt: row.value.attempt },
+        originRunId: Option.isSome(inherited) ? inherited.value.provenance.originRunId : priorRunId }
+    }
+    if (current.policySources.some((source) => captured.get(source.path) !== source.digest)) return empty
+    return { ...current, candidates }
+  }))
+  const select = ({ evidence, pool, reviewer }: { evidence: Evidence; pool: Pool; reviewer: string }) => guarded(Effect.gen(function*() {
+    const instance = yield* FlowRuntime.FlowInstance
+    const fresh = (reason: string): typeof Selection.Type => ({ review: null, reason,
+      provenance: { originRunId: instance.executionId, policyDigest: pool.policyDigest, policySources: pool.policySources, reusedFrom: null } })
+    const candidate = pool.candidates[evidence.spec.id]
+    if (!candidate) return fresh("no compatible recorded review")
+    if (candidate.inputDigest !== evidence.inputDigest || candidate.contentDigest !== evidence.contentDigest || candidate.reviewer !== reviewer) return fresh("page source, prose or reviewer changed")
+    const assessment = yield* Effect.result(ops.assess({ evidence, review: candidate.review, reviewer }))
+    if (assessment._tag === "Failure") return fresh("recorded citations fail current validation")
+    return { review: candidate.review, reason: "exact recorded review reused",
+      provenance: { originRunId: candidate.originRunId, policyDigest: pool.policyDigest, policySources: pool.policySources, reusedFrom: candidate.attempt } }
+  }))
+  return { load, select, bind: (page: typeof BoundPage.Type) => Effect.succeed(page),
+    publish: ({ pages }: { pages: Record<string, typeof BoundPage.Type> }) => {
+      const ordered = Object.keys(pages).sort((a, b) => Number(a.slice(5)) - Number(b.slice(5))).map((key) => pages[key]!)
+      return guarded(Effect.gen(function*() {
+        for (const page of ordered) {
+          const current = yield* policy(page.reviewer ?? "")
+          if (current.policyDigest !== page.provenance.policyDigest) return yield* Effect.fail(fail("Reviewer policy changed during review"))
+        }
+        return yield* ops.write(ordered, "verified", Object.fromEntries(ordered.map((page) => [page.evidence.spec.id, page.provenance])))
+      }))
+    } }
+}
+export const reuseLayers = (options: { root: string; output: string }) => {
+  const ops = reuseOperations(options)
+  return Layer.mergeAll(Load.toLayer(ops.load), Select.toLayer(ops.select), Bind.toLayer(ops.bind), Publish.toLayer(ops.publish), Interpreter.layer(IncrementalWiki))
+}
