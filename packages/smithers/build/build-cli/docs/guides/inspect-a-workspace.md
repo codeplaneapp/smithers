@@ -72,9 +72,10 @@ question: who owns the package holding that label, plus its upstream packages.
 pnpm exec smithers-build ci '//packages/...' --plan
 ```
 
-The plan names each selected target, its declared inputs and outputs, whether
-it is cacheable, whether the cache already holds a result, and a preview of
-its key material.
+The plan names each selected target, whether it is cacheable, and its preview
+key. Cache status is unresolved: planned nodes carry placeholder
+`cacheLookup: "not-wired"` and `wouldRun: true` values. These are not cache
+lookups or rebuild forecasts.
 
 `--plan` skips target bodies, but evaluates trusted declarations and reads the
 workspace. It may spawn bounded tool probes for version and identity lookups,
@@ -92,9 +93,20 @@ Install the required runtime, package manager, and tools on `PATH`, including
 `nix` for a declared Nix environment. Planning may fail or report a refusal
 when a required tool or environment is unavailable.
 
-`--plan` is the honest answer to "is this going to rebuild everything?". If a
-target you expected to hit is planned to run, its key moved, and
-[Caching](../concepts/caching.md) lists what a key covers.
+For local cache inspection of one target, use:
+
+```bash
+pnpm exec smithers-build explain '//packages/api:lib'
+pnpm exec smithers-build show target '//packages/api:lib'
+```
+
+Both commands plan the target and inspect its preview key for a matching
+successful local result. They report a local `candidate` or `miss`; a candidate
+is not a guaranteed hit because execution still validates outputs and
+dependency results. The execution key may depend on runtime dependency results,
+and the remote cache is not probed.
+These commands have the same declaration and tool requirements as planning.
+See [Caching](../concepts/caching.md) for what a key covers.
 
 ## Read any of it from a program
 

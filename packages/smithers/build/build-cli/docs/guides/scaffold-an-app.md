@@ -68,5 +68,5 @@ const report = await scaffold({ directory: "./ledger", template: "default" })
 ```
 
 `scaffold` also takes `templateRoot` to point at a template directory of your
-own, and `link` to force the rewrite on or off. See the
+own. Dependency versions are copied unchanged. See the
 [API reference](../api.md).

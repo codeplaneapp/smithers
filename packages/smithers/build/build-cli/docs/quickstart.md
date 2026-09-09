@@ -65,9 +65,10 @@ target:
 pnpm exec smithers-build test '//:greet' --plan
 ```
 
-The plan names each selected target, its declared inputs and outputs, whether
-it is cacheable, whether the cache already holds a result, and a preview of
-the key material that result is filed under.
+The plan names each selected target, whether it is cacheable, and its preview
+key. Cache status is unresolved; planning does not forecast cache hits or
+rebuilds. Use `explain` or `show target` for local cache inspection, subject to
+the [preview-key limits](./guides/inspect-a-workspace.md#see-what-a-run-would-do).
 
 Planning evaluates trusted declarations and reads the workspace. It may spawn
 bounded tool probes for version and identity lookups, and may resolve or build

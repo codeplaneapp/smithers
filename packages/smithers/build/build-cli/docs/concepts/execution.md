@@ -135,13 +135,20 @@ references. Replacing a compiler without changing its version string therefore
 invalidates its cached build. Workspace-local executable paths remain relative;
 host tool installations retain their resolved absolute paths.
 
-The child environment is also keyed: inherited values from the exec allowlist
-(including `PATH`, `CI`, and SDK selection), declared `env` overrides, and a
-resolved Nix environment. The environment enters diagnostics as a digest;
-withheld cache credentials and unrelated parent variables are excluded. A
-changed `PATH` invalidates command-form builds too. Tools selected dynamically
-inside shell scripts must still be declared as tool dependencies; this does not
-infer an arbitrary program's subprocess or library dependencies.
+The child environment key hashes declared `env` overrides and resolved Nix
+environment variables by value. Inherited `HOME`, `TMPDIR`, `TEMP`, and `TMP`
+are excluded; other inherited allowlisted names, including `PATH`, `CI`, and
+SDK selection, contribute presence only. Declare output-affecting values in
+`env` so changes to those values invalidate the cache. The environment enters
+diagnostics as a digest; withheld cache credentials and unrelated parent
+variables are excluded.
+
+A changed inherited `PATH` alone does not invalidate a key when it resolves
+the same executable identities. Executable fingerprinting covers changes to
+the resolved paths and bytes, including the leading literal program in a
+command-form build. Tools selected dynamically inside shell scripts must
+still be declared as tool dependencies; this does not infer an arbitrary
+program's subprocess or library dependencies.
 
 ## Services
 
