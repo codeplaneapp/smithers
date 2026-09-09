@@ -442,7 +442,17 @@ export interface Service {
     runId: RunId,
     fiber: Fiber.Fiber<unknown, unknown>
   ) => Effect.Effect<void, RunNotFound | PersistenceError>
-  readonly interrupt: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
+  /**
+   * Interrupts and awaits the local fiber with no caller-held mutation locks.
+   * `settle` wraps only the subsequent fenced status reconciliation, allowing
+   * ControlLive to commit its terminal event in the same transaction.
+   */
+  readonly interrupt: (
+    runId: RunId,
+    settle?: (
+      effect: Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
+    ) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
+  ) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
   /**
    * Joins or claims a suspended run.
    *
@@ -1044,7 +1054,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
               })
             }))
         ),
-        interrupt: Effect.fn("ControlRuntime.interrupt")(function*(runId) {
+        interrupt: Effect.fn("ControlRuntime.interrupt")(function*(runId, settle = (effect) => effect) {
           const run = yield* requireRun(runId)
           // Terminal first, as `resume` does: a settled run released its fence,
           // and answering `ClaimLost` there would name the wrong problem.
@@ -1054,11 +1064,21 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             run.summary.status === "failed"
           ) return snapshot(run.summary)
           if (run.localFence === undefined) return yield* new ClaimLost({ runId })
-          yield* checkFence(runId, run, run.localFence)
+          const fence = run.localFence
+          yield* checkFence(runId, run, fence)
           if (run.fiber !== undefined) yield* Fiber.interrupt(run.fiber)
-          run.fence = undefined
-          run.localFence = undefined
-          return updateSummary(run, { status: "cancelled", ownerId: undefined, parkedBy: undefined })
+          return yield* settle(Effect.gen(function*() {
+            // Cleanup may settle the run or release and replace its owner.
+            if (
+              run.summary.status === "cancelled" ||
+              run.summary.status === "completed" ||
+              run.summary.status === "failed"
+            ) return snapshot(run.summary)
+            yield* checkFence(runId, run, fence)
+            run.fence = undefined
+            run.localFence = undefined
+            return updateSummary(run, { status: "cancelled", ownerId: undefined, parkedBy: undefined })
+          }))
         }),
         resume: Effect.fn("ControlRuntime.resume")(function*(runId) {
           const run = yield* requireRun(runId)

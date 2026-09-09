@@ -1614,7 +1614,7 @@ const makeRuntime = (
         yield* requireRow(runId)
         ActiveFibers.register(fibers, runId, fiber)
       }),
-      interrupt: Effect.fn("SqlControlRuntime.interrupt")(function*(runId: RunId) {
+      interrupt: Effect.fn("SqlControlRuntime.interrupt")(function*(runId: RunId, settle = (effect) => effect) {
         const row = yield* requireRow(runId)
         const summary = yield* summaryOf(row)
         // Terminality is asked FIRST, as `resume` asks it. A settled run has
@@ -1627,8 +1627,22 @@ const makeRuntime = (
         const fiber = fibers.get(runId)
         // Cancellation is fiber interruption, not a flag anyone polls.
         if (fiber !== undefined) yield* Fiber.interrupt(fiber)
-        fibers.delete(runId)
-        return yield* transition(runId, row.owner, summary, "cancelled")
+        if (fibers.get(runId) === fiber) fibers.delete(runId)
+        // Only reconciliation holds the writer. Re-read after finalizers and
+        // retain the original fence so cleanup cannot transfer this cancel to
+        // a replacement owner or overwrite a terminal outcome.
+        return yield* settle(
+          writer.write(Effect.gen(function*() {
+            const current = yield* summaryOf(yield* requireRow(runId))
+            if (terminal(current.status)) return current
+            return yield* transition(runId, row.owner, current, "cancelled")
+          })).pipe(
+            Effect.catchTag(
+              "@smthrs/database/DatabaseError",
+              (error) => Effect.fail(persistence("settle an interrupted run")(error))
+            )
+          )
+        )
       }),
       resume: Effect.fn("SqlControlRuntime.resume")(function*(
         runId: RunId,

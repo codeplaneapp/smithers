@@ -8,15 +8,49 @@ import { Effect, Layer, Stream } from "effect"
 import { readFileSync } from "fs"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
-import { PersistenceError } from "../src/ControlError.ts"
+import { ClaimLost, PersistenceError } from "../src/ControlError.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
 import * as TestControl from "../src/test/TestControl.ts"
 import { contract, type Stack } from "./ControlContract.ts"
-import { live } from "./TestStack.ts"
+import { live, memoryRuntime } from "./TestStack.ts"
 
 contract("memory", (executor) => TestControl.layer(undefined, executor) as unknown as Layer.Layer<Stack>)
 
 describe("ControlLive", () => {
+  it("answers a terminal outcome observed after losing the cancellation claim", async () => {
+    const runtime = Layer.effect(
+      ControlRuntime,
+      Effect.map(ControlRuntime, (base) => ({
+        ...base,
+        interrupt: (runId: string) =>
+          Effect.gen(function*() {
+            const fence = yield* base.claimFence(runId)
+            yield* base.writeStatus(runId, fence, "completed")
+            return yield* new ClaimLost({ runId })
+          })
+      }))
+    ).pipe(Layer.provide(memoryRuntime()))
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        const card = yield* control.plan({ flowId: "system/test", input: {} })
+        yield* control.approve(card.approval)
+        const receipt = yield* control.run({
+          _tag: "Plan",
+          planId: card.planId,
+          digest: card.digest,
+          envelope: card.envelope,
+          idempotencyKey: "run:race"
+        })
+        if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a run")
+        yield* runtime.resume(receipt.runId)
+        expect(yield* control.cancel({ runId: receipt.runId, idempotencyKey: "cancel:race" }))
+          .toEqual({ _tag: "Terminal", runId: receipt.runId, status: "completed" })
+      }).pipe(Effect.provide(live({ runtime })), Effect.scoped, Effect.orDie)
+    )
+  })
+
   it("repairs a failed memory plan creation event exactly once on keyed retry", async () => {
     let fail = true
     const journal = Layer.effect(

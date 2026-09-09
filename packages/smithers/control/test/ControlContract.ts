@@ -616,6 +616,79 @@ export const contract = (name: string, harness: Harness): void => {
         expect(signals).toEqual([{ name: "reviewed", payload: { ok: true } }])
       }))
 
+    test("commits cancel intent before cleanup can signal another run and write the journal", () =>
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        const journal = yield* Journal.Journal
+        const { runId } = yield* start
+        const other = yield* start
+        let cleanupFinished = false
+        let intentCommitted = false
+        const owner = yield* Effect.never.pipe(
+          Effect.ensuring(
+            Effect.gen(function*() {
+              const events = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
+              intentCommitted = events.some((event) => event.kind === "control.run.cancel-requested")
+              yield* control.signal({
+                runId: other.runId,
+                signal: { name: "cleanup", payload: null },
+                idempotencyKey: "cleanup:signal"
+              })
+              yield* journal.transact(Effect.void)
+              cleanupFinished = true
+            }).pipe(
+              Effect.interruptible,
+              Effect.timeout("2 seconds"),
+              Effect.ignore
+            )
+          ),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* runtime.registerFiber(runId, owner)
+        const receipt = yield* control.cancel({ runId, idempotencyKey: "cancel:cleanup" })
+        expect(cleanupFinished).toBe(true)
+        expect(intentCommitted).toBe(true)
+        expect(receipt).toEqual({ _tag: "Terminal", runId, status: "cancelled" })
+        expect(yield* runtime.deliveredSignals(other.runId)).toEqual([{ name: "cleanup", payload: null }])
+      }))
+
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      test(`interrupt preserves ${status} reached by a finalizer`, () =>
+        Effect.gen(function*() {
+          const runtime = yield* ControlRuntime
+          const { runId } = yield* start
+          const fence = yield* runtime.claimFence(runId)
+          const owner = yield* Effect.never.pipe(
+            Effect.ensuring(runtime.writeStatus(runId, fence, status).pipe(Effect.orDie)),
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* runtime.registerFiber(runId, owner)
+          expect((yield* runtime.interrupt(runId)).status).toBe(status)
+          expect((yield* runtime.getRun(runId)).status).toBe(status)
+        }))
+    }
+
+    test("interrupt refuses the replacement fence installed by a finalizer", () =>
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const { runId } = yield* start
+        const fence = yield* runtime.claimFence(runId)
+        const owner = yield* Effect.never.pipe(
+          Effect.ensuring(
+            Effect.gen(function*() {
+              yield* runtime.writeStatus(runId, fence, "parked")
+              yield* runtime.resume(runId)
+            }).pipe(Effect.orDie)
+          ),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* runtime.registerFiber(runId, owner)
+        expect(yield* runtime.interrupt(runId).pipe(Effect.flip)).toBeInstanceOf(ClaimLost)
+        expect(yield* runtime.claimFence(runId)).not.toBe(fence)
+        expect((yield* runtime.getRun(runId)).status).toBe("accepted")
+      }))
+
     test("cancels by interrupting the owning Effect fiber", () =>
       Effect.gen(function*() {
         const control = yield* Control

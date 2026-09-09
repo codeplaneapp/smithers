@@ -258,8 +258,13 @@ terminal transition, and translates conflicts into typed failures.
 | Runs              | `launch(planId, digest, envelope) => Effect<LaunchResult, ...>`, `getRun(runId)`, `listRuns`, `listFlows`                                                                                           |
 | Messages          | `enqueueSteer(runId, message)`, `drainSteering(runId)`, `deliverSignal(runId, signal)`, `deliveredSignals(runId)`                                                                                   |
 | Resume delegation | `requestResume(runId) => Effect<number, ...>`, `pendingResumes`, `clearResume(runId, sequence)`                                                                                                     |
-| Ownership         | `registerFiber(runId, fiber)`, `interrupt(runId)`, `resume(runId, options?)`, `claimFence(runId)`, `releasePending(runId, fence)`, `writeStatus(runId, fence, status)`                              |
+| Ownership         | `registerFiber(runId, fiber)`, `interrupt(runId, settle?)`, `resume(runId, options?)`, `claimFence(runId)`, `releasePending(runId, fence)`, `writeStatus(runId, fence, status)`                     |
 | Identity          | `stampPrincipal(submitted?)`, `lookupMutation(key, fingerprint)`, `recordMutation(key, fingerprint, receipt)`                                                                                       |
+
+`interrupt` must be called without mutation locks. Its optional `settle` wrapper
+runs only after the fiber's finalizers finish and wraps the fenced status
+reconciliation. `ControlLive` uses it to commit the terminal event alongside
+the status. Direct callers may omit it.
 
 `resume` takes `{ scope?: "launched" \| "any" }`. `"launched"` restricts the
 claim to runs this plane launched, which every steer wake and every

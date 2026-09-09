@@ -4,7 +4,7 @@
  * process's writes, and losing a claim race to a live peer.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { DurableWriter } from "@smthrs/database/DurableWriter"
+import { DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { JournalEvent, Migrations, SqlJournal } from "@smthrs/journal"
 import * as Journal from "@smthrs/journal/Journal"
@@ -124,6 +124,118 @@ const started = Effect.gen(function*() {
 })
 
 describe("SqlControlRuntime", () => {
+  it("preserves the first attribution when recovering legacy duplicate cancel requests", async () => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const journal = yield* Journal.Journal
+        const { runId } = yield* started
+        for (const reason of ["first request", "duplicate request"]) {
+          yield* journal.emitDurableUnfenced(
+            new JournalEvent.Input({
+              runId: JournalEvent.RunId.make(runId),
+              sourceId: JournalEvent.SourceId.make("/control"),
+              eventType: "control.run.cancel-requested",
+              payload: { runId, reason }
+            })
+          )
+        }
+        expect((yield* runtime.getRun(runId)).cancellation?.reason).toBe("first request")
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+  })
+
+  it.each(["cancel-requested", "cancelled"])("recovers cancellation after a failed %s event", async (event) => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const journal = yield* Journal.Journal
+        const sql = yield* SqlClient.SqlClient
+        const { runId } = yield* started
+        let cleanedUp = false
+        const owner = yield* Effect.never.pipe(
+          Effect.ensuring(Effect.sync(() => {
+            cleanedUp = true
+          })),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* runtime.registerFiber(runId, owner)
+        let fail = true
+        const failing = Journal.make({
+          ...journal,
+          emitDurableUnfenced: (input) =>
+            Effect.gen(function*() {
+              const receipt = yield* journal.emitDurableUnfenced(input)
+              if (fail && input.eventType === `control.run.${event}`) {
+                fail = false
+                return yield* new Journal.JournalError({
+                  code: "sink_failed",
+                  message: "injected cancellation failure"
+                })
+              }
+              return receipt
+            })
+        })
+        const control = Context.get(
+          yield* Layer.build(Layer.fresh(ControlLive.layer)).pipe(
+            Effect.provide(Registry.layerNoop()),
+            Effect.provideService(Journal.Journal, failing)
+          ),
+          Control
+        )
+        const request = { runId, idempotencyKey: "cancel:recovery" }
+        expect(yield* Effect.flip(control.cancel(request))).toBeInstanceOf(PersistenceError)
+        expect(cleanedUp).toBe(event === "cancelled")
+        expect((yield* runtime.getRun(runId)).status).toBe("accepted")
+        const events = yield* journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 100 })
+        expect(events.entries.some((entry) => entry.eventType === "control.run.cancel-requested"))
+          .toBe(event === "cancelled")
+        expect(events.entries.some((entry) => entry.eventType === "control.run.cancelled")).toBe(false)
+        const receipts =
+          yield* sql`SELECT receipt_json FROM control_mutations WHERE mutation_key = 'cancel:cancel:recovery'`
+        expect(receipts).toHaveLength(event === "cancelled" ? 1 : 0)
+        expect(yield* control.cancel(request)).toEqual({ _tag: "Terminal", runId, status: "cancelled" })
+        expect(cleanedUp).toBe(true)
+        const committed = yield* journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 100 })
+        expect(committed.entries.filter((entry) => entry.eventType === "control.run.cancel-requested")).toHaveLength(1)
+        expect(committed.entries.filter((entry) => entry.eventType === "control.run.cancelled")).toHaveLength(1)
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+  })
+
+  it("reports a settlement writer failure without losing the cancellation fence", async () => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const writer = yield* DurableWriter
+        let fail = false
+        const runtime = yield* SqlControlRuntime.make().pipe(Effect.provideService(DurableWriter, {
+          write: (effect) =>
+            Effect.suspend(() =>
+              fail
+                ? Effect.fail(new DatabaseError({ code: "unsupported" }))
+                : writer.write(effect)
+            )
+        }))
+        const control = Context.get(
+          yield* Layer.build(Layer.fresh(ControlLive.layer)).pipe(
+            Effect.provide(Registry.layerNoop()),
+            Effect.provideService(ControlRuntime, runtime)
+          ),
+          Control
+        )
+        const { runId } = yield* started.pipe(Effect.provideService(Control, control))
+        const fence = yield* runtime.claimFence(runId)
+        fail = true
+        const error = yield* Effect.flip(runtime.interrupt(runId))
+        expect(error).toBeInstanceOf(PersistenceError)
+        expect((error as PersistenceError).operation).toBe("settle an interrupted run")
+        expect(yield* runtime.claimFence(runId)).toBe(fence)
+        fail = false
+        expect((yield* runtime.interrupt(runId)).status).toBe("cancelled")
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+  })
+
   it.each([false, true])(
     "rolls back plan, key, token and event on journal failure (after insert: %s)",
     async (afterInsert) => {
