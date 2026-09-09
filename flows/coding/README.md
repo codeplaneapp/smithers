@@ -100,6 +100,29 @@ Do not introduce a Node sidecar as a requirement for a Bun desktop host.
 
 ## Current boundary
 
+`atoms.ts` now supplies the concrete native implementation delegate discovered as
+`coding/implementation`. Register `atomDelegate` in the existing executable
+catalog and merge `atomFlows`, `atomOperations`, `nativeActions`, and
+`EditAtom.layer` into the host's existing action table. The host supplies its
+ordinary `AgentAction.Host`, guarded filesystem tools, seat resolver (the
+`coding/implement` role), budget and native adapter. No model transport or
+runtime is constructed in this recipe.
+
+Each atom journals its exact prepared native request before applying it, enters
+the native change, runs the agent, snapshots finished edits, and applies the
+planned message. Existing atoms are edited in place; JJ restacks their native
+descendants. The edit report is an explicit graph dependency of snapshot
+preparation. The head reporter may capture completed file writes before that
+snapshot without changing ownership. A changed parent, conflicted tree, or
+different working-copy identity refuses acceptance. Reads/writes in the agent
+report are explanatory observations, not a security boundary or test evidence.
+
+A real JJ/SQLite test creates two atoms with actual file writes, reopens and
+replays the run without editing again, amends the older atom, verifies the later
+atom retains its JJ ID with a new parent/commit and correct files, and refuses
+an incorrectly parented edit. The agent in this test is scripted; a live model
+and complete production host still require the configured composition.
+
 This is a validated implementation pass, not the complete coding product. Its
 result is `validated` or `changes-requested`. The pass does not yet apply
 corrections, restack earlier revisions, invalidate downstream builds, clean

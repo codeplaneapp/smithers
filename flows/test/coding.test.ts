@@ -178,13 +178,14 @@ test("registered project flows persist native child lineage and replay without r
     const result = yield* RunPlan.execute({
       flow: "coding", input: { plan: pinnedPlan }, prompt: "", model: null, placement: null,
       placementOptions: null, capabilities: [], flows: ["coding/RunPlan"]
-    }, { executionId: "coding-catalog-parent" })
+    }, { executionId: "coding-catalog-parent-" + "p".repeat(150) })
     const store = yield* RunStore
     for (const call of called) {
       const row = yield* store.get(call.runId)
       // RunStore.parentRunId is the trampoline predecessor. Spawn ancestry
       // lives in the engine state and its existing durable parent-edge table.
-      assert.equal(JSON.parse(row.stateJson).parentExecutionId, "coding-catalog-parent")
+      assert.equal(JSON.parse(row.stateJson).parentExecutionId, "coding-catalog-parent-" + "p".repeat(150))
+      assert.ok(call.runId.length <= 200, "nested catalog execution IDs remain bounded")
       assert.equal(row.status, "completed")
     }
     return result

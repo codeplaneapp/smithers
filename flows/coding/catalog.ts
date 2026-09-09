@@ -19,10 +19,16 @@ const invoke = (name: string, expectedDigest: string, input: Schema.Json, key: R
   const suffix = Digest.digest(Digest.canonical([
     name, descriptorDigest, input, key
   ]))
+  const legacyId = `${instance.executionId}/coding/${suffix}`
+  // Preserve existing resumable child IDs. Only an overlong new lineage uses
+  // the bounded form; hashing includes the complete parent identity.
+  const executionId = legacyId.length <= 200 ? legacyId : Digest.digest(Digest.canonical([
+    "coding/child/v1", instance.executionId, name, descriptorDigest, input, key
+  ]))
   // The runtime reads the ambient FlowInstance and persists the parent edge.
   // Full payload and verified descriptor identity prevent stale child reuse.
   return yield* runtime.execute(executable.flow, {
-    executionId: `${instance.executionId}/coding/${suffix}`,
+    executionId,
     payload: { input }
   }).pipe(Effect.catch(cause => Effect.fail(new CodingError({ code: "execution", message: `Project flow ${name} failed: ${String(cause)}` }))))
 })
