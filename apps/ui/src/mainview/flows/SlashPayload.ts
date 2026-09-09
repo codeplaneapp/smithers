@@ -57,6 +57,18 @@ const numbered = (args: string | undefined, reason: string): Parsed => {
   return ok(repo === undefined ? { number } : { number, repo })
 }
 
+/** Preserve JSON string whitespace when extracting the optional flow input. */
+export const flowRunParts = (args: string | undefined): { name?: string; repo?: string; input?: string } => {
+  const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(trimmed(args))
+  if (match === null) return {}
+  const name = match[1]!
+  const rest = match[2]?.trim() ?? ""
+  if (rest === "") return { name }
+  if (rest.startsWith("{") || rest.startsWith("[")) return { name, input: rest }
+  const target = /^(\S+)(?:\s+([\s\S]*))?$/.exec(rest)!
+  return { name, repo: target[1]!, ...(target[2] === undefined ? {} : { input: target[2] }) }
+}
+
 /** The three sandbox kinds `workspace.open --kind` accepts (ADR 0002). */
 const KINDS: ReadonlyArray<string> = ["container", "vm", "desktop"]
 
@@ -257,6 +269,13 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok({ runId, nodeId, seq })
   },
   "runs.events": (args) => required("runId", args, "runs.events needs a run id"),
+  "runs.coding.select": (args) => {
+    const [runId, changeId, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.coding.select needs a run id")
+    if (changeId === undefined) return no("runs.coding.select needs a predicted Change")
+    if (rest.length > 0) return no("runs.coding.select takes a run id and one Change")
+    return ok({ runId, changeId })
+  },
   "runs.trace.live": (args) => required("runId", args, "runs.trace.live needs a run id"),
   "runs.trace.view": (args) => {
     const [runId, view, ...rest] = tokensOf(args)
@@ -273,13 +292,15 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "triggers.list": (args) => repoOnly("triggers.list", args),
   "factory.show": (args) => repoOnly("factory.show", args),
   "flow.run": (args) => {
-    const tokens = tokensOf(args)
-    if (tokens.length > 2) return no("flow.run takes a flow name and optionally an owner/repo")
-    const [name, repo] = tokens
-    if (name === undefined) {
-      return no("flow.run needs a flow name: /flow.run create-workflow")
-    }
-    return ok(repo === undefined ? { name } : { name, repo })
+    const { name, repo, input } = flowRunParts(args)
+    if (name === undefined) return no("flow.run needs a flow name")
+    const target = { name, ...(repo === undefined ? {} : { repo }) }
+    if (input === undefined) return ok(target)
+    try {
+      const value: unknown = JSON.parse(input)
+      if (value === null || typeof value !== "object" || Array.isArray(value)) return no("Flow input must be a JSON object.")
+      return ok({ ...target, input: value })
+    } catch { return no("Flow input is not valid JSON. Fix the JSON object before running it.") }
   },
   "card.maximize": (args) => required("cardId", args, "card.maximize needs the card id"),
   "card.dismiss": (args) => required("cardId", args, "card.dismiss needs the card id"),

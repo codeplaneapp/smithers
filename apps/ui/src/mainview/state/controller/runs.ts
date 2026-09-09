@@ -18,6 +18,7 @@
  */
 import type { TraceFilter, TraceView } from "../../cards/RunTrace"
 import { traceFromJournal } from "../../cards/RunTrace"
+import { codingPlanOf } from "../../cards/CodingPlan"
 import type { CommandResult } from "../../flows/Flows"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
@@ -49,6 +50,7 @@ export interface RunsController {
   readonly traceSelect: (runId: string, nodeId: string, seq?: number) => CommandResult
   readonly traceView: (runId: string, view: TraceView) => CommandResult
   readonly traceLive: (runId: string) => CommandResult
+  readonly selectCodingChange: (runId: string, changeId: string) => CommandResult
   readonly stopAllRuns: (repo?: string) => Promise<CommandResult>
   readonly listApprovals: (repo?: string) => Promise<CommandResult>
   readonly openApproval: (runId: string) => Promise<CommandResult>
@@ -414,6 +416,16 @@ export const createRunsController = (
     return { value: `trace-select run=${runId} node=${nodeId}${seq === undefined ? "" : ` seq=${seq}`}` }
   }
 
+  const selectCodingChange = (runId: string, changeId: string): CommandResult => {
+    const card = runCardFor(runId)
+    if (card === undefined) return `Open the run first (runs.open ${runId}): its plan lives on the card.`
+    if (!codingPlanOf(card)?.changes.some((change) => change.id === changeId)) return `Run ${runId} has no recorded planned Change ${changeId}.`
+    const { codingChangeId: previous, ...payload } = card.payload
+    const selected = previous === changeId ? {} : { codingChangeId: changeId }
+    store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card: { ...card, payload: { ...payload, ...selected } } })
+    return { value: `coding-plan-selection run=${runId} change=${previous === changeId ? "none" : changeId}` }
+  }
+
   const traceView = (runId: string, view: TraceView): CommandResult => {
     const card = runCardFor(runId)
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
@@ -602,6 +614,7 @@ export const createRunsController = (
     showRunEvents,
     traceFilter,
     traceSelect,
+    selectCodingChange,
     traceView,
     traceLive,
     stopAllRuns,

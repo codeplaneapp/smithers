@@ -17,9 +17,9 @@ describe("slash payload argument counts", () => {
     }
   })
 
-  test("flow.run refuses a third token instead of dropping it", () => {
+  test("flow.run refuses extra text that is not a JSON input object", () => {
     const parsed = payloadFor("flow.run", "create-workflow will/flows extra")
-    expect(parsed).toEqual({ error: "flow.run takes a flow name and optionally an owner/repo" })
+    expect(parsed).toEqual({ error: "Flow input is not valid JSON. Fix the JSON object before running it." })
   })
 
   test("flow.run still takes its name and optional repo", () => {
@@ -28,7 +28,7 @@ describe("slash payload argument counts", () => {
       payload: { name: "create-workflow", repo: "will/flows" }
     })
     expect(payloadFor("flow.run", "")).toEqual({
-      error: "flow.run needs a flow name: /flow.run create-workflow"
+      error: "flow.run needs a flow name"
     })
   })
 
@@ -258,5 +258,17 @@ describe("the code.* positions", () => {
     expect(payloadFor("code.diagnostics", "src/x.ts will/flows extra")).toEqual({
       error: "code.diagnostics takes a path and optionally an owner/repo"
     })
+  })
+})
+
+
+describe("structured flow input", () => {
+  test("an optional JSON object preserves nested values and string whitespace with or without a repo", () => {
+    const input = { plan: { prompt: "Keep  two spaces.\nNext line.", changes: [{ title: "One" }] }, count: 3, enabled: true }
+    expect(payloadFor("flow.run", `coding will/repo ${JSON.stringify(input)}`)).toEqual({ payload: { name: "coding", repo: "will/repo", input } })
+    expect(payloadFor("flow.run", `coding ${JSON.stringify(input)}`)).toEqual({ payload: { name: "coding", input } })
+    for (const body of ["[]", "null", '"text"', "3", "true", "{} trailing", "{bad"]) {
+      expect(payloadFor("flow.run", `coding will/repo ${body}`)).toHaveProperty("error")
+    }
   })
 })

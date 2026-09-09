@@ -21,7 +21,7 @@ export interface WorkflowController {
   readonly listWorkspaceWorkflows: (repo?: string) => Promise<string | void | { readonly value: string }>
   /** The Flows pane: the surface switch, and the same listing that fills it. */
   readonly showFlows: () => Promise<string | void | { readonly value: string }>
-  readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
+  readonly runWorkflow: (name: string, repo?: string, input?: Record<string, unknown>) => Promise<string | void | { readonly value: string }>
   readonly chooseWorkflowRepo: (fullName: string) => Promise<string | void | { readonly value: string }>
   readonly forwardApprovalDecision: (
     card: Extract<Card, { kind: "approval" }>,
@@ -236,7 +236,7 @@ export const createWorkflowController = (
         steps: [args.firstStep],
         result: null,
         lastSeq: 0,
-        ...(args.input === undefined ? {} : { input: args.input }),
+        ...(args.input === undefined ? held?.input === undefined ? {} : { input: held.input } : { input: args.input }),
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         /*
          * The reader's view of the trace (spec 06 §5) survives a re-open: a
@@ -250,6 +250,7 @@ export const createWorkflowController = (
             ...(held.facet === undefined ? {} : { facet: held.facet }),
             ...(held.filter === undefined ? {} : { filter: held.filter }),
             ...(held.traceView === undefined ? {} : { traceView: held.traceView }),
+            ...(held.codingChangeId === undefined ? {} : { codingChangeId: held.codingChangeId }),
             ...(held.events === undefined ? {} : { events: held.events }),
             ...(held.selection === undefined ? {} : { selection: held.selection }),
             ...(held.cursorSeq === undefined ? {} : { cursorSeq: held.cursorSeq }),
@@ -437,7 +438,7 @@ export const createWorkflowController = (
     return listWorkspaceWorkflows()
   }
 
-  const runWorkflow = async (name: string, repoArg?: string): Promise<string | void | { readonly value: string }> => {
+  const runWorkflow = async (name: string, repoArg?: string, input: Record<string, unknown> = {}): Promise<string | void | { readonly value: string }> => {
     const guard = workflowIdentityGuard()
     if (guard !== undefined) return guard
     const balanceGuard = zeroBalanceGuard()
@@ -453,7 +454,7 @@ export const createWorkflowController = (
     const launched = await launchWorkflow({
       repo,
       workflow: name,
-      input: {},
+      input,
       title: `${name} — ${repo}`
     })
     if ("message" in launched) {

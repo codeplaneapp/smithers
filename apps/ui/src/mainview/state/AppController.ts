@@ -199,7 +199,7 @@ export interface AppController {
   readonly registerTrigger: TriggersSeam["registerTrigger"]
   /** Ask 5: the Flows pane — the surface switch and the listing that fills it. */
   readonly showFlows: () => Promise<string | void | { readonly value: string }>
-  readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
+  readonly runWorkflow: (name: string, repo?: string, input?: Record<string, unknown>) => Promise<string | void | { readonly value: string }>
   /* Wave 12 §2 — the answer to "which loaded repository?" (one act). */
   readonly chooseWorkflowRepo: (fullName: string) => Promise<string | void | { readonly value: string }>
   /* Wave 12 §3 — the two acts a run that has gone quiet offers. */
@@ -222,6 +222,7 @@ export interface AppController {
   readonly showRunEvents: RunsController["showRunEvents"]
   readonly traceFilter: RunsController["traceFilter"]
   readonly traceSelect: RunsController["traceSelect"]
+  readonly selectCodingChange: RunsController["selectCodingChange"]
   readonly traceView: RunsController["traceView"]
   readonly traceLive: RunsController["traceLive"]
   readonly stopAllRuns: RunsController["stopAllRuns"]
@@ -1318,6 +1319,7 @@ export const createAppController = (
     showRunEvents: runs.showRunEvents,
     traceFilter: runs.traceFilter,
     traceSelect: runs.traceSelect,
+    selectCodingChange: runs.selectCodingChange,
     traceView: runs.traceView,
     traceLive: runs.traceLive,
     stopAllRuns: runs.stopAllRuns,
@@ -1680,6 +1682,7 @@ export const createAppController = (
     showRunEvents: runs.showRunEvents,
     traceFilter: runs.traceFilter,
     traceSelect: runs.traceSelect,
+    selectCodingChange: runs.selectCodingChange,
     traceView: runs.traceView,
     traceLive: runs.traceLive,
     stopAllRuns: runs.stopAllRuns,

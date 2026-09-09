@@ -11,6 +11,7 @@
  * that lets a human decide a gate whose own approval card never landed.
  */
 import type { StorageApi } from "@tanstack/db"
+import { CODING_PLAN } from "../cards/fixtures/CodingPlan"
 import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
 import type { NativeRepositories } from "../native/NativeBridge"
@@ -732,5 +733,62 @@ describe("the approvals inbox — list, open, and the row decision", () => {
     await controller.commands.run("approval.approve", "approval-run-a-req-1")
     await settle(4)
     expect(double.state.submitted).toHaveLength(1)
+  })
+})
+
+
+describe("typed coding launch and plan inspection", () => {
+  test("flow.run preserves structured input, selection is actor-tagged and persisted, and reopening retains the plan", async () => {
+    const storage = memoryStorage()
+    const store = await createAppStore({ kind: "localStorage", storage })
+    const double = relay({ runs: [{ runId: "run-1", flowId: "coding", status: "running" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    const launched = await controller.commands.run("flow.run", `coding ${REPO} ${JSON.stringify({ plan: CODING_PLAN })}`)
+    expect(launched.status).toBe("executed")
+    expect(double.state.launched[0]).toEqual({ workflow: "coding", input: { plan: CODING_PLAN }, repo: REPO })
+    expect((await controller.commands.runForAgent("runs.coding.select", "run-1 memory")).status).toBe("executed")
+    let card = store.collections.cards.get("flow-run-run-1") as Extract<Card, { kind: "run-trace" }>
+    expect(card.payload.codingChangeId).toBe("memory")
+    expect([...store.collections.transitions.values()].filter((row) => row.type === "card.upsert").at(-1)?.actor).toBe("smithers")
+    await controller.commands.run("runs.open", `run-1 ${REPO}`)
+    card = store.collections.cards.get("flow-run-run-1") as typeof card
+    expect(card.payload.input).toEqual({ plan: CODING_PLAN })
+    expect(card.payload.codingChangeId).toBe("memory")
+    expect(said(await controller.commands.run("runs.coding.select", "run-1 fabricated"))).toContain("no recorded planned Change")
+    await settle()
+    controller.dispose()
+    await store.dispose?.()
+    const reloaded = await createAppStore({ kind: "localStorage", storage })
+    const restored = reloaded.collections.cards.get("flow-run-run-1") as typeof card
+    expect(restored.payload.codingChangeId).toBe("memory")
+    expect(restored.payload.input).toEqual({ plan: CODING_PLAN })
+    const second = createAppController(reloaded, unavailableRepositories, silentAgent(), double.services)
+    await second.commands.run("runs.coding.select", "run-1 memory")
+    expect((reloaded.collections.cards.get(card.id) as typeof card).payload.codingChangeId).toBeUndefined()
+    second.dispose()
+    await reloaded.dispose?.()
+  })
+
+  test("JSON input uses the existing schema form and malformed JSON launches nothing", async () => {
+    const store = await webStore()
+    const double = relay()
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    const invalid = await controller.commands.run("flow.run", `coding ${REPO} {invalid`)
+    expect(invalid.status).toBe("form")
+    expect(double.state.launched).toHaveLength(0)
+    const form = store.collections.cards.get("form-flow.run")
+    expect(form?.kind === "flow-form" && form.payload.draft).toMatchObject({ name: "coding", repo: REPO, input: "{invalid" })
+    expect(form?.kind === "flow-form" && form.payload.fields.some((field) => field.name === "input" && field.label === "Input JSON")).toBe(true)
+    expect(form?.kind === "flow-form" && form.payload.error).toContain("not valid JSON")
+    expect(said(await controller.commands.run("form.submit", "form-flow.run"))).toContain("not valid JSON")
+    expect(double.state.launched).toHaveLength(0)
+    await controller.commands.run("form.set", `form-flow.run input ${JSON.stringify({ plan: CODING_PLAN })}`)
+    const result = await controller.commands.run("form.submit", "form-flow.run")
+    expect(result.status).toBe("executed")
+    expect(double.state.launched[0]?.input).toEqual({ plan: CODING_PLAN })
+    const missing = await controller.commands.runForAgent("runs.coding.select", "run-1")
+    expect(missing).toMatchObject({ status: "form", fields: ["changeId"] })
   })
 })

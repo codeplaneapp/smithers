@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client"
 import type { Card } from "../state/AppState"
 import { PROTOTYPE_BANNER, RunTraceBody } from "./RunTraceCard"
 import { WorkflowRunCardBody } from "./WorkflowCards"
+import { CODING_PLAN } from "./fixtures/CodingPlan"
 
 /*
  * The run trace (factory spec 06, mocks #s5 and #s6): one card shows every
@@ -277,5 +278,32 @@ describe("the run card as a trace", () => {
     expect(host.querySelectorAll("[data-trace-bar]")).toHaveLength(0)
     expect(host.querySelector("[data-testid='run-trace-empty-run-1']")?.textContent).toContain("No journal yet. The run is launching")
     expect(host.querySelector("[data-testid='run-trace-clock-run-1']")?.textContent).toBe("no journal yet")
+  })
+})
+
+
+describe("predicted coding Changes in the same run card", () => {
+  test("the typed plan appears before any journal, with durable progressive detail and no invented outcomes", () => {
+    const initial = renderTrace({ workflow: "coding", input: { plan: CODING_PLAN }, traceView: undefined })
+    const outline = initial.host.querySelector("[aria-label='Predicted Changes']")
+    expect(outline?.textContent).toContain("Store repository memory")
+    expect(outline?.textContent).toContain("Connect the Wiki interface")
+    expect(initial.host.querySelector("[aria-label='Predicted atomic changes']")).toBeNull()
+    click(initial.host.querySelector("[data-flow='runs.coding.select']"))
+    expect(initial.dispatched).toEqual([{ name: "runs.coding.select", args: "run-1 memory" }])
+    const selected = renderTrace({ workflow: "coding", input: { plan: CODING_PLAN }, codingChangeId: "memory", cursorSeq: 0, traceView: undefined })
+    const details = selected.host.querySelector("[aria-label='Store repository memory']")!
+    expect(details.textContent).toContain("✨ feat(memory): persist causal documents")
+    expect(details.textContent).toContain("src/memory.test.ts")
+    expect(details.textContent).toContain("fast · required")
+    expect(details.textContent).toContain("slow · required")
+    expect(details.textContent).toContain("wiki-revision-42")
+    expect(details.textContent).not.toContain("passed")
+    expect(details.textContent).not.toContain("vibed")
+    expect(selected.host.querySelector("[aria-label='Turn explanations']")?.children).toHaveLength(0)
+  })
+  test("missing or invalid input cannot fabricate a coding plan", () => {
+    expect(renderTrace({ workflow: "coding" }).host.querySelector("[aria-label='Coding plan']")).toBeNull()
+    expect(renderTrace({ input: { plan: { ...CODING_PLAN, changes: [CODING_PLAN.changes[0], CODING_PLAN.changes[0]] } } }).host.querySelector("[aria-label='Coding plan']")).toBeNull()
   })
 })

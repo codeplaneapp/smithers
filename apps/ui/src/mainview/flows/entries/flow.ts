@@ -6,7 +6,8 @@
 import { Schema } from "effect"
 import { flow, NoPayload, RepoTarget, CardTarget } from "./Declare"
 import type { FlowEntry, Namespace } from "../registry"
-import { repoTargetGrammar } from "../SlashPayload"
+import { flowRunParts, repoTargetGrammar } from "../SlashPayload"
+import { line, text } from "../FlowForms"
 import type { RepositoryFlow } from "../../state/AppState"
 import type { CommandActions } from "./Declare"
 
@@ -117,17 +118,23 @@ export const flowFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "flow.run",
-    form: { fields: { name: { label: "Flow" }, repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    form: {
+      fields: { name: { label: "Flow" }, repo: { optionsFrom: "cloud-repos", kind: "text" }, input: { label: "Input JSON" } },
+      partial: flowRunParts,
+      args: (payload) => line(text(payload, "name"), text(payload, "repo"),
+        payload.input === undefined ? undefined : typeof payload.input === "string" ? text(payload, "input") : JSON.stringify(payload.input))
+    },
     summary: "Run a flow on your workspace",
     runtime: ["cloud"],
-    args: "<name> [owner/repo]",
+    args: "<name> [owner/repo] [JSON object]",
     requires: ["signed-in"],
     capabilities: ["outbound:launch"],
     input: Schema.Struct({
       name: Schema.String,
-      repo: Schema.optional(Schema.String)
+      repo: Schema.optional(Schema.String),
+      input: Schema.optional(Schema.Record(Schema.String, Schema.Json))
     }),
-    handler: ({ name, repo }) => actions.runWorkflow(name, repo)
+    handler: ({ name, repo, input }) => actions.runWorkflow(name, repo, input)
   })
 ]
 

@@ -184,7 +184,8 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
 
   const patch = (card: FlowFormCard, payload: FlowFormCard["payload"], status: Card["status"]): void => {
     const invocation = continuationFor(card)
-    store.dispatch({ type: "card.updated", actor: ctx.commandActor, id: card.id, patch: { payload, status } })
+    // Replace the payload so clearing an optional parse error is durable; patches merge omitted keys.
+    store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card: { ...card, payload, status } })
     if (invocation !== undefined) continuations.set(card.id, { invocation, payload: JSON.stringify(payload) })
   }
 
@@ -220,6 +221,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const given = "payload" in parsed ? parsed.payload : partialPayload(fields, hints, request.args)
     const draft = draftFrom(fields, given)
     const resolved = withOptions(fields, draft)
+    const parseError = "error" in parsed && missingFields(resolved, draft).length === 0 ? { error: parsed.error } : {}
     const cardId = formCardId(request.name)
     // A human's menu action now continues in the form. Release the menu's
     // backdrop through the same transitions used by its close gestures.
@@ -251,13 +253,13 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
         status: "active",
         createdAt: existing?.createdAt ?? Date.now(),
         ordinal: deps.nextOrdinal(),
-        payload: { flow: request.name, via: request.via, fields: resolved, draft, given }
+        payload: { flow: request.name, via: request.via, fields: resolved, draft, given, ...parseError }
       }
     })
     if (request.invocation !== undefined) {
       continuations.set(cardId, {
         invocation: request.invocation,
-        payload: JSON.stringify({ flow: request.name, via: request.via, fields: resolved, draft, given })
+        payload: JSON.stringify({ flow: request.name, via: request.via, fields: resolved, draft, given, ...parseError })
       })
     }
     void refreshModelList(cardId)
@@ -348,6 +350,11 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const represented = new Set(card.payload.fields.map((field) => field.name))
     const unrepresented = Object.fromEntries(Object.entries(card.payload.given).filter(([name]) => !represented.has(name)))
     const args = assembleArgs(card.payload.fields, entry.metadata.form, { ...unrepresented, ...card.payload.draft })
+    const parsed = payloadFor(flow, args, entry.metadata.grammar)
+    if ("error" in parsed) {
+      patch(card, { ...card.payload, error: parsed.error }, "error")
+      return parsed.error
+    }
     const actor = ctx.commandActor
     /*
      * The continuation keeps the asker's actor: an agent-rendered form runs

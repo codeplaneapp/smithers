@@ -191,6 +191,15 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ runId, nodeId, seq }) => actions.traceSelect(runId, nodeId, seq)
   }),
   flow({
+    name: "runs.coding.select",
+    summary: "Inspect or collapse a predicted Change in a coding run",
+    runtime: ["cloud"],
+    hidden: true,
+    args: "<runId> <changeId>",
+    input: Schema.Struct({ runId: Schema.String, changeId: Schema.String }),
+    handler: ({ runId, changeId }) => actions.selectCodingChange(runId, changeId)
+  }),
+  flow({
     name: "runs.trace.view",
     summary: "Show a run's turn explanations or full execution timeline in its embedded card",
     runtime: ["cloud"],

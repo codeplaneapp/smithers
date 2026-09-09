@@ -344,6 +344,7 @@ describe("THE FORM LAW — every flow's form round-trips through its own grammar
         else if (field.kind === "select") sample[field.name] = field.options?.[0]?.value ?? "x1"
         // A repository target is only ever read in its owner/repo shape (RepoContext.splitTrailingRepo).
         else if (field.name === "repo") sample[field.name] = "o/r"
+        else if (name === "flow.run" && field.name === "input") sample[field.name] = { message: "Keep  spaces" }
         else sample[field.name] = "x1"
       }
       const draft = draftFrom(fields, sample)

@@ -100,6 +100,7 @@ const AGENT_ROWS: ReadonlyArray<{ readonly name: string; readonly args?: string;
   { name: "runs.trace.select", args: "run-1 frame-1", confirm: false },
   { name: "runs.trace.view", args: "run-1 turns", confirm: false },
   { name: "runs.trace.live", args: "run-1", confirm: false },
+  { name: "runs.coding.select", args: "run-1 storage", confirm: false },
   { name: "chat.clear", confirm: true },
   { name: "tab.terminal", confirm: false },
   { name: "tab.harness", args: "claude", confirm: true },

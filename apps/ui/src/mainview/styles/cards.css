@@ -2261,3 +2261,21 @@
 	border-radius: 0.5rem;
 	overflow: hidden;
 }
+
+/* The actual coding plan is a compact outline within the existing run card. */
+.coding-plan { border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; }
+.coding-plan h4, .coding-plan h5 { margin: 0 0 0.375rem; font: inherit; font-weight: 600; }
+.coding-plan-changes { list-style: none; padding: 0; margin: 0; }
+.coding-plan-change { width: 100%; display: flex; gap: 0.75rem; padding: 0.5rem; text-align: left; color: inherit; font: inherit; background: transparent; border: 0; border-radius: 0.375rem; cursor: pointer; }
+.coding-plan-change[aria-expanded="true"] { background: var(--accent-soft, var(--surface-2)); }
+.coding-plan-change:focus-visible, .coding-plan summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.coding-plan-number, .coding-plan-meta { color: var(--text-muted); }
+.coding-plan-change .coding-plan-meta { display: block; font-size: 0.75rem; }
+.coding-plan-detail { padding: 0.75rem; overflow-wrap: anywhere; }
+.coding-plan-detail p { margin: 0.25rem 0 0.5rem; }
+.coding-plan-atoms { padding-left: 1.25rem; }
+.coding-plan-atoms > li { margin-bottom: 0.875rem; }
+.coding-plan-paths { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.coding-plan-paths ul, .coding-plan-checks { list-style: none; padding: 0; }
+.coding-plan-checks li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem 1rem; }
+@media (max-width: 640px) { .coding-plan-paths { grid-template-columns: minmax(0, 1fr); } }

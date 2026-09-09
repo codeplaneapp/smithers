@@ -825,7 +825,9 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       /** Whether the trace follows the newest frame (factory spec 06 §2); true when absent. A select turns it off. */
       liveTail: z.boolean().optional(),
       /** Progressive inspection uses one card: a cheap turn list by default, the full timeline on demand. */
-      traceView: z.enum(["turns", "timeline"]).optional()
+      traceView: z.enum(["turns", "timeline"]).optional(),
+      /** The predicted Change inspected within the recorded coding plan. */
+      codingChangeId: z.string().optional()
     })
   }),
   /* The workspace's workflows as an embedded card (flow.list). */

@@ -224,7 +224,7 @@ const coerce = (field: FormField, value: unknown): FieldValue | undefined => {
     case "boolean":
       return typeof value === "boolean" ? value : ["true", "on", "yes", "1"].includes(String(value).trim().toLowerCase())
     default:
-      return String(value)
+      return typeof value === "object" ? JSON.stringify(value) : String(value)
   }
 }
 
