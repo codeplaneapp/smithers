@@ -1,7 +1,8 @@
 // Deep reviewed and polished by a human on 2026-08-31.
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { Cause, Crypto, Effect, Exit, Layer, PlatformError, Schema } from "effect"
+import { Cause, Crypto, Effect, Exit, Layer, PlatformError, Schema, SchemaIssue } from "effect"
+import { inspect } from "node:util"
 import { describe, expect, it } from "vitest"
 import * as Keys from "../src/index.ts"
 
@@ -26,6 +27,20 @@ const failingCrypto = Layer.succeed(
       }))
   })
 )
+
+// Include issues in annotations/causes and inspect input fields, not just messages.
+const collectIssues = (root: unknown): Array<SchemaIssue.Issue> => {
+  const issues: Array<SchemaIssue.Issue> = []
+  const seen = new Set<object>()
+  const visit = (value: unknown): void => {
+    if (typeof value !== "object" || value === null || seen.has(value)) return
+    seen.add(value)
+    if (SchemaIssue.isIssue(value)) issues.push(value)
+    for (const child of Object.values(value)) visit(child)
+  }
+  visit(root)
+  return issues
+}
 
 describe("stored key validation", () => {
   const stored = `key1_${"a".repeat(64)}`
@@ -153,6 +168,55 @@ describe("key derivation", () => {
             cause: expect.objectContaining({ _tag: "SchemaError" })
           })
         }
+      }
+    })
+  })
+
+  describe.each(["digest_failed", "canonicalization_failed"] as const)("%s input reporting", (code) => {
+    const secret = "enclosing-key-material-sentinel"
+    const material = code === "digest_failed" ? { secret } : { secret, bad: 1n }
+
+    it("omits input throughout a direct DerivedKey failure despite reportInput: true", () => {
+      const error = Effect.runSync(Effect.flip(
+        Schema.decodeUnknownEffect(Keys.DerivedKey)(material, { reportInput: true }).pipe(
+          Effect.provide(failingCrypto)
+        )
+      ))
+      const issues = collectIssues(error.issue)
+      expect(issues.map((issue) => issue._tag)).toEqual(expect.arrayContaining(["Encoding", "InvalidValue"]))
+      expect(issues.filter(SchemaIssue.hasInput)).toEqual([])
+      expect(error.message).toContain(`[${code}]`)
+      expect(inspect(error.issue, { depth: null })).not.toContain(secret)
+    })
+
+    it.each(
+      [
+        ["Struct", Schema.Struct({ id: Schema.String, key: Keys.DerivedKey }), { id: "r1", key: material }],
+        ["Array", Schema.Array(Keys.DerivedKey), [material]]
+      ] as const
+    )("retains only the enclosing %s input when its boundary enables reporting", (_name, schema, input) => {
+      for (const mode of ["enabled", "disabled", "default", "annotated"] as const) {
+        const boundary = mode === "annotated" ? schema.annotate({ parseOptions: { reportInput: false } }) : schema
+        const options = mode === "default" ? undefined : { reportInput: mode !== "disabled" }
+        const error = Effect.runSync(Effect.flip(
+          Schema.decodeUnknownEffect(boundary)(input, options).pipe(Effect.provide(failingCrypto))
+        ))
+        expect(error.issue._tag).toBe("Composite")
+        const issues = collectIssues(error.issue)
+        expect(issues.map((issue) => issue._tag)).toEqual(
+          expect.arrayContaining(["Pointer", "Encoding", "InvalidValue"])
+        )
+        expect(issues.filter(SchemaIssue.hasInput)).toEqual(mode === "enabled" ? [error.issue] : [])
+        if (mode === "enabled") {
+          expect(error.issue.input).toBe(input)
+          expect(inspect(error.issue, { depth: null })).toContain(secret)
+        } else {
+          expect(inspect(error.issue, { depth: null })).not.toContain(secret)
+        }
+        const derivedIssue = issues.find((issue) => issue._tag === "Encoding")!
+        expect(inspect(derivedIssue, { depth: null })).not.toContain(secret)
+        expect(error.message).toContain(`[${code}]`)
+        expect(error.message).not.toContain(secret)
       }
     })
   })

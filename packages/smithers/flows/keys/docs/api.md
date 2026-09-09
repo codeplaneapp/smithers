@@ -64,9 +64,13 @@ The same derivation as a schema transformation, for composing inside a decode.
 - Operational failures become `SchemaError` issues whose message is
   `[<code>] <message>`. The typed `KeyDerivationError` is retained on the
   failing issue's annotations as `cause`, next to the stable `code`.
-- The schema pins `parseOptions: { reportInput: false }`, so no schema issue
-  retains the input value even when an enclosing caller requests input
-  reporting.
+- The schema pins `parseOptions: { reportInput: false }`, so its own
+  `InvalidValue` and `Encoding` issues omit input even when the caller requests
+  input reporting. Enclosing schemas such as `Struct` and `Array` decoded with
+  `{ reportInput: true }` retain the entire enclosing input on their own
+  `Composite` issue, including key material. Keep input reporting off at the
+  outer decoding boundary, or strip issue inputs before retaining diagnostics.
+  See the [boundary annotation example](./guides/derive-a-key-inside-a-schema.md#input-reporting-stops-at-the-derivedkey-boundary).
 - Annotated with the identifier `@smthrs/keys/Key`.
 
 ```ts

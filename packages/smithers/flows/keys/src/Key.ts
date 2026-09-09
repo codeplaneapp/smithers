@@ -183,7 +183,8 @@ export const DerivedKey = Schema.Unknown.pipe(
   })
 ).annotate({
   identifier: "@smthrs/keys/Key",
-  // Key material may contain secrets or large payloads. Never retain it in a
-  // schema issue, even when an enclosing caller requests input reporting.
+  // Omit input from DerivedKey's own InvalidValue and Encoding issues.
+  // Enclosing Struct/Array Composite issues can still retain key material;
+  // keep reportInput off at the outer decoding boundary too.
   parseOptions: { reportInput: false }
 })
