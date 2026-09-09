@@ -357,7 +357,7 @@ acquired once per run and every cell of that run is evaluated in it.
 | `makeNoop` | const | constructors | Constructs an unavailable sandbox stub, optionally overriding operations. |
 | `layerNoop` | const | layers | Provides an unavailable sandbox stub. |
 | `realmUnsupported` | const | constructors | Refuses a run on a binding that has no persistent realm. |
-| `callTimedOut` | const | constructors | Settles one overrunning flow call as a catchable failure. |
+| `callTimedOut` | const | constructors | Settles one overrunning flow call as a resolved failure. |
 | `compile` | const | conversions | Erases type-only syntax from a cell without evaluating or resolving modules. |
 | `PendingCall` | type | models | A queued call awaiting resolution by a binding's driver. |
 | `Latch` | interface | models | A wake-up latch shared between a binding's driver loop and its cell. |

@@ -262,7 +262,9 @@ export interface EngineLike {
    * re-running when the cell is re-executed after a crash or a permission park.
    *
    * A flow that fails settles as a `failure` {@link Cell.CallResult}, which the
-   * cell observes as a catchable exception. A permission requirement, an
+   * cell observes as a resolved `{ ok: false, error }` envelope, not a throw.
+   * It branches on `.ok === false` and `.error.code` to recover; success
+   * resolves with the flow's own value, unwrapped. A permission requirement, an
    * abort, or an engine failure travels in the error channel instead, so the
    * cell never sees — and can never swallow — a park.
    */
@@ -321,8 +323,8 @@ export interface EngineLike {
    *
    * `Option.none()` is the honest answer for a host with no store to pin into,
    * exactly as it is for `observe`. It is not an error: the controller answers
-   * the cell with a catchable `checkpoint_unavailable` and the run carries on
-   * taking its readings from the live tree.
+   * the cell with a resolved `checkpoint_unavailable` failure, and the run
+   * carries on taking its readings from the live tree.
    *
    * The result is nondeterministic, so the controller journals it through
    * {@link EngineLike.record} rather than calling this on a replayed frame.
@@ -388,7 +390,7 @@ export const makeNoop = (overrides: Partial<EngineLike> = {}): EngineLike =>
     observe: Effect.succeed(Option.none()),
     // Unpinnable for the same reason, and reported the same way: a stub engine
     // has no store to pin a tree into, and the controller reads the absence as
-    // a catchable refusal the cell can route around.
+    // a resolved refusal the cell can route around.
     capture: () => Effect.succeed(Option.none()),
     suspend: Effect.fn("EngineLike.suspend")(() => Effect.fail(unavailable("suspend", "suspended"))),
     ...overrides

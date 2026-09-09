@@ -556,8 +556,9 @@ export const checkpointOf = (value: Schema.Json): string | undefined => {
 /**
  * The settled outcome of one flow call.
  *
- * A `failure` is data the cell may catch and recover from; it is never a
- * harness failure. Anything the cell cannot see — a permission park, an abort —
+ * A `failure` resolves in the cell as a `{ ok: false, error }` envelope that
+ * it may inspect and recover from; it does not throw and is never a harness
+ * failure. Anything the cell cannot see, such as a permission park or an abort,
  * travels in the effect's error channel instead.
  *
  * @category models
@@ -737,12 +738,13 @@ export interface Extracted {
  * Extracts the cell program one model settlement emitted.
  *
  * Every fenced block tagged as a cell is kept, in reply order, and the blocks
- * are joined with newlines into one program. They are bodies of one async
- * function, so the semantics that follows is the honest one and needs no
- * machinery: execution runs the blocks in order and the **first `return` wins**
- * — a block that settles a transition ends the frame and the blocks after it do
- * not run. That is how the model evidently thinks of them, as sequential
- * frames, and it is what a single concatenated function body already does.
+ * are joined with newlines into one global async script in the persistent
+ * realm. Top-level `await` is supported; top-level `return` is invalid. Blocks
+ * execute in order. The first `ctx.done` or `ctx.park` that records an intent
+ * seals the frame; later `ctx.done` and `ctx.park` calls do nothing. Ordinary
+ * JavaScript in later blocks continues running, but later `ctx.call` and
+ * `ctx.checkpoint` calls resolve with a `run_completed` failure envelope
+ * without dispatching host work.
  *
  * Keeping only the *last* block is what this replaces, and the cost of that
  * rule was measured: on one graded instance the model wrote a near-par program

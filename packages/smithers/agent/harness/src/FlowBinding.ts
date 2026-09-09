@@ -28,9 +28,11 @@
  * The failure split is the one `EngineLike.call` declares. A refusal the agent
  * could plausibly correct — malformed input, a flow that failed, output that is
  * not serializable — becomes a `failure` {@link Cell.CallResult} the cell
- * observes as a catchable exception. Anything the cell must never swallow — a
- * permission requirement, an abort, a suspension — stays in the typed error
- * channel, and an interruption is never caught at all.
+ * observes as a resolved `{ ok: false, error }` envelope. The cell branches on
+ * `.ok === false` and `.error.code` to recover; ordinary failures do not throw.
+ * Anything the cell must never swallow, such as a permission requirement, an
+ * abort, or a suspension, stays in the typed error channel. An interruption
+ * is never caught at all.
  *
  * Governing design: `../docs/concepts.md#durable-cell-loop` and
  * `../docs/concepts.md#flow-registry`.
@@ -212,7 +214,7 @@ export interface Binding<R = never> {
 }
 
 /**
- * A refusal the cell observes as a catchable exception.
+ * A refusal the cell observes as a resolved `{ ok: false, error }` envelope.
  */
 const refused = (code: Cell.CallFailureCode, message: string): CallResult =>
   new CallResult({ outcome: "failure", value: null, code, message })
@@ -238,7 +240,7 @@ const publicMessage = <E>(error: E, render: ((error: E) => string | undefined) |
  *
  * A permission requirement, a denial, and every harness-level failure are the
  * controller's to act on: parking, escalating, or aborting the run. Returning
- * them as call results would let a cell catch its own permission park and
+ * them as call results would let a cell ignore its own permission park and
  * proceed as though it had authority.
  */
 const escalated = (error: unknown): HarnessError | undefined => {
@@ -501,7 +503,7 @@ export const catalog = (
  * is not disclosed, which is what keeps `flow.ts > flow.mdx > SKILL.md`
  * precedence exactly where discovery put it. The shadowed binding is reported
  * as an ordinary `duplicate_name` warning rather than silently dispatched, and
- * the resolver refuses the shadowed name catchably.
+ * the resolver refuses the shadowed name with a resolved failure envelope.
  *
  * @category constructors
  * @since 0.1.0

@@ -10,14 +10,16 @@
  * It is deliberately not a second registry. Discovery, precedence, first-found
  * collision handling, and progressive disclosure all stay in
  * `@smthrs/registry`; this module only decides which body runs and turns
- * every resolution problem into a {@link Cell.CallResult} the cell can catch.
+ * every resolution problem into a {@link Cell.CallResult} the cell can inspect.
  *
  * The split between a failed result and a failed effect is the contract
  * `EngineLike.call` declares. A refusal the agent could plausibly correct — an
  * unknown flow, a badly shaped input, a flow this host does not implement — is
- * a `failure` result, so the cell observes an ordinary exception and may
- * recover. Anything the cell must never swallow — a permission park, an abort —
- * stays in the error channel of the implementation that raised it.
+ * a `failure` result, so the cell observes a resolved `{ ok: false, error }`
+ * envelope and may recover by branching on `.ok === false` and `.error.code`.
+ * Ordinary call failures do not throw. Anything the cell must never swallow,
+ * such as a permission park or an abort, stays in the error channel of the
+ * implementation that raised it.
  *
  * The resolver's shape is exactly `FlowEngineLike.CallRunner["run"]`, so a
  * durable host wires it in without this browser-safe package depending on the
@@ -97,7 +99,7 @@ export interface Options {
   readonly catalog?: FlowBinding.Catalog | undefined
   /** Host implementations for module-backed flows, keyed by flow name. */
   readonly implementations?: ReadonlyMap<string, Implementation> | undefined
-  /** Runs a rendered markdown flow. A host with none refuses them catchably. */
+  /** Runs a rendered markdown flow. A host with none answers with a resolved failure envelope. */
   readonly prompt?: PromptRunner | undefined
 }
 
@@ -113,7 +115,7 @@ export interface Resolver {
 }
 
 /**
- * A refusal the cell observes as a catchable exception.
+ * A refusal the cell observes as a resolved `{ ok: false, error }` envelope.
  */
 const refused = (code: Cell.CallFailureCode, message: string): Cell.CallResult =>
   new Cell.CallResult({ outcome: "failure", value: null, code, message })

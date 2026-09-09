@@ -104,7 +104,7 @@ disable them.
 | `steps`       | 1,000   | per frame   | Interrupt checks, not bytecode operations. At least `Sandbox.minimumSteps`.                                                            |
 | `timeMs`      | 30,000  | per frame   | The cell's own JavaScript time. Time suspended in a `ctx.call` or `ctx.checkpoint()` does not count. At least `Sandbox.minimumTimeMs`. |
 | `totalMs`     | 900,000 | per frame   | Whole-evaluation time, host calls included. The backstop for a call that never settles.                                                |
-| `callMs`      | 120,000 | per call    | Wall-clock time one flow call may take before it settles as a catchable timeout.                                                       |
+| `callMs`      | 120,000 | per call    | Wall-clock time one flow call may take before it settles as a resolved timeout.                                                       |
 
 `memoryBytes` is a run budget rather than a frame budget because a realm outlives
 its frames. `runtime.setMemoryLimit` covers the object graph but does not count
@@ -331,7 +331,7 @@ subset; anything needing emit is refused). `Sandbox.driveCell` runs the shared
 drive loop that settles queued calls one at a time, in issue order, until the
 cell settles; `Sandbox.latch` creates the wake-up latch it waits on;
 `Sandbox.PendingCall` is the queued-call shape. `Sandbox.callTimedOut(flow,
-callMs)` synthesizes the catchable `timeout` refusal one ceiling means,
+callMs)` synthesizes the resolved `timeout` refusal one ceiling means,
 whichever clock enforced it. `Sandbox.raisedOutcome` projects a thrown value
 into a stable serializable `Cell.Raised`. `Sandbox.mintUnavailable` is the
 `checkpoint_unavailable` refusal for a run with no minter wired.
@@ -615,7 +615,7 @@ Registry-backed resolution for the flow calls a cell makes. It is deliberately
 not a second registry: discovery, precedence, collision handling, and
 progressive disclosure stay in [`@smthrs/registry`](/api/registry); this
 module only decides which body runs and turns every resolution problem into a
-`Cell.CallResult` the cell can catch.
+`Cell.CallResult` that resolves in the cell as `{ ok: false, error }`.
 
 ```ts
 export interface Options {
@@ -680,7 +680,8 @@ must be a struct-like object; unions of structs and records get no
 null-omission retry.
 
 Correctable failures (`invalid_input`, `flow_failed`) settle as `failure`
-results the cell catches. Ordinary handler failures use the opaque message
+results that resolve in the cell as `{ ok: false, error }`. Inspect
+`.ok === false` and `.error.code` to recover. Ordinary handler failures use the opaque message
 `Flow <name> failed.` Raw messages, objects, and causes are excluded from call
 results and their journal records. `Options.publicError`, typed as
 `(error: E) => string | undefined`, explicitly selects safe public text; the

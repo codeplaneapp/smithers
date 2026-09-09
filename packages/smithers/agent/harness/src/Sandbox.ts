@@ -85,9 +85,8 @@ export interface Invocation {
    * It arrives as the raw JSON the cell wrote rather than as an id because the
    * boundary, not the realm, decides whether it is a checkpoint: a cell that
    * passes a string, a failure envelope, or last frame's result gets an
-   * ordinary catchable `invalid_input` naming what `at` takes, instead of a
-   * throw from inside the sandbox that would lose the calls the cell had
-   * already paid for.
+   * resolved `invalid_input` failure naming what `at` takes. Throwing from inside
+   * the sandbox would lose the calls the cell had already paid for.
    */
   readonly at?: Schema.Json | undefined
 }
@@ -120,7 +119,7 @@ export interface Mint {
  *
  * The result is a {@link Cell.CallResult} like any other, so a host with no
  * store, a run past its checkpoint bound, and a store that failed are all
- * catchable refusals rather than teardown.
+ * resolved `{ ok: false, error }` refusals rather than teardown.
  *
  * @category models
  * @since 0.1.0
@@ -147,9 +146,23 @@ export const mintUnavailable: Minter = () =>
 /**
  * Resolves one invocation on behalf of a running cell.
  *
- * A {@link Cell.CallResult} of `failure` is returned to the cell as a catchable
- * exception. Anything the cell must not observe — a permission park, an abort,
- * an engine failure — travels in the error channel and tears the cell down.
+ * A {@link Cell.CallResult} of `failure` resolves in the cell as
+ * `{ ok: false, error }`, where `error` contains `code`, `message`, and `hint`;
+ * it does not throw. Success resolves with the flow's own value, unwrapped.
+ * Branch on `.ok === false` and `.error.code` to recover. For a flow whose
+ * successful result has a `stdout` field, a cell can retry a timed-out call:
+ *
+ * ```ts
+ * let result = await ctx.call("bash", { command: "find . -name '*.ts'" })
+ * if (result.ok === false && result.error.code === "timeout") {
+ *   result = await ctx.call("bash", { command: "find src -name '*.ts'" })
+ * }
+ * console.log(result.ok === false ? result.error.code : result.stdout)
+ * ```
+ *
+ * Anything the cell must not observe, such as a permission park, an abort,
+ * or an engine failure, travels in the effect's error channel and tears the
+ * cell down.
  *
  * @category models
  * @since 0.1.0
@@ -215,7 +228,7 @@ export interface Limits {
    * `limit_exceeded` rejection the model never sees as an answer: on the
    * SWE-bench django instance one broad `grep` held its cell for the entire
    * 900,000 ms ceiling, 75% of a 1,204-second run. This ceiling settles that
-   * same call as an ordinary catchable failure instead, so the cell observes a
+   * same call as an ordinary resolved failure instead, so the cell observes a
    * timeout it can narrow and retry inside the frame it is already in.
    */
   readonly callMs?: number | undefined
@@ -442,10 +455,12 @@ export const withDefaults = (
 /**
  * What a REPL cell asked the controller to do.
  *
- * `return` is a syntax error at the top level of a global script — measured, on
- * the variant this harness ships — so a REPL cell states its intent by calling
- * `ctx.done` or `ctx.park` instead of returning a transition. Both record and
- * let the script run on; the last call wins.
+ * A cell runs as a global async script in a persistent realm. Top-level
+ * `await` is supported; top-level `return` is invalid. The first `ctx.done`
+ * or `ctx.park` that records an intent seals the frame. Later `ctx.done` and
+ * `ctx.park` calls do nothing. Ordinary JavaScript continues running, but later
+ * `ctx.call` and `ctx.checkpoint` calls resolve with a `run_completed` failure
+ * envelope without dispatching host work.
  *
  * @category models
  * @since 0.1.0
@@ -500,8 +515,9 @@ export interface RealmEvaluation {
    * Settles a `ctx.checkpoint()` issued by this cell.
    *
    * Optional, and absent means the caller pins no trees — which the cell is
-   * told, catchably, at the line it asked. It is a separate collaborator from
-   * `call` because a checkpoint is not a flow: it is neither in the catalog nor
+   * told through a resolved failure envelope at the line it asked. It is a
+   * separate collaborator from `call` because a checkpoint is not a flow:
+   * it is neither in the catalog nor
    * subject to the capability envelope, and the run's own bound on how many
    * trees it may pin is the controller's, not any flow's.
    */
@@ -725,7 +741,7 @@ const seconds = (milliseconds: number): string => {
 }
 
 /**
- * Settles one overrunning flow call as a catchable failure.
+ * Settles one overrunning flow call as a resolved failure envelope in the cell.
  *
  * The message is written for the model, because the model is who reads it: it
  * names the flow, the budget it spent, and the one action that recovers the
@@ -827,7 +843,7 @@ const drive = (
           : settling.pipe(
             // The per-call ceiling, ahead of the interrupt cleanup below: a call
             // that overruns is answered, not abandoned, so the cell sees a
-            // catchable failure and the frame keeps its remaining budget.
+            // resolved failure and the frame keeps its remaining budget.
             Effect.timeoutOrElse({
               duration: callMs,
               orElse: () => Effect.succeed(callTimedOut(next.flow, callMs))
