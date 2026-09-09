@@ -4,7 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server"
 import type { Card } from "@smthrs/rpc/Cards"
 import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import { CardView } from "../ChatCards"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 
@@ -29,7 +30,7 @@ const unavailableRepositories: NativeRepositories = {
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 /** An agent that replays a fixed server-emitted frame stream for each turn. */
-const scriptedAgent = (frames: ReadonlyArray<AgentTurnFrame>): NativeAgent => {
+const scriptedAgent = (frames: ReadonlyArray<AgentTurnFrame>): AgentPort => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
   return {
     available: true,

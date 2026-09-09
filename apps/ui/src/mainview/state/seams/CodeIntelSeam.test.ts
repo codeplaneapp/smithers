@@ -15,7 +15,8 @@ import { createLspHost, defaultServerLookup } from "../../../bun/lsp/LspHost"
 import { findNode } from "../../../bun/Node"
 import { startLocalServer } from "../../../bun/server"
 import type { LocalServer, LocalServerOptions } from "../../../bun/server"
-import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
+import type { NativeRepositories } from "../../native/NativeBridge"
+import type { AgentPort } from "../../runtime/AgentPort"
 import { createAppFetch } from "../../runtime/LocalSession"
 import { createAppController } from "../AppController"
 import type { AppController, AppServices } from "../AppController"
@@ -63,7 +64,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

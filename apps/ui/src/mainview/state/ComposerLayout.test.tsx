@@ -6,7 +6,8 @@ import { createRoot } from "react-dom/client"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import App from "../App"
 import { ControllerTestProvider } from "../ControllerContext"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import type { AppController as AppControllerType } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -44,7 +45,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const silentAgent: NativeAgent = {
+const silentAgent: AgentPort = {
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},

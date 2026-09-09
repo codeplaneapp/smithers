@@ -1,21 +1,9 @@
 import { APP_BOOTSTRAP_PATH, AppBootstrapSchema, hasCapability } from "@smthrs/rpc/AppBootstrap"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { FetchLike, StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "./AgentPort"
 import { createWebAgent } from "../native/WebAgent"
-
-export interface IdentityPort {
-  readonly authFlow: AppBootstrap["authFlow"]
-}
-
-export interface SmithersCloudPort {
-  readonly available: true
-}
-
-export interface LocalHostPort {
-  readonly repositories: NativeRepositories
-  readonly sandbox: NonNullable<AppBootstrap["sandbox"]>
-}
 
 export type ShellPort =
   | { readonly kind: "browser" }
@@ -24,16 +12,19 @@ export type ShellPort =
 export interface AppRuntime {
   readonly bootstrap: AppBootstrap
   readonly http: FetchLike
+  /*
+   * Only the ports a consumer holds. Everything else the host advertises stays
+   * on `bootstrap.capabilities`, read through `hasCapability` at the site that
+   * cares, rather than mirrored here as a descriptor nobody reads.
+   */
   readonly backend: {
-    readonly agent?: NativeAgent
-    readonly identity?: IdentityPort
-    readonly cloud?: SmithersCloudPort
-    readonly local?: LocalHostPort
+    readonly agent?: AgentPort
+    readonly repositories?: NativeRepositories
   }
   readonly shell: ShellPort
 }
 
-export const unavailableAgent = (): NativeAgent => ({
+export const unavailableAgent = (): AgentPort => ({
   available: false,
   startTurn: async (): Promise<StartAgentTurnResult> => ({
     status: "error",
@@ -75,10 +66,8 @@ export const createRuntime = (options: {
     http,
     backend: {
       ...(hasCapability(bootstrap, "agent") ? { agent: createWebAgent({ fetchImpl: http }) } : {}),
-      ...(hasCapability(bootstrap, "identity") ? { identity: { authFlow: bootstrap.authFlow } } : {}),
-      ...(hasCapability(bootstrap, "cloud") ? { cloud: { available: true as const } } : {}),
       ...(bootstrap.host === "local" && bootstrap.sandbox !== null
-        ? { local: { repositories: options.nativeRepositories ?? unavailableRepositories, sandbox: bootstrap.sandbox } }
+        ? { repositories: options.nativeRepositories ?? unavailableRepositories }
         : {})
     },
     shell: native

@@ -3,7 +3,8 @@ import type { Event, Outcome } from "@smthrs/chain"
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
 import { USER_ONLY_VISIBLE } from "../flows/Flows"
@@ -19,7 +20,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const idleAgent: NativeAgent = {
+const idleAgent: AgentPort = {
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},

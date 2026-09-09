@@ -14,7 +14,8 @@ import type { AgentRole } from "@smthrs/rpc/AgentRoles"
 import { RuntimeCapabilitySchema } from "@smthrs/rpc/AppBootstrap"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { Harness } from "@smthrs/rpc/LocalApp"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
 import type { AppStore } from "../state/AppStore"
@@ -28,7 +29,7 @@ const memoryStorage = (): StorageApi => {
   return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => void data.set(key, value), removeItem: (key) => void data.delete(key) }
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

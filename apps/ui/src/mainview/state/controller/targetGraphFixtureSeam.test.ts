@@ -11,7 +11,8 @@ import type { StorageApi } from "@tanstack/db"
 import { afterAll, afterEach, beforeEach, expect, test } from "bun:test"
 import type { Repo } from "@smthrs/rpc/LocalApp"
 import { TARGET_GRAPH_FIXTURE_FLAG } from "../../dev/fixtureRunStream"
-import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
+import type { NativeRepositories } from "../../native/NativeBridge"
+import type { AgentPort } from "../../runtime/AgentPort"
 import { createAppController } from "../AppController"
 import { createAppStore } from "../AppStore"
 
@@ -66,7 +67,7 @@ const boot = async () => {
   const controller = createAppController(
     store,
     { available: false, pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "native only" }) } as NativeRepositories,
-    { available: false, startTurn: async () => ({ status: "error", message: "unavailable" }), cancelTurn: async () => {}, subscribe: () => () => {} } as NativeAgent
+    { available: false, startTurn: async () => ({ status: "error", message: "unavailable" }), cancelTurn: async () => {}, subscribe: () => () => {} } as AgentPort
   )
   store.dispatch({ type: "repos.loaded", actor: "system", repos: [REPO] })
   return { store, controller }

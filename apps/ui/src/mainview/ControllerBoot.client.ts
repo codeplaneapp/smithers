@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import { createAgentSeat } from "./chain/ChainRuntime"
 import { nativeOpenExternal, nativeRepositories, nativeShellAvailable } from "./native/NativeBridge"
 import { createAppFetch } from "./runtime/LocalSession"
@@ -43,7 +44,7 @@ const bootProgram = () =>
     const controller = yield* Effect.sync(() =>
       createAppController(
         store,
-        runtime.backend.local?.repositories ?? unavailableRepositories,
+        runtime.backend.repositories ?? unavailableRepositories,
         agent,
         {
           fetchImpl: runtime.http,
@@ -56,7 +57,7 @@ const bootProgram = () =>
       )
     )
 
-    if (runtime.backend.identity === undefined) {
+    if (!hasCapability(bootstrap, "identity")) {
       yield* promiseEffect("record unavailable identity", () => controller.adoptSession({
         state: "unavailable",
         login: null,
@@ -66,14 +67,14 @@ const bootProgram = () =>
     } else {
       yield* promiseEffect("load identity session", () => controller.loadSession())
     }
-    if (runtime.backend.local !== undefined) {
+    if (runtime.backend.repositories !== undefined) {
       yield* Effect.sync(() => void controller.loadRepos())
       yield* Effect.sync(() => void controller.loadHarnesses())
       // Agents as data (custom-agents.md): the app-agents mirror loads beside the harness list.
       yield* Effect.sync(() => void controller.loadAgents())
     }
     // Lane piper: the Smithers Cloud session mirrors into the store; a signed-in answer pulls the inventory.
-    if (runtime.bootstrap.capabilities.includes("cloud.pat")) {
+    if (hasCapability(bootstrap, "cloud.pat")) {
       yield* Effect.sync(() => void controller.loadCloudSession())
     }
     // Both URL rewrites keep the entry's state: on a repository path the

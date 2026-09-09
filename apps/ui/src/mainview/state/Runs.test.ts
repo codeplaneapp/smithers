@@ -13,7 +13,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { scopedControllers } from "./ControllerTestScope"
 import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -40,7 +41,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const silentAgent = (): NativeAgent => ({
+const silentAgent = (): AgentPort => ({
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},

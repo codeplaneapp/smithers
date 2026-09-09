@@ -10,7 +10,8 @@ import { createCommandRegistry } from "../flows/Commands"
 import type { CommandActions } from "../flows/Flows"
 import type { StorageApi } from "@tanstack/db"
 import { afterEach, describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { scopedControllers } from "./ControllerTestScope"
 import { createAppStore, TRACE_MESSAGE_PREFIX, VERBOSE_OFF_TEXT, VERBOSE_ON_TEXT, verboseTrace } from "./AppStore"
 
@@ -25,7 +26,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

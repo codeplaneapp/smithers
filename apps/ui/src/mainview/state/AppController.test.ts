@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 
@@ -26,7 +27,7 @@ const unavailableRepositories: NativeRepositories = {
 }
 
 /** Mirrors a web-mode agent whose server boundary is unreachable: every turn errors. */
-const webAgent = (message = "Could not reach the Smithers web agent."): NativeAgent => ({
+const webAgent = (message = "Could not reach the Smithers web agent."): AgentPort => ({
   available: false,
   startTurn: async () => ({ status: "error", message }),
   cancelTurn: async () => {},
@@ -75,7 +76,7 @@ describe("createAppController in pure web mode", () => {
   test("renders a streamed web turn to completion through the shared frame contract", async () => {
     const store = await webStore()
     const listeners = new Set<(frame: AgentTurnFrame) => void>()
-    const streamingAgent: NativeAgent = {
+    const streamingAgent: AgentPort = {
       available: true,
       startTurn: async (request) => {
         queueMicrotask(() => {

@@ -3,7 +3,8 @@ import type { StorageApi } from "@tanstack/db"
 import { afterAll, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { DEFAULT_PALETTE, PALETTES } from "./AppState"
 import { createAppStore } from "./AppStore"
@@ -39,7 +40,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

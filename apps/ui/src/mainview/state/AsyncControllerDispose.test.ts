@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import { createControllerContext } from "./controller/context"
@@ -8,7 +9,7 @@ const repositories: NativeRepositories = {
   available: false,
   pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "unused" })
 }
-const agent: NativeAgent = {
+const agent: AgentPort = {
   available: true,
   startTurn: async () => ({ status: "error", message: "unused" }),
   cancelTurn: async () => {},

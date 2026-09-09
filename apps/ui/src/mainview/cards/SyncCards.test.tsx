@@ -5,7 +5,8 @@ import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import { pillStatus } from "./CardRenderers"
 import { ControllerTestProvider } from "../ControllerContext"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
 import type { AppController } from "../state/AppController"
 import type { Card } from "../state/AppState"
@@ -56,7 +57,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const silentAgent: NativeAgent = {
+const silentAgent: AgentPort = {
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},

@@ -14,7 +14,8 @@ import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import App from "./App"
 import { ControllerTestProvider } from "./ControllerContext"
-import type { NativeAgent, NativeRepositories } from "./native/NativeBridge"
+import type { NativeRepositories } from "./native/NativeBridge"
+import type { AgentPort } from "./runtime/AgentPort"
 import { createAppController } from "./state/AppController"
 import type { AppController as AppControllerType } from "./state/AppController"
 import { createAppStore } from "./state/AppStore"
@@ -53,7 +54,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

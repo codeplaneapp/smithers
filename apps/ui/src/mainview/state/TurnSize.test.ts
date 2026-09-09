@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AgentChatMessage, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { MAX_TURN_REQUEST_BYTES, turnRequestBytes } from "./AgentTurnPolicy"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -41,7 +42,7 @@ const unavailableRepositories: NativeRepositories = {
 }
 
 /** An agent double that records every turn request and ends the turn fast. */
-const recordingAgent = (requests: StartAgentTurnRequest[]): NativeAgent => ({
+const recordingAgent = (requests: StartAgentTurnRequest[]): AgentPort => ({
   available: true,
   startTurn: async (request) => {
     requests.push(request)

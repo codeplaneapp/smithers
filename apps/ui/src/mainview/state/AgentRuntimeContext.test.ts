@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test"
 import { renderAgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 
@@ -28,7 +29,7 @@ const unavailableRepositories: NativeRepositories = {
 }
 
 /** An agent double that records every turn request and ends the turn fast. */
-const recordingAgent = (requests: StartAgentTurnRequest[]): NativeAgent => ({
+const recordingAgent = (requests: StartAgentTurnRequest[]): AgentPort => ({
   available: true,
   startTurn: async (request) => {
     requests.push(request)
@@ -100,7 +101,7 @@ describe("per-turn runtime context", () => {
     const requests: StartAgentTurnRequest[] = []
     const listeners = new Set<(frame: AgentTurnFrame) => void>()
     // Leg 1 asks for a command that mutates world state; leg 2 must SEE it.
-    const agent: NativeAgent = {
+    const agent: AgentPort = {
       available: true,
       startTurn: async (request) => {
         const leg = requests.length

@@ -13,7 +13,8 @@ import { createRoot } from "react-dom/client"
 import * as DebugFolds from "./chain/DebugFolds"
 import { ControllerTestProvider } from "./ControllerContext"
 import { DevtoolsPanel } from "./DevtoolsPanel"
-import type { NativeAgent, NativeRepositories } from "./native/NativeBridge"
+import type { NativeRepositories } from "./native/NativeBridge"
+import type { AgentPort } from "./runtime/AgentPort"
 import { createAppController } from "./state/AppController"
 import type { AppController } from "./state/AppController"
 import { createAppStore } from "./state/AppStore"
@@ -46,7 +47,7 @@ const unavailableRepositories: NativeRepositories = {
   pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "native only" })
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

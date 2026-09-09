@@ -1,6 +1,7 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import type { AppStore } from "./AppStore"
@@ -31,7 +32,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const agentWithGrants = (revoked: { count: number }): NativeAgent => ({
+const agentWithGrants = (revoked: { count: number }): AgentPort => ({
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},

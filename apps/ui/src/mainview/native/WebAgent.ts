@@ -1,7 +1,7 @@
 import { CANCEL_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { isAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { AgentTurnFrame, FetchLike, StartAgentTurnResult, TurnRefusal } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent } from "./NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 
 const MAX_ERROR_BYTES = 320
 
@@ -165,7 +165,7 @@ const streamFrames = async (
  * exist for a test or a boundary that moves the routes; nothing in the app
  * passes them.
  */
-export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
+export const createWebAgent = (options: WebAgentOptions = {}): AgentPort => {
   const baseUrl = options.baseUrl ?? ""
   const turnPath = options.turnPath ?? TURN_PATH
   const cancelPath = options.cancelPath ?? CANCEL_PATH

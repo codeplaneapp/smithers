@@ -1,7 +1,8 @@
 import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import { createControllerContext } from "./controller/context"
@@ -31,7 +32,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const countingAgent = (): { agent: NativeAgent; listeners: Set<(frame: AgentTurnFrame) => void> } => {
+const countingAgent = (): { agent: AgentPort; listeners: Set<(frame: AgentTurnFrame) => void> } => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
   return {
     listeners,

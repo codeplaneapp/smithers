@@ -9,7 +9,8 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -34,7 +35,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const silentAgent = (): NativeAgent => ({
+const silentAgent = (): AgentPort => ({
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},
@@ -135,7 +136,7 @@ describe("zero-balance workflow launch (Launch Checklist D-4)", () => {
   test("a $0 balance never blocks interactive chat — only workflow launch pauses", async () => {
     const store = await webStore()
     let turns = 0
-    const countingAgent: NativeAgent = {
+    const countingAgent: AgentPort = {
       ...silentAgent(),
       startTurn: async () => {
         turns += 1

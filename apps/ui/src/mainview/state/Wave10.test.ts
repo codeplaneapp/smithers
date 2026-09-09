@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { scopedControllers } from "./ControllerTestScope"
 import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -35,7 +36,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const silentAgent = (): NativeAgent => ({
+const silentAgent = (): AgentPort => ({
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},
@@ -87,7 +88,7 @@ const signIn = async (store: Awaited<ReturnType<typeof webStore>>): Promise<void
 /** A scripted tool-loop agent (the ToolLoop.test.ts pattern). */
 const scriptedToolAgent = (
   steps: ReadonlyArray<(request: StartAgentTurnRequest) => ReadonlyArray<Omit<AgentTurnFrame, "runId">>>
-): { agent: NativeAgent; requests: Array<StartAgentTurnRequest> } => {
+): { agent: AgentPort; requests: Array<StartAgentTurnRequest> } => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
   const requests: Array<StartAgentTurnRequest> = []
   let step = 0

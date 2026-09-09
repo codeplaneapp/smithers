@@ -1,6 +1,7 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
+import type { NativeRepositories } from "../../native/NativeBridge"
+import type { AgentPort } from "../../runtime/AgentPort"
 import type { FrameHistoryPort, FrameLocation } from "../../runtime/FrameHistory"
 import { createAppController } from "../AppController"
 import { createAppStore } from "../AppStore"
@@ -20,7 +21,7 @@ const repositories: NativeRepositories = {
   pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "native only" })
 }
 
-const agent: NativeAgent = {
+const agent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

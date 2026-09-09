@@ -4,7 +4,8 @@ import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { scopedControllers } from "../state/ControllerTestScope"
 import { trackDispatchCommits } from "../state/StoreTestScope"
 import { createAppStore } from "../state/AppStore"
@@ -36,7 +37,7 @@ const unavailableRepositories: NativeRepositories = {
  * only fallback. It must never see a browser turn — that is what "one backend"
  * means, so every case below asserts it stayed empty.
  */
-const recordingNative = (): { agent: NativeAgent; requests: Array<StartAgentTurnRequest> } => {
+const recordingNative = (): { agent: AgentPort; requests: Array<StartAgentTurnRequest> } => {
   const requests: Array<StartAgentTurnRequest> = []
   return {
     requests,
@@ -111,7 +112,7 @@ const harness = async (options: {
   return { store, controller, frames, nativeRequests: native.requests, waitForDone, settle }
 }
 
-describe("ChainRuntime behind the NativeAgent seam", () => {
+describe("ChainRuntime behind the AgentPort seam", () => {
   test("a chain turn drives the real app end-to-end through send()", async () => {
     const h = await harness({ author: Author.layerMock(scripts) })
     const worldBefore = h.store.collections.worldDocuments.size

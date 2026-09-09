@@ -8,7 +8,8 @@ import type { CommandRegistry } from "../flows/Commands"
 import type { CatalogItem } from "../flows/Commands"
 import type { SlashItem, SlashRow } from "../flows/registry"
 import { flowRequirements } from "../flows/registry"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { repoStep } from "../Onboarding"
 import { localSocketProtocols } from "../runtime/LocalSession"
 import type { FrameHistoryPort } from "../runtime/FrameHistory"
@@ -644,7 +645,7 @@ export interface AppFeatures {
 export const createAppController = (
   store: AppStore,
   repositories: NativeRepositories,
-  agent: NativeAgent,
+  agent: AgentPort,
   services: AppServices = {}
 ): AppController => {
   const ctx = createControllerContext(store, repositories, agent, services)

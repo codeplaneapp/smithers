@@ -7,7 +7,8 @@ import type { Root } from "react-dom/client"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import { cloudCapabilities, localCapabilities } from "@smthrs/rpc/HostCapabilities"
 import { ControllerTestProvider } from "../ControllerContext"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
 import type { Card } from "../state/AppState"
 import { createAppStore } from "../state/AppStore"
@@ -377,7 +378,7 @@ const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
   return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => void data.set(key, value), removeItem: (key) => void data.delete(key) }
 }
-const unavailableAgent: NativeAgent = { available: false, startTurn: async () => ({ status: "error", message: "unavailable" }), cancelTurn: async () => {}, subscribe: () => () => {} }
+const unavailableAgent: AgentPort = { available: false, startTurn: async () => ({ status: "error", message: "unavailable" }), cancelTurn: async () => {}, subscribe: () => () => {} }
 const unavailableRepositories: NativeRepositories = {
   available: false,
   pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "Local repositories can only be connected from the Smithers native app." })

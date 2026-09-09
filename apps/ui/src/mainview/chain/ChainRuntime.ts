@@ -4,7 +4,7 @@ import { Effect, Fiber, Layer, Ref } from "effect"
 import { CardPatchSchema, CardSchema } from "@smthrs/rpc/Cards"
 import type { AgentChatMessage, AgentTurnFrame, FetchLike, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { CommandRegistry } from "../flows/Commands"
-import type { NativeAgent } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import type { AppStore } from "../state/AppStore"
 import { isRuntimeOwnedCard } from "../state/isRuntimeOwnedCard"
 import { makeCollectionJournal } from "./CollectionJournal"
@@ -14,7 +14,7 @@ import { layerAuthor } from "./StreamModel"
 import { worldviewEntries } from "./Worldview"
 
 /*
- * The Agent Chain behind the NativeAgent seam (DESIGN.md §14). One turn is
+ * The Agent Chain behind the AgentPort seam (DESIGN.md §14). One turn is
  * one lineage: startTurn trampolines Chain.run over the chainEvents journal,
  * the journal tee folds every appended event into chain frames, and the
  * surface entries (say, card.show, card.update) are the model's doors to the
@@ -196,7 +196,7 @@ const teeJournal = (
       )
   })
 
-export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent => {
+export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
   const running = new Map<string, Fiber.Fiber<Outcome.RunResult, unknown>>()
   const steerable = new Map<string, Steering.Service>()
@@ -618,7 +618,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
 }
 
 /*
- * The agent seat: one NativeAgent the controller holds, delegating every turn
+ * The agent seat: one AgentPort the controller holds, delegating every turn
  * to the browser chain.
  *
  * The indirection is a binding order, not a choice of backend — the chain's
@@ -629,11 +629,11 @@ export const createChainRuntime = (options: ChainRuntimeOptions): NativeAgent =>
  * fallback, and a turn before the chain binds says so rather than pretending.
  */
 export const createAgentSeat = (
-  native?: NativeAgent
-): NativeAgent & { readonly bindChain: (chain: NativeAgent) => void } => {
+  native?: AgentPort
+): AgentPort & { readonly bindChain: (chain: AgentPort) => void } => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
-  const startedBy = new Map<string, NativeAgent>()
-  let chain: NativeAgent | undefined
+  const startedBy = new Map<string, AgentPort>()
+  let chain: AgentPort | undefined
 
   const forward = (frame: AgentTurnFrame): void => {
     if (frame.type === "done") startedBy.delete(frame.runId)
@@ -641,14 +641,14 @@ export const createAgentSeat = (
   }
   if (native !== undefined) native.subscribe(forward)
 
-  const unbound: NativeAgent = {
+  const unbound: AgentPort = {
     available: false,
     startTurn: async () => ({ status: "error", message: "Smithers is still starting up." }) as const,
     cancelTurn: async () => {},
     subscribe: () => () => {}
   }
 
-  const current = (): NativeAgent => chain ?? native ?? unbound
+  const current = (): AgentPort => chain ?? native ?? unbound
 
   return {
     available: true,

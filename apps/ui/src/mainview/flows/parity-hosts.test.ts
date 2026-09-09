@@ -32,7 +32,8 @@ import type { AppBootstrap, RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
 import { cloudCapabilities, localCapabilities } from "@smthrs/rpc/HostCapabilities"
 import App from "../App"
 import { ControllerTestProvider } from "../ControllerContext"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
 import type { AppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
@@ -60,7 +61,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

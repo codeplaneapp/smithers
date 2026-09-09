@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent } from "../../native/NativeBridge"
+import type { AgentPort } from "../../runtime/AgentPort"
 import type { ControllerContext } from "./context"
 import { createExplainController } from "./explain"
 
 const recordingController = () => {
   const launches: StartAgentTurnRequest[] = []
   const dispatches: Parameters<ControllerContext["store"]["dispatch"]>[0][] = []
-  const agent: NativeAgent = {
+  const agent: AgentPort = {
     available: true,
     subscribe: () => () => {},
     startTurn: async (request) => {

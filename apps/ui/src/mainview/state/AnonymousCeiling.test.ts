@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import type { AppStore } from "./AppStore"
@@ -42,7 +43,7 @@ const LOGIN_CEILING =
   "That is more than 1000 model calls in an hour, which no conversation reaches by hand. Chat resumes on its own in about 12 minutes. Nothing was charged and your balance is untouched."
 
 /** An agent whose every leg answers the given start result: the Worker refused or failed before streaming. */
-const refusingAgent = (result: StartAgentTurnResult): NativeAgent => ({
+const refusingAgent = (result: StartAgentTurnResult): AgentPort => ({
   available: true,
   startTurn: async () => result,
   cancelTurn: async () => {},

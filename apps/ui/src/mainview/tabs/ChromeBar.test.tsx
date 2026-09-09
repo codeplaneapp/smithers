@@ -14,7 +14,8 @@ import { DOWNLOAD_URL } from "@smthrs/rpc/AppLinks"
 const RELEASE_URL = "https://example.test/download"
 import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
 import type { Repo } from "@smthrs/rpc/LocalApp"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
 import type { AppController as AppControllerType, AppServices } from "../state/AppController"
 import { repoKeyOf } from "../state/AppState"
@@ -67,7 +68,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

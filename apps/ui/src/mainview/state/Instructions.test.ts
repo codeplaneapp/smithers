@@ -11,7 +11,8 @@ import { describe, expect, test } from "bun:test"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import { cloudCapabilities, localCapabilities } from "@smthrs/rpc/HostCapabilities"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import { IDENTITY_LINE, NO_DOWNLOAD_LINE, smithersInstructions, WEB_HOST_LINE } from "./Instructions"
@@ -73,7 +74,7 @@ const settle = async (ticks = 12): Promise<void> => {
 }
 
 /** An agent double that records the turn request and answers one text frame. */
-const recordingAgent = (): { agent: NativeAgent; requests: Array<StartAgentTurnRequest> } => {
+const recordingAgent = (): { agent: AgentPort; requests: Array<StartAgentTurnRequest> } => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
   const requests: Array<StartAgentTurnRequest> = []
   return {

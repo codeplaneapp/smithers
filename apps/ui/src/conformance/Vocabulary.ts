@@ -14,7 +14,8 @@ import { CardSchema } from "@smthrs/rpc/Cards"
 import ts from "typescript"
 import { adminFlows, baseFlows, type CommandActions } from "../mainview/flows/Flows"
 import { nameOf } from "../mainview/flows/registry"
-import type { NativeAgent, NativeRepositories } from "../mainview/native/NativeBridge"
+import type { NativeRepositories } from "../mainview/native/NativeBridge"
+import type { AgentPort } from "../mainview/runtime/AgentPort"
 import { createAppController } from "../mainview/state/AppController"
 import { createAppStore } from "../mainview/state/AppStore"
 import { DOTTED_IDENTIFIER, extractLiterals, ID_PREFIX, segmentsOf, sourceFiles } from "./Literals"
@@ -136,7 +137,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const absentAgent: NativeAgent = {
+const absentAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "no native agent in the conformance pin" }),
   cancelTurn: async () => {},

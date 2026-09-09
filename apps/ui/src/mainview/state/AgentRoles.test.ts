@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { Harness } from "@smthrs/rpc/LocalApp"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import { smithersInstructions } from "./Instructions"
@@ -60,7 +61,7 @@ const HARNESSES: ReadonlyArray<Harness> = [
 const recordingAgent = () => {
   const launches: StartAgentTurnRequest[] = []
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
-  const agent: NativeAgent = {
+  const agent: AgentPort = {
     available: true,
     startTurn: async (request) => {
       launches.push(request)

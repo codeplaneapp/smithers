@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 
@@ -35,10 +36,10 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
  */
 const scriptedToolAgent = (
   steps: ReadonlyArray<(request: StartAgentTurnRequest) => ReadonlyArray<Omit<AgentTurnFrame, "runId">>>
-): { agent: NativeAgent; requests: Array<StartAgentTurnRequest> } => {
+): { agent: AgentPort; requests: Array<StartAgentTurnRequest> } => {
   const requests: Array<StartAgentTurnRequest> = []
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
-  const agent: NativeAgent = {
+  const agent: AgentPort = {
     available: true,
     startTurn: async (request) => {
       const step = steps[requests.length] ?? steps[steps.length - 1]

@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import type { AppServices } from "./AppController"
 import type { Card } from "./AppState"
@@ -28,7 +29,7 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const silentAgent = (): NativeAgent => ({
+const silentAgent = (): AgentPort => ({
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},
@@ -208,7 +209,7 @@ describe("identity session record", () => {
   test("a signed-out send reaches the backend: identity is not a gate on the chat", async () => {
     const store = await webStore()
     let turns = 0
-    const countingAgent: NativeAgent = {
+    const countingAgent: AgentPort = {
       ...silentAgent(),
       startTurn: async () => {
         turns += 1
@@ -235,7 +236,7 @@ describe("identity session record", () => {
   test("a non-allowlisted send reaches the backend too", async () => {
     const store = await webStore()
     let turns = 0
-    const countingAgent: NativeAgent = {
+    const countingAgent: AgentPort = {
       ...silentAgent(),
       startTurn: async () => {
         turns += 1
@@ -312,7 +313,7 @@ describe("billing record", () => {
   test("a definitive $0 NEVER pauses chat — the turn runs (chat is on us during the alpha)", async () => {
     const store = await webStore()
     let turns = 0
-    const countingAgent: NativeAgent = {
+    const countingAgent: AgentPort = {
       ...silentAgent(),
       startTurn: async () => {
         turns += 1
@@ -485,7 +486,7 @@ describe("approval round trip", () => {
 describe("turn cost + stop discipline", () => {
   const streamingAgent = (
     emit: (runId: string, push: (frame: AgentTurnFrame) => void) => void
-  ): { agent: NativeAgent; cancelled: string[] } => {
+  ): { agent: AgentPort; cancelled: string[] } => {
     const listeners = new Set<(frame: AgentTurnFrame) => void>()
     const cancelled: string[] = []
     return {

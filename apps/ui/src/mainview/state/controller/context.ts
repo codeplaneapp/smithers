@@ -2,7 +2,8 @@ import { Effect } from "effect"
 import type { AgentChatMessage, FetchLike } from "@smthrs/rpc/NativeAgent"
 import { createGatewaySeam } from "./gateway"
 import type { CommandRegistry } from "../../flows/Commands"
-import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
+import type { NativeRepositories } from "../../native/NativeBridge"
+import type { AgentPort } from "../../runtime/AgentPort"
 import type { AppServices } from "../AppController"
 import type { AppStore } from "../AppStore"
 import type { ImpossibleAskClass } from "../Instructions"
@@ -51,7 +52,7 @@ export interface NetEntry {
 export interface ControllerContext {
   readonly store: AppStore
   readonly repositories: NativeRepositories
-  readonly agent: NativeAgent
+  readonly agent: AgentPort
   readonly services: AppServices
   readonly baseUrl: string
   readonly rawHttp: FetchLike
@@ -114,7 +115,7 @@ export interface ControllerContext {
 export const createControllerContext = (
   store: AppStore,
   repositories: NativeRepositories,
-  agent: NativeAgent,
+  agent: AgentPort,
   services: AppServices
 ): ControllerContext => {
   /*

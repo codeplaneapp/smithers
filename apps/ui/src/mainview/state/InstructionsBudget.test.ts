@@ -1,6 +1,7 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import { composeAgentInstructions } from "@smthrs/rpc/AgentContext"
@@ -52,7 +53,7 @@ const capturedTurn = async (prepare: (store: Awaited<ReturnType<typeof createApp
   })
   prepare(store)
   let captured: { instructions?: string; context?: AgentRuntimeContext } | undefined
-  const agent: NativeAgent = {
+  const agent: AgentPort = {
     available: true,
     startTurn: async (request) => {
       captured = request as { instructions?: string; context?: AgentRuntimeContext }

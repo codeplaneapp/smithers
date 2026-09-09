@@ -13,7 +13,8 @@ import type { Repo } from "@smthrs/rpc/LocalApp"
 import type { RunReplayResponse } from "@smthrs/rpc/TargetGraph"
 import { TARGET_GRAPH_ROUTES } from "@smthrs/rpc/TargetGraph"
 import { fixtureRunEvents, fixtureTargetGraph } from "../../dev/fixtureRunStream"
-import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
+import type { NativeRepositories } from "../../native/NativeBridge"
+import type { AgentPort } from "../../runtime/AgentPort"
 import { createAppController } from "../AppController"
 import { createAppStore } from "../AppStore"
 import type { Card } from "../AppState"
@@ -28,7 +29,7 @@ const memoryStorage = (): StorageApi => {
   }
 }
 
-const unavailableAgent: NativeAgent = {
+const unavailableAgent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "unavailable" }),
   cancelTurn: async () => {},

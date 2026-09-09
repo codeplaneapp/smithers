@@ -5,7 +5,8 @@ import type { AgentRole } from "@smthrs/rpc/AgentRoles"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { Harness } from "@smthrs/rpc/LocalApp"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { scopedControllers } from "./ControllerTestScope"
 import { createAppStore } from "./AppStore"
 import type { Card } from "./AppState"
@@ -73,7 +74,7 @@ const boot = async () => {
   const puts: Array<{ id: string; body: Record<string, unknown> }> = []
   const launches: Array<StartAgentTurnRequest> = []
   let modelsCalls = 0
-  const agent: NativeAgent = {
+  const agent: AgentPort = {
     available: true,
     startTurn: async (request) => {
       launches.push(request)

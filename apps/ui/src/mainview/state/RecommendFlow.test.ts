@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { RECOMMENDATION_ID } from "./AppState"
 import type { Repo } from "./AppState"
 import { createAppController } from "./AppController"
@@ -39,7 +40,7 @@ const nativeRepositories: NativeRepositories = {
   pickLocalRepository: async () => ({ status: "cancelled" })
 }
 
-const silentAgent: NativeAgent = {
+const silentAgent: AgentPort = {
   available: true,
   startTurn: async () => ({ status: "started" }),
   cancelTurn: async () => {},

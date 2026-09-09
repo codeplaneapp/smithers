@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import type { AppStore } from "./AppStore"
@@ -36,7 +37,7 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 const recordingAgent = () => {
   const launches: StartAgentTurnRequest[] = []
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
-  const agent: NativeAgent = {
+  const agent: AgentPort = {
     available: true,
     startTurn: async (request) => {
       launches.push(request)

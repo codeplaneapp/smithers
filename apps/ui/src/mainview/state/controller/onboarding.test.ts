@@ -6,7 +6,8 @@ import { describe, expect, test } from "bun:test"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { HomeDocument } from "@smthrs/rpc/HomePane"
 import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
-import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
+import type { NativeRepositories } from "../../native/NativeBridge"
+import type { AgentPort } from "../../runtime/AgentPort"
 import type { AppServices } from "../AppController"
 import type { Card } from "../AppState"
 import { createAppStore } from "../AppStore"
@@ -68,7 +69,7 @@ const fixture = async (routes: Record<string, Route>) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const requests: Array<string> = []
   const turns: Array<string> = []
-  const agent: NativeAgent = {
+  const agent: AgentPort = {
     available: true,
     startTurn: async (request) => {
       const last = request.messages.at(-1)

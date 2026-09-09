@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
 import { RECOVERY_DOWNLOAD_LABEL, RECOVERY_PRIVATE_WARNING } from "./StorageRecoveryAction"
@@ -8,7 +9,7 @@ const repositories: NativeRepositories = {
   available: false,
   pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "fixture unavailable" })
 }
-const agent: NativeAgent = {
+const agent: AgentPort = {
   available: false,
   startTurn: async () => ({ status: "error", message: "fixture unavailable" }),
   cancelTurn: async () => {},
