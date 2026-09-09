@@ -56,7 +56,7 @@ describe.skipIf(process.platform === "win32")("live process identity probe", () 
         encoding: "utf8",
         timeout: 500,
         killSignal: "SIGKILL",
-        env: { LC_ALL: "C", PATH: "/usr/bin:/bin" }
+        env: { LC_ALL: "C", TZ: "UTC", PATH: "/usr/bin:/bin" }
       })
     })
   }
@@ -67,8 +67,8 @@ describe.skipIf(process.platform === "win32")("live process identity probe", () 
     expect(captured.system!.snapshot(target)).toEqual({
       ownGroup: 77,
       members: [
-        { pid: target, startedAtMs: Date.parse(start), zombie: false },
-        { pid: 4322, startedAtMs: Date.parse(start), zombie: true }
+        { pid: target, startedAtMs: Date.UTC(2026, 8, 5, 12), zombie: false },
+        { pid: 4322, startedAtMs: Date.UTC(2026, 8, 5, 12), zombie: true }
       ]
     })
     expect(kill).not.toHaveBeenCalled()

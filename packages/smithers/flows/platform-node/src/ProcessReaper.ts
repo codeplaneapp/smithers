@@ -160,8 +160,9 @@ const bootedAtMs = (): number => Date.now() - Math.round(uptime() * 1000)
  * `lstart` is the one start-time column both BSD (macOS) and procps (Linux)
  * spell the same way, and it prints an absolute time rather than an elapsed
  * one, so the answer does not drift between reading it and comparing it. It is
- * also a LOCALIZED column, which is why the probe below pins `LC_ALL=C`:
- * `Date.parse` reads the C spelling and nothing else.
+ * also a LOCALIZED column, so the probe pins `LC_ALL=C` and `TZ=UTC`.
+ * Its text has no zone; parsing explicitly as UTC keeps the identity independent
+ * of the host runtime's timezone.
  */
 const startedAtMs = (executable: string) => (pid: number): StartTime => {
   const answer = ps(executable, "lstart", pid)
@@ -173,7 +174,7 @@ const startedAtMs = (executable: string) => (pid: number): StartTime => {
     return liveness(pid) === "dead" ? answer : { _tag: "unavailable" }
   }
   if (answer._tag !== "printed") return answer
-  const parsed = Date.parse(answer.text)
+  const parsed = Date.parse(`${answer.text} UTC`)
   return Number.isNaN(parsed) ? { _tag: "unavailable" } : { _tag: "started", startedAtMs: parsed }
 }
 
@@ -205,7 +206,7 @@ const groupSnapshot = (pgid: number): ProcessCleanup.Snapshot | undefined => {
     encoding: "utf8",
     timeout: cleanupProbeTimeoutMs,
     killSignal: "SIGKILL",
-    env: { LC_ALL: "C", PATH: "/usr/bin:/bin" }
+    env: { LC_ALL: "C", TZ: "UTC", PATH: "/usr/bin:/bin" }
   })
   if (result.error !== undefined || result.signal !== null || result.status !== 0) return undefined
   let own: number | undefined
@@ -218,7 +219,7 @@ const groupSnapshot = (pgid: number): ProcessCleanup.Snapshot | undefined => {
     if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(group)) return undefined
     if (pid === process.pid) own = group
     if (group !== pgid) continue
-    const started = Date.parse(match[4]!)
+    const started = Date.parse(`${match[4]!} UTC`)
     if (Number.isNaN(started)) return undefined
     members.push({ pid, startedAtMs: started, zombie: match[3]!.startsWith("Z") })
   }
@@ -300,8 +301,9 @@ const ps = (
     killSignal: "SIGKILL",
     // An empty-ish environment for the same reason the interpreter in
     // `AtomicFileSystem` gets one: nothing the caller exported may change what
-    // this answers. `LC_ALL` pins the one column format `Date.parse` can read.
-    env: { LC_ALL: "C", PATH: "/usr/bin:/bin" }
+    // this answers. Pin both the column's spelling and its timezone; the parser
+    // supplies UTC explicitly because `lstart` does not print a zone.
+    env: { LC_ALL: "C", TZ: "UTC", PATH: "/usr/bin:/bin" }
   })
   if (result.error !== undefined || result.signal !== null || result.status === null) {
     return { _tag: "unavailable" }
