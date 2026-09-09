@@ -3,8 +3,9 @@ export const PUBLIC_REPOS_PATH = "/api/public/repos"
 
 /**
  * Availability is curated; submitting a request never adds a repository here.
- * At launch only Smithers is available. The roster grows as maintainers claim
- * their repositories. The catalog order is the response order.
+ * At launch only Smithers is available. The roster grows as maintainers sign
+ * in with GitHub and install the Smithers GitHub App on their repositories.
+ * The catalog order is the response order.
  */
 export const AVAILABLE_REPOS = [
   {
@@ -12,7 +13,7 @@ export const AVAILABLE_REPOS = [
     title: "Smithers",
     url: "https://github.com/smithersai/smithers",
     // The one-sentence explanation the app's welcome reads. Curated, never fetched.
-    summary: "Smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows.",
+    summary: "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository.",
     // The Smithers Cloud mirror namespace that answers anonymous reads. The
     // backend serves the public mirror under this path and refuses the GitHub
     // name without credentials. Never part of the public catalog response.
@@ -22,8 +23,9 @@ export const AVAILABLE_REPOS = [
 
 /**
  * Repositories the landing page shows as coming soon: Smithers' direct
- * production dependencies and the VCS the engine runs on. They open as their
- * maintainers claim them, and until then no reader treats them as available:
+ * production dependencies and the VCS the engine runs on. One opens when its
+ * maintainers register it — sign in with GitHub, then install the Smithers
+ * GitHub App on the repository. Until then no reader treats them as available:
  * the Worker's routed app page and the Cloud mirror lookup only consult
  * AVAILABLE_REPOS. The order here is the response and card order.
  */

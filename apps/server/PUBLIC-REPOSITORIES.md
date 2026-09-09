@@ -10,7 +10,8 @@ never borrow a user's bearer token or cookie.
 `GET /api/public/repos` is the public site's catalog, served by the app Worker
 at `https://canary.smithers.sh`. The shared roster in
 `src/publicRepoCatalog.ts` lists `smithersai/smithers` alone at launch. The
-roster grows as maintainers claim their repositories, and the response keeps
+roster grows as maintainers register their repositories — sign in with GitHub,
+then install the Smithers GitHub App on the repository — and the response keeps
 the roster order. Repository requests do not change this roster. Each entry
 carries a curated `summary`, the one sentence the app's welcome speaks when the
 repository is opened (`repo.welcome` in apps/ui); it is written in the roster,
@@ -25,7 +26,7 @@ badge, a GitHub link, and the same stats slots, but no app link: they are not
 in `AVAILABLE_REPOS`, so the app page redirects for them and the Cloud mirror
 lookup has no entry. They carry no `summary`. Moving a repository from
 `COMING_SOON_REPOS` to `AVAILABLE_REPOS` (with its `summary` and `cloudRepo`)
-is how a maintainer's claim ships. The `repos` array is unchanged by this
+is how a maintainer's registration ships. The `repos` array is unchanged by this
 field, so a site built before it shipped keeps working.
 
 The endpoint fetches public GitHub repository metadata on the server, one
@@ -59,18 +60,6 @@ catalog carries it, makes that repository the active selection, and states it
 as the active repository in the agent's per-turn runtime context. It strips
 the `repo` parameter from the URL either way, so a reload does not reselect.
 Set `PUBLIC_APP_ORIGIN` at site build time to point the cards at a preview app.
-
-A coming-soon card links to that repository's own page at `/<owner>/<name>`,
-prerendered by the same site build (`src/pages/[owner]/[repo].astro`): the
-repository, its GitHub stats from this endpoint, the sentence that it opens as
-its maintainers claim it, and the nomination form pre-filled with it. The
-Worker serves the app document only for `AVAILABLE_REPOS`; a coming-soon path
-serves that page as the assets layer does. `wrangler.jsonc` runs the Worker
-first for every coming-soon owner, in the owner's GitHub case and in lowercase
-(wrangler matches those patterns case-sensitively), and the Worker then
-serves the canonical page for the repository segment in any case, with or
-without the trailing slash (`src/appDocument.ts`, `comingSoonDocumentPath` and
-`COMING_SOON_WORKER_FIRST`). An owner typed in a third case is the 404 page.
 
 ## Existing repository APIs
 

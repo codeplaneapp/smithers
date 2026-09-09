@@ -81,19 +81,17 @@ code, pre, kbd { font-family: var(--font-mono); }
 .hero .fine { margin-top: 1rem; font-size: 0.85rem; color: var(--text-faint); }
 .hero .fine a { text-decoration: underline; text-underline-offset: 3px; }
 
+/* ── Home hero: only content on the page, so it fills the viewport ── */
+.hero.home { min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; padding: 2rem 0; }
+.hero.home h1 { font-size: clamp(3.2rem, 11vw, 7.5rem); margin-bottom: 1.4rem; }
+.hero.home p.sub { font-size: clamp(1.25rem, 2.6vw, 1.8rem); max-width: 52rem; margin-bottom: 2.6rem; }
+.hero.home .actions { gap: 0.9rem; }
+.hero.home .btn { padding: 0.95rem 1.7rem; font-size: 1.08rem; }
+.hero.home .btn svg { width: 18px; height: 18px; }
+
 /* ── Footer ── */
 .foot { margin-top: auto; padding: 2.5rem 0 2rem; font-size: 0.85rem; color: var(--text-faint); display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; justify-content: center; }
 .foot a:hover { color: var(--text); }
-
-/* ── Copy prompt ── */
-.copy { position: relative; display: inline-flex; }
-.copy-tip { position: absolute; top: calc(100% + 0.55rem); left: 50%; transform: translate(-50%, 4px); opacity: 0; pointer-events: none; transition: opacity 180ms var(--ease), transform 180ms var(--ease); white-space: nowrap; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0.45rem 0.7rem; box-shadow: var(--shadow-2); z-index: 10; }
-.copy .tip { display: none; }
-.copy:hover .copy-tip, .copy:focus-within .copy-tip, .copy[data-state="copied"] .copy-tip, .copy[data-state="error"] .copy-tip { transform: translate(-50%, 0); opacity: 1; }
-.copy:hover .tip-prompt, .copy:focus-within .tip-prompt { display: inline; }
-.copy[data-state="copied"] .tip, .copy[data-state="error"] .tip { display: none !important; }
-.copy[data-state="copied"] .tip-done { display: inline !important; color: var(--success); }
-.copy[data-state="error"] .tip-error { display: inline !important; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

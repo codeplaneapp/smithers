@@ -6,7 +6,7 @@ const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://smithers
 /* A repository's app lives at <app origin>/<owner>/<name>. */
 const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").replace(/\/+$/, "")
 /* Smithers first, then its coming-soon dependencies; the catalog response follows the same order.
-   The heading counts every card, available and coming soon, because every card is rendered. */
+   The count covers available repositories only; coming-soon cards carry a badge instead. */
 const cards = [
   ...AVAILABLE_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, available: true })),
   ...COMING_SOON_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, available: false }))
@@ -14,7 +14,7 @@ const cards = [
 ---
 
 <section class="available wrap" aria-labelledby="available-title" data-available-repos data-endpoint={endpoint}>
-  <h2 id="available-title">Available repos <span class="count">{cards.length}</span></h2>
+  <h2 id="available-title">Available repos <span class="count">{AVAILABLE_REPOS.length}</span></h2>
   <div class="repo-grid">
     {cards.map((repo, index) => (
       <article class="repo-card" data-repo={repo.name} data-availability={repo.available ? "available" : "coming-soon"} aria-labelledby={`repo-title-${index} repo-badge-${index}`}>
@@ -34,9 +34,7 @@ const cards = [
               : <span id={`repo-badge-${index}`} class="badge badge-soon">Coming soon</span>}
           </div>
           <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
-          {repo.available
-            ? <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open Smithers <span aria-hidden="true">→</span></a>
-            : <a class="soon-link" href={`/${repo.name}/`}>Nominate {repo.title} <span aria-hidden="true">→</span></a>}
+          {repo.available && <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open Smithers <span aria-hidden="true">→</span></a>}
           <dl class="stats" aria-busy="true" data-stats>
             <div><dt>Stars</dt><dd data-stat="stars">—</dd></div>
             <div><dt>Forks</dt><dd data-stat="forks">—</dd></div>
@@ -50,7 +48,6 @@ const cards = [
       </article>
     ))}
   </div>
-  <p class="caption">Coming-soon repositories open as their maintainers claim them.</p>
 </section>
 
 <style>
@@ -76,10 +73,7 @@ const cards = [
   .badge-available { color: #251b3a; background: #dfb5ff; border-color: #dfb5ff; }
   .badge-soon { color: #e3c4ff; background: transparent; border-color: #8664a1; }
   .repo-card[data-availability="coming-soon"] .card-art { filter: saturate(.55); }
-  .soon-link { display: inline-flex; align-items: center; gap: .5rem; margin-top: 1.1rem; padding: .6rem 1rem; color: #e3c4ff; border: 1px solid #8664a1; font-size: .85rem; font-weight: 600; text-decoration: none; }
-  .soon-link:hover { color: #fff; border-color: #dfb5ff; }
-  .soon-link:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-  .caption { margin: 1.25rem 0 0; color: var(--text-muted); font-size: .85rem; line-height: 1.5; }
+  .repo-card[data-availability="coming-soon"] .stats { margin-top: 1.1rem; }
   .repo-name { display: inline-flex; gap: .6rem; color: #d5bae9; font: .73rem/1.7 var(--font-mono); overflow-wrap: anywhere; }
   .repo-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 4px; }
   .repo-name:focus-visible { outline-color: #dfb5ff; }
@@ -96,9 +90,43 @@ const cards = [
 </style>
 
 <script>
-  import { fillRepoStats } from "./repoStats"
+  import type { PublicRepoCatalog } from "../../../server/src/publicRepoCatalog"
 
-  /* The grid's cards are the section's descendants. */
   const root = document.querySelector<HTMLElement>("[data-available-repos]")
-  if (root) void fillRepoStats(root.dataset.endpoint!, [...root.querySelectorAll<HTMLElement>("[data-repo]")])
+  const number = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
+  const validCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+
+  if (root) {
+    const cards = [...root.querySelectorAll<HTMLElement>("[data-repo]")]
+    const showUnavailable = () => {
+      for (const card of cards) {
+        card.querySelector("[data-stats]")?.setAttribute("aria-busy", "false")
+        card.querySelector<HTMLElement>("[data-stats-status]")!.textContent = "Stats unavailable"
+      }
+    }
+    void (async () => {
+      try {
+        const response = await fetch(root.dataset.endpoint!, { credentials: "omit", signal: AbortSignal.timeout(15_000) })
+        if (!response.ok) throw new Error()
+        const data = await response.json() as PublicRepoCatalog
+        if (!Array.isArray(data.repos)) throw new Error()
+        // A catalog served before comingSoon shipped leaves those cards at "Stats unavailable".
+        const entries = [...data.repos, ...(Array.isArray(data.comingSoon) ? data.comingSoon : [])]
+        showUnavailable()
+        for (const card of cards) {
+          const stats = entries.find((repo) => repo.name === card.dataset.repo)?.stats
+          if (!stats || !validCount(stats.stars) || !validCount(stats.forks) || !validCount(stats.openIssuesAndPulls)) continue
+          for (const key of ["stars", "forks", "openIssuesAndPulls"] as const) {
+            const value = card.querySelector<HTMLElement>(`[data-stat="${key}"]`)!
+            value.textContent = number.format(stats[key])
+            value.title = stats[key].toLocaleString("en")
+          }
+          card.querySelector<HTMLElement>("[data-meta]")!.textContent = [stats.language, stats.license].filter((value) => typeof value === "string" && value).join(" · ")
+          card.querySelector<HTMLElement>("[data-stats-status]")!.textContent = ""
+        }
+      } catch {
+        showUnavailable()
+      }
+    })()
+  }
 </script>

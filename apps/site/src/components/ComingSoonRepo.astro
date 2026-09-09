@@ -1,13 +1,13 @@
 ---
 /*
  * The page for one coming-soon repository at /<owner>/<name>: what the
- * repository is on GitHub, that it opens as its maintainers claim it, and the
- * nomination form pre-filled with it. A page of the site on the Base layout,
+ * repository is on GitHub, that it opens as its maintainers register it, and
+ * the registration call to action. A page of the site on the Base layout,
  * not the app shell: there is no app to open here until the repository is
- * claimed and moves to AVAILABLE_REPOS.
+ * registered and moves to AVAILABLE_REPOS.
  */
 import Base from "../layouts/Base.astro"
-import RepoRequests from "./RepoRequests.astro"
+import RegisterRepo from "./RegisterRepo.astro"
 import { PUBLIC_REPOS_PATH } from "../../../server/src/publicRepoCatalog"
 
 interface Props {
@@ -17,7 +17,7 @@ const { repo } = Astro.props
 /* The app Worker (apps/server) serves the catalog under smithers.sh, beside this static site. */
 const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://smithers.sh${PUBLIC_REPOS_PATH}`
 const title = `${repo.title} on Smithers: coming soon`
-const description = `${repo.name} opens on Smithers as its maintainers claim it. Nominate it and leave an email for the day it opens.`
+const description = `${repo.name} opens on Smithers as its maintainers register it: sign in with GitHub, then install the Smithers GitHub App on the repository.`
 ---
 
 <Base title={title} description={description}>
@@ -29,7 +29,7 @@ const description = `${repo.name} opens on Smithers as its maintainers claim it.
         <span id="repo-badge" class="badge">Coming soon</span>
       </div>
       <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
-      <p class="explain">This repository opens as its maintainers claim it.</p>
+      <p class="explain">This repository opens as its maintainers register it.</p>
       <dl class="stats" aria-busy="true" data-stats>
         <div><dt>Stars</dt><dd data-stat="stars">…</dd></div>
         <div><dt>Forks</dt><dd data-stat="forks">…</dd></div>
@@ -41,7 +41,7 @@ const description = `${repo.name} opens on Smithers as its maintainers claim it.
       </div>
     </article>
   </main>
-  <RepoRequests repo={repo} />
+  <RegisterRepo />
 </Base>
 
 <style>

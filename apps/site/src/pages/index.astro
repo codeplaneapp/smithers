@@ -1,54 +1,21 @@
 ---
 import Base from "../layouts/Base.astro"
-import RepoRequests from "../components/RepoRequests.astro"
-import AvailableRepos from "../components/AvailableRepos.astro"
 import project from "../data/project.json"
 
 const title = "Smithers"
 const description = project.tagline
-const prompt =
-  `Install the Smithers CLI globally with \`${project.install.cli}\`, then run \`smthrs suggest\` to start onboarding me onto Smithers.`
 ---
 
 <Base title={title} description={description} header={false} footer={false}>
-  <main class="wrap hero">
+  <main class="wrap hero home">
     <h1>The workflow framework</h1>
     <p class="sub">{project.tagline}</p>
     <div class="actions">
-      <span class="copy" id="copy-shell">
-        <button class="btn primary" id="copy-prompt" type="button" data-prompt={prompt}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
-          <span>Copy prompt</span>
-        </button>
-        <span class="copy-tip" aria-live="polite">
-          <span class="tip tip-prompt">{prompt}</span>
-          <span class="tip tip-done">Copied: paste it into your coding agent</span>
-          <span class="tip tip-error">Copy failed. The prompt: {prompt}</span>
-        </span>
-      </span>
-      <a class="btn" href="/docs/" data-astro-prefetch="hover">Documentation</a>
-      <a class="btn ghost" href="/demo/" data-astro-prefetch="hover">Get a demo</a>
+      <a class="btn primary" href="/docs/quickstart/" data-astro-prefetch="hover">Start Here</a>
+      <a class="btn ghost" href="https://github.com/smithersai/smithers">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" /></svg>
+        <span>GitHub</span>
+      </a>
     </div>
   </main>
-  <RepoRequests />
-  <AvailableRepos />
-  <script>
-    const shell = document.getElementById("copy-shell")
-    const btn = document.getElementById("copy-prompt")
-    const text = btn?.getAttribute("data-prompt") ?? ""
-    let timer: ReturnType<typeof setTimeout> | undefined
-    btn?.addEventListener("click", async () => {
-      if (!shell) return
-      try {
-        await navigator.clipboard.writeText(text)
-        shell.dataset.state = "copied"
-      } catch {
-        shell.dataset.state = "error"
-      }
-      clearTimeout(timer)
-      timer = setTimeout(() => {
-        shell.dataset.state = ""
-      }, 3000)
-    })
-  </script>
 </Base>
