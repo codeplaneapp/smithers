@@ -4,7 +4,13 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 const collision = vi.hoisted(() => "00000000-0000-4000-8000-000000000000")
-const faults = vi.hoisted(() => ({ write: false, close: false, cleanup: false, closed: 0 }))
+const faults = vi.hoisted(() => ({
+  write: false,
+  close: false,
+  cleanup: false,
+  closed: 0,
+  abort: undefined as AbortController | undefined
+}))
 vi.mock("node:crypto", async (load) => ({
   ...await load<typeof import("node:crypto")>(),
   randomUUID: () => collision
@@ -28,6 +34,7 @@ vi.mock("node:fs/promises", async (load) => {
         vi.spyOn(handle, "close").mockImplementation(async () => {
           await close()
           faults.closed++
+          faults.abort?.abort()
           if (faults.close) throw Object.assign(new Error("fixture close failed"), { code: "EIO" })
         })
       }
@@ -46,7 +53,7 @@ import * as Evaluation from "../src/evaluation/Evaluation.ts"
 
 const roots: Array<string> = []
 afterEach(async () => {
-  Object.assign(faults, { write: false, close: false, cleanup: false, closed: 0 })
+  Object.assign(faults, { write: false, close: false, cleanup: false, closed: 0, abort: undefined })
   vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
@@ -67,6 +74,16 @@ describe("evaluation artifact publication ownership", () => {
       code: phase === "write" ? "ENOSPC" : "EIO"
     })
 
+    expect(faults.closed).toBe(1)
+    expect(await readdir(root)).toEqual([])
+  })
+
+  it("checks cancellation after writing and closes and removes its unpublished temporary file", async () => {
+    const root = await fixture()
+    const destination = join(root, "result.json")
+    const controller = new AbortController()
+    faults.abort = controller
+    await expect(Evaluation.writeJson(destination, "complete", false, controller.signal)).rejects.toBeDefined()
     expect(faults.closed).toBe(1)
     expect(await readdir(root)).toEqual([])
   })

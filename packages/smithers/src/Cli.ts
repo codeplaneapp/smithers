@@ -50,7 +50,7 @@ export const makeCli = (config: Bridge.Runtime = {}): ReturnType<typeof makeBuil
     .command(createCredentialsCli())
     .command(createTriggersCli(config))
     .command(createIntegrationsCli())
-    .command(createEvalCli())
+    .command(createEvalCli(config))
     .command("init", {
       description: "Initialize workspace and target declarations plus a starter flow, preserving existing files",
       args: z.object({ name: z.string().optional() }),

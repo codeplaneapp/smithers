@@ -3,6 +3,7 @@
  *
  * @since 1.0.0
  */
+import type { RuntimeConfig } from "@smthrs/build-cli/Cli"
 import { Baseline, CaseExecutor, Gate, Regression, Runner, Suite } from "@smthrs/evals"
 import { EvalError } from "@smthrs/evals/EvalError"
 import { Effect } from "effect"
@@ -11,6 +12,7 @@ import { randomUUID } from "node:crypto"
 import { link, mkdir, open, readdir, readFile, realpath, rename, unlink } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
+import type * as Environment from "../Environment.ts"
 import * as Project from "../Project.ts"
 
 /**
@@ -38,12 +40,8 @@ export interface Options {
  * @category constructors
  * @since 1.0.0
  */
-export const localRoot = (options: Options): string => {
-  if (options.remote || process.env.SMITHERS_REMOTE) {
-    throw new Error("Evaluation commands execute local suite modules; --remote is not supported")
-  }
-  return Project.root(options.root, process.cwd())
-}
+export const localRoot = (options: Options, environment?: Environment.Source): string =>
+  Project.localRoot(options, environment ?? process.env)
 
 /** File suffixes recognized as executable evaluation suites. */
 const modulePattern = /\.eval\.(?:ts|mts|js|mjs)$/
@@ -106,25 +104,30 @@ const suiteFile = async (root: string, selector: string): Promise<string> => {
  * @category constructors
  * @since 1.0.0
  */
-export const load = async (root: string, selector: string): Promise<{
+export const load = async (root: string, selector: string, runtime: RuntimeConfig = {}): Promise<{
   readonly file: string
   readonly suite: Suite.Suite
   readonly executor: CaseExecutor.Service
 }> => {
+  runtime.signal?.throwIfAborted()
   const files = await list(root)
   const matches = files.filter((entry) => entry.name === selector)
   if (matches.length > 1) throw new Error(`Ambiguous evaluation suite ${selector}; specify its file`)
   const file = matches[0]?.file ?? await suiteFile(root, selector)
+  runtime.signal?.throwIfAborted()
   const imported: unknown = await import(pathToFileURL(file).href)
+  runtime.signal?.throwIfAborted()
   const exports = imported as Record<string, unknown>
   const candidate = (exports.default ?? exports) as Partial<EvaluationModule>
   if (candidate.suite === undefined || typeof candidate.executor?.run !== "function") {
     throw new Error(`${file} must export { suite, executor }, where executor is a CaseExecutor.Service`)
   }
-  const resolvedSuite = Effect.isEffect(candidate.suite)
-    ? await Effect.runPromise(candidate.suite)
-    : await candidate.suite
-  const suite = await Effect.runPromise(Suite.make(resolvedSuite))
+  const declaration = candidate.suite
+  const resolvedSuite = await Effect.runPromise(
+    Effect.isEffect(declaration) ? declaration : Effect.promise(() => Promise.resolve(declaration)),
+    { signal: runtime.signal }
+  )
+  const suite = await Effect.runPromise(Suite.make(resolvedSuite), { signal: runtime.signal })
   return { file, suite, executor: candidate.executor }
 }
 
@@ -222,7 +225,13 @@ export const runPath = (root: string, runId: string): string => {
  * @category constructors
  * @since 1.0.0
  */
-export const writeJson = async (file: string, source: string, overwrite = false): Promise<void> => {
+export const writeJson = async (
+  file: string,
+  source: string,
+  overwrite = false,
+  signal?: AbortSignal
+): Promise<void> => {
+  signal?.throwIfAborted()
   await mkdir(dirname(file), { recursive: true })
   const temporary = `${file}.${randomUUID()}.tmp`
   // Enter cleanup only after exclusive creation proves we own this path.
@@ -234,6 +243,7 @@ export const writeJson = async (file: string, source: string, overwrite = false)
     } finally {
       await handle.close()
     }
+    signal?.throwIfAborted()
     // link is an atomic no-replace publication; a crash never exposes partial JSON.
     if (overwrite) await rename(temporary, file)
     else await link(temporary, file)
@@ -252,11 +262,13 @@ export const writeJson = async (file: string, source: string, overwrite = false)
 export const execute = async (
   suite: Suite.Suite,
   executor: CaseExecutor.Service,
-  options: { readonly runId: string; readonly at: string }
+  options: { readonly runId: string; readonly at: string },
+  runtime: RuntimeConfig = {}
 ): Promise<RunArtifact> =>
   artifactOf(
     await Effect.runPromise(
-      Runner.run(suite, options).pipe(Effect.provideService(CaseExecutor.CaseExecutor, executor))
+      Runner.run(suite, options).pipe(Effect.provideService(CaseExecutor.CaseExecutor, executor)),
+      { signal: runtime.signal }
     )
   )
 

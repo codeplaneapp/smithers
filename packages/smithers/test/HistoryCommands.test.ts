@@ -159,7 +159,9 @@ describe("history boundaries and refusal postconditions", () => {
     const root = await fixture()
     await rm(join(root, ".flows"), { recursive: true })
     await expect(History.read(root, "run-1", {}, false)).rejects.toThrow("No execution history")
-    expect(() => History.localRoot({ root }, { SMITHERS_REMOTE: "https://example.invalid" })).toThrow("remote history")
+    expect(() => History.localRoot({ root }, { SMITHERS_REMOTE: "https://example.invalid" })).toThrow(
+      "--remote is not supported"
+    )
     expect(() => History.reconcile(root)).not.toThrow()
     await expect(readFile(join(root, ".flows", "engine.db"))).rejects.toMatchObject({ code: "ENOENT" })
   })
@@ -429,8 +431,12 @@ describe("durable history CLI", () => {
     const root = join(tmpdir(), `missing-history-${Date.now()}`)
     const result = await serve(root, ["inspect", "run-1", "--remote", "https://example.invalid"])
     expect(result.exitCode).toBe(1)
-    expect(result.output).toContain("remote history is not supported")
-    expect(History.localRoot({ root }, { SMITHERS_REMOTE: "" })).toBe(root)
+    expect(result.output).toContain("--remote is not supported")
+    await expect(realpath(root)).rejects.toMatchObject({ code: "ENOENT" })
+    expect(() => History.localRoot({ root }, { SMITHERS_REMOTE: "" })).toThrow("is not an accessible directory")
+    const local = await mkdtemp(join(tmpdir(), "local-history-"))
+    directories.push(local)
+    expect(History.localRoot({ root: local }, { SMITHERS_REMOTE: "" })).toBe(local)
   })
 
   it("blocks restart after a committed rewind until control reconciliation has completed", async () => {

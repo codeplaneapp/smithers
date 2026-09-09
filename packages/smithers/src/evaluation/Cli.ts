@@ -3,12 +3,14 @@
  *
  * @since 1.0.0
  */
+import type { RuntimeConfig } from "@smthrs/build-cli/Cli"
 import * as Redaction from "@smthrs/journal/Redaction"
 import { Cli, z } from "incur"
 import { randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import * as Presentation from "../cli/Presentation.ts"
+import * as Project from "../Project.ts"
 import * as Evaluation from "./Evaluation.ts"
 
 /** Options shared by evaluation commands that load local modules. */
@@ -25,7 +27,7 @@ const message = (cause: unknown): string =>
  * @category constructors
  * @since 1.0.0
  */
-export const createEvalCli = () =>
+export const createEvalCli = (runtime: RuntimeConfig = {}) =>
   Cli.create("eval", {
     description: "Run fixed evaluation suites and compare committed score baselines"
   })
@@ -34,7 +36,9 @@ export const createEvalCli = () =>
       options: z.object(localOptions),
       async run(context) {
         try {
-          return Presentation.finish(context, { suites: await Evaluation.list(Evaluation.localRoot(context.options)) })
+          return Presentation.finish(context, {
+            suites: await Evaluation.list(Project.localRoot(context.options, runtime.environment ?? process.env))
+          })
         } catch (cause) {
           return context.error({ code: "eval_list_failed", message: message(cause) })
         }
@@ -56,19 +60,20 @@ export const createEvalCli = () =>
         let result: Evaluation.RunArtifact
         let file: string
         try {
-          const root = Evaluation.localRoot(context.options)
+          const root = Project.localRoot(context.options, runtime.environment ?? process.env)
           const runId = context.options.runId ?? randomUUID()
           file = Evaluation.runPath(root, runId)
-          const loaded = await Evaluation.load(root, context.args.suite)
+          const loaded = await Evaluation.load(root, context.args.suite, runtime)
           result = await Evaluation.execute(loaded.suite, loaded.executor, {
             runId,
             at: context.options.at ?? new Date().toISOString()
-          })
+          }, runtime)
+          runtime.signal?.throwIfAborted()
           const source = `${JSON.stringify(result, null, 2)}\n`
-          await Evaluation.writeJson(file, source)
+          await Evaluation.writeJson(file, source, false, runtime.signal)
           if (context.options.output !== undefined) {
             const output = resolve(root, context.options.output)
-            if (output !== file) await Evaluation.writeJson(output, source)
+            if (output !== file) await Evaluation.writeJson(output, source, false, runtime.signal)
           }
         } catch (cause) {
           return context.error({ code: "eval_run_failed", exitCode: 5, message: message(cause) })
@@ -95,7 +100,7 @@ export const createEvalCli = () =>
       }),
       async run(context) {
         try {
-          const root = Evaluation.localRoot(context.options)
+          const root = Project.localRoot(context.options, runtime.environment ?? process.env)
           const run = await Evaluation.readRun(root, context.args.run)
           if (
             run.cases.some((entry) => entry.error !== undefined) || run.observations.length === 0 ||
@@ -106,7 +111,7 @@ export const createEvalCli = () =>
           const file = context.options.output === undefined
             ? Evaluation.defaultBaselinePath(root, run.suite)
             : resolve(root, context.options.output)
-          await Evaluation.writeJson(file, await Evaluation.baseline(run), context.options.force)
+          await Evaluation.writeJson(file, await Evaluation.baseline(run), context.options.force, runtime.signal)
           return Presentation.finish(context, {
             file,
             suite: run.suite,
@@ -131,7 +136,7 @@ export const createEvalCli = () =>
       async run(context) {
         let result: Awaited<ReturnType<typeof Evaluation.compare>>
         try {
-          const root = Evaluation.localRoot(context.options)
+          const root = Project.localRoot(context.options, runtime.environment ?? process.env)
           const run = await Evaluation.readRun(root, context.args.run)
           const file = context.options.baseline === undefined
             ? Evaluation.defaultBaselinePath(root, run.suite)
@@ -141,7 +146,12 @@ export const createEvalCli = () =>
             min: context.options.min
           })
           if (context.options.output !== undefined) {
-            await Evaluation.writeJson(resolve(root, context.options.output), `${JSON.stringify(result, null, 2)}\n`)
+            await Evaluation.writeJson(
+              resolve(root, context.options.output),
+              `${JSON.stringify(result, null, 2)}\n`,
+              false,
+              runtime.signal
+            )
           }
         } catch (cause) {
           return context.error({ code: "eval_compare_failed", exitCode: 5, message: message(cause) })

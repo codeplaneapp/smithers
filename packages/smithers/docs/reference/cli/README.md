@@ -106,7 +106,14 @@ or suspended engine run; use `fork` for terminal history. Active runs and
 unsafe effect boundaries are refused. Evaluation artifacts live under
 `.flows/evals/runs/`; baselines default to `evals/<encoded-suite>.baseline.json`
 and require `--force` to overwrite. Evaluation comparison exits 1 for
-regressions and 5 for inconclusive results.
+regressions and 5 for inconclusive results. Cancellation interrupts evaluation
+suite effects, cases, and scorers, waits for their finalizers, and prevents
+publication of unfinished results. Embedded invocations pass `RuntimeConfig.signal`
+and `RuntimeConfig.environment` to `createEvalCli`.
+
+Evaluation, history, and operator commands share local project resolution.
+Roots must be accessible directories. An empty `SMITHERS_REMOTE` is unset;
+an explicit `--remote` option or nonempty environment value is refused.
 
 Action-result caches use the workspace's cache directory, normally
 `.flows/cache/`. `cache prune/clear` delete only local result files and require

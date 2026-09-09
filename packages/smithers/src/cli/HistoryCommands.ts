@@ -6,6 +6,7 @@ import * as Redaction from "@smthrs/journal/Redaction"
 import { type Cli, z } from "incur"
 import * as Environment from "../Environment.ts"
 import * as History from "../history/History.ts"
+import * as Project from "../Project.ts"
 import * as Bridge from "./ControlBridge.ts"
 import * as Presentation from "./Presentation.ts"
 
@@ -45,7 +46,7 @@ export const appendHistoryCommands = (cli: Cli.Cli, runtime: Bridge.Runtime = {}
           return Presentation.finish(
             c,
             await History.read(
-              History.localRoot(c.options, runtime.environment ?? process.env),
+              Project.localRoot(c.options, runtime.environment ?? process.env),
               c.args.run,
               parameters(c.options),
               false,
@@ -66,7 +67,7 @@ export const appendHistoryCommands = (cli: Cli.Cli, runtime: Bridge.Runtime = {}
           return Presentation.finish(
             c,
             await History.read(
-              History.localRoot(c.options, runtime.environment ?? process.env),
+              Project.localRoot(c.options, runtime.environment ?? process.env),
               c.args.run,
               parameters(c.options),
               true,
@@ -87,7 +88,7 @@ export const appendHistoryCommands = (cli: Cli.Cli, runtime: Bridge.Runtime = {}
           return Presentation.finish(
             c,
             await History.mutate(
-              History.localRoot(c.options, runtime.environment ?? process.env),
+              Project.localRoot(c.options, runtime.environment ?? process.env),
               c.args.run,
               parameters(c.options),
               "fork",
@@ -116,7 +117,7 @@ export const appendHistoryCommands = (cli: Cli.Cli, runtime: Bridge.Runtime = {}
           })
         }
         try {
-          const root = History.localRoot(c.options, runtime.environment ?? process.env)
+          const root = Project.localRoot(c.options, runtime.environment ?? process.env)
           if (c.options.preview) {
             return Presentation.finish(
               c,
@@ -143,7 +144,7 @@ export const reconcileHistory = (connection: Bridge.ConnectionOptions, runtime: 
     connection.remote !== undefined ||
     Environment.read(runtime.environment ?? process.env, "SMITHERS_REMOTE") !== undefined
   ) return
-  History.reconcile(History.localRoot(connection, runtime.environment ?? process.env))
+  History.reconcile(Project.localRoot(connection, runtime.environment ?? process.env))
 }
 
 /**
@@ -160,5 +161,5 @@ export const prepareHistoryRun = (
     connection.remote !== undefined ||
     Environment.read(runtime.environment ?? process.env, "SMITHERS_REMOTE") !== undefined
   ) return {}
-  return History.prepare(History.localRoot(connection, runtime.environment ?? process.env), runId)
+  return History.prepare(Project.localRoot(connection, runtime.environment ?? process.env), runId)
 }

@@ -1,6 +1,8 @@
 import { Cli } from "incur"
-import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, relative, resolve } from "node:path"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type * as Bridge from "../src/cli/ControlBridge.ts"
 import { appendHistoryCommands, prepareHistoryRun, reconcileHistory } from "../src/cli/HistoryCommands.ts"
 
@@ -19,6 +21,10 @@ vi.mock("../src/history/History.ts", async (load) => ({
   reconcile: ports.reconcile,
   prepare: ports.prepare
 }))
+
+const directory = mkdtempSync(join(tmpdir(), "smithers-history-dispatch-"))
+const relativeProject = relative(process.cwd(), directory)
+afterAll(() => rmSync(directory, { recursive: true, force: true }))
 
 const projection = {
   runId: "run-1",
@@ -65,7 +71,7 @@ describe("unified historical command dispatch", () => {
         command,
         "run-1",
         "--root",
-        "/fixture",
+        directory,
         "--at",
         "0",
         "--lineage",
@@ -74,10 +80,10 @@ describe("unified historical command dispatch", () => {
         "1"
       ], { environment: {}, signal: controller.signal })
       expect(ports.read).toHaveBeenCalledExactlyOnceWith(
-        "/fixture",
+        directory,
         "run-1",
         {
-          root: "/fixture",
+          root: directory,
           quiet: false,
           at: 0,
           lineage: "lineage/root",
@@ -95,12 +101,12 @@ describe("unified historical command dispatch", () => {
   )
 
   it.each(["inspect", "replay"])("keeps the latest-frame default and read budget for %s", async (command) => {
-    const result = await invoke([command, "run-1", "--root", "relative-project"])
+    const result = await invoke([command, "run-1", "--root", relativeProject])
     expect(ports.read).toHaveBeenCalledExactlyOnceWith(
-      resolve("relative-project"),
+      resolve(relativeProject),
       "run-1",
       {
-        root: "relative-project",
+        root: relativeProject,
         quiet: false,
         limit: 10_000,
         sequence: undefined
@@ -117,7 +123,7 @@ describe("unified historical command dispatch", () => {
       "fork",
       "run-1",
       "--root",
-      "/fixture",
+      directory,
       "--at",
       "0",
       "--lineage",
@@ -126,10 +132,10 @@ describe("unified historical command dispatch", () => {
       "12"
     ], { environment: {}, signal: controller.signal })
     expect(ports.mutate).toHaveBeenCalledExactlyOnceWith(
-      "/fixture",
+      directory,
       "run-1",
       {
-        root: "/fixture",
+        root: directory,
         quiet: false,
         at: 0,
         lineage: "lineage/root",
@@ -145,15 +151,15 @@ describe("unified historical command dispatch", () => {
 
   it("confirms rewind explicitly and preserves the mutation's audit receipt", async () => {
     const controller = new AbortController()
-    const result = await invoke(["rewind", "run-1", "--root", "/fixture", "--at", "7", "--yes"], {
+    const result = await invoke(["rewind", "run-1", "--root", directory, "--at", "7", "--yes"], {
       environment: {},
       signal: controller.signal
     })
     expect(ports.mutate).toHaveBeenCalledExactlyOnceWith(
-      "/fixture",
+      directory,
       "run-1",
       {
-        root: "/fixture",
+        root: directory,
         quiet: false,
         at: 7,
         limit: 10_000,
@@ -174,14 +180,14 @@ describe("unified historical command dispatch", () => {
       "rewind",
       "run-1",
       "--root",
-      "/fixture",
+      directory,
       "--at",
       "7",
       "--preview",
       ...(yes ? ["--yes"] : [])
     ], { environment: {}, signal: controller.signal })
-    expect(ports.preview).toHaveBeenCalledExactlyOnceWith("/fixture", "run-1", {
-      root: "/fixture",
+    expect(ports.preview).toHaveBeenCalledExactlyOnceWith(directory, "run-1", {
+      root: directory,
       quiet: false,
       at: 7,
       limit: 10_000,
@@ -194,7 +200,7 @@ describe("unified historical command dispatch", () => {
   })
 
   it("requires confirmation before resolving or changing any history", async () => {
-    const result = await invoke(["rewind", "run-1", "--root", "/fixture", "--at", "7"])
+    const result = await invoke(["rewind", "run-1", "--root", directory, "--at", "7"])
     expect(result.codes).toEqual([2])
     expect(JSON.parse(result.stdout)).toEqual({
       code: "confirmation_required",
@@ -213,7 +219,7 @@ describe("unified historical command dispatch", () => {
     for (const port of [ports.read, ports.mutate, ports.preview]) {
       port.mockRejectedValue(new Error("Authorization: Bearer private-fixture"))
     }
-    const result = await invoke([command, "run-1", "--root", "/fixture", ...flags], { environment: {} })
+    const result = await invoke([command, "run-1", "--root", directory, ...flags], { environment: {} })
     expect(result.codes).toEqual([1])
     expect(JSON.parse(result.stdout)).toEqual({
       code: "history_failed",
@@ -226,7 +232,7 @@ describe("unified historical command dispatch", () => {
 
   it("renders non-Error rejections through the same failure contract", async () => {
     ports.read.mockRejectedValue("Authorization: Bearer private-fixture")
-    const result = await invoke(["inspect", "run-1", "--root", "/fixture"])
+    const result = await invoke(["inspect", "run-1", "--root", directory])
     expect(result.codes).toEqual([1])
     expect(result.stdout).toContain("history_failed")
     expect(result.stdout).toContain("[REDACTED_TOKEN]")
@@ -239,7 +245,7 @@ describe("unified historical command dispatch", () => {
       vi.stubEnv("SMITHERS_REMOTE", "https://control.invalid")
       const result = await invoke([command, "run-1", "--at", "0", ...(command === "rewind" ? ["--yes"] : [])])
       expect(result.codes).toEqual([1])
-      expect(result.stdout).toContain("remote history is not supported")
+      expect(result.stdout).toContain("--remote is not supported")
       expect(ports.mutate).not.toHaveBeenCalled()
     }
   )
@@ -257,7 +263,7 @@ describe("unified historical command dispatch", () => {
     ) {
       const result = await invoke([command, "run-1", ...connection, ...flags], { environment })
       expect(result.codes).toEqual([1])
-      expect(result.stdout).toContain("remote history is not supported")
+      expect(result.stdout).toContain("--remote is not supported")
     }
     for (const port of Object.values(ports)) expect(port).not.toHaveBeenCalled()
   })
@@ -278,36 +284,36 @@ describe("unified historical command dispatch", () => {
 
 describe("normal run history routing", () => {
   it("uses the host environment when called without runtime options", () => {
-    reconcileHistory({ root: "/fixture", quiet: false })
-    expect(ports.reconcile).toHaveBeenCalledExactlyOnceWith("/fixture")
-    expect(prepareHistoryRun("child", { root: "/fixture", quiet: false })).toEqual({ executionRoot: "/fixture/child" })
-    expect(ports.prepare).toHaveBeenCalledExactlyOnceWith("/fixture", "child")
+    reconcileHistory({ root: directory, quiet: false })
+    expect(ports.reconcile).toHaveBeenCalledExactlyOnceWith(directory)
+    expect(prepareHistoryRun("child", { root: directory, quiet: false })).toEqual({ executionRoot: "/fixture/child" })
+    expect(ports.prepare).toHaveBeenCalledExactlyOnceWith(directory, "child")
   })
 
   it("honors the host's remote environment when no runtime override is provided", () => {
     vi.stubEnv("SMITHERS_REMOTE", "https://control.invalid")
-    reconcileHistory({ root: "/fixture", quiet: false })
-    expect(prepareHistoryRun("child", { root: "/fixture", quiet: false })).toEqual({})
+    reconcileHistory({ root: directory, quiet: false })
+    expect(prepareHistoryRun("child", { root: directory, quiet: false })).toEqual({})
     expect(ports.reconcile).not.toHaveBeenCalled()
     expect(ports.prepare).not.toHaveBeenCalled()
   })
 
   it("uses an explicit local environment instead of inheriting the host's remote target", () => {
     vi.stubEnv("SMITHERS_REMOTE", "https://control.invalid")
-    reconcileHistory({ root: "/fixture", quiet: false }, { environment: {} })
-    expect(prepareHistoryRun("child", { root: "/fixture", quiet: false }, { environment: {} })).toEqual({
+    reconcileHistory({ root: directory, quiet: false }, { environment: {} })
+    expect(prepareHistoryRun("child", { root: directory, quiet: false }, { environment: {} })).toEqual({
       executionRoot: "/fixture/child"
     })
-    expect(ports.reconcile).toHaveBeenCalledExactlyOnceWith("/fixture")
-    expect(ports.prepare).toHaveBeenCalledExactlyOnceWith("/fixture", "child")
+    expect(ports.reconcile).toHaveBeenCalledExactlyOnceWith(directory)
+    expect(ports.prepare).toHaveBeenCalledExactlyOnceWith(directory, "child")
   })
 
   it("treats an empty remote environment variable as absent", () => {
-    reconcileHistory({ root: "/fixture", quiet: false }, { environment: { SMITHERS_REMOTE: "" } })
-    expect(prepareHistoryRun("child", { root: "/fixture", quiet: false }, { environment: { SMITHERS_REMOTE: "" } }))
+    reconcileHistory({ root: directory, quiet: false }, { environment: { SMITHERS_REMOTE: "" } })
+    expect(prepareHistoryRun("child", { root: directory, quiet: false }, { environment: { SMITHERS_REMOTE: "" } }))
       .toEqual({ executionRoot: "/fixture/child" })
-    expect(ports.reconcile).toHaveBeenCalledExactlyOnceWith("/fixture")
-    expect(ports.prepare).toHaveBeenCalledExactlyOnceWith("/fixture", "child")
+    expect(ports.reconcile).toHaveBeenCalledExactlyOnceWith(directory)
+    expect(ports.prepare).toHaveBeenCalledExactlyOnceWith(directory, "child")
   })
 
   it("does not query or resume when local reconciliation or worktree resolution fails", () => {
@@ -317,10 +323,10 @@ describe("normal run history routing", () => {
     ports.prepare.mockImplementation(() => {
       throw new Error("unlinked child")
     })
-    expect(() => reconcileHistory({ root: "/fixture", quiet: false }, { environment: {} })).toThrow(
+    expect(() => reconcileHistory({ root: directory, quiet: false }, { environment: {} })).toThrow(
       "unreconciled audit"
     )
-    expect(() => prepareHistoryRun("child", { root: "/fixture", quiet: false }, { environment: {} })).toThrow(
+    expect(() => prepareHistoryRun("child", { root: directory, quiet: false }, { environment: {} })).toThrow(
       "unlinked child"
     )
   })

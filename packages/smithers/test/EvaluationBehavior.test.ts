@@ -1,3 +1,4 @@
+import type { RuntimeConfig } from "@smthrs/build-cli/Cli"
 import { Cli, Mcp } from "incur"
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -19,10 +20,10 @@ const fixture = async () => {
   return root
 }
 
-const serve = async (root: string, args: ReadonlyArray<string>) => {
+const serve = async (root: string, args: ReadonlyArray<string>, runtime: RuntimeConfig = {}) => {
   let output = ""
   let code = 0
-  await createEvalCli().serve([...args, "--root", root, "--json"], {
+  await createEvalCli(runtime).serve([...args, "--root", root, "--json"], {
     stdout: (text) => {
       output += text
     },
@@ -143,6 +144,28 @@ describe("evaluation suite discovery and execution", () => {
     expect(remote.code).toBe(1)
     expect(remote.output).toContain("--remote is not supported")
     expect(await readdir(root)).toEqual(["evals"])
+  })
+
+  it("uses the supplied environment and rejects an explicitly empty remote option", async () => {
+    const root = await fixture()
+    vi.stubEnv("SMITHERS_REMOTE", "https://ambient.invalid")
+    const local = await serve(root, ["list"], { environment: { SMITHERS_REMOTE: "" } })
+    expect(local.code, local.output).toBe(0)
+    vi.stubEnv("SMITHERS_REMOTE", "")
+    const remote = await serve(root, ["list"], { environment: { SMITHERS_REMOTE: "https://supplied.invalid" } })
+    expect(remote.code).toBe(1)
+    expect(remote.output).toContain("--remote is not supported")
+    const explicit = await serve(root, ["list", "--remote="], { environment: {} })
+    expect(explicit.code).toBe(1)
+    expect(explicit.output).toContain("--remote is not supported")
+  })
+
+  it("rejects missing project roots before discovery", async () => {
+    const root = await fixture()
+    const response = await serve(join(root, "missing"), ["list"])
+    expect(response.code).toBe(1)
+    expect(response.output).toContain("is not an accessible directory")
+    expect(await readdir(root)).toEqual([])
   })
 
   it.each(["value", "promise", "effect"] as const)(

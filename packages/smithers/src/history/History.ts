@@ -18,7 +18,6 @@ import { Cause, Effect, Exit, Layer } from "effect"
 import { existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import * as Environment from "../Environment.ts"
 import * as NodeControl from "../NodeControl.ts"
 import * as Project from "../Project.ts"
 import * as Workspace from "./Workspace.ts"
@@ -41,15 +40,7 @@ export interface Options {
  * @since 1.0.0
  * @category constructors
  */
-export const localRoot = (
-  options: Options,
-  environment: Readonly<Record<string, string | undefined>>
-): string => {
-  if (options.remote !== undefined || Environment.read(environment, "SMITHERS_REMOTE") !== undefined) {
-    throw new Error("Run history requires the local engine database; remote history is not supported")
-  }
-  return Project.root(options.root, process.cwd())
-}
+export { localRoot } from "../Project.ts"
 
 const requireDatabase = (root: string): string => {
   const file = NodeControl.executionDatabasePath(root)

@@ -8,7 +8,7 @@ import * as Redaction from "@smthrs/journal/Redaction"
 import { Effect, Layer } from "effect"
 import { z } from "incur"
 import * as Presentation from "../cli/Presentation.ts"
-import * as Environment from "../Environment.ts"
+import type * as Environment from "../Environment.ts"
 import * as ControlDatabase from "../internal/ControlDatabase.ts"
 import * as NodeControl from "../NodeControl.ts"
 import * as Project from "../Project.ts"
@@ -40,14 +40,8 @@ export interface LocalOptions {
  * @category constructors
  * @since 1.0.0
  */
-export const localRoot = (options: LocalOptions): string => {
-  if (options.remote !== undefined || Environment.read(process.env, "SMITHERS_REMOTE") !== undefined) {
-    throw new Error("This operator command requires the host that owns .flows/control.db; --remote is not supported.")
-  }
-  const root = Project.root(options.root, process.cwd())
-  Project.assertRoot(root)
-  return root
-}
+export const localRoot = (options: LocalOptions, environment?: Environment.Source): string =>
+  Project.localRoot(options, environment ?? process.env)
 
 /**
  * Shares the authoritative control database and its migration ledger.

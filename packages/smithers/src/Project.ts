@@ -318,3 +318,20 @@ export const assertRoot = (projectRoot: string): void => {
     })
   }
 }
+
+/**
+ * Resolves and validates a local-only invocation using the canonical environment rules.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const localRoot = (
+  options: { readonly root?: string | undefined; readonly remote?: string | undefined },
+  environment: Environment.Source
+): string => {
+  if (options.remote !== undefined || Environment.read(environment, "SMITHERS_REMOTE") !== undefined) {
+    throw new Error("This command requires the host that owns the local project; --remote is not supported")
+  }
+  const projectRoot = root(options.root, process.cwd())
+  assertRoot(projectRoot)
+  return projectRoot
+}
