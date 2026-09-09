@@ -123,7 +123,9 @@ A GitHub-proxied call refused for rate limit never fails silently: the
 card that made it gains the line `GitHub rate limit reached · 0 of 5 000 ·
 resets 12:40 · Retry after`, and the Retry action is disabled until the
 reset with the time on it. This is a line on the failing card, not a toast
-and not a card of its own.
+and not a card of its own. The countdown updates at each remaining-minute
+boundary. Re-check, Reconcile, and Try again re-enable at the reset without
+a store update. The clock stops at the reset or when the card unmounts.
 
 ## Connectors surface
 

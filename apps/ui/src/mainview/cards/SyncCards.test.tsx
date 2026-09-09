@@ -1,6 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import type { StorageApi } from "@tanstack/db"
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, jest, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import { pillStatus } from "../ChatCards"
@@ -472,6 +472,83 @@ describe("ConnectorSetupCardBody — the GitHub card", () => {
     )
     expect(buttonNamed(passed.host, "Re-check").disabled).toBe(false)
     expect(rateLimitHeldUntil({ limit: 5000, remaining: 0, resetAt: null })).toBeNull()
+  })
+})
+
+describe("rate-limit clock subscriptions", () => {
+  test.each([180_000, 150_000, 30_000])("releases every mounted retry at a reset %i ms away without a store update", (remaining) => {
+    jest.useFakeTimers({ now: Date.parse("2026-09-06T12:00:00Z") })
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const rateLimit = { limit: 5000, remaining: 0, resetAt: new Date(Date.now() + remaining).toISOString() }
+    try {
+      flushSync(() => root.render(
+        <>
+          <ConnectorSetupCardBody card={setupCard({ connector: "github", steps: [], rateLimit })} onRunCommand={() => {}} />
+          <RepoImportCardBody
+            card={{
+              id: "repo-import-will/flows",
+              kind: "repo-import",
+              title: "Import · will/flows",
+              status: "error",
+              createdAt: 0,
+              ordinal: 0,
+              payload: { repo: "will/flows", jobId: null, phase: "failed", detail: "GitHub rate limit exhausted", rateLimit }
+            }}
+            onRunCommand={() => {}}
+          />
+        </>
+      ))
+      const buttons = ["Re-check", "Reconcile", "Try again"].map((name) => buttonNamed(host, name))
+      const expectCountdown = (label: string) => {
+        expect([...host.querySelectorAll("p")].filter((line) => line.textContent?.includes(label))).toHaveLength(2)
+        expect(buttons.map((button) => button.disabled)).toEqual([true, true, true])
+      }
+      expectCountdown(remaining < 60_000 ? "resets in under a minute" : `resets in ${Math.ceil(remaining / 60_000)} min`)
+      let left = remaining
+      while (left > 60_000) {
+        const step = left % 60_000 || 60_000
+        flushSync(() => jest.advanceTimersByTime(step))
+        left -= step
+        expectCountdown(`resets in ${left / 60_000} min`)
+      }
+      flushSync(() => jest.advanceTimersByTime(left - 1))
+      expect(buttons.map((button) => button.disabled)).toEqual([true, true, true])
+      flushSync(() => jest.advanceTimersByTime(1))
+      expect(buttons.map((button) => button.disabled)).toEqual([false, false, false])
+      expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Re-check", "Reconcile", "Try again"])
+      expect(host.textContent).toContain("reset just now")
+      expect(jest.getTimerCount()).toBe(0)
+      flushSync(() => jest.advanceTimersByTime(60_000))
+      expect(buttons.map((button) => button.disabled)).toEqual([false, false, false])
+    } finally {
+      flushSync(() => root.unmount())
+      host.remove()
+      jest.useRealTimers()
+    }
+  })
+
+  test("unmount cancels the timer re-armed after a countdown tick", () => {
+    jest.useFakeTimers({ now: Date.parse("2026-09-06T12:00:00Z") })
+    const host = document.createElement("div")
+    const root = createRoot(host)
+    try {
+      flushSync(() => root.render(
+        <ConnectorSetupCardBody
+          card={setupCard({ connector: "github", steps: [], rateLimit: { limit: 5000, remaining: 0, resetAt: minutesFromNow(3) } })}
+          onRunCommand={() => {}}
+        />
+      ))
+      flushSync(() => jest.advanceTimersByTime(60_000))
+      expect(host.textContent).toContain("resets in 2 min")
+      expect(jest.getTimerCount()).toBeGreaterThan(0)
+    } finally {
+      flushSync(() => root.unmount())
+      const pending = jest.getTimerCount()
+      jest.useRealTimers()
+      expect(pending).toBe(0)
+    }
   })
 })
 

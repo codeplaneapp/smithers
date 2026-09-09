@@ -35,14 +35,23 @@ type RateLimit = { readonly limit: number; readonly remaining: number; readonly 
  * the subscriber at each minute boundary and once more at the reset itself,
  * so `resets in 12 min` counts down and a held Retry re-enables on time. An
  * external clock subscription (useSyncExternalStore), never a lifecycle
- * effect; the snapshot is the whole minutes left, so a tick always changes it.
+ * effect. Each tick re-arms the next remaining-minute boundary (or reset)
+ * before notifying React, and the chain stops at the reset. Unsubscribe
+ * clears the current timer; the snapshot is the whole minutes left.
  */
 const useClockUntil = (iso: string | null): void => {
   const at = iso === null ? Number.NaN : Date.parse(iso)
   const subscribe = useCallback((onTick: () => void) => {
-    const remaining = at - Date.now()
-    if (Number.isNaN(remaining) || remaining <= 0) return () => {}
-    const timer = setTimeout(onTick, remaining % 60_000 || 60_000)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = (): void => {
+      const remaining = at - Date.now()
+      if (Number.isNaN(remaining) || remaining <= 0) return
+      timer = setTimeout(() => {
+        schedule()
+        onTick()
+      }, remaining % 60_000 || 60_000)
+    }
+    schedule()
     return () => clearTimeout(timer)
   }, [at])
   const snapshot = (): number => (Number.isNaN(at) ? -1 : Math.max(0, Math.ceil((at - Date.now()) / 60_000)))
