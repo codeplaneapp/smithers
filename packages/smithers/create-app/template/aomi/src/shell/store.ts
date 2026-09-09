@@ -167,7 +167,7 @@ export const applyFrame = (previous: AppState, frame: TurnFrame): Partial<AppSta
     case "card":
       return {
         cards: { ...previous.cards, [frame.card.id]: frame.card },
-        entries: [...previous.entries, { kind: "card", id: newId("card"), cardId: frame.card.id }]
+        entries: [...previous.entries, { kind: "card", id: `card:${frame.card.id}`, cardId: frame.card.id }]
       }
     case "card.update": {
       const known = previous.cards[frame.card.id] !== undefined
@@ -175,7 +175,7 @@ export const applyFrame = (previous: AppState, frame: TurnFrame): Partial<AppSta
         cards: { ...previous.cards, [frame.card.id]: frame.card },
         entries: known
           ? previous.entries
-          : [...previous.entries, { kind: "card", id: newId("card"), cardId: frame.card.id }]
+          : [...previous.entries, { kind: "card", id: `card:${frame.card.id}`, cardId: frame.card.id }]
       }
     }
     case "park":
@@ -201,6 +201,20 @@ export const applyFrame = (previous: AppState, frame: TurnFrame): Partial<AppSta
 // ---------------------------------------------------------------------------
 
 let inflight: AbortController | undefined
+let loading: AbortController | undefined
+let selectionGeneration = 0
+
+const cancelLoad = (): void => {
+  loading?.abort()
+  loading = undefined
+}
+
+const leaveSession = (): void => {
+  selectionGeneration += 1
+  cancelLoad()
+  inflight?.abort()
+  inflight = undefined
+}
 
 /** How often a running flow re-reads its card, and how long it keeps trying. */
 const FLOW_POLL_MS = 750
@@ -224,12 +238,12 @@ export const actions = {
 
   /** Clears the transcript and starts a fresh session id. */
   newSession: (): void => {
-    inflight?.abort()
-    inflight = undefined
+    leaveSession()
     set({ sessionId: newId("ses"), entries: [], cards: {}, draft: "", status: "idle", error: undefined })
   },
 
   selectSession: (sessionId: string): void => {
+    leaveSession()
     set({ sessionId, entries: [], cards: {}, status: "idle", error: undefined })
     void actions.loadSession(sessionId)
   },
@@ -252,26 +266,44 @@ export const actions = {
 
   /** Rehydrates one session's transcript from `GET /api/session?id=`. */
   loadSession: async (sessionId: string): Promise<void> => {
+    if (state.sessionId !== sessionId) return
+    cancelLoad()
+    const controller = new AbortController()
+    loading = controller
+    const isCurrent = (): boolean =>
+      loading === controller && !controller.signal.aborted && state.sessionId === sessionId
     try {
-      const session = await client.getSession(sessionId)
+      const session = await client.getSession(sessionId, controller.signal)
+      if (!isCurrent() || session.id !== sessionId) return
       const cards: Record<string, AppCard> = {}
       for (const card of session.cards) cards[card.id] = card
+      const entries: ReadonlyArray<TranscriptEntry> = [
+        ...session.messages.map((message): TranscriptEntry => ({
+          kind: "message",
+          id: message.id,
+          role: message.role,
+          text: message.text
+        })),
+        ...session.cards.map((card): TranscriptEntry => ({ kind: "card", id: `card:${card.id}`, cardId: card.id }))
+      ]
+      // Cards have no revision timestamp: the same id can hold new HTML or
+      // flow progress. Compare the decoded JSON content, retaining unchanged
+      // slices so a poll does not remount cards or notify subscribers.
+      const sameCards = JSON.stringify(cards) === JSON.stringify(state.cards)
+      const sameEntries = JSON.stringify(entries) === JSON.stringify(state.entries)
+      const status = session.busy ? "streaming" : "idle"
+      if (sameCards && sameEntries && state.status === status && state.error === undefined) return
       set({
-        sessionId: session.id,
-        cards,
-        entries: [
-          ...session.messages.map((message): TranscriptEntry => ({
-            kind: "message",
-            id: message.id,
-            role: message.role,
-            text: message.text
-          })),
-          ...session.cards.map((card): TranscriptEntry => ({ kind: "card", id: newId("card"), cardId: card.id }))
-        ],
-        status: session.busy ? "streaming" : "idle"
+        cards: sameCards ? state.cards : cards,
+        entries: sameEntries ? state.entries : entries,
+        status,
+        error: undefined
       })
     } catch (cause) {
+      if (!isCurrent()) return
       set({ status: "error", error: cause instanceof Error ? cause.message : String(cause) })
+    } finally {
+      if (loading === controller) loading = undefined
     }
   },
 
@@ -279,6 +311,7 @@ export const actions = {
   submit: async (message: string, flowId = "chat"): Promise<void> => {
     const text = message.trim()
     if (text.length === 0 || state.status === "streaming") return
+    cancelLoad()
     const controller = new AbortController()
     inflight = controller
     set({
@@ -289,11 +322,14 @@ export const actions = {
     })
     try {
       for await (const frame of client.streamTurn({ sessionId: state.sessionId, flowId, message: text }, controller.signal)) {
+        if (inflight !== controller || controller.signal.aborted) return
         set(applyFrame(state, frame))
       }
+      if (inflight !== controller || controller.signal.aborted) return
       // Re-read: a `done` or `error` frame may already have settled the turn.
       if (store.getSnapshot().status === "streaming") set({ status: "idle" })
     } catch (cause) {
+      if (inflight !== controller) return
       if (controller.signal.aborted) {
         set({ status: "idle" })
       } else {
@@ -324,10 +360,14 @@ export const actions = {
    */
   runFlow: async (flowId: string, payload: unknown): Promise<void> => {
     const sessionId = state.sessionId
+    const generation = selectionGeneration
+    const isCurrent = (): boolean => state.sessionId === sessionId && selectionGeneration === generation
     let executionId: string
     try {
       executionId = await client.runFlow({ sessionId, flowId, payload })
+      if (!isCurrent()) return
     } catch (cause) {
+      if (!isCurrent()) return
       set({ status: "error", error: cause instanceof Error ? cause.message : String(cause) })
       return
     }
@@ -335,9 +375,9 @@ export const actions = {
       await new Promise((resolve) => setTimeout(resolve, FLOW_POLL_MS))
       // The user moved on. The run keeps going in the Worker; its card is
       // waiting in the session whenever they come back to it.
-      if (store.getSnapshot().sessionId !== sessionId) return
+      if (!isCurrent()) return
       await actions.loadSession(sessionId)
-      await actions.refreshSessions()
+      if (!isCurrent()) return
       if (isSettled(store.getSnapshot().cards[executionId])) return
     }
   },

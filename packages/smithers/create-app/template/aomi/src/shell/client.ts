@@ -119,9 +119,12 @@ export const cancelTurn = async (sessionId: string): Promise<boolean> => {
 }
 
 /** `GET /api/session?id=<sessionId>`. */
-export const getSession = async (id: string): Promise<SessionState> => {
+export const getSession = async (id: string, signal?: AbortSignal): Promise<SessionState> => {
   const route = `${Routes.session}?id=${encodeURIComponent(id)}`
-  return decodeSessionState(await json(await fetch(route, { headers: authHeaders() }), route))
+  return decodeSessionState(await json(await fetch(route, {
+    headers: authHeaders(),
+    ...(signal === undefined ? {} : { signal })
+  }), route))
 }
 
 /** `GET /api/session`: the Recent column. */

@@ -1,0 +1,253 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { AppCard, SessionState } from "../src/api.ts"
+import { actions, applyFrame, store } from "../src/shell/store.ts"
+
+interface PendingRequest {
+  readonly url: string
+  readonly signal: AbortSignal | null | undefined
+  readonly resolve: (response: Response) => void
+  readonly reject: (cause: Error) => void
+}
+
+let requests: Array<PendingRequest>
+
+const session = (id: string, cards: ReadonlyArray<AppCard> = [], busy = false): SessionState => ({
+  id,
+  messages: [{ id: `message:${id}`, role: "user", text: id, at: 1 }],
+  cards,
+  busy
+})
+
+const runCard = (phase: "running" | "completed" = "running"): AppCard => ({
+  kind: "flow-run", id: "execution", flowId: "build", executionId: "execution", phase, steps: []
+})
+
+const flush = async (): Promise<void> => {
+  await vi.advanceTimersByTimeAsync(0)
+}
+const respond = async (request: PendingRequest, body: unknown): Promise<void> => {
+  request.resolve(Response.json(body))
+  await flush()
+}
+const requestAt = (index: number): PendingRequest => {
+  const request = requests[index]
+  if (request === undefined) throw new Error(`Missing request ${index}`)
+  return request
+}
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  actions.newSession()
+  requests = []
+  // Deliberately ignore cancellation: a response already being decoded can
+  // still finish after abort, so cancellation alone cannot protect the store.
+  vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+    requests.push({ url, signal: init?.signal, resolve, reject })
+  })))
+})
+
+afterEach(() => {
+  actions.newSession()
+  vi.clearAllTimers()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+describe("session loads", () => {
+  it.each(["newer-first", "older-first"])("keeps the latest selection when responses arrive %s", async (order) => {
+    actions.selectSession("older")
+    actions.selectSession("newer")
+    if (order === "newer-first") {
+      await respond(requestAt(1), session("newer"))
+      const selected = store.getSnapshot()
+      await respond(requestAt(0), session("older"))
+      expect(store.getSnapshot()).toBe(selected)
+    } else {
+      await respond(requestAt(0), session("older"))
+      expect(store.getSnapshot().sessionId).toBe("newer")
+      expect(store.getSnapshot().entries).toEqual([])
+      await respond(requestAt(1), session("newer"))
+    }
+    expect(store.getSnapshot().sessionId).toBe("newer")
+    expect(store.getSnapshot().entries[0]).toMatchObject({ text: "newer" })
+    expect(requestAt(0).signal?.aborted).toBe(true)
+  })
+
+  it("ignores a stale failure", async () => {
+    actions.selectSession("older")
+    actions.selectSession("newer")
+    await respond(requestAt(1), session("newer"))
+    const selected = store.getSnapshot()
+    requestAt(0).reject(new Error("old request failed"))
+    await flush()
+    expect(store.getSnapshot()).toBe(selected)
+  })
+
+  it("keeps a fresh session when a previous load completes", async () => {
+    actions.selectSession("older")
+    actions.newSession()
+    const fresh = store.getSnapshot()
+    await respond(requestAt(0), session("older"))
+    expect(store.getSnapshot()).toBe(fresh)
+    expect(requestAt(0).signal?.aborted).toBe(true)
+  })
+
+  it("supersedes an earlier load of the same session", async () => {
+    actions.selectSession("same")
+    const latest = actions.loadSession("same")
+    await respond(requestAt(1), { ...session("same"), messages: [] })
+    await latest
+    const selected = store.getSnapshot()
+    await respond(requestAt(0), session("same"))
+    expect(store.getSnapshot()).toBe(selected)
+  })
+
+  it("does not let a pending load replace a newly submitted turn", async () => {
+    actions.selectSession("selected")
+    const turn = actions.submit("new message")
+    const submitting = store.getSnapshot()
+    await respond(requestAt(0), session("selected"))
+    expect(store.getSnapshot()).toBe(submitting)
+    expect(requestAt(0).signal?.aborted).toBe(true)
+    requestAt(1).resolve(new Response('{"type":"done","output":null}\n'))
+    await turn
+    expect(store.getSnapshot().status).toBe("idle")
+  })
+
+  it("reports a current failure and clears it after a successful retry", async () => {
+    actions.selectSession("selected")
+    requestAt(0).reject(new Error("offline"))
+    await flush()
+    expect(store.getSnapshot()).toMatchObject({ status: "error", error: "offline" })
+    const retry = actions.loadSession("selected")
+    await respond(requestAt(1), session("selected"))
+    await retry
+    expect(store.getSnapshot()).toMatchObject({ status: "idle", error: undefined })
+  })
+
+  it("preserves card keys and the whole snapshot for unchanged loads", async () => {
+    actions.selectSession("selected")
+    await respond(requestAt(0), session("selected", [runCard()]))
+    const previous = store.getSnapshot()
+    const notified = vi.fn()
+    const unsubscribe = store.subscribe(notified)
+    try {
+      const reload = actions.loadSession("selected")
+      await respond(requestAt(1), session("selected", [runCard()]))
+      await reload
+      expect(store.getSnapshot().entries.map((entry) => entry.id)).toEqual(previous.entries.map((entry) => entry.id))
+      expect(store.getSnapshot()).toBe(previous)
+      expect(notified).not.toHaveBeenCalled()
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it("updates card content and busy state without changing transcript keys", async () => {
+    actions.selectSession("selected")
+    await respond(requestAt(0), session("selected", [runCard()], true))
+    const previous = store.getSnapshot()
+    const reload = actions.loadSession("selected")
+    await respond(requestAt(1), session("selected", [runCard("completed")]))
+    await reload
+    expect(store.getSnapshot().entries).toBe(previous.entries)
+    expect(store.getSnapshot().cards.execution).toMatchObject({ phase: "completed" })
+    expect(store.getSnapshot().status).toBe("idle")
+  })
+
+  it("applies message edits and card removals", async () => {
+    actions.selectSession("selected")
+    await respond(requestAt(0), session("selected", [runCard()]))
+    const reload = actions.loadSession("selected")
+    const edited = { ...session("selected"), messages: [{ id: "message:selected", role: "user", text: "edited", at: 1 }] }
+    await respond(requestAt(1), edited)
+    await reload
+    expect(store.getSnapshot().cards).toEqual({})
+    expect(store.getSnapshot().entries).toEqual([{ kind: "message", id: "message:selected", role: "user", text: "edited" }])
+  })
+})
+
+describe("session changes during a turn", () => {
+  it.each(["frames", "failure"])("ignores old stream %s without settling the new turn", async (ending) => {
+    const oldTurn = actions.submit("old")
+    actions.selectSession("selected")
+    await respond(requestAt(1), session("selected"))
+    const newTurn = actions.submit("new")
+    const selected = store.getSnapshot()
+    if (ending === "frames") {
+      requestAt(0).resolve(new Response('{"type":"delta","text":"stale"}\n{"type":"done","output":null}\n'))
+    } else {
+      requestAt(0).reject(new Error("old stream failed"))
+    }
+    await oldTurn
+    expect(store.getSnapshot()).toBe(selected)
+    expect(requestAt(0).signal?.aborted).toBe(true)
+    requestAt(2).resolve(new Response('{"type":"done","output":null}\n'))
+    await newTurn
+    expect(store.getSnapshot().status).toBe("idle")
+  })
+
+  it("uses server card keys for streamed cards too", () => {
+    for (const type of ["card", "card.update"] as const) {
+      expect(applyFrame(store.getSnapshot(), { type, card: runCard() }).entries).toEqual([
+        { kind: "card", id: "card:execution", cardId: "execution" }
+      ])
+    }
+  })
+})
+
+describe("flow polling", () => {
+  it("leaves unchanged polls stable and reads only the session", async () => {
+    const id = store.getSnapshot().sessionId
+    const running = actions.runFlow("build", {})
+    await respond(requestAt(0), { executionId: "execution" })
+    await vi.advanceTimersByTimeAsync(750)
+    await respond(requestAt(1), session(id, [runCard()]))
+    // Allow the old implementation's registry fetch to finish as well.
+    if (requests[2]?.url === "/api/session") await respond(requestAt(2), { sessions: [] })
+    const previous = store.getSnapshot()
+    const count = requests.length
+    await vi.advanceTimersByTimeAsync(750)
+    await respond(requestAt(count), session(id, [runCard()]))
+    expect(store.getSnapshot().entries.map((entry) => entry.id)).toEqual(previous.entries.map((entry) => entry.id))
+    expect(store.getSnapshot()).toBe(previous)
+    expect(requests.every((request) => request.url !== "/api/session")).toBe(true)
+    await vi.advanceTimersByTimeAsync(750)
+    await respond(requestAt(count + 1), session(id, [runCard("completed")]))
+    await running
+    expect(store.getSnapshot().cards.execution).toMatchObject({ phase: "completed" })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("stops a pending poll when the user selects another session", async () => {
+    const id = store.getSnapshot().sessionId
+    const running = actions.runFlow("build", {})
+    await respond(requestAt(0), { executionId: "execution" })
+    await vi.advanceTimersByTimeAsync(750)
+    actions.selectSession("selected")
+    await respond(requestAt(2), session("selected"))
+    const selected = store.getSnapshot()
+    await respond(requestAt(1), session(id, [runCard()]))
+    expect(store.getSnapshot()).toBe(selected)
+    expect(requests).toHaveLength(3)
+    await running
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(["success", "failure"])("ignores a late run start %s even after reselecting the same session", async (ending) => {
+    const id = store.getSnapshot().sessionId
+    const running = actions.runFlow("build", {})
+    actions.newSession()
+    actions.selectSession(id)
+    await respond(requestAt(1), session(id))
+    const selected = store.getSnapshot()
+    if (ending === "success") await respond(requestAt(0), { executionId: "execution" })
+    else {
+      requestAt(0).reject(new Error("old run failed"))
+      await flush()
+    }
+    expect(store.getSnapshot()).toBe(selected)
+    expect(vi.getTimerCount()).toBe(0)
+    await running
+  })
+})
