@@ -40,6 +40,25 @@ const scripted = (scores: ReadonlyArray<number>) => ({
     Effect.succeed({ score: scores[iteration - 1]!, feedback: `feedback-${iteration}` })
 })
 
+/**
+ * Counts the candidates a run still holds. A WeakRef keeps its target alive
+ * for the rest of the job that created it, so the count is taken from a later
+ * job, after a forced collection.
+ */
+const liveCandidates = async (refs: ReadonlyArray<WeakRef<object>>): Promise<number> => {
+  const gc = (globalThis as { gc?: () => void }).gc
+  if (gc === undefined) {
+    // Without a real collection the count measures collector scheduling, not
+    // retention; refuse rather than flake.
+    throw new Error(
+      "Optimizer retention needs --expose-gc; run through this package's vitest config, which sets it"
+    )
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  gc()
+  return refs.filter((ref) => ref.deref() !== undefined).length
+}
+
 describe("Optimizer", () => {
   it("declares one generate and one evaluate call per iteration", () => {
     const optimizer = Optimizer.make({
@@ -252,6 +271,56 @@ describe("Optimizer", () => {
           `Optimizer evaluation score at iteration 1 must be a finite number, received ${score}`
         )
       }
+    }))
+
+  it.effect("picks the same best across a scripted sequence whose plateau repeats", () =>
+    Effect.gen(function*() {
+      const result = yield* Optimizer.run("prompt", {
+        maxIterations: 6,
+        onMaxReached: "return-last",
+        ...scripted([0.1, 0.7, 0.4, 0.7, 0.2, 0.7])
+      })
+
+      expect(result.best).toEqual({
+        candidate: "candidate-2",
+        score: 0.7,
+        feedback: "feedback-2",
+        iteration: 2
+      })
+      expect(result.iterations).toBe(6)
+      expect(result.converged).toBe(false)
+    }))
+
+  it.effect("releases a candidate the search has already lost", () =>
+    Effect.gen(function*() {
+      const bound = 32
+      const refs: Array<WeakRef<{ readonly iteration: number }>> = []
+      let live = -1
+      const result = yield* Optimizer.run("prompt", {
+        maxIterations: bound,
+        onMaxReached: "return-last",
+        generate: ({ iteration }) =>
+          Effect.sync(() => {
+            const candidate = { iteration }
+            refs.push(new WeakRef(candidate))
+            return candidate
+          }),
+        // Every score is worse than the one before it, so iteration 1 stays
+        // best and every later candidate is one the search has no reason to
+        // hold.
+        evaluate: ({ iteration }) =>
+          Effect.promise(async () => {
+            if (iteration === bound) live = await liveCandidates(refs)
+            return { score: -iteration }
+          })
+      })
+
+      expect(result.best.iteration).toBe(1)
+      expect(live).toBeGreaterThan(0)
+      // The best attempt, the previous one, and the one being scored. A count
+      // that tracks the bound instead means the run is keeping a ledger of
+      // every candidate it has produced.
+      expect(live).toBeLessThanOrEqual(3)
     }))
 
   it.effect("validates the target score and the bound before generating", () =>

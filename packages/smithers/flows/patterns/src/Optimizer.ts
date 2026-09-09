@@ -145,6 +145,15 @@ const validate = (options: {
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
 
+// What one iteration hands the next: the attempt just scored, which the
+// following generation reads, and the standing best, which the result reports.
+// The pair is the whole memory of the search, so the only candidates alive at
+// any point are the best one, the previous one, and the one being scored.
+interface Generation<C> {
+  readonly attempt: Attempt<C>
+  readonly best: Attempt<C>
+}
+
 /**
  * Declares the bounded search as its conservative topology.
  *
@@ -212,10 +221,11 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 /**
  * Runs the search, stopping at the first candidate that reaches the target.
  *
- * Every attempt is scored and retained, so `best` survives a later iteration
- * that scores worse. A later attempt has to beat the standing best rather than
- * match it, so equal scores keep the earliest attempt. Reaching the bound below
- * target fails `PatternError`
+ * Every iteration carries the standing best beside the attempt it just scored,
+ * so `best` survives a later iteration that scores worse without the search
+ * holding on to the candidates it has already lost. A later attempt has to beat
+ * the standing best rather than match it, so equal scores keep the earliest
+ * attempt. Reaching the bound below target fails `PatternError`
  * `exhausted` under `onMaxReached: "fail"` and returns the best attempt with
  * `converged: false` under `"return-last"`.
  *
@@ -235,13 +245,12 @@ export const run = <I, C, E, R, E2, R2>(
   const maxIterations = options.maxIterations
   const onMaxReached = options.onMaxReached
   return Effect.gen(function*() {
-    const attempts: Array<Attempt<C>> = []
-    const loop = yield* Loop.run<I, Attempt<C>, E | E2 | PatternError, R | R2, never, never>(input, {
+    const loop = yield* Loop.run<I, Generation<C>, E | E2 | PatternError, R | R2, never, never>(input, {
       maxIterations,
       onMaxReached: "return-last",
       body: ({ input, iteration, previous }) =>
         Effect.gen(function*() {
-          const candidate = yield* stages.generate({ input, previous, iteration })
+          const candidate = yield* stages.generate({ input, previous: previous?.attempt, iteration })
           const evaluation = yield* stages.evaluate({ value: candidate, iteration })
           if (!Number.isFinite(evaluation.score)) {
             return yield* Effect.fail(
@@ -258,20 +267,19 @@ export const run = <I, C, E, R, E2, R2>(
             feedback: evaluation.feedback,
             iteration
           }
-          attempts.push(attempt)
-          return attempt
+          // A later attempt has to beat the standing best rather than match
+          // it, so equal scores keep the earliest attempt wherever the tie
+          // falls. Comparing here rather than folding a ledger at the end is
+          // what releases a losing candidate as soon as the next one is
+          // scored.
+          return {
+            attempt,
+            best: previous === undefined || attempt.score > previous.best.score ? attempt : previous.best
+          }
         }),
-      until: ({ value }) => Effect.succeed(targetScore !== undefined && value.score >= targetScore)
+      until: ({ value }) => Effect.succeed(targetScore !== undefined && value.attempt.score >= targetScore)
     })
-    // The fold seeds with the first attempt and takes a later one only when it
-    // beats the standing best, so equal scores keep the earliest attempt
-    // wherever the tie falls. A successful loop always ran one body, so
-    // `attempts` is never empty and `loop.value` is only a type-level fallback.
-    const best = attempts.reduce(
-      (left, right) => right.score > left.score ? right : left,
-      /* v8 ignore next -- `loop.value` is a type-level fallback: a successful Loop.run always ran one body, so `attempts` always holds at least the first one. It becomes reachable only if Loop.run gains a zero-iteration success. */
-      attempts[0] ?? loop.value
-    )
+    const best = loop.value.best
     const converged = targetScore !== undefined && best.score >= targetScore
     if (!converged && onMaxReached === "fail") {
       return yield* Effect.fail(

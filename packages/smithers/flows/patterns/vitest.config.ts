@@ -5,6 +5,14 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   test: {
     environment: "node",
+    // The retention assertion in Optimizer.test.ts counts live candidates
+    // across a forced collection; without --expose-gc there is no collection
+    // to force and the test refuses rather than flakes. `execArgv` is top
+    // level in Vitest 4 (see packages/smithers/flows/sync/vitest.config.ts);
+    // the 3.x `poolOptions.forks.execArgv` shape type-checks and is silently
+    // ignored, which is how a flag that never reaches the worker looks.
+    pool: "forks",
+    execArgv: ["--expose-gc"],
     // House convention (see packages/smithers/flows/journal/vitest.config.ts): a finite 30 s
     // wall-clock budget so correct suites survive coverage-instrumented load
     // while a genuine hang still fails the run.
