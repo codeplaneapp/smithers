@@ -564,10 +564,19 @@ to one file, and `emptyLabel` covers an empty or unparseable patch.
 leading `a/` or `b/`, which is why `selectedPath` compares equal across all four
 spellings of a name.
 
-Syntax token colors stay the bundled Shiki `github-light` and `github-dark`
-pair. The underlying `CodeView` accepts a theme name but exposes no custom
-theme-registration prop, so replacing those tokens would require owning a
-separate highlighter and worker registration path.
+Syntax token colors follow the resolved `mode` and `palette`, which default to
+the document's theme and palette. `diffsThemeForMode` selects
+`themeRegistry[palette].syntax.shikiLight` or `shikiDark` for light or dark mode.
+Calling the helper without a palette uses `"night-owl"`. Override a registered
+palette on the component when a surface needs different syntax colors:
+
+```tsx
+<PierreDiffView patch={patch} palette="catppuccin" />
+```
+
+Registered palettes select bundled Shiki themes. The adapter exposes no
+registration prop for custom unregistered themes; those require a separate
+highlighter and worker registration path.
 
 ## Markdown editor
 

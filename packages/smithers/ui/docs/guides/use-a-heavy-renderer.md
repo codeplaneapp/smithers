@@ -52,7 +52,7 @@ function readable(patch: string): boolean {
   return items.length > 0 && items.every((item) => item.type === "diff" && item.fileDiff.hunks.length > 0)
 }
 
-export function DiffSurface({ patch }: { readonly patch: string }) {
+export default function DiffSurface({ patch }: { readonly patch: string }) {
   return readable(patch)
     ? <PierreDiffView layout="inline" patch={patch} />
     : <pre>{patch}</pre>
@@ -90,8 +90,16 @@ the nearest scrolling ancestor; changing it moves the mark and scrolls again.
 Until the highlighter has painted, the component renders a plain `<pre>`, so
 there is no blank frame.
 
-Highlighting runs on the main thread, because the underlying worker pool needs a
-worker factory the consumer supplies.
+`CodeFileView` automatically starts the shared worker pool on first use. The
+adapter supplies Bun and browser worker factories, with a 15-second
+initialization deadline (`CODE_VIEW_POOL_DEADLINE_MS`). Highlighting falls back
+to the main thread only when workers are unavailable or the pool fails,
+including startup errors or a missed initialization deadline.
+
+For embedded page teardown, call `disposeCodeViewPool` from
+`@smthrs/ui/adapters/code-view` after unmounting its code views, while its DOM
+still exists. This releases the shared pool so the next page can start a fresh
+one.
 
 ## Attach a terminal
 

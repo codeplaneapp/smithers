@@ -16,7 +16,7 @@ and the entry points are readable before you commit to it.
 
 | Requirement                     | Value                                                              |
 | ------------------------------- | ------------------------------------------------------------------ |
-| React                           | `^19.0.0`, as a peer dependency, together with `react-dom ^19.0.0` |
+| React                           | `^19.2.8`, as a peer dependency, together with `react-dom ^19.2.8` |
 | A bundler that reads TypeScript | The package ships `src/` directly, with no `dist/`                 |
 | A CSS-capable host              | None. The stylesheet travels as a JavaScript string                |
 
@@ -32,8 +32,8 @@ Declare the workspace protocol in the host application's `package.json`:
 {
   "dependencies": {
     "@smthrs/ui": "workspace:*",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }
 ```
