@@ -116,7 +116,11 @@ asking again per file.
 approval is: the operator says yes to everything the plan declared, before it
 starts. An envelope is a **set**, so `canonicalEnvelopePatterns` deduplicates
 its predicates and sorts them by formatted identity, and `envelopeSignature`
-computes the canonical identity of the plan digest, the scope, and that set.
+computes `sha256:` followed by the 64 lowercase hexadecimal digits of the
+SHA-256 digest of that canonical JSON encoding (plan digest, scope, sorted
+formatted predicates). Existing v1 journal events keep their format: replay
+recomputes the digest from their fields. Legacy full-JSON signature seeds are
+normalized to the same digest before comparison.
 Two approvals listing the same predicates in a different order are the same
 approval, and the second one is a no-op rather than a second durable record.
 
@@ -130,8 +134,16 @@ One store retains at most 1,024 policy rules across all four rulesets, 1,024
 activated envelope signatures, 256 patterns per envelope, and 1,024 parked
 requests. Metadata is limited to 16 levels of nesting, 1,024 members, and
 64 KiB of canonical JSON, and one encoded event to 256 KiB. Run, plan,
-request, and signature identities are limited to 4,096 UTF-16 code units, and
-capability resources share the capability package's own 4,096-unit limit.
+and request identities are limited to 4,096 UTF-16 code units. Generated
+envelope signatures occupy 71 ASCII characters; legacy signature seeds must
+fit the 256 KiB event bound before normalization. Other supplied signature
+identities retain the 4,096-unit limit. Capability resources share the
+capability package's own 4,096-unit limit.
+
+Construction and runtime envelopes use the same admission check. Incoming
+canonical patterns count toward the combined rule ceiling; rules already
+replayed for the same envelope are counted once. Journal reconstruction uses
+this admission check before appending a construction envelope.
 
 Every bound failure is `invalid_resolution` and happens **before** any state
 or journal authority changes, so a refused write never half-applies. The

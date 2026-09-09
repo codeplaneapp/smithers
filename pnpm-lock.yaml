@@ -4470,6 +4470,9 @@ importers:
       '@smthrs/capability':
         specifier: 1.0.0-rc.0
         version: link:../capability
+      '@smthrs/crypto':
+        specifier: 1.0.0-rc.0
+        version: link:../crypto
       '@smthrs/jj':
         specifier: 1.0.0-rc.0
         version: link:../jj

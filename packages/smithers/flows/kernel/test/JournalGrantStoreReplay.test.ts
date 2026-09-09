@@ -1091,3 +1091,71 @@ describe("JournalGrantStore paging and journal failures", () => {
     )
   })
 })
+
+describe("envelope admission and reopen bounds", () => {
+  for (const scope of ["run", "remembered"] as const) {
+    for (const admission of ["construction", "runtime"] as const) {
+      itEffect(`reopens a 256-pattern ${admission} ${scope} envelope`, () =>
+        run(Effect.gen(function*() {
+          const patterns = Array.from({ length: 256 }, (_, index) =>
+            new Capability.CapabilityPattern({ action: "fs:read", resource: `/workspace/file-${index}` }))
+          const envelope = { scope, patterns }
+          const store = yield* JournalGrantStore.make({
+            ...options,
+            ...(admission === "construction" ? { envelope } : {})
+          })
+          if (admission === "runtime") {
+            yield* store.grantEnvelope({ ...envelope, planDigest: options.planDigest })
+          }
+          const reopened = yield* JournalGrantStore.make({ ...options, envelope })
+          for (const pattern of patterns) {
+            yield* reopened.check(new Capability.Capability({ action: "fs:read", resource: pattern.resource }))
+          }
+          const journal = yield* Journal
+          const page = yield* journal.entries({
+            runId: runId(scope === "run" ? options.runId : options.policyRunId),
+            limit: 10
+          })
+          expect(page.entries).toHaveLength(1)
+        })))
+    }
+    for (const count of [maximumRules - 1, maximumRules]) {
+      itEffect(
+        `counts construction and replayed ${scope} patterns at ${count} rules`,
+        () =>
+          run(Effect.gen(function*() {
+            const rules = [Array.from({ length: count }, () => new Rule({ effect: "ask", pattern: insidePattern }))]
+            const envelope = { scope, patterns: [insidePattern] }
+            const result = yield* Effect.result(JournalGrantStore.make({ ...options, rules, envelope }))
+            const journal = yield* Journal
+            const page = yield* journal.entries({
+              runId: runId(scope === "run" ? options.runId : options.policyRunId),
+              limit: 10
+            })
+            if (count === maximumRules) {
+              expect(result).toMatchObject({ _tag: "Failure", failure: { code: "invalid_resolution" } })
+              expect(page.entries).toHaveLength(0)
+            } else {
+              expect(result._tag).toBe("Success")
+              expect(page.entries).toHaveLength(1)
+              const reopened = yield* JournalGrantStore.make({ ...options, rules, envelope })
+              yield* reopened.check(insideWrite)
+              const next = new Capability.CapabilityPattern({ action: "fs:read", resource: "/workspace/next" })
+              expect(
+                yield* Effect.flip(reopened.grantEnvelope({ planDigest: options.planDigest, scope, patterns: [next] }))
+              )
+                .toMatchObject({ code: "invalid_resolution" })
+              // Raising configured policy by one must also fail on plain replay.
+              const failure = yield* Effect.flip(
+                JournalGrantStore.make({
+                  ...options,
+                  rules: [[...rules[0]!, new Rule({ effect: "ask", pattern: insidePattern })]]
+                })
+              )
+              expect(failure.code).toBe("invalid_resolution")
+            }
+          }))
+      )
+    }
+  }
+})

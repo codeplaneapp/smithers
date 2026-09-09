@@ -195,6 +195,7 @@
   },
   "dependencies": {
     "@smthrs/capability": "1.0.0-rc.0",
+    "@smthrs/crypto": "1.0.0-rc.0",
     "@smthrs/jj": "1.0.0-rc.0",
     "@smthrs/journal": "1.0.0-rc.0"
   },

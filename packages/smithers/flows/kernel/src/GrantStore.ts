@@ -15,6 +15,7 @@ import {
   format,
   matches,
   maxResourceLength,
+  parsePattern,
   patternFromCapability,
   subsumes,
   tierOf
@@ -28,7 +29,8 @@ import {
   permissionRequired,
   Rule
 } from "@smthrs/capability/Permission"
-import { Context, Deferred, Effect, Layer, Option, type Scope, Semaphore } from "effect"
+import { digestSync } from "@smthrs/crypto/Sha256"
+import { Context, Deferred, Effect, Layer, Option, Schema, type Scope, Semaphore } from "effect"
 import { allows, type CapabilitySet, current, fromPatterns, intersect } from "./CapabilitySet.ts"
 import { DeniedGrant, EnvelopeGrant, type GrantEvent, OnceGrant, RememberedGrant, RunGrant } from "./GrantEvent.ts"
 import { Workspace } from "./Workspace.ts"
@@ -427,13 +429,19 @@ export const canonicalEnvelopePatterns = (
   return Object.freeze([...byIdentity.keys()].sort().map((identity) => byIdentity.get(identity)!))
 }
 
+const envelopeEncoding = (
+  planDigest: string,
+  scope: "run" | "remembered",
+  patterns: ReadonlyArray<CapabilityPattern>
+): string => JSON.stringify({ planDigest, scope, patterns: canonicalEnvelopePatterns(patterns).map(format) })
+
 /**
  * Computes the canonical identity of an envelope approval.
  *
  * Two envelopes with the same plan digest, scope, and predicate set produce
  * the same signature regardless of pattern order or repetition. The signature
  * is how the store, and journal replay above it, recognise an envelope that
- * is already durable.
+ * is already durable. It is `sha256:` followed by 64 lowercase hex digits.
  *
  * @category validation
  * @since 1.0.0-rc.0
@@ -443,12 +451,29 @@ export const envelopeSignature = (
   planDigest: string,
   scope: "run" | "remembered",
   patterns: ReadonlyArray<CapabilityPattern>
-): string =>
-  JSON.stringify({
-    planDigest,
-    scope,
-    patterns: canonicalEnvelopePatterns(patterns).map(format)
-  })
+): string => `sha256:${digestSync(envelopeEncoding(planDigest, scope, patterns))}`
+
+const decodeLegacySignature = Schema.decodeUnknownResult(
+  Schema.fromJsonString(Schema.Struct({
+    planDigest: Schema.String,
+    scope: Schema.Literals(["run", "remembered"]),
+    patterns: Schema.Array(Schema.String).check(Schema.isMaxLength(maximumEnvelopePatterns))
+  })),
+  { onExcessProperty: "error" }
+)
+
+// v1 events contain predicates, not signatures, and replay hashes them afresh.
+// Also accept canonical full-JSON identities supplied by older seed callers.
+const normalizeEnvelopeSignature = (value: string): string => {
+  if (!value.startsWith("{")) return value
+  if (value.length > maximumEventBytes || encoder.encode(value).byteLength > maximumEventBytes) return value
+  const decoded = decodeLegacySignature(value)
+  if (decoded._tag === "Failure" || !validIdentity(decoded.success.planDigest)) return value
+  const { planDigest, scope, patterns } = decoded.success
+  const parsed = Option.all(patterns.map(parsePattern))
+  if (Option.isNone(parsed) || envelopeEncoding(planDigest, scope, parsed.value) !== value) return value
+  return envelopeSignature(planDigest, scope, parsed.value)
+}
 
 /**
  * Checks that a request-scoped grant cannot authorize a different action or a
@@ -600,10 +625,11 @@ export const make = (
         throw invalid(`envelopeSignatures exceed ${maximumRules} entries`)
       }
       return values.map((value, index) => {
-        if (typeof value !== "string" || !validIdentity(value)) {
+        const signature = typeof value === "string" ? normalizeEnvelopeSignature(value) : value
+        if (typeof signature !== "string" || !validIdentity(signature)) {
           throw invalid(`envelopeSignatures[${index}] is malformed or too long`)
         }
-        return value
+        return signature
       })
     })
     const grantedEnvelopes = new Set<string>(signatures)
@@ -634,21 +660,40 @@ export const make = (
       return yield* Effect.fail(invalid(`runRules[${invalidRun}] is outside the workspace envelope`))
     }
 
-    if (options.envelope !== undefined) {
-      const envelope = yield* prepareEnvelope(options.envelope, planDigest, workspaceRoot)
-      const { patterns, scope } = envelope
-      if (patterns.length === 0) {
-        // An empty envelope carries no authority and no durable event.
-      } else {
+    // Both admission paths validate capacity before persistence or activation.
+    // A seeded construction envelope may already have rules installed by replay.
+    const admitEnvelope = (
+      envelope: Effect.Success<ReturnType<typeof prepareEnvelope>>,
+      activateSeeded: boolean
+    ): Effect.Effect<boolean, GrantStoreError> =>
+      Effect.gen(function*() {
+        const { patterns, scope } = envelope
+        if (patterns.length === 0) return false
         const signature = envelopeSignature(envelope.planDigest, scope, patterns)
-        if (!grantedEnvelopes.has(signature)) {
-          // The same ceiling `grantEnvelope` applies at reply time. Without it
-          // the construction envelope is the one write path that can push the
-          // durable signature history past what a later construction is
-          // willing to replay, which would brick every process after this one.
-          if (grantedEnvelopes.size >= maximumRules) {
-            return yield* Effect.fail(invalid(`grant envelopes exceed ${maximumRules} entries`))
-          }
+        const durable = grantedEnvelopes.has(signature)
+        if (durable && !activateSeeded) return false
+        const destination = scope === "remembered" ? rememberedRules : envelopeRules
+        const replayed = scope === "remembered"
+          ? rememberedRules
+          : runRules.filter(({ ceiling }) => ceiling === initialCeiling).map(({ rule }) => rule)
+        const existing = new Set<string>()
+        for (const rule of replayed) {
+          // Supplied rules can mask earlier grants. Only the trailing allow
+          // rules (including journal replay) can replace a fresh activation.
+          if (rule.effect === "allow") existing.add(format(rule.pattern))
+          else existing.clear()
+        }
+        const incoming = durable ? patterns.filter((pattern) => !existing.has(format(pattern))) : patterns
+        if (
+          configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length +
+              incoming.length > maximumRules
+        ) {
+          return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
+        }
+        if (!durable && grantedEnvelopes.size >= maximumRules) {
+          return yield* Effect.fail(invalid(`grant envelopes exceed ${maximumRules} entries`))
+        }
+        if (!durable) {
           yield* persistEvent(
             new EnvelopeGrant({
               eventType: "flows.kernel.grant.envelope.v1",
@@ -660,11 +705,15 @@ export const make = (
           )
           grantedEnvelopes.add(signature)
         }
-        const destination = scope === "remembered" ? rememberedRules : envelopeRules
-        for (const pattern of patterns) {
-          destination.push(new Rule({ effect: "allow", pattern }))
+        for (const pattern of incoming) {
+          destination.push(snapshotRule(new Rule({ effect: "allow", pattern })))
         }
-      }
+        return true
+      })
+
+    if (options.envelope !== undefined) {
+      const envelope = yield* prepareEnvelope(options.envelope, planDigest, workspaceRoot)
+      yield* admitEnvelope(envelope, true)
     }
 
     const rulesets = (capability: Capability): ReadonlyArray<ReadonlyArray<Rule>> => [
@@ -981,37 +1030,7 @@ export const make = (
               if (closed) {
                 return yield* Effect.fail(new GrantStoreError({ code: "store_closed" }))
               }
-              const signature = envelopeSignature(prepared.planDigest, prepared.scope, prepared.patterns)
-              if (grantedEnvelopes.has(signature)) {
-                // The same approval was already activated and persisted —
-                // repeating or reordering its predicates is a no-op, not new
-                // durable evidence.
-                return
-              }
-              if (
-                configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length +
-                    prepared.patterns.length > maximumRules
-              ) {
-                return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
-              }
-              if (grantedEnvelopes.size >= maximumRules) {
-                return yield* Effect.fail(invalid(`grant envelopes exceed ${maximumRules} entries`))
-              }
-              yield* persistEvent(
-                new EnvelopeGrant({
-                  eventType: "flows.kernel.grant.envelope.v1",
-                  runId: runId ?? "",
-                  planDigest: prepared.planDigest,
-                  patterns: prepared.patterns,
-                  scope: prepared.scope
-                })
-              )
-              grantedEnvelopes.add(signature)
-              const destination = prepared.scope === "remembered" ? rememberedRules : envelopeRules
-              for (const pattern of prepared.patterns) {
-                destination.push(snapshotRule(new Rule({ effect: "allow", pattern })))
-              }
-              yield* resolveCovered
+              if (yield* admitEnvelope(prepared, false)) yield* resolveCovered
             })
           )
         })

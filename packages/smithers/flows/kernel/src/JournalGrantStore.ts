@@ -367,6 +367,9 @@ export const make = (options: JournalGrantStoreOptions) =>
           )
         )
       }
+      // GrantStore's shared envelope admission adds only patterns not already
+      // replayed for a seeded envelope, and checks the combined rule and
+      // signature counts before any construction event is persisted.
       return GrantStore.make({
         runId,
         planDigest,

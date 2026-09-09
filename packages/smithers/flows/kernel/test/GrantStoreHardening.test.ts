@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Capability, CapabilityPattern } from "@smthrs/capability/Capability"
+import { Capability, CapabilityPattern, format } from "@smthrs/capability/Capability"
 import { Rule } from "@smthrs/capability/Permission"
 import { Deferred, Effect, Fiber } from "effect"
+import { createHash } from "node:crypto"
 import * as GrantStore from "../src/GrantStore.ts"
 import * as Workspace from "../src/Workspace.ts"
 
@@ -332,3 +333,169 @@ describe("GrantStore bounded input", () => {
       })
     ))
 })
+
+describe("envelope admission boundaries", () => {
+  for (const scope of ["run", "remembered"] as const) {
+    for (const count of [GrantStore.maximumRules - 1, GrantStore.maximumRules]) {
+      for (const admission of ["construction", "runtime"] as const) {
+        it.effect(`${admission} ${scope} envelope with ${count} existing rules`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            let writes = 0
+            const envelope = { planDigest: "plan-1", scope, patterns: [safePattern()] }
+            const options = {
+              attended: false,
+              planDigest: "plan-1",
+              rules: Array.from({ length: count }, deny),
+              persist: () =>
+                Effect.sync(() => {
+                  writes += 1
+                })
+            }
+            const admissionEffect = admission === "construction"
+              ? make({ ...options, envelope })
+              : Effect.gen(function*() {
+                const store = yield* make(options)
+                yield* store.grantEnvelope(envelope)
+                return store
+              })
+            const result = yield* Effect.result(admissionEffect)
+            if (count === GrantStore.maximumRules) {
+              expect(result).toMatchObject({ _tag: "Failure", failure: { code: "invalid_resolution" } })
+              expect(writes).toBe(0)
+            } else {
+              expect(result._tag).toBe("Success")
+              if (result._tag === "Success") yield* result.success.check(safe)
+              expect(writes).toBe(1)
+            }
+          })))
+      }
+    }
+  }
+})
+
+describe("bounded envelope identities", () => {
+  it("hashes the canonical encoding with SHA-256", () => {
+    const patterns = [safePattern(), workspacePattern()]
+    const canonical = JSON.stringify({
+      planDigest: "plan-1",
+      scope: "run",
+      patterns: GrantStore.canonicalEnvelopePatterns(patterns).map(format)
+    })
+    const signature = GrantStore.envelopeSignature("plan-1", "run", patterns)
+    expect(signature).toBe(`sha256:${createHash("sha256").update(canonical).digest("hex")}`)
+    expect(GrantStore.envelopeSignature("plan-1", "run", [...patterns].reverse())).toBe(signature)
+    expect(GrantStore.envelopeSignature("plan-2", "run", patterns)).not.toBe(signature)
+    expect(GrantStore.envelopeSignature("plan-1", "remembered", patterns)).not.toBe(signature)
+  })
+
+  it.effect("normalizes legacy full-JSON signatures before construction and runtime deduplication", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const patterns = Array.from(
+        { length: 256 },
+        (_, index) => new CapabilityPattern({ action: "fs:read", resource: `/workspace/file-${index}` })
+      )
+      const legacy = JSON.stringify({
+        planDigest: "plan-1",
+        scope: "run",
+        patterns: GrantStore.canonicalEnvelopePatterns(patterns).map(format)
+      })
+      expect(legacy.length).toBeGreaterThan(GrantStore.maximumIdentityLength)
+      let writes = 0
+      const envelope = { planDigest: "plan-1", patterns }
+      const store = yield* make({
+        attended: false,
+        planDigest: "plan-1",
+        envelope,
+        envelopeSignatures: [legacy],
+        persist: () =>
+          Effect.sync(() => {
+            writes += 1
+          })
+      })
+      yield* store.grantEnvelope(envelope)
+      yield* store.check(new Capability({ action: "fs:read", resource: patterns[0]!.resource }))
+      expect(writes).toBe(0)
+    })))
+})
+
+describe("legacy signature admission bounds", () => {
+  it.effect("rejects oversized or non-string seeds without persisting", () =>
+    Effect.scoped(Effect.gen(function*() {
+      for (
+        const seed of [42, "x".repeat(4097), "{" + "x".repeat(GrantStore.maximumEventBytes), "{" + "界".repeat(100_000)]
+      ) {
+        let writes = 0
+        const failure = yield* Effect.flip(make({
+          envelopeSignatures: [seed as string],
+          persist: () =>
+            Effect.sync(() => {
+              writes += 1
+            })
+        }))
+        expect(failure.code).toBe("invalid_resolution")
+        expect(writes).toBe(0)
+      }
+    })))
+
+  it.effect("does not treat noncanonical JSON seeds as durable envelope digests", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const fields = { planDigest: "plan-1", scope: "run", patterns: [format(safePattern())] }
+      const seeds = [
+        "{",
+        JSON.stringify({ ...fields, planDigest: "" }),
+        JSON.stringify({ ...fields, patterns: ["invalid"] }),
+        JSON.stringify({ ...fields, patterns: [format(safePattern()), format(safePattern())] })
+      ]
+      for (const seed of seeds) {
+        let writes = 0
+        yield* make({
+          planDigest: "plan-1",
+          envelopeSignatures: [seed],
+          envelope: { planDigest: "plan-1", patterns: [safePattern()] },
+          persist: () =>
+            Effect.sync(() => {
+              writes += 1
+            })
+        })
+        expect(writes).toBe(1)
+      }
+    })))
+
+  it.effect("counts seeded patterns missing from replay and preserves captured run ceilings", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const patterns = [safePattern()]
+      const envelope = { planDigest: "plan-1", patterns }
+      const envelopeSignatures = [GrantStore.envelopeSignature("plan-1", "run", patterns)]
+      const failure = yield* Effect.flip(
+        make({
+          planDigest: "plan-1",
+          envelope,
+          envelopeSignatures,
+          rules: Array.from({ length: GrantStore.maximumRules - 1 }, deny),
+          runRules: [{ rule: new Rule({ effect: "allow", pattern: safePattern() }), ceiling: [[]] }]
+        })
+      )
+      expect(failure.code).toBe("invalid_resolution")
+      const store = yield* make({
+        attended: false,
+        planDigest: "plan-1",
+        envelope,
+        envelopeSignatures,
+        runRules: [deny()]
+      })
+      yield* store.check(safe)
+    })))
+})
+
+it.effect("reactivates a seeded remembered envelope after a supplied ask rule", () =>
+  Effect.scoped(Effect.gen(function*() {
+    const pattern = safePattern()
+    const store = yield* make({
+      attended: false,
+      planDigest: "plan-1",
+      rules: [[], [new Rule({ effect: "allow", pattern }), new Rule({ effect: "ask", pattern })]],
+      envelopeSignatures: [GrantStore.envelopeSignature("plan-1", "remembered", [pattern])],
+      envelope: { planDigest: "plan-1", scope: "remembered", patterns: [pattern] }
+    })
+    yield* store.check(safe)
+  })))
