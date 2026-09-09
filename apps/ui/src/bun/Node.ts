@@ -1,15 +1,30 @@
 /*
  * The Node sidecar probe (LOCAL-APP.md, "Targets: load and run"). The
- * `smithers-build` loader runs under Node >= 22.19, and a Finder launch gets the
- * launchd PATH, so the probe walks explicit candidates rather than trusting
- * PATH alone. Every host read is injectable so the order and the version gate
- * can be asserted without a machine's node installs.
+ * `smithers-build` loader runs only under the runtimes its engines field
+ * allows, and a Finder launch gets the launchd PATH, so the probe walks
+ * explicit candidates rather than trusting PATH alone. Every host read is
+ * injectable so the order and the version gate can be asserted without a
+ * machine's node installs.
  */
 import { readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { delimiter, join } from "node:path"
 
+/** The lowest runtime the sidecar accepts, on the oldest supported major. */
 export const MIN_NODE_VERSION = "22.19.0"
+
+/*
+ * One row per supported Node major, mirroring the sidecar's engines field
+ * (packages/smithers/build/build-cli/package.json: "node": "^22.19.0 ||
+ * >=24.11.0"). A major with a row has to clear that row's floor; a major above
+ * the last row is accepted whole, which is what `>=24.11.0` means. Node 23
+ * shipped no LTS line and 24.0 through 24.10 are excluded, so the single floor
+ * this replaced handed the loader runtimes it refuses to run under.
+ */
+export const SUPPORTED_NODE_LINES = [
+  { major: 22, floor: MIN_NODE_VERSION },
+  { major: 24, floor: "24.11.0" }
+] as const satisfies ReadonlyArray<{ readonly major: number; readonly floor: string }>
 
 export interface NodeSidecar {
   readonly path: string
@@ -41,7 +56,16 @@ export const compareVersions = (left: string, right: string): number => {
   return 0
 }
 
-export const meetsMinimum = (version: string): boolean => compareVersions(version, MIN_NODE_VERSION) >= 0
+/** Whether a `node --version` string satisfies SUPPORTED_NODE_LINES. */
+export const meetsMinimum = (version: string): boolean => {
+  const parsed = parseVersion(version)
+  if (parsed === null) return false
+  const [major] = parsed
+  const line = SUPPORTED_NODE_LINES.find((entry) => entry.major === major)
+  if (line !== undefined) return compareVersions(version, line.floor) >= 0
+  const newest = SUPPORTED_NODE_LINES[SUPPORTED_NODE_LINES.length - 1]
+  return newest !== undefined && major > newest.major
+}
 
 const nvmCandidates = (host: NodeProbeHost): ReadonlyArray<string> => {
   const root = join(host.home, ".nvm", "versions", "node")
@@ -89,7 +113,7 @@ export const nodeCandidates = (host: NodeProbeHost): ReadonlyArray<string> => {
   return [...new Set(ordered)]
 }
 
-/** The first candidate that exists and reports a version >= 22.19.0. */
+/** The first candidate that exists and reports a supported version. */
 export const findNodeWith = async (host: NodeProbeHost): Promise<NodeSidecar | null> => {
   for (const candidate of nodeCandidates(host)) {
     if (!host.isFile(candidate)) continue

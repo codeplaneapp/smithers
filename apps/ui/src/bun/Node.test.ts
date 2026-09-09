@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { compareVersions, findNode, findNodeWith, meetsMinimum, nodeCandidates } from "./Node"
+import { join } from "node:path"
+import { compareVersions, findNode, findNodeWith, meetsMinimum, nodeCandidates, SUPPORTED_NODE_LINES } from "./Node"
 import type { NodeProbeHost } from "./Node"
 
 const fakeHost = (options: {
@@ -22,6 +23,32 @@ const fakeHost = (options: {
   }
 }
 
+/*
+ * The boundaries of the sidecar's engines range
+ * (packages/smithers/build/build-cli/package.json: "^22.19.0 || >=24.11.0").
+ * Node 23 and 24.0 through 24.10 sit outside it, so a single floor at 22.19.0
+ * would let the probe hand the loader a runtime it refuses to start under.
+ */
+const gateCases: ReadonlyArray<readonly [string, boolean]> = [
+  ["v18.20.4", false],
+  ["v20.11.0", false],
+  ["v22.18.9", false],
+  ["v22.19.0", true],
+  ["v22.19.1", true],
+  ["v22.21.0", true],
+  ["v23.0.0", false],
+  ["v23.11.0", false],
+  ["v24.0.0", false],
+  ["v24.1.0", false],
+  ["v24.10.9", false],
+  ["v24.11.0", true],
+  ["v24.12.1", true],
+  ["v25.0.0", true],
+  ["v26.4.0", true],
+  ["garbage", false],
+  ["", false]
+]
+
 describe("the version gate", () => {
   test("compares semver triples and accepts a leading v", () => {
     expect(compareVersions("v22.19.0", "22.19.0")).toBe(0)
@@ -29,11 +56,20 @@ describe("the version gate", () => {
     expect(compareVersions("20.11.0", "22.19.0")).toBeLessThan(0)
   })
 
-  test("22.19.0 is the floor", () => {
-    expect(meetsMinimum("v22.19.0")).toBe(true)
-    expect(meetsMinimum("v24.1.0")).toBe(true)
-    expect(meetsMinimum("v22.18.9")).toBe(false)
-    expect(meetsMinimum("garbage")).toBe(false)
+  for (const [version, supported] of gateCases) {
+    test(`${version === "" ? "an empty version" : version} is ${supported ? "accepted" : "rejected"}`, () => {
+      expect(meetsMinimum(version)).toBe(supported)
+    })
+  }
+
+  test("the table spells the sidecar's declared engines range", async () => {
+    const manifest = join(import.meta.dir, "../../../../packages/smithers/build/build-cli/package.json")
+    const declared = ((await Bun.file(manifest).json()) as { readonly engines: { readonly node: string } }).engines.node
+    const last = SUPPORTED_NODE_LINES.length - 1
+    const fromTable = SUPPORTED_NODE_LINES
+      .map((line, index) => (index === last ? `>=${line.floor}` : `^${line.floor}`))
+      .join(" || ")
+    expect(fromTable).toBe(declared)
   })
 })
 
@@ -90,6 +126,15 @@ describe("findNode", () => {
       files: { "/custom/node": "v22.19.5", "/new/bin/node": "v24.0.0" }
     })
     expect(await findNodeWith(host)).toEqual({ path: "/custom/node", version: "v22.19.5" })
+  })
+
+  test("skips an unsupported Node 24 build for a supported 22 line further down", async () => {
+    const host = fakeHost({
+      env: { PATH: "/new/bin:/old/bin" },
+      files: { "/new/bin/node": "v24.10.9", "/old/bin/node": "v22.19.0" }
+    })
+    expect(await findNodeWith(host)).toEqual({ path: "/old/bin/node", version: "v22.19.0" })
+    expect(host.probed).toEqual(["/new/bin/node", "/old/bin/node"])
   })
 
   test("answers null when nothing qualifies", async () => {
