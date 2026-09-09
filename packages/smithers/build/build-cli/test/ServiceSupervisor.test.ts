@@ -22,7 +22,7 @@ import * as Fs from "node:fs/promises"
 import * as NodeNet from "node:net"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import * as OutputStream from "../src/OutputStream.ts"
 import * as ServiceSupervisor from "../src/ServiceSupervisor.ts"
 
@@ -45,12 +45,22 @@ const freePort = (): Promise<number> =>
     probe.on("error", reject)
   })
 
+/**
+ * Whether the OS still knows `pid`.
+ *
+ * Only ESRCH means the process is gone. EPERM names a process this test may
+ * not signal — it is alive — and any other errno is a failed inspection, so
+ * reporting it as absence would let a teardown assertion pass on a survivor.
+ */
 const alive = (pid: number): boolean => {
   try {
     process.kill(pid, 0)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ESRCH") return false
+    if (code === "EPERM") return true
+    throw error
   }
 }
 
@@ -65,10 +75,71 @@ const waitFor = async (predicate: () => boolean | Promise<boolean>, timeoutMs: n
 
 const getText = (url: string): Promise<string> => fetch(url).then((response) => response.text())
 
-const pgrep = (pattern: string): Promise<string> =>
-  new Promise((resolve) => {
-    execFile("pgrep", ["-f", pattern], (_error, stdout) => resolve(stdout.trim()))
+/** A failed `pgrep`: a spawn errno, a signal, or an unexpected exit status. */
+type ProbeFailure = Error & {
+  readonly code?: number | string | undefined
+  readonly signal?: NodeJS.Signals | null | undefined
+}
+
+/**
+ * Pids whose command line carries `pattern`.
+ *
+ * pgrep exits 0 having named matches and 1 having found none. Every other
+ * outcome — a missing binary, a signal, an unexpected status — is a failed
+ * inspection, and answering it with "no matches" would let a cleanup
+ * assertion pass while the service is still running, so it rejects instead.
+ */
+const probeProcesses = (command: string, pattern: string): Promise<ReadonlyArray<number>> =>
+  new Promise((resolve, reject) => {
+    execFile(command, ["-f", pattern], (error, stdout) => {
+      const pids = stdout.split("\n").map((line) => line.trim()).filter((line) => line !== "").map(Number)
+      if (error === null) {
+        if (pids.length === 0) {
+          reject(new Error(`${command} -f ${pattern} exited 0 without naming a pid`))
+          return
+        }
+        resolve(pids)
+        return
+      }
+      const failure = error as ProbeFailure
+      if (failure.code === 1 && (failure.signal === null || failure.signal === undefined) && pids.length === 0) {
+        resolve([])
+        return
+      }
+      reject(
+        new Error(`${command} -f ${pattern} could not inspect processes`, { cause: error })
+      )
+    })
   })
+
+const pgrep = (pattern: string): Promise<ReadonlyArray<number>> => probeProcesses("pgrep", pattern)
+
+/**
+ * A process the marker probe must be able to see, alive for the whole file.
+ *
+ * An absence assertion with no positive observation cannot tell a service
+ * that was torn down from a probe that matches nothing at all, so every
+ * teardown check re-proves the probe against this control.
+ */
+const probeControlMarker = `service-supervisor-probe-control-${randomUUID()}`
+let probeControl: ReturnType<typeof spawn> | undefined
+
+beforeAll(async () => {
+  probeControl = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", probeControlMarker], {
+    stdio: "ignore"
+  })
+  await waitFor(async () => (await pgrep(probeControlMarker)).length > 0, 30_000)
+})
+
+afterAll(() => {
+  probeControl?.kill("SIGKILL")
+})
+
+/** Waits for `marker` to name no process, with the probe proven live after. */
+const waitForNoProcesses = async (marker: string, timeoutMs: number): Promise<void> => {
+  await waitFor(async () => (await pgrep(marker)).length === 0, timeoutMs)
+  expect(await pgrep(probeControlMarker)).not.toHaveLength(0)
+}
 
 /** A fixture-server spec; extra argv flags append after the port. */
 const serverSpec = (
@@ -503,7 +574,7 @@ describe("readiness", () => {
 
   it("fails acquisition when readiness never comes, and still stops the child", async () => {
     const port = await freePort()
-    const marker = `service-supervisor-timeout-proof-${process.pid}`
+    const marker = `service-supervisor-timeout-proof-${randomUUID()}`
     const error = await run(Effect.scoped(Effect.gen(function*() {
       const supervisor = yield* ServiceSupervisor.make
       return yield* Effect.flip(supervisor.acquire(
@@ -515,7 +586,7 @@ describe("readiness", () => {
     expect(error).toBeInstanceOf(ServiceSupervisor.ServiceError)
     expect(error.reason).toBe("readiness-timeout")
     expect(error.message).toContain("was not ready within 1000ms")
-    await waitFor(async () => (await pgrep(marker)) === "", 10_000)
+    await waitForNoProcesses(marker, 10_000)
   })
 })
 
@@ -839,15 +910,119 @@ describe("SIGINT teardown", () => {
       })
       const serverPid = Number(/READY (\d+)/.exec(output)![1])
       expect(alive(serverPid)).toBe(true)
-      expect(await pgrep(marker)).not.toBe("")
+      expect(await pgrep(marker)).not.toHaveLength(0)
       driver.kill("SIGINT")
       const outcome = await exited
       // The backstop re-raises, so the driver dies of SIGINT itself.
       expect(outcome.signal).toBe("SIGINT")
       await waitFor(() => !alive(serverPid), 10_000)
-      await waitFor(async () => (await pgrep(marker)) === "", 10_000)
+      await waitForNoProcesses(marker, 10_000)
     } finally {
       driver.kill("SIGKILL")
     }
   })
+})
+
+describe("process probes", () => {
+  it("rejects a failed process inspection instead of reporting an absence", async () => {
+    await expect(probeProcesses("pgrep-does-not-exist", probeControlMarker)).rejects.toThrow(
+      /could not inspect processes/
+    )
+  })
+
+  it("reads a process it may not signal as alive", () => {
+    // pid 1 is launchd: `process.kill` raises EPERM there for an unprivileged
+    // test, which is a permission failure, not a dead process.
+    expect(alive(1)).toBe(true)
+  })
+
+  it("reads an unused pid as absent", () => {
+    expect(alive(2_147_483)).toBe(false)
+  })
+})
+
+/** A minimal running service, one per identity case. */
+const identityBase = (key: string): ServiceSupervisor.ServiceSpec => ({
+  key,
+  cwd: fixtureDir,
+  argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+  readiness: { exec: ["true"], timeout: "10s" }
+})
+
+/** Every canonicalized field, changed away from the base spec. */
+const identityDrift: ReadonlyArray<
+  readonly [string, (base: ServiceSupervisor.ServiceSpec) => ServiceSupervisor.ServiceSpec]
+> = [
+  ["cwd", (base) => ({ ...base, cwd: Os.tmpdir() })],
+  ["argv", (base) => ({ ...base, argv: [...base.argv, "--extra"] as [string, ...Array<string>] })],
+  ["env", (base) => ({ ...base, env: { CANONICAL: "1" } })],
+  ["secrets", (base) => ({
+    ...base,
+    secrets: [Secret.HttpSecret(Secret.Secret("CANONICAL_SECRET"), ["http://127.0.0.1:1"])]
+  })],
+  ["secretUrls", (base) => ({
+    ...base,
+    secretUrls: [{ index: 1, secret: Secret.Secret("CANONICAL_URL") }]
+  })],
+  ["readiness", (base) => ({ ...base, readiness: { exec: ["true"], timeout: "20s" } })],
+  ["health", (base) => ({ ...base, health: { interval: "1h" } })],
+  ["stop", (base) => ({ ...base, stop: { signal: "SIGTERM", grace: "100ms" } })],
+  ["prepare", (base) => ({ ...base, prepare: [["true"]] })],
+  ["init", (base) => ({ ...base, init: [["true"]] })],
+  ["cleanup", (base) => ({ ...base, cleanup: [["true"]] })]
+]
+
+describe("spec identity", () => {
+  it("counts a change in any canonicalized field as drift under one key", async () => {
+    await run(Effect.scoped(Effect.gen(function*() {
+      const supervisor = yield* ServiceSupervisor.make
+      for (const [field, drift] of identityDrift) {
+        const base = identityBase(`//x:identity-${field}`)
+        yield* supervisor.acquire(base)
+        const error = yield* Effect.flip(supervisor.acquire(drift(base)))
+        expect([field, error.reason]).toEqual([field, "spec-drift"])
+      }
+    })))
+  }, 120_000)
+
+  it("keeps the lookup key out of the identity: another key is another service", async () => {
+    const pids = await run(Effect.scoped(Effect.gen(function*() {
+      const supervisor = yield* ServiceSupervisor.make
+      const base = identityBase("//x:identity-key-a")
+      const first = yield* supervisor.acquire(base)
+      const second = yield* supervisor.acquire({ ...base, key: "//x:identity-key-b" })
+      return [first.pid, second.pid] as const
+    })))
+    expect(pids[0]).not.toBe(pids[1])
+  }, 60_000)
+
+  it("accepts a spec that declares every field", async () => {
+    process.env["CANONICAL_FULL_SECRET"] = "full-secret-value"
+    process.env["CANONICAL_FULL_URL"] = "http://127.0.0.1:1"
+    try {
+      const tail = await run(Effect.scoped(Effect.gen(function*() {
+        const supervisor = yield* ServiceSupervisor.make
+        const handle = yield* supervisor.acquire({
+          key: "//x:every-field",
+          cwd: fixtureDir,
+          argv: [process.execPath, "-e", "console.log('up'); setInterval(() => {}, 1000)", "placeholder"],
+          env: { CANONICAL_FULL: "1" },
+          secrets: [Secret.HttpSecret(Secret.Secret("CANONICAL_FULL_SECRET"), ["http://127.0.0.1:1"])],
+          secretUrls: [{ index: 3, secret: Secret.Secret("CANONICAL_FULL_URL") }],
+          readiness: { exec: ["true"], timeout: "10s" },
+          health: { interval: "1h", failures: 5 },
+          stop: { signal: "SIGTERM", grace: "100ms" },
+          prepare: [["true"]],
+          init: [["true"]],
+          cleanup: [["true"]]
+        })
+        yield* Effect.tryPromise(() => waitFor(() => handle.outputTail().includes("up"), 20_000))
+        return handle.outputTail()
+      })))
+      expect(tail).toContain("up")
+    } finally {
+      delete process.env["CANONICAL_FULL_SECRET"]
+      delete process.env["CANONICAL_FULL_URL"]
+    }
+  }, 60_000)
 })

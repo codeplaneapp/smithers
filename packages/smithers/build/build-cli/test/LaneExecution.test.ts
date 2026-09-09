@@ -26,7 +26,7 @@ import { createRequire } from "node:module"
 import * as NodeNet from "node:net"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import * as AgentFake from "../src/AgentFake.ts"
 import type * as AgentSession from "../src/AgentSession.ts"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
@@ -145,16 +145,68 @@ const waitFor = async (predicate: () => Promise<boolean>, timeoutMs: number): Pr
   throw new Error(`condition not reached within ${timeoutMs}ms`)
 }
 
-/** Pids of live processes whose command line carries the marker. */
-const pgrep = (marker: string): Array<number> => {
+/** A failed `pgrep`: a spawn errno, a signal, or an unexpected exit status. */
+type ProbeFailure = Error & {
+  readonly status?: number | null | undefined
+  readonly signal?: NodeJS.Signals | null | undefined
+}
+
+/**
+ * Pids of live processes whose command line carries the marker.
+ *
+ * pgrep exits 0 having named matches and 1 having found none. Every other
+ * outcome — a missing binary, a signal, an unexpected status — is a failed
+ * inspection, and answering it with "no matches" would let a teardown
+ * assertion pass while the service is still running, so it throws instead.
+ */
+const probeProcesses = (command: string, marker: string): Array<number> => {
   try {
-    return NodeChildProcess.execFileSync("pgrep", ["-f", marker], { encoding: "utf8" })
+    return NodeChildProcess.execFileSync(command, ["-f", marker], { encoding: "utf8" })
       .split("\n")
       .filter((line) => line.trim() !== "")
       .map(Number)
-  } catch {
-    return []
+  } catch (error) {
+    const failure = error as ProbeFailure
+    if (failure.status === 1 && (failure.signal === null || failure.signal === undefined)) return []
+    throw new Error(`${command} -f ${marker} could not inspect processes`, { cause: error })
   }
+}
+
+const pgrep = (marker: string): Array<number> => probeProcesses("pgrep", marker)
+
+/**
+ * A process the marker probe must be able to see, alive for the whole file.
+ *
+ * An absence assertion with no positive observation cannot tell a service
+ * that was torn down from a probe that matches nothing at all, so every
+ * teardown check re-proves the probe against this control.
+ */
+const probeControlMarker = `lane-exec-probe-control-${process.pid}-${Math.random().toString(36).slice(2)}`
+let probeControl: NodeChildProcess.ChildProcess | undefined
+
+beforeAll(async () => {
+  probeControl = NodeChildProcess.spawn(
+    process.execPath,
+    ["-e", "setInterval(() => {}, 1000)", probeControlMarker],
+    { stdio: "ignore" }
+  )
+  await waitFor(async () => pgrep(probeControlMarker).length > 0, 30_000)
+})
+
+afterAll(() => {
+  probeControl?.kill("SIGKILL")
+})
+
+/** Asserts the marker names no process, with the probe proven live. */
+const expectNoProcesses = (marker: string): void => {
+  expect(pgrep(marker)).toHaveLength(0)
+  expect(pgrep(probeControlMarker)).not.toHaveLength(0)
+}
+
+/** Waits for the marker to name no process, with the probe proven live after. */
+const waitForNoProcesses = async (marker: string, timeoutMs: number): Promise<void> => {
+  await waitFor(async () => pgrep(marker).length === 0, timeoutMs)
+  expect(pgrep(probeControlMarker)).not.toHaveLength(0)
 }
 
 const marker = (): string => `lane-exec-${process.pid}-${Math.random().toString(36).slice(2)}`
@@ -189,7 +241,7 @@ export const Package = S.Package({ targets: { svc, probe } })
     const { exitCode, output } = await serve(root, ["//:probe", "--plan"])
     expect(exitCode).toBe(0)
     expect(output).toContain("services require an explicit sandbox network declaration")
-    expect(pgrep(mark)).toHaveLength(0)
+    expectNoProcesses(mark)
   })
 
   it("accepts an explicit unsandboxed service consumer", async () => {
@@ -211,7 +263,7 @@ export const Package = S.Package({ targets: { svc, probe } })
     expect(exitCode).toBe(0)
     expect(output).not.toContain("services require an explicit sandbox network declaration")
     expect(output).not.toContain("refusal:")
-    expect(pgrep(mark)).toHaveLength(0)
+    expectNoProcesses(mark)
   })
 
   it("acquires the service before the consumer, gates on readiness, and releases it after success", async () => {
@@ -239,7 +291,7 @@ export const Package = S.Package({ targets: { svc, probe } })
     // The server delayed listen by 500ms; the probe only passed because
     // acquisition waited for readiness.
     expect(Date.now() - started).toBeGreaterThanOrEqual(400)
-    await waitFor(async () => pgrep(mark).length === 0, 10_000)
+    await waitForNoProcesses(mark, 10_000)
   }, 60_000)
 
   it("releases the service when the consumer fails", async () => {
@@ -262,7 +314,7 @@ export const Package = S.Package({ targets: { svc, probe } })
     expect(logs).toContain("//:probe  service //:svc: ready")
     expect(logs).toContain("//:probe  failed")
     expect(logs).toContain("exit 3")
-    await waitFor(async () => pgrep(mark).length === 0, 10_000)
+    await waitForNoProcesses(mark, 10_000)
   }, 60_000)
 
   it("fails the consumer with a typed readiness timeout carrying the tail, and tears the service down", async () => {
@@ -293,7 +345,7 @@ export const Package = S.Package({ targets: { svc, probe } })
     expect(logs).toContain("service //:svc readiness-timeout")
     expect(logs).toContain("was not ready within 1000ms")
     expect(logs).not.toContain("//:probe  service //:svc: ready")
-    await waitFor(async () => pgrep(mark).length === 0, 10_000)
+    await waitForNoProcesses(mark, 10_000)
   }, 60_000)
 
   it("fails a running consumer when the service turns unhealthy, killing the consumer", async () => {
@@ -334,6 +386,7 @@ export const Package = S.Package({ targets: { svc, probe } })
     expect(logs).toContain("answered 500")
     expect(logs).toContain("wedged: answering 500 from now on")
     await waitFor(async () => pgrep(mark).length === 0 && pgrep(consumerMark).length === 0, 15_000)
+    expect(pgrep(probeControlMarker)).not.toHaveLength(0)
   }, 90_000)
 
   it("runs a Serve root in the foreground until interrupted, then applies the stop contract", async () => {
@@ -368,7 +421,7 @@ export const Package = S.Package({ targets: { svc } })
     expect(logs).toContain("//:svc  ready (pid")
     expect(logs).toContain("//:svc  stopped")
     expect(exitCode).toBe(1)
-    await waitFor(async () => pgrep(mark).length === 0, 10_000)
+    await waitForNoProcesses(mark, 10_000)
     expect(await portOpen(port)).toBe(false)
   }, 60_000)
 
@@ -396,7 +449,7 @@ export const Package = S.Package({ targets: { assets, svc, probe } })
     expect(output).toMatch(/label: "\/\/:probe"[\s\S]*?dependencies\[1\]: "\/\/:assets"/)
     expect(output).toContain("label: \"//:assets\"")
     expect(output).not.toContain("\"//:svc\"")
-    expect(pgrep(mark)).toHaveLength(0)
+    expectNoProcesses(mark)
   }, 60_000)
 })
 
@@ -626,5 +679,13 @@ export const Package = S.Package({ targets: { agent } })
       selection.mockRestore()
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     }
+  })
+})
+
+describe("process probes", () => {
+  it("throws on a failed process inspection instead of reporting an absence", () => {
+    expect(() => probeProcesses("pgrep-does-not-exist", probeControlMarker)).toThrow(
+      /could not inspect processes/
+    )
   })
 })

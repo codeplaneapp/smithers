@@ -296,52 +296,6 @@ interface ParsedSpec {
   readonly canonical: string
 }
 
-const canonicalize = (spec: ServiceSpec): string =>
-  JSON.stringify({
-    argv: spec.argv,
-    cwd: spec.cwd,
-    env: Object.fromEntries(Object.entries(spec.env ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
-    secrets: (spec.secrets ?? []).map(({ secret: { env, fallback }, audiences }) => ({
-      env,
-      fallback: fallback ?? null,
-      audiences: [...audiences]
-    })),
-    secretUrls: (spec.secretUrls ?? []).map(({ index, secret: { env, fallback } }) => ({
-      index,
-      env,
-      fallback: fallback ?? null
-    })),
-    health: spec.health === undefined
-      ? null
-      : { failures: spec.health.failures ?? null, interval: spec.health.interval },
-    readiness: spec.readiness === undefined
-      ? null
-      : "port" in spec.readiness
-      ? { port: spec.readiness.port }
-      : "http" in spec.readiness
-      ? { http: spec.readiness.http, timeout: spec.readiness.timeout }
-      : { exec: spec.readiness.exec, timeout: spec.readiness.timeout },
-    prepare: spec.prepare ?? [],
-    init: spec.init ?? [],
-    cleanup: spec.cleanup ?? [],
-    stop: spec.stop === undefined ? null : { grace: spec.stop.grace, signal: spec.stop.signal }
-  })
-
-const serviceSpecKeys = new Set([
-  "key",
-  "cwd",
-  "argv",
-  "env",
-  "secrets",
-  "secretUrls",
-  "readiness",
-  "health",
-  "stop",
-  "prepare",
-  "init",
-  "cleanup"
-])
-
 /** Reads one caller field without invoking an accessor. */
 const dataMember = (object: object, key: string, what: string): unknown => {
   let descriptor: PropertyDescriptor | undefined
@@ -453,6 +407,131 @@ const snapshotRecord = (
 }
 
 /**
+ * How one `ServiceSpec` field is copied and identified.
+ *
+ * `snapshot` rebuilds the caller's value from own enumerable data
+ * descriptors. `canonical` renders the field into the same-key drift
+ * identity, or is `undefined` for a field deliberately left out of it.
+ */
+interface SpecField {
+  readonly snapshot: (value: unknown) => unknown
+  readonly canonical: ((spec: ServiceSpec) => unknown) | undefined
+}
+
+/** Copies a list of argv lists, such as `prepare`, through data descriptors. */
+const commandList = (what: string) => (value: unknown): unknown =>
+  snapshotArray(value, what, (argv, index) => snapshotArray(argv, `${what}[${index}]`))
+
+/**
+ * Every `ServiceSpec` field, with its snapshot copy and its canonical
+ * rendering.
+ *
+ * The map is keyed by `keyof ServiceSpec` with optionality stripped, so a new
+ * field on the public interface does not compile until it states how it is
+ * copied and whether it takes part in the same-key identity. The allowed-key
+ * set, the frozen snapshot, and the drift identity all read this one table,
+ * so a field cannot be validated in one of them and dropped by another.
+ */
+const serviceSpecFields: { readonly [K in keyof ServiceSpec]-?: SpecField } = {
+  // The lookup key is the identity: two specs filed under one key have to
+  // differ in some other field to count as drift.
+  key: {
+    snapshot: (value) => inspectNested(value, "service spec key"),
+    canonical: undefined
+  },
+  cwd: {
+    snapshot: (value) => inspectNested(value, "service spec cwd"),
+    canonical: (spec) => spec.cwd
+  },
+  argv: {
+    snapshot: (value) => snapshotArray(value, "service spec argv"),
+    canonical: (spec) => spec.argv
+  },
+  env: {
+    snapshot: (value) => snapshotRecord(value, "service spec env", undefined),
+    canonical: (spec) =>
+      Object.fromEntries(Object.entries(spec.env ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  },
+  secrets: {
+    snapshot: (value) => snapshotArray(value, "service spec secrets"),
+    canonical: (spec) =>
+      (spec.secrets ?? []).map(({ audiences, secret: { env, fallback } }) => ({
+        env,
+        fallback: fallback ?? null,
+        audiences: [...audiences]
+      }))
+  },
+  secretUrls: {
+    snapshot: (value) =>
+      snapshotArray(value, "service spec secretUrls", (entry, index) =>
+        snapshotRecord(
+          entry,
+          `service spec secretUrls[${index}]`,
+          new Set(["index", "secret"])
+        )),
+    canonical: (spec) =>
+      (spec.secretUrls ?? []).map(({ index, secret: { env, fallback } }) => ({
+        index,
+        env,
+        fallback: fallback ?? null
+      }))
+  },
+  readiness: {
+    snapshot: (value) =>
+      snapshotRecord(
+        value,
+        "service spec readiness",
+        new Set(["port", "http", "timeout", "exec"]),
+        (key, member) =>
+          key === "exec" ? snapshotArray(member, "service spec readiness.exec") : inspectNested(
+            member,
+            `service spec readiness.${key}`
+          )
+      ),
+    canonical: (spec) =>
+      spec.readiness === undefined
+        ? null
+        : "port" in spec.readiness
+        ? { port: spec.readiness.port }
+        : "http" in spec.readiness
+        ? { http: spec.readiness.http, timeout: spec.readiness.timeout }
+        : { exec: spec.readiness.exec, timeout: spec.readiness.timeout }
+  },
+  health: {
+    snapshot: (value) => snapshotRecord(value, "service spec health", new Set(["interval", "failures"])),
+    canonical: (spec) =>
+      spec.health === undefined ? null : { failures: spec.health.failures ?? null, interval: spec.health.interval }
+  },
+  stop: {
+    snapshot: (value) => snapshotRecord(value, "service spec stop", new Set(["signal", "grace"])),
+    canonical: (spec) => spec.stop === undefined ? null : { grace: spec.stop.grace, signal: spec.stop.signal }
+  },
+  prepare: {
+    snapshot: commandList("service spec prepare"),
+    canonical: (spec) => spec.prepare ?? []
+  },
+  init: {
+    snapshot: commandList("service spec init"),
+    canonical: (spec) => spec.init ?? []
+  },
+  cleanup: {
+    snapshot: commandList("service spec cleanup"),
+    canonical: (spec) => spec.cleanup ?? []
+  }
+}
+
+/** The field names a caller may declare, derived from the descriptor map. */
+const serviceSpecKeys: ReadonlySet<string> = new Set(Object.keys(serviceSpecFields))
+
+/** Renders the canonicalized fields in a stable order for drift detection. */
+const canonicalize = (spec: ServiceSpec): string =>
+  JSON.stringify(Object.fromEntries(
+    Object.entries(serviceSpecFields)
+      .flatMap(([key, field]) => field.canonical === undefined ? [] : [[key, field.canonical(spec)] as const])
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  ))
+
+/**
  * A frozen plain-data copy of the caller's spec.
  *
  * `parseSpec` used to validate the caller's object and hand the same reference
@@ -485,47 +564,15 @@ const snapshotSpec = (caller: ServiceSpec): ServiceSpec => {
   for (const key of dataKeys(caller, "a service spec")) {
     if (!serviceSpecKeys.has(key)) throw new TypeError(`a service spec contains an unknown property: ${key}`)
   }
-  const read = (key: string): unknown => dataMember(caller, key, `service spec ${key}`)
-  const commands = (value: unknown, what: string): unknown =>
-    snapshotArray(value, what, (argv, index) => snapshotArray(argv, `${what}[${index}]`))
-  const argv = snapshotArray(read("argv"), "service spec argv")
-  const env = snapshotRecord(read("env"), "service spec env", undefined)
-  const secrets = snapshotArray(read("secrets"), "service spec secrets")
-  const secretUrls = snapshotArray(read("secretUrls"), "service spec secretUrls", (entry, index) =>
-    snapshotRecord(
-      entry,
-      `service spec secretUrls[${index}]`,
-      new Set(["index", "secret"])
-    ))
-  const readiness = snapshotRecord(
-    read("readiness"),
-    "service spec readiness",
-    new Set(["port", "http", "timeout", "exec"]),
-    (key, member) =>
-      key === "exec" ? snapshotArray(member, "service spec readiness.exec") : inspectNested(
-        member,
-        `service spec readiness.${key}`
-      )
-  )
-  const health = snapshotRecord(read("health"), "service spec health", new Set(["interval", "failures"]))
-  const stop = snapshotRecord(read("stop"), "service spec stop", new Set(["signal", "grace"]))
-  const prepare = commands(read("prepare"), "service spec prepare")
-  const init = commands(read("init"), "service spec init")
-  const cleanup = commands(read("cleanup"), "service spec cleanup")
-  return Object.freeze({
-    key: inspectNested(read("key"), "service spec key"),
-    cwd: inspectNested(read("cwd"), "service spec cwd"),
-    argv,
-    ...(env === undefined ? {} : { env }),
-    ...(secrets === undefined ? {} : { secrets }),
-    ...(secretUrls === undefined ? {} : { secretUrls }),
-    ...(readiness === undefined ? {} : { readiness }),
-    ...(health === undefined ? {} : { health }),
-    ...(stop === undefined ? {} : { stop }),
-    ...(prepare === undefined ? {} : { prepare }),
-    ...(init === undefined ? {} : { init }),
-    ...(cleanup === undefined ? {} : { cleanup })
-  }) as unknown as ServiceSpec
+  // Every field is copied through the one descriptor table, so validation and
+  // the snapshot cannot disagree about which fields exist. The assertion below
+  // is safe because `parseSpec` type-checks each copied field afterwards.
+  const snapshot: Record<string, unknown> = {}
+  for (const [key, field] of Object.entries(serviceSpecFields)) {
+    const value = field.snapshot(dataMember(caller, key, `service spec ${key}`))
+    if (value !== undefined) snapshot[key] = value
+  }
+  return Object.freeze(snapshot) as unknown as ServiceSpec
 }
 
 /** Reads a diagnostic key without invoking caller code. */
