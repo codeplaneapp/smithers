@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { JWKS_REFRESH_COOLDOWN_MS } from "../../src/server/sessions/fetchJwks.ts";
 import { jwksCache } from "../../src/server/sessions/jwksCache.ts";
 import { verifyOidc } from "../../src/server/sessions/verifyOidc.ts";
@@ -23,6 +23,50 @@ beforeEach(() => {
 });
 
 describe("verifyOidc", () => {
+  test.each(["forged", "tampered", "malformed"] as const)(
+    "tags a %s signature with a trusted kid",
+    async (kind) => {
+      const key = await rsaKeypair("trusted-kid");
+      const now = Date.now();
+      const claims = baseClaims(Math.floor(now / 1000) + 600);
+      const valid = await signTestJwt(key, claims);
+      const [header, payload, signature] = valid.split(".");
+      const tampered = Buffer.from(JSON.stringify({ ...claims, repository: "attacker/forged" })).toString("base64url");
+      const token =
+        kind === "forged"
+          ? await signTestJwt(await rsaKeypair("attacker-kid"), claims, { kid: key.kid })
+          : kind === "tampered"
+            ? `${header}.${tampered}.${signature}`
+            : `${header}.${payload}.!`;
+      const jwks = serveJwks([key.publicJwk]);
+      try {
+        expect(await verifyOidc(valid, jwks.url, now)).toEqual({ ok: true, claims });
+        expect(await verifyOidc(token, jwks.url, now)).toEqual({
+          ok: false,
+          reason: kind === "malformed" ? "malformed" : "bad-signature",
+        });
+      } finally {
+        jwks.stop();
+      }
+    },
+  );
+
+  test("tags crypto verification exceptions as bad-signature", async () => {
+    const key = await rsaKeypair("verify-exception");
+    const now = Date.now();
+    const token = await signTestJwt(key, baseClaims(Math.floor(now / 1000) + 600));
+    const jwks = serveJwks([key.publicJwk]);
+    const verify = spyOn(crypto.subtle, "verify").mockRejectedValue(
+      new DOMException("invalid signature", "OperationError"),
+    );
+    try {
+      expect(await verifyOidc(token, jwks.url, now)).toEqual({ ok: false, reason: "bad-signature" });
+    } finally {
+      verify.mockRestore();
+      jwks.stop();
+    }
+  });
+
   test("uses valid RS256 signing keys from a mixed JWKS", async () => {
     const rsa = await rsaKeypair("kid-mixed-rsa");
     const rsaWithoutAlg = { ...rsa.publicJwk };

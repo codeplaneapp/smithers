@@ -1,6 +1,7 @@
 import { jwksCache } from "./jwksCache.ts";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 5_000;
 
 /**
  * Unknown kids and broken upstream responses may be attacker-controlled or
@@ -125,12 +126,30 @@ export async function fetchJwks(
 
   const previousKeys = cached.keys;
   const request = (async () => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const response = await fetchImpl(url);
-      if (!response.ok) {
-        throw new Error(`jwks fetch ${url} returned ${response.status}`);
-      }
-      const keys = await usableRs256Keys(await response.json());
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`jwks fetch ${url} timed out`);
+          reject(error);
+          controller.abort(error);
+        }, FETCH_TIMEOUT_MS);
+      });
+      // Race through body consumption as well as fetch. Abort alone cannot
+      // release waiters if an injected transport ignores the signal.
+      const body = await Promise.race([
+        (async () => {
+          const response = await fetchImpl(url, { signal: controller.signal });
+          if (!response.ok) {
+            throw new Error(`jwks fetch ${url} returned ${response.status}`);
+          }
+          return response.json();
+        })(),
+        deadline,
+      ]);
+      clearTimeout(timer);
+      const keys = await usableRs256Keys(body);
       if (keys === null) {
         cached.lastRefreshFailure = { at: now, kind: "inadmissible" };
         return previousKeys ?? [];
@@ -142,6 +161,8 @@ export async function fetchJwks(
     } catch (error) {
       cached.lastRefreshFailure = { at: now, kind: "error", error };
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
   })();
   cached.inFlight = request;

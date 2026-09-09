@@ -240,7 +240,7 @@ describe("POST /api/sessions (OIDC)", () => {
     expect(((await res.json()) as { error: string }).error).toContain("claims do not match");
   });
 
-  test("rejects a token signed with the wrong key", async () => {
+  test("rejects a token with an unknown kid", async () => {
     const env = await buildTestEnv();
     await registerRepo(env, REPO);
     const wrong = await rsaKeypair("attacker-kid");
@@ -255,6 +255,71 @@ describe("POST /api/sessions (OIDC)", () => {
     );
     expect(res.status).toBe(401);
   });
+
+  test.each(["forged", "tampered", "malformed"] as const)(
+    "rejects a %s signature without minting a session or consuming quota",
+    async (kind) => {
+      const env = await buildTestEnv();
+      await registerRepo(env, REPO);
+      const claims = baseClaims(REPO, 7, Math.floor(Date.now() / 1000) + 600);
+      const original = await signTestJwt(keypair, { ...claims, repository: SECOND_REPO });
+      const [header, payload, signature] = original.split(".");
+      const tampered = Buffer.from(JSON.stringify(claims)).toString("base64url");
+      const token =
+        kind === "forged"
+          ? await signTestJwt(await rsaKeypair("attacker-kid"), claims, { kid: keypair.kid })
+          : kind === "tampered"
+            ? `${header}.${tampered}.${signature}`
+            : `${header}.${payload}.!`;
+      const res = await makeWorker(jwks.url).fetch(
+        new Request("https://review.test/api/sessions", {
+          method: "POST",
+          body: JSON.stringify({ oidcToken: token }),
+        }),
+        env,
+      );
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: `oidc: ${kind === "malformed" ? "malformed" : "bad-signature"}` });
+      expect(await env.DB.prepare("SELECT COUNT(*) AS c FROM sessions").first<{ c: number }>()).toEqual({ c: 0 });
+      expect(await env.DB.prepare("SELECT COUNT(*) AS c FROM reviewed_prs").first<{ c: number }>()).toEqual({ c: 0 });
+    },
+  );
+
+  test("returns 503 for a stalled JWKS body and retries after cooldown", async () => {
+    const env = await buildTestEnv();
+    await registerRepo(env, REPO);
+    let now = Date.now();
+    let attempts = 0;
+    let signal: AbortSignal | null | undefined;
+    const fetchUpstream = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      attempts += 1;
+      signal = init?.signal;
+      if (attempts === 1) return new Response(new ReadableStream());
+      return Response.json({ keys: [keypair.publicJwk] });
+    }) as typeof fetch;
+    const worker = createReviewWorker({ jwksUrl: "https://stalled.test/jwks", fetchUpstream, now: () => now });
+    const token = await signTestJwt(keypair, baseClaims(REPO, 7, Math.floor(now / 1000) + 600));
+    const mint = () => worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        body: JSON.stringify({ oidcToken: token }),
+      }),
+      env,
+    );
+    const started = performance.now();
+    const res = await mint();
+    expect(performance.now() - started).toBeLessThan(7_000);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "oidc: jwks-unavailable" });
+    expect(signal?.aborted).toBe(true);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS c FROM sessions").first<{ c: number }>()).toEqual({ c: 0 });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS c FROM reviewed_prs").first<{ c: number }>()).toEqual({ c: 0 });
+    expect((await mint()).status).toBe(503);
+    expect(attempts).toBe(1);
+    now += 5_000;
+    expect((await mint()).status).toBe(200);
+    expect(attempts).toBe(2);
+  }, 30_000);
 
   test("rejects a token with the wrong audience", async () => {
     const env = await buildTestEnv();

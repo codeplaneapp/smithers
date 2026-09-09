@@ -62,10 +62,10 @@ function base64UrlToJson<T>(input: string): T | null {
 }
 
 /**
- * fetchJwks throws for a network rejection, a non-2xx JWKS response, and for
- * repeat calls inside the post-failure cooldown. That is a transient upstream
- * problem rather than a bad token, so tag it instead of letting the throw
- * escape verifyOidc's no-throw contract and become an opaque 500.
+ * fetchJwks throws for a network rejection, timeout, non-2xx JWKS response,
+ * invalid JSON, and repeat calls inside the post-failure cooldown. That is a
+ * transient upstream problem rather than a bad token, so tag it instead of
+ * letting the throw escape verifyOidc's no-throw contract and become an opaque 500.
  */
 async function loadJwks(
   url: string,
@@ -83,7 +83,8 @@ async function loadJwks(
 /**
  * Verify a GitHub Actions OIDC token against the JWKS at `jwksUrl`. Returns a
  * tagged result instead of throwing: callers can map failure reasons to
- * specific HTTP statuses without try/catch flow.
+ * specific HTTP statuses without try/catch flow. Undecodable signatures are
+ * malformed; failed or throwing cryptographic verification is bad-signature.
  */
 export async function verifyOidc(
   token: string,
@@ -116,16 +117,25 @@ export async function verifyOidc(
   }
   if (!match) return { ok: false, reason: "unknown-key" };
 
-  const key = await importRs256Jwk(match);
-  const signature = base64UrlToBytes(rawSig);
-  const signed = new TextEncoder().encode(`${rawHeader}.${rawPayload}`);
-  const ok = await crypto.subtle.verify(
-    "RSASSA-PKCS1-v1_5",
-    key,
-    signature.buffer as ArrayBuffer,
-    signed.buffer as ArrayBuffer,
-  );
-  if (!ok) return { ok: false, reason: "bad-signature" };
+  let signature: Uint8Array;
+  try {
+    signature = base64UrlToBytes(rawSig);
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
+  try {
+    const key = await importRs256Jwk(match);
+    const signed = new TextEncoder().encode(`${rawHeader}.${rawPayload}`);
+    const ok = await crypto.subtle.verify(
+      "RSASSA-PKCS1-v1_5",
+      key,
+      signature.buffer as ArrayBuffer,
+      signed.buffer as ArrayBuffer,
+    );
+    if (!ok) return { ok: false, reason: "bad-signature" };
+  } catch {
+    return { ok: false, reason: "bad-signature" };
+  }
 
   if (payload.iss !== ISSUER) return { ok: false, reason: "wrong-issuer" };
   if (payload.aud !== AUDIENCE) return { ok: false, reason: "wrong-audience" };
