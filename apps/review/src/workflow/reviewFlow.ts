@@ -1,5 +1,5 @@
 /**
- * The review workflow, as four durable rounds.
+ * The review workflow, as four durable stages.
  *
  * `Node.all` fixes its width at plan time, and the file list a review fans out
  * over is something the first step discovers. That is what the rounds are for:
@@ -9,10 +9,10 @@
  * whether to narrate and quiz is decided from the POST-verification findings,
  * which do not exist until the verifying round has settled.
  *
- * Round 1 `Review`          prepare, then hand off
- * Round 2 `ReviewFiles`     fan out over the files in bounded batches, finalize
- * Round 3 `VerifyReview`    adjudicate the findings
- * Round 4 `NarrateReview`   narrate, quiz, render the walkthrough
+ * Stage 1 `Review`          prepare, then hand off
+ * Stage 2 `ReviewFiles`     one bounded batch per round, then finalize
+ * Stage 3 `VerifyReview`    adjudicate the findings
+ * Stage 4 `NarrateReview`   narrate, quiz, render the walkthrough
  *
  * @since 1.0.0
  */
@@ -33,7 +33,6 @@ import {
 import { NativeReviewAgentOutput } from "./openCodeReview.ts";
 import { ReviewInput } from "./reviewInputSchema.ts";
 import {
-  FileOutcomes,
   NarrateReviewPayload,
   ReviewFilesPayload,
   ReviewResult,
@@ -41,12 +40,12 @@ import {
 } from "./reviewSchemas.ts";
 
 /**
- * What the per-file fan-out needs from the composition: the two action
- * implementations its batches dispatch.
+ * What the file-review rounds need from the composition.
  */
 type FileReviewRequirement =
   | Action.Requirement<"smithers-review/ReviewFile">
-  | Action.Requirement<"smithers-review/MergeFileBatch">;
+  | Action.Requirement<"smithers-review/MergeFileBatch">
+  | Action.Requirement<"smithers-review/FinalizeReview">;
 
 /**
  * The narrating round: story, quiz, and the rendered walkthrough.
@@ -134,10 +133,7 @@ export const VerifyReview = Flow.make("smithers-review/VerifyReview", {
 });
 
 /**
- * The number of files one fan-out batch holds when the input names none.
- *
- * Batch width, not an enforced ceiling on the provider calls in flight; see
- * {@link ReviewFiles}.
+ * The maximum simultaneous file reviews when the input names no valid bound.
  *
  * @since 1.0.0
  * @category constants
@@ -147,35 +143,30 @@ export const DEFAULT_CONCURRENCY = 8;
 /**
  * The file-review round.
  *
- * The fan-out is batched rather than one flat `Node.all` so each batch's
- * answers are folded into an accumulator by a recorded step: a resume
- * mid-review replays the batches that already settled instead of re-asking
- * their seats.
- *
- * `input.concurrency` is that batch width and nothing more. It does not bound
- * the provider calls in flight, and no shape this body can build would: the
- * interpreter settles every dependency of a node concurrently before running
- * the node (`packages/smithers/flows/flow/src/Interpreter.ts`, the `Effect.forEach` over
- * `KeyMaterial.dependencies` with `concurrency: "unbounded"` above the AST
- * switch), so a batch chained onto its predecessor with `Node.bindPlanned` starts
- * alongside it exactly as `Node.all` does. A five-file review makes five calls
- * at once whatever the flag says. `tests/workflow/reviewFlow.test.ts` holds
- * every scripted call open and pins that width. The ordering has to come from
- * the plan contract in `@smthrs/flow`, which this app does not own.
+ * Each round reviews at most `input.concurrency` files and records their
+ * merged outcomes before handing off to the next batch. Only that round's
+ * batch enters the plan, so the interpreter's concurrent dependency traversal
+ * cannot start later batches early. The handoff carries the next offset and
+ * accumulated outcomes, preserving completed batches across a resume.
  *
  * @since 1.0.0
  * @category flows
  */
-export const ReviewFiles = Flow.make("smithers-review/ReviewFiles", {
+export const ReviewFiles: Flow.Flow<
+  "smithers-review/ReviewFiles",
+  typeof ReviewFilesPayload,
+  typeof ReviewResult,
+  typeof Schema.Never,
+  FileReviewRequirement
+> = Flow.make("smithers-review/ReviewFiles", {
   payload: ReviewFilesPayload,
   success: ReviewResult,
-  body: ({ input, prepared }) => {
+  body: ({ input, prepared, offset, outcomes }) => {
     const files = prepared.prompt.shouldReview ? prepared.prompt.files : [];
     const width = Number.isSafeInteger(input.concurrency) && input.concurrency > 0
       ? input.concurrency
       : DEFAULT_CONCURRENCY;
-    let outcomes: Node.Node<FileOutcomes, never, FileReviewRequirement> = Node.succeed<FileOutcomes>([]);
-    for (let offset = 0; offset < files.length; offset += width) {
+    if (offset < files.length) {
       const members: Record<string, Node.Node<NativeReviewAgentOutput | null, never, FileReviewRequirement>> = {};
       for (const file of files.slice(offset, offset + width)) {
         // A file whose review fails is a warning, not a dead run: 0.x spelled
@@ -185,12 +176,14 @@ export const ReviewFiles = Flow.make("smithers-review/ReviewFiles", {
           Node.catch({ onFailure: () => Node.succeed(null) }),
         );
       }
-      outcomes = Node.all({ previous: outcomes, batch: Node.all(members) }).pipe(
-        Node.bindPlanned((both) => MergeFileBatch.call({ previous: both.previous, batch: both.batch })),
+      return Node.all(members).pipe(
+        Node.bindPlanned((batch) => MergeFileBatch.call({ previous: outcomes, batch })),
+        Node.bindPlanned((collected) =>
+          ReviewFiles.to({ input, prepared, offset: offset + width, outcomes: collected })
+        ),
       );
     }
-    return outcomes.pipe(
-      Node.bindPlanned((collected) => FinalizeReview.call({ input, prepared, outcomes: collected })),
+    return FinalizeReview.call({ input, prepared, outcomes }).pipe(
       Node.bindPlanned((review) =>
         VerifyReview.to({
           input,

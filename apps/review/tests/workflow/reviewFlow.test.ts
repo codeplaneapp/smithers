@@ -130,31 +130,14 @@ describe("the review flow", () => {
     expect(readFileSync(out, "utf8")).toContain("<!doctype html>");
   }, 120_000);
 
-  // KNOWN GAP, pinned deliberately: `--concurrency` does not bound the calls.
-  //
-  // The old assertion here was `peak > 0`, which the scripted model satisfied
-  // by answering inside the tick it was called in; it would have held for any
-  // width at all. Held open, the real width shows: all five files are asked at
-  // once under `concurrency: 2`.
-  //
-  // The batch shape is not what fails. `packages/smithers/flows/flow/src/Interpreter.ts`
-  // settles every dependency of a node concurrently, with
-  // `concurrency: "unbounded"`, before it runs the node, so a batch chained
-  // onto its predecessor with `Node.andThen` starts alongside it just as the
-  // `Node.all` pairing in `ReviewFiles` does (checked both ways against this
-  // test). Ordering continuations is the plan contract's to change and
-  // `@smthrs/flow` is not this app's to edit, so the suite pins what ships.
-  // When the engine orders them, both assertions below become 2.
-  test("fans out over every file, currently without honouring the bound", async () => {
+  test.each([1, 2, 8])("bounds file-review calls at concurrency %i", async (concurrency) => {
     const repo = tempRepo(5);
     let inFlight = 0;
     let peak = 0;
     let started = 0;
-    // Every call parks here until the test lets it go, so calls that really are
-    // simultaneous are all in flight at once and `peak` is the true width. A
-    // synchronous answer settles in its own tick and reports a peak of 1 no
-    // matter how wide the fan-out is, which is why the old assertion here
-    // (`peak > 0`) held whatever the engine did.
+    // Hold the first calls open so the observed peak measures overlap.
+    // After the initial observation, keep later calls open briefly as well.
+    let draining = false;
     const release: (() => void)[] = [];
     /** Resolves once at least `count` calls have started. */
     const reached = (count: number) =>
@@ -165,29 +148,31 @@ describe("the review flow", () => {
 
     const pending = runReview(
       repo,
-      { narrate: false, quiz: "off", verify: false, concurrency: 2, out: join(repo, "w.html") },
+      { narrate: false, quiz: "off", verify: false, concurrency, out: join(repo, "w.html") },
       async (ask) => {
         inFlight += 1;
         started += 1;
         peak = Math.max(peak, inFlight);
-        await new Promise<void>((resolve) => release.push(resolve));
+        await new Promise<void>((resolve) => {
+          if (draining) setTimeout(resolve, 25);
+          else release.push(resolve);
+        });
         inFlight -= 1;
         return answerFor()(ask);
       },
     );
 
-    await reached(2);
+    const expectedPeak = Math.min(concurrency, 5);
+    await reached(expectedPeak);
     await new Promise((resolve) => setTimeout(resolve, 250));
-    // With the bound enforced these would both be 2. All five files are asked
-    // at once instead, which is the gap: a wide PR makes one provider call per
-    // changed file simultaneously, whatever `--concurrency` says.
-    expect(started).toBe(5);
-    expect(peak).toBe(5);
-
+    const initiallyStarted = started;
+    draining = true;
     for (const next of release.splice(0)) next();
     const result = await pending;
-    // What does hold: every file is reviewed, and every batch merges, so the
-    // findings are complete however the calls were scheduled.
+
+    expect(initiallyStarted).toBe(expectedPeak);
+    expect(peak).toBe(expectedPeak);
+    expect(started).toBe(5);
     expect(result.review.comments).toHaveLength(5);
     expect(result.review.comments.map((comment) => comment.path).sort()).toEqual([
       "src/file0.ts",
@@ -209,6 +194,27 @@ describe("the review flow", () => {
     expect(result.review.status).toBe("failed");
     expect(result.review.warnings.some((warning) => warning.type === "subtask_error")).toBe(true);
     expect(result.walkthrough.path).toBe(join(repo, "w.html"));
+  }, 120_000);
+
+  test("a failed batch member does not prevent later batches from running", async () => {
+    const repo = tempRepo(3);
+    const started: string[] = [];
+    const result = await runReview(
+      repo,
+      { narrate: false, quiz: "off", verify: false, concurrency: 1, out: join(repo, "w.html") },
+      (ask) => {
+        const path = /(src\/file\d+\.ts)/.exec(ask)![1]!;
+        started.push(path);
+        return path === "src/file0.ts" ? undefined : answerFor()(ask);
+      },
+    );
+
+    expect(started.sort()).toEqual(["src/file0.ts", "src/file1.ts", "src/file2.ts"]);
+    expect(result.review.comments.map((comment) => comment.path).sort()).toEqual([
+      "src/file1.ts",
+      "src/file2.ts",
+    ]);
+    expect(result.review.warnings.some((warning) => warning.type === "subtask_error")).toBe(true);
   }, 120_000);
 
   test("verification runs on the findings and its verdicts reach the walkthrough", async () => {

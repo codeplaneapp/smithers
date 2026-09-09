@@ -1,25 +1,26 @@
 # workflow/
 
-The review workflow itself: four durable rounds on `@smthrs/flow` plus the
+The review workflow itself: four durable stages on `@smthrs/flow` plus the
 pure functions they call.
 
-## The rounds
+## The stages
 
 `reviewFlow.ts` declares them.
 
-| Round | What it does |
+| Stage | What it does |
 | --- | --- |
 | `Review` | Runs `PrepareReview`, then hands off. |
-| `ReviewFiles` | Fans out over the discovered files in `concurrency`-wide batches, folds each batch into an accumulator, finalizes. |
+| `ReviewFiles` | Runs one `concurrency`-wide batch per durable round, carries its accumulated outcomes to the next round, then finalizes. Simultaneous file-review calls never exceed this width. |
 | `VerifyReview` | Adjudicates the findings, applies the verdicts. |
 | `NarrateReview` | Narrates, quizzes, renders and writes the walkthrough. |
 
-Why four and not one: `Node.all` fixes its width when the graph is built, and
+Why separate stages: `Node.all` fixes its width when the graph is built, and
 the file list a review fans out over is something the first step discovers.
 `Flow.to` ends a round and starts the next one with its payload decoded as real
 data, which is what lets `ReviewFiles` read `prepared.prompt.files` and build one
-node per file. Verification is its own round for the same reason — whether to
-narrate and quiz is decided from the POST-verification findings, and those do
+node per file in the current batch. A self-handoff starts the next batch only
+after the current one settles. Verification is its own round for the same
+reason: whether to narrate and quiz is decided from the POST-verification findings, and those do
 not exist until the verifying round has settled.
 
 ## The parts

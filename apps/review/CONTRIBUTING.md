@@ -9,19 +9,18 @@ OIDC repo auth, metered inference proxy, quota, metrics).
 
 ## How it works
 
-One durable Flow, in four rounds. `Flow.to` ends a round and starts the next
+One durable Flow, in four stages. `Flow.to` ends a round and starts the next
 one with its payload as real data, which is what lets round 2 fan out over a
 file list round 1 discovers:
 
 1. `Review` resolves the target, filters files, and hands off. `ReviewFiles`
    then runs one `ReviewFile` cell per changed file, in `--concurrency`-wide
    batches, on the `review` seat with the prompt in
-   `src/workflow/openCodeReview.ts`, and `MergeFileBatch` normalizes and
-   anchors each batch's comments. `VerifyReview` adjudicates the findings on
-   the `review-verify` seat when `--verify` is on. The batch width is what
-   `--concurrency` sets; it is not a ceiling on the provider calls in flight,
-   because the flow interpreter settles a node's dependencies concurrently.
-   `tests/workflow/reviewFlow.test.ts` pins that gap and names the fix.
+   `src/workflow/openCodeReview.ts`. Each batch runs in its own durable round;
+   `MergeFileBatch` records its outcomes before a handoff starts the next batch.
+   `--concurrency` bounds the simultaneous file-review calls per run (default
+   8). Completed batches survive a resume. `VerifyReview` adjudicates the
+   findings on the `review-verify` seat when `--verify` is on.
 2. `collect-changes` loads the full diff for every changed file, including
    files the review filters skip (tests, docs, configs). The walkthrough shows
    everything.

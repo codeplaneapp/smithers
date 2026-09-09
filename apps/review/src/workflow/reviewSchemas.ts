@@ -84,6 +84,22 @@ export const FileBatch = Schema.Record(Schema.String, Schema.NullOr(NativeReview
 export type FileBatch = typeof FileBatch.Type;
 
 /**
+ * The accumulator threaded through the concurrency batches.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const FileOutcomes = withDefault(Schema.Array(FileOutcome), []);
+
+/**
+ * A decoded outcome list.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type FileOutcomes = typeof FileOutcomes.Type;
+
+/**
  * The payload the file-review round runs under.
  *
  * @since 1.0.0
@@ -92,6 +108,8 @@ export type FileBatch = typeof FileBatch.Type;
 export const ReviewFilesPayload = Schema.Struct({
   input: ReviewInput,
   prepared: PreparedReview,
+  offset: withDefault(Schema.Number, 0),
+  outcomes: FileOutcomes,
 });
 
 /**
@@ -167,19 +185,3 @@ export const ReviewResult = Schema.Struct({
  * @category models
  */
 export type ReviewResult = typeof ReviewResult.Type;
-
-/**
- * The accumulator threaded through the concurrency batches.
- *
- * @since 1.0.0
- * @category schemas
- */
-export const FileOutcomes = withDefault(Schema.Array(FileOutcome), []);
-
-/**
- * A decoded outcome list.
- *
- * @since 1.0.0
- * @category models
- */
-export type FileOutcomes = typeof FileOutcomes.Type;
