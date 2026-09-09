@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Action, DurableClock, DurableDeferred, Flow, FlowRuntime, Graph, Interpreter, Poll, Sleep } from "@smthrs/flow"
+import { Node } from "@smthrs/plan"
 import { Duration, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
@@ -220,6 +221,59 @@ describe("stable error codes", () => {
 })
 
 describe("Poll as a plan", () => {
+  it("reproduces body and predicate identities and re-keys each semantic capture", () => {
+    const make = (changes: {
+      tag?: string
+      intervalMs?: number
+      backoff?: Poll.Backoff
+      maxAttempts?: number
+      onTimeout?: "fail" | "return-last"
+      checkVersion?: string
+    } = {}) =>
+      Poll.make(changes.tag ?? "poll/identity", {
+        input: { until: Schema.Number },
+        result: Schema.String,
+        intervalMs: changes.intervalMs ?? 10,
+        backoff: changes.backoff ?? "fixed",
+        maxAttempts: changes.maxAttempts ?? 3,
+        onTimeout: changes.onTimeout ?? "fail",
+        check: Node.capture(
+          { action: Probe.name, implementationVersion: changes.checkVersion ?? "probe/v1" },
+          ({ attempt, until }) => Probe.call({ attempt, until })
+        )
+      })
+    const identities = (poll: ReturnType<typeof make>) => {
+      const graph = Graph.build(poll, { until: 3 }, { callbackIdentity: "stable" })
+      expect(graph.diagnostics).toEqual([])
+      const branch = graph.nodes.find((node) => node.ast._tag === "Branch")?.ast
+      expect(branch?._tag).toBe("Branch")
+      return { body: Node.functionIdentity(poll.body), predicate: branch?._tag === "Branch" && branch.predicate }
+    }
+    const first = identities(make())
+    expect(identities(make())).toEqual(first)
+    for (
+      const change of [
+        { tag: "poll/renamed" },
+        { intervalMs: 20 },
+        { backoff: "linear" as const },
+        { maxAttempts: 4 },
+        { onTimeout: "return-last" as const },
+        { checkVersion: "probe/v2" }
+      ]
+    ) {
+      const changed = identities(make(change))
+      expect(changed.body).not.toEqual(first.body)
+      expect(changed.predicate).not.toEqual(first.predicate)
+    }
+  })
+
+  it("keeps an uncaptured check process-local", () => {
+    const graph = Graph.build(Rising, { until: 3 }, { callbackIdentity: "stable" })
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({ code: "unstable_callback", node: "root" }))
+    expect(() => Graph.drafts(graph)).toThrow(/process-local identity/)
+    expect(Graph.build(Rising, { until: 3 }).diagnostics).toEqual([])
+  })
+
   it("shows the attempt's check, its sleep, and the handoff that opens the next round", () => {
     const graph = Graph.build(Rising, { until: 3, attempt: 1 })
     const nodes = Graph.nodes(graph)

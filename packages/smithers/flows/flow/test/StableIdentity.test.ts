@@ -1,8 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Action, Flow, Graph, Interpreter } from "@smthrs/flow"
+import { Action, Flow, Graph, Interpreter, Poll, Sleep } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Cause, Effect, Exit, Layer, Schema } from "effect"
 import { execFileSync } from "node:child_process"
+import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { withCrypto } from "./Crypto.ts"
 import { layerMemory } from "./MemoryFlowRuntime.ts"
@@ -86,6 +87,40 @@ describe("stable callback admission", () => {
     expect(Graph.drafts(graph)).toEqual(Graph.drafts(Graph.build(flow, { seed: 1 })))
   })
 
+  it.effect("the canonical interpreter admits a captured poll and runs its first attempt", () =>
+    withCrypto(Effect.gen(function*() {
+      const attempts: Array<number> = []
+      const check = Action.make("stable/poll-check", {
+        payload: { attempt: Schema.Number },
+        success: Poll.CheckResult(Schema.String)
+      })
+      const poll = Poll.make("stable/poll", {
+        input: {},
+        result: Schema.String,
+        intervalMs: 10,
+        maxAttempts: 3,
+        check: Node.capture({ action: check.name, ...version }, ({ attempt }) => check.call({ attempt }))
+      })
+      const graph = Graph.build(poll, {}, stable)
+      expect(graph.diagnostics).toEqual([])
+      expect(Graph.drafts(graph)).toHaveLength(graph.nodes.length)
+      const implementations = Layer.mergeAll(
+        check.toLayer(({ attempt }) =>
+          Effect.sync(() => {
+            attempts.push(attempt)
+            return { satisfied: true, output: "ready" }
+          })
+        ),
+        Poll.layer,
+        Sleep.layer
+      )
+      const result = yield* poll.execute({}).pipe(Effect.provide(
+        Interpreter.layerWithImplementations(poll, implementations).pipe(Layer.provideMerge(layerMemory))
+      ))
+      expect(result).toBe("ready")
+      expect(attempts).toEqual([1])
+    })))
+
   it.effect("the canonical interpreter refuses unstable callbacks before the first action", () =>
     withCrypto(Effect.gen(function*() {
       let runs = 0
@@ -136,4 +171,43 @@ describe("independent process identity", () => {
     }
     expect(compile({ stable: false }).digest).not.toBe(compile({ stable: false }).digest)
   }, 120_000)
+})
+
+// Compile the declarations readers copy, so their cross-process key claim is
+// checked against the actual examples rather than a second handwritten flow.
+describe("tutorial callback identity", () => {
+  for (
+    const [page, flow, payload] of [
+      ["quickstart.md", "Greeting", { name: "Ada" }],
+      ["README.md", "Digest", { url: "https://example.com/post" }]
+    ] as const
+  ) {
+    it(`${page} admits its example under stable policy and reproduces its plan`, () => {
+      const markdown = readFileSync(new URL(`../docs/${page}`, import.meta.url), "utf8")
+      const example = markdown.match(/```ts\n([\s\S]*?)\n```/)![1]!
+        .split("/** The code arrives separately")[0]!
+        .replace(/^import .*$/gm, "")
+      const script = `
+        import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+        import { Action, Flow, Graph } from "@smthrs/flow"
+        import { Node, Plan } from "@smthrs/plan"
+        import { Effect, Schema } from "effect"
+        ${example}
+        const graph = Graph.build(${flow}, ${JSON.stringify(payload)}, { callbackIdentity: "stable" })
+        const plan = await Effect.runPromise(Plan.compile({
+          planId: "tutorial", flow: ${flow}._tag, nodes: Graph.drafts(graph)
+        }).pipe(Effect.provide(NodeCrypto.layer)))
+        console.log(JSON.stringify({ digest: plan.digest, keys: plan.nodes.map(node => node.key) }))
+      `
+      const compile = () =>
+        execFileSync(process.execPath, ["--input-type=module", "--eval", script], {
+          cwd: fileURLToPath(new URL("../", import.meta.url)),
+          encoding: "utf8",
+          timeout: 30_000
+        })
+      expect(compile()).toBe(compile())
+      expect(markdown).toContain("Interpreter.layerWithImplementations(")
+      expect(markdown).toContain("process-local")
+    }, 120_000)
+  }
 })

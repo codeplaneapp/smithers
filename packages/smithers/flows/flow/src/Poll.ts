@@ -235,7 +235,11 @@ const withAttempt = <Payload>(payload: object, attempt: number): Payload =>
  * that finishes, a deployment that goes live, a review that lands — and the
  * waiting has to survive a restart. `check` is the one thing an author writes:
  * a body fragment that reads whatever it polls and reports a {@link Check}.
- * Everything else is schedule.
+ * Everything else is schedule. Under stable callback admission (the default of
+ * `Interpreter.layerWithImplementations`), wrap `check` in `Node.capture` with
+ * every semantic capture, including a version for imported behavior. An
+ * uncaptured check keeps the poll process-local. The helper captures its own
+ * callbacks using the schedule and the check's identity.
  *
  * ```ts
  * const Deployment = Poll.make("deploy/wait", {
@@ -245,7 +249,10 @@ const withAttempt = <Payload>(payload: object, attempt: number): Payload =>
  *   backoff: "exponential",
  *   maxAttempts: 8,
  *   onTimeout: "fail",
- *   check: ({ attempt, id }) => Status.call({ attempt, id })
+ *   check: Node.capture(
+ *     { action: Status.name, implementationVersion: "deploy/status-check/v1" },
+ *     ({ attempt, id }) => Status.call({ attempt, id })
+ *   )
  * })
  * ```
  *
@@ -341,6 +348,7 @@ export const make = <
     )
   }
   const onTimeout = options.onTimeout ?? "fail"
+  const captures = { tag, intervalMs, backoff, maxAttempts, onTimeout, check: Node.functionIdentity(check) }
   const body = (
     payload: RoundPayload
   ): Node.Node<Flow.BodySuccess<Result["Type"]>, typeof Failure.Type, R> => {
@@ -348,7 +356,7 @@ export const make = <
     const last = attempt >= maxAttempts
     return check(withAttempt(payload, attempt)).pipe(
       Node.branch({
-        if: (checked) => checked.satisfied,
+        if: Node.capture(captures, (checked) => checked.satisfied),
         then: (checked) => Flow.done(checked.output),
         else: (checked): Node.Node<Flow.BodySuccess<Result["Type"]>, typeof Failure.Type> =>
           last
@@ -373,7 +381,8 @@ export const make = <
     success: result,
     error: Failure,
     maxRounds: maxAttempts,
-    body
+    // A captured wrapper must not admit a process-local check as stable.
+    body: captures.check.algorithm === "sha256-source-ephemeral/v4" ? body : Node.capture(captures, body)
   })
   return self
 }
