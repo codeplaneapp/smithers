@@ -69,11 +69,13 @@ import type * as Sandbox from "@smthrs/harness/Sandbox"
 import * as Steering from "@smthrs/harness/Steering"
 import * as Transcript from "@smthrs/harness/Transcript"
 import { Journal, JournalEvent } from "@smthrs/journal"
+import * as CapabilitySet from "@smthrs/kernel/CapabilitySet"
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import type { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
 import * as Descriptor from "@smthrs/registry/Descriptor"
+import * as Executable from "@smthrs/registry/Executable"
 import * as Registry from "@smthrs/registry/Registry"
 import { Ownership, RunStore } from "@smthrs/run-store"
 import * as Cause from "effect/Cause"
@@ -1192,6 +1194,9 @@ export const make = (
     const runtime = yield* ControlRuntime
     const journal = yield* Journal.Journal
     const registry = yield* Registry.Registry
+    // A host registers native modules through the existing executable catalog.
+    // Prompt-only compositions retain their current admission behavior.
+    const executables = yield* Effect.serviceOption(Executable.Catalog)
     const engine = yield* FlowRuntime.FlowRuntime
     const seats = yield* SeatResolver
     const agent = yield* Agent
@@ -1468,7 +1473,7 @@ export const make = (
       runId: string,
       card: PlanCard,
       descriptor: Descriptor.FlowDescriptor
-    ): Effect.Effect<{ readonly executionDigest: string; readonly seatId: string }, LaunchFailed> =>
+    ): Effect.Effect<string, LaunchFailed> =>
       Effect.suspend(() => {
         const expected = card.executionDigest
         if (expected === undefined || Descriptor.executionDigest(descriptor) !== expected) {
@@ -1481,6 +1486,15 @@ export const make = (
             })
           )
         }
+        return Effect.succeed(expected)
+      })
+
+    const approvedSeat = (
+      runId: string,
+      card: PlanCard,
+      descriptor: Descriptor.FlowDescriptor
+    ): Effect.Effect<string, LaunchFailed> =>
+      Effect.suspend(() => {
         // Validate the same executable fields at launch and on every resume.
         // An identified prompt without a seat cannot be run by another host.
         if (Option.isNone(descriptor.model)) {
@@ -1493,7 +1507,38 @@ export const make = (
             })
           )
         }
-        return Effect.succeed({ executionDigest: expected, seatId: descriptor.model.value })
+        return Effect.succeed(descriptor.model.value)
+      })
+
+    const approvedModule = (
+      runId: string,
+      card: PlanCard,
+      executionDigest: string
+    ): Effect.Effect<Executable.Executable, LaunchFailed> =>
+      Effect.suspend(() => {
+        const catalog = Option.getOrUndefined(executables)
+        const executable = catalog?.executables.find((entry) => entry.descriptor.name === card.flowId)
+        if (executable === undefined || Descriptor.executionDigest(executable.descriptor) !== executionDigest) {
+          const refusal = catalog?.refused.find((entry) => entry.flow === card.flowId)
+          return Effect.fail(
+            new LaunchFailed({
+              runId,
+              message: refusal?.message ??
+                `Flow ${card.flowId} has no registered executable matching its approved identity`,
+              cause: refusal ?? { flowId: card.flowId }
+            })
+          )
+        }
+        if (!card.envelope.flows.includes(executable.delegate)) {
+          return Effect.fail(
+            new LaunchFailed({
+              runId,
+              message: `Flow ${card.flowId} delegates to ${executable.delegate}, outside the approved flow envelope`,
+              cause: { flowId: card.flowId, delegate: executable.delegate }
+            })
+          )
+        }
+        return Effect.succeed(executable)
       })
 
     /** One agent run, executed as the whole of one durable flow execution. */
@@ -1518,18 +1563,25 @@ export const make = (
         const plan = yield* runtime.getPlan(payload.planId)
         const card = plan.card
         const descriptor = yield* registry.get(card.flowId)
-        const { executionDigest, seatId } = yield* approvedExecution(payload.runId, card, descriptor)
+        const executionDigest = yield* approvedExecution(payload.runId, card, descriptor)
         // The launch already validated the seat and body; re-validation here
         // guards a registry that changed between acceptance and execution.
         const flowBody = yield* registry.loadBody(card.flowId, executionDigest)
         if (flowBody._tag !== "Prompt") {
-          return yield* Effect.fail(
-            new HarnessError.HarnessError({
-              code: "engine_failed",
-              message: `Flow ${card.flowId} has a module body; only prompt flows run on the agent`
-            })
+          const executable = yield* approvedModule(payload.runId, card, executionDigest)
+          const input = yield* Schema.decodeUnknownEffect(Schema.Json)(plan.decodedInput)
+          // One ordinary durable child retains the module's native topology,
+          // action outputs, waits and replay. The existing session continues
+          // to own control admission, cancellation and settlement.
+          return yield* executable.flow.execute({ input }, {
+            executionId: Digest.digest(Digest.canonical(["control/module", payload.runId, executionDigest]))
+          }).pipe(
+            CapabilitySet.attenuate(patterns(card.envelope.capabilities)),
+            Effect.provide(options.budget(card.envelope)),
+            Effect.provide(options.quotaPolicy)
           )
         }
+        const seatId = yield* approvedSeat(payload.runId, card, descriptor)
         const seat = yield* seats.resolve(seatId)
         const steering = yield* Notifications.make({ runId: payload.runId, lineageId: payload.runId })
         // The three services a durable flow body already holds, captured
@@ -2165,20 +2217,24 @@ export const make = (
           )
         )
         if (flowBody._tag !== "Prompt") {
-          return "pending" as const
-        }
-        const { seatId } = yield* approvedExecution(input.run.runId, input.plan.card, descriptor.value)
-        // Resolve the seat now, so a missing key refuses the launch as a
-        // typed failure instead of failing the run after it was accepted.
-        yield* seats.resolve(seatId).pipe(
-          Effect.mapError((error) =>
-            new LaunchFailed({
-              runId: input.run.runId,
-              message: error.message,
-              cause: { seat: error.seat }
-            })
+          if (Option.isNone(executables)) return "pending" as const
+          const digest = yield* approvedExecution(input.run.runId, input.plan.card, descriptor.value)
+          yield* approvedModule(input.run.runId, input.plan.card, digest)
+        } else {
+          yield* approvedExecution(input.run.runId, input.plan.card, descriptor.value)
+          const seatId = yield* approvedSeat(input.run.runId, input.plan.card, descriptor.value)
+          // Resolve the seat now, so a missing key refuses the launch as a
+          // typed failure instead of failing the run after it was accepted.
+          yield* seats.resolve(seatId).pipe(
+            Effect.mapError((error) =>
+              new LaunchFailed({
+                runId: input.run.runId,
+                message: error.message,
+                cause: { seat: error.seat }
+              })
+            )
           )
-        )
+        }
         const start = yield* Deferred.make<void>()
         const drive: Drive = { settled: false }
         launchedDrives.set(input.run.runId, drive)

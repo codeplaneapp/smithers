@@ -29,6 +29,7 @@ import {
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
+import { Action, FlowRuntime } from "@smthrs/flow"
 import * as NodeFlowsRuntime from "@smthrs/flows/NodeRuntime"
 import type * as GatewayServer from "@smthrs/gateway/GatewayServer"
 import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
@@ -57,6 +58,7 @@ import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
 import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Discovery from "@smthrs/registry/Discovery"
+import * as Executable from "@smthrs/registry/Executable"
 import * as Registry from "@smthrs/registry/Registry"
 import { Ownership, RunStore } from "@smthrs/run-store"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
@@ -69,6 +71,7 @@ import * as SyncServer from "@smthrs/sync/SyncServer"
 import * as WorkspaceShare from "@smthrs/sync/WorkspaceShare"
 import type { FileSystem, Path, Result } from "effect"
 import { Context, Effect, Exit, Layer, Redacted, Scope, Semaphore } from "effect"
+import * as Deferred from "effect/Deferred"
 import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
@@ -88,6 +91,7 @@ import * as CommandStatus from "./internal/CommandStatus.ts"
 import * as ControlDatabase from "./internal/ControlDatabase.ts"
 import * as ControlDatabasePath from "./internal/ControlDatabasePath.ts"
 import * as ExecutionDatabasePath from "./internal/ExecutionDatabasePath.ts"
+import * as ModuleAuthority from "./internal/ModuleAuthority.ts"
 import * as Output from "./Output.ts"
 import * as Project from "./Project.ts"
 import * as Providers from "./Providers.ts"
@@ -592,10 +596,14 @@ export const engineDurable = (
   // A control plane that cannot open its own database has nothing to serve, so
   // a failed open, migration, or journal start is a startup defect rather than
   // a typed control-plane error every command would have to carry.
-  const stores = Layer.mergeAll(SqlJournal.layer({ capacity: 1024, overflow: "reject" }), RunStore.layer).pipe(
-    Layer.provideMerge(database),
-    Layer.orDie
-  )
+  // The control and native engines both use RunStore over different databases.
+  // Its exported layer is a singleton: a shared memo map must not reuse the
+  // control instance inside the native engine, whose state is versioned.
+  const stores = Layer.mergeAll(SqlJournal.layer({ capacity: 1024, overflow: "reject" }), Layer.fresh(RunStore.layer))
+    .pipe(
+      Layer.provideMerge(database),
+      Layer.orDie
+    )
   const runtime = registry === undefined
     ? SqlControlRuntime.layer({ ...authorization, owner }).pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
     : Layer.effect(ControlRuntime.ControlRuntime)(
@@ -957,6 +965,24 @@ const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer
 )
 
 /**
+ * Trusted module registration over the existing host services and catalog.
+ * This is the same final-phase registration accepted by the flow runtime.
+ * @category models
+ * @since 1.0.0
+ */
+export type ModuleRegistration = Layer.Layer<
+  Executable.Catalog,
+  never,
+  | Executable.Registration
+  | Exclude<Effect.Services<ReturnType<typeof AgentSession.make>>, Scope.Scope>
+  | FileSystem.FileSystem
+  | Path.Path
+  | KernelChildProcessSpawner.ChildProcessSpawner
+  | Budget.Budget
+  | QuotaPolicy.QuotaClassifier
+>
+
+/**
  * Provides the production run executor: the `@smthrs/agent` composition root
  * over the durable control stores, the local flow registry, and the standard
  * host capabilities: filesystem and shell through the kernel's guarded
@@ -973,7 +999,7 @@ const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer
  * @category layers
  * @since 0.1.0
  */
-export const layerExecutor = (
+const executorFromEngine = (
   registry: Layer.Layer<Registry.Registry>,
   engine: EngineDurable,
   root: string,
@@ -988,7 +1014,13 @@ export const layerExecutor = (
   grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root),
   requestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = layerRequestExecutor,
   quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerDefault(),
-  executionRoot: string = root
+  executionRoot: string = root,
+  /**
+   * Trusted native registrations using the existing executable catalog.
+   * Built in the engine's registration phase with the guarded host platform;
+   * every registered handler restores its owning approved control envelope.
+   */
+  modules?: ModuleRegistration
 ): Layer.Layer<
   ControlExecutor.ControlExecutor,
   never,
@@ -1056,7 +1088,22 @@ export const layerExecutor = (
       // that fails to spawn dies the executor loudly (`Effect.orDie`) rather
       // than running silently short of the tools it was configured to have.
       const mcp = yield* Effect.forEach(mcpServers, (server) => Effect.orDie(McpFlows.connected(server)))
-      return yield* AgentSession.make({
+      const catalogReady = yield* Deferred.make<Executable.Catalog>()
+      const catalog = modules === undefined ? undefined : Context.get(
+        yield* Layer.build(modules.pipe(
+          // No approved card exists at registration. ModuleAuthority installs
+          // the shared, journal-backed approved Budget at each handler entry.
+          // eslint-disable-next-line no-restricted-syntax -- construction-time dependency only
+          Layer.provide(Budget.layerUnbounded()),
+          Layer.provide(Action.layerImplementations),
+          Layer.provide(
+            Layer.succeed(FlowRuntime.FlowRuntime, yield* ModuleAuthority.make(Deferred.await(catalogReady)))
+          )
+        )),
+        Executable.Catalog
+      )
+      if (catalog !== undefined) yield* Deferred.succeed(catalogReady, catalog)
+      const session = AgentSession.make({
         canExecute,
         flows: [
           StandardFlows.filesystem(filesystemServices, nativeSearch),
@@ -1069,12 +1116,21 @@ export const layerExecutor = (
         quotaPolicy,
         budget: Budget.layerFromEnvelope
       })
+      // Lifecycle, steering and approval belong to the control journal. The
+      // registration phase otherwise inherits the engine's separate journal.
+      // Select only Journal: an unmaterialized engine.journal layer can also
+      // provide the control RunStore, which must not replace the native one.
+      const controlJournal = yield* Journal.Journal.pipe(Effect.provide(engine.journal))
+      return yield* (catalog === undefined ? session : session.pipe(
+        Effect.provideService(Executable.Catalog, catalog)
+      )).pipe(Effect.provideService(Journal.Journal, controlJournal))
     })
   ).pipe(
     Layer.provide([
       guarded,
       memory,
       Recall.layerNoop,
+      quotaPolicy,
       sessionAgent,
       // The run's mutation accounting is measured rather than declared, and
       // this is what measures it: without an observer in the composition the
@@ -1092,7 +1148,7 @@ export const layerExecutor = (
       layerSeatResolver(environment).pipe(Layer.provide(requestExecutor))
     ])
   )
-  return NodeFlowsRuntime.layer(
+  const nativeRuntime = NodeFlowsRuntime.layer(
     {
       filename: executionDatabasePath(root),
       workspaceRoot,
@@ -1132,7 +1188,28 @@ export const layerExecutor = (
     // honestly without this composition.
     Layer.orDie
   )
+  // The runtime exposes its stores for native registrations. Only the
+  // executor crosses back into the control composition: leaking the native
+  // Journal or RunStore here silently redirects ControlLive to engine.db.
+  return Layer.effect(ControlExecutor.ControlExecutor)(ControlExecutor.ControlExecutor).pipe(
+    Layer.provide(nativeRuntime)
+  )
 }
+
+/**
+ * Builds the executor over one captured control-store graph. Materializing
+ * before native registration prevents the shared RunStore layer from being
+ * memoized against the other database in an embedding composition.
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerExecutor = (
+  ...[registry, engine, ...options]: Parameters<typeof executorFromEngine>
+): ReturnType<typeof executorFromEngine> =>
+  Layer.unwrap(Effect.map(
+    materializeEngine(engine),
+    (materialized) => executorFromEngine(registry, materialized, ...options)
+  ))
 
 /**
  * Provides the application-selected Control implementation with Node HTTP and
@@ -1145,7 +1222,8 @@ export const layerExecutor = (
 const layerControlFromEngine = (
   applicationConfig: Application.Config,
   registry: Layer.Layer<Registry.Registry>,
-  engine: EngineDurable
+  engine: EngineDurable,
+  modules?: ModuleRegistration
 ) => {
   const remote = applicationConfig.remote ?? "http://127.0.0.1"
   const root = applicationConfig.root ?? process.cwd()
@@ -1159,7 +1237,8 @@ const layerControlFromEngine = (
       undefined,
       undefined,
       undefined,
-      applicationConfig.executionRoot ?? root
+      applicationConfig.executionRoot ?? root,
+      modules
     )
     : undefined
   return Application.layer(applicationConfig, registry, engine, executor).pipe(
@@ -1186,18 +1265,19 @@ const layerControlFromEngine = (
 export const layerControl = (
   applicationConfig: Application.Config,
   suppliedRegistry?: Layer.Layer<Registry.Registry> | undefined,
-  suppliedEngine?: EngineDurable | undefined
+  suppliedEngine?: EngineDurable | undefined,
+  modules?: ModuleRegistration
 ) => {
   const root = applicationConfig.root ?? process.cwd()
   const registry = suppliedRegistry ?? layerRegistry(root)
   const engine = suppliedEngine ?? engineDurable(root, registry, applicationConfig)
   if (applicationConfig.remote !== undefined) {
-    return layerControlFromEngine(applicationConfig, registry, engine)
+    return layerControlFromEngine(applicationConfig, registry, engine, modules)
   }
   return Layer.unwrap(
     Effect.map(
       materializeEngine(engine),
-      (materialized) => layerControlFromEngine(applicationConfig, registry, materialized)
+      (materialized) => layerControlFromEngine(applicationConfig, registry, materialized, modules)
     )
   )
 }
@@ -1237,7 +1317,7 @@ export const layerOutput = Layer.succeed(
  * @category layers
  * @since 0.1.0
  */
-export const layer = (applicationConfig: Application.Config) => {
+export const layer = (applicationConfig: Application.Config, modules?: ModuleRegistration) => {
   const root = applicationConfig.root ?? process.cwd()
   const registry = layerRegistry(root)
   const durable = engineDurable(root, registry, applicationConfig)
@@ -1249,7 +1329,7 @@ export const layer = (applicationConfig: Application.Config) => {
   // notice stopped printing on exactly the 0.x projects it exists for.
   const project = Project.layer(root, applicationConfig.migrationRoot ?? Project.legacyRoot(undefined, root))
   const compose = (engine: EngineDurable) => {
-    const control = layerControlFromEngine(applicationConfig, registry, engine)
+    const control = layerControlFromEngine(applicationConfig, registry, engine, modules)
     const gatewayHost = applicationConfig.remote === undefined
       ? Layer.effect(
         Serve.GatewayHost,

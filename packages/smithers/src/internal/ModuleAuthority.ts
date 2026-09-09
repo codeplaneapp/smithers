@@ -1,0 +1,152 @@
+/**
+ * Restores approved control authority at native handler boundaries, including resume.
+ * @since 1.0.0
+ */
+import * as AgentSession from "@smthrs/agent/AgentSession"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
+import { LaunchFailed } from "@smthrs/control/ControlError"
+import { ControlRuntime } from "@smthrs/control/ControlRuntime"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
+import * as RunState from "@smthrs/engine-store/RunState"
+import { FlowRuntime } from "@smthrs/flow"
+import { Journal } from "@smthrs/journal"
+import * as CapabilitySet from "@smthrs/kernel/CapabilitySet"
+import * as Descriptor from "@smthrs/registry/Descriptor"
+import type * as Executable from "@smthrs/registry/Executable"
+import * as Registry from "@smthrs/registry/Registry"
+import { RunStore } from "@smthrs/run-store"
+import { Effect, Option, RcMap, Schema } from "effect"
+
+/**
+ * Composes existing host authority services without another run ledger.
+ * @since 1.0.0
+ * @private
+ */
+export const make = (catalog: Effect.Effect<Executable.Catalog>) =>
+  Effect.gen(function*() {
+    const engine = yield* FlowRuntime.FlowRuntime
+    const state = yield* DurableEngineState.DurableEngineState
+    const runs = yield* RunStore.RunStore
+    const control = yield* ControlRuntime
+    const journal = yield* Journal.Journal
+    const quota = yield* QuotaPolicy.QuotaClassifier
+    const registry = yield* Registry.Registry
+    const refuse = (runId: string, message: string) => Effect.die(new LaunchFailed({ runId, message }))
+
+    const owner = (executionId: string) =>
+      Effect.gen(function*() {
+        const pending = [executionId]
+        const visited = new Set<string>()
+        const roots = new Set<string>()
+        while (pending.length > 0) {
+          const id = pending.pop()!
+          if (visited.has(id)) continue
+          if (visited.size >= 1_024) {
+            return yield* refuse(executionId, "Module ancestry exceeds the host traversal limit")
+          }
+          visited.add(id)
+          const run = yield* control.getRun(id).pipe(
+            Effect.map(Option.some),
+            Effect.catchTag("/control/RunNotFound", () => Effect.succeedNone),
+            Effect.orDie
+          )
+          if (Option.isSome(run)) {
+            const row = yield* runs.get(id).pipe(Effect.orDie)
+            const native = yield* Effect.try(() =>
+              Schema.decodeUnknownSync(RunState.RunState)(JSON.parse(row.stateJson))
+            )
+              .pipe(Effect.catch(() => refuse(executionId, "The control ancestor has invalid native state")))
+            // Time-travel forks copy the old payload's runId. AgentSession
+            // takes identity from this native row, not from that copied field.
+            const payload = native.payload as { readonly planId?: unknown } | null
+            if (
+              native.flowName !== "agent/run" || payload?.planId !== run.value.planId ||
+              native.parentExecutionId !== undefined || (yield* state.runParents(id)).length !== 0
+            ) {
+              return yield* refuse(executionId, "The native ancestor is not its owning control wrapper")
+            }
+            roots.add(id)
+            continue
+          }
+          const parents = yield* state.runParents(id)
+          if (parents.length > 0) {
+            for (const parent of parents) pending.push(parent.parentId)
+          } else {
+            // A trampoline predecessor is distinct from an ordinary spawn edge.
+            const row = yield* runs.get(id).pipe(Effect.orDie)
+            if (row.parentRunId !== null) pending.push(row.parentRunId)
+            else return yield* refuse(executionId, "Module execution has no recorded control ancestor")
+          }
+        }
+        if (roots.size !== 1) return yield* refuse(executionId, "Module execution has ambiguous control authority")
+        const rootId = [...roots][0]!
+        const run = yield* control.getRun(rootId).pipe(Effect.orDie)
+        if (
+          run.planId === undefined || run.status === "cancelled" || run.status === "failed" ||
+          run.status === "completed"
+        ) {
+          return yield* refuse(executionId, "The owning control run is not active")
+        }
+        const plan = yield* control.getPlan(run.planId).pipe(Effect.orDie)
+        if (plan.decision !== "approved" || run.planDigest !== plan.card.digest) {
+          return yield* refuse(executionId, "The owning control plan is not the approved plan")
+        }
+        const card = plan.card
+        const descriptor = yield* registry.get(card.flowId).pipe(Effect.orDie)
+        const executable = (yield* catalog).executables.find((entry) => entry.descriptor.name === card.flowId)
+        if (
+          card.executionDigest === undefined || Descriptor.executionDigest(descriptor) !== card.executionDigest ||
+          executable === undefined || Descriptor.executionDigest(executable.descriptor) !== card.executionDigest ||
+          !card.envelope.flows.includes(executable.delegate)
+        ) {
+          return yield* refuse(executionId, "The module no longer matches its approved executable identity")
+        }
+        // Re-read the pinned body as well: a parked child can run before its
+        // agent/run parent is entered again after a process restart.
+        yield* registry.loadBody(card.flowId, card.executionDigest).pipe(Effect.orDie)
+        return { rootId, envelope: card.envelope }
+      })
+
+    // Concurrent descendants share one existing Budget accumulator. RcMap
+    // holds it until all handlers release it; later acquisition recovers the
+    // existing journal's usage, including after a process restart.
+    const budgets = yield* RcMap.make({
+      capacity: 256,
+      lookup: (rootId: string) =>
+        Effect.gen(function*() {
+          const { envelope } = yield* owner(rootId)
+          return yield* Budget.make(Budget.policyFromEnvelope(envelope)).pipe(Effect.orDie)
+        })
+    })
+
+    return FlowRuntime.FlowRuntime.of({
+      ...engine,
+      register: (flow, handler) =>
+        engine.register(flow, (payload, executionId) =>
+          Effect.scoped(Effect.gen(function*() {
+            const { rootId, envelope } = yield* owner(executionId)
+            const budget = yield* RcMap.get(budgets, rootId).pipe(Effect.orDie)
+            const instance = yield* FlowRuntime.FlowInstance
+            const accountingInstance = { ...instance, executionId: rootId }
+            const key = (step: string) => JSON.stringify([executionId, step])
+            const account = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+              effect.pipe(
+                Effect.provideService(FlowRuntime.FlowInstance, accountingInstance),
+                Effect.provideService(Journal.Journal, journal)
+              )
+            const shared: Budget.Service = {
+              check: (step) => account(budget.check(step === undefined ? undefined : key(step))),
+              reserve: (step) => account(budget.reserve(key(step))),
+              record: (step, usage) => account(budget.record(key(step), usage)),
+              usage: account(budget.usage),
+              usageOf: (id) => account(budget.usageOf(id))
+            }
+            return yield* handler(payload, executionId).pipe(
+              CapabilitySet.attenuate(AgentSession.patterns(envelope.capabilities)),
+              Effect.provideService(Budget.Budget, shared),
+              Effect.provideService(QuotaPolicy.QuotaClassifier, quota)
+            )
+          })))
+    })
+  })

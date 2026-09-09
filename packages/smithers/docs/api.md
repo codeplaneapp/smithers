@@ -118,10 +118,11 @@ The Node composition for the command tree.
 | `seatResolver`, `layerSeatResolver` | constructor, layer | Resolves a declared seat string into a credentialed model. |
 | `testRunner`, `testFlows`, `checkpointStore` | constructors | The `test` flow's runner, the flows it registers, and the checkpoint store. |
 | `rebuildableTransport` | constructor | The replaceable HTTP dispatcher a model captures and uses after seat resolution returns. |
-| `layerExecutor` | `(registry, engine, root, environment, mcpServers?, grants?, requestExecutor?, quotaPolicy?) => Layer<ControlExecutor, never, ControlRuntime \| Journal \| NotificationQueue \| Registry>` | The production run executor. Pass the same `GrantStore` the filesystem gets. |
-| `layerControl` | `(config, registry?, engine?) => Layer` | `Control` alone, over the registry and engine you supply. |
+| `ModuleRegistration` | `Layer<Executable.Catalog, never, host registration services>` | Optional trusted native module registrations; see [native module hosts](guides/native-module-host.md) for authority and single-executor requirements. |
+| `layerExecutor` | `(registry, engine, root, environment, mcpServers?, grants?, requestExecutor?, quotaPolicy?, executionRoot?, modules?) => Layer<ControlExecutor, never, ControlRuntime \| Journal \| NotificationQueue \| Registry>` | The production run executor. Pass the same `GrantStore` the filesystem gets. |
+| `layerControl` | `(config, registry?, engine?, modules?) => Layer` | `Control` alone, over the registry and engine you supply. |
 | `layerOutput` | `Layer<Output>` | Deterministic rendering that also publishes its status as `process.exitCode`. |
-| `layer` | `(config) => Layer` | The complete command-handler environment. This is the production layer for `smthrs`. |
+| `layer` | `(config, modules?) => Layer` | The complete command-handler environment. This is the production layer for `smthrs`. |
 | `layerMemory` | `(root, engine?) => Layer<MemoryStore>` | The durable memory store over the control database. |
 | `layerMemoryRemote` | `Layer<MemoryStore>` | The store a `--remote` invocation gets: none, said out loud. |
 | `layerServer` | `(auth, options?) => Layer` | The control HTTP and WebSocket router on a scoped Node server. A non-loopback host without `listen: true` is rejected synchronously. |
