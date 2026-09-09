@@ -9,7 +9,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/core@next
+pnpm add @smthrs/core@next effect@4.0.0-rc.112
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
@@ -17,11 +17,14 @@ CommonJS with TypeScript declarations. It has no platform bindings: it reads no
 file, opens no socket, and starts no process, so the same build runs in Node,
 in Bun, in a browser, and in a Cloudflare Worker.
 
-Four runtime dependencies install with it:
+The package requires `effect@4.0.0-rc.112` as an exact peer dependency. Keep
+the application on that version so all Smithers packages share one Effect
+runtime. [`effect`](https://effect.website) supplies `Schema`, `Context`,
+`Result`, and `Data`, which appear in this package's public types. Import it
+directly in your own code.
 
-- [`effect`](https://effect.website) supplies `Schema`, `Context`, `Result`,
-  and `Data`, which appear in this package's public types. Import it directly
-  in your own code; it is a dependency, not a peer.
+Three runtime dependencies install with it:
+
 - [`@smthrs/canonical`](https://canonical.smithers.sh/reference/api/) supplies the RFC 8785 canonical JSON
   serialization behind `Digest.canonical`.
 - [`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/) supplies the synchronous SHA-256 behind
