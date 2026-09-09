@@ -3,7 +3,6 @@
  *
  * @since 0.1.0
  */
-import { isRecord } from "@smthrs/canonical/Record"
 import type { ModelRequest, ToolDefinition } from "./ModelRequest.ts"
 
 /**
@@ -76,43 +75,6 @@ const OPENAI_DEFERRED_MODELS = new Set([
 
 const isOpenAiDeferredModel = (modelId: string): boolean => OPENAI_DEFERRED_MODELS.has(modelId.toLowerCase())
 
-const toolCallNames = (value: unknown): ReadonlyArray<string> => {
-  const names: Array<string> = []
-  const visit = (current: unknown): void => {
-    if (Array.isArray(current)) {
-      for (const entry of current) visit(entry)
-      return
-    }
-    if (!isRecord(current)) return
-    const tag = typeof current["_tag"] === "string" ? current["_tag"] : current["type"]
-    if (typeof tag === "string" && tag.toLowerCase().replaceAll("-", "").includes("toolcall")) {
-      const name = current["name"]
-      if (typeof name === "string") names.push(name)
-    }
-    for (const child of Object.values(current)) visit(child)
-  }
-  visit(value)
-  return names
-}
-
-const addedToolNames = (value: unknown): ReadonlyArray<string> => {
-  const names: Array<string> = []
-  const visit = (current: unknown): void => {
-    if (Array.isArray(current)) {
-      for (const entry of current) visit(entry)
-      return
-    }
-    if (!isRecord(current)) return
-    const added = current["addedToolNames"]
-    if (Array.isArray(added)) {
-      for (const name of added) if (typeof name === "string") names.push(name)
-    }
-    for (const child of Object.values(current)) visit(child)
-  }
-  visit(value)
-  return names
-}
-
 const uniqueTools = (tools: ReadonlyArray<ToolDefinition>): ReadonlyArray<ToolDefinition> => {
   const seen = new Set<string>()
   const result: Array<ToolDefinition> = []
@@ -171,11 +133,20 @@ export const resolve = (request: ModelRequest, native: boolean): Resolution => {
   const used = new Set<string>()
   const usedBeforeActivation = new Set<string>()
   const activated = new Set<string>()
+  // One chronological pass over the typed transcript. `messages` is a closed
+  // union of the user, assistant, and tool roles whose parts are a closed union
+  // on `type`, so a call can only reach `used` through an assistant `tool-call`
+  // part and an activation only through a `tool-result` part.
   for (const message of request.messages) {
-    for (const name of toolCallNames(message)) used.add(normalizedName(name))
-    for (const name of addedToolNames(message)) {
-      const normalized = normalizedName(name)
-      if (known.has(normalized)) {
+    for (const part of message.content) {
+      if (part.type === "tool-call") {
+        used.add(normalizedName(part.name))
+        continue
+      }
+      if (part.type !== "tool-result") continue
+      for (const name of part.addedToolNames) {
+        const normalized = normalizedName(name)
+        if (!known.has(normalized)) continue
         if (!activated.has(normalized) && used.has(normalized)) usedBeforeActivation.add(normalized)
         activated.add(normalized)
       }

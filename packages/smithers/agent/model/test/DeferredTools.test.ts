@@ -152,27 +152,22 @@ describe("DeferredTools", () => {
     expect(result.deferred).toEqual([])
   })
 
-  it("reads a tagged tool call and skips names that are not strings", () => {
+  it("records use and activation only from tool-call and tool-result parts", () => {
+    // Each role carries a closed union of parts tagged by `type`, so text and
+    // thinking parts naming a tool contribute to neither set.
     const messages = [
-      { _tag: "ToolCallPart", name: "late", id: "call", arguments: "{}" },
-      { role: "assistant", content: [{ type: "tool-call", id: "bad", name: 42, arguments: "{}" }] },
-      {
-        role: "tool",
-        content: [{ type: "tool-result", toolCallId: "call", content: "", addedToolNames: ["late", 7] }]
-      }
-    ] as unknown as ReadonlyArray<Message>
-    // The walk is deliberately shape-driven, so it is exercised with transcript
-    // entries a decoded request could never hold.
-    const untyped = {
-      ...request([tool("loader", { loader: true }), tool("late", { deferred: true })]),
-      messages
-    } as unknown as ModelRequest
-    const result = DeferredTools.resolve(untyped, true)
+      Message.user("late"),
+      Message.assistant([{ type: "text", text: "late" }, { type: "thinking", text: "late" }]),
+      Message.tool({ type: "tool-result", toolCallId: "call", content: "late", addedToolNames: [] })
+    ]
+    const result = DeferredTools.resolve(
+      request([tool("loader", { loader: true }), tool("late", { deferred: true })], messages),
+      true
+    )
 
-    // The `_tag` call counts as use before activation, so `late` stays immediate.
-    expect(result.immediate.map((entry) => entry.name)).toEqual(["loader", "late"])
-    expect(result.deferred).toEqual([])
-    expect(result.activatedNames).toEqual(["late"])
+    expect(result.immediate.map((entry) => entry.name)).toEqual(["loader"])
+    expect(result.deferred.map((entry) => entry.name)).toEqual(["late"])
+    expect(result.activatedNames).toEqual([])
   })
 
   it("resolves the empty request and drops blank tool names", () => {

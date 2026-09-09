@@ -921,7 +921,7 @@ describe("AnthropicMessages body lowering", () => {
         { role: "user", content: [{ type: "thinking", text: "not user content" }] },
         {
           role: "assistant",
-          content: [{ type: "tool-result", toolCallId: "call", content: "not assistant content" }],
+          content: [{ type: "tool-result", toolCallId: "call", content: "not assistant content", addedToolNames: [] }],
           stopReason: "stop"
         }
       ],
