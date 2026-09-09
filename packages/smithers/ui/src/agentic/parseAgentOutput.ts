@@ -39,16 +39,29 @@ function readArray(record: UnknownRecord, keys: readonly string[]): unknown[] {
   return [];
 }
 
-function textFromPart(value: unknown, acceptedTypes?: ReadonlySet<string>): string | undefined {
-  if (typeof value === "string") return value.trim() ? value : undefined;
-  if (!isRecord(value)) return undefined;
-  const type = readString(value, ["type", "kind"]);
+function isRedactedRecord(value: UnknownRecord): boolean {
   // Provider-redacted thinking is never rendered, and signature/redaction
   // payloads are metadata about hidden reasoning -- drop them outright.
-  if (type && type.toLowerCase() === "redacted_thinking") return undefined;
-  if (value.signature !== undefined || value.redactedData !== undefined || value.redacted_data !== undefined) {
-    return undefined;
-  }
+  return (
+    [value.type, value.kind].some((type) => typeof type === "string" && type.toLowerCase() === "redacted_thinking") ||
+    value.signature !== undefined || value.redactedData !== undefined || value.redacted_data !== undefined
+  );
+}
+
+function isReasoningRecord(value: UnknownRecord): boolean {
+  return [value.type, value.kind].some(
+    (type) => typeof type === "string" && REASONING_CONTAINER_PART_TYPES.has(type.toLowerCase()),
+  );
+}
+
+function isResponseRecord(value: UnknownRecord): boolean {
+  return !isRedactedRecord(value) && !isReasoningRecord(value);
+}
+
+function textFromPart(value: unknown, acceptedTypes?: ReadonlySet<string>): string | undefined {
+  if (typeof value === "string") return value.trim() ? value : undefined;
+  if (!isRecord(value) || !isResponseRecord(value)) return undefined;
+  const type = readString(value, ["type", "kind"]);
   if (acceptedTypes && type && !acceptedTypes.has(type.toLowerCase())) return undefined;
   return readString(value, ["text", "content", "markdown", "value"]);
 }
@@ -68,14 +81,15 @@ const REASONING_CONTAINER_PART_TYPES = new Set(["reasoning", "thinking", "though
 const TOOL_PART_TYPES = new Set(["tool-call", "tool_call", "tool-use", "tool_use"]);
 
 function contentParts(record: UnknownRecord): unknown {
-  const message = isRecord(record.message) ? record.message : undefined;
+  const message = isRecord(record.message) && isResponseRecord(record.message) ? record.message : undefined;
   return message?.content ?? message?.parts ?? record.content ?? record.parts;
 }
 
 function responseText(record: UnknownRecord): string | undefined {
+  if (!isResponseRecord(record)) return undefined;
   const direct = readString(record, ["markdown", "text", "response", "message", "output"]);
   if (direct) return direct;
-  const message = isRecord(record.message) ? record.message : undefined;
+  const message = isRecord(record.message) && isResponseRecord(record.message) ? record.message : undefined;
   const messageText = message ? readString(message, ["markdown", "text", "response", "output"]) : undefined;
   if (messageText) return messageText;
   return joinParts(contentParts(record), RESPONSE_PART_TYPES);
@@ -115,10 +129,7 @@ function summaryFromPart(value: unknown, seen: WeakSet<object>, depth: number): 
   if (!isRecord(value)) return undefined;
   if (depth > MAX_SUMMARY_DEPTH || seen.has(value)) return undefined;
   const type = readString(value, ["type", "kind"]);
-  if (type && type.toLowerCase() === "redacted_thinking") return undefined;
-  if (value.signature !== undefined || value.redactedData !== undefined || value.redacted_data !== undefined) {
-    return undefined;
-  }
+  if (isRedactedRecord(value)) return undefined;
   // A `summary` field only names reasoning text when it rides on a recognized
   // reasoning content part. Unrelated part kinds (tool calls, text, images,
   // ...) and untyped generic content parts use `summary` for their own
@@ -327,6 +338,7 @@ function parseValue(
     return value.trim() ? { response: value, toolCalls: [], streaming: inheritedStreaming } : null;
   }
   if (!isRecord(value)) return null;
+  if (isRedactedRecord(value)) return null;
   // A cycle through the spine is caught by `seen`; a merely very deep acyclic
   // chain is caught by MAX_NEST_DEPTH. Both yield "nothing readable here"
   // rather than a stack overflow.
@@ -340,6 +352,14 @@ function parseValue(
     (status
       ? ["streaming", "running", "in-progress", "in_progress"].includes(status.toLowerCase())
       : inheritedStreaming);
+  // Reasoning records may disclose a summary, but their text, tools, and
+  // envelopes must never be interpreted as ordinary assistant output.
+  if (isReasoningRecord(value)) {
+    const reasoningSummary =
+      readString(value, ["reasoningSummary", "reasoning_summary"]) ??
+      summaryFromPart(value, new WeakSet<object>(), 0);
+    return reasoningSummary ? { reasoningSummary, toolCalls: [], streaming } : null;
+  }
   const response = responseText(value);
   const reasoningSummary = reasoningSummaryText(value);
   const calls = toolCalls(value, streaming);

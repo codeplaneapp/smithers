@@ -111,14 +111,29 @@ so that no shape a provider or a host realistically sends is truncated.
   `output`/`result`/`data`/`response`/`message` spine.
 
 Both traversals carry a `WeakSet`, so a cyclic payload is caught before the
-depth cap is reached. Crossing either bound returns the partial model, which
-falls back to the rendered JSON, rather than overflowing the stack and
-unmounting the React tree.
+depth cap is reached. Over-depth and cyclic branches are discarded. The result
+is `null` when no recognized fields remain; otherwise it is a partial model
+containing only readable response text, disclosed summaries, and tool calls.
+Partial models do not retain discarded raw branches. `AgentOutput` renders
+only model fields and provides no automatic JSON fallback.
+
+Raw reasoning, thinking, and thought records are excluded from response text
+and envelope traversal at every level, including nested message objects.
+Explicitly labeled summaries are retained separately as `reasoningSummary`.
+Records with `type` or `kind` set to `redacted_thinking`, or with defined
+`signature`, `redactedData`, or `redacted_data` metadata, are discarded entirely,
+including summaries.
+
+A host can explicitly render `<pre>{formatJsonSafe(displaySafePayload)}</pre>`
+when parsing returns `null`. The host must approve that payload for display:
+`formatJsonSafe` bounds serialization but does not remove private output, and
+`null` can indicate a privacy rejection. See the
+[fallback example](../guides/render-agent-output.md#format-a-value-you-did-not-produce).
 
 ### Formatting unknown JSON
 
-`src/agentic/formatJsonSafe.ts`, used by `SchemaDisplay` and the `AgentOutput`
-fallback.
+`src/agentic/formatJsonSafe.ts`, used by `SchemaDisplay` and available for
+host-provided JSON fallbacks.
 
 | Constant                 | Value   | Marker at the boundary                                                                                              |
 | ------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------- |

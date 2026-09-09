@@ -25,9 +25,11 @@ export function ResponseSurface({ payload }: { readonly payload: unknown }) {
 The parser walks the common provider shapes: an `output`, `result`, `data`,
 `response`, or `message` spine, and reasoning parts with nested `summary`
 arrays. Two things bound the walk, so a hostile or cyclic payload cannot unmount
-your tree: both traversals cap at depth 16 and carry a `WeakSet`, and crossing
-either bound returns the partial model, which renders as JSON rather than
-overflowing the stack.
+your tree: both traversals cap at depth 16 and carry a `WeakSet`. Over-depth or
+cyclic branches are discarded. The result is `null` when nothing readable
+remains, or a partial model containing only recognized fields. Discarded raw
+branches are not retained. `AgentOutput` renders the model's response, summary,
+and tools; it has no automatic JSON fallback.
 
 The model it produces is small and typed:
 
@@ -43,8 +45,13 @@ const model: AgentOutputModel = {
 ```
 
 `reasoningSummary` carries only text the provider explicitly disclosed as a
-summary. The parser drops raw reasoning and thinking transcripts, and no
-component in this family accepts one.
+summary. The parser drops raw reasoning, thinking, and thought transcripts at
+the root, in content parts, and in nested message or envelope records. It does
+not descend through those records except to read explicitly labeled summaries
+into `reasoningSummary`. Records with `type` or `kind` set to
+`redacted_thinking`, or with defined
+`signature`, `redactedData`, or `redacted_data` metadata are dropped entirely,
+including their summaries.
 
 ## Render streaming markdown
 
@@ -136,14 +143,26 @@ which is why the surface needs no motion to communicate progress.
 
 ## Format a value you did not produce
 
-`formatJsonSafe` is the bounded stringifier the fallback rendering uses. Reach
-for it directly whenever you display a value from a model or a provider:
+Use `formatJsonSafe` explicitly when the host wants a bounded JSON fallback.
+Only pass payloads the host has already approved for display to this example:
+the formatter bounds serialization but does not filter private reasoning. A
+`null` parse result can mean private output was discarded.
 
-```ts
-import { formatJsonSafe } from "@smthrs/ui"
+```tsx
+import { AgentOutput, formatJsonSafe, parseAgentOutput } from "@smthrs/ui"
 
-const text: string = formatJsonSafe(unknownValue)
+export function ApprovedResponseSurface({
+  displaySafePayload
+}: { readonly displaySafePayload: unknown }) {
+  const model = parseAgentOutput(displaySafePayload)
+  return model === null
+    ? <pre>{formatJsonSafe(displaySafePayload)}</pre>
+    : <AgentOutput model={model} />
+}
 ```
+
+This fallback runs only for `null`. Partial models render their recognized
+fields and do not render discarded branches as JSON.
 
 It truncates at four bounds, each marked in the output rather than silently: 12
 levels of depth, 200 entries per container, 8192 characters per string, and
