@@ -65,13 +65,19 @@ See [the write boundary](https://database.smithers.sh/concepts/write-boundary/).
 ### afterCommit
 
 ```ts
-const afterCommit: (update: Effect.Effect<void>) => Effect.Effect<boolean>
+const afterCommit: (update: Effect.Effect<void>, client?: SqlClient.SqlClient) => Effect.Effect<boolean>
 ```
 
 Registers a short, non-failing process-local update inside a managed `write`.
 The outermost successful commit runs it once, outside SQL retries. Failed
 attempts and rolled-back savepoints discard their registrations. The update
 runs uninterruptibly; it must not block or perform external deliveries.
+
+`client` scopes the registration to that client's managed write. A store passes
+its captured client, `DurableWriter.afterCommit(publish, sql)`, so an update
+that belongs to one database cannot ride the commit of a nested write to
+another one: the call answers `false` when the open scope belongs to a
+different client. Omitting `client` accepts whichever managed write is open.
 
 Returns `false` without running the update when the current transaction is not
 owned by the writer, including raw SQL transactions/savepoints. Skip optional
@@ -333,7 +339,7 @@ only. No exporter ships here: provide one, for example from
 ### writeRetries
 
 ```ts
-const writeRetries: Metric.Counter
+const writeRetries: Metric.Counter<number>
 ```
 
 Counter `flows_db_write_retries`, described as "Durable write transaction
