@@ -74,7 +74,43 @@ describe("parseHunks line accounting", () => {
 
   test("partial reports a patch that mentions hunks but parses none", () => {
     expect(parseHunks("@@ truncated").partial).toBe(true);
-    expect(parseHunks("@@ -1,1 +1,1 @@\n+x\n").partial).toBe(false);
+    // `@@ -1,1 +1,1 @@` followed by a lone addition is itself a cut hunk: the
+    // header promises one OLD line the body never gives. This case used to be
+    // pinned as complete, which is what let a truncated patch pass as whole.
+    expect(parseHunks("@@ -1,1 +1,1 @@\n+x\n").partial).toBe(true);
+    expect(parseHunks("@@ -0,0 +1,1 @@\n+x\n").partial).toBe(false);
+  });
+});
+
+describe("parseHunks reports a hunk cut short of its header's budget", () => {
+  test("a hunk that stops at EOF is partial", () => {
+    // The reviewer's probe: the header promises three lines a side and the body
+    // stops after one, yet the file used to be handed to the view as complete.
+    const parsed = parseHunks("@@ -1,3 +1,3 @@\n only-one-line");
+    expect(parsed.lines.map((line) => line.text)).toEqual(["@@ -1,3 +1,3 @@", "only-one-line"]);
+    expect(parsed.partial).toBe(true);
+  });
+
+  test("a hunk cut off by the next hunk header is partial", () => {
+    expect(parseHunks("@@ -1,3 +1,3 @@\n a\n@@ -10,1 +10,1 @@\n b\n").partial).toBe(true);
+  });
+
+  test("a hunk cut off by the next file's header is partial", () => {
+    expect(parseHunks("@@ -1,3 +1,3 @@\n a\ndiff --git a/b.ts b/b.ts\n").partial).toBe(true);
+  });
+
+  test("a row that is not hunk content ends the hunk and reports the cut", () => {
+    expect(parseHunks("@@ -1,3 +1,3 @@\n a\nnot a diff row\n").partial).toBe(true);
+  });
+
+  test("a hunk whose body spends both budgets is not partial", () => {
+    expect(parseHunks("@@ -1,2 +1,2 @@\n a\n b\n").partial).toBe(false);
+    expect(parseHunks("@@ -1 +1 @@\n-old\n+new\n").partial).toBe(false);
+    expect(parseHunks("@@ -1,2 +1,2 @@\n a\n b\n@@ -9,1 +9,1 @@\n c\n").partial).toBe(false);
+  });
+
+  test("a complete hunk followed by patch trailers stays complete", () => {
+    expect(parseHunks("@@ -1,1 +1,1 @@\n-old\n+new\n-- \n2.39.0\n").partial).toBe(false);
   });
 });
 
@@ -144,6 +180,37 @@ describe("detectBinary agrees with parseUnifiedFile", () => {
 
   test("an explicit isBinary flag still wins", () => {
     expect(detectBinary(file({ isBinary: true }))).toBe(true);
+  });
+
+  test("a CONTEXT line reading GIT binary patch is text, not a marker", () => {
+    // The reviewer's probe. parseHunks strips the row's leading space, so its
+    // text is byte-identical to git's metadata marker; only its line numbers
+    // say it is hunk body. Reading the text alone hid the real addition.
+    const patch = "diff --git a/readme.md b/readme.md\n"
+      + "--- a/readme.md\n+++ b/readme.md\n"
+      + "@@ -1 +1,2 @@\n"
+      + " GIT binary patch\n"
+      + "+Important added text\n";
+    const parsed = parseUnifiedFile(patch);
+    expect(parsed.isBinary).toBeUndefined();
+    expect(parsed.add).toBe(1);
+    expect(detectBinary(parsed)).toBe(false);
+  });
+
+  test("a CONTEXT line reading Binary files … is text too", () => {
+    const patch = "diff --git a/readme.md b/readme.md\n"
+      + "@@ -1,2 +1,2 @@\n"
+      + " Binary files a/logo.png and b/logo.png differ\n"
+      + " and the note continues\n";
+    const parsed = parseUnifiedFile(patch);
+    expect(parsed.isBinary).toBeUndefined();
+    expect(detectBinary(parsed)).toBe(false);
+  });
+
+  test("an unnumbered marker row in a hand-built file is still binary", () => {
+    // A DiffFile assembled from raw patch metadata, not from parseHunks: the
+    // marker carries no line number because git writes it outside any hunk.
+    expect(detectBinary(file({ lines: [{ kind: "context", text: "GIT binary patch" }] }))).toBe(true);
   });
 });
 

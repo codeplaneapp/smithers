@@ -7,7 +7,8 @@ import type { Diff, DiffFile, DiffFileStatus, DiffLine, Hunk } from "./diff";
  *
  * - `parseUnifiedFile` / `parseHunks` → turn a raw unified patch into a
  *   `DiffFile` (add/del totals, per-line numbering, status, rename + mode edges).
- * - `detectBinary`  → the git binary-marker heuristic.
+ * - `detectBinary`  → the git binary-marker check, read off patch metadata
+ *   rows rather than off hunk-body text.
  * - `groupHunks`    → split a file's flat lines into `@@`-headed hunks.
  * - `paginateHunks` → trim whole hunks then partials to a line budget.
  * - `initialExpanded` → the large-diff expand seed (≤3 all, else first 3).
@@ -47,11 +48,20 @@ export function statusLetter(file: DiffFile): string {
  * function then hid a real diff behind a placeholder. Same class of bug as the
  * `@@`/`+++` sniffing that commit d7222dda1f fixed by tagging headers at parse
  * time; this is the same fix one function over.
+ *
+ * A NUMBERED context row is the last piece of that structure. `parseHunks`
+ * numbers every context line it renders and strips the leading space that made
+ * it context, so a text patch whose body reads ` GIT binary patch` produced a
+ * row whose text is byte-identical to git's metadata marker. Git writes that
+ * marker outside any hunk, where it has no line number, so the number is what
+ * tells the two apart. Without this check a real addition rendered as a binary
+ * placeholder.
  */
 export function detectBinary(file: DiffFile): boolean {
   if (file.isBinary) return true;
   for (const line of file.lines) {
     if (line.header === true || line.kind !== "context") continue;
+    if (line.lnOld !== undefined || line.ln !== undefined) continue;
     if (line.text === "GIT binary patch") return true;
     if (line.text.startsWith("Binary files ")) return true;
   }
@@ -267,9 +277,13 @@ function headerPath(quoted: string | undefined, plain: string | undefined): stri
 /**
  * Parse the hunk body of a unified patch into flat `DiffLine`s, counting
  * additions and deletions and numbering each side. `@@ … @@` headers ride along
- * as tagged `context` lines so {@link groupHunks} can re-split later. `partial`
- * is true when the text looks like it has hunks but none parsed (a truncated
- * patch).
+ * as tagged `context` lines so {@link groupHunks} can re-split later.
+ *
+ * `partial` is true when the patch was cut: either the text looks like it has
+ * hunks but none parsed, or a hunk body ended before it spent both of the line
+ * budgets its `@@` header declared. Tracking only the first case reported a
+ * patch chopped in half as complete, so the view showed a truncated file with
+ * no warning.
  */
 export function parseHunks(diffText: string): {
   lines: DiffLine[];
@@ -284,14 +298,26 @@ export function parseHunks(diffText: string): {
   let newLine = 0;
   let inHunk = false;
   let sawHunk = false;
+  let truncated = false;
   // Budgets from the `@@` header. They stop a hunk body deterministically
   // instead of relying on a prefix that a file's own content might carry.
   let oldRemaining = 0;
   let newRemaining = 0;
 
+  /**
+   * End the open hunk. A hunk is complete only once both budgets are spent, so
+   * closing one with either side outstanding means the body was cut short by
+   * EOF, by the next header, or by a row that is not hunk content.
+   */
+  const closeHunk = (): void => {
+    if (inHunk && (oldRemaining > 0 || newRemaining > 0)) truncated = true;
+    inHunk = false;
+  };
+
   for (const raw of patchRows(diffText)) {
     const hunk = HUNK_RE.exec(raw);
     if (hunk) {
+      closeHunk();
       sawHunk = true;
       inHunk = true;
       oldLine = Number(hunk[1]);
@@ -340,12 +366,13 @@ export function parseHunks(diffText: string): {
       newRemaining -= 1;
       continue;
     }
-    if (raw.startsWith("diff --git ")) {
-      inHunk = false;
-    }
+    // Anything else ends the body: git writes only " ", "+", "-" and "\" rows
+    // inside a hunk, so the next file's header or any other row closes it.
+    closeHunk();
   }
+  closeHunk();
 
-  return { lines, add, del, partial: diffText.includes("@@ ") && !sawHunk };
+  return { lines, add, del, partial: truncated || (diffText.includes("@@ ") && !sawHunk) };
 }
 
 function statusFromDiffText(diffText: string): DiffFileStatus {

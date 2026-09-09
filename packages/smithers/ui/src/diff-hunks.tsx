@@ -40,6 +40,11 @@ export type DiffHunksProps = Omit<ComponentProps<"div">, "children"> & {
  * before this it documented nothing, because the component simply rendered an
  * empty body for a file whose `lines` the parser had deliberately left empty.
  *
+ * A file the parser could not read whole (`DiffFile.partial`) renders a warning
+ * above its hunks, so a patch cut mid-hunk never reads as the complete change.
+ * That warning is what `DiffFile.partial` has always documented and what this
+ * component never drew.
+ *
  * `revealed` / `onReveal` are caller-threaded so the pagination state lives
  * wherever the caller keeps its state, never in this component.
  */
@@ -58,7 +63,17 @@ export function DiffHunks({ file, revealed = true, onReveal, className, ...props
   const { hunks, hidden } = paginateHunks(file, visibleCount);
 
   return (
-    <div data-slot="diff-hunks" className={cn("sui-diff", className)} {...props}>
+    <div
+      data-slot="diff-hunks"
+      {...(file.partial === true ? { "data-partial": "true" } : {})}
+      className={cn("sui-diff", className)}
+      {...props}
+    >
+      {file.partial === true ? (
+        <div className="sui-diff-partial" role="status">
+          Partial diff: some hunks could not be parsed.
+        </div>
+      ) : null}
       {hunks.map((hunk, hunkIndex) => (
         <div key={hunk.header || hunkIndex}>
           {hunk.header ? (

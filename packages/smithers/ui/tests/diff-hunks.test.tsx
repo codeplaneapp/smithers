@@ -401,4 +401,38 @@ describe("DiffHunks reveal interaction", () => {
     expect(html).not.toContain('data-binary="true"');
     expect(html).toContain("sui-diff-line");
   });
+
+  test("a text file whose CONTEXT line reads GIT binary patch still renders its addition", () => {
+    // The reviewer's probe end to end: the placeholder used to replace a real
+    // add because the marker check read the row's text after the parser had
+    // stripped the leading space that made it context.
+    const html = renderToStaticMarkup(
+      <DiffHunks
+        file={parseUnifiedFile(
+          "diff --git a/readme.md b/readme.md\n--- a/readme.md\n+++ b/readme.md\n"
+            + "@@ -1 +1,2 @@\n GIT binary patch\n+Important added text\n",
+        )}
+      />,
+    );
+    expect(html).not.toContain('data-binary="true"');
+    expect(html).toContain("Important added text");
+  });
+
+  test("a patch cut mid-hunk renders the warning its type promises", () => {
+    const file = parseUnifiedFile("diff --git a/a.ts b/a.ts\n@@ -1,3 +1,3 @@\n only-one-line\n");
+    expect(file.partial).toBe(true);
+    const html = renderToStaticMarkup(<DiffHunks file={file} />);
+    expect(html).toContain('data-partial="true"');
+    expect(html).toContain("sui-diff-partial");
+    expect(html).toContain("could not be parsed");
+    // The lines it did parse still render.
+    expect(html).toContain("only-one-line");
+  });
+
+  test("a complete patch renders no partial warning", () => {
+    const html = renderToStaticMarkup(
+      <DiffHunks file={parseUnifiedFile("diff --git a/a.ts b/a.ts\n@@ -1,2 +1,2 @@\n a\n b\n")} />,
+    );
+    expect(html).not.toContain("sui-diff-partial");
+  });
 });

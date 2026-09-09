@@ -186,6 +186,18 @@ negative or non-finite count rather than rendering `NaN`. The four constants are
 the pagination policy documented in
 [Failure codes and limits](./reference/contracts.md).
 
+`parseHunks` reports `partial: true` when a hunk body ends before it spends both
+of the line budgets its `@@` header declares, whether the body is cut by the end
+of the text, by the next header, or by a row that is not hunk content. It also
+reports `partial` when the text mentions hunks but none parse. `parseUnifiedFile`
+carries the flag onto `DiffFile.partial`, and `DiffHunks` renders a
+`sui-diff-partial` warning above the hunks for such a file.
+
+`detectBinary` reads the `GIT binary patch` and `Binary files ` markers off
+patch metadata rows only: an unnumbered context line that is not a hunk header.
+Hunk body rows carry a line number, so a text diff whose own content reads
+`GIT binary patch` still renders its hunks instead of the binary placeholder.
+
 ## Time
 
 Also available from `@smthrs/ui/time`.
