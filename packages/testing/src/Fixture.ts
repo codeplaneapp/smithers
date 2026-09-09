@@ -205,6 +205,8 @@ const failureSchema = Schema.Struct({
     "unknown"
   ]),
   message: Schema.String,
+  // A key path only, never a value: see `ModelErrorLike`.
+  path: Schema.optional(Schema.String),
   retryAfterMillis: Schema.optional(Schema.Number),
   resetAtEpochMillis: Schema.optional(Schema.Number),
   resetSource: Schema.optional(Schema.String),

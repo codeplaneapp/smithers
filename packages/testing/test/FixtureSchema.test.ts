@@ -113,6 +113,27 @@ type Failure = NonNullable<RecordedCall["failure"]>
 const _failureKeys: Exact<keyof DecodedFailure, Exclude<keyof Failure, "_tag">> = true
 const _failureCodes: Exact<DecodedFailure["code"], Failure["code"]> = true
 
+// The key comparisons above are between two local shapes, so they hold whether
+// or not either one still mirrors `@smthrs/model`; `ModelLikeParity.test.ts` is
+// what pins them to production. What they cannot see either way is a field both
+// shapes declare that the schema then refuses to decode, so a recorded failure
+// with every optional field populated goes through the decoder below.
+//
+// `Complete` is why that vector cannot go stale: a field added to
+// `ModelErrorLike` stops this object compiling until it is carried.
+type Complete<T> = { readonly [K in keyof T]-?: Exclude<T[K], undefined> }
+const completeFailure: Complete<Omit<Failure, "_tag">> = {
+  code: "invalid_request",
+  message: "thinking.budget_tokens must be at least 1024",
+  path: "$.thinking.budget_tokens",
+  retryAfterMillis: 250,
+  resetAtEpochMillis: 1_757_000_000_000,
+  resetSource: "retry-after",
+  providerCode: "invalid_request_error",
+  requestId: "req_1",
+  httpStatus: 400
+}
+
 const request = (modelId: string): ModelRequestLike => ({
   modelId,
   system: [{ type: "text", text: "You are a concise reviewer." }],
@@ -135,6 +156,22 @@ describe("the Fixture interface and the Fixture schema are one contract", () => 
       expect(call.model).toBe("openai:gpt-5-mini")
       expect(call.request.modelId).toBe("openai:gpt-5-mini")
     })))
+
+  it.effect("decodes a recorded failure with every optional field populated", () =>
+    Effect.gen(function*() {
+      const call = {
+        request: request("openai:gpt-5-mini"),
+        model: "openai:gpt-5-mini",
+        events: [],
+        failure: completeFailure
+      }
+      const decoded = yield* decode({ calls: [call] })
+      const failure = decoded.calls[0]?.failure
+      // Field by field, not `toBeDefined`: a field the schema silently dropped
+      // would leave a fixture that replays a refusal the recorder captured more
+      // of than the replay hands back.
+      expect(failure).toStrictEqual(completeFailure)
+    }))
 
   it.effect("rejects a call whose model disagrees with its own request.modelId", () =>
     Effect.gen(function*() {

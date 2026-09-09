@@ -991,6 +991,7 @@ interface ModelErrorLike {
     | "invalid_provider_output"
     | "unknown"
   readonly message: string
+  readonly path?: string | undefined
   readonly retryAfterMillis?: number | undefined
   readonly resetAtEpochMillis?: number | undefined
   readonly resetSource?: string | undefined
@@ -1005,6 +1006,12 @@ tag, and required in everything a replay hands back: a consumer that classifies
 a provider refusal, such as a quota park, matches on the tag, so a replayed
 refusal without one is not the failure that was recorded. `RecordedModel`
 stamps it.
+
+`path` is the key path a refusal is about, such as
+`$.thinking.budget_tokens`. It is a path only and never a value, because a
+request value may carry credentials or user content, which is what makes it
+safe for a fixture to store. `RecordingModel` records it so a replayed
+`invalid_request` names the field the provider rejected.
 
 `code` is exactly the model package's `ModelErrorCode`. The permission and
 grant-store codes belong to the kernel: they are separate typed error classes

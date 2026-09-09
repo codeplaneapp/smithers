@@ -174,6 +174,16 @@ export interface ModelErrorLike {
     | "invalid_provider_output"
     | "unknown"
   readonly message: string
+  /**
+   * The key path a refusal is about, for example `messages[2].content[0].text`.
+   *
+   * A path only, never a value: `/model/ModelError` states that invariant
+   * because a request value may carry credentials or user content, which is
+   * what makes the field safe for a fixture to store. Recording it is what
+   * lets a replayed `invalid_request` name the field the provider rejected
+   * rather than only that it rejected something.
+   */
+  readonly path?: string | undefined
   readonly retryAfterMillis?: number | undefined
   readonly resetAtEpochMillis?: number | undefined
   readonly resetSource?: string | undefined

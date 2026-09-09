@@ -30,6 +30,7 @@ const recordedFailure = (error: Model.ModelFailure): ModelErrorLike | undefined 
     ? {
       code: error.code,
       message: error.message,
+      path: error.path,
       retryAfterMillis: error.retryAfterMillis,
       resetAtEpochMillis: error.resetAtEpochMillis,
       resetSource: error.resetSource,
