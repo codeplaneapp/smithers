@@ -7,7 +7,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Cause, Effect, Exit, Layer, Option } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as AttemptStore from "../src/AttemptStore.ts"
@@ -36,6 +36,29 @@ describe("durable run state redaction", () => {
       RunStore.RunStore | AttemptStore.AttemptStore | DurableWriter | SqlClient.SqlClient
     >
   ) => body.pipe(Effect.provide(storeLayers), Effect.provide(TestClock.layer()))
+
+  it.effect("persists default Redacted schema JSON encoding verbatim", () =>
+    Effect.gen(function*() {
+      const secret = "synthetic-credential"
+      const stateSchema = Schema.Struct({ apiKey: Schema.Redacted(Schema.String) })
+      const encoded = Schema.encodeSync(Schema.toCodecJson(stateSchema))({ apiKey: Redacted.make(secret) })
+      expect(encoded).toEqual({ apiKey: secret })
+      const stateJson = JSON.stringify(encoded)
+      const persisted = yield* withStores(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        yield* store.create("redacted-json", stateJson)
+        return (yield* store.get("redacted-json")).stateJson
+      }))
+      expect(persisted).toBe(stateJson)
+    }))
+
+  it("refuses Redacted schema JSON encoding when disallowJsonEncode is set", () => {
+    const stateSchema = Schema.Struct({
+      apiKey: Schema.Redacted(Schema.String, { disallowJsonEncode: true })
+    })
+    expect(() => Schema.encodeSync(Schema.toCodecJson(stateSchema))({ apiKey: Redacted.make("synthetic-credential") }))
+      .toThrow()
+  })
 
   it.effect("round-trips a run's durable state verbatim", () =>
     Effect.gen(function*() {
@@ -165,6 +188,47 @@ describe("durable run state redaction", () => {
       }
       expect(serialized.length).toBeLessThan(2_000)
       return error
+    }
+
+    for (const [kind, input] of [["string", secret], ["object", { apiKey: secret }]] as const) {
+      it.effect(`keeps rejected ${kind} timestamps out of published diagnostics`, () =>
+        withStores(Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          const runId = "timestamp-hygiene"
+          const owner = { hostId: "host-a", pid: 42, nonce: "nonce-a" }
+          const pending = { status: "pending", owner: null, heartbeatAtMs: null } as const
+          const evidence = { expectedOwner: owner, checkedAtMs: 0, kind: "lease-expired" } as const
+          const timestamp = input as unknown as number
+          const operations: ReadonlyArray<readonly [string, string, Effect.Effect<unknown, RunStore.RunStoreError>]> = [
+            ["requestCancel", "nowMs", store.requestCancel(runId, timestamp)],
+            ["requestCancelLineage", "nowMs", store.requestCancelLineage(runId, timestamp)],
+            ["claim", "nowMs", store.claim(runId, pending, owner, timestamp)],
+            ["claimAndOwn", "nowMs", store.claimAndOwn(runId, pending, owner, timestamp)],
+            ["heartbeat", "nowMs", store.heartbeat(runId, owner, timestamp)],
+            ["activate", "claimedAtMs", store.activate(runId, owner, timestamp, pending)],
+            ["abandonClaim", "claimedAtMs", store.abandonClaim(runId, owner, timestamp)],
+            ["recoverClaim", "claimedAtMs", store.recoverClaim(runId, owner, timestamp, owner, 0, evidence)],
+            ["recoverClaim", "nowMs", store.recoverClaim(runId, owner, 0, owner, timestamp, evidence)],
+            ["steal", "nowMs", store.steal(runId, pending, owner, timestamp, evidence)],
+            ["acknowledgeCancel", "nowMs", store.acknowledgeCancel(runId, owner, timestamp)]
+          ]
+          for (const [method, field, operation] of operations) {
+            const exit = yield* Effect.exit(operation)
+            const error = errorOf(exit)
+            expect(error).toMatchObject({ code: "invalid_run", method })
+            for (
+              const rendered of [
+                JSON.stringify(error),
+                JSON.stringify(error.cause),
+                error.message,
+                Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+              ]
+            ) {
+              expect(rendered).not.toContain(secret)
+            }
+            expect(error.cause).toEqual({ field, detail: "must be a non-negative safe integer" })
+          }
+        })))
     }
 
     it.effect("keeps create's published error cause free of executable state", () =>

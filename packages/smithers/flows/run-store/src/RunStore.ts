@@ -721,13 +721,12 @@ const snapshotRunId = (method: string, input: unknown): Effect.Effect<string, Ru
 const snapshotTimestamp = (
   method: string,
   field: string,
-  input: unknown,
-  cause?: unknown
+  input: unknown
 ): Effect.Effect<number, RunStoreError> =>
   typeof input === "number" && validTimestamp(input)
     ? Effect.succeed(input)
     : Effect.fail(
-      invalidRunError(method, cause ?? field, "must be a non-negative safe integer")
+      invalidRunError(method, field, "must be a non-negative safe integer")
     )
 
 /**
@@ -744,16 +743,17 @@ const snapshotLeaseReading = (
   method: string,
   field: string,
   input: unknown,
-  cause: Readonly<Record<string, unknown>>
+  cause: { readonly runId: string; readonly claimedAtMs?: number }
 ): Effect.Effect<number, RunStoreError> =>
   Effect.gen(function*() {
-    const nowMs = yield* snapshotTimestamp(method, field, input, cause)
+    const nowMs = yield* snapshotTimestamp(method, field, input)
     const clockMs = yield* Clock.currentTimeMillis
     if (nowMs > clockMs + heartbeatSkewAllowanceMs) {
       return yield* Effect.fail(
         invalidRunError(method, {
           ...cause,
           field,
+          nowMs,
           clockMs,
           detail: "runs ahead of the store clock by more than the heartbeat skew allowance"
         })
@@ -1048,9 +1048,12 @@ const evidenceMatchesOwner = (
  * `state_json` is executable state: it is decoded and re-entered on every
  * resume, so it is persisted and returned byte-for-byte. Nothing rewrites it
  * on the way through — a redactor here would silently change what the flow
- * re-reads (issue #72). Credential hygiene is an observability concern and
- * lives on the journal-event and export surfaces; a value that must never be
- * persisted at all is a `Redacted` field in the caller's state schema.
+ * re-reads (issue #72). `Schema.Redacted` hides inspection but allows schema
+ * JSON encoding by default. Use `Schema.Redacted(Schema.String, {
+ * disallowJsonEncode: true })` to refuse JSON encoding, or exclude credentials
+ * from the persistence schema and store a secret reference resolved from a
+ * secret provider on resume. Publication hygiene belongs on journal-event
+ * and export surfaces.
  *
  * @since 0.1.0
  * @category constructors
@@ -1178,12 +1181,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
   ): Effect.Effect<RequestCancelOutcome, RunStoreError> =>
     Effect.gen(function*() {
       const runId = yield* snapshotRunId("requestCancel", runIdInput)
-      const nowMs = yield* snapshotTimestamp(
-        "requestCancel",
-        "nowMs",
-        nowMsInput,
-        { runId, nowMs: nowMsInput }
-      )
+      const nowMs = yield* snapshotTimestamp("requestCancel", "nowMs", nowMsInput)
       yield* Effect.annotateCurrentSpan({ runId })
       return yield* write(
         "requestCancel",
@@ -1282,7 +1280,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
   const requestCancelLineage = Effect.fn("RunStore.requestCancelLineage")((runIdInput: string, nowMsInput: number) =>
     Effect.gen(function*() {
       const runId = yield* snapshotRunId("requestCancelLineage", runIdInput)
-      const nowMs = yield* snapshotTimestamp("requestCancelLineage", "nowMs", nowMsInput, { runId })
+      const nowMs = yield* snapshotTimestamp("requestCancelLineage", "nowMs", nowMsInput)
       yield* Effect.annotateCurrentSpan({ runId })
       return yield* write(
         "requestCancelLineage",
@@ -1321,7 +1319,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         "claim",
         "nowMs",
         nowMsInput,
-        { runId, nowMs: nowMsInput }
+        { runId }
       )
       yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
       return yield* write(
@@ -1377,7 +1375,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         "claimAndOwn",
         "nowMs",
         nowMsInput,
-        { runId, nowMs: nowMsInput }
+        { runId }
       )
       const evidence = evidenceInput === undefined
         ? undefined
@@ -1455,8 +1453,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const claimedAtMs = yield* snapshotTimestamp(
         "activate",
         "claimedAtMs",
-        claimedAtMsInput,
-        { runId, claimedAtMs: claimedAtMsInput }
+        claimedAtMsInput
       )
       const expected = yield* snapshotExpected("activate", expectedInput)
       yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
@@ -1558,15 +1555,13 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       const runId = yield* snapshotRunId("recoverClaim", runIdInput)
       const staleClaimant = yield* snapshotOwner("recoverClaim", "staleClaimant", staleClaimantInput)
-      const timestampCause = { runId, claimedAtMs: claimedAtMsInput, nowMs: nowMsInput }
       const claimedAtMs = yield* snapshotTimestamp(
         "recoverClaim",
         "claimedAtMs",
-        claimedAtMsInput,
-        timestampCause
+        claimedAtMsInput
       )
       const observer = yield* snapshotOwner("recoverClaim", "observer", observerInput)
-      const nowMs = yield* snapshotLeaseReading("recoverClaim", "nowMs", nowMsInput, timestampCause)
+      const nowMs = yield* snapshotLeaseReading("recoverClaim", "nowMs", nowMsInput, { runId, claimedAtMs })
       const evidence = yield* snapshotEvidence("recoverClaim", evidenceInput)
       yield* Effect.annotateCurrentSpan({ runId, observerHostId: observer.hostId })
       return yield* Effect.suspend((): Effect.Effect<RecoverClaimOutcome, RunStoreError> => {
@@ -1616,7 +1611,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         "heartbeat",
         "nowMs",
         nowMsInput,
-        { runId, nowMs: nowMsInput }
+        { runId }
       )
       yield* Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId })
       return yield* write(
@@ -1759,7 +1754,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         "steal",
         "nowMs",
         nowMsInput,
-        { runId, nowMs: nowMsInput }
+        { runId }
       )
       const evidence = yield* snapshotEvidence("steal", evidenceInput)
       yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
@@ -1808,7 +1803,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       const runId = yield* snapshotRunId("acknowledgeCancel", id)
       const owner = yield* snapshotOwner("acknowledgeCancel", "owner", ownerInput)
-      const observedAtMs = yield* snapshotTimestamp("acknowledgeCancel", "nowMs", time, { runId })
+      const observedAtMs = yield* snapshotTimestamp("acknowledgeCancel", "nowMs", time)
       const acknowledgement = JSON.stringify({ observedAtMs, owner })
       return yield* write(
         "acknowledgeCancel",
