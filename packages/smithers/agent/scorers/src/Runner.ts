@@ -101,14 +101,6 @@ export interface Service {
 export class Runner extends Context.Service<Runner, Service>()("flows/scorers/Runner") {}
 
 /**
- * Constructs a scorer runner.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const make = (service: Service): Service => Runner.of(service)
-
-/**
  * Constructs an inoperative scorer runner.
  *
  * @category constructors

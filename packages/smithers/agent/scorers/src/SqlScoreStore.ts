@@ -397,7 +397,7 @@ export const make: Effect.Effect<
       ${row.at}
     )`.pipe(Effect.mapError(DurableWriter.fromSqlError))
 
-  return ScoreStore.make({
+  return ScoreStore.ScoreStore.of({
     record: (observation) => {
       const prepared = prepare(observation)
       return prepared.pipe(

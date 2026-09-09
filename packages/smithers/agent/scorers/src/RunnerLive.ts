@@ -135,7 +135,7 @@ export const layer = (options: Options = {}): Layer.Layer<Runner.Runner, never, 
         Effect.forEach(jobs, (job) => execute(snapshot(job)), {
           concurrency: concurrency(batchOptions?.concurrency ?? options.concurrency)
         })
-      return Runner.make({
+      return Runner.Runner.of({
         submit: (job) => Queue.offer(queue, snapshot(job)).pipe(Effect.asVoid),
         runBatch: (jobs, batchOptions) =>
           runBatchCorrelated(jobs, batchOptions).pipe(

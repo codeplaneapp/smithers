@@ -8,6 +8,14 @@ are history, not the release that carries it.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed `Runner.make` and `ScoreStore.make`. Both forwarded their only
+  argument to the exported context service class and validated nothing, so the
+  package documented two constructors for one service. Construct through
+  `Runner.Runner.of` and `ScoreStore.ScoreStore.of`. `makeNoop` stays on both
+  namespaces because it supplies an implementation rather than forwarding one.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

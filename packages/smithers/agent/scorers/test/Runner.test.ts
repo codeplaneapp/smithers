@@ -18,7 +18,7 @@ const recorder = (
   const seen: Recorder["seen"] = []
   return {
     seen,
-    store: ScoreStore.make({
+    store: ScoreStore.ScoreStore.of({
       record: () => Effect.void,
       recordOnce: (identity, observation) =>
         recordOnce === undefined

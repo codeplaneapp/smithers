@@ -273,7 +273,6 @@ Every public export, once.
 | `ScoreStore.Page`                    | models       | Page bounds for `observations`: `limit`, `offset`, and the `before` filter.       |
 | `ScoreStore.Service`                 | services     | The durable score store implementation.                                           |
 | `ScoreStore.ScoreStore`              | services     | Context service for durable scorer observations.                                  |
-| `ScoreStore.make`                    | constructors | Constructs a score store.                                                         |
 | `ScoreStore.makeNoop`                | constructors | Constructs an inoperative score store.                                            |
 | `ScoreStore.layerNoop`               | layers       | Provides the inoperative score store.                                             |
 | `ScoreStore.validate`                | validation   | Decodes an observation against `Observation` before it is persisted.              |
@@ -285,7 +284,6 @@ Every public export, once.
 | `Runner.Outcome`                     | models       | A batch observation tagged with its job identity and durable write result.        |
 | `Runner.Service`                     | services     | The runtime scorer runner implementation.                                         |
 | `Runner.Runner`                      | services     | Context service for live and batch scorer execution.                              |
-| `Runner.make`                        | constructors | Constructs a scorer runner.                                                       |
 | `Runner.makeNoop`                    | constructors | Constructs an inoperative scorer runner.                                          |
 | `Runner.layerNoop`                   | layers       | Provides the inoperative scorer runner.                                           |
 | `Runner.jobIdentity`                 | constructors | Builds a length-prefixed `Job.identity` from its components.                      |

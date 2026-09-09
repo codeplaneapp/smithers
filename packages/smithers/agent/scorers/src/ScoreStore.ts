@@ -208,14 +208,6 @@ export interface Service {
 export class ScoreStore extends Context.Service<ScoreStore, Service>()("flows/scorers/ScoreStore") {}
 
 /**
- * Constructs a score store.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const make = (service: Service): Service => ScoreStore.of(service)
-
-/**
  * Constructs an inoperative score store.
  *
  * @category constructors
