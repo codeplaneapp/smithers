@@ -36,20 +36,23 @@ describe("TestHost memory filesystem", () => {
       expect(listing).toEqual([["deep"], ["nest"]])
     }))
 
-  it.effect("does not materialize parents for a non-recursive mkdir, though listings derive their names", () =>
+  it.effect("refuses a non-recursive mkdir with a missing parent without creating entries", () =>
     Effect.gen(function*() {
       const fs = BrowserFileSystem.make(TestHost.makeMemoryFs())
 
       const result = yield* (
         Effect.gen(function*() {
-          yield* fs.makeDirectory("/one/two")
+          const failure = yield* Effect.flip(fs.makeDirectory("/one/two"))
           const listedRoot = yield* fs.readDirectory("/")
           const missingParent = yield* Effect.flip(fs.stat("/one"))
-          return { listedRoot, missingParent }
+          const missingChild = yield* Effect.flip(fs.stat("/one/two"))
+          return { failure, listedRoot, missingParent, missingChild }
         })
       )
 
-      expect(result.listedRoot).toEqual(["one"])
+      expect(result.failure).toMatchObject({ reason: { _tag: "NotFound", method: "makeDirectory" } })
+      expect(result.listedRoot).toEqual([])
+      expect(result.missingChild).toMatchObject({ reason: { _tag: "NotFound", method: "stat" } })
       expect(result.missingParent).toMatchObject({ reason: { _tag: "NotFound", method: "stat" } })
     }))
 
@@ -101,6 +104,22 @@ describe("TestHost scripted commands", () => {
         exitCode: 127
       })
     }))
+
+  for (const command of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+    it.effect(`reports unlisted ${command} as a missing binary with an empty command table`, () =>
+      Effect.gen(function*() {
+        const result = yield* run(outcome(ChildProcess.make(command)), {})
+
+        expect(result).toEqual({ stdout: "", stderr: `command not found: ${command}\n`, exitCode: 127 })
+      }))
+
+    it.effect(`runs explicitly declared ${command}`, () =>
+      Effect.gen(function*() {
+        const result = yield* run(outcome(ChildProcess.make(command)), { [command]: { stdout: "declared" } })
+
+        expect(result).toEqual({ stdout: "declared", stderr: "declared", exitCode: 0 })
+      }))
+  }
 
   it.effect("defaults every unscripted field of a declared command", () =>
     Effect.gen(function*() {

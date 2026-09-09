@@ -105,7 +105,11 @@ export const makeMemoryFs = (
     },
     mkdir: async (path, options) => {
       if (options?.recursive === true) mkdirp(path)
-      else entries.set(normalize(path), { type: "directory", data: new Uint8Array() })
+      else {
+        const key = normalize(path)
+        if (!entries.has(key.replace(/\/[^/]*$/, "") || "/")) throw enoent(path)
+        entries.set(key, { type: "directory", data: new Uint8Array() })
+      }
     },
     readdir: async (path) => {
       const dir = normalize(path)
@@ -142,10 +146,17 @@ export const makeMemoryFs = (
         if (options?.force === true) return
         throw enoent(path)
       }
+      const prefix = key === "/" ? "/" : `${key}/`
+      if (
+        entries.get(key)?.type === "directory" && options?.recursive !== true &&
+        [...entries.keys()].some((other) => other !== key && other.startsWith(prefix))
+      ) {
+        throw Object.assign(new Error(`ENOTEMPTY: ${path}`), { code: "ENOTEMPTY" })
+      }
       entries.delete(key)
       if (options?.recursive === true) {
         for (const other of [...entries.keys()]) {
-          if (other.startsWith(`${key}/`)) entries.delete(other)
+          if (other.startsWith(prefix)) entries.delete(other)
         }
       }
     }
@@ -173,7 +184,7 @@ export const makeStubBash = (
   >
 ): BrowserChildProcessSpawner.JustBashLike => ({
   exec: async (command, options) => {
-    const scripted = responses?.[command]
+    const scripted = responses !== undefined && Object.hasOwn(responses, command) ? responses[command] : undefined
     if (scripted === undefined) {
       return { stdout: "", stderr: `command not found: ${command}\n`, exitCode: 127 }
     }

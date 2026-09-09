@@ -91,6 +91,44 @@ describe("TestHost memory filesystem operations", () => {
       expect(entries).toEqual(["a.txt", "deep", "sub"])
     }))
 
+  it("tags non-recursive mkdir under a missing parent with ENOENT", async () => {
+    const memory = makeMemoryFs()
+
+    await expect(memory.mkdir("/missing/./child/", { recursive: false })).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(memory.stat("/missing")).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(memory.stat("/missing/child")).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(memory.readdir("/")).resolves.toEqual([])
+  })
+
+  for (const path of ["/dir/./", "/"]) {
+    for (const options of [undefined, { recursive: false }, { force: true }]) {
+      it(`refuses non-recursive removal of non-empty ${path} with ${JSON.stringify(options)}`, async () => {
+        const memory = makeMemoryFs({ "/dir/child.txt": "child", "/dir/nested/deep.txt": "deep" })
+
+        await expect(memory.rm(path, options)).rejects.toMatchObject({ code: "ENOTEMPTY" })
+        expect((await memory.stat(path)).isDirectory()).toBe(true)
+        expect(decoder.decode(await memory.readFile("/dir/child.txt"))).toBe("child")
+        expect(decoder.decode(await memory.readFile("/dir/nested/deep.txt"))).toBe("deep")
+        await expect(memory.readdir("/")).resolves.toEqual(["dir"])
+        await expect(memory.readdir("/dir")).resolves.toEqual(["child.txt", "nested"])
+      })
+    }
+  }
+
+  it.effect("creates and removes an empty directory without recursive and removes a file", () =>
+    Effect.gen(function*() {
+      const fs = fileSystem()
+
+      yield* fs.makeDirectory("/empty/")
+      expect((yield* fs.stat("/empty")).type).toBe("Directory")
+      yield* fs.remove("/empty")
+      yield* fs.remove("/w/a.txt")
+
+      expect(yield* fs.exists("/empty")).toBe(false)
+      expect(yield* fs.exists("/w/a.txt")).toBe(false)
+      expect(yield* fs.readDirectory("/w")).toEqual(["sub"])
+    }))
+
   it.effect("resolves realPath and access only for paths that exist", () =>
     Effect.gen(function*() {
       const fs = fileSystem()
