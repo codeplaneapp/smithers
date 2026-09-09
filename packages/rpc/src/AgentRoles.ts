@@ -404,9 +404,11 @@ export interface HarnessModelSpec {
  * role's model id — COMPOSED, never stored, and never containing renderer
  * text except the delegated task as the CLI's first prompt. The model id is
  * re-checked here so a row that slipped past validation still cannot inject
- * a flag. `claude [prompt]` and `codex [PROMPT]` take the task positionally;
+ * a flag. A trimmed task starting with a dash is refused; every nonempty
+ * task follows the `--` option terminator as one positional prompt.
+ * `claude [prompt]` and `codex [PROMPT]` take the task positionally;
  * the OpenCode TUI takes none, so a task runs through
- * `opencode run -m provider/model <message>` (opencode 1.18.22 `run --help`).
+ * `opencode run -m provider/model -- <message>` (opencode 1.18.22 `run --help`).
  * @since 1.0.0
  * @category conversions
  */
@@ -418,9 +420,10 @@ export const roleLaunchArgv = (
   const model = role.model.id
   if (!MODEL_ID.test(model)) throw new Error(`Refusing to launch: ${JSON.stringify(model)} is not a model id.`)
   const prompt = task?.trim() ?? ""
-  if (prompt !== "" && harness.binary === "opencode") return ["opencode", "run", "-m", model, prompt]
+  if (prompt.startsWith("-")) throw new Error("Refusing to launch: a task must not start with a dash.")
+  if (prompt !== "" && harness.binary === "opencode") return ["opencode", "run", "-m", model, "--", prompt]
   const base = [harness.binary, ...harness.flag, model]
-  return prompt === "" ? base : [...base, prompt]
+  return prompt === "" ? base : [...base, "--", prompt]
 }
 
 /*

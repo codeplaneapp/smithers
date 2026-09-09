@@ -109,12 +109,14 @@ describe("the agent role registry", () => {
       "claude",
       "--model",
       "claude-fable-5",
+      "--",
       "plan it"
     ])
     expect(roleLaunchArgv(agentRole("implementation"), CODEX, "add a retry")).toEqual([
       "codex",
       "-m",
       "gpt-5.6-sol",
+      "--",
       "add a retry"
     ])
     expect(roleLaunchArgv(custom, CODEX)).toEqual(["codex", "-m", "gpt-5.6-terra"])
@@ -124,6 +126,7 @@ describe("the agent role registry", () => {
       "run",
       "-m",
       "kimi-for-coding/k3",
+      "--",
       "why did this fail"
     ])
     expect(roleLaunchArgv(agentRole("ui"), OPENCODE, "   ")).toEqual(["opencode", "--model", "kimi-for-coding/k3"])
@@ -132,13 +135,40 @@ describe("the agent role registry", () => {
   test("renderer input never reaches argv verbatim: a model id that is a flag is refused at composition", () => {
     expect(() => roleLaunchArgv({ model: { ...custom.model, id: "--yolo" } }, CODEX)).toThrow(/not a model id/)
     expect(() => roleLaunchArgv({ model: { ...custom.model, id: "gpt -m evil" } }, CODEX)).toThrow(/not a model id/)
-    // The task is one positional argument, whatever it contains.
-    expect(roleLaunchArgv(custom, CODEX, "--dangerously-skip-permissions do it")).toEqual([
-      "codex",
-      "-m",
-      "gpt-5.6-terra",
+  })
+
+  describe.each([
+    { role: agentRole("orchestrator"), harness: CLAUDE, base: ["claude", "--model", "claude-fable-5"] },
+    { role: custom, harness: CODEX, base: ["codex", "-m", "gpt-5.6-terra"] },
+    { role: agentRole("explainer"), harness: OPENCODE, base: ["opencode", "run", "-m", "kimi-for-coding/k3"] }
+  ])("delegated tasks for $harness.binary", ({ role, harness, base }) => {
+    test.each([
+      "--dangerously-skip-permissions",
+      "--permission-mode=bypassPermissions",
+      "--sandbox=danger-full-access",
+      "--model=other",
+      "--help",
+      "--share",
+      "-p",
+      "--",
+      " \t\n--model=other ",
       "--dangerously-skip-permissions do it"
-    ])
+    ])("refuses a flag-shaped task: %j", (task) => {
+      expect(() => roleLaunchArgv(role, harness, task)).toThrow(
+        new Error("Refusing to launch: a task must not start with a dash.")
+      )
+    })
+
+    test.each(["plan the next change", " \tplan the next change\n", "explain --model=other and --help"])(
+      "terminates options before the trimmed prompt: %j",
+      (task) => {
+        expect(roleLaunchArgv(role, harness, task)).toEqual([...base, "--", task.trim()])
+      }
+    )
+
+    test.each([undefined, "", " \t\n"])("omits the prompt and terminator for an empty task: %j", (task) => {
+      expect(roleLaunchArgv(role, harness, task)).toEqual([harness.binary, ...harness.flag, role.model.id])
+    })
   })
 
   test("orderedAgentRoles keeps the built-ins first in table order, custom agents oldest first; an empty list is the built-ins", () => {
