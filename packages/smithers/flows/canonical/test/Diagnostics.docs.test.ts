@@ -82,6 +82,15 @@ describe("documented diagnostic boundaries", () => {
     expect(reportingExample("issueOf")(new Error(secretText))).toBe("canonicalization_failed")
   })
 
+  it("retains the rejected input only when reportInput is true", () => {
+    const input = { [secretKey]: secretText, value: NaN }
+    const rendered = (options: { readonly reportInput?: boolean }): string =>
+      JSON.stringify(Effect.runSync(Effect.flip(Schema.decodeUnknownEffect(Canonical)(input, options))))
+    expect(rendered({})).not.toContain(secretText)
+    expect(rendered({ reportInput: false })).not.toContain(secretText)
+    expect(rendered({ reportInput: true })).toContain(secretText)
+  })
+
   it("demonstrates that reportInput false does not redact paths or custom messages", () => {
     expect(failure(keyedInput).path).toBe(`$.records.${secretKey}.value`)
     expect(failure(throwingInput).cause).toEqual(new Error(secretText))

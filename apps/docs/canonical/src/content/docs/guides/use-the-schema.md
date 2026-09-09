@@ -1,6 +1,6 @@
 ---
 title: "Canonicalize inside an Effect pipeline"
-description: "Decode with the Canonical schema instead of calling canonicalize: typed failures in the error channel, the branded document type, composing a derived schema, and keeping the rejected value out of diagnostics."
+description: "Decode with the Canonical schema instead of calling canonicalize: typed failures in the error channel, the branded document type, composing a derived schema, and limiting diagnostic disclosure."
 sidebar:
   order: 2
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/canonical/docs/guides/use-the-schema.md"
@@ -25,7 +25,10 @@ import * as Schema from "effect/Schema"
 
 const decode = Schema.decodeUnknownEffect(Canonical)
 
-const document: Effect.Effect<Canonical, Schema.SchemaError> = decode({ b: 2, a: 1 })
+const documentEffect: Effect.Effect<Canonical, Schema.SchemaError> = decode({ b: 2, a: 1 })
+
+const document: Canonical = Effect.runSync(documentEffect)
+// => '{"a":1,"b":2}'
 ```
 
 The success value is branded. Only decoding through `Canonical` produces the
@@ -41,7 +44,8 @@ hash("{\"a\":1,\"b\":2}")
 
 ## Encode a document back
 
-The encode direction parses the document into a plain JSON value:
+The encode direction takes the document itself, not the Effect that produced
+it, and parses it into a plain JSON value:
 
 ```ts
 Schema.encodeUnknownSync(Canonical)(document)
@@ -84,43 +88,80 @@ const fingerprint = (value: unknown): Effect.Effect<Canonical, FingerprintError>
   )
 ```
 
-## Keep failures free of the value
+## Limit diagnostic disclosure
 
-Anything you canonicalize is key material, and key material is often a secret
-or a large payload. Two habits keep it out of your diagnostics.
+Canonicalized values can contain secrets, including in member names. Treat
+every path segment, `message`, and original `cause` text as caller-controlled
+and potentially sensitive.
 
-**Pass `reportInput: false` when you decode.** Effect otherwise renders the
-rejected input into the schema issue, and that issue travels into logs and
-error responses:
+**Input retention is opt-in.** In `effect@4.0.0-rc.112` a schema issue keeps
+the rejected value only when the decode is given `reportInput: true`, and this
+package adds no parse options of its own. Writing `reportInput: false` changes
+nothing on a bare decode; write it to hold that policy against an option a
+caller or an enclosing schema supplies:
 
 ```ts
 decode(value, { reportInput: false })
 ```
 
-Set it once for good on a schema you own with
-`.annotate({ parseOptions: { reportInput: false } })`, so no caller can turn it
-back on.
+Pin it on a schema you own with
+`.annotate({ parseOptions: { reportInput: false } })`, so no caller can turn
+retention on.
 
-**Report the code and the path, not the value.** A thrown `CanonicalError`
-carries both, and neither contains the rejected value. This is the shape
-[`@smthrs/control`](https://control.smithers.sh/reference/api/) sends across its wire boundary:
+`reportInput` governs the retained input and nothing else. Whatever it is set
+to, the custom issue message still carries the path and the original getter or
+`toJSON` exception text.
+
+**Report only the stable code by default.** For errors from `canonicalize`,
+construct a diagnostic containing only the failure identifier:
 
 ```ts
 import { CanonicalError } from "@smthrs/canonical"
 
-const issueOf = (cause: unknown): string =>
-  cause instanceof CanonicalError ? `${cause.path}: ${cause.code}` : "$: canonicalization failed"
+const issueOf = (cause: unknown): string => cause instanceof CanonicalError ? cause.code : "canonicalization_failed"
 ```
 
-Cap the result if it crosses an RPC boundary. A path grows with the depth of
-the value, and an unbounded diagnostic is a way to inflate an error response.
+A `SchemaError` has no `CanonicalError.code` field. Map it to a fixed domain
+code, as in `fingerprint` above, instead of forwarding its message.
+
+**Allowlist or redact any additional fields before logging or RPC.** This
+example allows only complete paths whose segments are public schema names.
+Any other path, including one containing a dynamic record key, is replaced in
+full. All message and cause text is replaced with a constant:
+
+```ts
+import { CanonicalError } from "@smthrs/canonical"
+
+const publicPaths = new Set(["$", "$.input", "$.input.tags"])
+
+const detailedIssueOf = (cause: unknown) => {
+  if (!(cause instanceof CanonicalError)) return { code: "canonicalization_failed" }
+  return {
+    code: cause.code,
+    path: publicPaths.has(cause.path) ? cause.path : "$[redacted]",
+    message: "[redacted]",
+    cause: "[redacted]"
+  }
+}
+```
+
+Keep this allowlist application-owned; do not populate it from input. If you
+retain selected dynamic segments or exception details, apply an explicit
+allowlist or redaction policy to each before constructing the diagnostic.
+Cap the sanitized result as well: a path grows with depth, but limiting its
+length does not remove sensitive data.
+
+[`@smthrs/control`](https://control.smithers.sh/reference/api/) currently forwards `cause.path` and the code
+over RPC with a length cap. That behavior can disclose caller-supplied member
+names; it is not a redaction guarantee. Apply the boundary policy above before
+forwarding diagnostics in your own integrations.
 
 ## Compose a derived schema
 
 Because `Canonical` is an ordinary codec, a derived identity is a schema
 transformation rather than a function callers must remember to apply. Map the
-canonicalization failure into a schema issue, and annotate the result so it
-never reports its input:
+canonicalization failure into a schema issue using the fixed domain code and
+root path from `fingerprint`, and pin the retention policy on the schema:
 
 ```ts
 import * as SchemaGetter from "effect/SchemaGetter"

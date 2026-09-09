@@ -180,9 +180,53 @@ sealed model requests.
 
 ## The error message contains my input
 
-Effect's schema decoding renders the rejected input into the issue by default.
-Pass `reportInput: false` when you decode, or annotate a schema you own with
-`parseOptions: { reportInput: false }` so no caller can turn it back on. A
-thrown `CanonicalError` never contains the value: its `code` and `path` are
-safe to log as they are. See
-[Keep failures free of the value](/guides/use-the-schema/#keep-failures-free-of-the-value).
+A schema issue retains the rejected value only when the decode is given
+`reportInput: true`. In `effect@4.0.0-rc.112` nothing retains it by default,
+and this package adds no parse options of its own, so a plain decode is not
+where your input came from. Pass `reportInput: false`, or annotate a schema you
+own with `parseOptions: { reportInput: false }`, to hold that policy against a
+caller who asks for retention.
+
+Neither redacts the custom issue message or a thrown `CanonicalError`, which is
+the usual source. Those carry the path and the original exception text whatever
+`reportInput` is set to.
+
+Paths embed caller-supplied member names. A record keyed by a token or an email
+can disclose that key when a nested value fails. This example uses a fake token:
+
+```ts
+import { Canonical, CanonicalError, canonicalize } from "@smthrs/canonical"
+import * as Schema from "effect/Schema"
+
+const input = { records: { SYNTHETIC_SECRET_KEY: { value: NaN } } }
+
+try {
+  canonicalize(input)
+} catch (error) {
+  if (error instanceof CanonicalError) {
+    error.path // "$.records.SYNTHETIC_SECRET_KEY.value"
+    error.code // "canonical_nan": the default diagnostic to report
+  }
+}
+
+Schema.decodeUnknownSync(Canonical)(input, { reportInput: false })
+// throws SchemaError whose message still contains SYNTHETIC_SECRET_KEY
+
+Schema.decodeUnknownSync(Canonical)({
+  toJSON() {
+    throw new Error("SYNTHETIC_SECRET_VALUE")
+  }
+}, { reportInput: false })
+// throws SchemaError whose message still contains SYNTHETIC_SECRET_VALUE
+```
+
+The final two calls are separate failing examples. Getter and `toJSON`
+exception text is copied into the custom message, and a direct `CanonicalError`
+also preserves the original `cause`. Treat every path segment, `message`, and
+`cause` text as caller-controlled and potentially sensitive.
+
+Report only the stable code by default. Allowlist or redact any path segments
+and exception details before a log or RPC boundary. A length cap alone does not
+remove secrets. See
+[Limit diagnostic disclosure](/guides/use-the-schema/#limit-diagnostic-disclosure)
+for reporting examples and the current control RPC behavior.

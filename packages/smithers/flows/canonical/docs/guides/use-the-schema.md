@@ -24,7 +24,10 @@ import * as Schema from "effect/Schema"
 
 const decode = Schema.decodeUnknownEffect(Canonical)
 
-const document: Effect.Effect<Canonical, Schema.SchemaError> = decode({ b: 2, a: 1 })
+const documentEffect: Effect.Effect<Canonical, Schema.SchemaError> = decode({ b: 2, a: 1 })
+
+const document: Canonical = Effect.runSync(documentEffect)
+// => '{"a":1,"b":2}'
 ```
 
 The success value is branded. Only decoding through `Canonical` produces the
@@ -40,7 +43,8 @@ hash("{\"a\":1,\"b\":2}")
 
 ## Encode a document back
 
-The encode direction parses the document into a plain JSON value:
+The encode direction takes the document itself, not the Effect that produced
+it, and parses it into a plain JSON value:
 
 ```ts
 Schema.encodeUnknownSync(Canonical)(document)
@@ -89,17 +93,23 @@ Canonicalized values can contain secrets, including in member names. Treat
 every path segment, `message`, and original `cause` text as caller-controlled
 and potentially sensitive.
 
-**Pass `reportInput: false` when you decode.** This suppresses Schema input
-rendering only. It does not redact the custom issue message, which includes
-the path and original getter or `toJSON` exception text:
+**Input retention is opt-in.** In `effect@4.0.0-rc.112` a schema issue keeps
+the rejected value only when the decode is given `reportInput: true`, and this
+package adds no parse options of its own. Writing `reportInput: false` changes
+nothing on a bare decode; write it to hold that policy against an option a
+caller or an enclosing schema supplies:
 
 ```ts
 decode(value, { reportInput: false })
 ```
 
-Set it once for good on a schema you own with
-`.annotate({ parseOptions: { reportInput: false } })`, so no caller can turn it
-back on.
+Pin it on a schema you own with
+`.annotate({ parseOptions: { reportInput: false } })`, so no caller can turn
+retention on.
+
+`reportInput` governs the retained input and nothing else. Whatever it is set
+to, the custom issue message still carries the path and the original getter or
+`toJSON` exception text.
 
 **Report only the stable code by default.** For errors from `canonicalize`,
 construct a diagnostic containing only the failure identifier:
@@ -150,7 +160,7 @@ forwarding diagnostics in your own integrations.
 Because `Canonical` is an ordinary codec, a derived identity is a schema
 transformation rather than a function callers must remember to apply. Map the
 canonicalization failure into a schema issue using the fixed domain code and
-root path from `fingerprint`, and suppress Schema input rendering:
+root path from `fingerprint`, and pin the retention policy on the schema:
 
 ```ts
 import * as SchemaGetter from "effect/SchemaGetter"
