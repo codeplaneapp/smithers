@@ -287,8 +287,12 @@ Ordinary `/agent.explain <what>` questions remain plain text.
 ## Cards
 
 Every capability's output is an embedded card in the transcript (THE EMBED
-LAW); maximizing one is a presentation transition of the same component. The
-run lifecycle (lane `runs`, `docs/workbench-lanes/runs.md`) adds three
+LAW); maximizing one is a presentation transition of the same component. Each
+card file's header comment is that card's own contract: the facts it renders,
+the facets it switches, and the acts it binds. This section names the
+surfaces; the file states the detail, and its tests pin it.
+
+The run lifecycle (lane `runs`, `docs/workbench-lanes/runs.md`) adds three
 surfaces, all over the workspace gateway's own projections and procedures:
 
 - **`run-list`** (`/runs.list [status] [flow] [by=] [lineage=] [owner/repo]`) —
@@ -323,54 +327,87 @@ surfaces, all over the workspace gateway's own projections and procedures:
 Lane `citc` (ADR 0002) adds the persistent cloud computers:
 
 - **`workspace`** (`/workspace.open [bookmark] [owner/repo]`, `/workspace.view
-  <id>`) — one cloud computer bound to a repository bookmark. The header
+  <id>`) opens one cloud computer bound to a repository bookmark. The header
   names the repo, the target bookmark, and the BOOKMARK's head (`bookmark
-  main head @ qupxosqw`) — plue's workspace DTO carries no kind, no uptime,
-  no workspace head, and no ahead/behind (plue#446), and the card carries
-  none. A six-state pill (pending, starting, running, suspended, stopped,
-  failed) leads; a starting workspace streams its `provisioningStage`, a
-  failed one names the stage and offers Retry (`/workspace.open` again). The
-  facet strip switches Terminal (the attached session, every session with
-  its Destroy), Files and Services (empty with the ADR's wording — no routes
-  exist, plue#449), and Snapshots (Fork from, Make template, Delete per
-  row). Since plue#505 the header's facts line also states the languages
-  the workspace relays a language server for (`lsp: typescript`, from the
-  DTO's `lsp.languages`; nothing when the DTO names none), and a session row
-  carries its `kind` (`terminal` or `lsp`) and the lsp session's language. The footer acts: Suspend or Resume, Fork, Snapshot, and Delete
-  behind a typed confirm. `/workspace.terminal` opens the workspace's
-  terminal as an ordinary terminal tab whose row carries a `workspaceId`
-  instead of a `cwd` — the socket tunnels through the Bun server's
-  `/api/cloud-ws/` bridge with the Bun-held bearer attached upstream (the
-  token never reaches the renderer), and closing the tab detaches; killing
-  the session is the explicit `/workspace.session.destroy`. Every workspace
-  act refuses a `degraded` cloud session with the "sign in again to enable"
-  wording (ADR 0001's legacy scope set).
+  main head @ qupxosqw`), then the facts line the DTO carries: the sandbox
+  kind, the workspace's OWN head (`workspace head @ qupxosqw a03f5f11`), how
+  far it is `ahead` of and `behind` the bookmark, its uptime, the Nix
+  environment it was built from (`source @ revision`), its persistence, and
+  the languages it relays a language server for (`lsp: typescript`, from the
+  DTO's `lsp.languages`). Every fact renders only when the payload carries
+  it: an absent field renders NOTHING, never a placeholder and never a zero
+  the wire did not state. A vm or desktop adds what it booted (`env ·
+  <closure> · <image tag>`), a driving agent session is named but not opened,
+  and the ssh host rides its own copyable line. A six-state pill (pending,
+  starting, running, suspended, stopped, failed) leads; a starting workspace
+  streams its `provisioningStage`, a failed one names the stage plus plue's
+  failure code and message verbatim and offers the three kinds as the retry
+  (`/workspace.open … --kind <kind>`). The facet strip switches Terminal (the
+  attachment or the refusal in plue's own words and code, then every session
+  with its id, its status, and its Destroy), Files (the repository file
+  card's own listing, bound to the workspace's routes), Services (each
+  declared service with the port and url it publishes), Snapshots (Fork
+  from, Make template, Delete per row), and Egress (each call this computer
+  made, whether it was allowed or blocked, and which secret NAMES the proxy
+  swapped in, never a value); a `desktop` workspace also gets Desktop, which
+  mints a session and streams plue's NixOS VM over VNC, so it is its own
+  confirmed act rather than a facet switch. The footer acts: Suspend or
+  Resume, Fork, Snapshot, and Delete behind a typed confirm.
+  `/workspace.terminal` opens the workspace's terminal as an ordinary
+  terminal tab whose row carries a `workspaceId` instead of a `cwd` (the
+  socket tunnels through the Bun server's `/api/cloud-ws/` bridge with the
+  Bun-held bearer attached upstream, and the token never reaches the
+  renderer), and closing the tab detaches; killing the session is the
+  explicit `/workspace.session.destroy`. That act is rendered only where the
+  live registry holds `workspace.terminal`, and the Terminal facet otherwise
+  says terminals are not on the web yet. Every workspace act refuses a
+  `degraded` cloud session with the "sign in again to enable" wording (ADR
+  0001's legacy scope set).
 
 Lane `change` (ADR 0003) makes the change the unit of review:
 
-- **`change`** (`/change.view <changeId>`) — one card per change, rendered
-  from plue's change DTO plus its auxiliaries: the per-repo stat, the
-  carrying landing request's stack position (`Landing #42 · position 2 of 2
-  · open → main`), and the changeset when the repository's owner is an org
-  (a `failed` changeset renders its `failure_reason` verbatim and offers
-  Retry land). Five facet tabs switch the body: Diff (the parent → current
-  file rows, each opening its one-file diff), Checks (the newest answer per
-  context), Review (verdicts and threads — no stale/moved tokens, plue#453),
-  Findings and History (the ADR's degraded wording — no findings per
-  revision, plue#454; no revision history, plue#450). The header names
-  `repo · changeId · commit · author`, never `rev N of M`. The footer acts:
-  Land (the carrying landing request — queued, never "merged"; the
-  changeset's own atomic route when one carries the change, a 409 re-reads),
-  Split ready and Resolve (honest refusals until plue#452/#455), Revert
-  (only on a landed change; an honest refusal until plue#456). A `degraded`
-  sign-in reads a change freely; dispatching the resolve agent refuses with
-  the "sign in again to enable" wording.
-- **`diff`** (`/change.diff <changeId> [from] [to] [path]`) — one from → to
-  pair pinned at the change's commit (`pinned at a03f5f11`), conflicted
-  files leading. A hunk inlines up to 400 patch lines; a larger one rides by
-  reference and names its re-read (`/change.diff <changeId> parent current
-  <path>`). Only change-vs-parent has a route today — a rev → rev interdiff
-  refuses with the plue#451 wording.
+- **`change`** (`/change.view <changeId>`) renders one card per change, from
+  plue's change DTO plus its auxiliaries: the per-repo stat, the carrying
+  landing request's stack position (`Landing #42 · position 2 of 2 · open →
+  main`), and the changeset when the repository's owner is an org (a `failed`
+  changeset renders its `failure_reason` verbatim). The header names `repo ·
+  changeId · rev N of M · commit · author`, the landing pill, and whose turn
+  it is by LOGIN (`turn: will · reviewer`); a field the GET did not state
+  renders nothing, so a change with no recorded revision shows no revision
+  count. Five facets always switch the body: Diff (two revision pickers that
+  pin any pair through `change.pins`, the file rows at those pins each
+  opening its one-file diff and offering Split while the stack's landable
+  prefix is short, and `since your review at rev N` with show all once a
+  human review is recorded), Findings (the analyzer runs, then one row per
+  finding with its severity, analyzer, `path:line`, summary, the revision
+  that raised it, `· stale` when its anchor moved off, the feedback that
+  dimmed it, and its two acts, Please fix and Not useful), Checks (a revision
+  picker, then the newest answer per context with the work it did, `12
+  affected · 3 ran · 9 cached · 4s`), Review (the verdict strip with the
+  confidence WORD, the Request review picker off the landing's
+  `review_requests[]`, and the threads with Done / Ack / Reopen, each anchor
+  carrying `· stale` or `· moved → :line`),
+  and History (one row per revision with its provenance, its Diff to current
+  and Open computer acts, then the landed row). Walkthrough joins the strip
+  only when an artifact exists, leading when the current revision came from
+  an agent session and the change touches more than 20 files and otherwise
+  sitting after History; Owners closes the strip only when the change GET
+  carried ownership. The footer acts: Land (the carrying landing request:
+  queued, never "merged"; `Land 1 → N` for a stack, `Retry land` for a failed
+  one, the changeset's own atomic route when one carries the change, a 409
+  re-reads, and a blocked gate names its reason beside the button), Split
+  ready while the changeset can still land, Revert on a landed change, and
+  Full diff. A `degraded` sign-in reads a change freely; dispatching the
+  resolve agent refuses with the "sign in again to enable" wording.
+- **`diff`** (`/change.diff <changeId> [from] [to] [path]`) renders one from →
+  to pair pinned at the change's commit (`parent → rev 2 · pinned at rev 2 ·
+  a03f5f11`), conflicted files leading. Any pair pins: `parent → current`
+  reads plue's bare route and every other pair is a revision diff with jj
+  interdiff semantics, so a rev → rev interdiff is an ordinary read; a token
+  naming no recorded revision refuses by name and guesses nothing. A hunk
+  inlines up to 400 patch lines; a larger one rides by reference and names
+  its re-read (`/change.diff <changeId> parent current <path>`), and a binary
+  file says so instead of showing a diff.
 
 Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
 
@@ -391,14 +428,20 @@ Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
   (`/github.reconcile`; the route is 404 in prod today and its message
   shows verbatim). `/repos.app` stays as `github.app`'s hidden alias.
 - **`sync-ops`** (`/linear.sync [integration]`, `/linear.activity
-  [integration]`, `/github.mirror-sync [owner/repo]`) — one card kind
-  serves Linear syncs and GitHub mirror syncs: the subject, the trigger's
-  one fact (`sync started`, `already running`), and the durable ops, newest
-  first, a failed row carrying the server's error verbatim with Retry
-  (`/sync.retry <opId>`). The ops feed, the per-op retry, and the sync runs
-  do not exist (plue#468/#470): the card renders the ADR's degraded note,
-  `runState` stays null, and `/sync.retry` refuses with the wording — no
-  `/ops` or run route is ever called.
+  [integration]`, `/github.mirror-sync [owner/repo]`) is one card kind for
+  Linear syncs and GitHub mirror syncs: the subject, the run's own state word
+  and, for a mirror, the repository's `mirror_status`, the refs line (`behind
+  GitHub · 3 refs · 1 failed`), the run's counts (`12 of 20 · 1 failed`), the
+  run id or the trigger's one fact (`sync started`, `already running`), then
+  the durable ops newest first. An op row carries its glyph, `source → target
+  entity action` in the wire's own words, its status, its age, its error
+  verbatim, and, when the wire marked it retryable, a Retry on its OWN
+  backend's route (`/sync.retry <opId>` for a Linear op through the
+  integration that carries it, `/github.mirror.retry-ref` for a mirror ref);
+  a failed op is never filtered out. Past ten ops the card offers Show more
+  (`/sync.ops.show-more`), and a feed with older pages offers Load older
+  (`/sync.ops.load-older`, the Link header's keyset cursor). A null `runState`
+  wears the neutral pending pill, never "done".
 - **`repo-import`** grows the job's own progress: the stage counts (`refs
   214 of 214 · objects … · issues …`) when the wire carries them, the
   failed phase's Retry through `/repos.import.retry <jobId>` (the route

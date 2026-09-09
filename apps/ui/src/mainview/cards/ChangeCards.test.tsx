@@ -1,5 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterAll, describe, expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import type { Card } from "../state/AppState"
@@ -1006,6 +1007,57 @@ describe("the diff card", () => {
       })
     )
     expect(host.textContent ?? "").toContain("conflicted")
+    host.remove()
+  })
+})
+
+/*
+ * docs/LOCAL-APP.md's Cards section is this app's written contract, and it
+ * drifted once: it stated the pre-plue#446/#450/#451/#453/#454/#468 degraded
+ * cards (no `rev N of M`, no revision history, no findings per revision, no
+ * stale/moved tokens, a refusing interdiff, a workspace DTO with no facts, a
+ * sync card with no ops feed) as current behavior long after the cards had
+ * outgrown them. These pin the retired sentences out of the doc and tie the
+ * claims it still makes about the change card to what the card renders.
+ */
+describe("docs/LOCAL-APP.md's Cards section", () => {
+  /** The contract as one line, so a claim that wraps across lines still matches. */
+  const contract = async (): Promise<string> =>
+    (await readFile(new URL("../../../docs/LOCAL-APP.md", import.meta.url), "utf8")).replace(/\s+/g, " ")
+
+  test("no retired degraded claim comes back", async () => {
+    const text = await contract()
+    for (
+      const retired of [
+        "never `rev N of M`",
+        "Five facet tabs",
+        "no stale/moved tokens",
+        "no findings per revision",
+        "no revision history",
+        "a rev → rev interdiff refuses",
+        "carries no kind, no uptime, no workspace head",
+        "The ops feed, the per-op retry, and the sync runs do not exist"
+      ]
+    ) {
+      expect(text).not.toContain(retired)
+    }
+  })
+
+  test("the change card's header form and facet strip are the ones the doc states", async () => {
+    const text = await contract()
+    const { host } = renderChange(liveCard({ walkthrough: { seq: 2, sections: [], quiz: [] } }))
+    expect(host.textContent ?? "").toContain("· rev 2 of 2 ·")
+    expect(text).toContain("`repo · changeId · rev N of M · commit · author`")
+    /* The five always-on facets, named in the order the strip renders them. */
+    const listed = text.slice(text.indexOf("Five facets always switch the body:"))
+    const always = tabs(host).filter((label) => label !== "Walkthrough" && label !== "Owners")
+    const named = always.map((label) => listed.indexOf(label))
+    expect(always.filter((_, index) => named[index] === -1)).toEqual([])
+    expect(named).toEqual([...named].sort((left, right) => left - right))
+    /* The two conditional facets are named as conditional, not as part of the five. */
+    expect(tabs(host)).toContain("Walkthrough")
+    expect(text).toContain("Walkthrough joins the strip only when an artifact exists")
+    expect(text).toContain("Owners closes the strip only when the change GET carried ownership")
     host.remove()
   })
 })
