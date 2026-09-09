@@ -50,16 +50,18 @@ answers are possible:
 When a dispatch settles as a failure and the action declares a policy, the
 engine asks the policy for a decision:
 
-| Decision            | What the engine does                                                                                                                                              |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Retry after a delay | Sleeps the delay, increments the attempt, and dispatches again.                                                                                                   |
-| Attempts exhausted  | Records a completion whose exit is a `RetryPolicy.RetryAttemptsExhausted` defect carrying the action name, the attempt, the declared maximum, and the last error. |
-| Policy expired      | Records a completion whose exit is a `RetryPolicy.RetryPolicyExpired` defect carrying the declared `expirationMs` and the last error.                             |
-| Non-retryable       | Falls through and propagates the original failure unchanged.                                                                                                      |
+| Decision            | What the engine does |
+| ------------------- | -------------------- |
+| Retry after a delay | Sleeps the delay, increments the attempt, and dispatches again. |
+| Attempts exhausted  | Decodes and propagates the final declared failure; annotates `retry.stopReason` as `"exhausted"`. |
+| Policy expired      | Decodes and propagates the final declared failure; annotates `retry.stopReason` as `"expired"`. |
+| Non-retryable       | Decodes and propagates the original failure; annotates `retry.stopReason` as `"nonRetryable"`. |
 
-Exhausted and expired are distinguished on purpose. A run that ran out of
-attempts and a run that ran out of clock call for different fixes, and the two
-defects say which happened.
+When retries stop, the action's declared error channel is preserved, so typed
+recovery, including a graph `Catch`, can handle the final business failure.
+The action span records `retry.stopReason` and the one-based `retry.attempt`.
+Use these annotations to distinguish an exhausted attempt budget from an
+expired elapsed-time budget.
 
 A settlement that is not a completion, which for the action path means a
 suspension, returns immediately. A parked action is not a failed one.

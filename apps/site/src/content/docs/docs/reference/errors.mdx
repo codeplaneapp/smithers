@@ -75,10 +75,7 @@ Raised as defects by `NodeDatabase.layer` before a connection is created; match 
 
 #### Retry policy
 
-| Code | Where raised | Cause | Fix |
-| --- | --- | --- | --- |
-| `retry_policy_expired` | `RetryPolicyExpired` | The policy's deadline passed | Terminal by design: catch the typed failure or widen `expirationMs` |
-| `retry_attempts_exhausted` | `RetryAttemptsExhausted` | The attempt budget ran out | Terminal by design: catch the typed failure or raise `maxAttempts` |
+An exhausted or expired action retry policy propagates the final declared failure through the action's error channel. Typed recovery can handle that failure. The action span records `retry.stopReason` as `"exhausted"` or `"expired"` and `retry.attempt` as the one-based attempt. Inspect these annotations before adjusting `maxAttempts` or `expirationMs`. See [Retries](/docs/concepts/retries/).
 
 #### Interpreter (`InterpreterError`)
 

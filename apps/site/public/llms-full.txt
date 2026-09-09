@@ -1740,7 +1740,9 @@ node publish.ts
 
 Each dispatch reads `Action.CurrentAttempt` and records it, so `attempts` is the attempt ladder the run actually climbed: 1 and 2 failed, 3 succeeded.
 
-Two boundaries are worth keeping straight. When a policy does give up, the terminal failure is `RetryAttemptsExhausted` (the `maxAttempts` bound was reached) or `RetryPolicyExpired` (the `expirationMs` budget was spent), each with a stable code. And a retry policy governs ordinary typed failures only: an action implementation or adapter may explicitly fail with `InfraInterrupt` and opt into a separate `interruptRetryPolicy`; engines do not synthesize that marker from fiber interruption. [Retries](/docs/concepts/retries/) draws the full line, including where cancellation fits.
+When an action's retry policy gives up, the engine propagates the final declared failure so typed recovery still runs. The action span records `retry.stopReason` as `"exhausted"` when the `maxAttempts` bound is reached or `"expired"` when the `expirationMs` budget is spent, together with the one-based `retry.attempt`.
+
+A retry policy governs ordinary typed failures only: an action implementation or adapter may explicitly fail with `InfraInterrupt` and opt into a separate `interruptRetryPolicy`; engines do not synthesize that marker from fiber interruption. [Retries](/docs/concepts/retries/) explains both paths and cancellation.
 
 ```text
 You should see: the program prints an object with result "v1:uploaded",
@@ -6713,7 +6715,7 @@ Cancellation stops the flow fiber when the driver observes it. A cancel is a sta
 
 An interrupt marked `InfraInterrupt` means the host was lost or the work was rebalanced, not that the work failed. Only marked infrastructure interruptions use the action's `interruptRetryPolicy`. Ordinary typed failures use an explicit retry loop. An exhausted `interruptRetryPolicy` dies with the typed `InfraInterruptRetriesExhausted`, carrying the action, the attempts, and the final interrupt.
 
-The policy-driven engine path reports a terminal failure when its budget ends: `RetryPolicyExpired` when the deadline passed, and `RetryAttemptsExhausted` when the attempt budget did.
+The action's `retryPolicy` preserves the final declared failure when its budget ends, so typed recovery, including a graph `Catch`, still runs. The action span records `retry.stopReason` as `"expired"` when the deadline passed or `"exhausted"` when the attempt budget ended, together with the one-based `retry.attempt`.
 
 ## A recorded failure replays as itself
 
@@ -41855,10 +41857,7 @@ Raised as defects by `NodeDatabase.layer` before a connection is created; match 
 
 #### Retry policy
 
-| Code | Where raised | Cause | Fix |
-| --- | --- | --- | --- |
-| `retry_policy_expired` | `RetryPolicyExpired` | The policy's deadline passed | Terminal by design: catch the typed failure or widen `expirationMs` |
-| `retry_attempts_exhausted` | `RetryAttemptsExhausted` | The attempt budget ran out | Terminal by design: catch the typed failure or raise `maxAttempts` |
+An exhausted or expired action retry policy propagates the final declared failure through the action's error channel. Typed recovery can handle that failure. The action span records `retry.stopReason` as `"exhausted"` or `"expired"` and `retry.attempt` as the one-based attempt. Inspect these annotations before adjusting `maxAttempts` or `expirationMs`. See [Retries](/docs/concepts/retries/).
 
 #### Interpreter (`InterpreterError`)
 

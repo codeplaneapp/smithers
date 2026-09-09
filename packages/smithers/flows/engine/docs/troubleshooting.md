@@ -20,9 +20,12 @@ mistake rather than a condition a caller handles.
 
 The engine also raises refusals declared in [`@smthrs/flow`](/api/flow):
 `Flow.MaxRoundsExceeded`, `Action.ConcurrentKeylessDispatch`,
-`Action.IrreversibleRetryRequiresIdempotencyKey`,
-`Action.UncanonicalIdempotencyKey`, `RetryPolicy.RetryAttemptsExhausted`, and
-`RetryPolicy.RetryPolicyExpired`.
+`Action.IrreversibleRetryRequiresIdempotencyKey`, and
+`Action.UncanonicalIdempotencyKey`.
+
+An exhausted or expired action retry policy propagates the final declared
+failure. Inspect the action span's `retry.stopReason` and `retry.attempt` to
+diagnose the spent budget. See [Retries and attempts](./concepts/retries.md).
 
 ## Flow is not registered
 

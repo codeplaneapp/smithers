@@ -40,7 +40,7 @@ Cancellation stops the flow fiber when the driver observes it. A cancel is a sta
 
 An interrupt marked `InfraInterrupt` means the host was lost or the work was rebalanced, not that the work failed. Only marked infrastructure interruptions use the action's `interruptRetryPolicy`. Ordinary typed failures use an explicit retry loop. An exhausted `interruptRetryPolicy` dies with the typed `InfraInterruptRetriesExhausted`, carrying the action, the attempts, and the final interrupt.
 
-The policy-driven engine path reports a terminal failure when its budget ends: `RetryPolicyExpired` when the deadline passed, and `RetryAttemptsExhausted` when the attempt budget did.
+The action's `retryPolicy` preserves the final declared failure when its budget ends, so typed recovery, including a graph `Catch`, still runs. The action span records `retry.stopReason` as `"expired"` when the deadline passed or `"exhausted"` when the attempt budget ended, together with the one-based `retry.attempt`.
 
 ## A recorded failure replays as itself
 

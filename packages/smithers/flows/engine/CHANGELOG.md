@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Action retry exhaustion and expiration preserve the final declared failure
+  for typed recovery. Retry docs now describe this behavior and the action
+  span annotations `retry.stopReason` and `retry.attempt`.
+
 - The memory engine follows trampoline membership and child ownership when
   cancelling through any round ID. Requests persist across the gap before a
   successor exists, and children admitted after cancellation cannot dispatch
