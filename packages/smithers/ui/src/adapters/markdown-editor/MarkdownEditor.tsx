@@ -228,6 +228,7 @@ export function supportsRichTextEditing(): boolean {
 type EditorState = "loading" | "ready" | "failed";
 
 type CrepeListener = {
+  readonly listeners?: { markdownUpdated: Array<(_ctx: unknown, markdown: string) => void> };
   markdownUpdated: (handler: (_ctx: unknown, markdown: string) => void) => void;
 };
 
@@ -317,6 +318,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const fallbackRef = useRef<HTMLTextAreaElement | null>(null);
   const crepeRef = useRef<CrepeInstance | null>(null);
   const readyRef = useRef(false);
+  const destructionRef = useRef<Promise<unknown>>(Promise.resolve());
   const replaceAllRef = useRef<MarkdownEditorModule["replaceAll"] | null>(null);
   const suppressEchoRef = useRef(0);
   const onChangeRef = useRef(onChange);
@@ -413,12 +415,33 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     readyRef.current = false;
     const seed = lastMarkdownRef.current;
     let cancelled = false;
+    let released = false;
     let crepe: CrepeInstance | null = null;
-    host.innerHTML = "";
+    let creating: Promise<unknown> | undefined;
+    let detachListener: (() => void) | undefined;
+
+    /** Stop callbacks immediately, then destroy once creation has settled. */
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      readyRef.current = false;
+      crepeRef.current = null;
+      replaceAllRef.current = null;
+      detachListener?.();
+      const editor = crepe;
+      crepe = null;
+      if (editor) {
+        destructionRef.current = Promise.resolve(creating)
+          .catch(() => undefined)
+          .then(() => editor.destroy())
+          .catch(() => undefined); // A failed teardown must not crash recovery or unmount.
+      }
+    };
 
     /** Report and degrade: the textarea takes over with the current markdown. */
     const fail = (code: MarkdownEditorErrorCode, cause: unknown): void => {
-      if (cancelled) return;
+      if (cancelled || released) return;
+      release();
       setFallbackValue(lastMarkdownRef.current);
       setAttempt((previous) =>
         Object.is(previous.key, resetKey) && previous.readOnly === readOnly && previous.state !== "failed"
@@ -428,56 +451,70 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       onErrorRef.current?.({ code, cause });
     };
 
-    void (loadEditorRef.current ?? loadMilkdown)()
-      .then(
-        ({ Crepe, replaceAll }) => {
-          if (cancelled) return;
+    const initialize = async (): Promise<void> => {
+      // A prior editor may still be creating or asynchronously removing its DOM.
+      await destructionRef.current;
+      if (cancelled) return;
+      host.innerHTML = "";
+      let modules: MarkdownEditorModule;
+      try {
+        modules = await (loadEditorRef.current ?? loadMilkdown)();
+      } catch (cause) {
+        fail("editor-load-failed", cause);
+        return;
+      }
+      if (cancelled) return;
+      try {
+        const { Crepe, replaceAll } = modules;
+        replaceAllRef.current = replaceAll;
+        const editor = new Crepe({ root: host, defaultValue: seed });
+        crepe = editor;
+        crepeRef.current = editor;
+        editor.on((listener: CrepeListener) => {
+          if (released) return;
+          const updated = (_ctx: unknown, markdown: string): void => {
+            if (released || !readyRef.current) return;
+            lastMarkdownRef.current = markdown;
+            if (suppressEchoRef.current > 0) return; // programmatic replaceAll echo
+            onChangeRef.current?.(markdown);
+          };
+          // Milkdown exposes its subscriber arrays, but has no unsubscribe method.
+          detachListener = () => {
+            const handlers = listener.listeners?.markdownUpdated;
+            const index = handlers?.indexOf(updated) ?? -1;
+            if (index >= 0) handlers!.splice(index, 1);
+          };
+          listener.markdownUpdated(updated);
+        });
+        creating = Promise.resolve(editor.create());
+        await creating;
+        if (cancelled) return;
+        editor.setReadonly(readOnly);
+        if (lastMarkdownRef.current !== seed) {
+          suppressEchoRef.current += 1;
           try {
-            replaceAllRef.current = replaceAll;
-            const editor = new Crepe({ root: host, defaultValue: seed });
-            crepe = editor;
-            crepeRef.current = editor;
-            editor.on((listener: CrepeListener) => {
-              listener.markdownUpdated((_ctx, markdown) => {
-                lastMarkdownRef.current = markdown;
-                if (suppressEchoRef.current > 0) return; // programmatic replaceAll echo
-                onChangeRef.current?.(markdown);
-              });
-            });
-            return Promise.resolve(editor.create()).then(
-              () => {
-                if (cancelled) {
-                  void editor.destroy();
-                  return;
-                }
-                editor.setReadonly(readOnly);
-                readyRef.current = true;
-                setAttempt((previous) =>
-                  Object.is(previous.key, resetKey) && previous.readOnly === readOnly && previous.state === "loading"
-                    ? { ...previous, state: "ready" }
-                    : previous
-                );
-              },
-              (cause: unknown) => fail("editor-create-failed", cause),
-            );
-          } catch (cause) {
-            fail("editor-create-failed", cause);
-            return;
+            editor.editor.action(replaceAll(lastMarkdownRef.current, true));
+          } finally {
+            setTimeout(() => {
+              suppressEchoRef.current = Math.max(0, suppressEchoRef.current - 1);
+            }, 0);
           }
-        },
-        (cause: unknown) => fail("editor-load-failed", cause),
-      );
+        }
+        readyRef.current = true;
+        setAttempt((previous) =>
+          Object.is(previous.key, resetKey) && previous.readOnly === readOnly && previous.state === "loading"
+            ? { ...previous, state: "ready" }
+            : previous
+        );
+      } catch (cause) {
+        fail("editor-create-failed", cause);
+      }
+    };
+    void initialize();
 
     return () => {
       cancelled = true;
-      readyRef.current = false;
-      crepeRef.current = null;
-      replaceAllRef.current = null;
-      try {
-        void crepe?.destroy();
-      } catch {
-        // A failed teardown must not crash the unmount.
-      }
+      release();
     };
     // Re-init only when the doc reseeds or editability changes; content
     // updates flow through the listener + setMarkdown, never by recreating.

@@ -50,6 +50,12 @@ degrades to a plain editing surface instead of losing the document. A consumer
 that renders its own fallback can key on `onError`; one that does not still gets
 a working textarea.
 
+`setMarkdown` received while modules load or `create()` is pending replaces the
+seed before the editor becomes ready. Only the latest value is applied, without
+an `onChange` echo. Failed attempts release their editor and ignore stale
+callbacks. Retries wait for pending creation and teardown before reusing the
+host; teardown rejection does not prevent recovery.
+
 `data-mode` has three values: `"wysiwyg"` for the real editor, `"fallback"` when
 the caller passed `fallback` or the host failed the rich-text capability probe,
 and `"failed"` after one of the codes above.

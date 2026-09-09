@@ -7,13 +7,14 @@
 // handle, so these tests exercise the whole public surface off the real editor.
 // The DOM comes from tests/happy-dom-preload.ts (bunfig `[test] preload`).
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, type ReactElement } from "react";
+import { act, createRef, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   MARKDOWN_EDITOR_STYLE_ATTR,
   MarkdownEditor,
   type MarkdownEditorHandle,
+  type MarkdownEditorModule,
   MarkdownEditorStyles,
   markdownEditorCss,
 } from "../src/adapters/markdown-editor";
@@ -287,4 +288,154 @@ describe("MarkdownEditor styling", () => {
     expect(html).toContain("server value");
     expect(html).toContain('data-mode="fallback"');
   });
+});
+
+/** A controlled lifecycle with real DOM content and retained callback probes. */
+function lifecycleEditor() {
+  const loading = Promise.withResolvers<MarkdownEditorModule>();
+  const creating = Promise.withResolvers<void>();
+  const destroying = Promise.withResolvers<void>();
+  const handlers: Array<(ctx: unknown, markdown: string) => void> = [];
+  let retainedHandler: (ctx: unknown, markdown: string) => void = () => {};
+  let destroyed = 0;
+  let constructed = 0;
+  const replaced: string[] = [];
+  const module: MarkdownEditorModule = {
+    Crepe: class {
+      constructor(readonly options: { root: HTMLElement; defaultValue: string }) {
+        constructed++;
+        options.root.textContent = options.defaultValue;
+      }
+      editor = {
+        action: (command: unknown) => {
+          const markdown = String(command);
+          this.options.root.textContent = markdown;
+          replaced.push(markdown);
+          handlers.forEach((handler) => handler(undefined, markdown));
+        },
+      };
+      on(configure: Parameters<InstanceType<MarkdownEditorModule["Crepe"]>["on"]>[0]) {
+        configure({
+          listeners: { markdownUpdated: handlers },
+          markdownUpdated: (handler: typeof retainedHandler) => {
+            handlers.push(handler);
+            retainedHandler = handler;
+          },
+        } as Parameters<typeof configure>[0]);
+      }
+      create() { return creating.promise; }
+      destroy() {
+        destroyed++;
+        return destroying.promise.then(() => { this.options.root.textContent = ""; });
+      }
+      setReadonly() {}
+    },
+    replaceAll: (markdown) => markdown,
+  };
+  return {
+    module, loading, creating, destroying, handlers, replaced,
+    load: () => loading.promise,
+    emitStale: (markdown: string) => retainedHandler(undefined, markdown),
+    get destroyed() { return destroyed; },
+    get constructed() { return constructed; },
+  };
+}
+
+describe("MarkdownEditor asynchronous lifecycle", () => {
+  for (const phase of ["load", "create"] as const) {
+    test(`applies the latest setMarkdown during ${phase} before becoming ready`, async () => {
+      const stub = lifecycleEditor();
+      const ref = createRef<MarkdownEditorHandle>();
+      const changes: string[] = [];
+      await render(<MarkdownEditor ref={ref} value="old document" fallback={false}
+        loadEditor={stub.load} onChange={(markdown) => changes.push(markdown)} />);
+      if (phase === "create") {
+        await act(async () => { stub.loading.resolve(stub.module); });
+      }
+      await act(async () => {
+        ref.current!.setMarkdown("intermediate document");
+        ref.current!.setMarkdown("new external document");
+      });
+      expect(ref.current!.scrollToLine(1)).toBe(false);
+      await act(async () => {
+        stub.loading.resolve(stub.module);
+        stub.creating.resolve();
+      });
+      expect(ref.current!.getMarkdown()).toBe("new external document");
+      expect(container!.querySelector('[data-testid="markdown-editor"]')!.textContent).toBe("new external document");
+      expect(stub.replaced).toEqual(["new external document"]);
+      expect(changes).toEqual([]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        stub.emitStale("new external document plus local edit");
+      });
+      expect(changes).toEqual(["new external document plus local edit"]);
+      stub.destroying.resolve();
+    });
+  }
+
+  test("rejected create releases the editor once and ignores its retained callbacks", async () => {
+    const stub = lifecycleEditor();
+    const ref = createRef<MarkdownEditorHandle>();
+    const changes: string[] = [];
+    const errors: unknown[] = [];
+    await render(<MarkdownEditor ref={ref} value="seed" fallback={false}
+      loadEditor={stub.load} onChange={(markdown) => changes.push(markdown)}
+      onError={(error) => errors.push(error)} />);
+    await act(async () => { stub.loading.resolve(stub.module); });
+    const cause = new Error("partial create failed");
+    await act(async () => { stub.creating.reject(cause); });
+    expect(editor().getAttribute("data-mode")).toBe("failed");
+    await type(editor(), "fallback edit");
+    await act(async () => { stub.emitStale("late stale editor update"); });
+    expect(changes).toEqual(["fallback edit"]);
+    expect(ref.current!.getMarkdown()).toBe("fallback edit");
+    expect(editor().value).toBe("fallback edit");
+    expect(stub.destroyed).toBe(1);
+    expect(stub.handlers).toHaveLength(0);
+    expect(errors).toEqual([{ code: "editor-create-failed", cause }]);
+    stub.destroying.reject(new Error("teardown failed"));
+    const mounted = root!;
+    root = undefined;
+    await act(async () => mounted.unmount());
+    expect(stub.destroyed).toBe(1);
+  });
+
+  test("reset waits for pending creation and destruction before reusing the host", async () => {
+    const stub = lifecycleEditor();
+    const ref = createRef<MarkdownEditorHandle>();
+    const changes: string[] = [];
+    const view = (resetKey: number) => <MarkdownEditor ref={ref} value={`document ${resetKey}`}
+      resetKey={resetKey} fallback={false} loadEditor={stub.load}
+      onChange={(markdown) => changes.push(markdown)} />;
+    await render(view(0));
+    await act(async () => { stub.loading.resolve(stub.module); });
+    await rerender(view(1));
+    expect(stub.constructed).toBe(1);
+    await act(async () => { stub.emitStale("stale during reset"); });
+    expect(ref.current!.getMarkdown()).toBe("document 1");
+    expect(changes).toEqual([]);
+    await act(async () => { stub.creating.resolve(); });
+    expect(stub.destroyed).toBe(1);
+    expect(stub.constructed).toBe(1);
+    await act(async () => { stub.destroying.resolve(); });
+    expect(stub.constructed).toBe(2);
+    expect(container!.querySelector('[data-testid="markdown-editor"]')!.textContent).toBe("document 1");
+    expect(ref.current!.getMarkdown()).toBe("document 1");
+  });
+
+  test("synchronous setup failure releases the constructed editor", async () => {
+    const stub = lifecycleEditor();
+    const cause = new Error("listener setup failed");
+    const errors: unknown[] = [];
+    stub.module.Crepe.prototype.on = () => { throw cause; };
+    stub.destroying.resolve();
+    await render(<MarkdownEditor value="seed" fallback={false} loadEditor={stub.load}
+      onError={(error) => errors.push(error)} />);
+    await act(async () => { stub.loading.resolve(stub.module); });
+    expect(editor().getAttribute("data-mode")).toBe("failed");
+    expect(stub.destroyed).toBe(1);
+    expect(errors).toEqual([{ code: "editor-create-failed", cause }]);
+  });
+
 });
