@@ -51,10 +51,11 @@
  * @since 0.1.0
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Clock, Context, Duration, Effect, Layer, Option, Result, Schema } from "effect"
+import { Clock, Context, Duration, Effect, HashSet, Layer, Option, Result, Schema } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as FoldCache from "./internal/foldCache.ts"
 import type * as NotificationModel from "./Notification.ts"
 import { type NotificationError, NotificationQueue } from "./NotificationQueue.ts"
 
@@ -669,11 +670,20 @@ export class AlertRuntime extends Context.Service<AlertRuntime, RuntimeService>(
  */
 interface Watched {
   readonly open: ReadonlyMap<string, number>
-  readonly delivered: ReadonlySet<string>
+  /**
+   * The alerts already paged, as a persistent set: a tick adds a node and
+   * leaves the fold the previous tick published untouched, where copying the
+   * set would cost the run's whole delivery history on every tick.
+   */
+  readonly delivered: HashSet.HashSet<string>
   readonly cursor: number | undefined
 }
 
-/** How many runs one alert runtime keeps folded at a time. */
+/**
+ * How many runs one alert runtime keeps folded at a time. The retention policy
+ * is scan-resistant, so a sweep of more runs than this reads journal tails for
+ * all but a fixed handful of them.
+ */
 const maximumWatchedRuns = 64
 
 const alertNotification = (alert: Alert): NotificationModel.Notification => ({
@@ -730,12 +740,12 @@ export const layer = (
       const sink = yield* Sink
       // Folded history per run, so a tick costs the entries committed since
       // the previous one rather than the run's whole journal.
-      const watched = new Map<string, Watched>()
+      const watched = FoldCache.make<Watched>(maximumWatchedRuns)
 
       const observed = (runId: JournalEvent.RunId): Effect.Effect<Watched, Journal.JournalError> =>
         Effect.gen(function*() {
           const base: Watched = watched.get(runId) ??
-            { open: new Map(), delivered: new Set(), cursor: undefined }
+            { open: new Map(), delivered: HashSet.empty(), cursor: undefined }
           const fresh: Array<JournalEvent.Entry> = []
           let after = base.cursor === undefined ? undefined : JournalEvent.Seq.make(base.cursor)
           while (true) {
@@ -746,8 +756,10 @@ export const layer = (
           }
           if (fresh.length === 0) return base
 
+          // `open` is bounded by the policy's rules, so it is copied; the
+          // delivery history is not, so it grows by one persistent node.
           const open = new Map(base.open)
-          const delivered = new Set(base.delivered)
+          let delivered = base.delivered
           let cursor = base.cursor
           for (const entry of fresh) {
             cursor = entry.seq
@@ -755,7 +767,7 @@ export const layer = (
             if (payload === undefined) continue
             if (entry.eventType === deliveredEventType) {
               const id = payload["alertId"]
-              if (typeof id === "string") delivered.add(id)
+              if (typeof id === "string") delivered = HashSet.add(delivered, id)
             }
             observe(checked, detectors, entry, payload, open)
           }
@@ -765,13 +777,7 @@ export const layer = (
           // transaction's uncommitted rows, and caching them would outlive the
           // rollback that erased them: the run would page about a condition
           // durable history never held.
-          // Re-inserting moves the run to the end, so the key evicted below is
-          // always the least recently folded one.
-          yield* journal.whenCommitted(Effect.sync(() => {
-            watched.delete(runId)
-            watched.set(runId, next)
-            if (watched.size > maximumWatchedRuns) watched.delete(watched.keys().next().value!)
-          }))
+          yield* journal.whenCommitted(Effect.sync(() => watched.put(runId, next)))
           return next
         })
 
@@ -815,7 +821,7 @@ export const layer = (
           const refused: Array<Alert> = []
           const suppressed: Array<Alert> = []
           for (const alert of raised) {
-            if (history.delivered.has(alertId(alert))) {
+            if (HashSet.has(history.delivered, alertId(alert))) {
               suppressed.push(alert)
               continue
             }

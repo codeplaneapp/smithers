@@ -27,6 +27,75 @@ const item = (
     : { _tag: "human-followup", delivery, ...common }
 }
 
+/** One durable read, and the cursor it paged from. */
+interface Read {
+  readonly runId: string
+  readonly after: number | undefined
+  readonly limit: number
+  readonly entries: number
+}
+
+/**
+ * A journal that records every durable read.
+ *
+ * The cursor is the point: a fold the cache still holds pages from the
+ * sequence it stopped at, and a fold the cache dropped starts again with no
+ * cursor at all. Counting runs kept alive cannot tell those apart, so the
+ * eviction cases read this instead of the layer's private map.
+ */
+const recording = (reads: Array<Read>) =>
+  Layer.effect(
+    Journal.Journal,
+    Effect.map(Journal.Journal, (journal) =>
+      Journal.Journal.of({
+        ...journal,
+        entries: (options) =>
+          Effect.tap(journal.entries(options), (page) =>
+            Effect.sync(() => {
+              reads.push({
+                runId: options.runId,
+                after: options.after,
+                limit: options.limit,
+                entries: page.entries.length
+              })
+            }))
+      }))
+  ).pipe(Layer.provide(TestJournal.layer()))
+
+/** Folds `runs` runs, then sweeps them all again and reports the second sweep. */
+const sweep = (
+  runs: number,
+  admissions: number,
+  sweeps = 1
+): Promise<{ readonly reads: ReadonlyArray<Read>; readonly observed: ReadonlyArray<Notification> }> => {
+  const reads: Array<Read> = []
+  const ids = Array.from({ length: runs }, (_, index) => `run-${index}`)
+  return Effect.runPromise(
+    Effect.gen(function*() {
+      const queue = yield* NotificationQueue.NotificationQueue
+      yield* Effect.forEach(ids, (id) =>
+        Effect.forEach(
+          Array.from({ length: admissions }, (_, index) => index),
+          (index) => queue.admit(id, item(`${id}-n-${index}`, "steer")),
+          { discard: true }
+        ), { discard: true })
+      reads.length = 0
+      yield* Effect.forEach(
+        Array.from({ length: sweeps }, (_, index) => index),
+        () => Effect.forEach(ids, (id) => queue.pending(id), { discard: true }),
+        { discard: true }
+      )
+      const swept = reads.slice()
+      const observed = yield* queue.pending("run-0")
+      return { reads: swept, observed }
+    }).pipe(
+      Effect.provide(NotificationQueue.layerWith({ capacity: admissions })),
+      Effect.provide(recording(reads)),
+      Effect.scoped
+    )
+  )
+}
+
 const run = <A, E>(
   effect: Effect.Effect<A, E, NotificationQueue.NotificationQueue | Journal.Journal>
 ): Promise<A> =>
@@ -917,5 +986,118 @@ describe("NotificationQueue", () => {
     )
 
     expect(observed.map(({ id }) => id)).toEqual(["n-0"])
+  })
+  it("pages every fold from its cursor when the sweep fits what the cache holds", async () => {
+    const { observed, reads } = await sweep(64, 1)
+
+    expect(reads).toHaveLength(64)
+    expect(reads.filter((read) => read.after === undefined)).toEqual([])
+    expect(observed.map(({ id }) => id)).toEqual(["run-0-n-0"])
+  })
+
+  it("evicts a fold at one run past the bound without replaying every other journal", async () => {
+    const { observed, reads } = await sweep(65, 1)
+    const refolded = reads.filter((read) => read.after === undefined).map((read) => read.runId)
+
+    // Eviction happened: a cache that retained all 65 folds would page every
+    // one of them from its cursor, which is what the count assertions this
+    // replaces could not tell apart.
+    expect(refolded.length).toBeGreaterThan(0)
+    // ...and it cost a fixed handful of refolds, not the whole sweep. Evicting
+    // the least recently folded run instead evicts the run the next read wants,
+    // so all 65 would page from sequence zero on every sweep.
+    expect(refolded.length).toBeLessThanOrEqual(2)
+    expect(refolded).not.toContain("run-0")
+    expect(observed.map(({ id }) => id)).toEqual(["run-0-n-0"])
+  })
+
+  it("reads journal tails when a supervisor sweeps more runs than the cache holds", async () => {
+    const runs = 70
+    const admissions = 12
+    const { observed, reads } = await sweep(runs, admissions, 3)
+    const read = reads.reduce((total, page) => total + page.entries, 0)
+
+    // A sweep that evicted the next run on every read would replay all 70
+    // journals on each of the three passes: 2,520 entries for no new events.
+    expect(read).toBeLessThan(runs * admissions)
+    expect(observed).toHaveLength(admissions)
+  })
+
+  it("reads a replayed drain's notifications back from the journal instead of retaining them", async () => {
+    const reads: Array<Read> = []
+    const boundary = { runId: "run", targetLineageId: "run/root", boundary: "turn-0", wouldIdle: false }
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", item("n-0", "steer"))
+        const first = yield* queue.drain(boundary)
+        reads.length = 0
+        const replay = yield* queue.drain(boundary)
+        return { first, replay, reads: reads.slice() }
+      }).pipe(
+        Effect.provide(NotificationQueue.layer),
+        Effect.provide(recording(reads)),
+        Effect.scoped
+      )
+    )
+
+    expect(observed.first.notifications.map(({ id }) => id)).toEqual(["n-0"])
+    expect(observed.replay.duplicate).toBe(true)
+    expect(observed.replay.notifications.map(({ id }) => id)).toEqual(["n-0"])
+    expect(observed.replay.notifications[0]?.payload).toEqual({ body: "n-0" })
+    // The fold holds the drain's identity and the admission's sequence, not
+    // the notification: a queue that retained every admitted payload for the
+    // run's lifetime would answer the replay without reading anything back.
+    expect(observed.reads.filter((read) => read.limit === 1).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("keeps a capacity-one queue's reads bounded across a long history", async () => {
+    const cycles = 120
+    const measured = 20
+    const reads: Array<Read> = []
+    const cycle = (index: number) =>
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", item(`n-${index}`, "steer"))
+        yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: `turn-${index}`,
+          wouldIdle: false
+        })
+      })
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* Effect.forEach(Array.from({ length: cycles - measured }, (_, index) => index), cycle, {
+          discard: true
+        })
+        reads.length = 0
+        yield* Effect.forEach(
+          Array.from({ length: measured }, (_, index) => cycles - measured + index),
+          cycle,
+          { discard: true }
+        )
+        const tail = reads.reduce((total, page) => total + page.entries, 0)
+        // The very first boundary, 120 coalescing cycles later.
+        const ancient = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: "turn-0",
+          wouldIdle: false
+        })
+        return { tail, ancient }
+      }).pipe(
+        Effect.provide(NotificationQueue.layerWith({ capacity: 1 })),
+        Effect.provide(recording(reads)),
+        Effect.scoped
+      )
+    )
+
+    // One slot, so the pending state never grows. What a cycle reads must not
+    // grow with the 100 cycles of history behind it either.
+    expect(observed.tail).toBeLessThan(measured * 12)
+    expect(observed.ancient.duplicate).toBe(true)
+    expect(observed.ancient.notifications.map(({ id }) => id)).toEqual(["n-0"])
   })
 })

@@ -7,7 +7,8 @@
  * @since 0.1.0
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Context, Effect, Layer, Option, Schema, SchemaIssue, Semaphore } from "effect"
+import { Context, Effect, HashMap, Layer, Option, Schema, SchemaIssue, Semaphore } from "effect"
+import * as FoldCache from "./internal/foldCache.ts"
 import * as NotificationModel from "./Notification.ts"
 import * as NotificationEvent from "./NotificationEvent.ts"
 import * as NotificationState from "./NotificationState.ts"
@@ -315,10 +316,17 @@ const freeze = (value: unknown): void => {
   Object.freeze(value)
 }
 
-/** One committed admission, as the journal recorded it. */
+/**
+ * One committed admission, as the journal recorded it.
+ *
+ * This is an identity, not a payload: the fold keeps the fingerprint that
+ * settles a duplicate and the sequence the record lives at, and reads the
+ * notification itself back from the journal on the rare path that needs it.
+ * Retaining every admitted payload for a run's lifetime is what made a
+ * capacity-one queue grow without bound.
+ */
 interface Committed {
   readonly fingerprint: string | undefined
-  readonly notification: NotificationModel.Notification
   readonly decision: NotificationState.AdmissionDecision
   readonly seq: number
 }
@@ -332,14 +340,17 @@ interface Committed {
  */
 interface Loaded {
   readonly state: NotificationState.State
-  readonly admissions: ReadonlyMap<string, Committed>
-  readonly promotions: ReadonlyMap<string, NotificationEvent.Promoted>
+  readonly admissions: HashMap.HashMap<string, Committed>
+  /** Drain identity to the sequence its record committed at. */
+  readonly promotions: HashMap.HashMap<string, number>
   readonly cursor: number | undefined
 }
 
 /**
  * How many runs one layer keeps folded at a time. Evicting is safe: the next
- * call for an evicted run folds it again from the beginning.
+ * call for an evicted run folds it again from the beginning, and the retention
+ * policy is scan-resistant, so a supervisor sweeping more runs than this reads
+ * journal tails for all but a fixed handful of them.
  */
 const maximumCachedRuns = 64
 
@@ -399,14 +410,59 @@ export const layerWith = (
       // Only committed folds may be shared. A transaction reads its own
       // inserts, but its read-back is still provisional until the OUTERMOST
       // commit; neither a retry nor a later caller may dedupe against it.
-      const folded = new Map<string, Loaded>()
+      const folded = FoldCache.make<Loaded>(maximumCachedRuns)
+
+      /**
+       * One entry by the sequence it committed at.
+       *
+       * The fold keeps identities and sequences rather than payloads, so the
+       * paths that must report an admitted notification read it back here.
+       */
+      const entryAt = (
+        runId: JournalEvent.RunId,
+        seq: number
+      ): Effect.Effect<Option.Option<JournalEvent.Entry>, Journal.JournalError> =>
+        Effect.map(
+          journal.entries({
+            runId,
+            ...(seq === 0 ? {} : { after: JournalEvent.Seq.make(seq - 1) }),
+            limit: 1
+          }),
+          (page) => {
+            const found = page.entries[0]
+            return found !== undefined && found.seq === seq ? Option.some(found) : Option.none()
+          }
+        )
+
+      const admittedAt = (
+        runId: JournalEvent.RunId,
+        seq: number
+      ): Effect.Effect<Option.Option<NotificationEvent.Admitted>, Journal.JournalError> =>
+        Effect.map(entryAt(runId, seq), (entry) => {
+          if (Option.isNone(entry)) return Option.none()
+          const decoded = NotificationEvent.fromEntry(entry.value)
+          if (Option.isNone(decoded) || !NotificationEvent.isAdmitted(decoded.value)) return Option.none()
+          freeze(decoded.value.notification)
+          return Option.some(decoded.value)
+        })
+
+      const promotedAt = (
+        runId: JournalEvent.RunId,
+        seq: number
+      ): Effect.Effect<Option.Option<NotificationEvent.Promoted>, Journal.JournalError> =>
+        Effect.map(entryAt(runId, seq), (entry) => {
+          if (Option.isNone(entry)) return Option.none()
+          const decoded = NotificationEvent.fromEntry(entry.value)
+          if (Option.isNone(decoded) || !NotificationEvent.isPromoted(decoded.value)) return Option.none()
+          return Option.some(decoded.value)
+        })
 
       const load = (runId: JournalEvent.RunId): Effect.Effect<Loaded, Journal.JournalError> =>
         Effect.gen(function*() {
           const base: Loaded = folded.get(runId) ?? {
             state: NotificationState.empty(capacity),
-            admissions: new Map(),
-            promotions: new Map(),
+            admissions: HashMap.empty(),
+            promotions: HashMap.empty(),
             cursor: undefined
           }
           const fresh: Array<JournalEvent.Entry> = []
@@ -423,8 +479,12 @@ export const layerWith = (
 
           let state = base.state
           let cursor = base.cursor
-          const admissions = new Map(base.admissions)
-          const promotions = new Map(base.promotions)
+          // Persistent maps: one event adds a node and leaves the fold the
+          // previous load published untouched, where copying both maps would
+          // cost the run's whole history on every event and make a long run's
+          // folding quadratic in its own admissions.
+          let admissions = base.admissions
+          let promotions = base.promotions
           for (const entry of fresh) {
             cursor = entry.seq
             const decoded = NotificationEvent.fromEntry(entry)
@@ -432,27 +492,20 @@ export const layerWith = (
             const event = decoded.value
             if (NotificationEvent.isAdmitted(event)) {
               freeze(event.notification)
-              admissions.set(event.notification.id, {
-                notification: event.notification,
+              admissions = HashMap.set(admissions, event.notification.id, {
                 fingerprint: event.fingerprint,
                 decision: event.decision,
                 seq: entry.seq
               })
               state = NotificationState.applyAdmission(state, event.notification, entry.seq, event.decision)
             } else {
-              promotions.set(drainKey(event.targetLineageId, event.boundary), event)
+              promotions = HashMap.set(promotions, drainKey(event.targetLineageId, event.boundary), entry.seq)
               state = NotificationState.applyPromoted(state, event.ids)
             }
           }
 
           const loaded: Loaded = { state, admissions, promotions, cursor }
-          // Re-inserting moves the run to the end, so the key evicted below is
-          // always the least recently folded one.
-          yield* journal.whenCommitted(Effect.sync(() => {
-            folded.delete(runId)
-            folded.set(runId, loaded)
-            if (folded.size > maximumCachedRuns) folded.delete(folded.keys().next().value!)
-          }))
+          yield* journal.whenCommitted(Effect.sync(() => folded.put(runId, loaded)))
           return loaded
         })
 
@@ -479,13 +532,24 @@ export const layerWith = (
       ): Effect.Effect<AdmissionReceipt, Journal.JournalError | NotificationError> =>
         Effect.gen(function*() {
           const loaded = yield* load(runId)
-          const prior = loaded.admissions.get(admitted.id)
+          const prior = Option.getOrUndefined(HashMap.get(loaded.admissions, admitted.id))
           if (prior !== undefined) {
             // Legacy rows have no fingerprint; only their persisted content is
-            // available for comparison. New rows retain the original identity.
-            const same = prior.fingerprint === undefined
-              ? canonical(prior.notification) === canonical(admitted)
-              : prior.fingerprint === admittedFingerprint
+            // available for comparison, and the fold keeps identities rather
+            // than payloads, so the original is read back at its sequence.
+            // New rows settle on the fingerprint alone and read nothing.
+            let same = prior.fingerprint === admittedFingerprint
+            if (prior.fingerprint === undefined) {
+              const original = yield* admittedAt(runId, prior.seq)
+              if (Option.isNone(original)) {
+                return yield* new NotificationError({
+                  code: "notification_unavailable",
+                  notificationId: admitted.id,
+                  message: `The admission for notification ${admitted.id} is no longer readable`
+                })
+              }
+              same = canonical(original.value.notification) === canonical(admitted)
+            }
             if (!same) {
               return yield* new NotificationError({
                 code: "notification_id_reused",
@@ -534,7 +598,7 @@ export const layerWith = (
               payload: { notification: admitted, decision: admission.decision, fingerprint: admittedFingerprint }
             })
           )
-          const committed = (yield* load(runId)).admissions.get(admitted.id)
+          const committed = Option.getOrUndefined(HashMap.get((yield* load(runId)).admissions, admitted.id))
           if (committed === undefined) {
             // Only reachable when the emit deduped against an entry this
             // queue did not write, so nothing was committed and there is
@@ -571,23 +635,41 @@ export const layerWith = (
               const runId = JournalEvent.RunId.make(input.runId)
               const key = drainKey(input.targetLineageId, input.boundary)
               const loaded = yield* load(runId)
+              // A replay reports what the committed record delivered, read
+              // back from the journal: the fold holds the identities, not the
+              // notifications, so a run's drained payloads are not retained.
               const delivered = (
                 record: NotificationEvent.Promoted,
-                admissions: ReadonlyMap<string, Committed>
-              ): ReadonlyArray<NotificationModel.Notification> =>
-                record.ids.flatMap((id) => {
-                  const committed = admissions.get(id)
-                  return committed === undefined ? [] : [committed.notification]
+                admissions: HashMap.HashMap<string, Committed>
+              ): Effect.Effect<ReadonlyArray<NotificationModel.Notification>, Journal.JournalError> =>
+                Effect.map(
+                  Effect.forEach(record.ids, (id) => {
+                    const committed = HashMap.get(admissions, id)
+                    return Option.isNone(committed)
+                      ? Effect.succeed(Option.none<NotificationEvent.Admitted>())
+                      : admittedAt(runId, committed.value.seq)
+                  }),
+                  (found) => found.flatMap((event) => Option.isNone(event) ? [] : [event.value.notification])
+                )
+
+              const replayed = (seq: number, admissions: HashMap.HashMap<string, Committed>) =>
+                Effect.gen(function*() {
+                  const record = yield* promotedAt(runId, seq)
+                  if (Option.isNone(record)) {
+                    return yield* new NotificationError({
+                      code: "notification_unavailable",
+                      message: `The drain record for boundary ${input.boundary} is no longer readable`
+                    })
+                  }
+                  return {
+                    notifications: yield* delivered(record.value, admissions),
+                    boundary: input.boundary,
+                    duplicate: true
+                  }
                 })
 
-              const prior = loaded.promotions.get(key)
-              if (prior !== undefined) {
-                return {
-                  notifications: delivered(prior, loaded.admissions),
-                  boundary: input.boundary,
-                  duplicate: true
-                }
-              }
+              const prior = HashMap.get(loaded.promotions, key)
+              if (Option.isSome(prior)) return yield* replayed(prior.value, loaded.admissions)
 
               const cutoff = input.cutoffSeq ?? loaded.cursor ?? 0
               const steers = NotificationState.promoteSteers(loaded.state, cutoff, input.targetLineageId)
@@ -613,18 +695,19 @@ export const layerWith = (
                 })
               )
               const settled = yield* load(runId)
-              const record = settled.promotions.get(key)
-              if (record === undefined) {
+              const committed = HashMap.get(settled.promotions, key)
+              if (Option.isNone(committed)) {
                 return yield* new NotificationError({
                   code: "notification_unavailable",
                   message: `The journal identity for boundary ${input.boundary} holds an event this queue did not write`
                 })
               }
-              return {
-                notifications: delivered(record, settled.admissions),
-                boundary: input.boundary,
-                duplicate: receipt._tag === "Duplicate"
+              // An accepted emit wrote THIS drain, so the promoted set is the
+              // one already in hand and no read-back is owed.
+              if (receipt._tag === "Accepted") {
+                return { notifications: promoted, boundary: input.boundary, duplicate: false }
               }
+              return yield* replayed(committed.value, settled.admissions)
             }))
           )
         ),

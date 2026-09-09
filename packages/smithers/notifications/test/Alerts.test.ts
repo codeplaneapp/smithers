@@ -212,6 +212,79 @@ const controllableSink = () => {
   }
 }
 
+/** One durable read, and the cursor it paged from. */
+interface Read {
+  readonly runId: string
+  readonly after: number | undefined
+}
+
+/**
+ * A journal that records every durable read.
+ *
+ * A run the fold cache still holds pages from the sequence its last tick
+ * stopped at; a run the cache dropped starts again with no cursor. Asserting
+ * that an old alert stays suppressed cannot tell those apart, because keeping
+ * every fold answers the same way.
+ */
+const recording = (reads: Array<Read>) =>
+  Layer.effect(
+    Journal.Journal,
+    Effect.map(Journal.Journal, (journal) =>
+      Journal.Journal.of({
+        ...journal,
+        entries: (options) =>
+          Effect.tap(journal.entries(options), () =>
+            Effect.sync(() => {
+              reads.push({ runId: options.runId, after: options.after })
+            }))
+      }))
+  ).pipe(Layer.provide(TestJournal.layer()))
+
+/** Ticks `runs` parked runs, then sweeps them all again and reports the sweep. */
+const tickSweep = (runs: number) => {
+  const reads: Array<Read> = []
+  const ids = Array.from({ length: runs }, (_, index) => `bulk-run-${index}`)
+  return Effect.runPromise(
+    Effect.gen(function*() {
+      const journal = yield* Journal.Journal
+      const alerts = yield* Alerts.AlertRuntime
+      yield* Effect.forEach(
+        ids,
+        (id) =>
+          journal.emitDurableUnfenced(
+            new JournalEvent.Input({
+              runId: JournalEvent.RunId.make(id),
+              sourceId: JournalEvent.SourceId.make("/control"),
+              eventType: "control.run.parked",
+              payload: { runId: id, status: "waiting-approval" }
+            })
+          ),
+        { discard: true }
+      )
+      yield* TestClock.adjust("2 minutes")
+      yield* Effect.forEach(ids, (id) => alerts.tick(id), { discard: true })
+      reads.length = 0
+      yield* Effect.forEach(ids, (id) => alerts.tick(id), { discard: true })
+      const swept = reads.slice()
+      return {
+        reads: swept,
+        retained: yield* alerts.tick("bulk-run-0"),
+        refolded: yield* alerts.tick(ids[runs - 1]!)
+      }
+    }).pipe(
+      Effect.provide(
+        Alerts.layer(policy).pipe(
+          Layer.provideMerge(Layer.mergeAll(NotificationQueue.layer, Alerts.layerNoop)),
+          Layer.provideMerge(recording(reads)),
+          Layer.provideMerge(TestClock.layer())
+        )
+      ),
+      Effect.scoped,
+      Effect.orDie
+    )
+  )
+}
+
 const stack = (sink: Layer.Layer<Alerts.Sink>) =>
   Alerts.layer(policy).pipe(
     Layer.provideMerge(Layer.mergeAll(NotificationQueue.layer, sink)),
@@ -1018,6 +1091,31 @@ describe("Alerts.tick over a journal and a queue that can refuse", () => {
 
     expect(observed.suppressed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
     expect(observed.delivered).toEqual([])
+  })
+
+  it("pages every watched run from its cursor when the sweep fits what the cache holds", async () => {
+    const { reads, retained } = await tickSweep(64)
+
+    expect(reads).toHaveLength(64)
+    expect(reads.filter((read) => read.after === undefined)).toEqual([])
+    expect(retained.suppressed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+  })
+
+  it("evicts a watched run at one past the bound without replaying every other journal", async () => {
+    const { reads, refolded, retained } = await tickSweep(65)
+    const restarted = reads.filter((read) => read.after === undefined).map((read) => read.runId)
+
+    // Eviction happened: keeping all 65 folds pages every one from its cursor.
+    expect(restarted.length).toBeGreaterThan(0)
+    // ...and it cost a fixed handful of refolds. Dropping the least recently
+    // watched run drops the run the next tick wants, so all 65 would fold from
+    // sequence zero on every sweep.
+    expect(restarted.length).toBeLessThanOrEqual(2)
+    expect(restarted).not.toContain("bulk-run-0")
+    expect(retained.suppressed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+    // A refolded run reaches the same answer from the journal alone.
+    expect(refolded.suppressed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+    expect(refolded.delivered).toEqual([])
   })
 
   it("refuses a policy whose delay is not a whole number of milliseconds", async () => {
