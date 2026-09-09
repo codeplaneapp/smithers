@@ -254,7 +254,7 @@ terminal transition, and translates conflicts into typed failures.
 | Group             | Members                                                                                                                                                                                             |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Plans             | `plan(input: PlanInput) => Effect<PlanOutcome, FlowNotFound \| InvalidInput \| PersistenceError>`, `getPlan(planId)`, `listPlanIds`                                                                 |
-| Approvals         | `authorizeApproval(request)`, `lookupApproval(target)`, `registerApproval(nodeTarget)`, `installBulkGrant(token, envelope, scope)`, `resolveApproval(token, decision, principal, scope?)`, `grants` |
+| Approvals         | `authorizeApproval(request)`, `lookupApproval(target)`, `registerApproval(nodeTarget)`, `resolveApproval(token, decision, principal, scope?)`, `installBulkGrant(token, envelope, scope)`, `grants` |
 | Runs              | `launch(planId, digest, envelope) => Effect<LaunchResult, ...>`, `getRun(runId)`, `listRuns`, `listFlows`                                                                                           |
 | Messages          | `enqueueSteer(runId, message)`, `drainSteering(runId)`, `deliverSignal(runId, signal)`, `deliveredSignals(runId)`                                                                                   |
 | Resume delegation | `requestResume(runId) => Effect<number, ...>`, `pendingResumes`, `clearResume(runId, sequence)`                                                                                                     |
@@ -280,6 +280,13 @@ to `once`; when installing a wider grant, pass that same scope explicitly.
 `Control.approve` does this automatically. Resolution checks the owning
 `ApprovalAuthority` again and may fail with `Unauthorized`; it does not install
 a grant. `installBulkGrant` is a trusted storage port, not an authorization API.
+
+For a new decision, authenticate the principal and call `authorizeApproval`
+before target reads or receipt replay. Then call `lookupApproval`,
+`resolveApproval` exactly once with an authority recheck, `installBulkGrant` only
+on approval, and journal the decision. Commit the decision, grant, journal entry,
+receipt, and any node resume delegation atomically. Resolution must not require
+an installed grant or a flushed journal decision.
 
 Migration 6004 preserves legacy rows. Unknown old terminal decisions are
 refused with `PersistenceError`; pending rows remain pending. Preserve the old

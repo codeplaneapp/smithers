@@ -320,9 +320,13 @@ export interface PendingResume {
  *
  * A production adapter must fence every owner-sensitive write, implement
  * resume as join-or-claim, release claims on every waiting or terminal
- * transition, and translate all conflicts into typed failures. Approval
- * resolution is exactly once and is invoked only after grant installation and
- * the flushed journal decision.
+ * transition, and translate all conflicts into typed failures. For a new
+ * approval decision, authenticate the principal and call `authorizeApproval`
+ * before target reads or receipt replay. Then call `lookupApproval`,
+ * `resolveApproval` exactly once with an authority recheck, `installBulkGrant`
+ * only on approval, and journal the decision. Commit the decision, grant,
+ * journal entry, receipt, and any node resume delegation atomically. Resolution
+ * must not require an installed grant or a flushed journal decision.
  *
  * @category models
  * @since 0.1.0
