@@ -1,12 +1,15 @@
 /**
  * The durable `TimeTravelStore`, backed by SQL.
  *
- * Four tables carry what the journal cannot: `flows_time_travel_audits`
+ * Six tables carry what the journal cannot: `flows_time_travel_audits`
  * (one row per rewind, so a crash leaves something recovery can find),
  * `flows_time_travel_receipts` (proof a side effect was compensated),
- * `flows_time_travel_snapshots` (the tier-2 anchors at a frame), and
+ * `flows_time_travel_snapshots` (the tier-2 anchors at a frame),
  * `flows_time_travel_fork_intents` (a minted fork id, reserved before its
- * workspace is provisioned so a crash between the two never blocks a retry).
+ * workspace is provisioned so a crash between the two never blocks a retry),
+ * `flows_time_travel_edges` (fork edges), and `flows_time_travel_archive`
+ * (records retained across truncation). The migration ladder also initializes
+ * `flows_journal_generations`, shared with the journal.
  * Lineage edges are read as ONE tree across this package's fork edges and the
  * engine's child spawns, per `docs/specs/Concepts/Subflows.md` §129-131.
  *
@@ -22,6 +25,7 @@
  * @since 0.1.0
  */
 import { DurableWriter } from "@smthrs/database/DurableWriter"
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import { RunState } from "@smthrs/engine-store/RunState"
 import * as JournalGeneration from "@smthrs/journal/JournalGeneration"
 import { isTerminalRunStatus, type RunStatus } from "@smthrs/run-store/RunStore"
@@ -31,219 +35,21 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { forkCreatedEventType, type LineageEdge } from "./Frame.ts"
+import * as Migrations from "./Migrations.ts"
 import { error, TimeTravelError } from "./TimeTravelError.ts"
 import * as TimeTravelStore from "./TimeTravelStore.ts"
 
 /**
- * Recognizes the one ALTER TABLE failure {@link migrate} may absorb: the
- * column already exists. SQLite reports it as `duplicate column name`,
- * Postgres as `column ... already exists`; the failure's message chain is
- * walked because the SQL layer wraps the driver error.
- */
-const isDuplicateColumn = (cause: unknown): boolean => {
-  const seen = new Set<unknown>()
-  let current = cause
-  while (typeof current === "object" && current !== null && !seen.has(current)) {
-    seen.add(current)
-    const message = (current as { readonly message?: unknown }).message
-    if (typeof message === "string" && /duplicate column|already exists/i.test(message)) return true
-    current = (current as { readonly cause?: unknown }).cause
-  }
-  return false
-}
-
-/**
- * Creates the time-travel tables. The DDL is SQLite dialect — `typeof()` and
- * `json_valid` CHECK constraints, a `json_extract` expression index — so it
- * runs on any SQLite-speaking `SqlClient` and nowhere else (see the module
- * header).
+ * Applies pending time-travel migration rungs and records them in
+ * `flows_migrations`. The journal and run-store ladders must already be
+ * migrated; use `Migrations.run` to install the full durable schema.
  *
  * @since 0.1.0
  * @category migrations
  */
-export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
-  yield* JournalGeneration.initialize
-  const sql = yield* Effect.service(SqlClient.SqlClient)
-  /**
-   * Names the object a failing statement was creating.
-   *
-   * A driver error says what SQLite objected to ("views may not be indexed"),
-   * never which of a dozen statements raised it, and a migration failure that
-   * does not name its object is not actionable. The label is folded into the
-   * cause chain, so `make`'s typed defect carries both.
-   */
-  const step = <A, E, R>(object: string, statement: Effect.Effect<A, E, R>) =>
-    statement.pipe(
-      Effect.mapError((cause) => new Error(`time-travel migration failed creating ${object}`, { cause }))
-    )
-  yield* step(
-    "flows_time_travel_audits",
-    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_audits (
-    id TEXT PRIMARY KEY CHECK (length(id) > 0),
-    run_id TEXT NOT NULL CHECK (length(run_id) > 0),
-    lineage_id TEXT NOT NULL CHECK (length(lineage_id) > 0),
-    seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
-    status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed', 'failed')),
-    rate_limit_json TEXT CHECK (rate_limit_json IS NULL OR json_valid(rate_limit_json)),
-    detail_json TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
-  )`
-  )
-  yield* step(
-    "flows_time_travel_audits_status_idx on flows_time_travel_audits",
-    sql`CREATE INDEX IF NOT EXISTS flows_time_travel_audits_status_idx
-    ON flows_time_travel_audits (status)`
-  )
-  yield* step(
-    "flows_time_travel_receipts",
-    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_receipts (
-    id TEXT PRIMARY KEY CHECK (length(id) > 0),
-    audit_id TEXT NOT NULL CHECK (length(audit_id) > 0),
-    effect_id TEXT NOT NULL CHECK (length(effect_id) > 0),
-    receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json))
-  )`
-  )
-  yield* step(
-    "flows_time_travel_snapshots",
-    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_snapshots (
-    run_id TEXT NOT NULL CHECK (length(run_id) > 0),
-    lineage_id TEXT NOT NULL CHECK (length(lineage_id) > 0),
-    seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
-    change_id TEXT NOT NULL CHECK (length(change_id) > 0),
-    plan_digest TEXT CHECK (plan_digest IS NULL OR length(plan_digest) > 0),
-    PRIMARY KEY (run_id, lineage_id, seq)
-  )`
-  )
-  // Idempotent widening for a database migrated before the plan digest joined
-  // the anchor. `ADD COLUMN` on a table that already has it is an error, not a
-  // no-op, and there is nothing to repair when it fails — so exactly that one
-  // failure is absorbed. Every other ALTER failure (a view squatting on the
-  // table name, a locked or corrupt database) is real damage the migration
-  // must surface, never swallow.
-  yield* step(
-    "the flows_time_travel_snapshots plan_digest column",
-    sql`ALTER TABLE flows_time_travel_snapshots ADD COLUMN plan_digest TEXT`.pipe(
-      Effect.catch((cause) => isDuplicateColumn(cause) ? Effect.void : Effect.fail(cause))
-    )
-  )
-  // The frame address is `(lineageId, seq)`, and every engine record carries
-  // its lineage in the open `meta` envelope. Indexing it out of `meta_json`
-  // keeps a lineage-filtered replay from degenerating into a full run scan.
-  yield* step(
-    "flows_journal_events_lineage_idx on flows_journal_events",
-    sql`CREATE INDEX IF NOT EXISTS flows_journal_events_lineage_idx
-    ON flows_journal_events (run_id, json_extract(meta_json, '$.lineageId'), seq)`
-  )
-  // These partial indexes contain only lineage-producing journal records.
-  // Keep their predicates identical to the literal predicates in edgesUnder.
-  yield* step(
-    "flows_journal_events_child_spawn_idx on flows_journal_events",
-    sql`CREATE INDEX IF NOT EXISTS flows_journal_events_child_spawn_idx
-    ON flows_journal_events (run_id, seq)
-    WHERE event_type = 'flows.time-travel.effect-boundary'
-      AND json_extract(payload_json, '$.effect.kind') = 'flows/engine-store/child-spawn'`
-  )
-  yield* step(
-    "flows_journal_events_handoff_idx on flows_journal_events",
-    sql`CREATE INDEX IF NOT EXISTS flows_journal_events_handoff_idx
-    ON flows_journal_events (run_id, seq)
-    WHERE event_type = 'flows.engine.run-decision'
-      AND json_extract(payload_json, '$.decision') = 'handed-off'`
-  )
-  yield* step(
-    "flows_time_travel_edges",
-    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_edges (
-    parent_run_id TEXT NOT NULL CHECK (length(parent_run_id) > 0),
-    parent_seq INTEGER NOT NULL CHECK (
-      typeof(parent_seq) = 'integer' AND parent_seq >= 0 AND parent_seq <= 9007199254740991
-    ),
-    child_run_id TEXT NOT NULL UNIQUE CHECK (length(child_run_id) > 0),
-    kind TEXT NOT NULL CHECK (kind IN ('child', 'fork', 'continuation')),
-    attached INTEGER NOT NULL CHECK (attached IN (0, 1)),
-    CHECK (parent_run_id <> child_run_id)
-  )`
-  )
-  yield* step(
-    "flows_time_travel_edges_parent_idx on flows_time_travel_edges",
-    sql`CREATE INDEX IF NOT EXISTS flows_time_travel_edges_parent_idx
-    ON flows_time_travel_edges (parent_run_id, parent_seq)`
-  )
-  // A minted fork id, reserved before the child's workspace is provisioned
-  // and consumed when the fork commits. A row that outlives its fork is the
-  // durable trace of a process that died between the two; it keeps its
-  // ordinal taken (`reclaimed_at_ms` marks it handed back) so a retry never
-  // asks jj for the lane name the leftover on disk already holds.
-  yield* step(
-    "flows_time_travel_fork_intents",
-    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_fork_intents (
-    child_run_id TEXT PRIMARY KEY CHECK (length(child_run_id) > 0),
-    parent_run_id TEXT NOT NULL CHECK (length(parent_run_id) > 0),
-    parent_seq INTEGER NOT NULL CHECK (
-      typeof(parent_seq) = 'integer' AND parent_seq >= 0 AND parent_seq <= 9007199254740991
-    ),
-    reserved_at_ms INTEGER NOT NULL CHECK (
-      typeof(reserved_at_ms) = 'integer' AND reserved_at_ms >= 0 AND reserved_at_ms <= 9007199254740991
-    ),
-    reclaimed_at_ms INTEGER CHECK (
-      reclaimed_at_ms IS NULL
-      OR (typeof(reclaimed_at_ms) = 'integer' AND reclaimed_at_ms >= 0 AND reclaimed_at_ms <= 9007199254740991)
-    )
-  )`
-  )
-  yield* step(
-    "flows_time_travel_fork_intents_parent_idx on flows_time_travel_fork_intents",
-    sql`CREATE INDEX IF NOT EXISTS flows_time_travel_fork_intents_parent_idx
-    ON flows_time_travel_fork_intents (parent_run_id, parent_seq)`
-  )
-  // Sequences are reused after truncation; the archive key includes the
-  // journal generation observed inside the archive transaction.
-  const createArchive = sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
-    run_id TEXT NOT NULL CHECK (length(run_id) > 0),
-    generation INTEGER NOT NULL CHECK (
-      typeof(generation) = 'integer' AND generation >= 0 AND generation <= 9007199254740991
-    ),
-    seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
-    event_id TEXT NOT NULL CHECK (length(event_id) > 0),
-    source_id TEXT NOT NULL CHECK (length(source_id) > 0),
-    source_seq INTEGER NOT NULL CHECK (
-      typeof(source_seq) = 'integer' AND source_seq >= 0 AND source_seq <= 9007199254740991
-    ),
-    emitted_at_ms INTEGER NOT NULL CHECK (
-      typeof(emitted_at_ms) = 'integer' AND emitted_at_ms >= 0 AND emitted_at_ms <= 9007199254740991
-    ),
-    event_type TEXT NOT NULL CHECK (length(event_type) > 0),
-    payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
-    meta_json TEXT NOT NULL CHECK (json_valid(meta_json)),
-    archived_at_ms INTEGER NOT NULL CHECK (
-      typeof(archived_at_ms) = 'integer' AND archived_at_ms >= 0 AND archived_at_ms <= 9007199254740991
-    ),
-    PRIMARY KEY (run_id, generation, seq)
-  )`
-
-  yield* step("flows_time_travel_archive", createArchive)
-  yield* step(
-    "the flows_time_travel_archive generation rebuild",
-    sql.withTransaction(Effect.gen(function*() {
-      const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(flows_time_travel_archive)`
-      if (columns.some((column) => column.name === "generation")) return
-      // Legacy rows have no recoverable generation. Reserve zero for them.
-      // Older databases may also predate durable journal generations.
-      yield* sql`ALTER TABLE flows_time_travel_archive RENAME TO flows_time_travel_archive_legacy`
-      yield* createArchive
-      yield* sql`INSERT INTO flows_time_travel_archive
-        (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms,
-         event_type, payload_json, meta_json, archived_at_ms)
-        SELECT run_id, 0, seq, event_id, source_id, source_seq, emitted_at_ms,
-               event_type, payload_json, meta_json, archived_at_ms
-        FROM flows_time_travel_archive_legacy`
-      yield* sql`INSERT INTO flows_journal_generations (run_id, generation, after_seq)
-        SELECT DISTINCT legacy.run_id, 1,
-          COALESCE((SELECT MAX(seq) FROM flows_journal_events WHERE run_id = legacy.run_id), -1)
-        FROM flows_time_travel_archive_legacy AS legacy WHERE true
-        ON CONFLICT (run_id) DO NOTHING`
-      yield* sql`DROP TABLE flows_time_travel_archive_legacy`
-    }))
-  )
-})
+export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = DatabaseMigrations.run([Migrations.set]).pipe(
+  Effect.asVoid
+)
 const Json = Schema.fromJsonString(Schema.Unknown)
 const RunStateJson = Schema.fromJsonString(RunState)
 const mapError = (cause: unknown) =>
@@ -368,8 +174,9 @@ const decisionState = Schema.decodeUnknownOption(DecisionPayload)
 const attemptRef = Schema.decodeUnknownEffect(TimeTravelStore.AttemptRef)
 
 /**
- * Builds the SQL-backed store, running {@link migrate} first so a fresh
- * database is usable without a separate setup step. The `SqlClient`
+ * Builds the SQL-backed store, running {@link migrate} over a database the
+ * journal and run-store ladders have already migrated. Missing prerequisite
+ * tables and migration failures fail with `TimeTravelError`. The `SqlClient`
  * requirement is a SQLite dialect requirement, not a portable one — see the
  * module header.
  *
@@ -380,19 +187,31 @@ const attemptRef = Schema.decodeUnknownEffect(TimeTravelStore.AttemptRef)
  * @since 0.1.0
  * @category constructors
  */
-export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter | SqlClient.SqlClient> = Effect.gen(
+export const make: Effect.Effect<
+  TimeTravelStore.Service,
+  TimeTravelError,
+  DurableWriter | SqlClient.SqlClient
+> = Effect.gen(
   function*() {
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const writer = yield* DurableWriter
 
-    // The defect keeps the driver failure. Mapping the error to `undefined`
-    // first made every DDL failure - a view squatting on the table name, a
-    // locked or corrupt file - die as the literal value `undefined`: no
-    // message, no SQL, nothing to act on, which is the opposite of what
-    // `migrate`'s own comment promises about surfacing real damage.
+    for (const table of ["flows_journal_events", "flows_runs"]) {
+      const found = yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${table}`.pipe(
+        Effect.mapError((cause) => error("unknown", `could not check time-travel prerequisite ${table}`, cause))
+      )
+      if (found.length === 0) {
+        return yield* Effect.fail(error(
+          "unknown",
+          `time-travel requires ${table}; run the journal and run-store migration ladders before building the store`
+        ))
+      }
+    }
     yield* migrate.pipe(
-      Effect.mapError((cause) => error("unknown", "time-travel schema migration failed", cause)),
-      Effect.orDie
+      // The SQL migrator raises failed DDL as defects; store construction
+      // exposes these through the same typed channel as prerequisite errors.
+      Effect.catchDefect((cause) => Effect.fail(cause)),
+      Effect.mapError((cause) => error("unknown", "time-travel schema migration failed", cause))
     )
 
     /**
@@ -672,7 +491,9 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
             return yield* Effect.fail(
               error(
                 "live_parent",
-                currentRunId === parentRunId ? `parent ${currentRunId} is live` : `ancestor run ${currentRunId} is live`
+                currentRunId === parentRunId
+                  ? `parent ${currentRunId} is live`
+                  : `ancestor run ${currentRunId} is live`
               )
             )
           }
@@ -1275,7 +1096,8 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
  * @since 0.1.0
  * @category layers
  */
-export const layer: Layer.Layer<TimeTravelStore.TimeTravelStore, never, DurableWriter | SqlClient.SqlClient> = Layer
-  .effect(
-    TimeTravelStore.TimeTravelStore
-  )(make)
+export const layer: Layer.Layer<TimeTravelStore.TimeTravelStore, TimeTravelError, DurableWriter | SqlClient.SqlClient> =
+  Layer
+    .effect(
+      TimeTravelStore.TimeTravelStore
+    )(make)

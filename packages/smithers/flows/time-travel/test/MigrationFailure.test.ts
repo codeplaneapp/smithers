@@ -24,7 +24,7 @@ const messages = (value: unknown): ReadonlyArray<string> => {
 }
 
 describe("SqlTimeTravelStore migration failures", () => {
-  it.effect("dies with a typed defect that retains the driver failure", () =>
+  it.effect("fails with a typed error that retains the driver failure", () =>
     Effect.gen(function*() {
       const exit = yield* Effect.exit(
         Effect.gen(function*() {
@@ -40,7 +40,8 @@ describe("SqlTimeTravelStore migration failures", () => {
 
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) {
-        const found = Cause.findDefect(exit.cause)
+        expect(Result.isFailure(Cause.findDefect(exit.cause))).toBe(true)
+        const found = Cause.findError(exit.cause)
         expect(Result.isSuccess(found)).toBe(true)
         if (Result.isSuccess(found)) {
           expect(found.success).toBeInstanceOf(TimeTravelError)

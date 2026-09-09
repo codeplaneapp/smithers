@@ -374,13 +374,16 @@ The durable store, SQLite dialect only.
 
 ```ts
 const migrate: Effect<void, unknown, SqlClient>
-const make: Effect<TimeTravelStore.Service, never, DurableWriter | SqlClient>
-const layer: Layer<TimeTravelStore.TimeTravelStore, never, DurableWriter | SqlClient>
+const make: Effect<TimeTravelStore.Service, TimeTravelError, DurableWriter | SqlClient>
+const layer: Layer<TimeTravelStore.TimeTravelStore, TimeTravelError, DurableWriter | SqlClient>
 ```
 
-Building `make` runs `migrate` first, so a fresh database is usable without a
-separate setup step. Writes go through `DurableWriter` rather than straight to
-`SqlClient`.
+Building `make` applies pending time-travel migration rungs over a database
+the journal and run-store ladders have already migrated. Missing
+`flows_journal_events` or `flows_runs` fails with a `TimeTravelError` naming
+the table. Migration failures also use this typed channel and retain their
+cause. Use `Migrations.run` for the complete durable schema on a fresh
+database. Writes go through `DurableWriter`.
 
 ## EffectBoundary
 
@@ -451,7 +454,11 @@ as `blocking`.
 
 ## Migrations
 
-The same schema as a rung on the shared migration ladder.
+The schema as fixed rungs on the shared migration ladder. Store construction
+uses this same ladder and skips recorded rungs. Published IDs remain stable:
+`5001_initial`, `5002_archive_generation`, `5003_lineage_probes`, and
+`5004_plan_digest`. The last rung also accepts databases where an older
+store build already added `plan_digest` outside the ledger.
 
 | Export  | Signature                                                                                            |
 | ------- | ---------------------------------------------------------------------------------------------------- |
@@ -461,9 +468,8 @@ The same schema as a rung on the shared migration ladder.
 | `layer` | A layer that installs the complete schema before exposing the database.                              |
 
 The block is above `@smthrs/plan`'s `4000`, which is what keeps the set runnable
-on a database the engine ladder already migrated. The lineage index this set
-adds is over the journal's own table, and it ships here because a migrator
-refuses any migration whose id sits below the mark the database already applied.
+on a database the engine ladder already migrated. The journal owns
+`flows_journal_events`; this set owns the lineage indexes on that table.
 
 ## Failure behaviour
 
@@ -532,10 +538,11 @@ dependency arrow stays one way.
 `SqlTimeTravelStore.migrate` creates `flows_time_travel_snapshots`,
 `flows_time_travel_edges`, `flows_time_travel_audits`,
 `flows_time_travel_receipts`, `flows_time_travel_archive`, and
-`flows_time_travel_fork_intents`, and indexes `meta_json.lineageId` on the
-journal's own `flows_journal_events` so a lineage-filtered read is not a full
-run scan. `Migrations` publishes the same DDL as a rung on the shared ladder at
-id block `5000`, for a composition that owns migration itself.
+`flows_time_travel_fork_intents`. It also initializes `flows_journal_generations`,
+the journal generation counters bumped on truncation, and indexes
+`meta_json.lineageId` on the journal's own `flows_journal_events` so a
+lineage-filtered read is not a full run scan. `Migrations` publishes the fixed
+rungs at id block `5000`; store construction applies the same recorded set.
 
 With no `CompensationHandlers` provided, a crossed record that is not sealed
 resolves to no handler, classifies as `blocking`, and the rewind fails

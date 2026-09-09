@@ -188,6 +188,8 @@ describe("SqlTimeTravelStore.descendants", () => {
         const instrumented = new Proxy(sql, {
           apply(target, thisArg, args) {
             const statement: Statement.Statement<unknown> = Reflect.apply(target, thisArg, args)
+            // sql(name) constructs an identifier, including inside the migrator.
+            if (typeof args[0] === "string") return statement
             const compiled = statement.compile()
             if (compiled[0].includes("WITH RECURSIVE") && compiled[0].includes("flows_time_travel_edges")) {
               queries.push(compiled)

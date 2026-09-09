@@ -124,9 +124,10 @@ const layer = (filename: string) =>
   )
 ```
 
-`SqlTimeTravelStore.layer` migrates its own tables while it is built, so a
-fresh database needs no setup step. A composition that owns migration itself
-runs `Migrations.run` instead; see
+`SqlTimeTravelStore.layer` applies its own migration ladder while it is built.
+The database must already have the journal and run-store ladders applied;
+missing prerequisite tables fail with a typed `TimeTravelError`. Run
+`Migrations.run` to install the complete durable schema on a fresh database; see
 [Provide a store](./guides/provide-a-store.md).
 
 ## Execute the run, then replay it
