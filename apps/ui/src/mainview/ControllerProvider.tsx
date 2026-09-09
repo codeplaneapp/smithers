@@ -1,20 +1,20 @@
 import { use } from "react"
 import type { ReactNode } from "react"
-import type { BootSession } from "./BootSession"
 import { createControllerBoot } from "./ControllerBootMemo"
 import { ControllerContext } from "./ControllerContext"
 import type { AppController } from "./state/AppController"
 
 /*
- * The boot module is reached through a dynamic import, not a static one. This
- * module is rendered on the server by the Start entry (`routes/__root.tsx`),
- * and the boot chain reaches `electrobun/view`, which reads `window` while its
- * own module body evaluates — a static import therefore throws "window is not
- * defined" before any component runs. The import happens when a browser asks
- * to boot, which is the only place a controller exists.
+ * The boot module is reached through a dynamic import, not a static one, so it
+ * lands in a chunk of its own. Both hosts are browser-only — main.tsx renders
+ * AppIsland into `#root`, apps/site renders it as an Astro `client:only`
+ * island — so nothing here has to survive a server render; what the split buys
+ * is the paint order. The Suspense fallback shows while the boot chunk and the
+ * native bridge it pulls in are still in flight, which e2e/playwright/
+ * startup.spec.ts holds open by routing `ControllerBoot.client*.js`.
  */
-export const controllerBootPromise = createControllerBoot((session?: BootSession) =>
-  import("./ControllerBoot.client").then(({ runControllerBoot }) => runControllerBoot(session))
+export const controllerBootPromise = createControllerBoot(() =>
+  import("./ControllerBoot.client").then(({ runControllerBoot }) => runControllerBoot())
 )
 
 export function ControllerProvider({

@@ -110,8 +110,9 @@ let browserInstance: StartupWatchdog | undefined
  * The one watchdog a browser page has.
  *
  * An entry starts it and the tree it renders reports into it, so both halves
- * address the same watch. Never called while rendering on the server: the
- * Start entry reaches it only inside `ClientOnly`.
+ * address the same watch. Both entries are browser-only — main.tsx's `#root`
+ * render and apps/site's Astro `client:only` island — so this is only ever
+ * reached with a `window` in hand.
  */
 export const browserStartupWatchdog = (
   options: Partial<StartupWatchdogOptions> = {}

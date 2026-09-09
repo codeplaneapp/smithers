@@ -1,54 +1,77 @@
 import { describe, expect, test } from "bun:test"
-import type { BootSession } from "./BootSession"
+import { readFile } from "node:fs/promises"
 import { createControllerBoot } from "./ControllerBootMemo"
 import type { AppController } from "./state/AppController"
 
 /*
- * The boot memo used to pin the FIRST session forever: a module-scope promise
- * cached without a key, so a second session silently inherited the first
- * session's controller. The memo is now keyed on the session — a new session
- * boots a new controller, a stable session keeps its boot.
+ * `use(boot)` suspends on the promise it is handed, so every render and every
+ * remount of AppIsland has to receive the SAME promise: a fresh promise per
+ * render re-suspends forever and the app never mounts.
  */
 
-const sessionA: BootSession = { state: "signed-in", login: "a", allowlisted: true, admin: false, authFailed: false }
-const sessionB: BootSession = { state: "signed-out", login: null, allowlisted: false, admin: false, authFailed: false }
-
 describe("createControllerBoot", () => {
-  test("a stable session reuses its boot", () => {
+  test("every call gets the one boot, so a remount does not re-run it", async () => {
     let loads = 0
     const boot = createControllerBoot(() => {
       loads += 1
       return Promise.resolve({ tag: loads } as unknown as AppController)
     })
-    const first = boot(sessionA)
-    expect(boot(sessionA)).toBe(first)
+    const first = boot()
+    expect(boot()).toBe(first)
+    expect(boot()).toBe(first)
     expect(loads).toBe(1)
+    expect(((await first) as unknown as { tag: number }).tag).toBe(1)
   })
 
-  test("a new session boots a new controller instead of pinning the first", async () => {
-    let loads = 0
-    const boot = createControllerBoot((session) => {
-      loads += 1
-      return Promise.resolve({ tag: loads, login: session?.login ?? null } as unknown as AppController)
-    })
-    const first = boot(sessionA)
-    const second = boot(sessionB)
-    expect(second).not.toBe(first)
-    expect(loads).toBe(2)
-    expect(((await first) as unknown as { login: string | null }).login).toBe("a")
-    expect(((await second) as unknown as { login: string | null }).login).toBeNull()
-    // The first session's boot is not displaced retroactively: asking again
-    // for the CURRENT session reuses the current boot.
-    expect(boot(sessionB)).toBe(second)
-  })
-
-  test("an absent session (the Vite dev entry) is its own key", () => {
+  test("the boot starts on the first render, not when the module is imported", () => {
     let loads = 0
     const boot = createControllerBoot(() => {
       loads += 1
-      return Promise.resolve({ tag: loads } as unknown as AppController)
+      return Promise.resolve({} as unknown as AppController)
     })
-    expect(boot()).toBe(boot())
+    expect(loads).toBe(0)
+    boot()
     expect(loads).toBe(1)
+  })
+
+  test("a failed boot stays cached, so the error boundary sees one failure", async () => {
+    let loads = 0
+    const boot = createControllerBoot(() => {
+      loads += 1
+      return Promise.reject(new Error("boot failed"))
+    })
+    const first = boot()
+    expect(boot()).toBe(first)
+    expect(loads).toBe(1)
+    await expect(first).rejects.toThrow("boot failed")
+  })
+})
+
+/*
+ * The app has two browser-only hosts and no server entry: main.tsx renders
+ * AppIsland into `#root` for the Vite build, and apps/site renders it as an
+ * Astro `client:only` island. The boot chain used to serve a TanStack Start
+ * SSR entry that serialized an identity answer into the document; the entry is
+ * gone, so no module may name it or carry the session it hydrated.
+ */
+describe("the boot chain names only the hosts that exist", () => {
+  const bootModules = [
+    "AppIsland.tsx",
+    "ControllerBoot.client.ts",
+    "ControllerBootMemo.ts",
+    "ControllerProvider.tsx",
+    "SessionShell.tsx",
+    "StartupWatchdog.ts"
+  ]
+
+  test("no module mentions the removed Start entry or its serialized session", async () => {
+    const offenders: Array<string> = []
+    for (const name of bootModules) {
+      const source = await readFile(`${import.meta.dir}/${name}`, "utf8")
+      if (/routes\/__root|Start entry|Start document|ClientOnly|react-start|BootSession/.test(source)) {
+        offenders.push(name)
+      }
+    }
+    expect(offenders).toEqual([])
   })
 })

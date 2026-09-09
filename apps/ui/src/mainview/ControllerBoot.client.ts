@@ -1,5 +1,4 @@
 import { Effect } from "effect"
-import type { BootSession } from "./BootSession"
 import { createAgentSeat } from "./chain/ChainRuntime"
 import { nativeOpenExternal, nativeRepositories, nativeShellAvailable } from "./native/NativeBridge"
 import { createAppFetch } from "./runtime/LocalSession"
@@ -25,7 +24,7 @@ const promiseEffect = <A>(label: string, run: () => Promise<A>) =>
  * through the login-gated /api/model/stream, which the local origin does not
  * serve, so binding it would route every anonymous turn to a dead seam.
  */
-const bootProgram = (session: BootSession | undefined) =>
+const bootProgram = () =>
   Effect.gen(function*() {
     // Read the entry URL before the controller exists: creating it installs the
     // frame history, which writes the first history entry within the first
@@ -57,51 +56,40 @@ const bootProgram = (session: BootSession | undefined) =>
       )
     )
 
-    if (session === undefined) {
-      if (runtime.backend.identity === undefined) {
-        yield* promiseEffect("record unavailable identity", () => controller.adoptSession({
-          state: "unavailable",
-          login: null,
-          allowlisted: false,
-          admin: false
-        }))
-      } else {
-        yield* promiseEffect("load identity session", () => controller.loadSession())
-      }
-      if (runtime.backend.local !== undefined) {
-        yield* Effect.sync(() => void controller.loadRepos())
-        yield* Effect.sync(() => void controller.loadHarnesses())
-        // Agents as data (custom-agents.md): the app-agents mirror loads beside the harness list.
-        yield* Effect.sync(() => void controller.loadAgents())
-      }
-      // Lane piper: the Smithers Cloud session mirrors into the store; a signed-in answer pulls the inventory.
-      if (runtime.bootstrap.capabilities.includes("cloud.pat")) {
-        yield* Effect.sync(() => void controller.loadCloudSession())
-      }
-      // Both URL rewrites keep the entry's state: on a repository path the
-      // frame history stores the frame location there, not in the URL.
-      if (controller.handleAuthReturn(window.location.search)) {
-        window.history.replaceState(window.history.state, "", window.location.pathname)
-      }
-      // `/owner/name` (or the landing page's `/?repo=owner/name`) preselects a public-catalog repository.
-      // The path stays in the address bar; the parameter leaves it.
-      if (requested !== null) {
-        yield* Effect.sync(() => void openRequestedRepo(controller, runtime.http, requested))
-        if (window.location.search !== "") {
-          window.history.replaceState(window.history.state, "", withoutRepoParam(window.location))
-        }
-      }
-      return controller
+    if (runtime.backend.identity === undefined) {
+      yield* promiseEffect("record unavailable identity", () => controller.adoptSession({
+        state: "unavailable",
+        login: null,
+        allowlisted: false,
+        admin: false
+      }))
+    } else {
+      yield* promiseEffect("load identity session", () => controller.loadSession())
     }
-
-    yield* promiseEffect("adopt identity session", () => controller.adoptSession(session))
-    if (session.authFailed) {
-      yield* Effect.sync(() => {
-        controller.handleAuthReturn("?auth=failed")
-      })
+    if (runtime.backend.local !== undefined) {
+      yield* Effect.sync(() => void controller.loadRepos())
+      yield* Effect.sync(() => void controller.loadHarnesses())
+      // Agents as data (custom-agents.md): the app-agents mirror loads beside the harness list.
+      yield* Effect.sync(() => void controller.loadAgents())
+    }
+    // Lane piper: the Smithers Cloud session mirrors into the store; a signed-in answer pulls the inventory.
+    if (runtime.bootstrap.capabilities.includes("cloud.pat")) {
+      yield* Effect.sync(() => void controller.loadCloudSession())
+    }
+    // Both URL rewrites keep the entry's state: on a repository path the
+    // frame history stores the frame location there, not in the URL.
+    if (controller.handleAuthReturn(window.location.search)) {
+      window.history.replaceState(window.history.state, "", window.location.pathname)
+    }
+    // `/owner/name` (or the landing page's `/?repo=owner/name`) preselects a public-catalog repository.
+    // The path stays in the address bar; the parameter leaves it.
+    if (requested !== null) {
+      yield* Effect.sync(() => void openRequestedRepo(controller, runtime.http, requested))
+      if (window.location.search !== "") {
+        window.history.replaceState(window.history.state, "", withoutRepoParam(window.location))
+      }
     }
     return controller
   })
 
-export const runControllerBoot = (session?: BootSession): Promise<AppController> =>
-  Effect.runPromise(bootProgram(session))
+export const runControllerBoot = (): Promise<AppController> => Effect.runPromise(bootProgram())

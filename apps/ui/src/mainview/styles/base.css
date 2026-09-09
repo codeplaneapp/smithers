@@ -81,12 +81,12 @@ textarea {
 }
 
 /*
- * The server session shell (SessionShell.tsx): the HTML that paints before
- * the client bundle hydrates. These classes appear in no component the
+ * The session shell (SessionShell.tsx): the Suspense fallback that paints
+ * while the boot chunk loads. These classes appear in no component the
  * client renders, so without rules here the first ~800ms of every cold web
- * load was a bare paragraph and link in the page corner. The bubble borrows
- * the transcript's incoming-message treatment so the hydration swap lands on
- * a surface that already looks like the chat it becomes.
+ * load was a bare paragraph in the page corner. The bubble borrows the
+ * transcript's incoming-message treatment so the swap to the app lands on a
+ * surface that already looks like the chat it becomes.
  */
 .smithers-app {
 	display: flex;
@@ -115,12 +115,3 @@ textarea {
 	line-height: 1.42;
 }
 
-.server-session-shell a {
-	padding: 6px 14px;
-	border: 1px solid var(--ring-border);
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--brand) 10%, var(--surface));
-	color: var(--text);
-	font-weight: 500;
-	text-decoration: none;
-}
