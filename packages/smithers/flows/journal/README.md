@@ -134,7 +134,7 @@ with its one-line summary.
 
 | Namespace        | What it holds                                                                                                                                        |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Journal`        | The service and its 12 operations, the `Checkpoint` and `Compacted` models, typed errors, receipts, read options, constructors, and the no-op layer. |
+| `Journal`        | The service and its operations, the `Checkpoint` and `Compacted` models, typed errors, receipts, read options, constructors, and the no-op layer. |
 | `JournalEvent`   | Branded `RunId`, `Seq`, `SourceId`, and `SourceSeq`; the `Input` and committed `Entry` schemas; deterministic `makeEventId`.                         |
 | `SqlJournal`     | `SqlJournalOptions`, `CompactionPolicy`, and the database-backed `layer(options)`.                                                                   |
 | `OwnerId`        | The fencing token `emitDurable` accepts, carrying `hostId`, `pid`, and `nonce`.                                                                      |

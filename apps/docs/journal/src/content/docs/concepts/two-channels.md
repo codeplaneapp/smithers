@@ -44,11 +44,26 @@ Use this channel for telemetry: spans, progress, per-frame samples. A process
 crash can lose an accepted but unwritten entry, and that is the trade the
 channel exists to make.
 
-`emitLossy` also holds one property the durable channel cannot: it issues no
-read and opens no transaction, so it is safe to call from inside somebody
-else's open write transaction. A pre-admission dedupe read there would wait on
-the writer that is waiting on the caller, which is a measured deadlock and not
-a hypothetical one.
+`emitLossy` opens no transaction and performs no deduplication lookup in SQL.
+Admission is read-free only when its allocation floors are warmed. On a cold
+run, it reads `MAX(seq) + 1` from the run's durable entries. If `sourceSeq` is
+omitted and the producer floor is uncached, it also reads
+`MAX(source_seq) + 1` for `(runId, sourceId)`. An explicit `sourceSeq` avoids
+the producer-floor read, but does not warm the run floor by itself.
+
+Inside `Journal.transact` or `DurableWriter.write` using the same SQL client,
+these floor reads join the caller's transaction. A raw `sql.withTransaction`
+on that client also supplies the read transaction, but lossy admission remains
+a separate queued write: it is not atomic with the caller's commit or rollback.
+For atomic state and event writes, use
+[`transact` with `emitDurable`](/guides/commit-state-and-entry/).
+
+If another transaction holds the shared connection without passing its SQL
+transaction context to the admission, a cold floor read can wait on that
+connection while its holder waits on the caller. Only warmed allocations avoid
+that read dependency. Admit outside that transaction when the required floors
+may be cold, including after truncation invalidates them. Do not wait for
+`flush` while holding a transaction the queued writer needs.
 
 ## flush is the lossy barrier only
 

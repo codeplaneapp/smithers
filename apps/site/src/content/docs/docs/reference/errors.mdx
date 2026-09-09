@@ -113,9 +113,9 @@ Raised as defects by `NodeDatabase.layer` before a connection is created; match 
 | `sink_failed` | The durable write path | A database failure on write | Restore the database; the writer fiber survives |
 | `read_failed` | The read path | A database failure on read | Restore the database and read again |
 | `decode_failed` | Reads | A row no longer matches the schema | Inspect the stored row; the journal refuses to decode it |
-| `checkpoint_invalid` | Checkpoint and compaction | A compaction-aware refusal; carries `checkpointSeq` | Resume from the carried `checkpointSeq` |
-| `reader_behind` | Reads | A compaction-aware refusal; carries `checkpointSeq` | Resume from the carried `checkpointSeq` |
-| `compacted` | Reads below a run's compaction floor | The entries below the floor were deleted | Resync from `latestCheckpoint(runId)`; the error carries the floor as `checkpointSeq` |
+| `checkpoint_invalid` | `checkpoint` and `compact` | A missing or invalid checkpoint or sequence; `checkpointSeq` is optional | Write a checkpoint at a committed sequence above the compaction floor, or select an existing valid checkpoint for compaction, then retry |
+| `reader_behind` | `compact` | A live stream still needs entries below the requested checkpoint; carries `checkpointSeq` | Let the blocking stream catch up or close it, then retry compaction |
+| `compacted` | Reads below a run's compaction floor | The entries below the floor were deleted; carries the floor as `checkpointSeq` | Load `latestCheckpoint(runId)`, apply its `state`, then resume the tail with `afterSequence: checkpoint.seq` |
 | `unknown` | Any journal path | A genuinely unclassified journal defect | Treat it as a defect, not a caller error |
 
 ### `@smthrs/control`

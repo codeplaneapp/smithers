@@ -69,7 +69,7 @@ on `(run_id, source_id, source_seq)` stays authoritative, so a miss changes the
 receipt, not the durable answer.
 
 On a miss for an explicit producer sequence, the entry is admitted
-optimistically with no read at all:
+optimistically without a SQL deduplication lookup:
 
 - `emitLossy` returns `Accepted` where a resident entry would have returned
   `Duplicate`.
@@ -78,11 +78,18 @@ optimistically with no read at all:
 - A changed retry behind an evicted entry surfaces its `idempotency_conflict`
   from `flush` instead of from the emit.
 
-The pre-admission read is deliberately absent, not missing. `emitLossy` is
-called from inside other packages' open write transactions, and a `SELECT`
-there waits on the writer that is waiting on the caller: the agent executor's
-exit flush deadlocked exactly so, measured at over 120 seconds against about
-half a second without the read.
+The deduplication lookup is deliberately deferred to the writer. Allocation
+can still read before admission: a cold run needs `MAX(seq) + 1`, and an
+omitted `sourceSeq` with an uncached producer floor also needs
+`MAX(source_seq) + 1` for `(runId, sourceId)`. Only warmed allocation floors
+make admission read-free; an explicit producer sequence avoids only the
+producer-floor read.
+
+These reads use the caller's SQL transaction context when the client is shared.
+A caller holding the connection in another transaction without propagating
+that context can deadlock on a cold admission. See
+[the two channels](/concepts/two-channels/) for supported transaction compositions
+and the separate commit of queued lossy entries.
 
 Bounding the index also bounds startup. Only the most recent
 `sourceEventCache` events are decoded when the layer is built, so resident

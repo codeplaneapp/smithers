@@ -1,6 +1,6 @@
 ---
 title: "API reference"
-description: "Every public export of @smthrs/journal: the Journal service and its 12 operations, the event envelope, the SQL layer options, redaction, projections, metrics, migrations, and the two test entry points."
+description: "Every public export of @smthrs/journal: the Journal service and its operations, the event envelope, the SQL layer options, redaction, projections, metrics, migrations, and the two test entry points."
 ---
 
 ```ts
@@ -37,8 +37,8 @@ column above records. See
 
 ## Journal
 
-`Journal.Journal` is the service tag; `Journal.Service` is its interface. Every
-method fails with a `JournalError` carrying a stable `code`.
+`Journal.Journal` is the service tag; `Journal.Service` is its interface.
+Fallible journal operations use `JournalError` with a stable `code`.
 
 ### Operations
 
@@ -48,6 +48,7 @@ method fails with a `JournalError` carrying a stable `code`.
 | `emitDurable`         | `(input: Input, owner: OwnerId) => Effect<DurableReceipt, JournalError>`                           | allocates and commits inside the write transaction, fenced on `owner`             |
 | `emitDurableUnfenced` | `(input: Input) => Effect<DurableReceipt, JournalError>`                                           | the same commit with no fence, for a genuinely ownerless admission                |
 | `transact`            | `<A, E, R>(effect: Effect<A, E, R>) => Effect<A, E \| JournalError, R>`                            | runs a state projection and its `emitDurable` calls in one transaction            |
+| `whenCommitted`       | `(update: Effect<void>) => Effect<boolean>`                                                         | accepts a short, non-failing update after managed commit, or runs it immediately outside a transaction; returns `false` without publishing when commit ownership is unknown |
 | `stream`              | `(options: StreamOptions) => Stream<Entry, JournalError>`                                          | durable history, then committed changes; never completes                          |
 | `entries`             | `(options: EntriesOptions) => Effect<EntriesPage, JournalError>`                                   | paged read                                                                        |
 | `changes`             | `Effect<PubSub.Subscription<Entry>, never, Scope>`                                                 | post-commit publication, bounded and sliding                                      |
@@ -56,6 +57,11 @@ method fails with a `JournalError` carrying a stable `code`.
 | `checkpoint`          | `(options: CheckpointOptions, owner: OwnerId) => Effect<Checkpoint, JournalError>`                 | durably captures replay state at a committed sequence, in `transact`'s discipline |
 | `latestCheckpoint`    | `(runId: RunId) => Effect<Option<Checkpoint>, JournalError>`                                       | the resync point for a compacted run                                              |
 | `compact`             | `(options: CompactOptions, owner: OwnerId) => Effect<Compacted, JournalError>`                     | truncates strictly below a checkpoint, atomically with the floor advance          |
+| `generation?`         | `(runId: RunId) => Effect<{ generation: number; afterSeq: number }, JournalError>`                  | optional durable rewind generation and archive boundary; omission means generation zero |
+
+`whenCommitted` returning `true` means accepted, possibly deferred. Failed
+savepoints and transaction retries discard their registrations. See
+[commit state and its entry together](./guides/commit-state-and-entry.md).
 
 `owner` is mandatory on `emitDurable`, `checkpoint`, and `compact`. The insert,
 the checkpoint replacement, and the truncation land only while `flows_runs`
