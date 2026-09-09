@@ -32,7 +32,9 @@ The kernel decorates ports; something else has to provide them.
 filesystem, a scripted interpreter, `TestClock`, and a seeded PRNG. `Workspace`
 names the root that filesystem capability resources are resolved against.
 
-Create `quickstart.ts`:
+Create `quickstart.test.ts`. Vitest only discovers files matching
+`**/*.{test,spec}.?(c|m)[jt]s?(x)`, so the name is what makes the example
+runnable:
 
 ```ts
 import { GrantStore, HostServices, Permission, Workspace } from "@smthrs/kernel"
@@ -133,7 +135,7 @@ other resolutions, `"run"`, `"remembered"`, and `"deny"`, are covered in
 
 ## Run it
 
-Save both programs and assert their results:
+Append the assertions to `quickstart.test.ts`, below both programs:
 
 ```ts
 import { describe, expect, it } from "@effect/vitest"
@@ -152,7 +154,7 @@ describe("quickstart", () => {
 ```
 
 ```bash
-pnpm vitest run quickstart.ts
+pnpm vitest run quickstart.test.ts
 ```
 
 ## What just happened

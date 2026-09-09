@@ -35,6 +35,23 @@ test("sync concept frame ceiling agrees with the protocol default", () => {
   assert.equal(documentedMiB[1], defaultMiB[1])
 })
 
+test("kernel concept lists exactly the closed host tag surface", () => {
+  const concept = readFileSync(new URL("../src/content/docs/docs/concepts/kernel.mdx", import.meta.url), "utf8")
+  const source = readFileSync(
+    new URL("../../../packages/smithers/flows/kernel/src/HostServices.ts", import.meta.url),
+    "utf8"
+  )
+  const declared = /export const HostServiceTags = \[([^\]]*)\]/.exec(source)
+  assert.ok(declared, "the kernel declares its closed host tag list")
+  const tags = declared[1].split(",").map((entry) => entry.trim()).filter(Boolean)
+    .map((entry) => entry.replace(/^\w+\./, "").replace(/Port$/, ""))
+  const documented = /The host surface is (?:a|the) fixed list[^:]*: (.+?)\. Each is/.exec(concept)
+  assert.ok(documented, "the concept documents the closed host tag list")
+  assert.deepEqual([...documented[1].matchAll(/`(\w+)`/g)].map((match) => match[1]), tags)
+  assert.match(concept, /`Workspace` is not a host service\./)
+  assert.match(concept, /`CommandLine` is not one either: it is a pure renderer with no host access/)
+})
+
 test("subpackage keys example reuses the derivation vector of the keys API reference", () => {
   const subpackages = readFileSync(new URL("../src/content/docs/docs/reference/subpackages.mdx", import.meta.url), "utf8")
   const reference = readFileSync(new URL("../src/content/docs/docs/reference/api/keys.mdx", import.meta.url), "utf8")

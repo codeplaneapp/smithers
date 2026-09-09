@@ -23,7 +23,9 @@ import DocsDiagram from "../../../../components/DocsDiagram.astro"
 
 ## The closed host surface
 
-The host surface is a fixed list: `FileSystem`, `HttpClient`, `CommandLine`, `ChildProcessSpawner`, `Workspace`, and `Jj`. Each is a service a platform adapter supplies, and the kernel decorates the same tags with middleware layers. There is no second protected tag: composing a decorator over a raw host layer shadows that raw implementation for every consumer of the original tag, so a flow cannot walk past the check by importing the platform service directly. `Path` is pure manipulation and passes through unchecked.
+The host surface is the fixed list `HostServiceTags`, five tags long: `FileSystem`, `Path`, `ChildProcessSpawner`, `Jj`, and `HttpClient`. Each is a service a platform adapter supplies, and the kernel decorates the same tags with middleware layers. There is no second protected tag: composing a decorator over a raw host layer shadows that raw implementation for every consumer of the original tag, so a flow cannot walk past the check by importing the platform service directly. `Path` is on the list as an explicit pass-through, because path manipulation is pure and lexical and needs no check; its layer re-provides Effect's service unchanged, so every member of the closed list still carries a recorded kernel decision.
+
+`Workspace` is not a host service. It is a separate policy input the kernel requires before it can name a filesystem capability, supplied once so the grant store and the filesystem decorator resolve resources against the same root. `CommandLine` is not one either: it is a pure renderer with no host access, turning a command into the exact string a `proc:spawn` grant names.
 
 `HostServices.layer` composes the closed protected surface at the application boundary, in one direction: the raw platform service, then the kernel decorator consulting the grant store, then the flow-visible service.
 
