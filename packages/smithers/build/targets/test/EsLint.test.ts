@@ -23,6 +23,30 @@ const eslint = NodePath.join(
 )
 
 describe("ESLint source paths", () => {
+  it("renders a workspace-rooted config from the package cwd", () => {
+    const config = Input.file("//eslint.config.js")
+    const target = EsLint.EsLint({
+      packageManager,
+      sources: [Input.glob("//packages/foo/src/**/*.ts")],
+      configs: [config],
+      deps: [],
+      maxWarnings: 0,
+      fix: false,
+      cwd: "packages/foo"
+    })
+    expect(plannedArgv(target)).toEqual([
+      "pnpm",
+      "exec",
+      "eslint",
+      "--config",
+      "../../eslint.config.js",
+      "--max-warnings",
+      "0",
+      "src/**/*.ts"
+    ])
+    expect(Target.metadata(target).inputs).toContainEqual(config)
+  })
+
   it.each([".", "packages/example"])("lints rooted and relative globs from cwd %s", async (cwd) => {
     const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-eslint-")))
     try {

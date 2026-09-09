@@ -43,6 +43,13 @@ path for a child running under a target's own `cwd`. A rule that renders a
 declared path into argv uses the second one; stripping the `//` alone resolves
 the path against the wrong directory whenever `cwd` is not the workspace root.
 
+`EsLint`, `BiomeCheck`, and `Dprint` render configuration paths this way. For
+example, `//eslint.config.js` becomes `../../eslint.config.js` under
+`cwd: "packages/foo"`. ESLint also renders source files and glob patterns.
+Biome renders source files and each glob's static directory prefix;
+`//**/*.ts` selects the workspace root. Paths without `//` remain relative to
+`cwd`. Declared inputs retain their original paths for keying.
+
 `DeclaredOutputs` is the complete tree a target promises one execution
 produces. It is target metadata, not something read back out of an action
 payload: an untrusted cache entry never chooses which paths are verified.

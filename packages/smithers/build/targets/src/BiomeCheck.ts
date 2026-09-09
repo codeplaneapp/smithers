@@ -16,7 +16,7 @@ import * as Target from "./Target.ts"
  *
  * `cwd` is the workspace-relative directory the tool runs in and defaults to
  * the workspace root. The `config` path and every source path resolve from
- * `cwd` when the tool runs.
+ * `cwd` unless prefixed with `//`, which anchors them at the workspace root.
  *
  * @category schemas
  * @since 0.1.0
@@ -69,18 +69,20 @@ const globMagic = /[*?[\]{}!()|@+]/
  * contributes its static directory prefix, a file contributes its path, and
  * a git diff contributes nothing. With no usable source Biome checks `cwd`.
  */
-const biomePaths = (sources: ReadonlyArray<Input.Declared>): ReadonlyArray<string> => {
+const biomePaths = (cwd: string, sources: ReadonlyArray<Input.Declared>): ReadonlyArray<string> => {
   const paths: Array<string> = []
   for (const source of sources) {
-    if (source._tag === "File") paths.push(source.path)
+    if (source._tag === "File") paths.push(Input.rootRelative(cwd, source.path))
     if (source._tag !== "Glob") continue
+    const rooted = source.pattern.startsWith("//")
+    const pattern = rooted ? source.pattern.slice(2) : source.pattern
     const segments: Array<string> = []
-    for (const segment of source.pattern.split("/")) {
+    for (const segment of pattern.split("/")) {
       if (globMagic.test(segment)) break
       segments.push(segment)
     }
     const prefix = segments.join("/")
-    paths.push(prefix === "" ? "." : prefix)
+    paths.push(Input.rootRelative(cwd, rooted ? `//${prefix}` : prefix === "" ? "." : prefix))
   }
   const unique = [...new Set(paths)]
   return unique.length === 0 ? ["."] : unique
@@ -110,7 +112,10 @@ export const BiomeCheck = Target.make("BiomeCheck", {
   success: BiomeReport,
   error: Exec.ExecError,
   implementation: (attrs) => {
-    const shared = [`--config-path=${attrs.config.path}`, ...biomePaths(attrs.sources)]
+    const shared = [
+      `--config-path=${Input.rootRelative(attrs.cwd, attrs.config.path)}`,
+      ...biomePaths(attrs.cwd, attrs.sources)
+    ]
     if (!attrs.lint) {
       return attrs.format
         ? Target.runTool({

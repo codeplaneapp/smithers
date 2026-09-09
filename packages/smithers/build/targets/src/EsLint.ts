@@ -15,7 +15,7 @@ import * as Target from "./Target.ts"
  *
  * `cwd` is the workspace-relative directory the tool runs in and defaults to
  * the workspace root. Config paths and source patterns resolve from `cwd`
- * when the tool runs.
+ * unless prefixed with `//`, which anchors them at the workspace root.
  *
  * @category schemas
  * @since 0.1.0
@@ -79,7 +79,7 @@ export const EsLint = Target.make("EsLint", {
       cwd: attrs.cwd,
       argv: PackageManager.exec(attrs.packageManager, [
         "eslint",
-        ...(config === undefined ? [] : ["--config", config.path]),
+        ...(config === undefined ? [] : ["--config", Input.rootRelative(attrs.cwd, config.path)]),
         "--max-warnings",
         String(attrs.maxWarnings),
         ...(attrs.fix ? ["--fix"] : []),

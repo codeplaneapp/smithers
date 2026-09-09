@@ -17,7 +17,8 @@ import * as Target from "./Target.ts"
  * the workspace root. `config` is the dprint configuration file; the tool
  * discovers the files it checks from that configuration, so `sources` exists
  * purely as declared key material for the files a formatting verdict depends
- * on.
+ * on. Config paths resolve from `cwd` unless prefixed with `//`, which anchors
+ * them at the workspace root.
  *
  * @category schemas
  * @since 0.1.0
@@ -67,7 +68,7 @@ export const Dprint = Target.make("Dprint", {
         "dprint",
         attrs.fix ? "fmt" : "check",
         "--config",
-        attrs.config.path
+        Input.rootRelative(attrs.cwd, attrs.config.path)
       ])
     })
 })
