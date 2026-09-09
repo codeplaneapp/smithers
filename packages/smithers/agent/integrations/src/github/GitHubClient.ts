@@ -17,7 +17,8 @@
  * - **Token hygiene.** The token reaches the `Authorization` header and
  *   nothing else, not a message, not `details`, not a log line, and every
  *   request URL, including a `rel="next"` target, is pinned to the configured
- *   API origin so a redirected link cannot carry the token elsewhere. The
+ *   API origin so a redirected link cannot carry the token elsewhere. Errors
+ *   redact echoed credentials from summaries, details, and cause messages. The
  *   origin pin is not a path pin: a caller that builds a path from provider
  *   data uses `Repository.repositoryPath`, which validates each segment,
  *   because `new URL` resolves `..` inside a path.
@@ -29,6 +30,7 @@
  */
 import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect"
 import { IntegrationError, isRetryable } from "../core/IntegrationError.ts"
+import { redactedError } from "../core/RedactedError.ts"
 import * as Environment from "../Environment.ts"
 import { type GitHubConfig, resolve } from "./Config.ts"
 
@@ -285,9 +287,13 @@ export const make = (
   env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): GitHubClient => {
   const resolved = resolve(config, env)
+  const integrationError = redactedError([
+    resolved.token,
+    resolved.token === undefined ? undefined : `Bearer ${resolved.token}`
+  ])
   const baseUrl = resolved.apiBaseUrl.replace(/\/+$/, "")
   if (!URL.canParse(baseUrl)) {
-    throw new IntegrationError(
+    throw integrationError(
       "invalid-config",
       "GitHub apiBaseUrl must be a valid HTTP or HTTPS URL.",
       { apiBaseUrl: resolved.apiBaseUrl, retryable: false }
@@ -295,7 +301,7 @@ export const make = (
   }
   const parsedBaseUrl = new URL(baseUrl)
   if (parsedBaseUrl.protocol !== "http:" && parsedBaseUrl.protocol !== "https:") {
-    throw new IntegrationError(
+    throw integrationError(
       "invalid-config",
       "GitHub apiBaseUrl must be a valid HTTP or HTTPS URL.",
       { apiBaseUrl: resolved.apiBaseUrl, retryable: false }
@@ -303,7 +309,7 @@ export const make = (
   }
   const apiOrigin = parsedBaseUrl.origin
   if (!Number.isSafeInteger(resolved.maxRetries) || resolved.maxRetries < 0 || resolved.maxRetries > 10) {
-    throw new IntegrationError(
+    throw integrationError(
       "invalid-config",
       "GitHub maxRetries must be an integer between 0 and 10.",
       { maxRetries: resolved.maxRetries, retryable: false }
@@ -316,7 +322,7 @@ export const make = (
   const assertApiOrigin = (url: string): void => {
     const parsed = new URL(url)
     if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.origin !== apiOrigin) {
-      throw new IntegrationError(
+      throw integrationError(
         "delivery-failed",
         `GitHub request refused: ${parsed.origin} is not the configured GitHub API origin.`,
         { origin: parsed.origin, apiOrigin, retryable: false }
@@ -330,7 +336,7 @@ export const make = (
   const buildUrl = (path: string, query?: RequestOptions["query"]): string => {
     const absolute = path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`
     if (!URL.canParse(absolute)) {
-      throw new IntegrationError("invalid-config", `GitHub request path is not a URL: ${path}`, {
+      throw integrationError("invalid-config", `GitHub request path is not a URL: ${path}`, {
         path,
         retryable: false
       })
@@ -355,7 +361,7 @@ export const make = (
     body === undefined ? Effect.succeed(undefined) : Effect.try({
       try: () => JSON.stringify(body),
       catch: (cause) =>
-        new IntegrationError(
+        integrationError(
           "invalid-config",
           "GitHub request body could not be serialized as JSON.",
           { retryable: false, outcomeUnknown: false },
@@ -406,7 +412,7 @@ export const make = (
         const message = typeof json === "object" && json !== null && "message" in json
           ? String(json.message)
           : response.statusText
-        throw new IntegrationError(
+        throw integrationError(
           "delivery-failed",
           `GitHub request failed: ${method} ${new URL(url).pathname} -> ${response.status} ${message}${
             outcomeUnknown ? " (outcome unknown: the write was not repeated)" : ""
@@ -424,14 +430,16 @@ export const make = (
         )
       },
       catch: (cause) =>
-        cause instanceof IntegrationError ? cause : new IntegrationError(
-          "delivery-failed",
-          `GitHub request failed: ${method} - ${cause instanceof Error ? cause.message : String(cause)}${
-            mayRepeatAmbiguously ? "" : " (outcome unknown: the write was not repeated)"
-          }`,
-          { method, retryable: mayRepeatAmbiguously, outcomeUnknown: !mayRepeatAmbiguously },
-          { cause }
-        )
+        cause instanceof IntegrationError
+          ? integrationError(cause.reason, cause.summary, cause.details, { cause: cause.cause })
+          : integrationError(
+            "delivery-failed",
+            `GitHub request failed: ${method} - ${cause instanceof Error ? cause.message : String(cause)}${
+              mayRepeatAmbiguously ? "" : " (outcome unknown: the write was not repeated)"
+            }`,
+            { method, retryable: mayRepeatAmbiguously, outcomeUnknown: !mayRepeatAmbiguously },
+            { cause }
+          )
     })
   }
 
@@ -480,7 +488,7 @@ export const make = (
         if (schema === undefined) return Effect.succeed(json)
         return (Schema.decodeUnknownEffect(schema)(json) as Effect.Effect<unknown, unknown>).pipe(
           Effect.mapError((cause) =>
-            new IntegrationError(
+            integrationError(
               "decode-failed",
               `GitHub response for ${method} ${path} failed schema validation.`,
               { method, path },

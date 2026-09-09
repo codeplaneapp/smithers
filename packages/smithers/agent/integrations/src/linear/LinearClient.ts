@@ -17,7 +17,8 @@
  *   and lost the answer, so repeating files a second issue. Those report
  *   `outcomeUnknown` instead.
  * - **Key hygiene.** The API key reaches the `Authorization` header and
- *   nothing else.
+ *   nothing else. Errors redact echoed credentials from summaries, details,
+ *   and retained cause messages.
  *
  * One `AbortController` spans each attempt's request *and* its body read, so
  * interrupting the fiber during either tears the exchange down.
@@ -27,6 +28,7 @@
 import { isRecord } from "@smthrs/canonical/Record"
 import { Context, Effect, Layer } from "effect"
 import { IntegrationError } from "../core/IntegrationError.ts"
+import { redactedError } from "../core/RedactedError.ts"
 import * as Environment from "../Environment.ts"
 import { type LinearConfig, resolve } from "./Config.ts"
 
@@ -368,6 +370,7 @@ export const make = (
   env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): LinearClient => {
   const { apiBaseUrl, apiKey } = resolve(config, env)
+  const integrationError = redactedError([apiKey, apiKey?.replace(/^Bearer\s+/i, "")])
 
   const teamByKey = new Map<string, TeamRef>()
   const statesByTeam = new Map<string, ReadonlyArray<NamedNode>>()
@@ -378,7 +381,7 @@ export const make = (
       const retryServerErrors = queryOptions?.retryServerErrors ?? true
       if (apiKey === undefined) {
         return yield* Effect.fail(
-          new IntegrationError(
+          integrationError(
             "credentials-missing",
             "Linear API key is not configured. Pass config.apiKey or set SMITHERS_LINEAR_API_KEY.",
             { apiBaseUrl }
@@ -410,7 +413,7 @@ export const make = (
               })
             },
             catch: (cause) =>
-              new IntegrationError(
+              integrationError(
                 "delivery-failed",
                 retryServerErrors
                   ? "Linear API request failed (network error)."
@@ -427,7 +430,7 @@ export const make = (
           // answer, so a write stops here and says the outcome is unknown.
           if (response.status >= 500 && !retryServerErrors) {
             return yield* Effect.fail(
-              new IntegrationError(
+              integrationError(
                 "delivery-failed",
                 `Linear API responded ${response.status} to a write, so its outcome is unknown and it was not repeated.`,
                 { status: response.status, apiBaseUrl, outcomeUnknown: true }
@@ -437,7 +440,7 @@ export const make = (
           if (response.status === 429 || response.status >= 500) {
             if (attempt >= MAX_ATTEMPTS) {
               return yield* Effect.fail(
-                new IntegrationError(
+                integrationError(
                   "delivery-failed",
                   `Linear API responded ${response.status} after ${attempt} attempts.`,
                   { status: response.status, apiBaseUrl }
@@ -454,13 +457,13 @@ export const make = (
               return response.text()
             },
             catch: (cause) =>
-              new IntegrationError(
+              integrationError(
                 "delivery-failed",
                 `Linear API response body could not be read (status ${response.status}).`,
                 {
                   status: response.status,
                   outcomeUnknown: !retryServerErrors && response.ok,
-                  cause: (cause instanceof Error ? cause.message : String(cause)).replaceAll(apiKey, "[REDACTED]")
+                  cause: cause instanceof Error ? cause.message : String(cause)
                 },
                 { cause }
               )
@@ -469,28 +472,29 @@ export const make = (
           const json = yield* Effect.try({
             try: () => JSON.parse(body) as Record<string, any>,
             catch: (cause) =>
-              new IntegrationError(
+              integrationError(
                 "decode-failed",
                 `Linear API returned a non-JSON response (status ${response.status}).`,
                 { status: response.status },
                 { cause }
               )
           })
-          const errors = Array.isArray(json?.["errors"]) ? (json["errors"] as Array<{ message?: unknown }>) : []
+          const errors = (Array.isArray(json?.["errors"]) ? (json["errors"] as Array<{ message?: unknown }>) : [])
+            .map((error) => typeof error?.message === "string" ? error.message : "unknown")
           if (!response.ok) {
             return yield* Effect.fail(
-              new IntegrationError("delivery-failed", `Linear API responded ${response.status}.`, {
+              integrationError("delivery-failed", `Linear API responded ${response.status}.`, {
                 status: response.status,
-                errors: errors.map((error) => error?.message)
+                errors
               })
             )
           }
           if (errors.length > 0) {
             return yield* Effect.fail(
-              new IntegrationError(
+              integrationError(
                 "delivery-failed",
-                `Linear GraphQL error: ${errors.map((error) => error?.message ?? "unknown").join("; ")}`,
-                { errors: errors.map((error) => error?.message) }
+                `Linear GraphQL error: ${errors.join("; ")}`,
+                { errors }
               )
             )
           }
@@ -504,7 +508,7 @@ export const make = (
       }
       // Unreachable: the loop returns or fails on every path.
       return yield* Effect.fail(
-        new IntegrationError("delivery-failed", "Linear API retry loop exhausted.", { apiBaseUrl })
+        integrationError("delivery-failed", "Linear API retry loop exhausted.", { apiBaseUrl })
       )
     })
 
@@ -515,7 +519,7 @@ export const make = (
       // on an action whose tier is irreversible.
       if (ref.teamId !== undefined && ref.teamKey !== undefined) {
         return yield* Effect.fail(
-          new IntegrationError(
+          integrationError(
             "decode-failed",
             "Linear team is over-specified: pass teamId or teamKey, not both.",
             { teamId: ref.teamId, teamKey: ref.teamKey }
@@ -526,7 +530,7 @@ export const make = (
       const key = ref.teamKey?.trim()
       if (key === undefined || key.length === 0) {
         return yield* Effect.fail(
-          new IntegrationError("decode-failed", "Linear team is required: pass teamId or teamKey.")
+          integrationError("decode-failed", "Linear team is required: pass teamId or teamKey.")
         )
       }
       // Linear team keys are uppercase, and the cache is keyed that way, so
@@ -540,7 +544,7 @@ export const make = (
       const team = (yield* connectionNodes(data?.["teams"], "teams"))[0]
       if (team === undefined || typeof team["id"] !== "string") {
         return yield* Effect.fail(
-          new IntegrationError("decode-failed", `Linear team with key "${key}" not found.`, { teamKey: key })
+          integrationError("decode-failed", `Linear team with key "${key}" not found.`, { teamKey: key })
         )
       }
       // The same rule `namedNodes` follows: erasing a wrong-typed member turns
@@ -580,7 +584,7 @@ export const make = (
       const match = states.find((state) => state.name?.toLowerCase() === stateName.toLowerCase())
       if (match === undefined) {
         return yield* Effect.fail(
-          new IntegrationError("decode-failed", `Linear workflow state "${stateName}" not found for team.`, {
+          integrationError("decode-failed", `Linear workflow state "${stateName}" not found for team.`, {
             teamId,
             stateName,
             known: states.map((state) => state.name)
@@ -607,7 +611,7 @@ export const make = (
       }
       if (missing.length > 0) {
         return yield* Effect.fail(
-          new IntegrationError("decode-failed", `Linear label(s) not found for team: ${missing.join(", ")}.`, {
+          integrationError("decode-failed", `Linear label(s) not found for team: ${missing.join(", ")}.`, {
             teamId,
             missing
           })
@@ -622,7 +626,7 @@ export const make = (
       const issue = data?.["issue"]
       if (issue === undefined || issue === null) {
         return yield* Effect.fail(
-          new IntegrationError("decode-failed", `Linear issue "${idOrIdentifier}" not found.`, { idOrIdentifier })
+          integrationError("decode-failed", `Linear issue "${idOrIdentifier}" not found.`, { idOrIdentifier })
         )
       }
       return yield* requireIssue(issue, "issue")
@@ -635,7 +639,7 @@ export const make = (
     Effect.gen(function*() {
       if (fields.stateId !== undefined && fields.stateName !== undefined) {
         return yield* Effect.fail(
-          new IntegrationError(
+          integrationError(
             "decode-failed",
             "Linear issue state is over-specified: pass stateId or stateName, not both.",
             { stateId: fields.stateId, stateName: fields.stateName }
@@ -644,7 +648,7 @@ export const make = (
       }
       if (fields.labelIds !== undefined && fields.labels !== undefined) {
         return yield* Effect.fail(
-          new IntegrationError(
+          integrationError(
             "decode-failed",
             "Linear issue labels are over-specified: pass labelIds or labels, not both.",
             { labelIds: fields.labelIds, labels: fields.labels }
@@ -665,7 +669,7 @@ export const make = (
       } else if (fields.stateName !== undefined) {
         if (teamId === undefined) {
           return yield* Effect.fail(
-            new IntegrationError("decode-failed", "Resolving a Linear state name requires the issue's team.", {
+            integrationError("decode-failed", "Resolving a Linear state name requires the issue's team.", {
               stateName: fields.stateName
             })
           )
@@ -681,7 +685,7 @@ export const make = (
         if (fields.labels.length === 0) input["labelIds"] = []
         else if (teamId === undefined) {
           return yield* Effect.fail(
-            new IntegrationError("decode-failed", "Resolving Linear label names requires the issue's team.", {
+            integrationError("decode-failed", "Resolving Linear label names requires the issue's team.", {
               labels: fields.labels
             })
           )
@@ -699,7 +703,7 @@ export const make = (
       const payload = data?.["issueCreate"]
       if (!isRecord(payload) || payload["success"] !== true || payload["issue"] == null) {
         return yield* Effect.fail(
-          new IntegrationError("delivery-failed", "Linear issueCreate did not return an issue.", {
+          integrationError("delivery-failed", "Linear issueCreate did not return an issue.", {
             success: isRecord(payload) ? payload["success"] ?? false : false
           })
         )
@@ -723,7 +727,7 @@ export const make = (
       const payload = data?.["issueUpdate"]
       if (!isRecord(payload) || payload["success"] !== true || payload["issue"] == null) {
         return yield* Effect.fail(
-          new IntegrationError("delivery-failed", "Linear issueUpdate did not return an issue.", {
+          integrationError("delivery-failed", "Linear issueUpdate did not return an issue.", {
             success: isRecord(payload) ? payload["success"] ?? false : false,
             idOrIdentifier
           })
@@ -742,7 +746,7 @@ export const make = (
       const payload = data?.["commentCreate"]
       if (!isRecord(payload) || payload["success"] !== true || payload["comment"] == null) {
         return yield* Effect.fail(
-          new IntegrationError("delivery-failed", "Linear commentCreate did not return a comment.", {
+          integrationError("delivery-failed", "Linear commentCreate did not return a comment.", {
             success: isRecord(payload) ? payload["success"] ?? false : false,
             idOrIdentifier
           })

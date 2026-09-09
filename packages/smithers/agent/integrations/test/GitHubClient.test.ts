@@ -1,5 +1,7 @@
 import { Effect, Schema } from "effect"
-import { afterEach, describe, expect, expectTypeOf, it } from "vitest"
+import { inspect } from "node:util"
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest"
+import { fromIntegrationError } from "../src/core/ActionFailure.ts"
 import { type IntegrationError, isIntegrationError } from "../src/core/IntegrationError.ts"
 import { DEFAULT_API_BASE_URL, resolve } from "../src/github/Config.ts"
 import { isRateLimitResponse, make, nextPageUrl, retryAfterMs } from "../src/github/GitHubClient.ts"
@@ -12,6 +14,7 @@ let fixture: Fixture | undefined
 afterEach(async () => {
   await fixture?.close()
   fixture = undefined
+  vi.unstubAllGlobals()
 })
 
 const client = (extra: { readonly maxRetries?: number } = {}) =>
@@ -457,4 +460,93 @@ describe("a body that cannot be serialized", () => {
     expect(failure.details).toMatchObject({ outcomeUnknown: false, retryable: false })
     expect(fixture.requests).toHaveLength(0)
   })
+})
+
+describe("text GitHub or the transport wrote", () => {
+  it("reaches the journal with the token removed", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 401, { message: `Bad credentials: ${TOKEN} is not valid` })
+    )
+    const failure = await Effect.runPromise(Effect.flip(client({ maxRetries: 0 }).request("GET", "/user")))
+    expect(failure.message).not.toContain(TOKEN)
+    expect(failure.message).toContain("Bad credentials: [REDACTED] is not valid")
+    expect(fromIntegrationError(failure).message).not.toContain(TOKEN)
+  })
+
+  it("reaches the journal with the token removed when fetch itself reports it", async () => {
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (() => Promise.reject(new Error(`proxy rejected authorization ${TOKEN}`))) as typeof fetch
+    try {
+      const failure = await Effect.runPromise(
+        Effect.flip(
+          make({ token: TOKEN, apiBaseUrl: "https://api.github.test", maxRetries: 0 }, {}).request("GET", "/user")
+        )
+      )
+      expect(failure.message).not.toContain(TOKEN)
+      expect(failure.message).toContain("proxy rejected authorization [REDACTED]")
+      expect(fromIntegrationError(failure).message).not.toContain(TOKEN)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+})
+
+// Inspect includes non-enumerable cause/stack fields that JSON serialization omits.
+const expectRedacted = (failure: IntegrationError, secret: string) => {
+  expect(inspect(failure, { depth: null })).not.toContain(secret)
+  expect(JSON.stringify(failure)).not.toContain(secret)
+  expect(JSON.stringify(fromIntegrationError(failure))).not.toContain(secret)
+}
+
+describe("credential redaction", () => {
+  it.each(["fetch", "body", "primitive"])("sanitizes a %s failure and its retained cause", async (stage) => {
+    const message = `rejected Bearer ${TOKEN}; ${TOKEN}; Bearer ${TOKEN}`
+    const cause = Object.assign(new Error(message, { cause: new Error(message) }), { authorization: message })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => {
+        if (stage === "fetch") throw cause
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(stage === "primitive" ? message : cause)
+            }
+          })
+        )
+      })
+    )
+    const failure = await Effect.runPromise(
+      Effect.flip(make({ token: TOKEN, maxRetries: 0 }, {}).request("POST", "/user"))
+    )
+    expectRedacted(failure, TOKEN)
+    expect(failure.cause).toBeInstanceOf(Error)
+    expect((failure.cause as Error).message).toBe("rejected [REDACTED]; [REDACTED]; [REDACTED]")
+    expect(failure.details).toMatchObject({ outcomeUnknown: true })
+  })
+})
+
+it("redacts provider status text, repeated tokens, response headers, and paths", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("no JSON", {
+        status: 401,
+        statusText: `Bearer ${TOKEN} rejected ${TOKEN} ${TOKEN}`,
+        headers: { "x-ratelimit-remaining": TOKEN }
+      })
+    )
+  )
+  const failure = await Effect.runPromise(Effect.flip(
+    make({ token: TOKEN, maxRetries: 0 }, {}).request("GET", `/${TOKEN}`)
+  ))
+  expectRedacted(failure, TOKEN)
+  expect(failure.summary).toContain("[REDACTED] rejected [REDACTED] [REDACTED]")
+})
+
+it("redacts credentials retained by a schema decoding error", async () => {
+  vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(TOKEN)))
+  const failure = await Effect.runPromise(Effect.flip(
+    make({ token: TOKEN }, {}).request("GET", "/user", undefined, { schema: Schema.Number })
+  ))
+  expectRedacted(failure, TOKEN)
 })

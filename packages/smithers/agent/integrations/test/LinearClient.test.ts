@@ -1,5 +1,7 @@
 import { Cause, Effect, Exit } from "effect"
+import { inspect } from "node:util"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { fromIntegrationError } from "../src/core/ActionFailure.ts"
 import type { IntegrationError } from "../src/core/IntegrationError.ts"
 import { DEFAULT_API_BASE_URL, resolve } from "../src/linear/Config.ts"
 import { make, normalizePriority, type Priority, retryDelayMs } from "../src/linear/LinearClient.ts"
@@ -858,4 +860,90 @@ it("interrupts a pending Linear response body read", async () => {
   expect(exit._tag).toBe("Failure")
   await vi.waitFor(() => expect(closed).toBe(true))
   expect(fixture.requests).toHaveLength(1)
+})
+
+describe("text Linear wrote", () => {
+  it("reaches the journal with the API key removed", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 200, { errors: [{ message: `Authentication failed for ${API_KEY}` }] })
+    )
+    const failure = await Effect.runPromise(Effect.flip(client().query("query X { x }")))
+    expect(failure.message).not.toContain(API_KEY)
+    expect(failure.message).toContain("Authentication failed for [REDACTED]")
+    expect(failure.details?.["errors"]).toEqual(["Authentication failed for [REDACTED]"])
+    expect(fromIntegrationError(failure).message).not.toContain(API_KEY)
+  })
+
+  it("keeps the API key out of the details of a non-2xx answer", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 403, { errors: [{ message: `key ${API_KEY} is revoked` }] })
+    )
+    const failure = await Effect.runPromise(Effect.flip(client().query("query X { x }")))
+    expect(failure.details?.["errors"]).toEqual(["key [REDACTED] is revoked"])
+    expect(JSON.stringify(failure.details)).not.toContain(API_KEY)
+  })
+
+  // A structured `message` could nest the key anywhere, so it is reported as an
+  // unnamed error rather than stringified into the journal.
+  it("does not copy a non-string GraphQL message into the failure", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 200, { errors: [{ message: { token: API_KEY } }] })
+    )
+    const failure = await Effect.runPromise(Effect.flip(client().query("query X { x }")))
+    expect(failure.message).toContain("unknown")
+    expect(JSON.stringify(failure.details)).not.toContain(API_KEY)
+  })
+})
+
+// Inspect includes non-enumerable cause/stack fields that JSON serialization omits.
+const expectRedacted = (failure: IntegrationError, secret: string) => {
+  expect(inspect(failure, { depth: null })).not.toContain(secret)
+  expect(JSON.stringify(failure)).not.toContain(secret)
+  expect(JSON.stringify(fromIntegrationError(failure))).not.toContain(secret)
+}
+
+describe("credential redaction", () => {
+  it.each(["fetch", "body", "primitive"])("sanitizes a %s failure and its retained cause", async (stage) => {
+    const message = `rejected Bearer ${API_KEY}; ${API_KEY}; Bearer ${API_KEY}`
+    const cause = Object.assign(new Error(message, { cause: new Error(message) }), { authorization: message })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => {
+        if (stage === "fetch") throw cause
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(stage === "primitive" ? message : cause)
+            }
+          })
+        )
+      })
+    )
+    const failure = await Effect.runPromise(
+      Effect.flip(make({ apiKey: `Bearer ${API_KEY}` }, {}).query("mutation X { x }", {}, { retryServerErrors: false }))
+    )
+    expectRedacted(failure, API_KEY)
+    expect(failure.cause).toBeInstanceOf(Error)
+    expect((failure.cause as Error).message).toBe("rejected [REDACTED]; [REDACTED]; [REDACTED]")
+    expect(failure.details).toMatchObject({ outcomeUnknown: true })
+  })
+})
+
+it("redacts credentials in a JSON parse cause", async () => {
+  vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(API_KEY)))
+  const failure = await Effect.runPromise(Effect.flip(make({ apiKey: API_KEY }, {}).query("query X { x }")))
+  expect(failure.reason).toBe("decode-failed")
+  expectRedacted(failure, API_KEY)
+})
+
+it("redacts the raw OAuth token as well as its Authorization header", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      errors: [{ message: `Bearer ${API_KEY} rejected ${API_KEY}; ${API_KEY}` }]
+    }))
+  )
+  const failure = await Effect.runPromise(Effect.flip(make({ apiKey: `Bearer ${API_KEY}` }, {}).query("query X { x }")))
+  expectRedacted(failure, API_KEY)
+  expect(failure.summary).toContain("[REDACTED] rejected [REDACTED]; [REDACTED]")
 })

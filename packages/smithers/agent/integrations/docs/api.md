@@ -246,7 +246,9 @@ default `https://api.github.com`), `webhookSecret` (falls back to
 The REST client. Rate-limit handling, bounded pagination, and token hygiene:
 the token reaches the `Authorization` header and nothing else, and every
 request URL, including a `rel="next"` target, is pinned to the configured API
-origin.
+origin. Provider and transport errors redact the token and Authorization
+header value from summaries, details, and retained cause messages before
+construction. Raw upstream stacks and nested causes are discarded.
 
 Service interface:
 
@@ -415,6 +417,9 @@ at 30 seconds. A 5xx is retried only for a query: on `issueCreate`,
 `issueUpdate`, or `commentCreate` the server may have applied the mutation
 and lost the answer, so those report `outcomeUnknown` instead of filing a
 second issue. Interrupting the fiber aborts the request and the body read.
+Provider and transport errors redact the API key, including the raw token of
+a Bearer credential, from summaries, details, and retained cause messages.
+Raw upstream stacks and nested causes are discarded.
 
 Service interface:
 
