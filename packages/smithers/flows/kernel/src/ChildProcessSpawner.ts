@@ -21,7 +21,6 @@
  *
  * @since 1.0.0-rc.0
  */
-import { make as makeCapability } from "@smthrs/capability/Capability"
 import { toPlatformError } from "@smthrs/capability/Permission"
 import { Effect, Layer } from "effect"
 import { systemError } from "effect/PlatformError"
@@ -30,6 +29,7 @@ import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/proces
 import * as CommandLine from "./CommandLine.ts"
 import { GrantStore } from "./GrantStore.ts"
 import * as Containment from "./internal/Containment.ts"
+import { makeCapability } from "./internal/makeCapability.ts"
 
 const data = (value: object, name: PropertyKey): unknown => {
   const descriptor = Object.getOwnPropertyDescriptor(value, name)
@@ -269,10 +269,13 @@ export const layer: Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner 
     const check = (command: ChildProcess.Command) => {
       const rendered = CommandLine.render(command)
       const environment = environmentNames(command)
-      return grants.check(makeCapability("proc:spawn", rendered), {
-        cwd: CommandLine.cwd(command),
-        ...(environment === undefined ? {} : { env: environment })
-      }).pipe(
+      return makeCapability("proc:spawn", rendered).pipe(
+        Effect.flatMap((capability) =>
+          grants.check(capability, {
+            cwd: CommandLine.cwd(command),
+            ...(environment === undefined ? {} : { env: environment })
+          })
+        ),
         Effect.mapError((error) =>
           toPlatformError({
             module: "ChildProcessSpawner",

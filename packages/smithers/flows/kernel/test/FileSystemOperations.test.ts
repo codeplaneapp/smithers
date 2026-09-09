@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import type * as Capability from "@smthrs/capability/Capability"
-import { permissionDenied } from "@smthrs/capability/Permission"
-import { Effect, FileSystem as EffectFileSystem, Path as EffectPath, Sink, Stream } from "effect"
+import * as Capability from "@smthrs/capability/Capability"
+import { fromPlatformError, permissionDenied } from "@smthrs/capability/Permission"
+import { Effect, FileSystem as EffectFileSystem, Option, Path as EffectPath, Sink, Stream } from "effect"
 import * as FileSystem from "../src/FileSystem.ts"
 import { GrantStore } from "../src/GrantStore.ts"
 import * as Workspace from "../src/Workspace.ts"
@@ -123,8 +123,8 @@ interface Case {
   readonly run: (fileSystem: EffectFileSystem.FileSystem) => Effect.Effect<unknown, unknown, never>
 }
 
-const read = (resource: string): Capability.Capability => ({ action: "fs:read", resource })
-const write = (resource: string): Capability.Capability => ({ action: "fs:write", resource })
+const read = (resource: string): Capability.Capability => Capability.make("fs:read", resource)
+const write = (resource: string): Capability.Capability => Capability.make("fs:write", resource)
 
 const cases: ReadonlyArray<Case> = [
   {
@@ -396,6 +396,30 @@ const provide = <A, E>(
   )
 
 describe("FileSystem operation guards", () => {
+  for (const length of [4096, 4097]) {
+    for (const isolated of [true, false]) {
+      it.effect(`keeps a ${length}-unit path resource typed with isolation=${isolated}`, () =>
+        Effect.gen(function*() {
+          const checks: Array<Capability.Capability> = []
+          const calls: Array<string> = []
+          const resource = `/workspace/${"x".repeat(length - "/workspace/".length)}`
+          const exit = yield* provide(
+            (fs) =>
+              Effect.gen(function*() {
+                const error = Option.getOrThrow(fromPlatformError(yield* Effect.flip(fs.readFile(resource))))
+                expect(error.code).toBe(length === 4096 ? "permission_denied" : "invalid_resolution")
+                if (length === 4097) expect(error).toMatchObject({ message: expect.stringContaining("4096") })
+              }),
+            isolated ? hostFileSystem(calls) : makeHostFileSystem(calls),
+            scriptedStore(() => false, checks)
+          )
+          expect(exit._tag).toBe("Success")
+          expect(checks).toHaveLength(length === 4096 && isolated ? 1 : 0)
+          expect(calls).not.toContain("readFile")
+        }))
+    }
+  }
+
   for (const testCase of cases) {
     it.effect(`requests ${testCase.capabilities.length} capability check(s) for ${testCase.name}`, () =>
       Effect.gen(function*() {

@@ -60,6 +60,26 @@ const protectedClient = <A, E>(
 const denial = (error: unknown) => Option.getOrThrow(HttpClient.fromHttpClientError(error as never))
 
 describe("HttpClient", () => {
+  for (const length of [4096, 4097]) {
+    for (const kind of ["invalid URL", "host", "model"] as const) {
+      itEffect(`keeps a ${length}-unit ${kind} resource in the typed channel`, () => {
+        const checks: Array<Capability.Capability> = []
+        const calls: Array<string> = []
+        return Effect.gen(function*() {
+          const client = yield* EffectHttpClient.HttpClient
+          const request = kind === "model"
+            ? client.post("https://api.test").pipe(HttpClient.withModelCall("x".repeat(length - "api.test/".length)))
+            : client.get(kind === "host" ? `https://${"x".repeat(length)}` : "x".repeat(length))
+          const error = denial(yield* Effect.flip(request))
+          expect(error.code).toBe(length === 4096 ? "permission_denied" : "invalid_resolution")
+          if (length === 4097) expect(error).toMatchObject({ message: expect.stringContaining("4096") })
+          expect(checks).toHaveLength(length === 4096 && kind !== "invalid URL" ? 1 : 0)
+          expect(calls).toEqual([])
+        }).pipe((effect) => protectedClient(effect, host(calls), store(checks, false)))
+      })
+    }
+  }
+
   itEffect("maps GET and HEAD to net:get and every other method to net:post", () => {
     const checks: Array<Capability.Capability> = []
     const calls: Array<string> = []

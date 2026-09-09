@@ -29,7 +29,7 @@
  * @since 1.0.0-rc.0
  */
 
-import { type Capability, make as makeCapability } from "@smthrs/capability/Capability"
+import type { Capability } from "@smthrs/capability/Capability"
 import {
   formatError,
   isPermissionError,
@@ -45,6 +45,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as UrlParams from "effect/unstable/http/UrlParams"
 import { GrantStore } from "./GrantStore.ts"
+import { makeCapability } from "./internal/makeCapability.ts"
 
 const snapshotRawBody = (value: unknown): unknown => {
   if (value instanceof globalThis.Uint8Array) return value.slice()
@@ -234,34 +235,29 @@ export const layerNoop = (): Layer.Layer<EffectHttpClient.HttpClient> =>
 const capabilityFor = (
   request: HttpClientRequest.HttpClientRequest,
   modelId: string | undefined
-): Effect.Effect<Capability, PermissionDenied> => {
+): Effect.Effect<Capability, PermissionError> => {
+  const action = modelId === undefined
+    ? request.method === "GET" || request.method === "HEAD" ? "net:get" : "net:post"
+    : "model:call"
   let url: URL
   try {
     url = new URL(request.url)
   } catch {
-    return Effect.fail(
-      new PermissionDenied({
-        code: "permission_denied",
-        capability: makeCapability(
-          modelId === undefined
-            ? request.method === "GET" || request.method === "HEAD" ? "net:get" : "net:post"
-            : "model:call",
-          request.url
-        ),
-        reason: "HTTP capability checks require an absolute, parseable URL"
-      })
+    return makeCapability(action, request.url).pipe(
+      Effect.flatMap((capability) =>
+        Effect.fail(
+          new PermissionDenied({
+            code: "permission_denied",
+            capability,
+            reason: "HTTP capability checks require an absolute, parseable URL"
+          })
+        )
+      )
     )
   }
   const host = url.host.toLowerCase()
   const resource = url.protocol === "https:" ? host : `${url.protocol}//${host}`
-  return Effect.succeed(
-    modelId === undefined
-      ? makeCapability(
-        request.method === "GET" || request.method === "HEAD" ? "net:get" : "net:post",
-        resource
-      )
-      : makeCapability("model:call", `${resource}/${modelId}`)
-  )
+  return makeCapability(action, modelId === undefined ? resource : `${resource}/${modelId}`)
 }
 
 /**

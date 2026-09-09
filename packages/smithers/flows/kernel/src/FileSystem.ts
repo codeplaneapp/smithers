@@ -16,7 +16,6 @@
  *
  * @since 1.0.0-rc.0
  */
-import { make as makeCapability } from "@smthrs/capability/Capability"
 import { permissionDenied, type PermissionError, toPlatformError } from "@smthrs/capability/Permission"
 import {
   Effect,
@@ -32,6 +31,7 @@ import {
 } from "effect"
 import * as Batch from "./FileSystemBatch.ts"
 import { GrantStore } from "./GrantStore.ts"
+import { makeCapability } from "./internal/makeCapability.ts"
 import { Workspace } from "./Workspace.ts"
 
 export * from "./FileSystemBatch.ts"
@@ -349,6 +349,11 @@ export const layer: Layer.Layer<
       : Option.map(boundaryInfo.ino, (ino) => `${boundaryInfo.dev}:${ino}`)
     const refuse = (method: string, resource: string) => (error: PermissionError): PlatformError.PlatformError =>
       toPlatformError({ module: "FileSystem", method, pathOrDescriptor: resource, error })
+    const deny = (action: "fs:read" | "fs:write", method: string, resource: string, reason: string) =>
+      makeCapability(action, resource).pipe(
+        Effect.flatMap((capability) => Effect.fail(permissionDenied(capability, reason))),
+        Effect.mapError(refuse(method, resource))
+      )
     /**
      * Resolves the canonical capability resource a path names right now and
      * applies the always-on hard-link refusal. `guard` runs it twice — once
@@ -369,14 +374,7 @@ export const layer: Layer.Layer<
               onSuccess: (info) => {
                 const hardLinked = info.type === "File" && Option.isSome(info.nlink) && info.nlink.value > 1
                 return hardLinked
-                  ? Effect.fail(
-                    refuse(method, resource)(
-                      permissionDenied(
-                        makeCapability(action, resource),
-                        "hard-linked files cannot be confined to the workspace"
-                      )
-                    )
-                  )
+                  ? deny(action, method, resource, "hard-linked files cannot be confined to the workspace")
                   : Effect.succeed(resource)
               }
             })
@@ -391,7 +389,8 @@ export const layer: Layer.Layer<
       const method = action === "fs:read" ? "read" : "write"
       return resolvedResource(action, method, value).pipe(
         Effect.flatMap((resource) =>
-          grants.check(makeCapability(action, resource)).pipe(
+          makeCapability(action, resource).pipe(
+            Effect.flatMap((capability) => grants.check(capability)),
             Effect.mapError(refuse(method, resource)),
             // The grant decision can suspend — an attended request waiting for
             // a human, a journal-backed store doing IO. What was authorized is
@@ -402,14 +401,7 @@ export const layer: Layer.Layer<
             Effect.flatMap((settled) =>
               settled === resource
                 ? Effect.void
-                : Effect.fail(
-                  refuse(method, resource)(
-                    permissionDenied(
-                      makeCapability(action, resource),
-                      "path no longer names the resource that was authorized"
-                    )
-                  )
-                )
+                : deny(action, method, resource, "path no longer names the resource that was authorized")
             )
           )
         )
@@ -421,18 +413,13 @@ export const layer: Layer.Layer<
       action: "fs:read" | "fs:write",
       value: string,
       method: string
-    ): PlatformError.PlatformError => {
-      const resource = normalize(value)
-      return toPlatformError({
-        module: "FileSystem",
+    ): Effect.Effect<never, PlatformError.PlatformError> =>
+      deny(
+        action,
         method,
-        pathOrDescriptor: resource,
-        error: permissionDenied(
-          makeCapability(action, resource),
-          "host does not provide descriptor-relative, no-follow filesystem isolation"
-        )
-      })
-    }
+        normalize(value),
+        "host does not provide descriptor-relative, no-follow filesystem isolation"
+      )
     const atomicOne = <A>(
       action: "fs:read" | "fs:write",
       value: string,
@@ -440,7 +427,7 @@ export const layer: Layer.Layer<
       request: AtomicRequest
     ): Effect.Effect<A, PlatformError.PlatformError> =>
       atomic === undefined
-        ? Effect.fail(atomicUnavailable(action, value, method))
+        ? atomicUnavailable(action, value, method)
         : guard(action, value).pipe(
           Effect.andThen(
             atomic.execute<A>({
@@ -458,7 +445,7 @@ export const layer: Layer.Layer<
       request: AtomicRequest
     ): Effect.Effect<A, PlatformError.PlatformError> =>
       atomic === undefined
-        ? Effect.fail(atomicUnavailable(first[0], first[1], method))
+        ? atomicUnavailable(first[0], first[1], method)
         : guard(first[0], first[1]).pipe(
           Effect.andThen(guard(second[0], second[1])),
           Effect.andThen(
@@ -477,7 +464,7 @@ export const layer: Layer.Layer<
       use: (isolated: EffectFileSystem.FileSystem) => Effect.Effect<A, PlatformError.PlatformError>
     ): Effect.Effect<A, PlatformError.PlatformError> =>
       atomic?.isolated === undefined
-        ? Effect.fail(atomicUnavailable(action, value, method))
+        ? atomicUnavailable(action, value, method)
         : guard(action, value).pipe(Effect.andThen(use(atomic.isolated)))
     const isolatedTwo = <A>(
       first: readonly ["fs:read" | "fs:write", string],
@@ -486,7 +473,7 @@ export const layer: Layer.Layer<
       use: (isolated: EffectFileSystem.FileSystem) => Effect.Effect<A, PlatformError.PlatformError>
     ): Effect.Effect<A, PlatformError.PlatformError> =>
       atomic?.isolated === undefined
-        ? Effect.fail(atomicUnavailable(first[0], first[1], method))
+        ? atomicUnavailable(first[0], first[1], method)
         : guard(first[0], first[1]).pipe(
           Effect.andThen(guard(second[0], second[1])),
           Effect.andThen(use(atomic.isolated))
@@ -517,15 +504,13 @@ export const layer: Layer.Layer<
         write(value) :
         read(value)
     }
-    const descriptorRefusal = (action: "fs:read" | "fs:write", value: string): PlatformError.PlatformError => {
-      const resource = normalize(value)
-      return refuse(action === "fs:read" ? "read" : "write", resource)(
-        permissionDenied(
-          makeCapability(action, resource),
-          "descriptor no longer names the resource at its authorized path"
-        )
+    const descriptorRefusal = (action: "fs:read" | "fs:write", value: string) =>
+      deny(
+        action,
+        action === "fs:read" ? "read" : "write",
+        normalize(value),
+        "descriptor no longer names the resource at its authorized path"
       )
-    }
     /**
      * Confirms an open descriptor still names the resource its authorization
      * bound: the `device:inode` identity fstat'd at open time must be what the
@@ -547,11 +532,11 @@ export const layer: Layer.Layer<
         onSome: (bound) =>
           host.stat(normalize(value)).pipe(
             Effect.matchEffect({
-              onFailure: () => Effect.fail(descriptorRefusal(action, value)),
+              onFailure: () => descriptorRefusal(action, value),
               onSuccess: (info) =>
                 Option.match(identityOf(info), {
-                  onNone: () => Effect.fail(descriptorRefusal(action, value)),
-                  onSome: (current) => current === bound ? Effect.void : Effect.fail(descriptorRefusal(action, value))
+                  onNone: () => descriptorRefusal(action, value),
+                  onSome: (current) => current === bound ? Effect.void : descriptorRefusal(action, value)
                 })
             })
           )
@@ -647,12 +632,10 @@ export const layer: Layer.Layer<
           const captured = snapshotOptions(options)
           return (
             atomic?.isolated === undefined
-              ? Effect.fail(
-                atomicUnavailable(
-                  "fs:write",
-                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
-                  "makeTempDirectory"
-                )
+              ? atomicUnavailable(
+                "fs:write",
+                captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                "makeTempDirectory"
               )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempDirectory(normalizeTempOptions(captured)))
@@ -663,12 +646,10 @@ export const layer: Layer.Layer<
           const captured = snapshotOptions(options)
           return (
             atomic?.isolated === undefined
-              ? Effect.fail(
-                atomicUnavailable(
-                  "fs:write",
-                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
-                  "makeTempDirectoryScoped"
-                )
+              ? atomicUnavailable(
+                "fs:write",
+                captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                "makeTempDirectoryScoped"
               )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempDirectoryScoped(normalizeTempOptions(captured)))
@@ -679,12 +660,10 @@ export const layer: Layer.Layer<
           const captured = snapshotOptions(options)
           return (
             atomic?.isolated === undefined
-              ? Effect.fail(
-                atomicUnavailable(
-                  "fs:write",
-                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
-                  "makeTempFile"
-                )
+              ? atomicUnavailable(
+                "fs:write",
+                captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                "makeTempFile"
               )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempFile(normalizeTempOptions(captured)))
@@ -695,12 +674,10 @@ export const layer: Layer.Layer<
           const captured = snapshotOptions(options)
           return (
             atomic?.isolated === undefined
-              ? Effect.fail(
-                atomicUnavailable(
-                  "fs:write",
-                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
-                  "makeTempFileScoped"
-                )
+              ? atomicUnavailable(
+                "fs:write",
+                captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                "makeTempFileScoped"
               )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempFileScoped(normalizeTempOptions(captured)))
@@ -712,7 +689,7 @@ export const layer: Layer.Layer<
           const flag = captured?.flag ?? "r"
           const isolated = atomic?.isolated
           return isolated === undefined
-            ? Effect.fail(atomicUnavailable("fs:read", value, "open"))
+            ? atomicUnavailable("fs:read", value, "open")
             : openChecks(value, flag).pipe(
               Effect.andThen(isolated.open(normalize(value), captured)),
               // fstat the handle the moment it exists: the authorization the
@@ -787,7 +764,7 @@ export const layer: Layer.Layer<
             Effect.fn("FileSystem.watch")(() =>
               Effect.suspend(() =>
                 atomic?.isolated === undefined
-                  ? Effect.fail(atomicUnavailable("fs:read", value, "watch"))
+                  ? atomicUnavailable("fs:read", value, "watch")
                   : read(value).pipe(Effect.map(() => atomic.isolated!.watch(normalize(value))))
               )
             )()
@@ -824,7 +801,7 @@ export const layer: Layer.Layer<
               () =>
                 Effect.suspend(() =>
                   atomic?.isolated === undefined
-                    ? Effect.fail(atomicUnavailable("fs:write", value, "sink"))
+                    ? atomicUnavailable("fs:write", value, "sink")
                     : write(value).pipe(Effect.map(() => atomic.isolated!.sink(normalize(value), captured)))
                 )
             )()
@@ -838,7 +815,7 @@ export const layer: Layer.Layer<
             Effect.fn("FileSystem.stream")(() =>
               Effect.suspend(() =>
                 atomic?.isolated === undefined
-                  ? Effect.fail(atomicUnavailable("fs:read", value, "stream"))
+                  ? atomicUnavailable("fs:read", value, "stream")
                   : read(value).pipe(Effect.map(() => atomic.isolated!.stream(normalize(value), captured)))
               )
             )()
@@ -870,7 +847,7 @@ export const layer: Layer.Layer<
           )
         }
         if (Option.isNone(rootIdentity)) {
-          return yield* Effect.fail(atomicUnavailable("fs:read", logicalRoot, "batch"))
+          return yield* atomicUnavailable("fs:read", logicalRoot, "batch")
         }
         // Snapshot before any asynchronous root or permission checks.
         const captured = snapshotOptions(requests).map((request) => ({
@@ -922,7 +899,8 @@ export const layer: Layer.Layer<
         for (const [index, request] of captured.entries()) {
           const resource = resources[index]!
           const checked = Result.isFailure(resource) ? Result.fail(resource.failure) : yield* Effect.result(
-            grants.check(makeCapability("fs:read", resource.success)).pipe(
+            makeCapability("fs:read", resource.success).pipe(
+              Effect.flatMap((capability) => grants.check(capability)),
               Effect.mapError(refuse("read", resource.success))
             )
           )
@@ -935,12 +913,9 @@ export const layer: Layer.Layer<
           ({ request, resource }) =>
             resolvedResource("fs:read", "read", request.path).pipe(
               Effect.flatMap((current) =>
-                current === resource ? Effect.void : Effect.fail(
-                  refuse("read", resource)(permissionDenied(
-                    makeCapability("fs:read", resource),
-                    "path no longer names the resource that was authorized"
-                  ))
-                )
+                current === resource ?
+                  Effect.void :
+                  deny("fs:read", "read", resource, "path no longer names the resource that was authorized")
               ),
               Effect.result
             ),

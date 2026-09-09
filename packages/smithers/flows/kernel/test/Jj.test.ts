@@ -25,6 +25,43 @@ const fileSystem = EffectFileSystem.makeNoop({
 })
 
 describe("Jj", () => {
+  for (const length of [4096, 4097]) {
+    itEffect(`keeps a ${length}-unit snapshot resource in the typed channel`, () => {
+      const checks: Array<Capability.Capability> = []
+      let invoked = false
+      return Effect.gen(function*() {
+        const jj = yield* Jj.Jj
+        const error = yield* Effect.flip(jj.snapshot("x".repeat(length)))
+        expect(error).toMatchObject({ code: length === 4096 ? "permission_denied" : "invalid_resolution" })
+        if (length === 4097) expect(error).toMatchObject({ message: expect.stringContaining("4096") })
+        expect(checks).toHaveLength(length === 4096 ? 1 : 0)
+        expect(invoked).toBe(false)
+      }).pipe(
+        Effect.provide(Jj.layer),
+        Effect.provideService(
+          HostJj.Jj,
+          HostJj.makeNoop({
+            snapshot: () =>
+              Effect.sync(() => {
+                invoked = true
+                return { changeId: "change" }
+              })
+          })
+        ),
+        Effect.provideService(EffectFileSystem.FileSystem, fileSystem),
+        Effect.provide(Path.layer),
+        Effect.provide(Workspace.layer("/workspace")),
+        Effect.provideService(GrantStore, {
+          ...scriptedStore(checks),
+          check: (capability) => {
+            checks.push(capability)
+            return Effect.fail(permissionDenied(capability, "denied by test"))
+          }
+        })
+      )
+    })
+  }
+
   itEffect("checks every host operation before delegating it", () => {
     const calls: Array<string> = []
     const checks: Array<Capability.Capability> = []

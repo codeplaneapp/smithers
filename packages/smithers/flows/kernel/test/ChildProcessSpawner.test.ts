@@ -61,6 +61,27 @@ const hostSpawner = (options: {
   )
 
 describe("ChildProcessSpawner", () => {
+  for (const length of [4096, 4097]) {
+    itEffect(`keeps a ${length}-unit command resource in the typed channel`, () => {
+      const checks: Array<Capability.Capability> = []
+      let invoked = false
+      return Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const error = denial(
+          yield* Effect.flip(spawner.exitCode(ChildProcess.make("tool", ["x".repeat(length - "tool ".length)])))
+        )
+        expect(error.code).toBe(length === 4096 ? "permission_denied" : "invalid_resolution")
+        if (length === 4097) expect(error).toMatchObject({ message: expect.stringContaining("4096") })
+        expect(checks).toHaveLength(length === 4096 ? 1 : 0)
+        expect(invoked).toBe(false)
+      }).pipe(
+        Effect.provide(ChildProcessSpawner.layer),
+        Effect.provideService(HostChildProcessSpawner, hostSpawner({ stdout: "", onSpawn: () => (invoked = true) })),
+        Effect.provideService(GrantStore, scriptedStore(new Set(), checks))
+      )
+    })
+  }
+
   itEffect("checks before spawning and does not delegate a denied command", () => {
     let invoked = false
     const checks: Array<Capability.Capability> = []

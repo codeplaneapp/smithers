@@ -13,12 +13,13 @@
  *
  * @since 1.0.0-rc.0
  */
-import { make as makeCapability } from "@smthrs/capability/Capability"
+import type { Action } from "@smthrs/capability/Capability"
 import { permissionDenied } from "@smthrs/capability/Permission"
 import { type ChangeId, Jj } from "@smthrs/jj"
 import { Effect, FileSystem as EffectFileSystem, Layer, Path as EffectPath } from "effect"
 import { canonicalResource } from "./FileSystem.ts"
 import { GrantStore } from "./GrantStore.ts"
+import { makeCapability } from "./internal/makeCapability.ts"
 import { Workspace } from "./Workspace.ts"
 
 /**
@@ -86,32 +87,34 @@ export const layer: Layer.Layer<
     const path = yield* EffectPath.Path
     const workspace = yield* Workspace
     const grants = yield* GrantStore
+    const check = (action: Action, resource: string) =>
+      makeCapability(action, resource).pipe(Effect.flatMap((capability) => grants.check(capability)))
     return Jj.of({
-      status: Effect.fn("Jj.status")(() =>
-        grants.check(makeCapability("jj:status", ".")).pipe(Effect.andThen(jj.status()))
-      ),
+      status: Effect.fn("Jj.status")(() => check("jj:status", ".").pipe(Effect.andThen(jj.status()))),
       diff: Effect.fn("Jj.diff")((from, to) =>
-        grants.check(makeCapability("jj:diff", `${from}:${to}`)).pipe(Effect.andThen(jj.diff(from, to)))
+        check("jj:diff", `${from}:${to}`).pipe(Effect.andThen(jj.diff(from, to)))
       ),
       snapshot: Effect.fn("Jj.snapshot")((message) =>
-        grants.check(makeCapability("jj:snapshot", message ?? "")).pipe(Effect.andThen(jj.snapshot(message)))
+        check("jj:snapshot", message ?? "").pipe(Effect.andThen(jj.snapshot(message)))
       ),
       restore: Effect.fn("Jj.restore")((changeId) =>
-        grants.check(makeCapability("jj:restore", changeId)).pipe(Effect.andThen(jj.restore(changeId)))
+        check("jj:restore", changeId).pipe(Effect.andThen(jj.restore(changeId)))
       ),
       workspaceAdd: Effect.fn("Jj.workspaceAdd")((name, destination, revision) =>
         canonicalResource(fileSystem, path, workspace.root, destination).pipe(
           Effect.flatMap((resource) =>
-            grants.check(makeCapability("jj:workspace-add", resource)).pipe(
-              Effect.andThen(grants.check(makeCapability("fs:write", resource))),
+            check("jj:workspace-add", resource).pipe(
+              Effect.andThen(check("fs:write", resource)),
               Effect.andThen(canonicalResource(fileSystem, path, workspace.root, destination)),
               Effect.flatMap((settled) =>
                 settled === resource
                   ? jj.workspaceAdd(name, resource, revision)
-                  : Effect.fail(
-                    permissionDenied(
-                      makeCapability("jj:workspace-add", resource),
-                      "workspace destination no longer names the resource that was authorized"
+                  : makeCapability("jj:workspace-add", resource).pipe(
+                    Effect.flatMap((capability) =>
+                      Effect.fail(permissionDenied(
+                        capability,
+                        "workspace destination no longer names the resource that was authorized"
+                      ))
                     )
                   )
               )
@@ -120,7 +123,7 @@ export const layer: Layer.Layer<
         )
       ),
       workspaceForget: Effect.fn("Jj.workspaceForget")((name) =>
-        grants.check(makeCapability("jj:workspace-forget", name)).pipe(Effect.andThen(jj.workspaceForget(name)))
+        check("jj:workspace-forget", name).pipe(Effect.andThen(jj.workspaceForget(name)))
       ),
       // `root` and `revert` are optional on the service, so the decorator
       // forwards the ABSENCE too. A backend that cannot revert must keep
@@ -136,15 +139,13 @@ export const layer: Layer.Layer<
           // authorized name would decide the answer for a repository the grant
           // never mentioned.
           canonicalResource(fileSystem, path, workspace.root, from).pipe(
-            Effect.flatMap((resource) =>
-              grants.check(makeCapability("jj:root", resource)).pipe(Effect.andThen(jjRoot(resource)))
-            )
+            Effect.flatMap((resource) => check("jj:root", resource).pipe(Effect.andThen(jjRoot(resource))))
           )
         )
       },
       ...jjRevert === undefined ? {} : {
         revert: Effect.fn("Jj.revert")((changeId: ChangeId) =>
-          grants.check(makeCapability("jj:revert", changeId)).pipe(Effect.andThen(jjRevert(changeId)))
+          check("jj:revert", changeId).pipe(Effect.andThen(jjRevert(changeId)))
         )
       }
     })
