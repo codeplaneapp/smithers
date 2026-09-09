@@ -396,23 +396,27 @@ const readJson = async (request, limit) => {
 const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
 
 /**
- * Renders an inert JSON value with deterministic member order and hard bounds.
+ * Renders an inert JSON value, and the text of one subtree of it, in one pass.
  *
  * Validation precedes rendering, so cycles, accessors, sparse arrays, exotic
  * prototypes, negative zero, and adversarial nesting never reach the recursive
- * renderer. JSON parsed from a request naturally satisfies the inertness
- * checks; the checks also keep this exported utility safe for direct callers.
- *
- * @category utilities
+ * renderer. A caller that needs both the whole document and the canonical text
+ * of one member of it passes that member as `capture` rather than rendering it
+ * a second time; the whole document is still what the depth, member, and byte
+ * bounds are measured against.
  */
-export const canonicalJson = (value) => {
+const renderCanonical = (value, capture) => {
   const ancestors = new Set()
   const chunks = []
-  let bytes = 0
+  // A UTF-8 encoding is never shorter than the UTF-16 text it came from, so
+  // this running length refuses an oversized document without encoding a
+  // single fragment. The exact byte count is taken once, from the joined text.
+  let length = 0
   let members = 0
+  let captured = null
   const append = (fragment) => {
-    bytes += utf8Bytes(fragment)
-    if (!Number.isSafeInteger(bytes) || bytes > maxCanonicalJsonBytes) {
+    length += fragment.length
+    if (!Number.isSafeInteger(length) || length > maxCanonicalJsonBytes) {
       throw new Error("canonical JSON exceeds its byte bound")
     }
     chunks.push(fragment)
@@ -421,7 +425,7 @@ export const canonicalJson = (value) => {
     if (text.length > maxCanonicalJsonBytes) throw new Error("canonical JSON exceeds its byte bound")
     append(JSON.stringify(text))
   }
-  const render = (current, depth) => {
+  const renderValue = (current, depth) => {
     if (depth > maxJsonDepth) throw new Error("JSON is nested too deeply")
     if (current === null) {
       append("null")
@@ -497,9 +501,35 @@ export const canonicalJson = (value) => {
     }
   }
 
+  /**
+   * Renders `current`, keeping the text of the first `capture` occurrence.
+   *
+   * A parsed JSON document holds exactly one reference to each object it
+   * contains, and equal primitives render to equal text, so the first match is
+   * the subtree the caller asked for whichever occurrence it is.
+   */
+  const render = (current, depth) => {
+    if (capture === undefined || captured !== null || current !== capture) {
+      renderValue(current, depth)
+      return
+    }
+    const start = chunks.length
+    renderValue(current, depth)
+    captured = chunks.slice(start).join("")
+  }
+
   render(value, 0)
-  return chunks.join("")
+  const text = chunks.join("")
+  if (utf8Bytes(text) > maxCanonicalJsonBytes) throw new Error("canonical JSON exceeds its byte bound")
+  return { text, captured }
 }
+
+/**
+ * Renders an inert JSON value with deterministic member order and hard bounds.
+ *
+ * @category utilities
+ */
+export const canonicalJson = (value) => renderCanonical(value).text
 
 /**
  * Refuses an action-cache key that cannot be stored or cannot have come from a
@@ -520,6 +550,16 @@ const invalidKeyDigest = (keyDigest) => {
   return null
 }
 
+/**
+ * Refuses a stored row that cannot have come from this service.
+ *
+ * The published bytes were rendered and bounded on the way in, and the `body`
+ * column carries a `CHECK (octet_length(body) <= ... AND body IS JSON)`, so a
+ * hit only repeats the checks that stay cheap next to the size of the row: the
+ * type, the byte bound, and the key the row claims. Rendering the document
+ * again would make the hottest route the service has pay for the size of every
+ * hit twice, to guard against a writer that bypassed both.
+ */
 const validateStoredActionBody = (keyDigest, body) => {
   if (typeof body !== "string" || utf8Bytes(body) > maxActionCacheBodyBytes) {
     throw new Error("action cache returned an invalid stored body")
@@ -527,7 +567,6 @@ const validateStoredActionBody = (keyDigest, body) => {
   let value
   try {
     value = JSON.parse(body)
-    canonicalJson(value)
   } catch {
     throw new Error("action cache returned invalid stored JSON")
   }
@@ -594,9 +633,12 @@ const readPublication = async (request, keyDigest) => {
   let digests
   try {
     // Validate the whole envelope, not just the conflict discriminator. This
-    // prevents deeply nested or over-wide metadata from reaching storage.
-    canonicalJson(parsed.value)
-    resultJson = canonicalJson(enveloped ? record.result : parsed.value)
+    // prevents deeply nested or over-wide metadata from reaching storage. The
+    // discriminator is the result subtree of that same rendering, so an
+    // envelope is walked once rather than once for each of the two.
+    const rendered = renderCanonical(parsed.value, enveloped ? record.result : undefined)
+    if (enveloped && rendered.captured === null) throw new Error("envelope result was not rendered")
+    resultJson = enveloped ? rendered.captured : rendered.text
     digests = enveloped ? referencedDigests(record) : []
   } catch {
     return { ok: false, response: json(400, { error: "body contains invalid or unsupported cache metadata" }) }

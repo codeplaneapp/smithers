@@ -21,6 +21,7 @@ import {
   maxConcurrentFindMissingRequests,
   maxFindMissingDigests,
   maxJsonDepth,
+  maxJsonMembers,
   maxReferencedDigests
 } from "../protocol.js"
 
@@ -1833,6 +1834,122 @@ describe("canonicalJson", () => {
     expect(canonicalJson(proxy)).toBe("{\"value\":\"safe\"}")
     expect(proxyReads).toBe(0)
     expect(() => canonicalJson("x".repeat(maxCanonicalJsonBytes + 1))).toThrow("byte bound")
+  })
+})
+
+/**
+ * Counts the UTF-8 encoder allocations one operation makes.
+ *
+ * Byte accounting used to allocate a `Uint8Array` for every fragment rendered,
+ * so a large document cost tens of thousands of allocations, and a publication
+ * paid for the result subtree twice. A call count is asserted rather than a
+ * duration because dozens of suites share the machine that runs this one.
+ */
+const countEncodes = async (work) => {
+  const encode = TextEncoder.prototype.encode
+  let calls = 0
+  TextEncoder.prototype.encode = function counted(...args) {
+    calls += 1
+    return encode.apply(this, args)
+  }
+  try {
+    return { value: await work(), calls }
+  } finally {
+    TextEncoder.prototype.encode = encode
+  }
+}
+
+/** A cached result whose declared outputs make it a large canonical document. */
+const wideResult = (files) => ({
+  key: keyDigest,
+  rule: "build",
+  label: "//:build",
+  exitOk: true,
+  output: {
+    files: Array.from({ length: files }, (_, index) => ({
+      path: `dist/chunk-${index}.js`,
+      digest: digestOf(`chunk-${index}`),
+      bytes: index
+    }))
+  },
+  storedAt: "2026-08-14T00:00:00.000Z"
+})
+
+describe("canonical rendering cost", () => {
+  test("counts a document's bytes without encoding every fragment", async () => {
+    const value = wideResult(2000)
+    const { value: text, calls } = await countEncodes(async () => canonicalJson(value))
+
+    expect(text.length).toBeGreaterThan(100_000)
+    expect(text).toStartWith(`{"exitOk":true,"key":"${keyDigest}"`)
+    expect(calls).toBeLessThanOrEqual(2)
+  })
+
+  test("serves a cache hit without rendering the stored document again", async () => {
+    const body = JSON.stringify(wideResult(2000))
+    const handler = makeHandler({ actionCache: { ...memoryActionCache(), get: async () => body } })
+    const hit = readRequest(`/ac/${keyDigest}`)
+    const { value: response, calls } = await countEncodes(() => handler(hit))
+
+    expect(response.status).toBe(200)
+    expect(body.length).toBeGreaterThan(100_000)
+    await expect(response.text()).resolves.toBe(body)
+    expect(calls).toBeLessThanOrEqual(8)
+  })
+
+  test("publishes an envelope with one rendering of its result", async () => {
+    const actionCache = memoryActionCache()
+    const handler = makeHandler({ actionCache })
+    const result = wideResult(2000)
+    const publication = jsonRequest(`/ac/${keyDigest}`, {
+      keyDigest,
+      result,
+      meta: { rule: "build" },
+      createdAtMs: 1_700_000_000_000,
+      recordedRunId: "run-1",
+      recordedEventSeq: 7
+    }, { method: "PUT" })
+    const { value: response, calls } = await countEncodes(() => handler(publication))
+
+    expect(response.status).toBe(201)
+    expect(actionCache.entries.get(keyDigest).resultJson).toBe(canonicalJson(result))
+    expect(calls).toBeLessThanOrEqual(8)
+  })
+
+  test("takes the discriminator from the result when metadata renders identically", async () => {
+    const actionCache = memoryActionCache()
+    const handler = makeHandler({ actionCache })
+    const result = { exitOk: true, output: "same" }
+    const shared = await handler(
+      jsonRequest(`/ac/${keyDigest}`, { keyDigest, meta: result, result }, { method: "PUT" })
+    )
+    const primitive = await handler(
+      jsonRequest(`/ac/${"b".repeat(64)}`, { keyDigest: "b".repeat(64), meta: "x", result: "x" }, { method: "PUT" })
+    )
+
+    expect(shared.status).toBe(201)
+    expect(actionCache.entries.get(keyDigest).resultJson).toBe(canonicalJson(result))
+    expect(primitive.status).toBe(201)
+    expect(actionCache.entries.get("b".repeat(64)).resultJson).toBe(canonicalJson("x"))
+  })
+
+  test("still bounds envelope metadata that lies outside the result", async () => {
+    const handler = makeHandler()
+    const deepMeta = `${"[".repeat(maxJsonDepth)}0${"]".repeat(maxJsonDepth)}`
+    // Wide rather than large: the member bound has to refuse this before the
+    // body bound would, so the array stays well under the byte limit.
+    const wideMeta = { keyDigest, result: { exitOk: true }, meta: new Array(maxJsonMembers).fill(0) }
+    const deep = await handler(
+      jsonRequest(`/ac/${keyDigest}`, `{"keyDigest":"${keyDigest}","result":{"exitOk":true},"meta":${deepMeta}}`, {
+        method: "PUT"
+      })
+    )
+    const wide = await handler(jsonRequest(`/ac/${keyDigest}`, wideMeta, { method: "PUT" }))
+
+    expect(deep.status).toBe(400)
+    await expect(deep.json()).resolves.toEqual({ error: "body contains invalid or unsupported cache metadata" })
+    expect(wide.status).toBe(400)
+    await expect(wide.json()).resolves.toEqual({ error: "body contains invalid or unsupported cache metadata" })
   })
 })
 
