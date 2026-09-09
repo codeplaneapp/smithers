@@ -1,10 +1,12 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as ts from "typescript"
-import { beforeAll, describe, expect, it } from "vitest"
-import { notice } from "./golden.ts"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { fences, notice } from "./golden.ts"
 
 const url = (path: string): URL => new URL(path, import.meta.url)
 const manifest = JSON.parse(readFileSync(url("../package.json"), "utf8")) as {
@@ -13,7 +15,7 @@ const manifest = JSON.parse(readFileSync(url("../package.json"), "utf8")) as {
   readonly engines?: { readonly node?: string }
   readonly exports?: unknown
   readonly sideEffects?: unknown
-  readonly publishConfig?: { readonly access?: string; readonly tag?: string }
+  readonly publishConfig?: { readonly access?: string; readonly exports?: unknown; readonly tag?: string }
 }
 
 describe("the published manifest", () => {
@@ -261,4 +263,110 @@ describe("the reader the empty type surface assertion is made of", () => {
       expect(declaredExports(mutation.declaration)).toEqual(mutation.exports)
     })
   }
+})
+
+/**
+ * A 0.x project's `node_modules/smthrs`, laid out the way npm lays out the
+ * published package: `publishConfig.exports` over `dist/`. The fixtures import
+ * the bare specifier, so what they print is what a project sees, specifier
+ * included. The `dist` link may dangle until the build hook above runs; Node
+ * resolves it when a fixture loads.
+ */
+const consumerRoot = mkdtempSync(join(tmpdir(), "smthrs-consumer-"))
+
+beforeAll(() => {
+  const installed = join(consumerRoot, "node_modules", "smthrs")
+  mkdirSync(installed, { recursive: true })
+  writeFileSync(
+    join(installed, "package.json"),
+    JSON.stringify({ name: "smthrs", type: "module", exports: manifest.publishConfig?.exports })
+  )
+  symlinkSync(fileURLToPath(url("../dist")), join(installed, "dist"))
+})
+
+afterAll(() => {
+  rmSync(consumerRoot, { recursive: true, force: true })
+})
+
+/** Runs one consumer file under Node and returns its exit status and stderr. */
+const runConsumer = (file: string, source: string): { readonly status: number | null; readonly stderr: string } => {
+  const path = join(consumerRoot, file)
+  writeFileSync(path, source)
+  const result = spawnSync(process.execPath, [path], { cwd: consumerRoot, encoding: "utf8" })
+  return { status: result.status, stderr: result.stderr }
+}
+
+/** The line Node prints when a static import names an export this module never declares. */
+const missingExport = (name: string): string =>
+  `SyntaxError: The requested module 'smthrs' does not provide an export named '${name}'`
+
+/**
+ * Every way a 0.x project spells an import of `smthrs`, and whether the
+ * notice reaches it. A static named or default import is rejected while the
+ * module graph links, before the module body evaluates, so nothing this
+ * package does can put the notice in that error. The docs promise the notice
+ * only for the imports that reach evaluation, and this table is what keeps
+ * that promise honest.
+ */
+const consumers = [
+  {
+    case: "a static named import of a 0.x export",
+    file: "named.mjs",
+    source: "import { Workflow } from \"smthrs\"\nconsole.log(Workflow)\n",
+    error: missingExport("Workflow"),
+    printsNotice: false
+  },
+  {
+    case: "a static default import",
+    file: "default.mjs",
+    source: "import smthrs from \"smthrs\"\nconsole.log(smthrs)\n",
+    error: missingExport("default"),
+    printsNotice: false
+  },
+  {
+    case: "a bare side-effect import",
+    file: "bare.mjs",
+    source: "import \"smthrs\"\n",
+    error: `Error: ${notice.split("\n")[0]}`,
+    printsNotice: true
+  },
+  {
+    case: "a namespace import",
+    file: "namespace.mjs",
+    source: "import * as smthrs from \"smthrs\"\nconsole.log(smthrs)\n",
+    error: `Error: ${notice.split("\n")[0]}`,
+    printsNotice: true
+  },
+  {
+    case: "a dynamic import",
+    file: "dynamic.mjs",
+    source: "await import(\"smthrs\")\n",
+    error: `Error: ${notice.split("\n")[0]}`,
+    printsNotice: true
+  },
+  {
+    case: "a CommonJS require",
+    file: "require.cjs",
+    source: "require(\"smthrs\")\n",
+    error: `Error: ${notice.split("\n")[0]}`,
+    printsNotice: true
+  }
+] as const
+
+describe("what a 0.x project sees at its own import statement", () => {
+  for (const consumer of consumers) {
+    it(`${consumer.case} exits 1 ${consumer.printsNotice ? "with" : "without"} the notice`, () => {
+      const result = runConsumer(consumer.file, consumer.source)
+
+      expect(result.status).toBe(1)
+      expect(result.stderr.split("\n")).toContain(consumer.error)
+      expect(result.stderr.includes(notice)).toBe(consumer.printsNotice)
+    })
+  }
+
+  it("is the missing-export error the troubleshooting page quotes, specifier included", () => {
+    // The page can only tell a reader to recognize the error it actually
+    // prints. A rewording on either side, Node's or ours, surfaces here.
+    expect(fences(readFileSync(url("../docs/troubleshooting.md"), "utf8"))).toContain(missingExport("Workflow"))
+  })
 })

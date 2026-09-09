@@ -2,7 +2,8 @@
 
 **Documentation:** https://smthrs.smithers.sh
 
-`smthrs@1.0.0-rc.0` is a migration notice, not a runtime. Importing it throws:
+`smthrs@1.0.0-rc.0` is a migration notice, not a runtime. An import that
+reaches it throws:
 
 ```text
 smthrs 1.0 is a migration notice, not a runtime.
@@ -56,6 +57,22 @@ npm install @smthrs/flows@next @smthrs/cli@next
 engine, and the stores behind one dependency. `@smthrs/cli` owns the `smthrs`
 command and its `smithers` alias. Import the `@smthrs/*` package you need.
 Nothing at 1.0 re-exports everything.
+
+## `does not provide an export named` instead of the notice
+
+The module declares no exports, and the notice is thrown while the module body
+evaluates. A static named or default import, the way 0.x code is written, is
+rejected one step earlier, while Node links the module graph:
+
+```text
+SyntaxError: The requested module 'smthrs' does not provide an export named 'Workflow'
+```
+
+Only an import that reaches evaluation prints the notice: a bare
+`import "smthrs"`, a namespace import, a dynamic `import()`, or a `require`.
+Read the SyntaxError as the notice: Smithers 1.0 ships as `@smthrs/*` packages,
+so install `@smthrs/flows@next` and `@smthrs/cli@next`, then run
+`smthrs migrate` to rewrite the import.
 
 ## `ERR_PACKAGE_PATH_NOT_EXPORTED` instead of the notice
 
