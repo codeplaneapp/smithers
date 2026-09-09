@@ -880,6 +880,19 @@ describe("seatbelt profile", () => {
 })
 
 describe("docker argv", () => {
+  it("names each wrapped run uniquely and returns its removal identity", () => {
+    const plan = planned(host("win32", { docker: "docker" }), {
+      mechanism: Sandbox.Docker({ image: "node:22" })
+    })
+    const first = ExecSandbox.wrap(plan, ["true"], {}, linux)
+    const second = ExecSandbox.wrap(plan, ["true"], {}, linux)
+    expect(first).toHaveProperty("containerName", expect.stringMatching(/^smithers-[0-9a-f-]{36}$/))
+    const name = first.containerName
+    expect(first.argv.slice(first.argv.indexOf("--name"), first.argv.indexOf("--name") + 2))
+      .toEqual(["--name", name])
+    expect(second).not.toHaveProperty("containerName", name)
+  })
+
   it("mounts an external read at its host path, read-only", () => {
     const plan = planned(
       host("win32", { docker: "docker" }, ["/work/ws/src/a.ts", "/srv/git/one"], ["/work/ws/node_modules"]),
@@ -1009,11 +1022,13 @@ describe("every mechanism renders the same text on any host", () => {
       host("win32", { docker: "docker" }, ["/work/ws/src/a.ts"], ["/work/ws/node_modules", "/work/ws/dist"]),
       { mechanism: Sandbox.Docker({ image: "node:22" }) }
     )
-    expect(ExecSandbox.docker(plan, ["node"], { CI: "1" }, linux)).toEqual([
+    expect(ExecSandbox.docker(plan, ["node"], { CI: "1" }, linux, "smithers-fixture")).toEqual([
       "docker",
       "run",
       "--rm",
       "--init",
+      "--name",
+      "smithers-fixture",
       "--read-only",
       "--tmpfs",
       "/tmp:rw,exec",

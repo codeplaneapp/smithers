@@ -8,12 +8,18 @@
  * outside the workspace to write into.
  */
 import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as ScopedProcess from "@smthrs/platform-node/ScopedProcess"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
 import * as Layer from "effect/Layer"
+import * as PlatformError from "effect/PlatformError"
+import * as Sink from "effect/Sink"
+import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
+import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
+import { spawnSync } from "node:child_process"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
@@ -61,6 +67,180 @@ afterEach(async () => {
   vi.restoreAllMocks()
   await Fs.rm(root, { recursive: true, force: true })
   await Fs.rm(outside, { recursive: true, force: true })
+})
+
+// No pull: this probe runs only with a reachable daemon and a locally cached image.
+const dockerAvailable = spawnSync("docker", ["info"], { timeout: 5000, stdio: "ignore" }).status === 0
+const dockerImage = "node:22-bookworm"
+const dockerImageAvailable = dockerAvailable &&
+  spawnSync("docker", ["image", "inspect", dockerImage], { timeout: 5000, stdio: "ignore" }).status === 0
+
+describe("Docker cleanup", () => {
+  it.skipIf(!dockerImageAvailable)("removes a real daemon container on cancellation", async () => {
+    let containerName: string | undefined
+    const wrap = ExecSandbox.wrap
+    vi.spyOn(ExecSandbox, "wrap").mockImplementation((...args) => {
+      const wrapped = wrap(...args)
+      const index = wrapped.argv.indexOf("--name")
+      if (index !== -1) containerName = wrapped.argv[index + 1]
+      return wrapped
+    })
+    let ready!: () => void
+    const started = new Promise<void>((resolve) => {
+      ready = resolve
+    })
+    let stdout = ""
+    try {
+      await Effect.runPromise(Effect.gen(function*() {
+        const fiber = yield* Exec.run({
+          workspaceRoot: root,
+          sandbox: { policy: {}, reads: [], writes: [], mechanism: { _tag: "SandboxDocker", image: dockerImage } },
+          onStdout: (chunk) => {
+            stdout += Buffer.from(chunk).toString("utf8")
+            if (stdout.includes("ready")) ready()
+          }
+        }, { ...payload(["node", "-e", "console.log('ready');setInterval(()=>{},1000)"]), timeoutMs: 45000 })
+          .pipe(Effect.forkChild)
+        try {
+          const outcome = yield* Effect.promise(() =>
+            Promise.race([
+              started.then(() => "ready"),
+              Effect.runPromise(Fiber.await(fiber)).then((exit) => JSON.stringify(exit))
+            ])
+          )
+          expect(outcome).toBe("ready")
+          expect(containerName).toBeDefined()
+          expect(
+            spawnSync("docker", ["inspect", "--format", "{{.State.Running}}", containerName!], {
+              timeout: 5000,
+              encoding: "utf8"
+            }).stdout.trim()
+          ).toBe("true")
+          yield* Fiber.interrupt(fiber)
+          expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true)
+          const listed = spawnSync("docker", [
+            "ps",
+            "-a",
+            "--filter",
+            `name=^/${containerName!}$`,
+            "--format",
+            "{{.Names}}"
+          ], {
+            timeout: 5000,
+            encoding: "utf8"
+          })
+          expect(listed.status).toBe(0)
+          expect(listed.stdout.trim()).toBe("")
+        } finally {
+          yield* Fiber.interrupt(fiber)
+        }
+      }))
+    } finally {
+      if (containerName !== undefined) {
+        spawnSync("docker", ["rm", "--force", containerName], { timeout: 5000, stdio: "ignore" })
+      }
+    }
+  }, 75000)
+
+  it.each([
+    "timeout",
+    "interruption",
+    "startup failure",
+    "startup interruption",
+    "success",
+    "removal hangs",
+    "removal fails"
+  ])(
+    "removes the container after client cleanup and before scratch cleanup: %s",
+    async (mode) => {
+      const host = ExecSandbox.host()
+      vi.spyOn(ExecSandbox, "host").mockReturnValue({ ...host, executable: () => "/fake/docker" })
+      const events: Array<string> = []
+      const calls: Array<ScopedProcess.Options> = []
+      let scratch = ""
+      const plan = ExecSandbox.plan
+      vi.spyOn(ExecSandbox, "plan").mockImplementation((...args) => {
+        const result = plan(...args)
+        if (result !== undefined && !ExecSandbox.isUnenforceable(result)) scratch = result.tmp
+        return result
+      })
+      let ready!: () => void
+      const started = new Promise<void>((resolve) => {
+        ready = resolve
+      })
+      vi.spyOn(ScopedProcess, "spawn").mockImplementation((options) =>
+        Effect.gen(function*() {
+          const removing = options.args?.[0] === "rm"
+          calls.push(options)
+          events.push(removing ? "remove" : "run")
+          expect(NodeFs.existsSync(scratch)).toBe(true)
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              events.push(removing ? "remove closed" : "client closed")
+            })
+          )
+          if (removing && mode === "removal fails") {
+            return yield* Effect.fail(PlatformError.systemError({
+              _tag: "Unknown",
+              module: "ChildProcess",
+              method: "spawn",
+              description: "daemon unavailable"
+            }))
+          }
+          if (!removing) {
+            ready()
+            if (mode === "startup failure") {
+              return yield* Effect.fail(PlatformError.systemError({
+                _tag: "Unknown",
+                module: "ChildProcess",
+                method: "spawn",
+                description: "startup failed"
+              }))
+            }
+            if (mode === "startup interruption") return yield* Effect.never
+          }
+          return Object.assign(
+            makeHandle({
+              pid: ProcessId(1),
+              isRunning: Effect.succeed(true),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.empty,
+              stderr: Stream.empty,
+              all: Stream.empty,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void),
+              exitCode: (removing
+                  ? mode !== "removal hangs"
+                  : mode === "success" || mode === "removal hangs" || mode === "removal fails")
+                ? Effect.succeed(ExitCode(0)) :
+                Effect.never
+            }),
+            { targetPid: 1 }
+          )
+        })
+      )
+      const effect = Exec.run({
+        workspaceRoot: root,
+        sandbox: { policy: {}, reads: [], writes: [], mechanism: { _tag: "SandboxDocker", image: "fixture" } }
+      }, { ...payload(["true"]), timeoutMs: mode === "timeout" ? 10 : "unbounded" })
+      const exit = await Effect.runPromise(Effect.gen(function*() {
+        const fiber = yield* effect.pipe(Effect.forkChild)
+        yield* Effect.promise(() => started)
+        if (mode === "interruption" || mode === "startup interruption") yield* Fiber.interrupt(fiber)
+        return yield* Fiber.await(fiber)
+      }))
+      expect(Exit.isSuccess(exit)).toBe(mode === "success" || mode === "removal hangs" || mode === "removal fails")
+      expect(events).toEqual(["run", "client closed", "remove", "remove closed"])
+      const args = calls[0]!.args!
+      expect(args).toContain("--name")
+      expect(calls[1]!.command).toBe(calls[0]!.command)
+      expect(calls[1]!.args).toEqual(["rm", "--force", args[args.indexOf("--name") + 1]])
+      expect(calls[1]!.env).toEqual(calls[0]!.env)
+      expect(NodeFs.existsSync(scratch)).toBe(false)
+    }
+  )
 })
 
 describe("run", () => {

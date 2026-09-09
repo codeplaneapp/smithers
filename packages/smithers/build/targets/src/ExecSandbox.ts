@@ -31,6 +31,7 @@
  *
  * @since 0.1.0
  */
+import { randomUUID } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as NodeOs from "node:os"
 import * as NodePath from "node:path"
@@ -936,7 +937,8 @@ export const docker = (
   confinement: Plan,
   argv: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
-  hostFacts: Host = host()
+  hostFacts: Host = host(),
+  containerName: string = `smithers-${randomUUID()}`
 ): ReadonlyArray<string> => {
   if (confinement.mechanism._tag !== "docker") throw new Error("docker argv needs a docker plan")
   validateWrites(confinement, hostFacts)
@@ -945,6 +947,8 @@ export const docker = (
     "run",
     "--rm",
     "--init",
+    "--name",
+    containerName,
     "--read-only",
     "--tmpfs",
     "/tmp:rw,exec",
@@ -976,7 +980,8 @@ export const docker = (
 
 /**
  * Wraps a tool argv in the plan's mechanism and reports the environment the
- * wrapper needs the child to carry.
+ * wrapper needs the child to carry. Docker runs also return the unique
+ * container name the caller must forcibly remove when the client scope closes.
  *
  * @category rendering
  * @since 0.1.0
@@ -986,7 +991,11 @@ export const wrap = (
   argv: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
   hostFacts: Host = host()
-): { readonly argv: ReadonlyArray<string>; readonly env: Readonly<Record<string, string>> } => {
+): {
+  readonly argv: ReadonlyArray<string>
+  readonly env: Readonly<Record<string, string>>
+  readonly containerName?: string
+} => {
   const extra = environment(confinement)
   switch (confinement.mechanism._tag) {
     case "bubblewrap":
@@ -995,8 +1004,10 @@ export const wrap = (
       const profile = seatbelt(confinement, hostFacts)
       return { argv: [confinement.mechanism.executable, "-p", profile, ...argv], env: extra }
     }
-    case "docker":
-      return { argv: docker(confinement, argv, { ...env, ...extra }, hostFacts), env: {} }
+    case "docker": {
+      const containerName = `smithers-${randomUUID()}`
+      return { argv: docker(confinement, argv, { ...env, ...extra }, hostFacts, containerName), env: {}, containerName }
+    }
   }
 }
 

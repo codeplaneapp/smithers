@@ -1342,9 +1342,12 @@ const confined = (
       for (const [name, value] of Object.entries(base)) if (typeof value === "string") visible[name] = value
       const wrapped = ExecSandbox.wrap(confinement, resolved.argv, visible)
       return {
-        ...resolved,
-        argv: wrapped.argv as [string, ...Array<string>],
-        env: { ...resolved.env, ...wrapped.env }
+        containerName: wrapped.containerName,
+        payload: {
+          ...resolved,
+          argv: wrapped.argv as [string, ...Array<string>],
+          env: { ...resolved.env, ...wrapped.env }
+        }
       }
     },
     catch: preparationError
@@ -1364,7 +1367,29 @@ const confined = (
           }
         })
     )
-    const payload = yield* prepare
+    const { containerName, payload } = yield* prepare
+    if (containerName !== undefined && confinement.mechanism._tag === "docker") {
+      const executable = confinement.mechanism.executable
+      // Register before spawning, including interrupted/failed startup. The
+      // nested client scope closes first; removal finishes before scratch cleanup.
+      yield* Effect.addFinalizer(() =>
+        spawnTool(
+          cwd,
+          {
+            ...payload,
+            argv: [executable, "rm", "--force", containerName],
+            timeoutMs: 5000
+          },
+          sensitiveEnv,
+          secretEnv,
+          undefined,
+          undefined,
+          options.environment
+        ).pipe(
+          Effect.ignore
+        )
+      )
+    }
     return yield* spawnTool(
       cwd,
       payload,
