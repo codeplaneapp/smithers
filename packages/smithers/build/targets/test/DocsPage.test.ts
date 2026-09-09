@@ -39,6 +39,7 @@ describe("Docs.Page attrs", () => {
     expect(() => decode({ prompt, references: [], inputs: [], output, gates: [], maxRounds: 1 })).toThrow()
     expect(() => decode({ brief, prompt, references: [], inputs: [], output: "", gates: [], maxRounds: 1 })).toThrow()
     expect(() => decode({ brief, prompt, references: [], inputs: [], output, gates: [], maxRounds: 0 })).toThrow()
+    expect(() => decode({ brief, prompt, references: [], inputs: [], output, gates: [], maxRounds: 1.5 })).toThrow()
     // A page has one output and no free-form write-set, payload spec, or MCP
     // surface: the struct carries none of those keys.
     expect(Object.keys(DocsPage.PageAttrs.fields).sort()).toEqual(
@@ -92,6 +93,21 @@ describe("Docs.Page projection", () => {
       changes: [output],
       maxRounds: 3
     })
+  })
+
+  it("refuses a fractional round count the Agent.Diff payload could not carry", () => {
+    const attrs = {
+      brief,
+      prompt,
+      references: [],
+      inputs: [],
+      output,
+      gates: [],
+      maxRounds: 1.5
+    }
+    expect(() => DocsPage.Page(attrs)).toThrow()
+    expect(() => DocsPage.Page({ ...attrs, maxRounds: 2 })).not.toThrow()
+    expect(DocsPage.pagePayload({ ...attrs, maxRounds: 2 }, context).maxRounds).toBe(2)
   })
 })
 

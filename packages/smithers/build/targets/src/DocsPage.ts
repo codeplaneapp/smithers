@@ -56,10 +56,7 @@ export const PageAttrs = Schema.Struct({
   gates: Attr.Gates,
   sandbox: Schema.optional(Attr.Sandbox),
   approval: Schema.optional(Attr.Approval),
-  maxRounds: Schema.Number.check(
-    Schema.isGreaterThanOrEqualTo(1),
-    Schema.isLessThanOrEqualTo(AgentTarget.maximumRounds)
-  )
+  maxRounds: AgentTarget.RoundCount
 })
 
 /**

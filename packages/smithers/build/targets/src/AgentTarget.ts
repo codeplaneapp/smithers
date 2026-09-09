@@ -199,6 +199,29 @@ export const defaultPrRounds = 3
 export const maximumGateDetail = 64 * 1024
 
 /**
+ * Rounds one bounded candidate and gate loop runs: a whole number from 1 to
+ * {@link maximumRounds}.
+ *
+ * Every declaration that projects to a {@link DiffPayload} shares it, so a
+ * declaration a rule accepts always projects to a payload the action accepts.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const RoundCount = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(1),
+  Schema.isLessThanOrEqualTo(maximumRounds)
+)
+
+/**
+ * Rounds one bounded candidate and gate loop runs.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type RoundCount = typeof RoundCount.Type
+
+/**
  * Finding severity, ordered `info` below `warning` below `error`.
  *
  * @category schemas
@@ -562,10 +585,7 @@ export const DiffPayload = Schema.Struct({
   diffs: Schema.Array(Input.GitDiff),
   changes: Schema.Array(Schema.NonEmptyString),
   gateIdentities: Schema.Array(Schema.NonEmptyString),
-  maxRounds: Schema.Int.check(
-    Schema.isGreaterThanOrEqualTo(1),
-    Schema.isLessThanOrEqualTo(maximumRounds)
-  )
+  maxRounds: RoundCount
 })
 
 /**
@@ -821,10 +841,7 @@ export const DiffAttrs = Schema.Struct({
   secrets: Schema.optional(Attr.Secrets),
   sandbox: Schema.optional(Attr.Sandbox),
   approval: Schema.optional(Attr.Approval),
-  maxRounds: Schema.Number.check(
-    Schema.isGreaterThanOrEqualTo(1),
-    Schema.isLessThanOrEqualTo(maximumRounds)
-  )
+  maxRounds: RoundCount
 })
 
 /**
@@ -883,10 +900,7 @@ export const PrAttrs = Schema.Struct({
   secrets: Schema.optional(Attr.Secrets),
   sandbox: Schema.optional(Attr.Sandbox),
   approval: Schema.optional(Attr.Approval),
-  maxRounds: Schema.optional(Schema.Number.check(
-    Schema.isGreaterThanOrEqualTo(1),
-    Schema.isLessThanOrEqualTo(maximumRounds)
-  ))
+  maxRounds: Schema.optional(RoundCount)
 })
 
 /**

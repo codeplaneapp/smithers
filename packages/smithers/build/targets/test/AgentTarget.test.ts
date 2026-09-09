@@ -154,6 +154,19 @@ describe("Agent.Diff", () => {
     })
     expect(call?.payload).not.toHaveProperty("agent")
   })
+
+  it("refuses a fractional round count the sealed payload could not carry", () => {
+    const attrs = {
+      prompt: Input.file("prompts/task.md"),
+      data: [],
+      changes: ["src/**"],
+      gates: [],
+      maxRounds: 1.5
+    }
+    expect(() => AgentTarget.Diff(attrs)).toThrow()
+    expect(() => AgentTarget.Diff({ ...attrs, maxRounds: 2 })).not.toThrow()
+    expect(AgentTarget.diffPayload({ ...attrs, maxRounds: 2 }, context).maxRounds).toBe(2)
+  })
 })
 
 describe("Agent.Pr", () => {
@@ -210,5 +223,18 @@ describe("Agent.Pr", () => {
       gateIdentities: [],
       maxRounds: AgentTarget.defaultPrRounds
     })
+  })
+
+  it("refuses a fractional round count and leaves an integer untouched", () => {
+    const attrs = {
+      prompt: Input.file("prompts/pr.md"),
+      data: [],
+      changes: ["src/**"],
+      gates: [],
+      maxRounds: 1.5
+    }
+    expect(() => AgentTarget.Pr(attrs)).toThrow()
+    expect(() => AgentTarget.Pr({ ...attrs, maxRounds: 4 })).not.toThrow()
+    expect(AgentTarget.prPayload({ ...attrs, maxRounds: 4 }, context).maxRounds).toBe(4)
   })
 })
