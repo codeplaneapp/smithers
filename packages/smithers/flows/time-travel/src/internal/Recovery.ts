@@ -368,7 +368,13 @@ const recoverOne = (
       Effect.suspend(() =>
         acquired === undefined
           ? Effect.void
-          : Effect.exit(runs.transitionOwned(audit.runId, options.owner, status, acquired.stateJson)).pipe(
+          : Effect.exit(runs.transitionOwned(
+            audit.runId,
+            options.owner,
+            // Pending cannot be restored directly; suspended releases ownership.
+            status === "pending" ? "suspended" : status,
+            acquired.stateJson
+          )).pipe(
             Effect.flatMap((released) =>
               Effect.sync(() => {
                 if (Exit.isFailure(released)) {
@@ -438,7 +444,7 @@ const recoverOne = (
               const restored = yield* runs.transitionOwned(
                 audit.runId,
                 options.owner,
-                detail.originalStatus,
+                detail.originalStatus === "pending" ? "suspended" : detail.originalStatus,
                 acquiredRow.stateJson
               ).pipe(
                 Effect.mapError((cause) => runFailure("restore recovered run", cause))
@@ -481,7 +487,7 @@ const recoverOne = (
         _tag: "Busy" as const,
         auditId: audit.id,
         error: error(
-          "busy",
+          failure.code,
           `${failure.message}; could not give ownership back: ${releaseProblem}`,
           { recovery: recoveryExit.cause, release: releaseProblem }
         )

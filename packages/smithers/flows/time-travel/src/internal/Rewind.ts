@@ -1122,7 +1122,9 @@ export const rewind = (
               const restored = yield* runs.transitionOwned(
                 options.runId,
                 options.owner,
-                claimed.row.status,
+                // Pending is not a transition target; suspended clears the
+                // rewind owner while preserving the run's resumable state.
+                claimed.row.status === "pending" ? "suspended" : claimed.row.status,
                 claimed.row.stateJson
               ).pipe(
                 Effect.mapError((cause) => runStoreFailure("restore run state", cause)),
@@ -1143,7 +1145,7 @@ export const rewind = (
             if (detail !== undefined && restorationProblem !== undefined) {
               return yield* Effect.fail(
                 error(
-                  "unknown",
+                  failure.code,
                   `${failure.message}; ${restorationProblem}`,
                   { rewind: protocolExit.cause, restoration: restorationProblem }
                 )

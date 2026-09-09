@@ -106,7 +106,17 @@ const claimable = (
       }),
     heartbeat: () => Effect.succeed({ _tag: "Updated" as const }),
     transitionOwned: (_runId, transitionOwner, status, stateJson) =>
-      Effect.sync(() => {
+      Effect.gen(function*() {
+        if (status === "pending") {
+          return yield* Effect.fail(
+            new RunStore.RunStoreError({
+              code: "invalid_run",
+              method: "transitionOwned",
+              message: "transitionOwned cannot target pending",
+              cause: status
+            })
+          )
+        }
         if (row.owner?.nonce !== transitionOwner.nonce) return { _tag: "FenceLost" as const }
         row = {
           ...row,
@@ -173,6 +183,64 @@ const runRecovery = (
 }
 
 describe("Recovery ownership arbitration", () => {
+  it.effect("rolls an originally pending run back to suspended and closes the audit", () =>
+    Effect.gen(function*() {
+      const runs = claimable(baseRow({ status: "pending", owner: null, heartbeatAtMs: null }))
+      const { audits, outcomes } = yield* runRecovery(runs, {
+        audit: auditRow(
+          {
+            version: 1,
+            phase: "audit_written",
+            originalStatus: "pending",
+            suffixCount: 0,
+            warnings: [],
+            cancelledChildren: []
+          } satisfies AuditDetail
+        )
+      })
+
+      expect(outcomes).toEqual([{ _tag: "RolledBack", auditId: "audit" }])
+      expect(runs.state()).toMatchObject({
+        status: "suspended",
+        owner: null,
+        heartbeatAtMs: null,
+        claim: null,
+        stateJson: "{\"cursor\":7}"
+      })
+      expect(audits[0]).toMatchObject({ status: "failed", detail: { phase: "rolled_back" } })
+    }))
+
+  it.effect("releases an originally pending run to suspended after a recovery failure", () =>
+    Effect.gen(function*() {
+      const runs = claimable(baseRow({ status: "pending", owner: null, heartbeatAtMs: null }))
+      const { audits, outcomes } = yield* runRecovery(runs, {
+        audit: auditRow(
+          {
+            version: 1,
+            phase: "compensated",
+            originalStatus: "pending",
+            suffixCount: 1,
+            warnings: [],
+            cancelledChildren: []
+          } satisfies AuditDetail
+        ),
+        journal: Journal.makeNoop()
+      })
+
+      expect(outcomes[0]).toMatchObject({
+        _tag: "Failed",
+        error: { code: "unknown", message: "could not inspect archive commit for audit" }
+      })
+      expect(runs.state()).toMatchObject({
+        status: "suspended",
+        owner: null,
+        heartbeatAtMs: null,
+        claim: null,
+        stateJson: "{\"cursor\":7}"
+      })
+      expect(audits[0]).toMatchObject({ status: "failed", detail: { phase: "terminal_failure" } })
+    }))
+
   it.effect("claims an unowned suspended run and gives the fence back when it finishes", () =>
     Effect.gen(function*() {
       const calls: Array<string> = []
@@ -395,7 +463,10 @@ describe("Recovery ownership arbitration", () => {
 
       const first = yield* runRecovery(firstRuns, { store })
 
-      expect(first.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "busy" } })
+      expect(first.outcomes[0]).toMatchObject({
+        _tag: "Busy",
+        error: { code: "unknown", cause: { release: "release ownership failed" } }
+      })
       const firstMessage = first.outcomes[0]?._tag === "Busy" ? first.outcomes[0].error.message : ""
       expect(firstMessage).toContain(`read pending child ${childRunId} failed`)
       expect(firstMessage).toContain("could not give ownership back")
@@ -1035,11 +1106,11 @@ describe("Recovery ownership arbitration", () => {
         }
       )
 
-      expect(finish.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "busy" } })
+      expect(finish.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "unknown" } })
       expect(finish.outcomes[0]?._tag === "Busy" ? finish.outcomes[0].error.message : "").toContain(
         "finish recovered suspension failed"
       )
-      expect(rollback.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "busy" } })
+      expect(rollback.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "unknown" } })
       expect(rollback.outcomes[0]?._tag === "Busy" ? rollback.outcomes[0].error.message : "").toContain(
         "restore recovered run failed"
       )

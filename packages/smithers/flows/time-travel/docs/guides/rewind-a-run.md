@@ -137,7 +137,13 @@ in the Smithers examples on GitHub.
 | `limit_exceeded`      | The suffix is longer than the cap allows. Raised before the run is claimed.                                |
 | `unknown`             | The store, the journal, or an unmapped host failure. The cause is attached.                                |
 
-A refusal before the commit point leaves the world as it was. See
+If a rewind fails after claiming the run but before commit, successful rollback
+restores the saved run state and releases ownership as `suspended`, including
+when the run was originally
+`pending`. Startup recovery uses the same restoration rule. The audit closes
+as `failed` after restoration succeeds. If ownership cannot be released, the
+audit stays `in_progress` for recovery; the error keeps its original code and
+attaches the restoration problem as its cause. See
 [The rewind protocol](../concepts/rewind-protocol.md) for where each step sits
 relative to that point, and what a crash between them costs.
 

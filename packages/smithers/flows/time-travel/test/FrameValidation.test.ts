@@ -7,14 +7,16 @@ import * as SqlJournal from "@smthrs/journal/SqlJournal"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as Cause from "effect/Cause"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as EffectBoundary from "../src/EffectBoundary.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
-import { TimeTravel } from "../src/TimeTravel.ts"
+import { makeWith, TimeTravel } from "../src/TimeTravel.ts"
 import { TimeTravelStore } from "../src/TimeTravelStore.ts"
 
 const entries: ReadonlyArray<JournalEvent.Entry> = [
@@ -369,6 +371,95 @@ const rewindSql = (frame: { readonly lineageId: string; readonly seq: number }) 
   )
 
 describe("SQL public TimeTravel frame validation mirror", () => {
+  it.effect.each(["restored", "persistence failure", "fence loss"] as const)(
+    "preserves a pending run's irreversible refusal after %s",
+    (restoration) =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          const runs = yield* RunStore.RunStore
+          const store = yield* TimeTravelStore
+          const stateJson = JSON.stringify({ version: 1, flowName: "FrameValidation", payload: { cursor: 7 } })
+          yield* sql`
+            INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+            VALUES ('run', 'pending', 0, ${stateJson})
+          `
+          for (const seq of [0, 1]) {
+            const payload = seq === 0 ? {} : {
+              version: 1,
+              effect: {
+                id: "send",
+                kind: "send",
+                tier: "irreversible",
+                status: "succeeded",
+                runId: "run",
+                lineageId: "run/root",
+                idempotencyKey: "send"
+              }
+            }
+            yield* sql`
+              INSERT INTO flows_journal_events
+                (run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json)
+              VALUES ('run', ${seq}, ${`event-${seq}`}, 'frame-validation', ${seq}, ${seq},
+                      ${seq === 0 ? "baseline" : EffectBoundary.eventType}, ${JSON.stringify(payload)},
+                      ${JSON.stringify({ lineageId: "run/root" })})
+            `
+          }
+          const timeTravel = yield* makeWith().pipe(Effect.provideService(RunStore.RunStore, {
+            ...runs,
+            transitionOwned: restoration === "restored" ? runs.transitionOwned : () =>
+              restoration === "fence loss"
+                ? Effect.succeed({ _tag: "FenceLost" as const })
+                : Effect.fail(
+                  new RunStore.RunStoreError({
+                    code: "persistence_failed",
+                    method: "transitionOwned",
+                    message: "restore unavailable",
+                    cause: undefined
+                  })
+                )
+          }))
+          const failure = yield* Effect.flip(
+            timeTravel.rewind({ runId: "run", frame: { lineageId: "run/root", seq: 0 } })
+          )
+          const row = yield* runs.get("run")
+          const audits = yield* sql<{ readonly status: string; readonly detail: string }>`
+            SELECT status, detail_json AS detail FROM flows_time_travel_audits WHERE run_id = 'run'
+          `
+
+          expect(failure.code).toBe("irreversible")
+          expect(row.stateJson).toBe(stateJson)
+          expect(audits).toHaveLength(1)
+          if (restoration === "restored") {
+            expect(row).toMatchObject({ status: "suspended", owner: null, heartbeatAtMs: null, claim: null })
+            expect(audits[0]!.status).toBe("failed")
+            expect(JSON.parse(audits[0]!.detail)).toMatchObject({ phase: "rolled_back", originalStatus: "pending" })
+            expect(yield* store.pendingAudits()).toEqual([])
+            const claimant = { hostId: "next-driver", pid: 42, nonce: "next-driver" }
+            const claim = yield* runs.claim(
+              "run",
+              {
+                status: row.status,
+                owner: row.owner,
+                heartbeatAtMs: row.heartbeatAtMs
+              },
+              claimant,
+              yield* Clock.currentTimeMillis
+            )
+            expect(claim._tag).toBe("Claimed")
+            if (claim._tag === "Claimed") yield* runs.abandonClaim("run", claimant, claim.claimedAtMs)
+          } else {
+            expect(audits[0]!.status).toBe("in_progress")
+            expect(failure.cause).toMatchObject({
+              restoration: restoration === "fence loss"
+                ? "restore run state returned FenceLost"
+                : "restore run state failed"
+            })
+          }
+        }).pipe(Effect.provide(sqlLayer()))
+      )
+  )
+
   it.effect.each(
     [
       ["frame zero", { lineageId: "run/root", seq: 0 }],
