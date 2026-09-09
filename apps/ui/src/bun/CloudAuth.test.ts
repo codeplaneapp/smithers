@@ -20,11 +20,22 @@ const memoryKeychain = (): CloudKeychain & { readonly store: Map<string, string>
 
 const callbackBody = (url: string, value: Record<string, unknown>): string => JSON.stringify({ ...value, callback_state: new URL(url).searchParams.get("callback_state") })
 
+/*
+ * Every fixture auth runs on this frozen clock. Production expiry is
+ * `expiresAt <= now()`, so a credential pinned to a wall-clock date would
+ * silently turn these sign-in assertions into signed-out ones the day the
+ * real clock passed it; the fixture expiry is stated relative to NOW instead.
+ */
+const NOW = Date.parse("2026-01-01T00:00:00Z")
+const now = (): number => NOW
+/** An ISO instant `offsetMs` from the frozen clock. */
+const at = (offsetMs: number): string => new Date(NOW + offsetMs).toISOString()
+
 const CREDENTIALS = {
   token: "smithers_test_token",
   username: "will",
   email: "will@codeplane.app",
-  expiresAt: "2027-01-01T00:00:00Z"
+  expiresAt: at(24 * 60 * 60 * 1000)
 }
 
 /*
@@ -86,7 +97,7 @@ describe("parseCloudCredentials", () => {
 describe("cloud sign-in", () => {
   test("a fresh attempt rejects missing and previous callback state before probing", async () => {
     let probes = 0
-    auth = await createCloudAuth({ api: "https://cloud-auth.test", keychain: memoryKeychain(), fetchImpl: async () => { probes++; return new Response("[]") } })
+    auth = await createCloudAuth({ now, api: "https://cloud-auth.test", keychain: memoryKeychain(), fetchImpl: async () => { probes++; return new Response("[]") } })
     const first = await auth.start()
     if (!("url" in first)) throw new Error(first.error)
     await auth.signOut()
@@ -109,7 +120,7 @@ describe("cloud sign-in", () => {
     let probes = 0
     const saved = memoryKeychain()
     const api = "https://cloud-auth.test"
-    auth = await createCloudAuth({ api, keychain: saved, fetchImpl: async () => { probes++; return new Response("[]") } })
+    auth = await createCloudAuth({ now, api, keychain: saved, fetchImpl: async () => { probes++; return new Response("[]") } })
     const started = await auth.start()
     if (!("url" in started)) throw new Error(started.error)
     const port = new URL(started.url).searchParams.get("callback_port")
@@ -134,7 +145,7 @@ describe("cloud sign-in", () => {
   })
 
   test("oversized callback bodies do not consume the attempt", async () => {
-    auth = await createCloudAuth({ api: "https://cloud-auth.test", keychain: memoryKeychain(), fetchImpl: async () => new Response("[]") })
+    auth = await createCloudAuth({ now, api: "https://cloud-auth.test", keychain: memoryKeychain(), fetchImpl: async () => new Response("[]") })
     const started = await auth.start()
     if (!("url" in started)) throw new Error(started.error)
     const port = new URL(started.url).searchParams.get("callback_port")
@@ -154,7 +165,7 @@ describe("cloud sign-in", () => {
   test("only the first callback settles the attempt; a replay or a racing local process is refused", async () => {
     const upstream = fakeUpstream()
     const keychain = memoryKeychain()
-    const auth: CloudAuth = await createCloudAuth({ api: upstream.origin, keychain, log: () => {} })
+    const auth: CloudAuth = await createCloudAuth({ now, api: upstream.origin, keychain, log: () => {} })
     try {
       const started = await auth.start()
       if (!("url" in started)) throw new Error(started.error)
@@ -186,7 +197,7 @@ describe("cloud sign-in", () => {
     const fake = fakeUpstream()
     upstream = fake.server
     const keychain = memoryKeychain()
-    auth = await createCloudAuth({ api: fake.origin, keychain, waitTimeoutMs: 5000 })
+    auth = await createCloudAuth({ now, api: fake.origin, keychain, waitTimeoutMs: 5000 })
     expect(auth.session()).toEqual({ state: "signed-out", username: null, expiresAt: null })
 
     const started = await auth.start()
@@ -224,7 +235,7 @@ describe("cloud sign-in", () => {
   test("a 403 insufficient-scope probe answer degrades the session", async () => {
     const fake = fakeUpstream({ probeStatus: 403, probeBody: JSON.stringify({ error: "insufficient token scope" }) })
     upstream = fake.server
-    auth = await createCloudAuth({ api: fake.origin, keychain: memoryKeychain(), waitTimeoutMs: 5000 })
+    auth = await createCloudAuth({ now, api: fake.origin, keychain: memoryKeychain(), waitTimeoutMs: 5000 })
     const started = await auth.start()
     if ("error" in started) throw new Error(started.error)
     await fetch(started.url)
@@ -250,7 +261,7 @@ describe("cloud sign-in", () => {
       probeDelayMs: 300
     })
     upstream = fake.server
-    auth = await createCloudAuth({ api: fake.origin, keychain: memoryKeychain(), waitTimeoutMs: 5000 })
+    auth = await createCloudAuth({ now, api: fake.origin, keychain: memoryKeychain(), waitTimeoutMs: 5000 })
     const started = await auth.start()
     if ("error" in started) throw new Error(started.error)
     await fetch(started.url)
@@ -265,7 +276,7 @@ describe("cloud sign-in", () => {
   test("a 403 that does not name scope does not degrade", async () => {
     const fake = fakeUpstream({ probeStatus: 403, probeBody: JSON.stringify({ error: "forbidden" }) })
     upstream = fake.server
-    auth = await createCloudAuth({ api: fake.origin, keychain: memoryKeychain(), waitTimeoutMs: 5000 })
+    auth = await createCloudAuth({ now, api: fake.origin, keychain: memoryKeychain(), waitTimeoutMs: 5000 })
     const started = await auth.start()
     if ("error" in started) throw new Error(started.error)
     await fetch(started.url)
@@ -278,7 +289,7 @@ describe("cloud sign-in", () => {
   })
 
   test("a callback that never arrives expires the attempt back to signed-out", async () => {
-    auth = await createCloudAuth({ api: "http://127.0.0.1:1", keychain: memoryKeychain(), waitTimeoutMs: 50 })
+    auth = await createCloudAuth({ now, api: "http://127.0.0.1:1", keychain: memoryKeychain(), waitTimeoutMs: 50 })
     const started = await auth.start()
     if ("error" in started) throw new Error(started.error)
     expect(auth.session().state).toBe("signing-in")
@@ -287,7 +298,7 @@ describe("cloud sign-in", () => {
   })
 
   test("a malformed callback body is refused and the attempt stays open", async () => {
-    auth = await createCloudAuth({ api: "http://127.0.0.1:1", keychain: memoryKeychain(), waitTimeoutMs: 5000 })
+    auth = await createCloudAuth({ now, api: "http://127.0.0.1:1", keychain: memoryKeychain(), waitTimeoutMs: 5000 })
     const started = await auth.start()
     if ("error" in started) throw new Error(started.error)
     const port = Number(new URL(started.url).searchParams.get("callback_port"))
@@ -310,11 +321,15 @@ describe("cloud sign-in", () => {
     const fake = fakeUpstream()
     upstream = fake.server
     const keychain = memoryKeychain()
-    auth = await createCloudAuth({ api: fake.origin, keychain, waitTimeoutMs: 5000 })
+    auth = await createCloudAuth({ now, api: fake.origin, keychain, waitTimeoutMs: 5000 })
     const started = await auth.start()
     if ("error" in started) throw new Error(started.error)
     await fetch(started.url)
-    while (auth.session().state !== "signed-in") await Bun.sleep(10)
+    const deadline = Date.now() + 5000
+    while (auth.session().state !== "signed-in") {
+      if (Date.now() > deadline) throw new Error("the callback never signed the session in")
+      await Bun.sleep(10)
+    }
     await auth.signOut()
     expect(auth.session()).toEqual({ state: "signed-out", username: null, expiresAt: null })
     expect(auth.token()).toBeUndefined()
@@ -324,15 +339,30 @@ describe("cloud sign-in", () => {
   test("a previous launch's credential restores from the keychain", async () => {
     const keychain = memoryKeychain()
     keychain.store.set("smithers-cloud:api.smithers-cloud.test", JSON.stringify(CREDENTIALS))
-    auth = await createCloudAuth({ api: "https://api.smithers-cloud.test", keychain, fetchImpl: async () => new Response("[]") })
+    auth = await createCloudAuth({ now, api: "https://api.smithers-cloud.test", keychain, fetchImpl: async () => new Response("[]") })
     expect(auth.session()).toEqual({ state: "signed-in", username: "will", expiresAt: CREDENTIALS.expiresAt })
     expect(auth.token()).toBe(CREDENTIALS.token)
+  })
+
+  test("a restored credential lives up to its expiry instant and not through it", async () => {
+    // Production refuses `expiresAt <= now()`: the instant itself is already dead.
+    for (const [expiresAt, state] of [[at(1), "signed-in"], [at(0), "signed-out"], [at(-1), "signed-out"]] as const) {
+      const keychain = memoryKeychain()
+      keychain.store.set("smithers-cloud:api.smithers-cloud.test", JSON.stringify({ ...CREDENTIALS, expiresAt }))
+      auth = await createCloudAuth({ now, api: "https://api.smithers-cloud.test", keychain, fetchImpl: async () => new Response("[]") })
+      expect(auth.session().state).toBe(state)
+      expect(auth.token()).toBe(state === "signed-in" ? CREDENTIALS.token : undefined)
+      // An expired credential is not merely ignored: it leaves the keychain.
+      expect(keychain.store.size).toBe(state === "signed-in" ? 1 : 0)
+      await auth.stop()
+      auth = undefined
+    }
   })
 
   test("SMITHERS_CLOUD_TOKEN is the dev/CI override: read first, never stored", async () => {
     const keychain = memoryKeychain()
     keychain.store.set("smithers-cloud:api.smithers-cloud.test", JSON.stringify(CREDENTIALS))
-    auth = await createCloudAuth({ api: "https://api.smithers-cloud.test", keychain, envToken: "smithers_env_override", fetchImpl: async () => new Response("[]") })
+    auth = await createCloudAuth({ now, api: "https://api.smithers-cloud.test", keychain, envToken: "smithers_env_override", fetchImpl: async () => new Response("[]") })
     expect(auth.token()).toBe("smithers_env_override")
     expect(auth.session().state).toBe("signed-in")
     // The override is not a login: no stored credential is touched or reported.
