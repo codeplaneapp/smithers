@@ -16,6 +16,9 @@ import * as SandboxConformance from "../src/SandboxConformance/index.ts"
 // a CI shard without a daemon stay green without pretending to have proven
 // anything.
 const engineAvailable = spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0
+const missingEngine = engineAvailable
+  ? undefined
+  : "no container engine answers `docker info` on this host"
 const image = "alpine:3.20"
 
 // Session keys are suite-unique so a concurrently running vitest worker
@@ -52,6 +55,16 @@ const provider = Effect.gen(function*() {
 // timeout under load would report a conforming provider as broken.
 const conformanceBudget = 900_000
 const budget = 180_000
+
+// The skip has to be visible, and it has to name what is missing: a case that
+// silently disappears is indistinguishable from one that never existed, and one
+// that disappears without a reason is indistinguishable from a suite quietly
+// switched off.
+describe.skipIf(engineAvailable)("ContainerSandbox against a real engine", () => {
+  it(`is skipped because ${missingEngine ?? "this host runs a container engine"}`, () => {
+    expect(missingEngine).toEqual(expect.any(String))
+  })
+})
 
 describe.skipIf(!engineAvailable)("ContainerSandbox against a real engine", () => {
   it.effect(

@@ -12,6 +12,9 @@ const namespace = `smthrs-sandbox-it-${process.pid}`
 const clusterAvailable = spawnSync("kubectl", ["--context", context, "cluster-info"], {
   stdio: "ignore"
 }).status === 0
+const missingCluster = clusterAvailable
+  ? undefined
+  : `no Kubernetes cluster answers \`kubectl --context ${context} cluster-info\``
 
 const kubectl = (args: ReadonlyArray<string>) =>
   spawnSync("kubectl", ["--context", context, ...args], { encoding: "utf8", timeout: 300_000 })
@@ -30,6 +33,16 @@ const provider = Effect.gen(function*() {
     namespace
   })
 }).pipe(Effect.provide(platform))
+
+// The skip has to be visible, and it has to name what is missing: a case that
+// silently disappears is indistinguishable from one that never existed, and one
+// that disappears without a reason is indistinguishable from a suite quietly
+// switched off.
+describe.skipIf(clusterAvailable)("KubernetesSandbox against OrbStack", () => {
+  it(`is skipped because ${missingCluster ?? `the \`${context}\` cluster is reachable`}`, () => {
+    expect(missingCluster).toEqual(expect.any(String))
+  })
+})
 
 describe.skipIf(!clusterAvailable)("KubernetesSandbox against OrbStack", () => {
   beforeAll(() => {

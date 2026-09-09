@@ -158,6 +158,19 @@ describe("standard tool placement on DirectorySandbox", () => {
 })
 
 const dockerAvailable = spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0
+const missingEngine = dockerAvailable
+  ? undefined
+  : "no container engine answers `docker info` on this host"
+
+// The skip has to be visible, and it has to name what is missing: a case that
+// silently disappears is indistinguishable from one that never existed, and one
+// that disappears without a reason is indistinguishable from a suite quietly
+// switched off.
+describe.skipIf(dockerAvailable)("standard tool placement on ContainerSandbox", () => {
+  it(`is skipped because ${missingEngine ?? "this host runs a container engine"}`, () => {
+    expect(missingEngine).toEqual(expect.any(String))
+  })
+})
 
 describe.skipIf(!dockerAvailable)("standard tool placement on ContainerSandbox", () => {
   it("runs the unchanged std handlers inside a real Alpine machine", async () => {
