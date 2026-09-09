@@ -45,10 +45,19 @@
 - Repo list contract (today): `GET /api/user/repos` rows carry owner (bare
   login), name, full_name, default_bookmark, no head. Head is
   `GET /api/repos/{owner}/{repo}/bookmarks` items `{ name, target_change_id,
-  target_commit_id }`: one call per repo for the first cut. Org vs user:
+  target_commit_id }` in an `{ items, next_cursor }` envelope. Inventory
+  follows cursors until the default bookmark is found, with at most six
+  repository lookups in flight and 100 pages per lookup (`limit=100`). Failed
+  or incomplete pagination preserves a previously loaded head. Org vs user:
   `GET /api/user/orgs` once, match logins. plue#445 adds `owner_type` and
   `default_bookmark_head { change_id, commit_id }` to the row; the collection
-  is built so those replace the per-repo call. plue#446: workspace head and
+  reads those directly. When a majority of repositories with a default
+  bookmark carry the inline head, inventory skips fallback lookups for the
+  remaining rows. Working copies from `GET /api/user/workspaces` use
+  `workspace_id`, `repository_owner`, `repository_name`, `workspace_title`,
+  and `state`, retaining `workspace:<workspace_id>` identities on refresh.
+  Legacy bookmark arrays and per-repository workspace DTOs remain readable.
+  plue#446: workspace head and
   ahead/behind. A third issue: per-repo mirror status.
 - Auth from the native app: the CLI's browser login, not an env token. Bun
   listens on `127.0.0.1:<random>` with `/callback`, opens the browser at

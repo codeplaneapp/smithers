@@ -6,6 +6,7 @@ import { createAppController } from "../AppController"
 import type { AppServices } from "../AppController"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
+import { BOOKMARK_WIRE } from "./fixtures/BookmarkWire"
 
 /*
  * The bookmarks seam through the real command path: controller.commands.run
@@ -95,14 +96,9 @@ const ready = async (services: AppServices) => {
 
 /* ---- the wire shape multi's bookmark parser accepts ---- */
 
-const bookmark = (name: string, changeId: string, commitId = "") => ({
-  name,
-  target_change_id: changeId,
-  target_commit_id: commitId,
-  is_tracking_remote: true
-})
+const bookmark = BOOKMARK_WIRE.row
 
-const page = (items: unknown[], nextCursor = "") => json(200, { items, next_cursor: nextCursor })
+const page = (items: unknown[], nextCursor = "") => json(200, BOOKMARK_WIRE.page(items, nextCursor))
 
 const BOOKMARKS = "/api/repos/will/flows/bookmarks"
 

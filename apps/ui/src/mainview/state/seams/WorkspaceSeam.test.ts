@@ -8,6 +8,7 @@ import type { CloudWorkspaceInput } from "../AppState"
 import { dropDesktopStream, readDesktopStream } from "./DesktopStream"
 import { createWorkspaceSeam, DEGRADED_WORKSPACE_REFUSAL, desktopSessionRetry, terminalSessionRetry } from "./WorkspaceSeam"
 import type { SeamContext } from "./SeamContext"
+import { USER_WORKSPACE_ROW } from "./fixtures/UserWorkspaceRow"
 
 /*
  * The workspaces seam (lane citc): the gates (signed-in, never degraded),
@@ -125,19 +126,8 @@ const DESKTOP_MINT = {
   vnc_password: DESKTOP_VNC_PASSWORD
 }
 
-/** plue's UserWorkspaceRow (GET /api/user/workspaces — services/workspace.go): a switcher row, not the DTO. */
-const USER_ROW = {
-  workspace_id: "ws-1",
-  repository_id: 7,
-  repository_owner: "will",
-  repository_name: "smithers",
-  workspace_title: "review",
-  state: "running",
-  last_accessed_at: null,
-  last_activity_at: "2026-09-01T00:00:00Z",
-  created_at: "2026-09-01T00:00:00Z",
-  sort_timestamp: "2026-09-01T00:00:00Z"
-}
+/** plue's UserWorkspaceRow (GET /api/user/workspaces — services/workspace.go): a switcher row, not the DTO; recorded once for every seam that reads the route. */
+const USER_ROW = USER_WORKSPACE_ROW
 
 const wsRow: CloudWorkspaceInput = {
   id: "ws-1",
