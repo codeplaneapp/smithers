@@ -77,6 +77,27 @@ include this identity in the approved plan. It returns `undefined` when the
 descriptor has no `body.contentDigest`: the descriptor may be displayed, but
 `AgentSession` refuses to execute a prompt without a measured, approved identity.
 
+### Descriptor.declarationDigest
+
+```ts
+const declarationDigest: (descriptor: FlowDescriptor) => string
+```
+
+Hashes one flow's complete declaration. This is the single declaration identity
+for `FlowDescriptor`: `@smthrs/chain` keys its catalog entries with it and
+`@smthrs/harness` folds it into every call identity, so one declaration is one
+number everywhere.
+
+Every top-level field is material. Within `provenance` the only deliberate
+exclusion is `pack`, which describes where discovery found the declaration
+rather than what the call depends on. `capabilities` is sorted because a set is
+what it means; every other array hashes in declaration order. Absent `Option`
+and optional fields hash as `null`.
+
+Unlike `executionDigest` this is always defined. It identifies what was
+declared, not whether the source bytes were measured, so a descriptor with no
+`body.contentDigest` still has a declaration identity to key against.
+
 ### Descriptor.SourceScan
 
 ```ts
@@ -511,16 +532,16 @@ interface Registry {
 const Registry: Context.Service<Registry, Registry>
 ```
 
-| Member      | What it answers                                                                                                                                         |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list`      | Every descriptor, in deterministic first-found order.                                                                                                   |
-| `visible`   | The descriptors whose `modelInvocable` is true.                                                                                                         |
-| `get`       | One descriptor, or `RegistryError { code: "not_found" }`.                                                                                               |
-| `getOption` | One descriptor as an `Option`. It cannot fail.                                                                                                          |
+| Member      | What it answers                                                                                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `list`      | Every descriptor, in deterministic first-found order.                                                                                                                                |
+| `visible`   | The descriptors whose `modelInvocable` is true.                                                                                                                                      |
+| `get`       | One descriptor, or `RegistryError { code: "not_found" }`.                                                                                                                            |
+| `getOption` | One descriptor as an `Option`. It cannot fail.                                                                                                                                       |
 | `loadBody`  | Returns the body locator or prompt, optionally checking the approved execution identity first. Source bytes are checked against the discovery digest; unmeasured bodies are refused. |
-| `runPrompt` | A markdown body rendered as a prompt. A module flow is `not_prompt_flow`.                                                                               |
-| `refresh`   | Rescans every configured source and replaces the snapshot.                                                                                              |
-| `warnings`  | Every discovery and collision diagnostic.                                                                                                               |
+| `runPrompt` | A markdown body rendered as a prompt. A module flow is `not_prompt_flow`.                                                                                                            |
+| `refresh`   | Rescans every configured source and replaces the snapshot.                                                                                                                           |
+| `warnings`  | Every discovery and collision diagnostic.                                                                                                                                            |
 
 Reads observe one complete snapshot, so a `list` and the `get` after it never
 disagree. `refresh` replaces the snapshot only after every source succeeds, so

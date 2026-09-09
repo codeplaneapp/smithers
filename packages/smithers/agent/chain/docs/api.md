@@ -727,10 +727,12 @@ warnings, and lazy bodies.
 
 ### Constructors and layers
 
-- `declarationDigest(descriptor): string`: the canonical digest of a
-  descriptor's full declaration (name, description, capabilities, effects,
-  placement, model, flows, schema references, and body reference), so
-  redeclaring a flow on any of those axes changes what every call key pins.
+- `declarationDigest(descriptor): string`: re-exported from
+  `Descriptor.declarationDigest` in `@smthrs/registry`, which owns
+  `FlowDescriptor`. The canonical digest of a descriptor's full declaration:
+  every top-level field except `provenance.pack`, with `capabilities` sorted,
+  so redeclaring a flow on any of those axes changes what every call key pins.
+  It is the same number `@smthrs/harness` folds into a call identity.
 - `make(options?): Effect<Catalog.Service, never, Registry.Registry>`:
   builds the catalog service from the ambient registry. Only callable
   descriptors are projected. Precedence when names collide: registry

@@ -124,6 +124,40 @@ describe("RegistryCatalog", () => {
     expect(Catalog.entryDigest(entry)).toBe(RegistryCatalog.declarationDigest(base))
   })
 
+  it("keys entries on the registry's declaration identity, not a second one", () => {
+    // Two hand-rolled digests of one `FlowDescriptor` meant a field added to
+    // the descriptor had to be remembered in two packages, and a miss silently
+    // changed what one of them re-keyed. There is one identity, and it is
+    // owned by the package that owns the type.
+    expect(RegistryCatalog.declarationDigest).toBe(Descriptor.declarationDigest)
+  })
+
+  it.each([
+    ["modelInvocable", { modelInvocable: false }],
+    ["path", { path: "/elsewhere/greet" }],
+    ["frontmatter", { frontmatter: { title: "Greet" } }],
+    ["budget", { budget: { tokens: 4_096 } }],
+    ["provenance.root", { provenance: new Descriptor.Provenance({ root: "/elsewhere", source: "test" }) }],
+    ["provenance.source", { provenance: new Descriptor.Provenance({ root: "/flows", source: "installed" }) }]
+  ] as ReadonlyArray<readonly [string, Partial<Descriptor.FlowDescriptor>]>)(
+    "re-keys when %s changes",
+    (_field, change) => {
+      // Each of these was invisible to the catalog's own digest: two
+      // declarations differing only here keyed identically, so a refreshed
+      // registry could move one without the entry digest noticing.
+      const base = descriptor({ name: "greet" })
+      expect(RegistryCatalog.declarationDigest(new Descriptor.FlowDescriptor({ ...base, ...change })))
+        .not.toBe(RegistryCatalog.declarationDigest(base))
+    }
+  )
+
+  it("treats capabilities as a set", () => {
+    const base = descriptor({ name: "greet" })
+    const reordered = new Descriptor.FlowDescriptor({ ...base, capabilities: ["fs:read", "fs:write"] })
+    const declared = new Descriptor.FlowDescriptor({ ...base, capabilities: ["fs:write", "fs:read"] })
+    expect(RegistryCatalog.declarationDigest(reordered)).toBe(RegistryCatalog.declarationDigest(declared))
+  })
+
   it("renders a markdown flow then hands it to the prompt runner", async () => {
     const ran: Array<{ rendered: string; name: string }> = []
     const prompt: RegistryCatalog.PromptRunner = (rendered, flowDescriptor) =>

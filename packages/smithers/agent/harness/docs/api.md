@@ -104,7 +104,7 @@ disable them.
 | `steps`       | 1,000   | per frame   | Interrupt checks, not bytecode operations. At least `Sandbox.minimumSteps`.                                                            |
 | `timeMs`      | 30,000  | per frame   | The cell's own JavaScript time. Time suspended in a `ctx.call` or `ctx.checkpoint()` does not count. At least `Sandbox.minimumTimeMs`. |
 | `totalMs`     | 900,000 | per frame   | Whole-evaluation time, host calls included. The backstop for a call that never settles.                                                |
-| `callMs`      | 120,000 | per call    | Wall-clock time one flow call may take before it settles as a resolved timeout.                                                       |
+| `callMs`      | 120,000 | per call    | Wall-clock time one flow call may take before it settles as a resolved timeout.                                                        |
 
 `memoryBytes` is a run budget rather than a frame budget because a realm outlives
 its frames. `runtime.setMemoryLimit` covers the object graph but does not count
@@ -434,9 +434,12 @@ carries authority.
 digest, the zero-based `ordinal` of the call within the cell, the
 `declaration` digest, and the resolved `layers` into one key. Re-executing a
 cell reaches the same ordinal with the same declaration, so a settled boundary
-replays. `Cell.declarationDigest(descriptor)` hashes the complete material
-declaration: every top-level `FlowDescriptor` field except `provenance.pack`,
-with `capabilities` sorted and every other array in declaration order.
+replays. `Cell.declarationDigest(descriptor)` re-exports
+`Descriptor.declarationDigest` from `@smthrs/registry`, which owns
+`FlowDescriptor`. It hashes the complete material declaration: every top-level
+field except `provenance.pack`, with `capabilities` sorted and every other
+array in declaration order. `@smthrs/chain` keys its catalog entries with the
+same number.
 
 **Call results.** `Cell.CallResultVariant` is a discriminated union of
 `CallSuccess` (`outcome: "success"`, JSON `value`, optional `message`) and

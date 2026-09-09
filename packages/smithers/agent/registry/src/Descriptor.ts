@@ -11,7 +11,7 @@
  * @since 0.1.0
  */
 import * as Digest from "@smthrs/core/Digest"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 /**
  * The reversibility tier declared by a flow.
@@ -486,6 +486,55 @@ export const executionDigest = (descriptor: FlowDescriptor): string | undefined 
   descriptor.body.contentDigest === undefined
     ? undefined
     : Digest.digest(Digest.canonical(Schema.encodeSync(FlowDescriptor)(descriptor)))
+
+/**
+ * The canonical digest of one flow's complete declaration.
+ *
+ * This is the single declaration identity for `FlowDescriptor`, owned by the
+ * package that owns the type. `@smthrs/chain` keys its catalog entries with it
+ * and `@smthrs/harness` folds it into every call identity, so one declaration
+ * is one number everywhere and adding a descriptor field is one edit here
+ * rather than a field two packages must each remember.
+ *
+ * Every top-level field is material. Within `provenance`, the only deliberate
+ * exclusion is `pack`: it describes where discovery found the declaration, not
+ * what the call depends on.
+ *
+ * `capabilities` is sorted because a set is what it means; every other array is
+ * hashed in declaration order, because order is part of what was declared.
+ * `Option` and optional fields hash as `null` when absent so an omitted field
+ * and a field that is present and null are one value, which is what they are
+ * once the descriptor has crossed JSON.
+ *
+ * `BodyRef.contentDigest` is the source identity discovery or `FlowBinding.make`
+ * measured. It makes an in-place body edit material even when the locator is
+ * unchanged.
+ *
+ * Unlike {@link executionDigest} this is always defined: it identifies what was
+ * declared, not whether the source bytes were measured, so a descriptor with no
+ * `contentDigest` still has a declaration identity to key against.
+ *
+ * @category hashing
+ * @since 1.0.0-rc.0
+ */
+export const declarationDigest = (descriptor: FlowDescriptor): string =>
+  Digest.digest(Digest.canonical({
+    body: { ...descriptor.body },
+    budget: descriptor.budget ?? null,
+    capabilities: [...descriptor.capabilities].sort(),
+    description: descriptor.description,
+    effects: { ...descriptor.effects },
+    flows: [...descriptor.flows],
+    frontmatter: { ...descriptor.frontmatter },
+    input: { ...descriptor.input },
+    model: Option.getOrNull(descriptor.model),
+    modelInvocable: descriptor.modelInvocable,
+    name: descriptor.name,
+    output: { ...descriptor.output },
+    path: descriptor.path,
+    placement: Option.getOrNull(descriptor.placement),
+    provenance: { root: descriptor.provenance.root, source: descriptor.provenance.source }
+  }))
 
 /**
  * The budget one descriptor declared, or {@link budgetUnbounded}.

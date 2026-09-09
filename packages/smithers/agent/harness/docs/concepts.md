@@ -122,8 +122,9 @@ Enforced by the `QuickJSSandbox` realm prelude and the `Cell` contract.
 ## Flow registry
 
 A cell may call only what the registry disclosed to it, and it must call the
-declaration it was shown. `Cell.declarationDigest` hashes the complete material
-declaration, `Cell.CallIdentity` folds that digest into every call's identity,
+declaration it was shown. `Cell.declarationDigest` is `@smthrs/registry`'s
+`Descriptor.declarationDigest`, the one declaration identity for
+`FlowDescriptor`; it hashes the complete material declaration, `Cell.CallIdentity` folds that digest into every call's identity,
 and `CellCalls.make` re-derives it at the boundary: an entry that moved between
 the frame that showed the catalog and the boundary that runs the call is refused
 with `declaration_changed` rather than dispatched to a body the model never saw.

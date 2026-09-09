@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `RegistryCatalog.declarationDigest` is now `Descriptor.declarationDigest`
+  re-exported from `@smthrs/registry`, the package that owns
+  `FlowDescriptor`, instead of a second hand-rolled digest of the same type.
+  The digest hashed ten fields with `capabilities` in declaration order; the
+  shared identity hashes every top-level field except `provenance.pack`, with
+  `capabilities` sorted. Two declarations that differed only in
+  `modelInvocable`, `budget`, `path`, `frontmatter` or `provenance` used to
+  key identically and no longer do.
+
+  This is a journal format break: every entry digest changes value, so a
+  catalog entry key recorded by an earlier version does not match the key this
+  version derives. Existing journals re-key, and a markdown call replayed
+  against one fails its call-time declaration check with `CallError` asking
+  for a rebuilt catalog. Rebuild the catalog rather than migrating the
+  recorded keys.
+
+  `@smthrs/harness`'s `Cell.declarationDigest` is the same re-export and its
+  digest value is unchanged, so one declaration is now one number on both
+  sides of the boundary.
+
 ## 0.1.0
 
 The version the manifest has carried since the package moved into

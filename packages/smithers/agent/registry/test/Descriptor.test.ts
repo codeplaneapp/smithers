@@ -230,3 +230,124 @@ describe("FlowDescriptor", () => {
     ).toEqual(Option.none())
   })
 })
+
+describe("declarationDigest", () => {
+  const base = new Descriptor.FlowDescriptor({
+    name: "inspect",
+    description: "Inspect one value.",
+    body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts", contentDigest: "1".repeat(64) }),
+    input: new Descriptor.SchemaRefInline({ document: { type: "object" } }),
+    output: new Descriptor.SchemaRefInline({ document: { type: "string" } }),
+    model: Option.some("anthropic/claude"),
+    flows: ["inspect/child"],
+    capabilities: ["fs:write", "fs:read"],
+    effects: { reads: ["src/**"], writes: [], mode: "hermetic", onConflict: "serialize", tier: "sealed" },
+    placement: Option.some("sandbox"),
+    modelInvocable: true,
+    budget: { tokens: 4_096, milliseconds: 30_000 },
+    path: "flows/inspect.ts",
+    frontmatter: { retries: 2, title: "Inspect" },
+    provenance: new Descriptor.Provenance({
+      source: "project",
+      root: "/repo",
+      pack: { name: "tools", version: "1.0.0", origin: "local" }
+    })
+  })
+
+  /** Every material descriptor field, and a declaration differing only there. */
+  const material: ReadonlyArray<readonly [string, Partial<Descriptor.FlowDescriptor>]> = [
+    ["name", { name: "inspect2" }],
+    ["description", { description: "Inspect two values." }],
+    ["body", {
+      body: new Descriptor.BodyRefModule({ path: "flows/inspect2.ts", contentDigest: "1".repeat(64) })
+    }],
+    ["body contents", {
+      body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts", contentDigest: "2".repeat(64) })
+    }],
+    ["input", { input: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
+    ["output", { output: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
+    ["model", { model: Option.some("openai/gpt") }],
+    ["flows", { flows: ["inspect/other-child"] }],
+    ["capabilities", { capabilities: ["fs:write", "fs:read", "net:read"] }],
+    ["effects", {
+      effects: { reads: ["src/**"], writes: ["src/**"], mode: "hermetic", onConflict: "serialize", tier: "sealed" }
+    }],
+    ["placement", { placement: Option.some("remote") }],
+    ["modelInvocable", { modelInvocable: false }],
+    ["budget", { budget: undefined }],
+    ["path", { path: "elsewhere/inspect.ts" }],
+    ["frontmatter", { frontmatter: { retries: 3, title: "Inspect" } }],
+    ["provenance.source", {
+      provenance: new Descriptor.Provenance({ source: "installed", root: "/repo", pack: base.provenance.pack })
+    }],
+    ["provenance.root", {
+      provenance: new Descriptor.Provenance({ source: "project", root: "/elsewhere", pack: base.provenance.pack })
+    }]
+  ]
+
+  it.each(material)("changes when %s changes", (_field, change) => {
+    // Every consumer keys on this number: `@smthrs/chain` keys catalog entries
+    // with it and `@smthrs/harness` raises `declaration_changed` from it. A
+    // field it does not cover is a field a refreshed registry can move without
+    // any of them noticing, and the call is then dispatched to a declaration
+    // nobody approved.
+    expect(Descriptor.declarationDigest(new Descriptor.FlowDescriptor({ ...base, ...change })))
+      .not.toBe(Descriptor.declarationDigest(base))
+  })
+
+  it("deliberately excludes pack provenance", () => {
+    expect(Descriptor.declarationDigest(
+      new Descriptor.FlowDescriptor({
+        ...base,
+        provenance: new Descriptor.Provenance({
+          source: base.provenance.source,
+          root: base.provenance.root,
+          pack: { name: "tools", version: "2.0.0", origin: "installed" }
+        })
+      })
+    )).toBe(Descriptor.declarationDigest(base))
+  })
+
+  it("does not depend on key order or on capability order", () => {
+    const reordered = new Descriptor.FlowDescriptor({
+      provenance: base.provenance,
+      frontmatter: { title: "Inspect", retries: 2 },
+      path: base.path,
+      budget: base.budget,
+      modelInvocable: base.modelInvocable,
+      placement: base.placement,
+      effects: base.effects,
+      capabilities: ["fs:read", "fs:write"],
+      flows: base.flows,
+      model: base.model,
+      output: base.output,
+      input: base.input,
+      body: base.body,
+      description: base.description,
+      name: base.name
+    })
+
+    expect(Descriptor.declarationDigest(reordered)).toBe(Descriptor.declarationDigest(base))
+  })
+
+  it("is defined for a descriptor with no measured source bytes", () => {
+    // The difference from `executionDigest`: what was declared is knowable
+    // before the bytes are measured, so an unmeasured descriptor still keys.
+    const unmeasured = new Descriptor.FlowDescriptor({
+      ...base,
+      body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts" })
+    })
+
+    expect(Descriptor.executionDigest(unmeasured)).toBeUndefined()
+    expect(Descriptor.declarationDigest(unmeasured)).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it("pins one fully populated declaration", () => {
+    // A golden vector, so a change to the algorithm is a change to a number
+    // somebody had to write down rather than a silent re-keying of every call
+    // in every package that imports this identity.
+    expect(Descriptor.declarationDigest(base)).toBe(
+      "cc7a8bd540a0be9e239d8dcc70c113b841b44079df80ce9ff118f7c9bf6a5bae"
+    )
+  })
+})

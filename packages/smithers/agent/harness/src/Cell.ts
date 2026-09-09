@@ -427,54 +427,16 @@ export class CallIdentity extends Schema.Class<CallIdentity>("flows/harness/Cell
 /**
  * Computes the declaration digest folded into a call identity.
  *
- * Every top-level field `FlowDescriptor` declares is material. Within
- * `provenance`, the only deliberate exclusion is `pack`: it describes where
- * discovery found the declaration, not what the call depends on.
- *
- * `capabilities` is sorted because a set is what it means; every other array is
- * hashed in declaration order, because order is part of what was declared.
- * `Option` and optional fields hash as `null` when absent so an omitted field
- * and a field that is present and null are one value, which is what they are
- * once the descriptor has crossed JSON.
- *
- * `BodyRef.contentDigest` is the source identity discovery or
- * `FlowBinding.make` measured. It makes an in-place body edit material even
- * when the locator is unchanged. The field remains optional only to decode
- * pre-rc descriptors; current constructors always supply it.
- *
- * `@smthrs/chain`'s `RegistryCatalog.declarationDigest` hashes the same
- * descriptor for its own catalog-entry key over a strictly narrower set — no
- * `modelInvocable`, `budget`, `path`, `frontmatter` or provenance, and
- * capabilities in declaration order rather than sorted — so the two numbers are
- * different numbers for one declaration and neither may be compared against the
- * other. Exporting one identity from the package that owns `FlowDescriptor` is
- * the standing follow-up; until it lands, each digest is only ever compared
- * with itself.
+ * Re-exported from `@smthrs/registry`, which owns `FlowDescriptor` and
+ * therefore owns what one declaration hashes to. It is the same number
+ * `@smthrs/chain` keys its catalog entries with, so a declaration has one
+ * identity across the boundary rather than one per package.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export const declarationDigest = (descriptor: Descriptor.FlowDescriptor): string =>
-  Digest.digest(
-    CanonicalJson.stringify({
-      name: descriptor.name,
-      description: descriptor.description,
-      capabilities: [...descriptor.capabilities].sort(),
-      effects: { ...descriptor.effects },
-      placement: Option.getOrNull(descriptor.placement),
-      model: Option.getOrNull(descriptor.model),
-      flows: [...descriptor.flows],
-      input: { ...descriptor.input },
-      output: { ...descriptor.output },
-      body: { ...descriptor.body },
-      modelInvocable: descriptor.modelInvocable,
-      budget: descriptor.budget ?? null,
-      path: descriptor.path,
-      frontmatter: { ...descriptor.frontmatter },
-      provenance: { source: descriptor.provenance.source, root: descriptor.provenance.root }
-    })
-  )
+export const declarationDigest: (descriptor: Descriptor.FlowDescriptor) => string = Descriptor.declarationDigest
 
 /**
  * One flow call requested from inside a cell.

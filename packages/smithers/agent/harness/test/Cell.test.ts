@@ -236,107 +236,13 @@ describe("Cell.source", () => {
 })
 
 describe("Cell.declarationDigest", () => {
-  const base = new Descriptor.FlowDescriptor({
-    name: "inspect",
-    description: "Inspect one value.",
-    body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts", contentDigest: "1".repeat(64) }),
-    input: new Descriptor.SchemaRefInline({ document: { type: "object" } }),
-    output: new Descriptor.SchemaRefInline({ document: { type: "string" } }),
-    model: Option.some("anthropic/claude"),
-    flows: ["inspect/child"],
-    capabilities: ["fs:write", "fs:read"],
-    effects: { reads: ["src/**"], writes: [], mode: "hermetic", onConflict: "serialize", tier: "sealed" },
-    placement: Option.some("sandbox"),
-    modelInvocable: true,
-    budget: { tokens: 4_096, milliseconds: 30_000 },
-    path: "flows/inspect.ts",
-    frontmatter: { retries: 2, title: "Inspect" },
-    provenance: new Descriptor.Provenance({
-      source: "project",
-      root: "/repo",
-      pack: { name: "tools", version: "1.0.0", origin: "local" }
-    })
-  })
-
-  /** Every material descriptor field, and a declaration differing only there. */
-  const material: ReadonlyArray<readonly [string, Partial<Descriptor.FlowDescriptor>]> = [
-    ["name", { name: "inspect2" }],
-    ["description", { description: "Inspect two values." }],
-    ["body", {
-      body: new Descriptor.BodyRefModule({ path: "flows/inspect2.ts", contentDigest: "1".repeat(64) })
-    }],
-    ["body contents", {
-      body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts", contentDigest: "2".repeat(64) })
-    }],
-    ["input", { input: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
-    ["output", { output: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
-    ["model", { model: Option.some("openai/gpt") }],
-    ["flows", { flows: ["inspect/other-child"] }],
-    ["capabilities", { capabilities: ["fs:write", "fs:read", "net:read"] }],
-    ["effects", {
-      effects: { reads: ["src/**"], writes: ["src/**"], mode: "hermetic", onConflict: "serialize", tier: "sealed" }
-    }],
-    ["placement", { placement: Option.some("remote") }],
-    ["modelInvocable", { modelInvocable: false }],
-    ["budget", { budget: undefined }],
-    ["path", { path: "elsewhere/inspect.ts" }],
-    ["frontmatter", { frontmatter: { retries: 3, title: "Inspect" } }],
-    ["provenance.source", {
-      provenance: new Descriptor.Provenance({ source: "installed", root: "/repo", pack: base.provenance.pack })
-    }],
-    ["provenance.root", {
-      provenance: new Descriptor.Provenance({ source: "project", root: "/elsewhere", pack: base.provenance.pack })
-    }]
-  ]
-
-  it.each(material)("changes when %s changes", (_field, change) => {
-    // The digest is the drift detector CellCalls raises `declaration_changed`
-    // from. A field it does not cover is a field a refreshed registry can move
-    // without the boundary noticing, and the call is then dispatched to a
-    // declaration the model was never shown.
-    expect(Cell.declarationDigest(new Descriptor.FlowDescriptor({ ...base, ...change })))
-      .not.toBe(Cell.declarationDigest(base))
-  })
-
-  it("deliberately excludes pack provenance", () => {
-    expect(Cell.declarationDigest(
-      new Descriptor.FlowDescriptor({
-        ...base,
-        provenance: new Descriptor.Provenance({
-          source: base.provenance.source,
-          root: base.provenance.root,
-          pack: { name: "tools", version: "2.0.0", origin: "installed" }
-        })
-      })
-    )).toBe(Cell.declarationDigest(base))
-  })
-
-  it("does not depend on key order or on capability order", () => {
-    const reordered = new Descriptor.FlowDescriptor({
-      provenance: base.provenance,
-      frontmatter: { title: "Inspect", retries: 2 },
-      path: base.path,
-      budget: base.budget,
-      modelInvocable: base.modelInvocable,
-      placement: base.placement,
-      effects: base.effects,
-      capabilities: ["fs:read", "fs:write"],
-      flows: base.flows,
-      model: base.model,
-      output: base.output,
-      input: base.input,
-      body: base.body,
-      description: base.description,
-      name: base.name
-    })
-
-    expect(Cell.declarationDigest(reordered)).toBe(Cell.declarationDigest(base))
-  })
-
-  it("pins one fully populated declaration", () => {
-    // A golden vector, so a change to the algorithm is a change to a number
-    // somebody had to write down rather than a silent re-keying of every call.
-    expect(Cell.declarationDigest(base)).toBe("cc7a8bd540a0be9e239d8dcc70c113b841b44079df80ce9ff118f7c9bf6a5bae")
+  it("is @smthrs/registry's declaration identity, not a second one", () => {
+    // The field set, the capability ordering, the pack exclusion and the
+    // golden vector are pinned once, in the package that owns
+    // `FlowDescriptor`: `registry/test/Descriptor.test.ts`. What the harness
+    // owes the boundary is that it keys on that number and not on one of its
+    // own, because `@smthrs/chain` keys its catalog entries on the same one.
+    expect(Cell.declarationDigest).toBe(Descriptor.declarationDigest)
   })
 })
 

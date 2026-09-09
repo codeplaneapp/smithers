@@ -12,8 +12,7 @@
  *
  * @since 0.1.0
  */
-import * as Digest from "@smthrs/core/Digest"
-import type * as Descriptor from "@smthrs/registry/Descriptor"
+import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { Effect, Layer, Option } from "effect"
 import * as Catalog from "./Catalog.ts"
@@ -58,28 +57,18 @@ export interface Options {
 }
 
 /**
- * The canonical digest of a descriptor's full declaration — name,
- * description, capabilities, effects, placement, model, flows, schema
- * references, and body reference — so redeclaring a flow on any of those
- * axes changes what every call key pins.
+ * The canonical digest of a descriptor's full declaration, and so of what
+ * every catalog entry key pins.
+ *
+ * Re-exported from `@smthrs/registry`, which owns `FlowDescriptor`: one
+ * declaration is one number here, in `@smthrs/harness`'s call identities, and
+ * anywhere else that keys on a declaration.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export const declarationDigest = (descriptor: Descriptor.FlowDescriptor): string =>
-  Digest.digest(Digest.canonical({
-    body: { ...descriptor.body },
-    capabilities: descriptor.capabilities,
-    description: descriptor.description,
-    effects: { ...descriptor.effects },
-    flows: descriptor.flows,
-    input: { ...descriptor.input },
-    model: Option.getOrElse(descriptor.model, () => null),
-    name: descriptor.name,
-    output: { ...descriptor.output },
-    placement: Option.getOrElse(descriptor.placement, () => null)
-  }))
+export const declarationDigest: (descriptor: Descriptor.FlowDescriptor) => string = Descriptor.declarationDigest
 
 const promptArgs = (name: string, payload: unknown): Effect.Effect<string, Catalog.CallError> => {
   if (typeof payload === "string") return Effect.succeed(payload)
