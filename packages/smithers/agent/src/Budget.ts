@@ -1015,7 +1015,8 @@ export const make = (
      *
      * Answers whether this call was new, so a caller that also has to write the
      * call down does so exactly when the accumulator took it. Recovery holds
-     * the recovery permit; live recording holds admission through its write.
+     * the recovery permit. Live writes normally hold admission; an existing
+     * transaction can account synchronously without waiting on another writer.
      */
     const account = (
       run: RunAccount,
@@ -1292,12 +1293,10 @@ export const make = (
                 })
               )
             )
-            return yield* Effect.uninterruptibleMask((restore) =>
-              // A live write is backpressure, not evidence of a failed ledger.
-              // Keep new admission behind its result. A deferred transaction
-              // callback leaves pending set after this permit is released, so
-              // speculative, failed and interrupted writes still fail closed.
-              run.admission.withPermits(1)(Effect.gen(function*() {
+            let entered = false
+            const write = Effect.uninterruptibleMask((restore) =>
+              Effect.gen(function*() {
+                entered = true
                 const pending = run.pending.get(stepKey) ??
                   unavailable("record", runId, "a paid model step has uncommitted usage")
                 const counted = yield* account(run, runId, stepKey, spent, pending)
@@ -1309,8 +1308,31 @@ export const make = (
                     if (run.pending.get(stepKey) === pending) run.pending.delete(stepKey)
                   })
                 ))
-              }))
+              })
             )
+            return yield* Effect.gen(function*() {
+              const journal = yield* Effect.serviceOption(Journal.Journal)
+              let outsideTransaction = true
+              if (runId !== looseRunId && Option.isSome(journal)) {
+                outsideTransaction = false
+                yield* journal.value.whenCommitted(Effect.sync(() => {
+                  outsideTransaction = true
+                })).pipe(Effect.mapError((cause) => unavailable("record", runId, String(cause), cause)))
+              }
+              // A transaction already owns its writer. Waiting for admission
+              // could invert that lock against another record waiting to write.
+              // Its usage remains pending until the existing commit callback.
+              if (!outsideTransaction) return yield* write
+              // Keep admission behind a live write, but allow a queued paid
+              // record to be cancelled before it gets the permit.
+              return yield* run.admission.withPermits(1)(write)
+            }).pipe(Effect.onError(() => Effect.gen(function*() {
+              if (entered) return
+              const current = yield* Ref.get(run.state)
+              if (!current.counted.has(stepKey) && !run.pending.has(stepKey)) {
+                run.pending.set(stepKey, unavailable("record", runId, "a paid model step could not enter usage accounting"))
+              }
+            })))
           }), stepKey),
       usage: withRecovered((run) => Effect.map(Ref.get(run.state), summarize)),
       usageOf: (runId) =>

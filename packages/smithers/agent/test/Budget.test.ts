@@ -1009,7 +1009,7 @@ describe("admission while usage is being committed", () => {
           const budget = yield* Budget.make({ tokens: { max: mode === "exhausted" ? 100 : 1000 } })
           const record = yield* Effect.forkChild(Effect.exit(budget.record("paid", { totalTokens: 60 })))
           yield* writing.await
-          const next = yield* Effect.forkChild(Effect.exit(budget.reserve("next")))
+          const next = yield* Effect.forkChild(Effect.exit(budget.reserve("next")), { startImmediately: true })
           yield* Effect.yieldNow
           const waiting = next.pollUnsafe() === undefined
           yield* release.open
@@ -1043,6 +1043,84 @@ describe("admission while usage is being committed", () => {
       )
     }
   )
+
+  it("cancels a queued paid record without forgetting its unrecorded spend", async () => {
+    const { journal } = budgetLedger()
+    const writing = Latch.makeUnsafe(), release = Latch.makeUnsafe()
+    const delayed = Journal.make({
+      ...journal,
+      emitDurableUnfenced: (input) =>
+        input.eventType !== Budget.usageEvent
+          ? journal.emitDurableUnfenced(input)
+          : writing.open.pipe(Effect.andThen(release.await), Effect.andThen(journal.emitDurableUnfenced(input)))
+    })
+    await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const budget = yield* Budget.make({ tokens: { max: 1000 } })
+      const first = yield* Effect.forkChild(budget.record("first", { totalTokens: 60 }), { startImmediately: true })
+      yield* writing.await
+      const second = yield* Effect.forkChild(budget.record("second", { totalTokens: 25 }), { startImmediately: true })
+      const cancelling = yield* Effect.forkChild(Fiber.interrupt(second), { startImmediately: true })
+      yield* Effect.yieldNow
+      const stoppedBeforeWriteFinished = cancelling.pollUnsafe() !== undefined
+      // Always release the fixture before asserting, including on the old bug.
+      yield* release.open
+      yield* Fiber.join(first)
+      yield* Fiber.join(cancelling)
+      expect(stoppedBeforeWriteFinished).toBe(true)
+      expect(failureOf(yield* Effect.exit(budget.check("next")))).toMatchObject({
+        _tag: "flows/agent/BudgetAccountingUnavailable", phase: "record"
+      })
+      yield* budget.record("second", { totalTokens: 25 })
+      expect(yield* budget.usage).toEqual({ tokens: 85, calls: 2, largestCall: 60 })
+      expect((yield* budget.check("next"))._tag).toBe("proceed")
+    })).pipe(
+      Effect.provideService(Journal.Journal, delayed),
+      Effect.provideService(FlowRuntime.FlowInstance, instanceFor("cancel-queued-usage"))
+    ))
+  })
+
+  it("records inside a held transaction while an outside writer waits for its commit", async () => {
+    const { journal } = budgetLedger()
+    const writing = Latch.makeUnsafe(), committed = Latch.makeUnsafe()
+    const callbacks: Array<Effect.Effect<void>> = []
+    const outside = Journal.make({
+      ...journal,
+      emitDurableUnfenced: (input) =>
+        input.eventType !== Budget.usageEvent
+          ? journal.emitDurableUnfenced(input)
+          : writing.open.pipe(Effect.andThen(committed.await), Effect.andThen(journal.emitDurableUnfenced(input)))
+    })
+    const transaction = Journal.make({
+      ...journal,
+      whenCommitted: (callback) => Effect.sync(() => { callbacks.push(callback); return true })
+    })
+    await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const budget = yield* Budget.make({ tokens: { max: 1000 } })
+      yield* budget.usage // Recovery precedes the transaction, as at the model boundary.
+      const waitingWriter = yield* Effect.forkChild(budget.record("outside", { totalTokens: 60 }), { startImmediately: true })
+      yield* writing.await
+      const inside = yield* Effect.forkChild(
+        budget.record("inside", { totalTokens: 25 }).pipe(Effect.provideService(Journal.Journal, transaction)),
+        { startImmediately: true }
+      )
+      yield* Effect.yieldNow
+      const recordedBeforeCommit = inside.pollUnsafe() !== undefined
+      // Release a broken implementation too, so failure cannot wedge cleanup.
+      yield* committed.open
+      yield* Fiber.join(waitingWriter)
+      yield* Fiber.join(inside)
+      expect(recordedBeforeCommit).toBe(true)
+      expect(failureOf(yield* Effect.exit(budget.check("before-commit-callback")))).toMatchObject({
+        _tag: "flows/agent/BudgetAccountingUnavailable", phase: "record"
+      })
+      yield* Effect.forEach(callbacks, (callback) => callback, { discard: true })
+      expect(yield* budget.usage).toEqual({ tokens: 85, calls: 2, largestCall: 60 })
+      expect((yield* budget.check("after-commit"))._tag).toBe("proceed")
+    })).pipe(
+      Effect.provideService(Journal.Journal, outside),
+      Effect.provideService(FlowRuntime.FlowInstance, instanceFor("transaction-usage-contention"))
+    ))
+  })
 })
 
 describe("recovering a run's skip-remaining latch", () => {
