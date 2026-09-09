@@ -119,7 +119,9 @@ Review behavior
   --no-verify               skip the adversarial verification pass over findings
   --quiz <off|auto|on>      reviewer comprehension quiz (default auto: only for
                             high/critical impact changes); the impact reasons
-                            behind the assessment appear in the walkthrough
+                            behind the assessment appear in the walkthrough.
+                            Independent of --no-review and --no-narrate; use
+                            --quiz off with both flags for offline use
   --concurrency <n>         maximum simultaneous file reviews (default 8)
   --timeout <min>           per-agent-task timeout in minutes (default 10)
 
@@ -153,7 +155,7 @@ Examples
   ${command}                              review the working tree
   ${command} --from main --to HEAD        review a branch against main
   ${command} --pr 42 --publish            review PR #42 and post it
-  ${command} --no-review --no-narrate     walkthrough only, no agents`;
+  ${command} --no-review --no-narrate --quiz off     walkthrough only, no agents`;
 }
 
 /**

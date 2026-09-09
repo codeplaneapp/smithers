@@ -63,7 +63,7 @@ Keep the workflow on `pull_request`. Never switch it to `pull_request_target`: t
 Comment on any pull request:
 
 ```text
-@smthrs review
+@smithers review
 ```
 
 Only owners, members, and collaborators can trigger reviews. Repositories registered in `auto` mode skip the comment and review every non-draft PR push; `comment` mode is the default. The mode is a server-side setting on your registration, so switching never touches your workflow file.
@@ -109,7 +109,7 @@ smithers-review /path/to/repo --pr 123
 smithers-review /path/to/repo --pr 123 --publish
 
 # no seats: deterministic story, no review findings (works offline)
-smithers-review /path/to/repo --no-review --no-narrate
+smithers-review /path/to/repo --no-review --no-narrate --quiz off
 ```
 
 The repository path defaults to the current directory. `--publish` needs a publish service URL in `SMITHERS_REVIEW_PUBLISH_URL` and an operator-issued API key in `SMITHERS_REVIEW_PUBLISH_TOKEN`; both can also be set in `~/.smithers-review.json`.
@@ -130,11 +130,11 @@ Seats are `provider:model` strings, and the provider ahead of the colon decides 
 | `OPENROUTER_API_KEY` | Credential for `openrouter:` seats. |
 | `ANTHROPIC_BASE_URL` | Sends `anthropic:` seats to a proxy origin instead of `api.anthropic.com`. |
 
-The `quiz` action input, and `--quiz on` / `--quiz off` on the bin, control the reviewer quiz: a short set of multiple-choice questions a reviewer can answer only after reading the change. It auto-triggers when the assessed impact is high or critical, and the walkthrough lists the reasons behind the assessment. Nothing blocks a merge on the score.
+The `quiz` action input, and `--quiz on` / `--quiz off` on the bin, control the reviewer quiz: a short set of multiple-choice questions a reviewer can answer only after reading the change. It auto-triggers when the assessed impact is high or critical, and the walkthrough lists the reasons behind the assessment. Quiz generation uses a model independently of `--no-review` and `--no-narrate`. For offline use, pass all three: `--no-review --no-narrate --quiz off`. Nothing blocks a merge on the score.
 
 ## Verify it worked
 
-Comment `@smthrs review` on an open pull request. The action posts the narrative summary as the review body and every finding as an inline comment, the status comment shows remaining quota, and the service hosts the walkthrough HTML. Because findings never fail the build, a review full of findings still leaves the check green; a spent quota skips with a notice instead.
+Comment `@smithers review` on an open pull request. The action posts the narrative summary as the review body and every finding as an inline comment, the status comment shows remaining quota, and the service hosts the walkthrough HTML. Because findings never fail the build, a review full of findings still leaves the check green; a spent quota skips with a notice instead.
 
 ## See also
 

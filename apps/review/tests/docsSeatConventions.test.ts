@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { gateEvent } from "../action/src/gateEvent.ts";
+import { parseReviewArgs } from "../src/cli/parseReviewArgs.ts";
 
 /**
- * The two documents that describe this app to a reader must describe rc.0.
+ * The package overview and contributor guide must describe rc.0.
  *
- * README.md and CONTRIBUTING.md are the whole documentation surface here, so a
- * stale sentence in one of them is the only thing a reader has. They drifted
- * once already: CONTRIBUTING kept documenting the 0.x agent engine, a Codex or
- * Claude Code subprocess selected by `SMITHERS_REVIEW_ENGINE`, for a release
- * that runs no subprocess at all, and README already said the opposite.
+ * README.md and CONTRIBUTING.md drifted once already: CONTRIBUTING kept
+ * documenting the 0.x agent engine, a Codex or Claude Code subprocess selected
+ * by `SMITHERS_REVIEW_ENGINE`, for a release that runs no subprocess at all,
+ * and README already said the opposite.
  *
  * The check is a name check, not a prose check. Every name below belongs to a
  * mechanism rc.0 deleted, so a document that mentions one is describing
@@ -56,6 +57,48 @@ describe("the app's documentation describes rc.0", () => {
       // saying nothing about seats would pass the checks above and still leave
       // a reader with no way to choose a model.
       expect(text).toContain("SMITHERS_REVIEW_SEAT");
+    });
+  }
+});
+
+const siteGuide = "../../site/src/content/docs/docs/guides/pr-review-action.mdx";
+
+describe("documented review commands", () => {
+  test("the guide's comment commands match the action trigger and start a review", () => {
+    const trigger = read("../action/src/gateEvent.ts").match(/const MAGIC_PHRASE = "([^"]+)";/)?.[1];
+    if (!trigger) throw new Error("The action trigger constant was not found");
+    const commands = read(siteGuide).match(/@[\w-]+ review/g) ?? [];
+    expect(commands.length).toBeGreaterThanOrEqual(2);
+    for (const command of commands) {
+      expect(command).toBe(trigger);
+      expect(gateEvent({
+        eventName: "issue_comment",
+        payload: {
+          action: "created",
+          issue: { number: 42, pull_request: {} },
+          comment: { body: command, author_association: "MEMBER" },
+        },
+      })).toEqual({ run: true, eventName: "issue_comment", prNumber: 42 });
+    }
+  });
+
+  for (const relative of ["../README.md", siteGuide, "../src/cli/main.ts", "../docs/commands.md"]) {
+    test(`${relative} disables every model-backed step in no-seats examples`, () => {
+      const examples = read(relative).split("\n").filter((line) =>
+        /^\s*(?:smithers-review|\$\{command\})\s/.test(line) &&
+        line.includes("--no-review") && line.includes("--no-narrate")
+      );
+      expect(examples.length).toBeGreaterThan(0);
+      for (const example of examples) {
+        // CLI help separates the command and its description with two spaces.
+        const command = example.trim().split(/\s{2,}/)[0]!;
+        const args = parseReviewArgs(command.split(/\s+/).slice(1));
+        expect({ review: args.review, narrate: args.narrate, quiz: args.quiz }).toEqual({
+          review: false,
+          narrate: false,
+          quiz: "off",
+        });
+      }
     });
   }
 });

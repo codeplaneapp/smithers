@@ -80,6 +80,8 @@ The quiz auto-triggers when the assessed impact is **high** or
 added code, critical findings, sheer size, …); the specific reasons behind
 the assessment are listed in the walkthrough. Force it with `--quiz on`,
 disable it with `--quiz off` (CLI), or set the `quiz:` action input.
+Quiz generation uses a model independently of `--no-review` and `--no-narrate`.
+For offline use, pass all three: `--no-review --no-narrate --quiz off`.
 
 After taking the quiz in the walkthrough, copy the attestation (your
 score) into a PR comment so the author knows the review was earned.
@@ -148,8 +150,10 @@ smithers-review /path/to/repo --pr 123
 smithers-review /path/to/repo --pr 123 --publish
 
 # no seats: deterministic story, no review findings (works offline)
-smithers-review /path/to/repo --no-review --no-narrate
+smithers-review /path/to/repo --no-review --no-narrate --quiz off
 ```
+
+See [review commands](docs/commands.md) for the comment trigger and offline flags.
 
 The repo path defaults to the current directory. Seats are `provider:model`
 strings, and the provider ahead of the colon decides which credential is read:
