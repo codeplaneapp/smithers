@@ -231,13 +231,15 @@ export interface Source {
   /** One poll turn against the stored offset. Commits nothing. */
   readonly poll: (cursor: string | null) => Effect.Effect<Batch, IntegrationError>
   /**
-   * Polls forever: read the cursor, poll, hand the batch to `onBatch`, and
-   * commit the offset only after `onBatch` succeeds.
+   * Reads the cursor, polls, hands the batch to `onBatch`, and
+   * commits the offset only after `onBatch` succeeds.
+   * The default schedule polls forever with 250 milliseconds between turns.
+   * A caller-supplied finite schedule ends polling normally with `undefined`.
    */
   readonly run: <E, R>(
     onBatch: (events: ReadonlyArray<ExternalEvent>) => Effect.Effect<void, E, R>,
     options?: { readonly schedule?: Schedule.Schedule<unknown> | undefined }
-  ) => Effect.Effect<never, IntegrationError | E, R | CursorStore>
+  ) => Effect.Effect<void, IntegrationError | E, R | CursorStore>
 }
 
 /**
@@ -378,7 +380,7 @@ export const make = (
         yield* onBatch(batch.events)
         if (batch.cursor !== undefined) yield* cursors.set(sourceId, batch.cursor)
       })
-      return yield* Effect.repeat(turn, runOptions?.schedule ?? Schedule.spaced("250 millis")) as Effect.Effect<never>
+      return yield* Effect.asVoid(Effect.repeat(turn, runOptions?.schedule ?? Schedule.spaced("250 millis")))
     })
 
   return { sourceId, poll, run }

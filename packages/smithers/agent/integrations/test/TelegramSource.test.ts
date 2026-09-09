@@ -281,6 +281,19 @@ describe("poll", () => {
 })
 
 describe("run", () => {
+  it.each([
+    { schedule: Schedule.forever.pipe(Schedule.upTo({ times: 0 })), polls: 1 },
+    { schedule: Schedule.recurs(1), polls: 2 }
+  ])("succeeds with undefined when a finite schedule ends after $polls polls", async ({ schedule, polls }) => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
+    const result = await runWithCursors(
+      source().run(() => Effect.void, { schedule })
+    )
+    expect(fixture.requests).toHaveLength(polls)
+    expect(fixture.requests[0]?.url).toBe(`/bot${TOKEN}/getUpdates`)
+    expect(result).toBeUndefined()
+  })
+
   it("commits the offset only after the handler succeeded", async () => {
     fixture = await startFixture((_request, response) =>
       json(response, 200, { ok: true, result: [{ update_id: 10, message: message() }] })
