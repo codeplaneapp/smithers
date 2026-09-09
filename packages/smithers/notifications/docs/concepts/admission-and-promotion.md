@@ -127,7 +127,8 @@ over an immutable `State`. `NotificationQueue` is those functions plus
 durability, and `applyAdmission` and `applyPromoted` are the replay half, which
 applies a committed decision rather than recomputing it.
 
-That split is why the promotion rules can be tested directly, and why a
-deployment that raised the capacity can derive its own projection instead of
-reading one that assumes the default. See
+That split is why the promotion rules can be tested directly, and why the
+capacity bound belongs to `admit` alone. `applyAdmission` retains what a record
+admitted without consulting it, so a deployment that raised the capacity replays
+in full through `Projection.derive`. See
 [the journal records](./journal-records.md).

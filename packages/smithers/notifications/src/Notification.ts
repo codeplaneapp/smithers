@@ -56,6 +56,14 @@ export const HumanSteer = Schema.TaggedStruct("human-steer", {
 })
 
 /**
+ * The decoded form of {@link HumanSteer}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type HumanSteer = typeof HumanSteer.Type
+
+/**
  * A human message that waits for the run to become idle.
  *
  * The delivery class is the whole difference from {@link HumanSteer}: a
@@ -69,6 +77,14 @@ export const HumanFollowup = Schema.TaggedStruct("human-followup", {
   ...common,
   delivery: Schema.Literal("queue")
 })
+
+/**
+ * The decoded form of {@link HumanFollowup}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type HumanFollowup = typeof HumanFollowup.Type
 
 /**
  * A machine-originated event. Consecutive events sharing a coalescing key
@@ -86,6 +102,14 @@ export const SystemEvent = Schema.TaggedStruct("system-event", {
   delivery: Schema.Literal("queue"),
   coalescingKey: Schema.optional(Schema.String)
 })
+
+/**
+ * The decoded form of {@link SystemEvent}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type SystemEvent = typeof SystemEvent.Type
 
 /**
  * Any durable notification retained by the pending queue.

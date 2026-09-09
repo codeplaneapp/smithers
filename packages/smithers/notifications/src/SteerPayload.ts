@@ -56,6 +56,14 @@ export const MessagePayload = Schema.Struct({
 })
 
 /**
+ * The decoded form of {@link MessagePayload}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type MessagePayload = typeof MessagePayload.Type
+
+/**
  * A model-seat change that applies from the next turn on.
  *
  * @category models
@@ -67,6 +75,14 @@ export const SeatPayload = Schema.Struct({
 })
 
 /**
+ * The decoded form of {@link SeatPayload}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type SeatPayload = typeof SeatPayload.Type
+
+/**
  * A thinking-level change that applies from the next turn on.
  *
  * @category models
@@ -76,6 +92,14 @@ export const ThinkingPayload = Schema.Struct({
   kind: Schema.Literal("Thinking"),
   thinking: Thinking
 })
+
+/**
+ * The decoded form of {@link ThinkingPayload}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ThinkingPayload = typeof ThinkingPayload.Type
 
 /**
  * Tools added to the active set for future turns.
@@ -91,6 +115,14 @@ export const ToolsPayload = Schema.Struct({
   kind: Schema.Literal("Tools"),
   toolNames: Schema.NonEmptyArray(Schema.NonEmptyString)
 })
+
+/**
+ * The decoded form of {@link ToolsPayload}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ToolsPayload = typeof ToolsPayload.Type
 
 /**
  * Any steering item a notification payload can carry.

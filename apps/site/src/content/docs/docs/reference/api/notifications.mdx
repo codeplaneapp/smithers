@@ -242,11 +242,13 @@ Import from `@smthrs/notifications/Projection`.
 | -------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `derive` | `Journal.Projection<NotificationState.State>` | Re-derives pending notifications from admitted and promoted journal entries. Foreign entries leave the state unchanged. |
 
-The projection starts at `NotificationState.empty(NotificationState.defaultCapacity)`,
-which is what `NotificationQueue.layer` enforces. A deployment that raised the
-bound with `NotificationQueue.layerWith` derives its own projection from
-`NotificationState`, because this one would report a shorter queue than the run
-actually holds.
+The projection starts at `NotificationState.empty(NotificationState.defaultCapacity)`.
+Capacity gates new admissions; it does not truncate replay. `applyAdmission`
+applies the decision each record committed, so a composition built with
+`NotificationQueue.layerWith` above the default replays every admission it
+wrote. The projected `capacity` stays at the default because no journal record
+carries the bound the layer was built at, so read `items` rather than
+`capacity`.
 
 ## SteerPayload
 
@@ -306,18 +308,24 @@ own `detectors` are merged over `defaultDetectors`.
 
 ### Sinks
 
-| Export                  | Signature                                                                                                                                | What it is                                                                                                                                                                                                                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SinkService`           | `{ deliver: (alert: Alert) => Effect.Effect<void, AlertError> }`                                                                         | Where a raised alert is sent. `deliver` MUST be idempotent on `alertId(alert)`, and MUST fail when the page did not go out.                                                                                                                             |
-| `Sink`                  | `Context.Service` under `/notifications/AlertSink`                                                                                       | The service tag.                                                                                                                                                                                                                                        |
-| `layerNoop`             | `Layer<Sink>`                                                                                                                            | Accepts every alert and sends it nowhere. The admission and the delivery record still happen.                                                                                                                                                           |
-| `defaultWebhookTimeout` | `Duration.Duration`                                                                                                                      | Ten seconds.                                                                                                                                                                                                                                            |
-| `layerWebhook`          | `(options: { url: string; headers?: Record<string, string>; timeout?: Duration.Duration }) => Layer<Sink, never, HttpClient.HttpClient>` | POSTs each alert to one webhook. The body is the alert plus its `alertId`, and the same id is sent as an `Idempotency-Key` header, set after the caller's headers. A non-2xx answer is a failure; an endpoint that never answers fails after `timeout`. |
+| Export                  | Signature                                                                                                  | What it is                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SinkService`           | `{ deliver: (alert: Alert) => Effect.Effect<void, AlertError> }`                                           | Where a raised alert is sent. `deliver` MUST be idempotent on `alertId(alert)`, and MUST fail when the page did not go out.                                                                                                                                                                                                                                                     |
+| `Sink`                  | `Context.Service` under `/notifications/AlertSink`                                                         | The service tag.                                                                                                                                                                                                                                                                                                                                                                |
+| `layerNoop`             | `Layer<Sink>`                                                                                              | Accepts every alert and sends it nowhere. The admission and the delivery record still happen.                                                                                                                                                                                                                                                                                   |
+| `defaultWebhookTimeout` | `Duration.Duration`                                                                                        | Ten seconds.                                                                                                                                                                                                                                                                                                                                                                    |
+| `layerWebhook`          | `(options: { url: string; headers?: Record<string, string>; timeout?: Duration.Duration }) => Layer<Sink>` | POSTs each alert to one webhook using an owned Fetch client with redirects disabled and a scope per delivery. Injected `HttpClient` layers are not used. The body is the alert plus its `alertId`, and the same id is sent as an `Idempotency-Key` header, set after the caller's headers. A non-2xx answer is a failure; an endpoint that never answers fails after `timeout`. |
 
 | Export        | Shape                                                                                                           |
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
-| `FailureCode` | `"sink_rejected" \| "sink_unreachable" \| "sink_timeout"`.                                                      |
+| `FailureCode` | `"sink_rejected" \| "sink_unreachable" \| "sink_timeout" \| "sink_misconfigured"`.                              |
 | `AlertError`  | Tagged `/notifications/AlertError`: `{ code: FailureCode; message: string; status?: number; reason?: string }`. |
+
+`sink_misconfigured` is the one code no alert ever carries. `layerWebhook`
+validates its `url` while the layer is built, before any alert exists, and a url
+that is not an absolute `http:` or `https:` one dies there rather than failing
+through the delivery channel: a scheme bound is what keeps a credential set in
+`headers` from being handed to something that is not HTTP.
 
 `AlertError` deliberately holds no request. A webhook request carries the
 credential the deployment handed `layerWebhook`, and an error is logged, encoded,

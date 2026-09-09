@@ -89,11 +89,12 @@ tail, so the stream does not end on its own. That is what a projection is for:
 a live view that stays correct as entries arrive. Bound it with `Stream.take`
 when you want a snapshot, or fork it into a scope when you want a follower.
 
-`Projection.derive` starts at `NotificationState.empty(NotificationState.defaultCapacity)`,
-which is the bound `NotificationQueue.layer` enforces. A deployment that raised
-the bound with `NotificationQueue.layerWith` builds its own projection over
-`NotificationState` instead, because this one would report a shorter queue than
-the run actually holds.
+`Projection.derive` starts at `NotificationState.empty(NotificationState.defaultCapacity)`.
+That bound is the initial state's, not the run's: replay applies committed
+decisions rather than re-deciding, so a deployment that raised the bound with
+`NotificationQueue.layerWith` sees every admission it wrote replayed, past 128.
+No journal record carries the layer's bound, so the projected `capacity` stays
+at the default and `items` is the field to read.
 
 For the live answer rather than a replay, use `NotificationQueue.pending`; see
 [Report what a run is waiting on](../guides/report-pending-notifications.md).

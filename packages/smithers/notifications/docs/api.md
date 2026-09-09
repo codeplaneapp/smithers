@@ -247,11 +247,13 @@ Import from `@smthrs/notifications/Projection`.
 | -------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `derive` | `Journal.Projection<NotificationState.State>` | Re-derives pending notifications from admitted and promoted journal entries. Foreign entries leave the state unchanged. |
 
-The projection starts at `NotificationState.empty(NotificationState.defaultCapacity)`,
-which is what `NotificationQueue.layer` enforces. A deployment that raised the
-bound with `NotificationQueue.layerWith` derives its own projection from
-`NotificationState`, because this one would report a shorter queue than the run
-actually holds.
+The projection starts at `NotificationState.empty(NotificationState.defaultCapacity)`.
+Capacity gates new admissions; it does not truncate replay. `applyAdmission`
+applies the decision each record committed, so a composition built with
+`NotificationQueue.layerWith` above the default replays every admission it
+wrote. The projected `capacity` stays at the default because no journal record
+carries the bound the layer was built at, so read `items` rather than
+`capacity`.
 
 ## SteerPayload
 
@@ -321,8 +323,14 @@ own `detectors` are merged over `defaultDetectors`.
 
 | Export        | Shape                                                                                                           |
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
-| `FailureCode` | `"sink_rejected" \| "sink_unreachable" \| "sink_timeout"`.                                                      |
+| `FailureCode` | `"sink_rejected" \| "sink_unreachable" \| "sink_timeout" \| "sink_misconfigured"`.                              |
 | `AlertError`  | Tagged `/notifications/AlertError`: `{ code: FailureCode; message: string; status?: number; reason?: string }`. |
+
+`sink_misconfigured` is the one code no alert ever carries. `layerWebhook`
+validates its `url` while the layer is built, before any alert exists, and a url
+that is not an absolute `http:` or `https:` one dies there rather than failing
+through the delivery channel: a scheme bound is what keeps a credential set in
+`headers` from being handed to something that is not HTTP.
 
 `AlertError` deliberately holds no request. A webhook request carries the
 credential the deployment handed `layerWebhook`, and an error is logged, encoded,

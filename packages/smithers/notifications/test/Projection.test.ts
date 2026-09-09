@@ -128,6 +128,40 @@ describe("Notification projection", () => {
     expect(states.at(-1)?.items).toEqual([])
   })
 
+  it("replays every committed admission past the projection's own capacity", async () => {
+    const overCapacity = NotificationState.defaultCapacity + 1
+    const notifications = Array.from({ length: overCapacity }, (_, index) => notification(`n-${index}`))
+
+    const states = await Effect.runPromise(
+      runJournal(
+        Effect.gen(function*() {
+          const journal = yield* Journal.Journal
+          yield* Effect.forEach(
+            notifications,
+            (value) =>
+              journal.emitDurableUnfenced(
+                input(NotificationEvent.AdmittedEventType, {
+                  notification: value,
+                  decision: "admitted"
+                })
+              ),
+            { discard: true }
+          )
+          yield* journal.flush
+          return yield* journal.project(Projection.derive, { runId }).pipe(
+            Stream.take(overCapacity + 1),
+            Stream.runCollect
+          )
+        })
+      )
+    )
+
+    const last = states.at(-1)
+    expect(last?.capacity).toBe(NotificationState.defaultCapacity)
+    expect(last?.items.length).toBe(overCapacity)
+    expect(last?.items.at(-1)?.notification.id).toBe(`n-${overCapacity - 1}`)
+  })
+
   it("ignores foreign events and records rejected admissions without queueing them", async () => {
     const states = await Effect.runPromise(
       runJournal(

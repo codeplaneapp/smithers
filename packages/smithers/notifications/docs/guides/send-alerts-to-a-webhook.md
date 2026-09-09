@@ -33,6 +33,11 @@ export const alerting = (policy: Alerts.Policy, token: string) =>
 failure at that bound, because a hung page is indistinguishable from silence and
 waiting on one forever is not an option a pager may take.
 
+`url` must be an absolute `http:` or `https:` url. It is checked when the layer
+is built, so a `file:` or `javascript:` endpoint is a defect that fails the
+composition with `sink_misconfigured` rather than a delivery failure at 3am. The
+error names no url, because the value can carry basic-auth credentials.
+
 The sink uses the platform's `fetch` and forces `redirect: "manual"`. A 3xx
 response fails with `sink_rejected`; credentials and alert bodies are never
 forwarded to the redirect target. Injected `HttpClient` layers, including clients
@@ -83,6 +88,10 @@ stable half:
 | `sink_rejected`    | The endpoint answered, and refused the page. | The answer. |
 | `sink_unreachable` | The request never got an answer.             | Absent.     |
 | `sink_timeout`     | No answer arrived inside the sink's bound.   | Absent.     |
+
+`sink_misconfigured` is the fourth code and never appears here: it is raised
+while the layer is built, before any alert exists. See
+[Point it at an endpoint](#point-it-at-an-endpoint).
 
 A failure is journaled as `Alerts.failedEventType`, one record per alert per
 code, and the alert is retried on the next tick. The error carries the answering
