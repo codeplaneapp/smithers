@@ -22,7 +22,7 @@
  *
  * @since 0.1.0
  */
-import { DurableWriter, fromSqlError } from "@smthrs/database/DurableWriter"
+import { afterCommit, DatabaseError, DurableWriter, fromSqlError } from "@smthrs/database/DurableWriter"
 import { OwnerId } from "@smthrs/journal/OwnerId"
 import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import { Cause, Clock, Context, Duration, Effect, Layer, Metric, Schema } from "effect"
@@ -642,7 +642,12 @@ const persistenceError = (method: string, cause: unknown): RunStoreError => {
   const code = typeof cause === "object" && cause !== null && "code" in cause && cause.code === "constraint"
     ? "constraint"
     : "persistence_failed"
-  return runStoreError(method, code, "database operation failed", { category: code })
+  return runStoreError(method, code, "database operation failed", {
+    category: code,
+    // Keep the classification for outer transaction retries, never driver
+    // causes that may contain executable state or bound SQL values.
+    ...(Schema.is(DatabaseError)(cause) ? { cause: new DatabaseError({ code: cause.code }) } : {})
+  })
 }
 
 const invalidRunError = (
@@ -1715,7 +1720,12 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
                 RETURNING run_id AS "runId"
               `
           /* v8 ignore next -- both CAS outcomes are asserted; V8 reports a synthetic implicit branch */
-          if (rows.length > 0) return transitioned
+          if (rows.length > 0) {
+            if (terminalStatuses.has(toStatus)) {
+              yield* afterCommit(Metric.update(ObservabilityMetric.runThroughput, 1), sql)
+            }
+            return transitioned
+          }
           const current = yield* selectRun(sql, runId)
           const row = current[0]
           if (row === undefined) return notFound
@@ -1726,9 +1736,6 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           return ownsRow ? guardFailed : fenceLost
         })
       )
-      if (outcome._tag === "Transitioned" && terminalStatuses.has(toStatus)) {
-        yield* Metric.update(ObservabilityMetric.runThroughput, 1)
-      }
       return outcome
     }).pipe(
       observeOutcome((outcome) =>

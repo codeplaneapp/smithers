@@ -53,7 +53,7 @@ const Uninspectable = Symbol("@smthrs/database/internal/WriteRetry/Uninspectable
 // Driver errors sometimes inherit their fields, so reads stay inheritance-aware
 // rather than requiring own data properties. Each read is isolated so a hostile
 // accessor or Proxy is treated as uninspectable instead of escaping as a defect.
-const readProperty = (value: object, property: "cause" | "code" | "message"): unknown => {
+const readProperty = (value: object, property: "cause" | "code" | "message" | "_tag"): unknown => {
   try {
     return (value as Record<typeof property, unknown>)[property]
   } catch {
@@ -185,15 +185,24 @@ export const classifySqlError = (error: SqlError.SqlError): SqlFailureCode =>
     ? "busy"
     : "unknown"
 
-/** Finds the structured SQL failure, if any, in a cause chain. */
-const findSqlError = (error: unknown): SqlError.SqlError | undefined => {
+/** Finds SQL provenance, including a redacted normalized error, in a cause chain. */
+const findFailureCode = (error: unknown): DurableWriter.DatabaseErrorCode | undefined => {
   const seen = new Set<unknown>()
   let current = error
   while (typeof current === "object" && current !== null && !seen.has(current)) {
     seen.add(current)
     const sqlError = sqlErrorOf(current)
     if (sqlError !== undefined) {
-      return sqlError
+      return classifySqlError(sqlError)
+    }
+    // Check the tagged vocabulary without importing DurableWriter at runtime:
+    // it owns the retry loop and imports this module. A bare code or message
+    // remains insufficient provenance for replaying application failures.
+    if (readProperty(current, "_tag") === "@smthrs/database/DatabaseError") {
+      const code = readProperty(current, "code")
+      if (code === "busy" || code === "io" || code === "constraint" || code === "unsupported" || code === "unknown") {
+        return code
+      }
     }
     const next = readProperty(current, "cause")
     if (next === Uninspectable) return undefined
@@ -205,7 +214,7 @@ const findSqlError = (error: unknown): SqlError.SqlError | undefined => {
 /**
  * Returns whether a failure represents a transient write conflict in either
  * the SQLite or the Postgres vocabulary. The failure may be
- * the structured SQL error itself or a domain error wrapping one — the walk
+ * the structured SQL error, a normalized DatabaseError, or a domain error wrapping one — the walk
  * follows `cause` chains (and a `SqlError`'s reason cause) either way, so the
  * outermost `DurableWriter.write` still replays a transaction whose failing
  * savepoint a nested store already normalized into its own error type.
@@ -214,20 +223,17 @@ const findSqlError = (error: unknown): SqlError.SqlError | undefined => {
  * classification {@link classifySqlError} makes is the whole decision.
  *
  * A defect is judged by this same function, so a raw throw qualifies only when
- * it carries a `SqlError` too.
+ * it carries SQL or normalized database provenance too.
  *
  * @category guards
  * @since 0.1.0
  */
-export const isRetryableWriteError = (error: unknown): boolean => {
-  const sqlError = findSqlError(error)
-  return sqlError !== undefined && classifySqlError(sqlError) === "busy"
-}
+export const isRetryableWriteError = (error: unknown): boolean => findFailureCode(error) === "busy"
 
 /** Returns whether one typed reason carries an I/O failure. */
 const isIoFailure = (error: unknown): boolean => {
-  const sqlError = findSqlError(error)
-  return sqlError === undefined ? isIoCause(error) : classifySqlError(sqlError) === "io"
+  const code = findFailureCode(error)
+  return code === undefined ? isIoCause(error) : code === "io"
 }
 
 interface ClassifiedCause<E> {
@@ -256,7 +262,7 @@ const classifyCause = <E>(cause: Cause.Cause<E>): ClassifiedCause<E> => {
   for (const reason of cause.reasons) {
     if (
       (Cause.isFailReason(reason) && isIoFailure(reason.error)) ||
-      (Cause.isDieReason(reason) && isIoCause(reason.defect))
+      (Cause.isDieReason(reason) && (isIoCause(reason.defect) || isIoFailure(reason.defect)))
     ) {
       return { cause, retryable: false }
     }

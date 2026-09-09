@@ -92,7 +92,9 @@ export interface Service {
  * body verbatim against the committed state. Its retry classification
  * follows `cause` chains, so a transient failure keeps replaying the
  * outermost transaction even after a nested store has wrapped it in a domain
- * error that preserves `cause`.
+ * error that preserves `cause`. A store may redact driver payloads by keeping
+ * only a new `DatabaseError({ code })` in that cause chain; its normalized
+ * category is sufficient retry provenance.
  *
  * @category services
  * @since 0.1.0

@@ -34,7 +34,7 @@ const failingDatabase = (cause: unknown): Layer.Layer<DurableWriter.DurableWrite
       get: (target, property) => property === "in" ? () => "" : Reflect.get(target, property)
     }
   ) as unknown as SqlClient.SqlClient
-  const write: DurableWriter.Service["write"] = (effect) => effect
+  const write: DurableWriter.Service["write"] = () => Effect.die("unexpected write in read-only failure fixture")
   return Layer.merge(
     Layer.succeed(SqlClient.SqlClient)(sql),
     Layer.succeed(DurableWriter.DurableWriter)(DurableWriter.DurableWriter.of({ write }))
@@ -773,9 +773,21 @@ describe("AttemptStore", () => {
       ])
       expect(failures.map((failure) => failure.cause)).toEqual([
         { category: "unknown" },
-        { category: "constraint", reason: "ConstraintError" },
-        { category: "constraint", reason: "UniqueViolation" },
-        { category: "constraint", reason: "constraint" },
+        {
+          category: "constraint",
+          reason: "ConstraintError",
+          cause: new DurableWriter.DatabaseError({ code: "constraint" })
+        },
+        {
+          category: "constraint",
+          reason: "UniqueViolation",
+          cause: new DurableWriter.DatabaseError({ code: "constraint" })
+        },
+        {
+          category: "constraint",
+          reason: "constraint",
+          cause: new DurableWriter.DatabaseError({ code: "constraint" })
+        },
         { category: "persistence_failed", reason: "unknown" },
         { category: "persistence_failed", reason: "unknown" },
         { category: "persistence_failed", reason: "unknown" },

@@ -9,7 +9,7 @@
  *
  * @since 0.1.0
  */
-import { DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
+import { DatabaseError, DurableWriter, fromSqlError } from "@smthrs/database/DurableWriter"
 import type { OwnerId } from "@smthrs/journal/OwnerId"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -714,7 +714,11 @@ const mapPersistenceError = (method: AttemptStoreMethod) => (cause: unknown): At
     "attempt persistence failed",
     {
       category: code,
-      reason: sqlError ? cause.reason._tag : databaseError ? cause.code : "unknown"
+      reason: sqlError ? cause.reason._tag : databaseError ? cause.code : "unknown",
+      // The outer writer must still recognize a nested savepoint's conflict.
+      ...(sqlError || databaseError
+        ? { cause: new DatabaseError({ code: sqlError ? fromSqlError(cause).code : cause.code }) }
+        : {})
     }
   )
 }

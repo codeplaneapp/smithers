@@ -862,6 +862,43 @@ describe("DurableWriter", () => {
     ).toBe(true)
   })
 
+  it.each(["busy", "io", "constraint", "unknown", "unsupported"] as const)(
+    "classifies a payload-free DatabaseError with code %s through domain causes",
+    (code) => {
+      const error = { cause: new DurableWriter.DatabaseError({ code }) }
+      expect(WriteRetry.isRetryableWriteError(error)).toBe(code === "busy")
+    }
+  )
+
+  it("does not treat an untagged busy category or an invalid database code as retry provenance", () => {
+    expect(WriteRetry.isRetryableWriteError({ cause: { code: "busy" } })).toBe(false)
+    expect(WriteRetry.isRetryableWriteError({ _tag: "@smthrs/database/DatabaseError", code: "invalid" }))
+      .toBe(false)
+  })
+
+  it.effect.each([false, true])(
+    "redacted I/O failures veto retry on either channel (defect=%s)",
+    (defect) =>
+      Effect.gen(function*() {
+        const io = { cause: new DurableWriter.DatabaseError({ code: "io" }) }
+        const original = Cause.combine(
+          Cause.fail(new DurableWriter.DatabaseError({ code: "busy" })),
+          defect ? Cause.die(io) : Cause.fail(io)
+        )
+        let attempts = 0
+        const exit = yield* Effect.exit(WriteRetry.withWriteRetry(
+          Effect.suspend(() => {
+            attempts += 1
+            return Effect.failCause(original)
+          }),
+          publicRetryOptions
+        ))
+        expect(attempts).toBe(1)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(exit.cause).toBe(original)
+      })
+  )
+
   it.effect("does not retry a nested write; only the outermost transaction replays", () =>
     Effect.gen(function*() {
       let outerBodies = 0

@@ -44,6 +44,11 @@ A terminal transition also advances `runThroughput` from
 rest of the runtime. See
 [Read the runtime metrics](/pkg/observability/guides/read-runtime-metrics).
 
+Throughput advances only after the outermost managed `DurableWriter.write`
+commits. Rolled-back savepoints and retried transactions do not count; the
+final committed transition counts once. Use the shared writer for this metric:
+raw SQL transactions do not provide a managed commit notification.
+
 ## Wire an exporter
 
 This package ships no exporter. It defines counters and updates them, so they
