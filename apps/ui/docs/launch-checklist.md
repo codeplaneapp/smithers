@@ -33,3 +33,25 @@ The CLI writes JSON and Markdown reports before the first row and after every
 completed row through `onProgress`. Reports during a run contain completed rows
 only. Earlier results therefore remain on disk while a later row is pending.
 The browser is closed in `finally`, including when report writing fails.
+
+B-1 submits a unique prompt and observes the associated reply grow while the
+transcript's `aria-busy` projection of `session.phase` is true. It then reloads
+the page and requires a new navigation time origin, the same prompt and partial
+reply, an idle session, and that reply's app-closed interruption note. An old prompt,
+a pending indicator alone, or a reply that completed before interruption does
+not prove recovery.
+
+E-3 requires `CHECKLIST_BILLING_UPSTREAM_URL`, `CHECKLIST_BILLING_ADMIN_TOKEN`,
+and `CHECKLIST_BILLING_PRODUCT_SERVICE_TOKEN`. It creates a unique synthetic
+account name for each invocation and grants that account $1 with an
+`admin:`-prefixed grant ID. The admin token authenticates the write through
+`x-smithers-admin-token`; the product service token authenticates the isolated
+account reads through `x-smithers-service-token` and `x-user-login`.
+
+E-3 reads `/api/billing/balance` without caching before the grant, after the
+first grant, and after its identical replay. Each response must name the
+isolated user and expose `balance.totalNanos` and `credits`. The first grant
+must add exactly one dollar and one credit with the requested attribution and
+timestamp. Replay must leave both the balance and all durable credit records
+unchanged. HTTP 201 followed by HTTP 200 with `duplicate: true` is insufficient.
+The synthetic account retains the grant and its audit record after the probe.

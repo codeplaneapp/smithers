@@ -6,7 +6,8 @@
  * assert that workflow launch pauses". Both are asserted here against a fake
  * page, so a regression that quietly drops a probe fails the gate.
  */
-import { describe, expect, test } from "bun:test"
+import { GlobalRegistrator } from "@happy-dom/global-registrator"
+import { afterAll, describe, expect, test } from "bun:test"
 import { ROWS } from "./Rows.ts"
 import { runChecklist } from "./Runner.ts"
 import { BrowserUnavailableError, type ChecklistRow, type ProbeContext, type ProbePage } from "./Types.ts"
@@ -73,6 +74,152 @@ const recorder = (): Recorder => ({ typed: [], pressed: [], reloads: 0 })
 
 const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(typeof body === "string" ? body : JSON.stringify(body), { status })
+
+GlobalRegistrator.register()
+afterAll(() => GlobalRegistrator.unregister())
+
+describe("E-3 (grant replay preserves the durable balance and audit)", () => {
+  const env = {
+    CHECKLIST_BILLING_UPSTREAM_URL: "https://billing.test",
+    CHECKLIST_BILLING_ADMIN_TOKEN: "admin-fixture",
+    CHECKLIST_BILLING_PRODUCT_SERVICE_TOKEN: "product-fixture"
+  }
+  const ledger = (fault = "none") => {
+    let totalNanos = 500_000_000_000
+    let posts = 0
+    let user = ""
+    const credits: Array<Record<string, unknown>> = []
+    const calls: Array<string> = []
+    const bodies: Array<Record<string, unknown>> = []
+    const fetch: ProbeContext["fetch"] = async (url, init) => {
+      const headers = new Headers(init?.headers)
+      if (init?.method !== "POST") {
+        expect(url).toBe("https://billing.test/api/billing/balance")
+        expect(headers.get("x-smithers-service-token")).toBe("product-fixture")
+        expect(headers.has("authorization")).toBe(false)
+        expect(init?.cache).toBe("no-store")
+        user ||= headers.get("x-user-login") ?? ""
+        expect(headers.get("x-user-login")).toBe(user)
+        calls.push("read")
+        if (fault === "unreadable") return jsonResponse({}, 503)
+        return jsonResponse({
+          user: fault === "wrong-account" ? "another-account" : user,
+          balance: { totalNanos: fault === "malformed" ? null : totalNanos },
+          credits
+        })
+      }
+      calls.push("grant")
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>
+      bodies.push(body)
+      posts += 1
+      if (posts === 1 || fault === "double-credit") totalNanos += 1_000_000_000
+      if (posts === 1 && fault !== "missing-audit") credits.push({
+        id: body.grantId ?? body.idempotencyKey,
+        kind: "promotional", grantedUsd: "1", consumedUsd: "0", remainingUsd: "1",
+        createdAt: "2026-09-08T00:00:00.000Z", expiresAt: null,
+        source: "admin-grant:manual-admin-grant",
+        requestedBy: body.requester, requestedAt: body.timestamp
+      })
+      if (posts === 2 && fault === "duplicate-audit") credits.push({ ...credits[0] })
+      if (posts === 2 && fault === "rewritten-audit") credits[0]!.createdAt = "2026-09-09T00:00:00.000Z"
+      if (fault === "bad-attribution" && credits[0]) credits[0].requestedBy = "someone-else"
+      if (posts === 1 && fault === "wrong-first-credit") totalNanos += 1_000_000_000
+      if (posts === 2 && fault === "wrong-first-credit") totalNanos -= 1_000_000_000
+      return jsonResponse(posts === 1 ? { granted: true } : { duplicate: true }, posts === 1 ? 201 : 200)
+    }
+    return { fetch, calls, bodies }
+  }
+
+  test("reads before, after the grant, and after replay for one isolated account", async () => {
+    const first = ledger()
+    expect((await rowById("E-3").probe(contextFor({ env, fetch: first.fetch }))).status).toBe("pass")
+    expect(first.calls).toEqual(["read", "grant", "read", "grant", "read"])
+    expect(first.bodies[0]).toEqual(first.bodies[1])
+    expect(first.bodies[0]?.amountUsd).toBe(1)
+    expect(first.bodies[0]?.grantId).toMatch(/^admin:/)
+    expect(first.bodies[0]?.userId).toBe(first.bodies[0]?.requester)
+    const second = ledger()
+    expect((await rowById("E-3").probe(contextFor({ env, fetch: second.fetch }))).status).toBe("pass")
+    expect(second.bodies[0]?.userId).not.toBe(first.bodies[0]?.userId)
+  })
+
+  for (const fault of ["double-credit", "missing-audit", "duplicate-audit", "rewritten-audit", "bad-attribution", "wrong-first-credit", "wrong-account", "malformed", "unreadable"]) {
+    test(`fails despite duplicate:true when the ledger has ${fault}`, async () => {
+      const fixture = ledger(fault)
+      expect((await rowById("E-3").probe(contextFor({ env, fetch: fixture.fetch }))).status).toBe("fail")
+    })
+  }
+})
+
+describe("B-1 (recover an observed streaming turn)", () => {
+  const recoveryPage = (fault = "none") => {
+    const doc = document.implementation.createHTMLDocument()
+    const track = recorder()
+    let submitted = false
+    let reads = 0
+    const render = () => {
+      doc.body.replaceChildren()
+      doc.body.append(doc.createElement("textarea"))
+      const transcript = doc.createElement("div")
+      transcript.setAttribute("data-testid", "transcript")
+      transcript.setAttribute("aria-busy", String(submitted && (track.reloads === 0 || fault === "still-running") && fault !== "never-started" && fault !== "already-complete"))
+      doc.body.append(transcript)
+      const message = (role: string, text: string, note = "") => {
+        const article = doc.createElement("article")
+        article.className = "smithers-chat-message"
+        article.setAttribute("data-role", role)
+        const markdown = doc.createElement("div")
+        markdown.className = "message-markdown"
+        markdown.textContent = text
+        article.append(markdown)
+        const meta = doc.createElement("div")
+        meta.className = "sui-chat-message-meta"
+        meta.textContent = note
+        article.append(meta)
+        transcript.append(article)
+      }
+      message("user", "Launch checklist B-1 restore probe")
+      message("assistant", "An old reply", "Turn interrupted")
+      if (!submitted || fault === "stale-marker") return
+      message("user", track.typed[0] ?? "")
+      if (fault === "never-started") return
+      reads += 1
+      const partial = reads === 1 ? "one" : "one two"
+      if (fault === "unrelated-reply") message("user", "A different turn")
+      message("assistant", track.reloads > 0 && fault === "lost-work" ? "" : partial,
+        track.reloads > 0 && fault !== "missing-status"
+          ? fault === "failed-recovery" ? "Turn interrupted — Recovery failed to load the session." : "Turn interrupted — That turn was interrupted when the app closed."
+          : "")
+    }
+    const page: ProbePage = {
+      text: async () => { render(); return doc.body.textContent ?? "" },
+      evaluate: async <T>(expression: string) => {
+        render()
+        return new Function("document", "performance", `return (${expression})`)(doc, { timeOrigin: fault === "no-reload" ? 1 : track.reloads + 1 }) as T
+      },
+      type: async (text) => { track.typed.push(text) },
+      press: async (key) => { track.pressed.push(key); if (key === "Enter") submitted = true },
+      reload: async () => { track.reloads += 1 }
+    }
+    return { page, track }
+  }
+
+  test("interrupts a new streaming reply and restores its partial text with idle/interrupted state", async () => {
+    const first = recoveryPage()
+    expect((await rowById("B-1").probe(contextFor({ page: first.page }))).status).toBe("pass")
+    expect(first.track.reloads).toBe(1)
+    const second = recoveryPage()
+    expect((await rowById("B-1").probe(contextFor({ page: second.page }))).status).toBe("pass")
+    expect(second.track.typed[0]).not.toBe(first.track.typed[0])
+  })
+
+  for (const fault of ["stale-marker", "never-started", "already-complete", "lost-work", "still-running", "missing-status", "failed-recovery", "unrelated-reply", "no-reload"]) {
+    test(`fails recovery with ${fault}`, async () => {
+      const fixture = recoveryPage(fault)
+      expect((await rowById("B-1").probe(contextFor({ page: fixture.page }))).status).toBe("fail")
+    })
+  }
+})
 
 describe("the row catalog", () => {
   test("covers every checklist section", () => {

@@ -46,6 +46,7 @@ const SESSION_COOKIE = "CHECKLIST_SESSION_COOKIE"
 const ZERO_BALANCE_COOKIE = "CHECKLIST_ZERO_BALANCE_BEARER"
 const BILLING_UPSTREAM = "CHECKLIST_BILLING_UPSTREAM_URL"
 const BILLING_ADMIN_TOKEN = "CHECKLIST_BILLING_ADMIN_TOKEN"
+const BILLING_PRODUCT_TOKEN = "CHECKLIST_BILLING_PRODUCT_SERVICE_TOKEN"
 
 const signedInPage = (ctx: ProbeContext): Promise<ProbePage> => ctx.page(ctx.env[SESSION_COOKIE])
 
@@ -100,6 +101,36 @@ const balanceRead = async (ctx: ProbeContext, cookieEnvVar: string, label: strin
     `${label}: HTTP ${response.status} ${text.slice(0, 200)}`
   )
 }
+
+interface RecoverySnapshot {
+  readonly timeOrigin: number
+  readonly busy: string | null
+  readonly found: boolean
+  readonly reply: string
+  readonly note: string
+}
+
+/** App.tsx projects session.phase through aria-busy and message.status through the reply's meta. */
+const recoverySnapshot = (page: ProbePage, prompt: string): Promise<RecoverySnapshot> => page.evaluate(`(() => {
+  const transcript = document.querySelector('[data-testid="transcript"]');
+  const messages = Array.from(transcript?.querySelectorAll('.smithers-chat-message[data-role]') ?? []);
+  const text = (message) => message?.querySelector('.message-markdown')?.textContent ?? '';
+  const index = messages.findIndex((message) => message.getAttribute('data-role') === 'user' && text(message) === ${JSON.stringify(prompt)});
+  let response;
+  if (index >= 0) {
+    for (const message of messages.slice(index + 1)) {
+      if (message.getAttribute('data-role') === 'user') break;
+      if (message.getAttribute('data-role') === 'assistant') { response = message; break; }
+    }
+  }
+  return {
+    timeOrigin: performance.timeOrigin,
+    busy: transcript?.getAttribute('aria-busy') ?? null,
+    found: index >= 0,
+    reply: text(response),
+    note: response?.querySelector('.sui-chat-message-meta')?.textContent ?? ''
+  };
+})()`)
 
 export const ROWS: ReadonlyArray<ChecklistRow> = [
   {
@@ -221,17 +252,41 @@ export const ROWS: ReadonlyArray<ChecklistRow> = [
     browser: true,
     probe: async (ctx) => {
       const page = await signedInPage(ctx)
-      const marker = "Launch checklist B-1 restore probe"
+      const marker = `Launch checklist B-1 restore probe ${crypto.randomUUID()}. Count slowly from one to two hundred, one number per line.`
+      const initial = await recoverySnapshot(page, marker)
+      if (initial.busy !== "false") return fail("B-1 needs an idle transcript before submitting its own turn")
       await sendPrompt(page, marker)
-      await ctx.sleep(1_500)
+      const activeDeadline = ctx.now() + 60_000
+      let previous: RecoverySnapshot | undefined
+      let active: RecoverySnapshot | undefined
+      while (ctx.now() < activeDeadline) {
+        const snapshot = await recoverySnapshot(page, marker)
+        if (snapshot.found && snapshot.busy === "true" && snapshot.note === "" && snapshot.reply.trim() !== "") {
+          // A pending indicator or persisted user prompt alone does not prove streaming.
+          if (previous !== undefined && snapshot.reply.startsWith(previous.reply) && snapshot.reply.length > previous.reply.length) {
+            active = snapshot
+            break
+          }
+          previous = snapshot
+        } else {
+          previous = undefined
+        }
+        await ctx.sleep(100)
+      }
+      if (active === undefined) return fail("B-1 never observed a growing partial reply for its new prompt while the session was responding")
       await page.reload()
-      const restored = await waitForText(page, (text) => text.includes(marker), 30_000, ctx.now, ctx.sleep)
-      return verdict(
-        restored.ok,
-        `after a reload mid-turn the transcript ${
-          restored.ok ? "still carries" : "lost"
-        } the in-flight prompt (waited ${restored.elapsedMs}ms)`
-      )
+      const recoveryDeadline = ctx.now() + 30_000
+      let restored: RecoverySnapshot | undefined
+      while (ctx.now() < recoveryDeadline) {
+        restored = await recoverySnapshot(page, marker)
+        if (Number.isFinite(restored.timeOrigin) && restored.timeOrigin !== active.timeOrigin &&
+          restored.found && restored.reply.startsWith(active.reply) && restored.busy === "false" &&
+          restored.note === "Turn interrupted — That turn was interrupted when the app closed.") {
+          return verdict(true, "B-1 reloaded an actively streaming turn; its prompt and partial reply survived, with the session idle and that reply marked interrupted")
+        }
+        await ctx.sleep(100)
+      }
+      return fail(`B-1 recovery did not preserve the partial reply with idle/interrupted state: reloaded=${restored?.timeOrigin !== active.timeOrigin}; prompt=${restored?.found}; partial=${restored?.reply.startsWith(active.reply)}; aria-busy=${restored?.busy}; note=${restored?.note}`)
     }
   },
   {
@@ -640,28 +695,66 @@ export const ROWS: ReadonlyArray<ChecklistRow> = [
     id: "E-3",
     section: "E",
     title: "A grant with requester + timestamp credits the balance exactly once (201, audit record)",
-    requiredEnv: [BILLING_UPSTREAM, BILLING_ADMIN_TOKEN],
+    requiredEnv: [BILLING_UPSTREAM, BILLING_ADMIN_TOKEN, BILLING_PRODUCT_TOKEN],
     probe: async (ctx) => {
       const upstream = ctx.env[BILLING_UPSTREAM] ?? ""
       const timestamp = new Date(ctx.now()).toISOString()
+      // Fits the billing service's GitHub-login grammar, and isolates concurrent runs.
+      const requester = `lc-e3-${crypto.randomUUID().replaceAll("-", "")}`
+      const grantId = `admin:${requester}`
       const body = JSON.stringify({
-        requester: "launch-checklist",
+        userId: requester,
+        requester,
         timestamp,
-        amountUsd: "1.00",
-        idempotencyKey: `launch-checklist-${timestamp}`
+        amountUsd: 1,
+        kind: "promotional",
+        grantId
       })
       const headers = {
         "content-type": "application/json",
-        authorization: `Bearer ${ctx.env[BILLING_ADMIN_TOKEN] ?? ""}`
+        "x-smithers-admin-token": ctx.env[BILLING_ADMIN_TOKEN] ?? ""
       }
+      // BalanceOverview.credits is the ledger's durable audit, not the POST receipt.
+      const readLedger = async () => {
+        const response = await ctx.fetch(`${upstream}/api/billing/balance`, {
+          cache: "no-store",
+          headers: {
+            "x-smithers-service-token": ctx.env[BILLING_PRODUCT_TOKEN] ?? "",
+            "x-user-login": requester
+          }
+        })
+        const record = asRecord(await response.json().catch(() => null))
+        const totalNanos = asRecord(record?.balance)?.totalNanos
+        const credits = Array.isArray(record?.credits) ? record.credits.map(asRecord) : undefined
+        if (response.status !== 200 || record?.user !== requester || typeof totalNanos !== "number" ||
+          !Number.isSafeInteger(totalNanos) || totalNanos < 0 || credits === undefined ||
+          credits.some((credit) => credit === undefined || typeof credit.id !== "string")) return undefined
+        return { totalNanos, credits: credits as Array<Record<string, unknown>> }
+      }
+      const auditKey = (credit: Record<string, unknown>) => JSON.stringify(Object.entries(credit).sort(([a], [b]) => a.localeCompare(b)))
+      const auditKeys = (credits: ReadonlyArray<Record<string, unknown>>) => credits.map(auditKey).sort().join("\n")
+      const before = await readLedger()
+      if (before === undefined) return fail("E-3 could not read the isolated account's balance and durable credits before granting")
+      if (before.credits.some((credit) => credit.id === grantId)) return fail("E-3 isolated grant id already exists before the first grant")
       const first = await ctx.fetch(`${upstream}/api/billing/admin/grants`, { method: "POST", headers, body })
       const firstText = await first.text()
-      // The same key again must not credit twice — "exactly once" is the row.
-      // The upstream's definite replay answer is 200 with duplicate:true
-      // (billing-grants.e2e.ts E6.9 proves the shape against the double);
-      // any other non-201 — a 500 above all — is a failure, not a pass.
+      const afterFirst = await readLedger()
+      const audit = afterFirst?.credits.filter((credit) => credit.id === grantId) ?? []
+      const grant = audit[0]
+      const attributed = audit.length === 1 && grant?.requestedBy === requester && grant.requestedAt === timestamp &&
+        grant.kind === "promotional" && typeof grant.grantedUsd === "string" && Number(grant.grantedUsd) === 1 &&
+        typeof grant.consumedUsd === "string" && Number(grant.consumedUsd) === 0 &&
+        typeof grant.remainingUsd === "string" && Number(grant.remainingUsd) === 1 &&
+        typeof grant.createdAt === "string" && Number.isFinite(Date.parse(grant.createdAt)) &&
+        grant.expiresAt === null && typeof grant.source === "string" && grant.source.startsWith("admin-grant:")
+      if (first.status !== 201 || afterFirst === undefined || afterFirst.totalNanos - before.totalNanos !== 1_000_000_000 ||
+        !attributed || afterFirst.credits.length !== before.credits.length + 1 ||
+        auditKeys(afterFirst.credits.filter((credit) => credit.id !== grantId)) !== auditKeys(before.credits)) {
+        return fail(`E-3 first grant did not credit exactly $1 with one attributed durable audit record: HTTP ${first.status}; totalNanos ${before.totalNanos} -> ${afterFirst?.totalNanos}; attributed=${attributed}; receipt=${firstText.slice(0, 160)}`)
+      }
       const repeat = await ctx.fetch(`${upstream}/api/billing/admin/grants`, { method: "POST", headers, body })
       const repeatText = await repeat.text()
+      const afterReplay = await readLedger()
       let duplicate = false
       try {
         duplicate = asRecord(JSON.parse(repeatText))?.duplicate === true
@@ -669,10 +762,9 @@ export const ROWS: ReadonlyArray<ChecklistRow> = [
         duplicate = false
       }
       return verdict(
-        first.status === 201 && repeat.status === 200 && duplicate,
-        `grant: HTTP ${first.status} ${
-          firstText.slice(0, 160)
-        }; replay of the same idempotency key: HTTP ${repeat.status} duplicate=${duplicate} ${repeatText.slice(0, 160)}`
+        repeat.status === 200 && duplicate && afterReplay !== undefined &&
+          afterReplay.totalNanos === afterFirst.totalNanos && auditKeys(afterReplay.credits) === auditKeys(afterFirst.credits),
+        `E-3 ${requester}: totalNanos ${before.totalNanos} -> ${afterFirst.totalNanos} -> ${afterReplay?.totalNanos}; credits ${before.credits.length} -> ${afterFirst.credits.length} -> ${afterReplay?.credits.length}; replay HTTP ${repeat.status} duplicate=${duplicate}; durable audit unchanged=${afterReplay !== undefined && auditKeys(afterReplay.credits) === auditKeys(afterFirst.credits)}`
       )
     }
   },
