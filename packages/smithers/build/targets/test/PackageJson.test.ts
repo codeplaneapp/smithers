@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
+import * as Vm from "node:vm"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import * as Input from "../src/Input.ts"
 import {
@@ -16,18 +17,20 @@ import {
   maximumManifestBytes,
   merge,
   PackageJson,
+  PackageJsonCheck,
   parseGenerated,
   publishFields,
   render,
   scriptCommand,
   sync,
-  type SyncPayload,
+  SyncPayload,
   targets
 } from "../src/PackageJson.ts"
 import * as PackageJsonTemplate from "../src/PackageJsonTemplate.ts"
 import * as Target from "../src/Target.ts"
 import { Attrs as TsBuildAttrs, distributionLayout, type Tool, TsBuild } from "../src/TsBuild.ts"
 import { Vitest } from "../src/Vitest.ts"
+import { plannedCalls } from "./plan.ts"
 import { packageManager } from "./toolchain.ts"
 
 let root: string
@@ -844,6 +847,86 @@ describe("target synthesis", () => {
       expect(metadata.cacheable).toBe(false)
     }
     expect((Target.metadata(expanded.refresh).attrs as { mode: string }).mode).toBe("refresh")
+  })
+
+  it.each(["write", "refresh"] as const)("coerces %s to check in lint metadata", (mode) => {
+    const target = PackageJsonCheck({
+      output: "//package.json",
+      fields: payload().fields,
+      generated: [],
+      readme: null,
+      sources: null,
+      mode
+    })
+    expect(Target.metadata(target).forKind("lint").attrs).toMatchObject({ mode: "check" })
+  })
+
+  it.each(["write", "refresh"] as const)("forces %s to check in the action payload", async (mode) => {
+    const target = PackageJsonCheck({
+      output: "//package.json",
+      fields: payload().fields,
+      generated: ["description"],
+      readme: null,
+      sources: null,
+      mode
+    })
+    const value = Schema.decodeUnknownSync(SyncPayload)(plannedCalls(target)[0]!.payload)
+    expect(value.mode).toBe("check")
+    const original = render({ name: "widget", version: "0.0.9", description: "A widget." })
+    await Fs.writeFile(NodePath.join(root, "package.json"), original)
+    expect((await failure(value, "missing-package-json-model")).message).toContain("version: expected")
+    expect(await Fs.readFile(NodePath.join(root, "package.json"), "utf8")).toBe(original)
+  })
+
+  it.each(["check", "write", "refresh"] as const)(
+    "keys %s generation on sources within the declaring package",
+    async (kind) => {
+      const directory = NodePath.join(root, "packages/widget")
+      await Fs.mkdir(NodePath.join(directory, "src/nested"), { recursive: true })
+      await Fs.writeFile(NodePath.join(directory, "PACKAGE.ts"), "// package boundary\n")
+      await Fs.writeFile(NodePath.join(directory, "README.md"), "# widget\n")
+      await Fs.writeFile(NodePath.join(directory, "src/index.ts"), "export const widget = 1\n")
+      await Fs.writeFile(NodePath.join(directory, "src/nested/PACKAGE.ts"), "// nested boundary\n")
+      await Fs.writeFile(NodePath.join(directory, "src/nested/hidden.ts"), "export const hidden = 1\n")
+      const expanded = targets(
+        PackageJson({ name: "widget", version: "0.1.0", description: generated }),
+        "packages/widget",
+        labeller([])
+      )
+      const value = Schema.decodeUnknownSync(SyncPayload)(plannedCalls(expanded[kind])[0]!.payload)
+      const first = await generationContext(root, value)
+      expect(first.sources).toEqual(["packages/widget/src/index.ts"])
+      await Fs.writeFile(NodePath.join(directory, "src/added.ts"), "export const added = 1\n")
+      const added = await generationContext(root, value)
+      expect(added.sources).toEqual(["packages/widget/src/added.ts", "packages/widget/src/index.ts"])
+      expect(added.digest).not.toBe(first.digest)
+      await Fs.writeFile(NodePath.join(directory, "src/index.ts"), "export const widget = 2\n")
+      await Fs.writeFile(NodePath.join(directory, "src/nested/another.ts"), "export const another = 1\n")
+      expect((await generationContext(root, value)).digest).toBe(added.digest)
+      await Fs.unlink(NodePath.join(directory, "src/added.ts"))
+      expect((await generationContext(root, value)).digest).toBe(first.digest)
+    }
+  )
+
+  it("carries the declaration context when a check target is constructed directly", async () => {
+    const directory = NodePath.join(root, "packages/widget")
+    await Fs.mkdir(NodePath.join(directory, "src"), { recursive: true })
+    await Fs.writeFile(NodePath.join(directory, "PACKAGE.ts"), "// package boundary\n")
+    await Fs.writeFile(NodePath.join(directory, "src/index.ts"), "export const widget = 1\n")
+    const declare = Vm.compileFunction("return make(attrs)", ["make", "attrs"], {
+      filename: NodePath.join(directory, "PACKAGE.ts")
+    })
+    const target: Target.AnyTarget = declare(PackageJsonCheck, {
+      output: "//package.json",
+      fields: payload().fields,
+      generated: ["description"],
+      readme: null,
+      sources: Input.glob("//packages/widget/src/**/*.ts"),
+      mode: "check"
+    })
+    expect(Target.metadata(target).sourceFile).toBe(NodePath.join(directory, "PACKAGE.ts"))
+    const value = Schema.decodeUnknownSync(SyncPayload)(plannedCalls(target)[0]!.payload)
+    expect((await generationContext(root, value)).sources).toEqual(["packages/widget/src/index.ts"])
   })
 
   it("anchors the manifest, README, and source glob at the workspace root", () => {

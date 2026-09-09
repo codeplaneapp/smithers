@@ -582,6 +582,8 @@ export type SyncMode = typeof SyncMode.Type
  */
 export const SyncPayload = Schema.Struct({
   path: Schema.NonEmptyString,
+  /** Workspace-relative for synthesized targets, absolute from declaration context. */
+  packageDirectory: Schema.optional(Schema.String),
   mode: SyncMode,
   fields: Schema.Record(Schema.String, Schema.Unknown),
   generated: Schema.Array(GeneratedField),
@@ -790,7 +792,14 @@ export const generationContext = async (
     if (text === undefined) throw new Error(`package-json generation README is missing: ${payload.readme.path}`)
     readme = text
   }
-  const sources = payload.sources === null ? [] : await Input.expandGlob(workspaceRoot, "", payload.sources, {
+  const declaringDirectory = payload.packageDirectory ?? ""
+  const packageDirectory = Input.resolvePath(
+    "",
+    NodePath.isAbsolute(declaringDirectory)
+      ? NodePath.relative(root, declaringDirectory).split(NodePath.sep).join("/")
+      : declaringDirectory
+  )
+  const sources = payload.sources === null ? [] : await Input.expandGlob(root, packageDirectory, payload.sources, {
     cacheDirectory: options.cacheDirectory,
     signal: options.signal
   })
@@ -1060,6 +1069,8 @@ export const SyncPackageJsonLive = (
  */
 export const Attrs = Schema.Struct({
   output: Schema.NonEmptyString,
+  /** Explicit package anchor for synthesized targets; otherwise use the declaration context. */
+  packageDirectory: Schema.optional(Schema.String),
   fields: Schema.Record(Schema.String, Schema.Unknown),
   generated: Schema.Array(GeneratedField),
   readme: Schema.NullOr(Input.File),
@@ -1081,9 +1092,13 @@ export type Attrs = typeof Attrs.Type
 /** What executing a manifest sync node requires. */
 type SyncRequirement = Action.Requirement<"smithers-build/sync-package-json">
 
-const implementation = (attrs: Attrs): Node.Node<void, WriteFileError | DriftError, SyncRequirement> =>
+const implementation = (
+  attrs: Attrs,
+  context: Target.ImplementationContext
+): Node.Node<void, WriteFileError | DriftError, SyncRequirement> =>
   SyncPackageJson.call({
     path: resolveOutputPath(attrs.output),
+    packageDirectory: attrs.packageDirectory ?? context.packageDirectory ?? "",
     mode: attrs.mode,
     fields: attrs.fields,
     generated: attrs.generated,
@@ -1113,7 +1128,8 @@ export const PackageJsonCheck = Target.make("PackageJsonCheck", {
   error: Schema.Union([WriteFileError, DriftError]),
   cache: true,
   inputs: (attrs) => [Input.file(`//${resolveOutputPath(attrs.output)}`)],
-  implementation
+  attrsForKind: (kind, attrs) => kind === "lint" ? { ...attrs, mode: "check" as const } : attrs,
+  implementation: (attrs, context) => implementation({ ...attrs, mode: "check" }, context)
 })
 
 /**
@@ -1500,6 +1516,7 @@ export const targets = (
   const anchored = (value: string): string => `//${Input.resolvePath(packagePath, value)}`
   const shared = {
     output: anchored(declaration.output),
+    packageDirectory: packagePath,
     fields,
     generated: declaration.generated,
     readme: declaration.readme === null ? null : Input.file(anchored(declaration.readme.path)),

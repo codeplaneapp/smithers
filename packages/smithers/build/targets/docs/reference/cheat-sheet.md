@@ -564,6 +564,11 @@ Dual builds use declarations beside ESM; CJS-only builds use declarations beside
 `PackageJson.publishFields` derives entry points from this layout during declaration expansion.
 The tsup tool declares one flat output tree and does not request declarations, so it cannot serve as a `PackageJson` publish entry.
 
+`PackageJson` expands generated-prose source globs within the declaring package, excluding nested packages.
+The generation digest includes the source path listing, so adding or removing a source changes it; editing source bytes does not.
+`PackageJsonCheck` always checks, even when declared with `mode: "write"` or `mode: "refresh"`.
+It never writes the manifest or calls a model. Use `PackageJsonWrite` for those modes.
+
 ## Shell, tools, Node, and bundling
 
 ```ts
