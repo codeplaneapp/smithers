@@ -5,16 +5,17 @@ description: "One durable engine, with Effect services selected at the host boun
 
 # Runtime portability is a required contract
 
-Smithers flow definitions and domain services are Effect programs. They do not
-select a JavaScript runtime, open a SQL connection, or spawn another runtime.
-Node and Bun use the same engine, journal, migration sets, run store, step cache,
-capability checks, and durable waits. Only the executable's host layers differ.
+Smithers flow definitions and domain services must be Effect programs. Runtime
+selection, connection creation and process spawning belong to injected host
+services. Keep domain definitions independent of the executable that runs them.
+`NodeRuntime` and `BunRuntime` bind the same `makeNative` runtime factory to their
+matching database, host and cryptography layers.
 
-The shared `@smthrs/flows/Runtime` composition requires Effect `SqlClient`,
-`Path`, `FileSystem`, `Crypto` and JJ services. It creates no SQL driver. The
-existing Node composition and the Bun composition inject their matching SQL
-adapter and host services. Both database adapters share the schema guard and
-startup retry logic; stores use the existing `DurableWriter` transaction policy.
+The shared `@smthrs/flows/Runtime.storage` composition builds journal and durable
+store layers over injected services; it does not select a SQL driver. The native
+compositions supply that driver. Both database adapters share the schema guard
+and startup retry logic; stores use the existing `DurableWriter` transaction
+policy.
 
 ```ts
 import * as BunRuntime from "@smthrs/flows/BunRuntime"
@@ -30,10 +31,11 @@ const application = program.pipe(
 ```
 
 Use `NodeRuntime.layerHost` with the same flow definitions in a Node executable.
-The outer executable runs the Effect and owns its scope. Closing that scope
-closes database resources and releases durable work. `signals: []` leaves signal
-handling with an embedding application. Node/Bun compatibility does not imply
-that browser or edge durable execution has been implemented.
+The outer executable runs the Effect and owns its scope. The native host
+composition forks that scope and builds the runtime inside it; closing the
+caller's scope initiates runtime shutdown. `signals: []` leaves signal handling
+with an embedding application. These examples cover native Node and Bun hosts;
+browser and edge hosts need their own adapters and validation.
 
 ## Database ownership
 
