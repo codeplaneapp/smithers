@@ -1131,6 +1131,145 @@ describe("McpClient.connect", () => {
     })
   })
 
+  it("snapshots the 1 MiB probe argument with one descriptor batch per container", async () => {
+    const args = {
+      rows: Array.from({ length: 12_000 }, (_, i) => ({
+        id: i,
+        name: `row-${i}`,
+        ok: i % 2 === 0,
+        tags: ["a", "b"],
+        score: i / 7
+      }))
+    }
+    const encoded = JSON.stringify(args)
+    expect(encoded.length).toBe(985_531)
+    let sent: unknown
+    await withFakeServer(
+      (request) => {
+        if (request.method === "tools/call") {
+          sent = (request.params as { arguments: unknown }).arguments
+          return { content: [] }
+        }
+        return respondToEcho(request)
+      },
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "snapshot-budget", command: "mcp", args: [] })
+        const descriptors = vi.spyOn(Object, "getOwnPropertyDescriptor")
+        const batches = vi.spyOn(Object, "getOwnPropertyDescriptors")
+        descriptors.mockClear()
+        let call: ReturnType<typeof client.callTool>
+        let perMemberCalls: number
+        let batchCalls: number
+        try {
+          call = client.callTool("add", args)
+          perMemberCalls = descriptors.mock.calls.length
+          batchCalls = batches.mock.calls.length
+        } finally {
+          descriptors.mockRestore()
+          batches.mockRestore()
+        }
+        expect(perMemberCalls).toBe(0)
+        expect(batchCalls).toBe(24_002)
+        yield* call
+      })
+    )
+    expect(JSON.stringify(sent)).toBe(encoded)
+  })
+
+  it("bounds large enum membership across a long result array", async () => {
+    const count = 10_000
+    const rows = Array(count).fill(count - 1)
+    const outputSchema = {
+      type: "object",
+      properties: {
+        rows: { type: "array", items: { enum: Array.from({ length: count }, (_, i) => i) } }
+      }
+    }
+    await withFakeServer(
+      respondWithStructured(outputSchema, { rows }),
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "enum-budget", command: "mcp", args: [] })
+        const start = performance.now()
+        const result = yield* client.callTool("add", {})
+        expect(result.structuredContent).toEqual({ rows })
+        expect(performance.now() - start).toBeLessThan(1_000)
+      })
+    )
+  })
+
+  it.each([
+    { value: { z: [1, null, true], a: { b: "x" } }, member: { a: { b: "x" }, z: [1, null, true] }, accepts: true },
+    { value: { a: [1, 2] }, member: { a: [2, 1] }, accepts: false },
+    { value: { a: "1" }, member: { a: 1 }, accepts: false },
+    { value: { a: 0 }, member: { a: -0 }, accepts: true },
+    { value: { a: {} }, member: { a: [] }, accepts: false },
+    { value: { a: { b: 1 } }, member: { "a\":{\"b": 1 }, accepts: false }
+  ])("preserves composite enum equality: $accepts ($value)", async ({ value, member, accepts }) => {
+    await withFakeServer(
+      respondWithStructured({ enum: [member] }, value),
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "enum-json", command: "mcp", args: [] })
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const exit = yield* Effect.exit(client.callTool("add", {}))
+          expect(Exit.isSuccess(exit)).toBe(accepts)
+          if (!accepts) expect(typedFailure(exit)).toMatchObject({ code: "invalid_response" })
+        }
+      })
+    )
+  })
+
+  it("ignores a proxy symbol that disappears during descriptor collection", async () => {
+    const symbol = Symbol("gone")
+    const args = new Proxy({}, { ownKeys: () => [symbol] })
+    await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "snapshot-symbol", command: "mcp", args: [] })
+        yield* client.callTool("add", args)
+      })
+    )
+  })
+
+  it("lets a host timer interrupt structured validation", async () => {
+    const rows = Array(100_000).fill(999)
+    const outputSchema = {
+      required: ["validationStart"],
+      properties: {
+        rows: { items: { enum: Array.from({ length: 1_000 }, (_, i) => i) } }
+      }
+    }
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let started = 0
+    const hasOwn = Object.hasOwn
+    try {
+      await withFakeServer(
+        respondWithStructured(outputSchema, { validationStart: true, rows }),
+        Effect.gen(function*() {
+          const client = yield* McpClient.connect({ server: "enum-interrupt", command: "mcp", args: [] })
+          // Arm only when the validator checks required, after transport parsing.
+          const reflection = vi.spyOn(Object, "hasOwn").mockImplementation((value, key) => {
+            if (key === "validationStart" && started === 0) {
+              started = performance.now()
+              timer = setTimeout(() => controller.abort(), 25)
+            }
+            return hasOwn(value, key)
+          })
+          const exit = yield* Effect.promise(() =>
+            Effect.runPromiseExit(client.callTool("add", {}), {
+              signal: controller.signal
+            })
+          ).pipe(Effect.ensuring(Effect.sync(() => reflection.mockRestore())))
+          expect(started).toBeGreaterThan(0)
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(performance.now() - started).toBeLessThan(1_000)
+        })
+      )
+    } finally {
+      clearTimeout(timer)
+    }
+  })
+
   it("supports every documented outputSchema type and type arrays", async () => {
     const structuredContent = {
       nullValue: null,

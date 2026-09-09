@@ -416,17 +416,54 @@ const matchesJsonSchemaType = (value: unknown, type: JsonSchemaType): boolean =>
   }
 }
 
-const jsonValuesEqual = (left: unknown, right: unknown): boolean => {
-  if (left === right) return true
-  if (Array.isArray(left)) {
-    return Array.isArray(right) && left.length === right.length &&
-      left.every((value, index) => jsonValuesEqual(value, right[index]))
+// Every traversal step consumes a slice slot, including enum-key construction.
+// Yielding keeps validation interruptible after the transport has completed.
+const runJsonWork = <A>(work: Generator<void, A>): Effect.Effect<A> =>
+  Effect.gen(function*() {
+    while (true) {
+      for (let steps = 0; steps < 1_024; steps += 1) {
+        const next = work.next()
+        if (next.done) return next.value
+      }
+      yield* Effect.yieldNow
+    }
+  })
+
+// Keys are canonical JSON: object order is irrelevant, array order is not.
+// Inputs here are depth-checked parsed JSON, never caller-owned arguments.
+const enumKey = function*(value: unknown): Generator<void, string> {
+  yield
+  if (Array.isArray(value)) {
+    const items: Array<string> = []
+    for (const item of value) items.push(yield* enumKey(item))
+    return `[${items.join(",")}]`
   }
-  if (!isRecord(left) || !isRecord(right)) return false
-  const leftKeys = Object.keys(left)
-  const rightKeys = Object.keys(right)
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key) => Object.hasOwn(right, key) && jsonValuesEqual(left[key], right[key]))
+  if (isRecord(value)) {
+    const members: Array<string> = []
+    for (const key of Object.keys(value).sort()) {
+      members.push(`${JSON.stringify(key)}:${yield* enumKey(value[key])}`)
+    }
+    return `{${members.join(",")}}`
+  }
+  return JSON.stringify(value)!
+}
+
+type EnumIndexes = WeakMap<Record<string, unknown>, ReadonlySet<string>>
+
+const indexEnums = function*(schema: Record<string, unknown>, indexes: EnumIndexes): Generator<void, void> {
+  yield
+  if (Array.isArray(schema.enum)) {
+    const index = new Set<string>()
+    for (const member of schema.enum) index.add(yield* enumKey(member))
+    indexes.set(schema, index)
+  }
+  if (isRecord(schema.properties)) {
+    for (const property of Object.values(schema.properties)) {
+      yield
+      if (isRecord(property)) yield* indexEnums(property, indexes)
+    }
+  }
+  if (isRecord(schema.items)) yield* indexEnums(schema.items, indexes)
 }
 
 /**
@@ -436,23 +473,28 @@ const jsonValuesEqual = (left: unknown, right: unknown): boolean => {
  * partial validator must not turn an unsupported constraint into a false
  * rejection.
  */
-const validateStructuredContent = (
+const validateStructuredContent = function*(
   value: unknown,
   schema: Record<string, unknown>,
-  path: string
-): JsonIssue | undefined => {
-  if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => jsonValuesEqual(candidate, value))) {
+  path: string,
+  indexes: EnumIndexes
+): Generator<void, JsonIssue | undefined> {
+  yield
+  const index = indexes.get(schema)
+  if (index !== undefined && !index.has(yield* enumKey(value))) {
     return { path, reason: "expected a declared enum value" }
   }
 
   const declaredTypes = Array.isArray(schema.type) ? schema.type : [schema.type]
-  const types = [
-    ...new Set(
-      declaredTypes.filter((candidate): candidate is JsonSchemaType =>
-        typeof candidate === "string" && jsonSchemaTypes.has(candidate)
-      )
-    )
-  ]
+  const types: Array<JsonSchemaType> = []
+  for (const candidate of declaredTypes) {
+    yield
+    if (
+      typeof candidate === "string" && jsonSchemaTypes.has(candidate) && !types.includes(candidate as JsonSchemaType)
+    ) {
+      types.push(candidate as JsonSchemaType)
+    }
+  }
   if (types.length > 0 && !types.some((type) => matchesJsonSchemaType(value, type))) {
     return { path, reason: `expected ${types.join(" or ")}` }
   }
@@ -460,6 +502,7 @@ const validateStructuredContent = (
   if (isRecord(value)) {
     if (Array.isArray(schema.required)) {
       for (const key of schema.required) {
+        yield
         if (typeof key === "string" && !Object.hasOwn(value, key)) {
           return { path: `${path}.${key}`, reason: "required property is missing" }
         }
@@ -467,8 +510,9 @@ const validateStructuredContent = (
     }
     if (isRecord(schema.properties)) {
       for (const [key, propertySchema] of Object.entries(schema.properties)) {
+        yield
         if (!Object.hasOwn(value, key) || !isRecord(propertySchema)) continue
-        const issue = validateStructuredContent(value[key], propertySchema, `${path}.${key}`)
+        const issue = yield* validateStructuredContent(value[key], propertySchema, `${path}.${key}`, indexes)
         if (issue !== undefined) return issue
       }
     }
@@ -476,19 +520,20 @@ const validateStructuredContent = (
 
   if (Array.isArray(value) && isRecord(schema.items)) {
     for (const [index, item] of value.entries()) {
-      const issue = validateStructuredContent(item, schema.items, `${path}[${index}]`)
+      const issue = yield* validateStructuredContent(item, schema.items, `${path}[${index}]`, indexes)
       if (issue !== undefined) return issue
     }
   }
   return undefined
 }
 
-const asToolResult = (
+const asToolResult = function*(
   server: string,
   result: unknown,
   outputSchema: Record<string, unknown> | undefined,
-  diagnostic: (source: "invalid-response", detail: unknown) => void
-): Result.Result<ToolResult, McpError> => {
+  diagnostic: (source: "invalid-response", detail: unknown) => void,
+  indexes: EnumIndexes
+): Generator<void, Result.Result<ToolResult, McpError>> {
   if (!isRecord(result)) {
     return Result.fail(invalidResponse(
       server,
@@ -512,6 +557,7 @@ const asToolResult = (
   const content: Array<Record<string, unknown>> = []
   const blocks = hasContent ? result.content as Array<unknown> : []
   for (const [index, block] of blocks.entries()) {
+    yield
     if (!isRecord(block)) {
       return Result.fail(invalidResponse(
         server,
@@ -536,7 +582,7 @@ const asToolResult = (
     }
     structuredContent = result.structuredContent
     if (outputSchema !== undefined) {
-      const issue = validateStructuredContent(structuredContent, outputSchema, "structuredContent")
+      const issue = yield* validateStructuredContent(structuredContent, outputSchema, "structuredContent", indexes)
       if (issue !== undefined) {
         diagnostic("invalid-response", { issue, outputSchema })
         return Result.fail(invalidResponse(
@@ -564,7 +610,15 @@ type JsonIssue = {
   readonly reason: string
 }
 
-const jsonFailure = (path: string, reason: string): Result.Result<JsonValue, JsonIssue> => Result.fail({ path, reason })
+type JsonPath = string | { readonly parent: JsonPath; key: string | number }
+
+const renderJsonPath = (path: JsonPath): string =>
+  typeof path === "string" ?
+    path :
+    `${renderJsonPath(path.parent)}${typeof path.key === "number" ? `[${path.key}]` : `.${path.key}`}`
+
+const jsonFailure = (path: JsonPath, reason: string): Result.Result<JsonValue, JsonIssue> =>
+  Result.fail({ path: renderJsonPath(path), reason })
 
 const reflect = <A>(thunk: () => A): Result.Result<A, string> => {
   try {
@@ -574,16 +628,8 @@ const reflect = <A>(thunk: () => A): Result.Result<A, string> => {
   }
 }
 
-const ownDescriptor = (
-  object: object,
-  key: PropertyKey,
-  path: string
-): Result.Result<PropertyDescriptor | undefined, JsonIssue> => {
-  const descriptor = reflect(() => Object.getOwnPropertyDescriptor(object, key))
-  return Result.isFailure(descriptor)
-    ? Result.fail({ path, reason: descriptor.failure })
-    : Result.succeed(descriptor.success)
-}
+const ownDescriptors = (object: object): Result.Result<PropertyDescriptorMap, string> =>
+  reflect(() => Object.getOwnPropertyDescriptors(object))
 
 const isAccessor = (descriptor: PropertyDescriptor): boolean =>
   Object.hasOwn(descriptor, "get") || Object.hasOwn(descriptor, "set")
@@ -600,7 +646,7 @@ const spendJson = (budget: JsonBudget, bytes: number): boolean => {
 
 const snapshotJson = (
   value: unknown,
-  path: string,
+  path: JsonPath,
   ancestors: Set<object>,
   budget: JsonBudget
 ): Result.Result<JsonValue, JsonIssue> => {
@@ -636,20 +682,20 @@ const snapshotJson = (
     if (!spendJson(budget, Math.max(0, length.success - 1))) {
       return jsonFailure(path, "JSON expansion exceeds the outbound frame budget")
     }
+    const descriptors = ownDescriptors(value)
+    if (Result.isFailure(descriptors)) return jsonFailure(path, descriptors.failure)
     ancestors.add(value)
     const copied: Array<JsonValue> = []
+    const memberPath: JsonPath = { parent: path, key: 0 }
     for (let index = 0; index < length.success; index += 1) {
-      const memberPath = `${path}[${index}]`
-      const descriptor = ownDescriptor(value, String(index), memberPath)
-      if (Result.isFailure(descriptor)) {
-        ancestors.delete(value)
-        return Result.fail(descriptor.failure)
-      }
-      if (descriptor.success !== undefined && isAccessor(descriptor.success)) {
+      memberPath.key = index
+      // Missing slots must not resolve through Object.prototype.
+      const descriptor = Object.hasOwn(descriptors.success, index) ? descriptors.success[index] : undefined
+      if (descriptor !== undefined && isAccessor(descriptor)) {
         ancestors.delete(value)
         return jsonFailure(memberPath, "an accessor property")
       }
-      const member = descriptor.success === undefined ? undefined : descriptor.success.value
+      const member = descriptor === undefined ? undefined : descriptor.value
       const snapshot = snapshotJson(member, memberPath, ancestors, budget)
       if (Result.isFailure(snapshot)) {
         ancestors.delete(value)
@@ -669,34 +715,31 @@ const snapshotJson = (
   }
   const symbols = reflect(() => Object.getOwnPropertySymbols(object))
   if (Result.isFailure(symbols)) return jsonFailure(path, symbols.failure)
+  const descriptors = ownDescriptors(object)
+  if (Result.isFailure(descriptors)) return jsonFailure(path, descriptors.failure)
   for (const key of symbols.success) {
-    const enumerable = reflect(() => Object.prototype.propertyIsEnumerable.call(object, key))
-    if (Result.isFailure(enumerable)) return jsonFailure(path, enumerable.failure)
-    if (enumerable.success) return jsonFailure(path, "a symbol-keyed property")
+    if (Object.hasOwn(descriptors.success, key) && descriptors.success[key]!.enumerable) {
+      return jsonFailure(path, "a symbol-keyed property")
+    }
   }
-  const names = reflect(() => Object.getOwnPropertyNames(object))
-  if (Result.isFailure(names)) return jsonFailure(path, names.failure)
 
   ancestors.add(object)
   const copied: JsonObject = {}
   let members = 0
-  for (const key of names.success) {
-    const memberPath = `${path}.${key}`
-    const descriptor = ownDescriptor(object, key, memberPath)
-    if (Result.isFailure(descriptor)) {
-      ancestors.delete(object)
-      return Result.fail(descriptor.failure)
-    }
-    if (descriptor.success === undefined || descriptor.success.enumerable !== true) continue
+  const memberPath: JsonPath = { parent: path, key: "" }
+  for (const key of Object.keys(descriptors.success)) {
+    memberPath.key = key
+    const descriptor = descriptors.success[key]!
+    if (descriptor.enumerable !== true) continue
     if (!spendJson(budget, key.length + 3 + Math.min(1, members++))) {
       ancestors.delete(object)
       return jsonFailure(path, "JSON expansion exceeds the outbound frame budget")
     }
-    if (isAccessor(descriptor.success)) {
+    if (isAccessor(descriptor)) {
       ancestors.delete(object)
       return jsonFailure(memberPath, "an accessor property")
     }
-    const snapshot = snapshotJson(descriptor.success.value, memberPath, ancestors, budget)
+    const snapshot = snapshotJson(descriptor.value, memberPath, ancestors, budget)
     if (Result.isFailure(snapshot)) {
       ancestors.delete(object)
       return snapshot
@@ -830,6 +873,10 @@ export const connect = (
           params = { cursor: page.nextCursor }
         }
         JsonLimits.freezeParsed(tools)
+        const enumIndexes: EnumIndexes = new WeakMap()
+        for (const tool of tools) {
+          if (tool.outputSchema !== undefined) yield* runJsonWork(indexEnums(tool.outputSchema, enumIndexes))
+        }
 
         const callTool = (name: string, args: Record<string, unknown>): Effect.Effect<ToolResult, McpError> => {
           const tool = tools.find((candidate) => candidate.name === name)
@@ -851,7 +898,11 @@ export const connect = (
           }
           return Effect.flatMap(
             transport.request("tools/call", { name, arguments: snapshot.success }),
-            (result) => decodeResponse(result, asToolResult(options.server, result, tool.outputSchema, diagnostic))
+            (result) =>
+              Effect.flatMap(
+                runJsonWork(asToolResult(options.server, result, tool.outputSchema, diagnostic, enumIndexes)),
+                (decoded) => decodeResponse(result, decoded)
+              )
           )
         }
 
