@@ -3,9 +3,11 @@ title: "Troubleshooting"
 description: "Every failure @smthrs/jj reports, grouped by code: the symptom you see, what caused it, and what to change."
 ---
 
-Every failure this package produces is a `JjError` with one of four codes.
-Find the code, then the message, and read the matching section. The codes and
-how they are assigned are in
+Every failure this package produces is a `JjError` with one of six codes.
+Find the code, then the message, and read the matching section. Two of them,
+`not_installed` and `unsupported_version`, can fail a CLI layer while it is
+built rather than an operation, so the program never receives `Jj` at all. The
+codes and how they are assigned are in
 [How a jj failure is reported](./concepts/failures.md).
 
 ## not_installed
@@ -100,6 +102,37 @@ different target revision. The classification matches only on a line jj opened
 with `Error:` or `Caused by:` and only where `conflict` is a whole word, so a
 branch named `conflict-fix` or a path named `docs/conflict-resolution.md` does
 not produce this code.
+
+## snapshot_refused
+
+### "Warning: Refused to snapshot some files: ..."
+
+**What happened.** jj skipped at least one file while capturing the working
+copy, and exited successfully anyway. The Node and Bun layers read that warning
+and fail the operation with `snapshot_refused`: a snapshot that quietly dropped
+a file is not one a run can restore from. Both layers already pass
+`--config snapshot.max-new-file-size=0` on every command, so the default 1 MiB
+new-file limit is not what produced it.
+
+**What to change.** Read the list jj printed in the message: it names every
+file it skipped and why. Fix or remove those files and snapshot again. The
+change jj did record is missing them, so a later `restore` cannot bring them
+back.
+
+## unsupported_version
+
+### "jj requires version 0.39.0 or newer; found ..."
+
+**What happened.** A CLI layer probed `jj --version` before exposing `Jj`, and
+the binary it resolved is older than `NodeJj.minimumVersion` or printed a
+version string this package cannot parse. The failure is in the layer, so no
+operation ran and the program never received the service.
+
+**What to change.** Upgrade jj with `brew upgrade jj` or
+`cargo install --locked jj-cli`, or point `SMITHERS_JJ_PATH` at a newer binary.
+Probe results are cached per absolute path for the lifetime of the process, so
+restart it after replacing a binary in place. See
+[Choose which jj binary runs](./guides/choose-the-jj-binary.md).
 
 ## unknown
 

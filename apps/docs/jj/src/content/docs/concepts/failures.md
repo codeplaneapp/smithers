@@ -1,6 +1,6 @@
 ---
 title: "How a jj failure is reported"
-description: "The four JjError codes and what each means, how each layer classifies jj's own output onto them, and why the cause is copied onto plain data before it reaches the journal."
+description: "The six JjError codes and what each means, how each layer classifies jj's own output onto them, and why the cause is copied onto plain data before it reaches the journal."
 sidebar:
   order: 2
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/jj/docs/concepts/failures.md"
@@ -13,22 +13,33 @@ produced it, and an optional `cause`. Nothing escapes as an untyped throw: a
 WebAssembly module, and a repository that refuses an operation all arrive the
 same way.
 
-## The four codes are a closed contract
+## The six codes are a closed contract
 
-| Code            | Meaning                                               |
-| --------------- | ----------------------------------------------------- |
-| `not_installed` | No usable jj on this host.                            |
-| `conflict`      | The repository refused: the operation would conflict. |
-| `invalid_ref`   | The change id or revision does not resolve.           |
-| `unknown`       | Everything else jj reported.                          |
+| Code                  | Meaning                                                         |
+| --------------------- | --------------------------------------------------------------- |
+| `not_installed`       | No usable jj on this host.                                      |
+| `conflict`            | The repository refused: the operation would conflict.           |
+| `invalid_ref`         | The change id or revision does not resolve.                     |
+| `snapshot_refused`    | jj skipped files while capturing the working copy.              |
+| `unsupported_version` | The jj command line is older than the minimum, or unrecognized. |
+| `unknown`             | Everything else jj reported.                                    |
 
 Callers branch on these, step keys digest them, and user interfaces map them to
 remediation. A code is added and never repurposed. Widening `conflict` to cover
 a new situation would silently change what an already-recorded run means.
 
+`conflict`, `invalid_ref`, `snapshot_refused`, and `unknown` always report an
+operation. The other two also reach a caller from layer construction, before any
+operation runs: a CLI layer probes `jj --version` before it exposes `Jj`, and
+that probe fails with `not_installed` when no usable binary was found, and with
+`unsupported_version` when the binary is older than `NodeJj.minimumVersion` or
+prints a version this package cannot parse. `unsupported_version` is only ever a
+construction failure, so `JjError` sits in the layer error channel of all four
+CLI layers as well as in every method's.
+
 ## Classification is one definition, shared by every layer
 
-The Node adapter reads jj's own stderr vocabulary and maps it onto the four
+The Node adapter reads jj's own stderr vocabulary and maps it onto these
 codes, the same way `NodeFileSystem` maps errno. Two details in that mapping
 exist because the naive version was wrong:
 

@@ -25,8 +25,8 @@
   excerpt and the recorded `jj` command each count their ellipsis against the
   ceiling they name, so neither exceeds it by a character.
 - `resolveJjBinary` records the environment variable that supplied an override,
-  so `describe()` reports `FLOWS_JJ_PATH` when the rc.0 alias won instead of
-  always naming `SMITHERS_JJ_PATH`.
+  so `describe()` names the variable it actually read. `overrideVariables` is
+  that list, and it holds `SMITHERS_JJ_PATH` alone.
 
 - `Jj`'s error channel is now honest about the capability kernel: every method
   fails with `JjFailure` (`JjError | Permission.PermissionError`), and
@@ -60,9 +60,11 @@
   and `Path doesn't exist` is no longer read as a missing revision: `invalid_ref`
   is decided before `conflict`, and both match jj's phrasing rather than a bare
   substring.
-- `SMITHERS_JJ_PATH` (and its `FLOWS_JJ_PATH` alias) now names the binary the
-  Node and Bun layers actually spawn. It was resolved and printed by
-  `smithers doctor` while every operation ran whatever `PATH` produced. A
+- `SMITHERS_JJ_PATH` now names the binary the Node and Bun layers actually
+  spawn. It was resolved and printed by `smithers doctor` while every operation
+  ran whatever `PATH` produced. It is the only override the resolver reads:
+  migrate a host still setting `FLOWS_JJ_PATH`, which is not an alias and is
+  ignored, so the layer falls back to `PATH` instead of the requested file. A
   resolution that came from `PATH` is still spawned as the bare name `jj`, so a
   host spawner that hands the child a different `PATH` still decides for itself.
 - Spawn failures that never produced a process stay in the typed channel.

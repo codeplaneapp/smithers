@@ -14,7 +14,7 @@ and revert one change.
 One program written against that service runs against the
 [jj](https://jj-vcs.github.io) command line on Node and Bun, or against jj-lib
 compiled to WebAssembly in a browser tab. Behind a service rather than an
-ad-hoc `spawn`, the repository is explicit, failures are a closed set of four
+ad-hoc `spawn`, the repository is explicit, failures are a closed set of six
 codes, and a test swaps the layer instead of the code.
 
 ## Availability
@@ -128,14 +128,21 @@ single-permit semaphore, while separate Node or Bun processes coordinate through
 an exclusive `.jj/smithers.lock` owner directory. A later caller reclaims a lock whose
 owner process has exited, so a killed host does not strand the repository.
 
-## Failures are four codes
+## Failures are six codes
 
 Every operation fails with a `JjError` carrying a stable `code`, the `module`
 and `method` that failed, the `command` that produced it, and a plain-data
 `cause`. `not_installed` means no usable jj on this host, `conflict` that the
-repository refused, `invalid_ref` that a revision does not resolve, and
+repository refused, `invalid_ref` that a revision does not resolve,
+`snapshot_refused` that jj skipped files while capturing the working copy, and
 `unknown` everything else jj reported. Nothing escapes as an untyped throw, and
 the codes survive a journal round trip, so a recorded run keeps its meaning.
+
+Two of those codes also fail a CLI layer before it hands out `Jj` at all, so a
+composition sees them from the layer rather than from a call: `not_installed`
+when the version probe finds no usable binary, and `unsupported_version` when
+the binary it found is older than `NodeJj.minimumVersion` or prints a version
+this package cannot parse. `unsupported_version` never reaches an operation.
 
 **Feature detection is by error code, never by property absence.** A backend
 that cannot perform an operation keeps the method and answers `not_installed`,
@@ -169,9 +176,10 @@ Seven of the eight operations work there, with real change ids and a real
 operation log. `revert` has no operation in the compiled module and reports
 `not_installed`. The backend also diverges from the command line in ways worth
 reading before you assume parity: repositories use jj's Simple backend with no
-git interop, every operation auto-initializes the repository, real symlinks are
-rejected before snapshotting, and durability belongs to the mount rather than
-to this layer. All of them are listed in
+git interop, only `snapshot` creates a missing repository while `status`,
+`diff`, and `restore` refuse one with `unknown` and write nothing, real
+symlinks are rejected before snapshotting, and durability belongs to the mount
+rather than to this layer. All of them are listed in
 [Run jj in a browser tab](https://jj.smithers.sh/guides/run-jj-in-a-browser/).
 
 ## More
@@ -185,9 +193,6 @@ to this layer. All of them are listed in
 
 ## License
 
-Only the wasm `init` operation creates repositories. BrowserJj refuses status,
-diff, and restore on missing repositories with code `unknown`, without creating
-a directory or `.jj`. Snapshot explicitly initializes an absent repository.
 The shipped Rust dependency inventory in `THIRD_PARTY_NOTICES.md` is generated
 from the locked Cargo graph for `wasm32-wasip1`. After a dependency change, run
 `node scripts/generate-third-party-notices.mjs` from the repository root;

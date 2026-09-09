@@ -4,9 +4,11 @@ description: "Every failure @smthrs/jj reports, grouped by code: the symptom you
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/jj/docs/troubleshooting.md"
 ---
 
-Every failure this package produces is a `JjError` with one of four codes.
-Find the code, then the message, and read the matching section. The codes and
-how they are assigned are in
+Every failure this package produces is a `JjError` with one of six codes.
+Find the code, then the message, and read the matching section. Two of them,
+`not_installed` and `unsupported_version`, can fail a CLI layer while it is
+built rather than an operation, so the program never receives `Jj` at all. The
+codes and how they are assigned are in
 [How a jj failure is reported](/concepts/failures/).
 
 ## not_installed
@@ -102,6 +104,37 @@ with `Error:` or `Caused by:` and only where `conflict` is a whole word, so a
 branch named `conflict-fix` or a path named `docs/conflict-resolution.md` does
 not produce this code.
 
+## snapshot_refused
+
+### "Warning: Refused to snapshot some files: ..."
+
+**What happened.** jj skipped at least one file while capturing the working
+copy, and exited successfully anyway. The Node and Bun layers read that warning
+and fail the operation with `snapshot_refused`: a snapshot that quietly dropped
+a file is not one a run can restore from. Both layers already pass
+`--config snapshot.max-new-file-size=0` on every command, so the default 1 MiB
+new-file limit is not what produced it.
+
+**What to change.** Read the list jj printed in the message: it names every
+file it skipped and why. Fix or remove those files and snapshot again. The
+change jj did record is missing them, so a later `restore` cannot bring them
+back.
+
+## unsupported_version
+
+### "jj requires version 0.39.0 or newer; found ..."
+
+**What happened.** A CLI layer probed `jj --version` before exposing `Jj`, and
+the binary it resolved is older than `NodeJj.minimumVersion` or printed a
+version string this package cannot parse. The failure is in the layer, so no
+operation ran and the program never received the service.
+
+**What to change.** Upgrade jj with `brew upgrade jj` or
+`cargo install --locked jj-cli`, or point `SMITHERS_JJ_PATH` at a newer binary.
+Probe results are cached per absolute path for the lifetime of the process, so
+restart it after replacing a binary in place. See
+[Choose which jj binary runs](/guides/choose-the-jj-binary/).
+
 ## unknown
 
 `unknown` is everything jj reported that the vocabulary does not classify. Read
@@ -195,13 +228,13 @@ Forgetting drops the workspace registration and does not touch the commits made
 in the lane or the directory on disk. Removing the directory is the caller's
 job, on both backends.
 
-### A browser symlink became a regular file
+### Browser operations reject real symlinks
 
-jj-lib on `wasm32-wasip1` reports symlinks unsupported. Checking out a tree
-symlink materializes a regular file, and snapshotting a real on-disk symlink
-stores the linked file's content as the target. The representation is stable
-across further snapshot and restore cycles. See
-[Run jj in a browser tab](/guides/run-jj-in-a-browser/#symlinks-degrade-to-regular-files).
+Remove real symlinks from the working copy, including ignored directories,
+then retry. `BrowserJj` rejects them before any operation that snapshots,
+because the shipped reactor would otherwise persist target bytes. Existing
+tree symlinks still check out as regular files containing link text. See
+[Run jj in a browser tab](/guides/run-jj-in-a-browser/#real-symlinks-are-rejected).
 
 ### Browser changes vanished after a reload
 

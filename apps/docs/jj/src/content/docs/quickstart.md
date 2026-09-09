@@ -111,5 +111,5 @@ step reversible, and the reason to reach for `revert` instead when you mean
   the difference between `restore` and `revert`, and when each is right.
 - [Give each parallel agent its own workspace lane](/guides/workspace-lanes/):
   `workspaceAdd`, pinned revisions, and cleanup.
-- [How a jj failure is reported](/concepts/failures/): the four codes and
+- [How a jj failure is reported](/concepts/failures/): the six codes and
   what each one means.
