@@ -179,36 +179,43 @@ describe("gateEvent", () => {
       const d = gateEvent({
         eventName: "issue_comment",
         payload: {
+          action: "created",
           issue: { number: 7 },
           comment: { body: "@smithers review", author_association: "OWNER" },
         },
       });
-      expect(d.run).toBe(false);
+      expect(d).toEqual({ run: false, reason: "comment is not on a pull request" });
     });
 
     test("skips comments that do not begin with the magic phrase", () => {
       const d = gateEvent({
         eventName: "issue_comment",
         payload: {
+          action: "created",
           issue: issuePr(7),
           comment: { body: "lgtm", author_association: "OWNER" },
         },
       });
-      expect(d.run).toBe(false);
+      expect(d).toEqual({ run: false, reason: 'comment does not start with "@smithers review"' });
     });
 
-    test("rejects drive-by associations", () => {
-      for (const association of ["NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", undefined]) {
+    test.each(["NONE", "CONTRIBUTOR", "FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR", "MANNEQUIN", undefined])(
+      "rejects drive-by association %s",
+      (association) => {
         const d = gateEvent({
           eventName: "issue_comment",
           payload: {
+            action: "created",
             issue: issuePr(7),
             comment: { body: "@smithers review", author_association: association },
           },
         });
-        expect(d.run).toBe(false);
-      }
-    });
+        expect(d).toEqual({
+          run: false,
+          reason: `comment author association "${String(association)}" is not OWNER/MEMBER/COLLABORATOR`,
+        });
+      },
+    );
   });
 
   test("unsupported events skip", () => {

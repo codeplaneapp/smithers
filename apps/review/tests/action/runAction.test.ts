@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -185,9 +185,23 @@ describe("runAction (subprocess)", () => {
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
     delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    delete env.GH_TOKEN;
+    delete env.GITHUB_TOKEN;
+    delete env.GH_ENTERPRISE_TOKEN;
+    delete env.GITHUB_ENTERPRISE_TOKEN;
     env.GITHUB_EVENT_NAME = "pull_request";
     env.GITHUB_EVENT_PATH = eventPath;
+    env.GITHUB_REPOSITORY = "octo/widgets";
+    env.GITHUB_WORKSPACE = PKG_ROOT;
+    env.GITHUB_RUN_ID = "";
+    env.SMITHERS_GH_BIN = FAKE_GH;
+    env.SMITHERS_FAKE_GH_STDOUT = "";
+    env.SMITHERS_FAKE_GH_EXIT = "0";
+    const ghLog = join(tmp, "gh.log");
+    env.SMITHERS_FAKE_GH_LOG = ghLog;
 
+    // Refuse to launch this valid event with a real GitHub executable.
+    expect(env.SMITHERS_GH_BIN).toBe(FAKE_GH);
     const result = Bun.spawnSync(["bun", RUN_ACTION], {
       cwd: PKG_ROOT,
       env,
@@ -197,6 +211,27 @@ describe("runAction (subprocess)", () => {
     // Gate passes (valid PR) → fetchOidcToken throws → process.exit(1)
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr.toString()).toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
+
+    const calls = (await readFile(ghLog, "utf8")).split("--- fake gh call ---\n").slice(1);
+    expect(calls).toHaveLength(4);
+    const endpoint = "repos/octo/widgets/issues/42/comments";
+    const lookup = [
+      "api",
+      "--paginate",
+      endpoint,
+      "--jq",
+      '.[] | select(.body | startswith("<!-- smithers-review-status -->")) | .id',
+    ];
+    expect(calls[0]!.trim().split("\n")).toEqual(lookup);
+    expect(calls[2]!.trim().split("\n")).toEqual(lookup);
+    const statuses = [calls[1]!, calls[3]!].map((call) => {
+      const lines = call.trim().split("\n");
+      expect(lines.slice(0, 6)).toEqual(["api", "--method", "POST", endpoint, "--input", "-"]);
+      return (JSON.parse(lines.slice(6).join("\n")) as { body: string }).body;
+    });
+    expect(statuses[0]).toBe("<!-- smithers-review-status -->\n🔍 smithers review started");
+    expect(statuses[1]).toStartWith("<!-- smithers-review-status -->\n❌ smithers review failed before it could start:");
+    expect(statuses[1]).toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
     // Not the 5s default: a cold bun subprocess boot runs 3-6s on loaded CI
     // runners.
   }, 20_000);
