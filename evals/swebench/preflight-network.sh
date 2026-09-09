@@ -35,6 +35,7 @@
 # to fail, and an exit code on its own says nothing about the network. What the
 # probe reads is the **pair**:
 #
+#   boot/assertion failed or network unverified     inconclusive  no suite comparison established
 #   both the same                                  ok       the network is irrelevant here
 #   none carries a resolution/connection error      flagged  the suite reaches the network
 #     that bridge does not
@@ -47,7 +48,7 @@
 # exits 2 and says so at the top, because a testbed no repository's suite can
 # run is a condition to abandon rather than a sandbox to tighten, and finding
 # that out is the whole reason this runs first. One flagged probe exits 1. All
-# clear exits 0.
+# clear exits 0. Any inconclusive probe exits 2 and is excluded from coverage.
 #
 # **Three probes do not cover eight families, and the report says which ones it
 # did not reach rather than letting an all-clear read as coverage.** The scored
@@ -214,6 +215,7 @@ families() {
 ROWS=""
 FLAGGED=0
 NOISY=0
+INCONCLUSIVE=0
 TOTAL=0
 PROBED_FAMILIES=""
 
@@ -251,11 +253,18 @@ for ID in $INSTANCES; do
   NONE_EGRESS=0; if has_egress_signature "$NONE_LOG"; then NONE_EGRESS=1; fi
   NET_EGRESS=0; if has_egress_signature "$NET_LOG"; then NET_EGRESS=1; fi
 
-  # A timeout under both conditions is a slow suite, not a network finding. It
-  # is the one exit status that has to be read before the others, because 124
-  # under `none` and 0 under `bridge` would otherwise look like an egress
-  # dependency when it is a clock.
-  if [ "$NONE_STATUS" = "124" ] && [ "$NET_STATUS" = "124" ]; then
+  # Setup sentinels are not suite results. Both conditions must be established
+  # before either their exit statuses or their network-error logs can be read
+  # as a comparison. Equal genuine suite failures still clear below.
+  if [ "$NONE_STATUS" = "255" ] || [ "$NET_STATUS" = "255" ] \
+    || [ "$NONE_STATUS" = "254" ] || [ "$NET_STATUS" = "254" ]; then
+    VERDICT=inconclusive
+    WHY="container start or network assertion failed (exit $NONE_STATUS and $NET_STATUS)"
+  elif [ "$NONE_SEEN" != "none" ] || [ "$NET_SEEN" != "bridge" ]; then
+    VERDICT=inconclusive
+    WHY="network conditions were not established (observed '$NONE_SEEN' and '$NET_SEEN')"
+  # A timeout under both conditions is a slow suite, not a network finding.
+  elif [ "$NONE_STATUS" = "124" ] && [ "$NET_STATUS" = "124" ]; then
     VERDICT=ok
     WHY="the suite exceeded ${TIMEOUT}s under both conditions"
   elif [ "$NONE_EGRESS" = "1" ] && [ "$NET_EGRESS" = "0" ]; then
@@ -273,8 +282,13 @@ for ID in $INSTANCES; do
   fi
 
   SIZE="$(families --family "$FAMILY")"
-  PROBED_FAMILIES="$PROBED_FAMILIES $FAMILY"
+  if [ "$VERDICT" != "inconclusive" ]; then
+    PROBED_FAMILIES="$PROBED_FAMILIES $FAMILY"
+  fi
   case "$VERDICT" in
+    inconclusive)
+      INCONCLUSIVE=$((INCONCLUSIVE + 1))
+      log "$ID: inconclusive — $WHY" ;;
     flagged)
       FLAGGED=$((FLAGGED + 1))
       log "$ID: FLAGGED — $WHY (stands for $SIZE scored $FAMILY instances)" ;;
@@ -302,8 +316,10 @@ if [ -n "$REPORT" ]; then
     process.stdin.on("data", (chunk) => { text += chunk }).on("end", () => {
       const rows = text.split("\n").filter((line) => line.trim() !== "").map((line) => JSON.parse(line))
       const flagged = rows.filter((row) => row.verdict === "flagged")
+      const inconclusive = rows.filter((row) => row.verdict === "inconclusive")
       require("fs").writeFileSync(process.argv[1], JSON.stringify({
-        probes: rows.length,
+        probes: rows.length - inconclusive.length,
+        inconclusive: inconclusive.length,
         flagged: flagged.length,
         systemic: rows.length > 0 && flagged.length === rows.length,
         instancesAtRisk: flagged.reduce((total, row) => total + row.familySize, 0),
@@ -331,6 +347,10 @@ esac
 
 if [ "$TOTAL" = "0" ]; then
   log "no probes ran"
+  exit 2
+fi
+if [ "$INCONCLUSIVE" -gt 0 ]; then
+  log "$INCONCLUSIVE of $TOTAL probes inconclusive; repair container setup or network inspection and rerun the preflight"
   exit 2
 fi
 if [ "$FLAGGED" = "$TOTAL" ]; then

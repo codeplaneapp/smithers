@@ -285,6 +285,7 @@ probe compares is the **pair**.
 
 | what the pair shows | verdict | what it means |
 | --- | --- | --- |
+| either boot or network assertion fails, or either network is unverified | `inconclusive` | the pair cannot establish whether the suite needs the network |
 | same outcome under both | `ok` | the network makes no difference to this repository's suite |
 | `none` carries a name-resolution or connection error the `bridge` run does not | `flagged` | the suite reaches the network; the instance is not measurable under `none` |
 | `none` fails, `bridge` passes | `flagged` | same finding, read off the exit status instead |
@@ -297,7 +298,11 @@ one probe stands for all of them. **If every probe is flagged the script says
 `--network none` testbed that no repository's suite can run is not a sandbox to
 tighten, it is a condition to abandon, and finding that out is the whole reason
 the probe runs before the lane. One flagged probe exits 1 and names what it
-costs. All clear exits 0.
+costs. All clear exits 0. Any inconclusive probe exits 2 and does not count as
+a probed family. The JSON report counts completed comparisons in `probes` and
+setup failures separately in `inconclusive`, retaining both in `rows`.
+`./network-dryrun.sh --offline` checks these setup failures, unknown network
+readbacks, and ordinary suite results without Docker.
 
 **Three probes do not cover eight families, and the report says so before it
 says anything else.** The scored 43 come from astropy, django, matplotlib, psf,

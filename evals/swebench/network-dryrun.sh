@@ -2,6 +2,7 @@
 # Proves the sealed testbed against real docker, without spending a token.
 #
 #   ./network-dryrun.sh
+#   ./network-dryrun.sh --offline   # ledger and preflight setup-failure fixtures only
 #
 # `fixtures/check-testbed-network.mjs` replays the ledger field and the
 # scoreboard's assertion offline. What it cannot replay is the part that only
@@ -38,6 +39,12 @@
 # Spends no model tokens. Needs docker and about 8 MB of pulls.
 set -eu
 S="$(cd "$(dirname "$0")" && pwd)"
+case "${1:-}" in
+  ''|--offline) ;;
+  *) echo "usage: network-dryrun.sh [--offline]" >&2; exit 2 ;;
+esac
+node "$S/fixtures/check-testbed-network.mjs"
+if [ "${1:-}" = "--offline" ]; then exit 0; fi
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/flows-network-dryrun-XXXXXX")"
 PASSED=0
 

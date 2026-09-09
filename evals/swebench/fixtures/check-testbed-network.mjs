@@ -44,7 +44,7 @@
  */
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { compareLanes, render, sealFailures, testbed } from "../compare-codex-lanes.mjs"
@@ -65,6 +65,112 @@ const flowsRows = (id, verdict) => [
 const codexRow = (id, verdict, extra = {}) => ({ kind: "instance", id, state: "graded", at: 2, verdict, ...extra })
 
 try {
+  // Run the production preflight with a fake daemon. Only the unknown-readback
+  // cases replace the assertion helper, to pin the classifier's own guard even
+  // if a successful helper ever returns an unknown condition.
+  const preflightRoot = join(temporary, "preflight")
+  const bin = join(preflightRoot, "bin")
+  mkdirSync(bin, { recursive: true })
+  mkdirSync(join(preflightRoot, "lib"))
+  copyFileSync(join(root, "preflight-network.sh"), join(preflightRoot, "preflight-network.sh"))
+  for (const name of ["excluded.mjs", "fullbench-row.mjs", "testbed-network.sh"]) {
+    copyFileSync(join(root, "lib", name), join(preflightRoot, "lib", name))
+  }
+  const executable = (path, text) => writeFileSync(path, text, { mode: 0o755 })
+  executable(join(bin, "docker"), `#!/bin/bash
+case "$1" in
+  image|rm|ps) exit 0 ;;
+  run)
+    case "$PREFLIGHT_CASE:$*" in
+      boot-failed:*swb-preflight-probe--probe-1-*) exit 1 ;;
+    esac
+    exit 0 ;;
+  inspect)
+    NAME="\${!#}"
+    NETWORK="\${NAME##*-}"
+    case "$PREFLIGHT_CASE:$NETWORK" in
+      assert-none:none|assert-bridge:bridge|assert-both:*) echo host ;;
+      *) echo "$NETWORK" ;;
+    esac ;;
+  exec)
+    case "$PREFLIGHT_CASE:$*" in
+      broken:*) echo 'FAILED test_bug'; exit 1 ;;
+      slow:*) exit 124 ;;
+      needs:*swb-preflight-probe--probe-1-none*) echo 'socket.gaierror'; exit 1 ;;
+      noisy:*swb-preflight-probe--probe-1-bridge*) exit 1 ;;
+    esac
+    exit 0 ;;
+  *) echo "unexpected docker call: $*" >&2; exit 99 ;;
+esac
+`)
+  executable(join(bin, "image"), "#!/bin/sh\necho fixture-image\n")
+  executable(join(bin, "testcmd"), "#!/bin/sh\necho true\n")
+  const population = jsonl(join(preflightRoot, "manifest.jsonl"), [
+    { kind: "instance", id: "probe__probe-1" },
+    { kind: "instance", id: "works__works-1" }
+  ])
+  const cases = [
+    { name: "boot-failed", exits: [255, 255], verdict: "inconclusive", status: 2 },
+    { name: "assert-none", exits: [254, 0], verdict: "inconclusive", status: 2 },
+    { name: "assert-bridge", exits: [0, 254], verdict: "inconclusive", status: 2 },
+    { name: "assert-both", exits: [254, 254], verdict: "inconclusive", status: 2 },
+    { name: "unknown-none", exits: [0, 0], verdict: "inconclusive", status: 2 },
+    { name: "unknown-bridge", exits: [0, 0], verdict: "inconclusive", status: 2 },
+    { name: "boot-failed", exits: [255, 255], verdict: "inconclusive", status: 2, instances: "probe__probe-1 works__works-1" },
+    { name: "works", exits: [0, 0], verdict: "ok", status: 0 },
+    { name: "broken", exits: [1, 1], verdict: "ok", status: 0 },
+    { name: "slow", exits: [124, 124], verdict: "ok", status: 0 },
+    { name: "needs", exits: [1, 0], verdict: "flagged", status: 2 },
+    { name: "noisy", exits: [0, 1], verdict: "noisy", status: 0 }
+  ]
+  for (const fixture of cases) {
+    const helper = join(preflightRoot, "lib", "testbed-network.sh")
+    if (fixture.name.startsWith("unknown-")) {
+      executable(helper, `#!/bin/sh
+if [ "$3" = "${fixture.name.slice("unknown-".length)}" ]; then echo unknown; else echo "$3"; fi
+`)
+    } else {
+      copyFileSync(join(root, "lib", "testbed-network.sh"), helper)
+    }
+    const reportPath = join(preflightRoot, "report.json")
+    const result = spawnSync("bash", [join(preflightRoot, "preflight-network.sh"), "--report", reportPath], {
+      cwd: preflightRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        PREFLIGHT_CASE: fixture.name,
+        SWB_PREFLIGHT_INSTANCES: fixture.instances ?? "probe__probe-1",
+        SWB_PREFLIGHT_IMAGE_CMD: join(bin, "image"),
+        SWB_PREFLIGHT_TEST_CMD: join(bin, "testcmd"),
+        SWB_PREFLIGHT_MANIFEST: population,
+        SWB_PREFLIGHT_LOGS: join(preflightRoot, "logs"),
+        SWB_PREFLIGHT_TIMEOUT: "5",
+        SWB_PREFLIGHT_SHELL: "sh"
+      }
+    })
+    assert.ifError(result.error)
+    const report = JSON.parse(readFileSync(reportPath, "utf8"))
+    const row = report.rows[0]
+    assert.deepEqual([row.noneExit, row.bridgeExit], fixture.exits, fixture.name)
+    assert.equal(row.verdict, fixture.verdict, `${fixture.name}: ${result.stdout}`)
+    assert.equal(result.status, fixture.status, `${fixture.name}: ${result.stderr}`)
+    const inconclusive = fixture.verdict === "inconclusive"
+    const total = fixture.instances === undefined ? 1 : 2
+    assert.equal(report.rows.length, total, fixture.name)
+    assert.equal(report.inconclusive, inconclusive ? 1 : 0, fixture.name)
+    assert.equal(report.probes, total - (inconclusive ? 1 : 0), fixture.name)
+    assert.equal(report.flagged, fixture.verdict === "flagged" ? 1 : 0, fixture.name)
+    assert.equal(report.systemic, fixture.verdict === "flagged", fixture.name)
+    if (inconclusive) {
+      assert.ok(result.stdout.includes(`not probed: probe:1${total === 1 ? " works:1" : " —"}`), fixture.name)
+      assert.ok(result.stdout.includes(`1 of ${total} probes inconclusive`), fixture.name)
+      assert.doesNotMatch(result.stdout, /probes clear|SYSTEMIC/u, fixture.name)
+    }
+  }
+  console.log(`check-testbed-network: ${cases.length} offline preflight cases passed`)
+
   // -------------------------------------------------------------------------
   // The condition, read off a lane's own rows.
   // -------------------------------------------------------------------------
