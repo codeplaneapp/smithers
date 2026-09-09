@@ -44,8 +44,11 @@ const freePort = (): Promise<number> =>
     })
   })
 
-const waitForHealth = async (port: number): Promise<Response> => {
-  const deadline = Date.now() + 20_000
+// An in-process host answers on the first poll; a spawned `bin.ts` has to
+// type-strip the whole CLI graph first, which takes tens of seconds on a loaded
+// machine, so that caller passes its own budget.
+const waitForHealth = async (port: number, budget = 20_000): Promise<Response> => {
+  const deadline = Date.now() + budget
   let lastFailure: unknown
   while (Date.now() < deadline) {
     try {
@@ -274,13 +277,21 @@ describe("the serve command", () => {
     ], {
       cwd: root,
       env: { ...process.env, SMITHERS_API_KEY: credential, SMITHERS_REMOTE: "" },
-      stdio: "ignore",
-      timeout: 60_000,
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 150_000,
       killSignal: "SIGKILL"
+    })
+    let stderr = ""
+    child.stderr!.setEncoding("utf8")
+    child.stderr!.on("data", (chunk: string) => {
+      stderr += chunk
     })
     const closed = new Promise<void>((resolve) => child.once("close", () => resolve()))
     try {
-      await waitForHealth(port)
+      // Report what the child said; a bare ECONNREFUSED names nothing.
+      await waitForHealth(port, 120_000).catch((cause: unknown) => {
+        throw new Error(`the gateway subprocess never served /health\n${stderr}`, { cause })
+      })
       await Effect.runPromise(
         Effect.gen(function*() {
           const control = yield* Control.Control
@@ -296,7 +307,7 @@ describe("the serve command", () => {
       child.kill("SIGTERM")
       await closed
     }
-  }, 90_000)
+  }, 180_000)
 
   it("hosts GET /health until the command fiber is interrupted", async () => {
     const root = mkdtempSync(join(tmpdir(), "smithers-serve-"))
