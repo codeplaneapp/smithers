@@ -21,7 +21,7 @@ export interface RunOptions {
   readonly rows: ReadonlyArray<ChecklistRow>
   readonly mode: "dry-run" | "run"
   readonly context: ProbeContext
-  /** Shared by preparation and the probe, including streamed response bodies. */
+  /** Bounds the probe, including streamed response bodies. */
   readonly rowTimeoutMs?: number
   /** Called after every completed row so reports survive later failures. */
   readonly onProgress?: (results: ReadonlyArray<RowResult>) => void
@@ -111,7 +111,6 @@ export const runChecklist = async ({ rows, mode, context, rowTimeoutMs = 120_000
         }
       }
     }
-    let prepared: ReadonlyArray<string> = []
     let timer: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -122,30 +121,18 @@ export const runChecklist = async ({ rows, mode, context, rowTimeoutMs = 120_000
     })
     let completed: RowResult
     try {
-      const probeResult = await Promise.race([deadline, (async () => {
-        // Ordinary preparation failures are evidence. A deadline stops the row.
-        if (row.prepare !== undefined) {
-          try {
-            prepared = [await row.prepare(rowContext)]
-          } catch (error) {
-            signal.throwIfAborted()
-            prepared = [`prepare did not run: ${String(error instanceof Error ? error.message : error)}`]
-          }
-        }
-        signal.throwIfAborted()
-        return row.probe(rowContext)
-      })()])
+      const probeResult = await Promise.race([deadline, row.probe(rowContext)])
       completed = result(
         row,
         probeResult.status,
         probeResult.status === "pass" ? [] : [probeResult.detail],
-        [...prepared, probeResult.detail],
+        [probeResult.detail],
         context.now() - start,
         probeResult.status === "not-testable-yet"
       )
     } catch (error) {
       const status: Status = error instanceof BrowserUnavailableError ? "not-testable-yet" : "fail"
-      completed = result(row, status, [String(error instanceof Error ? error.message : error)], prepared, context.now() - start)
+      completed = result(row, status, [String(error instanceof Error ? error.message : error)], [], context.now() - start)
     } finally {
       clearTimeout(timer)
       controller.abort(new Error(`row ${row.id} finished`))

@@ -84,6 +84,13 @@ describe("the row catalog", () => {
     expect(unprobed).toEqual([])
   })
 
+  test("probe is the only lifecycle a row runs — setup belongs inside the probe", () => {
+    const extraHooks = ROWS.flatMap((row) =>
+      Object.entries(row).filter(([key, value]) => key !== "probe" && typeof value === "function").map(([key]) => `${row.id}.${key}`)
+    )
+    expect(extraHooks).toEqual([])
+  })
+
   test("row ids are unique", () => {
     expect(new Set(ROWS.map((row) => row.id)).size).toBe(ROWS.length)
   })

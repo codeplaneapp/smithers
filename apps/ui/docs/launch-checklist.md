@@ -20,13 +20,14 @@ Socket close or error rejects all pending requests and subsequent sends.
 Evaluation rejects malformed responses and page exceptions; a valid CDP
 `undefined` result still returns JavaScript `undefined`.
 
-Each checklist row has a 120-second budget shared by preparation and its probe.
-Library callers can set `runChecklist({ rowTimeoutMs, ... })`. Expiry records a
-failed row and continues to the next row, even if the probe ignores cancellation.
-Ordinary preparation errors remain best-effort evidence. The row signal reaches
-fetch, streamed response bodies, browser startup, page calls and sleeps. Custom
-probes should use these context methods and `ctx.signal` for additional work.
-The signal is also aborted when the row finishes to cancel leftover operations.
+Each checklist row has a 120-second budget for its probe, the row's single
+lifecycle. Library callers can set `runChecklist({ rowTimeoutMs, ... })`. Expiry
+records a failed row and continues to the next row, even if the probe ignores
+cancellation. A row that must undo state left by an earlier run does that inside
+its probe and reports one outcome. The row signal reaches fetch, streamed
+response bodies, browser startup, page calls and sleeps. Custom probes should use
+these context methods and `ctx.signal` for additional work. The signal is also
+aborted when the row finishes to cancel leftover operations.
 
 The CLI writes JSON and Markdown reports before the first row and after every
 completed row through `onProgress`. Reports during a run contain completed rows

@@ -74,17 +74,10 @@ export interface ChecklistRow {
   /** True when the probe drives a headless page (so a run without a browser can say so precisely). */
   readonly browser?: boolean
   /**
-   * State this row must undo before it can grade anything — the account is the
-   * fixture, and a previous run left marks on it. Its returned line is recorded
-   * as evidence so the report says what was reset.
-   *
-   * A prepare step is best-effort by construction: it may not have the rights
-   * (the checklist session need not be an admin), and a row whose preparation
-   * did not happen still runs and still reports honestly. Ordinary preparation
-   * errors never fail a row; exhausting the shared row deadline does fail it.
+   * The row's single lifecycle. Every row has one: a row with no probe is a row
+   * this runner does not actually check. A row that must undo state left by an
+   * earlier run does that inside its probe and reports one outcome.
    */
-  readonly prepare?: (ctx: ProbeContext) => Promise<string>
-  /** Every row has one. A row with no probe is a row this runner does not actually check. */
   readonly probe: (ctx: ProbeContext) => Promise<ProbeResult>
 }
 
