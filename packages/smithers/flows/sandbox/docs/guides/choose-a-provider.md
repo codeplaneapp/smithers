@@ -15,7 +15,7 @@ stop a running command, and what the provider costs to run.
 | Provider              | A machine is                                                         | Needs                                            | Byte-exact command output | Declares `kill` |
 | --------------------- | -------------------------------------------------------------------- | ------------------------------------------------ | ------------------------- | --------------- |
 | `DirectorySandbox`    | one host directory                                                   | nothing beyond host services                     | yes                       | yes             |
-| `JustBashSandbox`     | one directory in a shared virtual filesystem, interpreted in process | a just-bash instance                             | yes                       | no              |
+| `JustBashSandbox`     | one directory in a shared virtual filesystem, interpreted in process | a just-bash instance                             | no                        | no              |
 | `ContainerSandbox`    | one container held on `sleep infinity`                               | a Docker-compatible CLI                          | yes                       | yes             |
 | `KubernetesSandbox`   | one Pod held on `sleep infinity`                                     | `kubectl` and a cluster                          | yes                       | yes             |
 | `MicrosandboxSandbox` | one local microVM                                                    | a Microsandbox host                              | yes                       | no              |

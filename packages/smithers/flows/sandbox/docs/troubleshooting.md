@@ -134,8 +134,8 @@ provider never fires. A provider that wants to be supervised implements `ping`.
 ## A command's output came back changed
 
 **What happened.** The provider is one whose vendor API reports output as a
-string. `VercelSandbox`, `DaytonaSandbox`, and `CloudflareSandbox` re-encode
-that string as UTF-8, so a tarball or a compiled binary written to stdout comes
+string. `JustBashSandbox`, `VercelSandbox`, `DaytonaSandbox`, and
+`CloudflareSandbox` re-encode that string as UTF-8, so a tarball or a compiled binary written to stdout comes
 back altered. `AwsSandbox` reframes output through a pseudo-terminal, which
 normalizes line endings and interleaves standard error.
 

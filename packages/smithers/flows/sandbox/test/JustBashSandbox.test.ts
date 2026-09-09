@@ -1,9 +1,10 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { chmodSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { env as hostEnv } from "node:process"
@@ -129,6 +130,105 @@ const output = (session: Session, command: string, options: Parameters<Session["
 const budget = 60_000
 
 describe("JustBashSandbox", () => {
+  it.effect("serializes concurrent commands across sessions", () =>
+    Effect.gen(function*() {
+      const { fs } = yield* services
+      const events: Array<{ command: string; phase: string; time: number }> = []
+      const bash: JustBashSandbox.JustBashLike = {
+        exec: async (command) => {
+          events.push({ command, phase: "enter", time: performance.now() })
+          await new Promise<void>((resolve) => setTimeout(resolve, 10))
+          events.push({ command, phase: "exit", time: performance.now() })
+          return { stdout: command, stderr: "", exitCode: 0 }
+        }
+      }
+      const provider = JustBashSandbox.make({ bash, fs, root })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const one = yield* provider.acquire("serialized-one")
+        const two = yield* provider.acquire("serialized-two")
+        const results = yield* Effect.all([output(one, "one"), output(two, "two")], { concurrency: 2 })
+        expect(results.map((result) => result.stdout)).toEqual(["one", "two"])
+        expect(events.map(({ command, phase }) => `${command}:${phase}`)).toEqual([
+          "one:enter",
+          "one:exit",
+          "two:enter",
+          "two:exit"
+        ])
+        expect(events[2]!.time).toBeGreaterThanOrEqual(events[1]!.time)
+      }))
+    }))
+
+  it.effect("times out callers while retaining the permit until exec settles", () =>
+    Effect.gen(function*() {
+      const { fs } = yield* services
+      const entered = yield* Deferred.make<void>()
+      let finish!: () => void
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      const calls: Array<string> = []
+      const bash: JustBashSandbox.JustBashLike = {
+        exec: async (command) => {
+          calls.push(command)
+          if (command === "held") {
+            Deferred.doneUnsafe(entered, Effect.void)
+            await pending
+          }
+          return { stdout: command, stderr: "", exitCode: 0 }
+        }
+      }
+      const provider = JustBashSandbox.make({ bash, fs, root })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const one = yield* provider.acquire("timeout-one")
+        const two = yield* provider.acquire("timeout-two")
+        yield* Effect.gen(function*() {
+          const running = yield* output(one, "held").pipe(
+            Effect.timeout("100 millis"),
+            Effect.flip,
+            Effect.forkChild
+          )
+          yield* Deferred.await(entered)
+          yield* TestClock.adjust("100 millis")
+          expect(running.pollUnsafe()).toBeDefined()
+          expect((yield* Fiber.join(running))._tag).toBe("TimeoutError")
+
+          const queued = yield* output(two, "cancelled-in-queue").pipe(
+            Effect.timeout("100 millis"),
+            Effect.flip,
+            Effect.forkChild
+          )
+          yield* TestClock.adjust("100 millis")
+          expect(queued.pollUnsafe()).toBeDefined()
+          expect((yield* Fiber.join(queued))._tag).toBe("TimeoutError")
+          expect(calls).toEqual(["held"])
+
+          finish()
+          expect((yield* output(two, "after")).stdout).toBe("after")
+          expect(calls).toEqual(["held", "after"])
+        }).pipe(Effect.ensuring(Effect.sync(() => finish())))
+      }))
+    }))
+
+  it.effect("documents string output as UTF-8 text and directs binary output to file transfer", () =>
+    Effect.gen(function*() {
+      const { fs } = yield* services
+      const provider = JustBashSandbox.make({
+        bash: { exec: async () => ({ stdout: "\u00ff", stderr: "\ufffd", exitCode: 0 }) },
+        fs,
+        root
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const session = yield* provider.acquire("text-output")
+        const process = yield* session.spawn("binary-output", {})
+        expect(Array.from(yield* Stream.runCollect(process.stdout))).toEqual([new Uint8Array([195, 191])])
+        expect(Array.from(yield* Stream.runCollect(process.stderr))).toEqual([new Uint8Array([239, 191, 189])])
+      }))
+      const limits = readFileSync(new URL("../docs/limits.md", import.meta.url), "utf8")
+      const textProviders = limits.slice(limits.indexOf("It is not"), limits.indexOf("whose vendor"))
+      expect(textProviders).toContain("`JustBashSandbox`")
+      expect(limits).toContain("reads that back with `readFile`")
+    }))
+
   it.effect("refuses guest inherited environment deletion before interpreter execution", () =>
     Effect.gen(function*() {
       const { fs } = yield* services

@@ -4,6 +4,7 @@
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import type * as FileSystem from "effect/FileSystem"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
@@ -81,10 +82,14 @@ const rootedAt = (workdir: string) => (path: string): string => {
  * This provider is a workspace boundary, not a security boundary. An
  * interpreted command can address anything its shared virtual filesystem
  * permits. Runs are serialized because just-bash has one mutable filesystem
- * view. A spawn completes before it returns, stdout and stderr each replay at
- * most one chunk, and `isRunning` is already false by the time a caller can
- * observe the adapted handle. There is no signal delivery, separately spawned
- * process pipeline, or incremental output. Consequently sessions omit `kill`,
+ * view. Cancelling a spawn stops waiting; an exec already started continues
+ * holding the permit until it settles. A cancelled queued command never runs.
+ * A hung interpreter keeps later commands queued, but their callers can still
+ * cancel. Closing the session scope removes its workspace even if exec is
+ * still running. A successful spawn completes before it returns, stdout and
+ * stderr each replay at most one UTF-8 encoded chunk, and `isRunning` is already
+ * false by the time a caller can observe the adapted handle. There is no signal
+ * delivery, separately spawned process pipeline, or incremental output. Consequently sessions omit `kill`,
  * and `SandboxConformance` skips its kill-and-survivor check for this provider
  * instead of reporting a violation.
  *
@@ -129,13 +134,26 @@ export const make = (options: JustBashSandboxOptions): Provider => {
               ...(spawnOptions.env === undefined ? {} : { env }),
               ...(stdin === undefined ? {} : { stdin: latin1(stdin), stdinKind: "bytes" as const })
             }
-            const result = yield* gate.withPermit(
-              Effect.uninterruptible(
-                Effect.tryPromise({
-                  try: () => options.bash.exec(command, execOptions),
-                  catch: failure("spawn_error", `\`${command}\` could not run through just-bash`)
-                })
-              )
+            const result = yield* Effect.uninterruptibleMask((restore) =>
+              Effect.gen(function*() {
+                // The interpreter cannot be aborted. Its own fiber must keep
+                // the permit until exec settles, even after its caller leaves.
+                const execution = yield* gate.withPermit(
+                  Effect.uninterruptible(
+                    Effect.tryPromise({
+                      try: () => options.bash.exec(command, execOptions),
+                      catch: failure("spawn_error", `\`${command}\` could not run through just-bash`)
+                    })
+                  )
+                ).pipe(Effect.forkDetach)
+                return yield* restore(Fiber.join(execution)).pipe(
+                  // Cancel a queued acquisition without waiting on an exec
+                  // that has already entered its uninterruptible region.
+                  Effect.onInterrupt(() =>
+                    Fiber.interrupt(execution).pipe(Effect.forkDetach({ startImmediately: true }), Effect.asVoid)
+                  )
+                )
+              })
             )
             return {
               stdout: captured(result.stdout),
