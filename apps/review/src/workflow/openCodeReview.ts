@@ -1315,10 +1315,11 @@ function parseHunks(diffText: string): Hunk[] {
       hunks.push(current);
       continue;
     }
+    // File headers precede the first hunk; inside a hunk every diff marker is code.
     if (!current) continue;
-    if (line.startsWith("+") && !line.startsWith("+++")) {
+    if (line.startsWith("+")) {
       current.lines.push({ type: "added", content: line.slice(1) });
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
+    } else if (line.startsWith("-")) {
       current.lines.push({ type: "deleted", content: line.slice(1) });
     } else if (line.startsWith(" ")) {
       current.lines.push({ type: "context", content: line.slice(1) });
@@ -1498,12 +1499,12 @@ function sortComments(comments: Array<ReviewComment>) {
   });
 }
 
-function normalizedComment(comment: ReviewComment, defaultPath: string) {
+function normalizedComment(comment: ReviewComment, path: string) {
   const startLine = Math.max(0, comment.startLine || 0);
   const endLine = Math.max(startLine, comment.endLine || startLine);
   return {
     ...comment,
-    path: comment.path.trim() || defaultPath,
+    path,
     content: comment.content.trim(),
     suggestionCode: comment.suggestionCode.trim(),
     existingCode: comment.existingCode.trim(),
@@ -1519,7 +1520,9 @@ function normalizedComment(comment: ReviewComment, defaultPath: string) {
  * This is where a seat's output stops being trusted: findings are scoped to
  * the file that was reviewed, anchored to lines the diff actually contains,
  * de-duplicated, and counted. A file whose review failed becomes a
- * `subtask_error` warning instead of failing the run.
+ * `subtask_error` warning; the run fails only when every file review fails.
+ * Incomplete statuses preserve their messages as file-scoped warnings.
+ * Results must explicitly pair each output with its reviewed file.
  *
  * @since 1.0.0
  * @category constructors
@@ -1528,35 +1531,19 @@ export function finalizeNativeReview(
   input: OpenCodeReviewInput,
   prepared: NativeReviewPrompt,
   preview: PreviewOutput,
-  fileResults: NativeReviewFileResult[] | NativeReviewAgentOutput | NativeReviewAgentOutput[] | null | undefined,
+  fileResults: ReadonlyArray<NativeReviewFileResult>,
 ): ReviewRunOutput {
   input = normalizeOpenCodeReviewInput(input);
   prepared = decodePrompt(prepared);
   if (!prepared.shouldReview || !input.runReview) return skippedReviewOutput(prepared);
 
-  const results: NativeReviewFileResult[] = Array.isArray(fileResults)
-    ? fileResults
-        .map((entry, index) => {
-          if (isPlainRecord(entry) && "file" in entry) return entry as NativeReviewFileResult;
-          return { file: prepared.files[index], output: entry as NativeReviewAgentOutput };
-        })
-        .filter((entry) => entry.file)
-    : fileResults && isPlainRecord(fileResults) && "file" in fileResults
-      ? [fileResults as NativeReviewFileResult]
-      : fileResults
-        ? prepared.files.length === 1
-          ? [{ file: prepared.files[0], output: fileResults as NativeReviewAgentOutput }]
-          : []
-        : [];
-
-  const byFileId = new Map(results.map((result) => [result.file.id, result]));
+  const byFileId = new Map(fileResults.map((result) => [result.file.id, result]));
   const orderedResults = prepared.files.map((file) => byFileId.get(file.id) ?? { file, output: null });
 
   const reviewablePaths = new Set(preview.entries.filter((entry) => entry.willReview).map((entry) => entry.path));
   const warnings: Array<ReviewWarning> = [];
   const comments: Array<ReviewComment> = [];
   let failedFiles = 0;
-  let explicitFailure = false;
 
   for (const result of orderedResults) {
     if (!result.output) {
@@ -1569,21 +1556,41 @@ export function finalizeNativeReview(
       continue;
     }
     const parsed = decodeAgentOutput(result.output);
-    if (parsed.status === "failed") {
-      explicitFailure = true;
-      failedFiles += 1;
-      warnings.push({
-        file: result.file.path,
-        type: "subtask_error",
-        message: parsed.message || "Native Smithers file review failed.",
-      });
+    switch (parsed.status) {
+      case "success":
+        break;
+      case "failed":
+        failedFiles += 1;
+        warnings.push({
+          file: result.file.path,
+          type: "subtask_error",
+          message: parsed.message.trim() || "Native Smithers file review failed.",
+        });
+        break;
+      case "completed_with_errors":
+      case "completed_with_warnings":
+        warnings.push({
+          file: result.file.path,
+          type: parsed.status === "completed_with_errors" ? "subtask_error" : "subtask_warning",
+          message: parsed.message.trim() || `Native Smithers file review ${parsed.status.replaceAll("_", " ")}.`,
+        });
+        break;
+      default:
+        parsed.status satisfies never;
     }
     warnings.push(...parsed.warnings);
-    comments.push(
-      ...parsed.comments
-        .map((comment) => normalizedComment(comment, result.file.path))
-        .map((comment) => anchorCommentLines(comment, result.file.diff)),
-    );
+    for (const comment of parsed.comments) {
+      const path = comment.path.trim();
+      if (path && path !== result.file.path) {
+        warnings.push({
+          file: result.file.path,
+          type: "out_of_scope_comment",
+          message: `Dropped comment targeting ${path} from review of ${result.file.path}.`,
+        });
+        continue;
+      }
+      comments.push(anchorCommentLines(normalizedComment(comment, result.file.path), result.file.diff));
+    }
   }
 
   const scopedComments = comments.filter((comment) => comment.content && reviewablePaths.has(comment.path));
@@ -1617,7 +1624,7 @@ export function finalizeNativeReview(
     elapsed: "",
   });
   const status =
-    failedFiles >= prepared.files.length || (explicitFailure && prepared.files.length === 1)
+    failedFiles >= prepared.files.length
       ? "failed"
       : warnings.length > 0
         ? "completed_with_warnings"
@@ -1632,7 +1639,9 @@ export function finalizeNativeReview(
         ? `All ${prepared.files.length} file review(s) failed.`
         : finalComments.length > 0
           ? `Reviewed ${prepared.reviewableFiles} file(s) and produced ${finalComments.length} comment(s).`
-          : "No comments generated. Looks good to me.",
+          : status === "completed_with_warnings"
+            ? "No comments generated. Review completed with warnings; see diagnostics."
+            : "No comments generated. Looks good to me.",
     summary,
     comments: finalComments,
     warnings,
