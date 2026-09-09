@@ -704,15 +704,44 @@ the runtime.
 interface Options {
   readonly delegates: ReadonlyArray<Delegate>
   readonly agent?: string | undefined
-  readonly load?: ((path: string) => Effect.Effect<unknown, unknown>) | undefined
+  readonly loadTimeoutMs?: number | undefined
+  readonly load?:
+    | ((path: string, source: {
+      readonly bytes: Uint8Array
+      readonly contentDigest: string
+    }) => Effect.Effect<unknown, unknown>)
+    | undefined
 }
 ```
 
 `delegates` is the set of registered runtime flows a descriptor may delegate
 to. `agent` renames the fallback delegate for a host that calls its driver
-something other than `agent`. `load` replaces the default dynamic `import` of
-the module a descriptor points at; it receives a filesystem path, not a
-specifier.
+something other than `agent`.
+
+`load` receives the resolved filesystem path (or the original `file:` URL),
+the verified entry bytes, and their SHA-256 `contentDigest`. Custom loaders
+must evaluate those bytes and key any evaluation cache by both source path
+and digest. Reopening the original path or caching only by path violates the
+integrity and refresh contract. Existing one-argument loaders remain assignable
+but must adopt this contract to support edited modules safely.
+
+The default loader writes the verified bytes to an exclusively created,
+owner-readable sibling file whose unique name includes the digest. Each load
+gets a fresh module identity. Relative imports and package resolution retain
+the original directory; `import.meta.url` names the temporary sibling. The
+source directory must be writable. Temporary files are removed when loading
+settles or is interrupted. Imported dependencies retain the host's normal
+module cache and are outside the entry digest.
+
+`loadTimeoutMs` bounds each `catalog` entry, including custom loaders, and
+defaults to 30,000 milliseconds. Supply a positive finite number. Expiry becomes
+`ExecutableError { code: "body_unavailable" }` naming the flow, source path,
+and deadline. The catalog logs the refusal immediately and proceeds to the
+next entry. Direct `fromDescriptor` and `fromRegistry` calls have no deadline.
+Native imports cannot be cancelled: the deadline stops waiting and cleans up
+temporary files, but cannot stop initialization resources or synchronous code
+that blocks the event loop. Hosts needing termination must supply an isolated,
+interruptible loader.
 
 ### Executable.Delegate
 
@@ -875,7 +904,8 @@ Every discovered flow this host can run, and the ones it declined. A project's
 flows directory is a mixed set: some entries delegate to a flow this host
 registered, others name a delegate only another host has, and one may simply be
 broken. None of those is a reason to withhold the rest, so every refusal is
-reported in `refused` carrying its code rather than raised.
+reported in `refused` carrying its code rather than raised. Each refusal is
+logged before loading the next entry. Each entry has the `loadTimeoutMs` deadline.
 
 The service tag is provided by `layer`, so a command that lists or diagnoses
 flows reads the same refusals the registration phase acted on instead of

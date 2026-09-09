@@ -325,10 +325,21 @@ export interface Options {
   /** The delegate a model-backed descriptor runs on. Defaults to `agent`. */
   readonly agent?: string | undefined
   /**
-   * Loads a module body. Defaults to a dynamic `import` of the file the
-   * descriptor points at; a test or a bundled host supplies its own.
+   * Per-entry catalog deadline in milliseconds. Defaults to 30,000.
+   * Must be positive and finite. Direct descriptor loads have no deadline.
    */
-  readonly load?: ((path: string) => Effect.Effect<unknown, unknown>) | undefined
+  readonly loadTimeoutMs?: number | undefined
+  /**
+   * Evaluates the verified entry bytes. Any cache must include both path and
+   * contentDigest; reopening path does not honor the verified identity.
+   * Defaults to importing a private, digest-qualified sibling file.
+   */
+  readonly load?:
+    | ((path: string, source: {
+      readonly bytes: Uint8Array
+      readonly contentDigest: string
+    }) => Effect.Effect<unknown, unknown>)
+    | undefined
 }
 
 const refuse = (options: {
@@ -361,9 +372,9 @@ const refuse = (options: {
  * addresses `/a`. The loader then imports the wrong module, or none, with
  * nothing in the failure to say why.
  *
- * Exported because {@link Options.load} receives a filesystem path, not a
- * specifier: a host that supplies its own loader has to make the same
- * conversion without depending on `node:url` here.
+ * Exported because {@link Options.load} receives a resolved filesystem path
+ * or an existing file URL. A host that supplies its own loader can convert
+ * filesystem paths without depending on `node:url` here.
  *
  * @category conversions
  * @since 1.0.0-rc.0
@@ -375,11 +386,31 @@ export const fileSpecifier = (path: string): string => {
   return normalized.startsWith("/") ? `file://${escaped}` : `file:///${escaped}`
 }
 
-const importModule = (path: string): Effect.Effect<unknown, unknown> =>
-  Effect.tryPromise({
-    try: () => import(/* @vite-ignore */ fileSpecifier(path)) as Promise<unknown>,
-    catch: (cause) => cause
-  })
+const importModule = (
+  path: string,
+  source: { readonly bytes: Uint8Array; readonly contentDigest: string }
+): Effect.Effect<unknown, unknown, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const platformPath = yield* Path.Path
+    const sourcePath = path.startsWith("file:") ? yield* platformPath.fromFileUrl(new URL(path)) : path
+    // Reserve a unique name using the host filesystem. The module is a sibling
+    // of this directory, so relative imports retain the source's base directory.
+    const reservation = yield* fs.makeTempDirectoryScoped({
+      directory: platformPath.dirname(sourcePath),
+      prefix: `.smithers-${source.contentDigest}-`
+    })
+    const modulePath = `${reservation}${platformPath.extname(sourcePath) || ".mjs"}`
+    yield* Effect.acquireRelease(
+      fs.writeFile(modulePath, new Uint8Array(0), { flag: "wx", mode: 0o600 }),
+      () => fs.remove(modulePath).pipe(Effect.orDie)
+    )
+    yield* fs.writeFile(modulePath, source.bytes)
+    return yield* Effect.tryPromise({
+      try: () => import(/* @vite-ignore */ fileSpecifier(modulePath)) as Promise<unknown>,
+      catch: (cause) => cause
+    })
+  }).pipe(Effect.scoped)
 
 /**
  * The registry name of the flow a descriptor delegates to.
@@ -602,9 +633,12 @@ const loadModule = (
 ): Effect.Effect<LoadedBody, ExecutableError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const platformPath = yield* Path.Path
-    yield* sourceBytes(descriptor, path)
+    const bytes = yield* sourceBytes(descriptor, path)
     const loadPath = path.startsWith("file:") ? path : platformPath.resolve(path)
-    const loaded = yield* (options.load ?? importModule)(loadPath).pipe(
+    const loaded = yield* (options.load ?? importModule)(loadPath, {
+      bytes,
+      contentDigest: descriptor.body.contentDigest!
+    }).pipe(
       Effect.mapError((cause) =>
         refuse({
           code: "body_unavailable",
@@ -907,12 +941,36 @@ export const catalog = (
     const executables: Array<Executable> = []
     const refused: Array<ExecutableError> = []
     for (const descriptor of descriptors) {
-      const result = yield* Effect.result(fromDescriptor(descriptor, options))
+      const loadTimeoutMs = options.loadTimeoutMs ?? 30_000
+      const result = yield* Effect.result(
+        fromDescriptor(descriptor, options).pipe(
+          Effect.timeoutOrElse({
+            duration: loadTimeoutMs,
+            orElse: () =>
+              Effect.fail(refuse({
+                code: "body_unavailable",
+                flow: descriptor.name,
+                path: descriptor.body.path,
+                message:
+                  `the body of flow "${descriptor.name}" timed out after ${loadTimeoutMs}ms while loading "${descriptor.body.path}"`
+              }))
+          })
+        )
+      )
       if (result._tag === "Success") {
         executables.push(result.success)
         continue
       }
-      refused.push(result.failure)
+      const failure = result.failure
+      refused.push(failure)
+      yield* Effect.logWarning("discovered flow is not runnable on this host", {
+        flow: failure.flow,
+        path: failure.path,
+        code: failure.code,
+        delegate: failure.delegate,
+        available: failure.available,
+        reason: failure.message
+      })
     }
     return { executables, refused }
   })
@@ -942,21 +1000,11 @@ export const layer = (
 > =>
   Layer.unwrap(
     Effect.map(
-      Effect.tap(catalog(options), (built) =>
-        Effect.forEach(built.refused, (failure) =>
-          Effect.logWarning("discovered flow is not runnable on this host", {
-            flow: failure.flow,
-            code: failure.code,
-            delegate: failure.delegate,
-            available: failure.available,
-            reason: failure.message
-          }), { discard: true })),
+      catalog(options),
       (built) =>
         Layer.mergeAll(
           Layer.succeed(Catalog)(built),
-          ...built.executables.map((executable) =>
-            executable.layer
-          )
+          ...built.executables.map((executable) => executable.layer)
         )
     )
   )

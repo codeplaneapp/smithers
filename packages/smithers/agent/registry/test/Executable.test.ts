@@ -64,9 +64,8 @@ const Agent = Flow.make("agent", {
 /**
  * The options every case starts from.
  *
- * `load` is deliberately absent, so the default loader — a dynamic `import` of
- * the `file:` specifier {@link module:Executable} builds — is the path under
- * test everywhere a fixture module is read. A stand-in is passed only by the
+ * `load` is deliberately absent, so the default loader's verified sibling
+ * module is the path under test everywhere a fixture module is read. A stand-in is passed only by the
  * cases that need a module no file can contain, such as one with no default
  * export.
  */
@@ -216,7 +215,9 @@ describe("refusals", () => {
       const executable = yield* Executable.fromDescriptor(
         descriptor,
         options({
-          load: (path) => {
+          load: (path, source) => {
+            expect(source.bytes).toEqual(bytes)
+            expect(source.contentDigest).toBe(Digest.digest(bytes))
             loadedPaths.push(path)
             return Effect.succeed({ default: greetModule })
           }
@@ -385,6 +386,113 @@ describe("refusals", () => {
       )
       expect(failure.code).toBe("invalid_module")
     }).pipe(Effect.provide(platform)))
+})
+
+describe("verified module revisions", () => {
+  const source = (priority: number) => `
+import { Annotations, Flow, Placement } from "@smthrs/core"
+import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
+import { Schema } from "effect"
+import { identity } from "./helper.ts"
+export default Flow.make({
+  description: "Priority ${priority}",
+  input: Schema.Unknown,
+  output: Schema.Unknown,
+  flows: ["test/echo"]
+}).pipe(
+  Flow.annotate(Annotations.Priority, identity(${priority})),
+  Flow.annotate(CacheEnvironment.CachePolicyAnnotation, { ttlMs: ${priority * 1000}, scope: "shared" }),
+  Flow.annotate(Annotations.Placement, Placement.${priority === 7 ? "local" : "sandbox"}())
+)
+`
+
+  it.effect("adopts edited priority, cache, and placement after registry refresh in one process", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ directory: modulesRoot, prefix: ".g4-" })
+      yield* fs.makeDirectory(`${root}/flows/revision`, { recursive: true })
+      const path = `${root}/flows/revision/flow.ts`
+      yield* fs.writeFileString(`${root}/flows/revision/helper.ts`, "export const identity = (n: number) => n")
+      yield* fs.writeFileString(path, source(7))
+      yield* Effect.gen(function*() {
+        const registry = yield* Registry.Registry
+        const first = yield* Executable.fromRegistry("revision", options())
+        expect(first.lowered.priority).toBe(7)
+        yield* fs.writeFileString(path, source(9))
+        yield* registry.refresh()
+        const second = yield* Executable.fromRegistry("revision", options())
+        expect(second.descriptor.body.contentDigest).not.toBe(first.descriptor.body.contentDigest)
+        expect(second.lowered.priority).toBe(9)
+        expect(second.lowered.cache).toEqual({ ttlMs: 9000, scope: "shared" })
+        expect(second.invocation(null).placement).toBe("sandbox")
+        expect(yield* fs.readDirectory(`${root}/flows/revision`)).toEqual(["flow.ts", "helper.ts"])
+      }).pipe(Effect.provide(Executable.layerProject({ root })))
+    }).pipe(Effect.scoped, Effect.provide(platform)))
+
+  for (const filename of ["flow.ts", "flow"]) {
+    it.effect(`evaluates verified bytes when ${filename} is replaced after the read`, () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ directory: modulesRoot, prefix: ".g4-" })
+        const path = `${root}/${filename}`
+        const bytes = new TextEncoder().encode(source(7))
+        yield* fs.writeFileString(`${root}/helper.ts`, "export const identity = (n: number) => n")
+        yield* fs.writeFile(path, bytes)
+        const descriptor = new Descriptor.FlowDescriptor({
+          ...(yield* descriptorNamed("greet")),
+          body: new Descriptor.BodyRefModule({ path, contentDigest: Digest.digest(bytes) })
+        })
+        const racingFs = FileSystem.make({
+          ...fs,
+          readFile: (requested) =>
+            fs.readFile(requested).pipe(
+              Effect.tap(() => requested === path ? fs.writeFileString(path, source(9)) : Effect.void)
+            )
+        })
+        const executable = yield* Executable.fromDescriptor(descriptor, options()).pipe(
+          Effect.provideService(FileSystem.FileSystem, racingFs)
+        )
+        expect(executable.lowered.priority).toBe(7)
+        expect(executable.lowered.cache).toEqual({ ttlMs: 7000, scope: "shared" })
+        expect(executable.invocation(null).placement).toBe("local")
+        expect(yield* fs.readDirectory(root)).toEqual([filename, "helper.ts"])
+      }).pipe(Effect.scoped, Effect.provide(platform)))
+  }
+
+  it.live("bounds a stuck top-level await, logs its refusal, and loads the next entry", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ directory: modulesRoot, prefix: ".g4-" })
+      for (const name of ["aaa-hung", "healthy"]) {
+        const directory = `${root}/flows/${name}`
+        yield* fs.makeDirectory(directory, { recursive: true })
+        yield* fs.writeFileString(`${directory}/helper.ts`, "export const identity = (n: number) => n")
+        yield* fs.writeFileString(
+          `${directory}/flow.ts`,
+          source(7) +
+            (name === "aaa-hung" ? "\nawait new Promise(() => {})" : "")
+        )
+      }
+      const logs: Array<string> = []
+      const capture = Logger.make((entry) => void logs.push(JSON.stringify(entry.message)))
+      const built = yield* Executable.catalog(options({ loadTimeoutMs: 500 })).pipe(
+        Effect.provide(Executable.layerProject({ root })),
+        Effect.provide(Logger.layer([capture])),
+        Effect.timeout(5000)
+      )
+      expect(built.executables.map((entry) => entry.descriptor.name)).toEqual(["healthy"])
+      expect(built.refused).toHaveLength(1)
+      expect(built.refused[0]).toMatchObject({
+        code: "body_unavailable",
+        flow: "aaa-hung",
+        path: `${root}/flows/aaa-hung/flow.ts`
+      })
+      expect(built.refused[0]!.message).toContain("500")
+      expect(built.refused[0]!.message).toContain("aaa-hung/flow.ts")
+      expect(logs).toHaveLength(1)
+      expect(logs[0]).toContain("aaa-hung")
+      expect(yield* fs.readDirectory(`${root}/flows/aaa-hung`)).toEqual(["flow.ts", "helper.ts"])
+    }).pipe(Effect.scoped, Effect.provide(platform)))
 })
 
 describe("the module specifier", () => {

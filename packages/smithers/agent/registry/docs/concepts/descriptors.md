@@ -45,11 +45,20 @@ honest. `Registry.loadBody` and `Executable.fromDescriptor` rehash the bytes
 they read and refuse with `body_unavailable` when the file changed after
 discovery or `contentDigest` is absent. Older journaled descriptors still decode
 and can be listed, but their unmeasured bodies cannot be loaded or run. Refresh
-the registry to measure the current bytes before loading them.
+the registry to measure the current bytes before loading them. The default
+executable loader evaluates those verified entry bytes under a fresh,
+digest-qualified module identity, so refresh adopts edited priority, cache,
+and placement annotations even after an earlier load in the same process.
+The entry digest does not cover imported dependencies; those retain the host's
+normal module cache.
 
 Body paths may be filesystem paths or `file:` URLs. Verification decodes file
 URLs, including percent-encoded filenames, through the host `Path` service.
-Module loading retains the original URL for import.
+Custom module loaders receive the original URL plus the verified bytes and
+digest. The default loader imports a private temporary sibling of the source,
+preserving its directory for relative imports. See
+[Executable.Options](../api.md#executableoptions) for loader requirements and
+catalog deadlines.
 
 ## What a descriptor carries
 
