@@ -6,7 +6,7 @@
  *
  * @since 0.0.0
  */
-import { Chunk, Context, Option, Result, Schema } from "effect"
+import { Chunk, Context, Option, Result, Schema, SchemaAST } from "effect"
 import * as Annotations from "./Annotations.ts"
 import * as Effects from "./Effects.ts"
 import * as Flow from "./Flow.ts"
@@ -751,38 +751,120 @@ const emptyRecord = (value: unknown): boolean =>
   typeof value !== "object" || value === null || Reflect.ownKeys(value).length === 0
 
 /**
- * Projects the type parameters a declared schema was built from, so
- * `Schema.Option(Schema.String)` and `Schema.Option(Schema.Number)` key
- * differently even though both render an opaque JSON Schema.
+ * Selects semantic AST fields, excluding Effect's derived parser caches.
+ * Children stay as ASTs until the bounded walk reaches them.
  */
-const schemaTypeParameters = (
-  ast: Schema.Top["ast"],
-  nodeId: string,
-  depth: number,
-  path: string,
-  budget: MemberBudget
-): ReadonlyArray<unknown> => {
-  const parameters = (ast as { readonly typeParameters?: unknown }).typeParameters
-  if (!Array.isArray(parameters)) return []
-  return parameters.map((parameter, index) =>
-    schemaIdentity(
-      Schema.make(parameter as Parameters<typeof Schema.make>[0]),
-      nodeId,
-      depth + 1,
-      `${path}.typeParameters[${index}]`,
-      budget
-    )
-  )
+const schemaFields = (source: SchemaAST.AST): object => {
+  const common = {
+    tag: source._tag,
+    annotations: source.annotations ?? null,
+    typeParameters: [],
+    checks: source.checks,
+    encoding: source.encoding,
+    context: source.context
+  }
+  switch (source._tag) {
+    case "Declaration":
+      return {
+        ...common,
+        typeParameters: source.typeParameters,
+        encodingChecks: source.encodingChecks,
+        encodingRun: source.encodingRun
+      }
+    case "Arrays":
+      return {
+        ...common,
+        isMutable: source.isMutable,
+        elements: source.elements,
+        rest: source.rest,
+        encodingChecks: source.encodingChecks
+      }
+    case "Objects":
+      return {
+        ...common,
+        propertySignatures: source.propertySignatures,
+        indexSignatures: source.indexSignatures,
+        encodingChecks: source.encodingChecks
+      }
+    case "Union":
+      return { ...common, types: source.types, mode: source.mode, encodingChecks: source.encodingChecks }
+    case "TemplateLiteral":
+      return { ...common, parts: source.parts }
+    case "Enum":
+      return { ...common, enums: source.enums }
+    case "Literal":
+      return { ...common, literal: source.literal }
+    case "UniqueSymbol":
+      return { ...common, symbol: source.symbol }
+    case "Suspend":
+      // Evaluate only after the walk has checked depth and registered this AST
+      // as active, so recursive schemas become references rather than loops.
+      return { ...common, suspended: source.thunk() }
+    default:
+      return common
+  }
 }
 
 /**
- * Renders schema document, type-parameter, and structural annotation identity.
- *
- * An undecorated `Schema.declare` guard is inherently indistinguishable: the
- * guard is a closure the host cannot inspect, it takes no type parameters, and
- * JSON Schema renders it as the empty document, so every such schema would key
- * identically. That is refused rather than collapsed; annotating the
- * declaration, for example with an `identifier`, restores identity.
+ * Walks ASTs and their public structural records (properties, links, contexts,
+ * checks and transformations). Each container is charged before expansion.
+ * Opaque transformation/filter functions use the ordinary function identity;
+ * declarations retain the explicit annotation/type-parameter contract.
+ */
+const schemaStructure = (
+  value: unknown,
+  nodeId: string,
+  depth: number,
+  path: string,
+  budget: MemberBudget,
+  active: Map<object, string>
+): unknown => {
+  if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
+  if (value === null || typeof value !== "object") {
+    return reflection(value, nodeId, new Set(), depth, path, false, budget)
+  }
+  const reference = active.get(value)
+  if (reference !== undefined) return { _tag: "SchemaReference", path: reference }
+  active.set(value, path)
+  try {
+    if (Array.isArray(value)) {
+      charge(budget, value.length, nodeId, path)
+      return value.map((item, index) => schemaStructure(item, nodeId, depth + 1, `${path}[${index}]`, budget, active))
+    }
+    const isAst = SchemaAST.isAST(value)
+    if (isAst && value._tag === "Declaration" && value.typeParameters.length === 0 && emptyRecord(value.annotations)) {
+      throw opaqueSchema(path)
+    }
+    const fields = isAst ? schemaFields(value) : value
+    const keys = Object.keys(fields).sort()
+    charge(budget, keys.length + (isAst ? 2 : 0), nodeId, path)
+    const result: Record<string, unknown> = Object.create(null)
+    for (const key of keys) {
+      const member = Object.getOwnPropertyDescriptor(fields, key)!
+      const memberPath = `${path}${isAst ? ".ast" : ""}.${key}`
+      if (key === "annotations" && "value" in member) {
+        try {
+          result[key] = reflection(member.value, nodeId, new Set(), depth + 1, memberPath, true, budget)
+        } catch (cause) {
+          if (!(cause instanceof CyclicAnnotationsSignal)) throw cause
+          result[key] = { _tag: "CyclicAnnotations" }
+        }
+      } else {
+        result[key] = "value" in member
+          ? schemaStructure(member.value, nodeId, depth + 1, memberPath, budget, active)
+          : reflectedMember(member, nodeId, new Set(), depth, memberPath, false, budget)
+      }
+    }
+    return isAst ? { _tag: "Schema", ast: result } : result
+  } finally {
+    active.delete(value)
+  }
+}
+
+/**
+ * Bounds every structural child before JSON Schema generation. The generated
+ * document shares the AST's budget; only generation failures use the fallback,
+ * so a typed refusal while charging the document cannot be swallowed.
  */
 function schemaIdentity(
   schema: Schema.Top,
@@ -791,48 +873,20 @@ function schemaIdentity(
   path: string,
   budget: MemberBudget = memberBudget()
 ): unknown {
-  if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
-  // Read the AST exactly once: a schema is caller-supplied, so every extra read
-  // is another chance for a hostile or lazily failing accessor to observe a
-  // different value halfway through one projection.
-  const source = schema.ast
-  let annotations: unknown = null
-  try {
-    if (source.annotations !== undefined) {
-      annotations = reflection(
-        source.annotations,
-        nodeId,
-        new Set(),
-        depth + 1,
-        `${path}.ast.annotations`,
-        true,
-        budget
-      )
-    }
-  } catch (cause) {
-    if (cause instanceof CyclicAnnotationsSignal) {
-      annotations = { _tag: "CyclicAnnotations" }
-    } else {
-      throw cause
-    }
-  }
-  const typeParameters = schemaTypeParameters(source, nodeId, depth, path, budget)
-  const ast = { tag: source._tag, annotations, typeParameters }
-  let document: { readonly schema: unknown } | undefined
+  // Read the caller's AST once for the projection. JSON Schema generation has
+  // its own read, whose failure must not discard the structural identity.
+  const identity = schemaStructure(schema.ast, nodeId, depth, path, budget, new Map()) as object
+  let document: unknown
   try {
     document = Schema.toJsonSchemaDocument(schema)
   } catch {
-    document = undefined
+    return identity
   }
-  if (
-    source._tag === "Declaration" &&
-    typeParameters.length === 0 &&
-    emptyRecord(annotations) &&
-    (document === undefined || emptyRecord(document.schema))
-  ) {
-    throw opaqueSchema(path)
+  charge(budget, 1, nodeId, `${path}.document`)
+  return {
+    ...identity,
+    document: reflection(document, nodeId, new Set(), depth + 1, `${path}.document`, false, budget)
   }
-  return document === undefined ? { _tag: "Schema", ast } : { _tag: "Schema", document, ast }
 }
 
 const plannedDescriptor = (value: unknown): PlannedValueDescriptor | undefined => {

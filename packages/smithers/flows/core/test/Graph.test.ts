@@ -1,4 +1,4 @@
-import { Result, Schema } from "effect"
+import { JsonSchema, Result, Schema, SchemaAST } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Effects from "../src/Effects.ts"
 import * as Flow from "../src/Flow.ts"
@@ -356,6 +356,153 @@ describe("Graph", () => {
     expect(JSON.stringify(material)).not.toContain("Looks up a value")
     expect(() => JSON.stringify(material)).not.toThrow()
     expect(JSON.stringify(material)).not.toContain("function")
+  })
+
+  it("refuses opaque declarations at nested schema positions", () => {
+    const numeric = Schema.declare((value: unknown): value is number => typeof value === "number")
+    const textual = Schema.declare((value: unknown): value is string => typeof value === "string")
+    for (const value of [numeric, textual]) {
+      expect(() => Graph.build(Node.dynamic({ output: Schema.Struct({ v: value }) })))
+        .toThrow(Node.NodeBuildError)
+    }
+  })
+
+  it.each(
+    [
+      ["transformation", Schema.NumberFromString, Schema.String],
+      ["date", Schema.Date, Schema.String],
+      ["brands", Schema.String.pipe(Schema.brand("A")), Schema.String.pipe(Schema.brand("B"))],
+      ["parameters", Schema.Option(Schema.String), Schema.Option(Schema.Number)],
+      [
+        "filters",
+        Schema.String.check(Schema.makeFilter((value) => value === "a")),
+        Schema.String.check(Schema.makeFilter((value) => value === "b"))
+      ]
+    ] as const
+  )("preserves nested schema %s identity", (_, first, second) => {
+    const material = (v: Schema.Top) => keyMaterial(Graph.build(Node.dynamic({ output: Schema.Struct({ v }) })))
+    expect(material(first)).not.toEqual(material(second))
+    expect(material(first)).toEqual(material(first))
+  })
+
+  it.each(["Struct", "Array"] as const)("bounds nested %s schemas with a typed payload refusal", (kind) => {
+    let output: Schema.Top = Schema.String
+    for (let index = 0; index <= Graph.maximumPayloadDepth; index++) {
+      output = kind === "Struct" ? Schema.Struct({ child: output }) : Schema.Array(output)
+    }
+    expect(() => Graph.build(Node.dynamic({ output }))).toThrow(Graph.GraphBuildError)
+    try {
+      Graph.build(Node.dynamic({ output }))
+    } catch (error) {
+      expect(error).toMatchObject({ code: "payload_too_deep", nodeId: "root" })
+    }
+  })
+
+  it("charges wide schema structure to the payload member budget", () => {
+    const fields: Record<string, typeof Schema.String> = {}
+    for (let index = 0; index < Graph.maximumPayloadMembers / 4; index++) fields[`v${index}`] = Schema.String
+    const output = Schema.Struct(fields)
+    expect(() => Graph.build(Node.dynamic({ output }))).toThrow(Graph.GraphBuildError)
+    try {
+      Graph.build(Node.dynamic({ output }))
+    } catch (error) {
+      expect(error).toMatchObject({ code: "payload_too_large", nodeId: "root" })
+    }
+  })
+
+  it("bounds the generated JSON Schema document even when the AST is shallow", () => {
+    const output = (levels: number) =>
+      Schema.String.check(Schema.makeFilter(() => true, {
+        toJsonSchema: () => {
+          let document: JsonSchema.JsonSchema = { type: "string" }
+          for (let index = 0; index < levels; index++) document = { properties: { v: document } }
+          return document
+        }
+      }))
+    expect(() => Graph.build(Node.succeed(output(61)))).not.toThrow()
+    expect(() => Graph.build(Node.succeed(output(62)))).toThrow(Graph.GraphBuildError)
+    try {
+      Graph.build(Node.succeed(output(62)))
+    } catch (error) {
+      expect(error).toMatchObject({ code: "payload_too_deep", nodeId: "root" })
+    }
+  })
+
+  it("charges generated document members to the AST's remaining budget", () => {
+    const output = (count: number) =>
+      Schema.String.check(Schema.makeFilter(() => true, {
+        toJsonSchema: () => ({ enum: Array.from({ length: count }, (_, index) => String(index)) })
+      }))
+    expect(() => Graph.build(Node.succeed(output(Graph.maximumPayloadMembers - 22)))).not.toThrow()
+    expect(() => Graph.build(Node.succeed(output(Graph.maximumPayloadMembers - 21)))).toThrow(Graph.GraphBuildError)
+    try {
+      Graph.build(Node.succeed(output(Graph.maximumPayloadMembers - 21)))
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "payload_too_large",
+        paths: ["$.document.schema.allOf[0].enum"],
+        nodeId: "root"
+      })
+    }
+  })
+
+  it("walks recursive suspended schemas without losing nested declaration guards", () => {
+    let recursive: Schema.Top
+    recursive = Schema.Struct({ next: Schema.suspend(() => Schema.NullOr(recursive)) })
+    expect(keyMaterial(Graph.build(Node.dynamic({ output: recursive })))).toEqual(
+      keyMaterial(Graph.build(Node.dynamic({ output: recursive })))
+    )
+    const opaque = Schema.declare((value: unknown): value is string => typeof value === "string")
+    expect(() => Graph.build(Node.dynamic({ output: Schema.suspend(() => Schema.Struct({ v: opaque })) })))
+      .toThrow(Node.NodeBuildError)
+  })
+
+  it.each(
+    [
+      ["array", (v: Schema.Top) => Schema.Array(v)],
+      ["tuple", (v: Schema.Top) => Schema.Tuple([v])],
+      ["union", (v: Schema.Top) => Schema.Union([v, Schema.Null])],
+      ["record", (v: Schema.Top) => Schema.Record(Schema.String, v)],
+      ["suspend", (v: Schema.Top) => Schema.suspend(() => v)]
+    ] as const
+  )("preserves annotations under a schema %s", (_, wrap) => {
+    const material = (brand: string) =>
+      keyMaterial(Graph.build(Node.dynamic({
+        output: wrap(Schema.String.pipe(Schema.brand(brand)))
+      })))
+    expect(material("A")).not.toEqual(material("B"))
+  })
+
+  it.each(
+    [
+      [
+        "template parts",
+        Schema.TemplateLiteral(["prefix", Schema.String.pipe(Schema.brand("A"))]),
+        Schema.TemplateLiteral(["prefix", Schema.String.pipe(Schema.brand("B"))])
+      ],
+      ["enum values", Schema.Enum({ A: "a" }), Schema.Enum({ A: "b" })],
+      ["unique symbols", Schema.UniqueSymbol(Symbol.for("a")), Schema.UniqueSymbol(Symbol.for("b"))]
+    ] as const
+  )("preserves schema %s in structural identity", (_, first, second) => {
+    const material = (output: Schema.Top) => keyMaterial(Graph.build(Node.dynamic({ output })))
+    expect(material(first)).not.toEqual(material(second))
+  })
+
+  it("describes schema structural accessors without invoking them", () => {
+    let calls = 0
+    const context = new SchemaAST.Context(false, false)
+    Object.defineProperty(context, "annotations", {
+      enumerable: true,
+      get: () => {
+        calls++
+        throw new Error("must not read structural accessor")
+      }
+    })
+    const output = Schema.make(new SchemaAST.String(undefined, undefined, undefined, context))
+    expect(keyMaterial(Graph.build(Node.dynamic({ output })))[0]?.material.body).toMatchObject({
+      output: { ast: { context: { annotations: { _tag: "Accessor" } } } }
+    })
+    expect(calls).toBe(0)
   })
 
   it("keeps callable-flow names and descriptions out of key material", () => {

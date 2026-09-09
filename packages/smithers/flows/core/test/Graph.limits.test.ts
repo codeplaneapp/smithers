@@ -238,9 +238,14 @@ describe("Graph width limits", () => {
       schema: Schema.String.annotate({ wide: Array.from({ length: count }, (_, index) => index) })
     })
 
-    // The carrier spends one member on `schema` and the annotations record
-    // spends one on `wide` before the array itself is charged.
-    expect(() => Graph.build(Node.succeed(carrier(Graph.maximumPayloadMembers - 2)))).not.toThrow()
+    // One carrier key, eight AST/wrapper members, one annotation key, and
+    // five document members leave this many array items at the exact limit.
+    expect(() => Graph.build(Node.succeed(carrier(Graph.maximumPayloadMembers - 15)))).not.toThrow()
+    expect(thrown(() => Graph.build(Node.succeed(carrier(Graph.maximumPayloadMembers - 14))))).toMatchObject({
+      code: "payload_too_large",
+      paths: ["$.schema.document.schema"],
+      nodeId: "root"
+    })
     expect(thrown(() => Graph.build(Node.succeed(carrier(Graph.maximumPayloadMembers - 1))))).toMatchObject({
       code: "payload_too_large",
       paths: ["$.schema.ast.annotations.wide"],
