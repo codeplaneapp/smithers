@@ -40,7 +40,7 @@ const claude: Harness = {
   launch: { argv: ["claude"] }
 }
 
-const setup = async () => {
+const setup = async (deleteSession?: (url: string) => Promise<Response>) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const bodies: Array<Record<string, unknown>> = []
   let next = 0
@@ -49,6 +49,7 @@ const setup = async () => {
     commandActor: "user",
     baseUrl: "http://local",
     boundedFetch: async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE" && deleteSession !== undefined) return deleteSession(_url)
       bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>)
       next += 1
       return new Response(JSON.stringify({ sessionId: `pty-${next}` }), { status: 200 })
@@ -78,5 +79,67 @@ describe("where a process tab runs", () => {
     expect(bodies.map((body) => body.repoId)).toEqual(["repo-1", "repo-1"])
     expect(store.collections.tabs.get("pty-1")).toMatchObject({ title: "Terminal · smithers", cwd: "/Users/u/smithers" })
     expect(store.collections.tabs.get("pty-2")).toMatchObject({ title: "Claude Code · smithers", cwd: "/Users/u/smithers" })
+  })
+})
+
+describe("closing a process tab", () => {
+  for (const kind of ["terminal", "harness"] as const) {
+    for (const failure of ["HTTP 500", "transport error"] as const) {
+      test(`${kind}: ${failure} preserves the tab and confirmation for a retry`, async () => {
+        const urls: string[] = []
+        const { store, tabs } = await setup(async (url) => {
+          urls.push(url)
+          if (urls.length > 1) return new Response(null, { status: 204 })
+          if (failure === "transport error") throw new Error("connection lost")
+          return new Response(null, { status: 500 })
+        })
+        if (kind === "terminal") await tabs.openTerminalTab()
+        else await tabs.openHarnessTab("claude")
+        await tabs.closeTab("pty-1")
+        expect(urls).toHaveLength(0)
+        const error = await tabs.confirmTabClose()
+        expect(store.collections.tabs.has("pty-1")).toBe(true)
+        expect(store.session().pendingTabCloseId).toBe("pty-1")
+        expect(store.session().activeTabId).toBe("pty-1")
+        expect(error).toContain("Could not terminate")
+        expect(error).toContain(failure === "HTTP 500" ? "500" : "connection lost")
+        expect(error).toContain("close again to retry")
+        expect(await tabs.confirmTabClose()).toBeUndefined()
+        expect(urls).toEqual(["http://local/api/pty/pty-1", "http://local/api/pty/pty-1"])
+        expect(store.collections.tabs.has("pty-1")).toBe(false)
+        expect(store.session().pendingTabCloseId).toBeNull()
+      })
+    }
+
+    test(`${kind}: an exited session retries cleanup and accepts confirmed absence`, async () => {
+      let attempts = 0
+      const { store, tabs } = await setup(async () => new Response(null, { status: ++attempts === 1 ? 500 : 404 }))
+      if (kind === "terminal") await tabs.openTerminalTab()
+      else await tabs.openHarnessTab("claude")
+      tabs.notePtyExit("pty-1", 0)
+      const error = await tabs.closeTab("pty-1")
+      expect(store.collections.tabs.has("pty-1")).toBe(true)
+      expect(error).toContain("Could not terminate")
+      expect(await tabs.closeTab("pty-1")).toBeUndefined()
+      expect(attempts).toBe(2)
+      expect(store.collections.tabs.has("pty-1")).toBe(false)
+    })
+  }
+
+  test("a cloud terminal detaches without deleting its session", async () => {
+    let attempts = 0
+    const { store, tabs } = await setup(async () => {
+      attempts += 1
+      throw new Error("must not delete a cloud session")
+    })
+    store.dispatch({
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "cloud", kind: "terminal", title: "Cloud terminal", sessionId: "cloud-session", workspaceId: "workspace-1" }
+    })
+    await tabs.closeTab("cloud")
+    expect(await tabs.confirmTabClose()).toBeUndefined()
+    expect(attempts).toBe(0)
+    expect(store.collections.tabs.has("cloud")).toBe(false)
   })
 })

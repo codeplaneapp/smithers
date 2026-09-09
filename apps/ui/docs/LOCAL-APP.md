@@ -169,6 +169,12 @@ abort contract. Termination failures reject shutdown; they never report a
 clean stop or release the still-owned child's capacity. Independent local
 listener, auth and LSP finalizers are attempted even if PTY disposal fails.
 
+Closing a local terminal or harness tab removes it only after the session
+DELETE succeeds or returns 404. Other HTTP responses and transport failures
+surface a termination error and keep the tab. A pending close confirmation
+stays open so Close session retries; exited tabs retry through close directly.
+Closing a cloud workspace terminal still detaches without deleting its session.
+
 PTY scrollback retains at most 64 KiB of raw UTF-8 output per session.
 `GET /api/pty/:id/output?tail=<bytes>` strips ANSI escapes and returns a suffix
 within the requested non-negative safe-integer byte limit. It drops a partial

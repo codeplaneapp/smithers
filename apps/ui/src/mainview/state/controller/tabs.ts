@@ -334,7 +334,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     store.dispatch({ type: "tab.selected", actor: "user", id: tab.id })
   }
 
-  const endSession = async (tab: TabRow): Promise<void> => {
+  const endSession = async (tab: TabRow): Promise<string | void> => {
     if (!isProcessTab(tab)) return
     /*
      * A workspace terminal's process is a cloud workspace session: closing
@@ -345,14 +345,18 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     // An exited session is still listed on the server until deleted, so the
     // DELETE goes out either way; a 404 for one the server already dropped is fine.
     try {
-      await ctx.boundedFetch(`${baseUrl}/api/pty/${encodeURIComponent(tab.sessionId)}`, { method: "DELETE" })
-    } catch {
-      // The tab closes either way.
+      const response = await ctx.boundedFetch(`${baseUrl}/api/pty/${encodeURIComponent(tab.sessionId)}`, { method: "DELETE" })
+      if (!response.ok && response.status !== 404) {
+        throw new Error(await ctx.errorMessageOf(response, `The server answered ${response.status}`))
+      }
+    } catch (error) {
+      return `Could not terminate ${tab.title}: ${error instanceof Error ? error.message : String(error)}. The tab is still open; close again to retry.`
     }
   }
 
-  const finishClose = async (tab: TabRow): Promise<void> => {
-    await endSession(tab)
+  const finishClose = async (tab: TabRow): Promise<string | void> => {
+    const error = await endSession(tab)
+    if (error !== undefined) return error
     store.dispatch({ type: "tab.closed", actor: "user", id: tab.id })
   }
 
@@ -364,7 +368,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       store.dispatch({ type: "tab.close.asked", actor: "user", id: tab.id })
       return
     }
-    await finishClose(tab)
+    return finishClose(tab)
   }
 
   const confirmTabClose: TabsController["confirmTabClose"] = async () => {
@@ -375,7 +379,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       store.dispatch({ type: "tab.close.asked", actor: "user", id: null })
       return
     }
-    await finishClose(tab)
+    return finishClose(tab)
   }
 
   const cancelTabClose: TabsController["cancelTabClose"] = () => {
