@@ -174,24 +174,34 @@ describe("Graph release coverage", () => {
     const nameDescriptor = Object.getOwnPropertyDescriptor(Error.prototype, "name")!
     Reflect.deleteProperty(Error.prototype, "name")
     try {
-      expect(reflected(new Error())).toEqual({ _tag: "Error", name: "Error", message: "" })
+      expect(reflected(new Error())).toEqual({ _tag: "Error", name: "Error", message: "", fields: {} })
     } finally {
       Object.defineProperty(Error.prototype, "name", nameDescriptor)
     }
 
     const accessorError = new Error("ignored")
+    const name = () => 1
+    const message = () => 2
     Object.defineProperties(accessorError, {
-      name: { get: () => 1 },
-      message: { get: () => 2 }
+      name: { get: name },
+      message: { get: message }
     })
-    expect(reflected(accessorError)).toEqual({ _tag: "Error", name: "Error", message: "" })
+    expect(reflected(accessorError)).toEqual({
+      _tag: "Error",
+      name: "Error",
+      message: "",
+      fields: {
+        name: { _tag: "Accessor", get: internal.functionIdentity(name), set: null },
+        message: { _tag: "Accessor", get: internal.functionIdentity(message), set: null }
+      }
+    })
 
     const bytes = new ArrayBuffer(3)
     new Uint8Array(bytes).set([1, 2, 3])
     expect(reflected(bytes)).toEqual({ _tag: "Bytes", kind: "ArrayBuffer", bytes: [1, 2, 3] })
   })
 
-  it("walks only enumerable data properties while discovering planned references", () => {
+  it("walks data properties without invoking accessors while discovering planned references", () => {
     const accept = Flow.make({
       input: Schema.Unknown,
       output: Schema.String,

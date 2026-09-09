@@ -109,7 +109,12 @@ describe("Graph reflection", () => {
     expect(reflected(new Date(0))).toEqual({ _tag: "Date", epochMilliseconds: 0 })
     expect(reflected(new Date(Number.NaN))).toEqual({ _tag: "Date", epochMilliseconds: null })
     expect(reflected(/a+/gim)).toEqual({ _tag: "RegExp", source: "a+", flags: "gim" })
-    expect(reflected(new Error("boom"))).toEqual({ _tag: "Error", name: "Error", message: "boom" })
+    expect(reflected(new Error("boom"))).toEqual({
+      _tag: "Error",
+      name: "Error",
+      message: "boom",
+      fields: { message: "boom" }
+    })
     expect(reflected(new Map([[{ key: 1 }, { value: 2 }]]))).toEqual({
       _tag: "Map",
       entries: [[{ key: 1 }, { value: 2 }]]

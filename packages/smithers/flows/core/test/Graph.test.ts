@@ -1,5 +1,6 @@
-import { JsonSchema, Result, Schema, SchemaAST } from "effect"
+import { Chunk, Data, JsonSchema, Option, Result, Schema, SchemaAST } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Digest from "../src/Digest.ts"
 import * as Effects from "../src/Effects.ts"
 import * as Flow from "../src/Flow.ts"
 import * as Graph from "../src/Graph.ts"
@@ -741,6 +742,109 @@ describe("Graph", () => {
       error: { _tag: "Timeout", after: 30 }
     })
     expect(Graph.nodes(other)[0]?.keyMaterial.body).not.toEqual(Graph.nodes(graph)[0]?.keyMaterial.body)
+  })
+
+  it("includes tagged error fields and nested causes in failure identity", () => {
+    class Rejected extends Schema.TaggedError<Rejected>()("Rejected", { reason: Schema.String }) {}
+    class Denied extends Data.TaggedError("Denied")<{ readonly reason: string }> {}
+    const material = (error: unknown) => Digest.canonical(keyMaterial(Graph.build(Node.fail(error))))
+
+    expect(material(new Rejected({ reason: "no reviewer" })))
+      .not.toBe(material(new Rejected({ reason: "tests failed" })))
+    expect(material(new Denied({ reason: "no reviewer" })))
+      .not.toBe(material(new Denied({ reason: "tests failed" })))
+    expect(material(new Error("failed", { cause: new Rejected({ reason: "one" }) })))
+      .not.toBe(material(new Error("failed", { cause: new Rejected({ reason: "two" }) })))
+    expect(material(new Error("failed", { cause: "one" })))
+      .not.toBe(material(new Error("failed", { cause: "two" })))
+  })
+
+  it("reflects error descriptors without reading accessors or stack", () => {
+    let reads = 0
+    const error = new Error("failed", { cause: new Error("nested") })
+    Object.defineProperties(error, {
+      stack: {
+        get: () => {
+          reads++
+          throw new Error("stack read")
+        }
+      },
+      detail: {
+        get: () => {
+          reads++
+          throw new Error("detail read")
+        }
+      },
+      hidden: { value: "retained" }
+    })
+    expect(Graph.nodes(Graph.build(Node.fail(error)))[0]?.keyMaterial.body).toMatchObject({
+      error: {
+        _tag: "Error",
+        fields: {
+          cause: { _tag: "Error", message: "nested" },
+          detail: { _tag: "Accessor" },
+          hidden: "retained"
+        }
+      }
+    })
+    expect(reads).toBe(0)
+    const first = new Error("same")
+    const second = new Error("same")
+    first.stack = "first stack"
+    second.stack = "second stack"
+    expect(keyMaterial(Graph.build(Node.fail(first)))).toEqual(keyMaterial(Graph.build(Node.fail(second))))
+  })
+
+  it("applies reflection refusals and limits to error fields", () => {
+    expect(() => Graph.build(Node.fail(new Error("bad", { cause: new WeakMap() })))).toThrow(Node.NodeBuildError)
+    expect(() => Graph.build(Node.fail(Object.assign(new Error("bad"), { [Symbol("field")]: 1 }))))
+      .toThrow(Node.NodeBuildError)
+    const cyclic = new Error("cycle")
+    cyclic.cause = cyclic
+    expect(Graph.nodes(Graph.build(Node.fail(cyclic)))[0]?.keyMaterial.body).toMatchObject({
+      error: { fields: { cause: { _tag: "Circular" } } }
+    })
+    let deep: unknown = "end"
+    for (let index = 0; index <= Graph.maximumPayloadDepth; index++) deep = new Error("nested", { cause: deep })
+    expect(() => Graph.build(Node.fail(deep))).toThrow(Graph.GraphBuildError)
+    expect(() => Graph.build(Node.fail(new Error("wide", { cause: Array(Graph.maximumPayloadMembers).fill(0) }))))
+      .toThrow(Graph.GraphBuildError)
+  })
+
+  it.each(
+    [
+      ["Map values", (value: unknown) => new Map([["value", value]])],
+      ["Map keys", (value: unknown) => new Map([[value, "value"]])],
+      ["Set", (value: unknown) => new Set([value])],
+      ["Map in object", (value: unknown) => ({ map: new Map([["value", value]]) })],
+      ["Set in array", (value: unknown) => [new Set([value])]],
+      ["Chunk", (value: unknown) => Chunk.make(value)],
+      ["Option", (value: unknown) => Option.some(value)],
+      ["Result", (value: unknown) => Result.succeed(value)],
+      ["hidden property", (value: unknown) => Object.defineProperty({}, "hidden", { value })],
+      ["array extra", (value: unknown) => Object.assign([], { extra: value })],
+      ["error cause", (value: unknown) => new Error("failed", { cause: value })]
+    ] as const
+  )("discovers planned references in %s and substitutes producer identity", (_label, wrap) => {
+    const accept = Flow.make({ input: Schema.Unknown, body: () => Node.dynamic({ prompt: "Use the input" }) })
+    const next = (value: unknown) => accept(wrap(value))
+    const identities = [1, 2].map((value) => {
+      const nodes = Graph.nodes(Graph.build(Node.andThen(Node.succeed(value), next)))
+      const work = nodes.find((node) => node.id === "root.then.flow")!
+      expect(work.keyMaterial.inputs).toContainEqual({ _tag: "Ref", from: "root.andThen", path: [] })
+      return Digest.canonical({
+        ...work.keyMaterial,
+        inputs: work.keyMaterial.inputs.map((input) =>
+          input._tag === "Ref"
+            ? {
+              ...input,
+              from: Digest.digest(Digest.canonical(nodes.find((node) => node.id === input.from)!.keyMaterial.body))
+            }
+            : input
+        )
+      })
+    })
+    expect(identities[0]).not.toBe(identities[1])
   })
 
   it("re-raises from a recovery arm", () => {

@@ -913,7 +913,9 @@ const plannedInputRefs = (
   value: unknown,
   nodeId: string,
   seen: Set<object> = new Set(),
-  depth = 0
+  depth = 0,
+  path = "$",
+  budget: MemberBudget = memberBudget()
 ): ReadonlyArray<PlannedInputRef> => {
   if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
   const descriptor = plannedDescriptor(value)
@@ -923,26 +925,17 @@ const plannedInputRefs = (
   if (value === null || (typeof value !== "object" && typeof value !== "function")) return []
   if (seen.has(value)) return []
   seen.add(value)
-  const refs: Array<PlannedInputRef> = []
-  if (Array.isArray(value)) {
-    const descriptors = Object.getOwnPropertyDescriptors(value)
-    for (let index = 0; index < value.length; index++) {
-      const member = descriptors[String(index)]
-      if (member !== undefined && member.enumerable && "value" in member) {
-        refs.push(...plannedInputRefs(member.value, nodeId, seen, depth + 1))
+  try {
+    const refs: Array<PlannedInputRef> = []
+    for (const { member, path: memberPath } of planMembers(value, nodeId, path, budget)) {
+      if (member !== undefined && "value" in member) {
+        refs.push(...plannedInputRefs(member.value, nodeId, seen, depth + 1, memberPath, budget))
       }
     }
-  } else {
-    const descriptors = Object.getOwnPropertyDescriptors(value)
-    for (const key of Reflect.ownKeys(descriptors).filter((key): key is string => typeof key === "string").sort()) {
-      const member = descriptors[key]!
-      if (member.enumerable && "value" in member) {
-        refs.push(...plannedInputRefs(member.value, nodeId, seen, depth + 1))
-      }
-    }
+    return refs
+  } finally {
+    seen.delete(value)
   }
-  seen.delete(value)
-  return refs
 }
 
 const define = (target: object, key: string, value: unknown): void => {
@@ -955,6 +948,80 @@ const define = (target: object, key: string, value: unknown): void => {
 }
 
 const isArrayIndex = (key: string, length: number): boolean => /^(?:0|[1-9]\d*)$/.test(key) && Number(key) < length
+
+interface PlanMember {
+  readonly key: string
+  readonly member: PropertyDescriptor | undefined
+  readonly path: string
+  readonly errorArgs?: boolean
+}
+
+const errorArgsSymbol = Symbol.for("effect/Data/Error/plainArgs")
+
+/**
+ * The shared member contract for identity and planned references. Charge
+ * containers before expansion, preserve holes and non-enumerable properties,
+ * and inspect descriptors without invoking accessors. Error stacks are volatile.
+ */
+const planMembers = (value: object, nodeId: string, path: string, budget: MemberBudget): ReadonlyArray<PlanMember> => {
+  if (value instanceof Map) {
+    charge(budget, mapSize(value), nodeId, path)
+    return [...Map.prototype.entries.call(value)].flatMap(([key, member], index) => [
+      { key: String(index * 2), member: { value: key }, path: `${path}.entries[${index}][0]` },
+      { key: String(index * 2 + 1), member: { value: member }, path: `${path}.entries[${index}][1]` }
+    ])
+  }
+  if (value instanceof Set) {
+    charge(budget, setSize(value), nodeId, path)
+    return [...Set.prototype.values.call(value)].map((member, index) => ({
+      key: String(index),
+      member: { value: member },
+      path: `${path}.values[${index}]`
+    }))
+  }
+  if (Object.getPrototypeOf(value) === chunkPrototype) {
+    charge(budget, Chunk.size(value as Chunk.Chunk<unknown>), nodeId, path)
+    return Chunk.toReadonlyArray(value as Chunk.Chunk<unknown>).map((member, index) => ({
+      key: String(index),
+      member: { value: member },
+      path: `${path}.values[${index}]`
+    }))
+  }
+  const keys = Reflect.ownKeys(value)
+  const symbol = keys.find((key): key is symbol =>
+    typeof key === "symbol" && !(value instanceof Error && key === errorArgsSymbol)
+  )
+  if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
+  const ownKeys = keys.filter((key): key is string =>
+    typeof key === "string" && !(value instanceof Error && key === "stack")
+  )
+  if (Array.isArray(value)) {
+    const extraKeys = ownKeys.filter((key) => key !== "length" && !isArrayIndex(key, value.length)).sort()
+    charge(budget, value.length + extraKeys.length, nodeId, path)
+    return [
+      ...Array.from({ length: value.length }, (_, index) => ({
+        key: String(index),
+        member: Object.getOwnPropertyDescriptor(value, String(index)),
+        path: `${path}[${index}]`
+      })),
+      ...extraKeys.map((key) => ({
+        key,
+        member: Object.getOwnPropertyDescriptor(value, key),
+        path: propertyPath(path, key)
+      }))
+    ]
+  }
+  const errorArgs = value instanceof Error ? Object.getOwnPropertyDescriptor(value, errorArgsSymbol) : undefined
+  charge(budget, ownKeys.length + (errorArgs === undefined ? 0 : 1), nodeId, path)
+  return [
+    ...ownKeys.sort().map((key) => ({
+      key,
+      member: Object.getOwnPropertyDescriptor(value, key),
+      path: propertyPath(path, key)
+    })),
+    ...(errorArgs === undefined ? [] : [{ key: "args", member: errorArgs, path: `${path}.args`, errorArgs: true }])
+  ]
+}
 
 /**
  * Projects one own property, describing an accessor instead of invoking it.
@@ -1097,11 +1164,10 @@ function reflection(
   if (prototype === chunkPrototype) {
     seen.add(value)
     try {
-      charge(budget, Chunk.size(value as Chunk.Chunk<unknown>), nodeId, path)
       return {
         _tag: "Chunk",
-        values: Chunk.toReadonlyArray(value as Chunk.Chunk<unknown>).map((member, index) =>
-          reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles, budget)
+        values: planMembers(value, nodeId, path, budget).map(({ member, path: memberPath }) =>
+          reflectedMember(member!, nodeId, seen, depth, memberPath, rejectCycles, budget)
         )
       }
     } finally {
@@ -1119,12 +1185,28 @@ function reflection(
     return { _tag: "RegExp", source: regexpSource(value), flags: regexpFlags(value) }
   }
   if (value instanceof Error) {
-    const name = dataProperty(value, "name")
-    const message = dataProperty(value, "message")
-    return {
-      _tag: "Error",
-      name: typeof name === "string" ? name : "Error",
-      message: typeof message === "string" ? message : ""
+    seen.add(value)
+    try {
+      const name = dataProperty(value, "name")
+      const message = dataProperty(value, "message")
+      const fields = Object.create(null) as Record<string, unknown>
+      const args = Object.create(null) as Record<string, unknown>
+      for (const { key, member, path: memberPath, errorArgs } of planMembers(value, nodeId, path, budget)) {
+        define(
+          errorArgs ? args : fields,
+          key,
+          reflectedMember(member!, nodeId, seen, depth, memberPath, rejectCycles, budget)
+        )
+      }
+      return {
+        _tag: "Error",
+        ...args,
+        name: typeof name === "string" ? name : "Error",
+        message: typeof message === "string" ? message : "",
+        fields
+      }
+    } finally {
+      seen.delete(value)
     }
   }
   const sharedArrayBuffer = typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer
@@ -1147,11 +1229,15 @@ function reflection(
   seen.add(value)
   if (value instanceof Map) {
     try {
-      charge(budget, mapSize(value), nodeId, path)
-      const entries = [...Map.prototype.entries.call(value)].map(([key, member], index) => [
-        reflection(key, nodeId, seen, depth + 1, `${path}.entries[${index}][0]`, rejectCycles, budget),
-        reflection(member, nodeId, seen, depth + 1, `${path}.entries[${index}][1]`, rejectCycles, budget)
-      ])
+      const members = planMembers(value, nodeId, path, budget)
+      const entries: Array<ReadonlyArray<unknown>> = []
+      for (let index = 0; index < members.length; index += 2) {
+        entries.push(
+          members.slice(index, index + 2).map(({ member, path: memberPath }) =>
+            reflectedMember(member!, nodeId, seen, depth, memberPath, rejectCycles, budget)
+          )
+        )
+      }
       entries.sort(compareJsonText)
       return { _tag: "Map", entries }
     } finally {
@@ -1160,9 +1246,8 @@ function reflection(
   }
   if (value instanceof Set) {
     try {
-      charge(budget, setSize(value), nodeId, path)
-      const values = [...Set.prototype.values.call(value)].map((member, index) =>
-        reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles, budget)
+      const values = planMembers(value, nodeId, path, budget).map(({ member, path: memberPath }) =>
+        reflectedMember(member!, nodeId, seen, depth, memberPath, rejectCycles, budget)
       )
       values.sort(compareJsonText)
       return { _tag: "Set", values }
@@ -1172,34 +1257,19 @@ function reflection(
   }
   if (Array.isArray(value)) {
     try {
-      const descriptors = Object.getOwnPropertyDescriptors(value)
-      const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
-      if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
-      const extraKeys = Reflect.ownKeys(descriptors)
-        .filter((key): key is string => typeof key === "string" && key !== "length" && !isArrayIndex(key, value.length))
-        .sort()
-      charge(budget, value.length + extraKeys.length, nodeId, path)
+      const members = planMembers(value, nodeId, path, budget)
       const items = new Array<unknown>(value.length)
-      for (let index = 0; index < value.length; index++) {
-        const member = descriptors[String(index)]
+      const extra = Object.create(null) as Record<string, unknown>
+      for (const { key, member, path: memberPath } of members) {
         define(
-          items,
-          String(index),
+          isArrayIndex(key, value.length) ? items : extra,
+          key,
           member === undefined
             ? { _tag: "Hole" }
-            : reflectedMember(member, nodeId, seen, depth, `${path}[${index}]`, rejectCycles, budget)
+            : reflectedMember(member, nodeId, seen, depth, memberPath, rejectCycles, budget)
         )
       }
-      if (extraKeys.length === 0) return items
-      const extra = Object.create(null) as Record<string, unknown>
-      for (const key of extraKeys) {
-        define(
-          extra,
-          key,
-          reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles, budget)
-        )
-      }
-      return { _tag: "Array", items, extra }
+      return members.length === value.length ? items : { _tag: "Array", items, extra }
     } finally {
       seen.delete(value)
     }
@@ -1209,20 +1279,12 @@ function reflection(
     throw unrepresentableInstance(value, path)
   }
   try {
-    const descriptors = Object.getOwnPropertyDescriptors(value)
-    const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
-    if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
-    const keys = Reflect.ownKeys(descriptors).filter((key): key is string => typeof key === "string").sort()
-    charge(budget, keys.length, nodeId, path)
+    const members = planMembers(value, nodeId, path, budget)
     const result = Object.create(null) as Record<string, unknown>
-    for (const key of keys) {
-      define(
-        result,
-        key,
-        reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles, budget)
-      )
+    for (const { key, member, path: memberPath } of members) {
+      define(result, key, reflectedMember(member!, nodeId, seen, depth, memberPath, rejectCycles, budget))
     }
-    const tag = descriptors._tag
+    const tag = members.find(({ key }) => key === "_tag")?.member
     return tag !== undefined && "value" in tag && typeof tag.value === "string" && reflectionTags.has(tag.value)
       ? { _tag: "Escaped", value: result }
       : result
