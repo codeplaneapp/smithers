@@ -1,8 +1,8 @@
-/** Node host composition over the shared, injected durable runtime.
+/** Bun host composition over the shared, injected durable runtime.
  * @since 1.0.0
  */
-import * as Database from "@smthrs/database/node/NodeDatabase"
-import * as Host from "@smthrs/platform-node/NodeHost"
+import * as Database from "@smthrs/database/bun/BunDatabase"
+import * as Host from "@smthrs/platform-bun/BunHost"
 export type { CompositionRootsAreComplete } from "./internal/NativeRuntimeApi.ts"
 import { makeNative } from "./internal/NativeRuntime.ts"
 import type { NativeRuntimeApi } from "./internal/NativeRuntimeApi.ts"
@@ -12,10 +12,10 @@ export { RuntimeConfigurationError } from "./Runtime.ts"
 export type { Options } from "./Runtime.ts"
 
 const runtime = makeNative({
-  name: "NodeRuntime",
+  name: "BunRuntime",
   database: (filename) => Database.layer({ filename }),
   host: Host,
-  crypto: Host.NodeCrypto.layer
+  crypto: Host.BunCrypto.layer
 })
 
 /** Provides the migrated stores over the native SQL driver.

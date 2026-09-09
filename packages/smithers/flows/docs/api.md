@@ -8,7 +8,9 @@ description: "Every public export of @smthrs/flows: the barrel's namespaces and 
 | Entry point                   | Contents                                                                           |
 | ----------------------------- | ---------------------------------------------------------------------------------- |
 | `@smthrs/flows`               | The barrel: nineteen engine packages re-exported, plus `namespaces`. Browser-safe. |
-| `@smthrs/flows/NodeRuntime`   | The durable runtime compositions for Node and local SQLite. Node-only.             |
+| `@smthrs/flows/Runtime`       | Shared engine/storage composition over injected Effect SQL and host services.      |
+| `@smthrs/flows/NodeRuntime`   | Native Node composition, preserving the existing API.                              |
+| `@smthrs/flows/BunRuntime`    | Native Bun composition using the Bun SQL adapter.                                  |
 | `@smthrs/flows/SandboxedFlow` | Running a child flow's own code inside a provisioned machine. Node-only.           |
 
 ```ts

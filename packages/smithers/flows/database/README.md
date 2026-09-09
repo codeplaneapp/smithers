@@ -123,3 +123,22 @@ Full documentation is at [database.smithers.sh](https://database.smithers.sh):
 ## License
 
 MIT
+
+## Runtime portability is a required contract
+
+The engine and product flows are platform-independent Effect programs. Node and Bun
+provide different SQL and host layers to the same runtime, migrations, journal,
+stores, cache, and recovery logic. A Node subprocess is not a Bun compatibility
+mechanism. Keep filesystem, process, crypto, HTTP and SQL access behind their
+existing Effect services, selected at the executable's composition root.
+
+`@smthrs/flows/Runtime` consumes an injected Effect `SqlClient` and host services.
+`@smthrs/flows/NodeRuntime` and `@smthrs/flows/BunRuntime` select matching native
+services. Database adapters are `@smthrs/database/node/NodeDatabase` and
+`@smthrs/database/bun/BunDatabase`; both share the schema guard, startup retry
+policy and `DurableWriter`. Domain code must not open an extra database or create
+its own command, job, event, or locking ledger around the durable engine.
+
+Runtime parity must be demonstrated by the same execute, persist, restart, resume
+and cancellation scenarios, including opening a Node-created database in Bun and
+vice versa. A browser-safe import alone does not prove durable browser execution.

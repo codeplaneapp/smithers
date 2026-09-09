@@ -139,3 +139,11 @@ const notices = UnsupportedBackend.ignoredNames(process.env).map(UnsupportedBack
 ```
 
 Print them. Do not change the exit code: this is a notice, not a refusal.
+
+## Select the native runtime at the boundary
+
+On Bun, provide `BunDatabase.layer` from `@smthrs/database/bun/BunDatabase`
+in place of the Node driver. Both expose the same Effect SqlClient and use the
+same schema guard and bounded startup retries. The `DurableWriter` and migration
+layers above them remain identical. Flow and product services receive those
+services through Effect; they do not construct a second database for their state.

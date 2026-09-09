@@ -398,7 +398,9 @@ describe("NodeDatabase guard: Bun (X-18)", () => {
       expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
       if (!NodeDatabase.isUnsupportedDatabase(defect)) return
       expect(defect.code).toBe("unsupported_runtime")
-      expect(defect.message).toBe("1.0.0-rc.0 runs the durable engine on Node.js >=22.19.0 only")
+      expect(defect.message).toBe(
+        "Use @smthrs/database/bun/BunDatabase under Bun; NodeDatabase requires Node.js >=22.19.0"
+      )
     }))
 
   it.effect("refuses before it inspects the file, so an in-memory database is refused too", () =>

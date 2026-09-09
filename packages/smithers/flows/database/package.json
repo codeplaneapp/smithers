@@ -43,7 +43,8 @@
     "./UnsupportedBackend": "./src/UnsupportedBackend.ts",
     "./index": "./src/index.ts",
     "./node/NodeDatabase": "./src/node/NodeDatabase.ts",
-    "./test/TestDatabase": "./src/test/TestDatabase.ts"
+    "./test/TestDatabase": "./src/test/TestDatabase.ts",
+    "./bun/BunDatabase": "./src/bun/BunDatabase.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -143,6 +144,16 @@
           "types": "./dist/cjs/test/TestDatabase.d.ts",
           "default": "./dist/cjs/test/TestDatabase.js"
         }
+      },
+      "./bun/BunDatabase": {
+        "import": {
+          "types": "./dist/esm/bun/BunDatabase.d.ts",
+          "default": "./dist/esm/bun/BunDatabase.js"
+        },
+        "require": {
+          "types": "./dist/cjs/bun/BunDatabase.d.ts",
+          "default": "./dist/cjs/bun/BunDatabase.js"
+        }
       }
     }
   },
@@ -173,14 +184,20 @@
     "madge": "8.0.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.69.0",
-    "vitest": "4.1.9"
+    "vitest": "4.1.9",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112",
+    "@types/bun": "1.3.6"
   },
   "peerDependencies": {
     "@effect/sql-sqlite-node": "4.0.0-rc.112",
-    "effect": "4.0.0-rc.112"
+    "effect": "4.0.0-rc.112",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112"
   },
   "peerDependenciesMeta": {
     "@effect/sql-sqlite-node": {
+      "optional": true
+    },
+    "@effect/sql-sqlite-bun": {
       "optional": true
     }
   }

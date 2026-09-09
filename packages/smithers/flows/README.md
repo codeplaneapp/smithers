@@ -113,10 +113,12 @@ tab runs them on.
 
 [RC support matrix](https://smithers.sh/docs/reference/support-matrix/) lists runtime evidence limits.
 
-Durable execution is a separate claim. It is supported only on Node.js 22.19.0
-or later with local SQLite; a browser or edge runtime is not a supported durable
-host even when you supply another SQL client. Both Node-only modules are
-subpaths precisely so importing the root never opens `node:sqlite`.
+Durable execution is provided by the Node and Bun compositions over local SQLite.
+The shared engine consumes injected Effect services. Browser-safe authoring and
+inspection do not establish browser or edge durable execution. Native drivers
+remain explicit subpaths so the root does not import `node:sqlite` or `bun:sqlite`.
+See [runtime portability](./docs/concepts/runtime-portability.md) for the contract
+and the native cross-runtime restart regression.
 
 ## The Node runtime
 
@@ -166,3 +168,30 @@ The published site is https://flows.smithers.sh.
   export, with the options each entry point takes.
 - [Troubleshooting](https://flows.smithers.sh/troubleshooting/): every typed
   refusal these modules raise, and what to change.
+
+## Runtime portability is a required contract
+
+The engine and product flows are platform-independent Effect programs. Node and Bun
+provide different SQL and host layers to the same runtime, migrations, journal,
+stores, cache, and recovery logic. A Node subprocess is not a Bun compatibility
+mechanism. Keep filesystem, process, crypto, HTTP and SQL access behind their
+existing Effect services, selected at the executable's composition root.
+
+`@smthrs/flows/Runtime` consumes an injected Effect `SqlClient` and host services.
+`@smthrs/flows/NodeRuntime` and `@smthrs/flows/BunRuntime` select matching native
+services. Database adapters are `@smthrs/database/node/NodeDatabase` and
+`@smthrs/database/bun/BunDatabase`; both share the schema guard, startup retry
+policy and `DurableWriter`. Domain code must not open an extra database or create
+its own command, job, event, or locking ledger around the durable engine.
+
+Runtime parity must be demonstrated by the same execute, persist, restart, resume
+and cancellation scenarios, including opening a Node-created database in Bun and
+vice versa. A browser-safe import alone does not prove durable browser execution.
+
+For a Bun executable, install the corresponding optional platform and SQL adapter:
+
+```sh
+pnpm add @smthrs/platform-bun@1.0.0-rc.0 @effect/platform-bun@4.0.0-rc.112 @effect/sql-sqlite-bun@4.0.0-rc.112
+```
+
+Then use `BunRuntime.layerHost` with the same options and registered flows.

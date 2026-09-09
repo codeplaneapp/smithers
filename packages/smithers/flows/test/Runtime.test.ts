@@ -1,0 +1,86 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import { expect, it } from "@effect/vitest"
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
+import * as Jj from "@smthrs/jj/Jj"
+import { Context, Effect, Exit, Layer, Path } from "effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import * as Runtime from "../src/Runtime.ts"
+
+const options: Runtime.Options = {
+  filename: "runtime.sqlite",
+  workspaceRoot: ".",
+  owner: { hostId: "injected-runtime" },
+  isAlive: () => Effect.succeed(false)
+}
+
+it("reports invalid JavaScript configuration before constructing injected services", () => {
+  const invalid = [
+    [{ filename: "" }, "filename"],
+    [{ owner: undefined }, "owner.hostId"],
+    [{ isAlive: undefined }, "isAlive"],
+    [{ canExecute: "yes" }, "canExecute"]
+  ] as const
+  for (const [patch, field] of invalid) {
+    const parameters = [
+      { ...options, ...patch } as unknown as Runtime.Options,
+      StepBoundary.layer,
+      WorkspaceSandbox.layerFileSystem(),
+      Layer.empty
+    ] as const
+    for (const construct of [() => Runtime.make(...parameters), () => Runtime.layer(...parameters)]) {
+      expect(construct).toThrow(expect.objectContaining({ code: "invalid_runtime_configuration", field }))
+    }
+  }
+})
+
+it("uses the caller's SQL instance for every migrated store without opening a second database", async () => {
+  const root = mkdtempSync(join(tmpdir(), "flows-injected-runtime-"))
+  const filename = join(root, "must-not-open.sqlite")
+  try {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        for (const registry of [undefined, Layer.empty]) {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const parameters = [
+              { ...options, filename, workspaceRoot: root },
+              StepBoundary.layer,
+              WorkspaceSandbox.layerFileSystem(),
+              Layer.empty
+            ] as const
+            const context = yield* registry === undefined
+              ? Runtime.make(...parameters)
+              : Runtime.make(...parameters, registry)
+            const writer = Context.get(context, DurableWriter.DurableWriter)
+            expect(yield* sql`SELECT name FROM sqlite_master WHERE name = 'flows_runs'`)
+              .toEqual([{ name: "flows_runs" }])
+            yield* sql`CREATE TABLE IF NOT EXISTS injected_probe (value INTEGER)`
+            const rolledBack = yield* Effect.exit(writer.write(
+              sql`INSERT INTO injected_probe VALUES (1)`.pipe(Effect.andThen(Effect.fail("reject")))
+            ))
+            expect(Exit.isFailure(rolledBack)).toBe(true)
+            expect(yield* sql`SELECT * FROM injected_probe`).toEqual([])
+          }))
+        }
+      }).pipe(
+        Effect.provide(Layer.mergeAll(
+          NodeDatabase.layer({ filename: ":memory:" }),
+          NodeFileSystem.layer,
+          NodeCrypto.layer,
+          Path.layer,
+          Jj.layerNoop({})
+        )),
+        Effect.scoped
+      )
+    )
+    expect(existsSync(filename)).toBe(false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

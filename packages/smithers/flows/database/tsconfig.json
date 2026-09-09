@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "moduleDetection": "force",
@@ -22,11 +26,17 @@
     "sourceMap": true,
     "inlineSources": true,
     "rewriteRelativeImportExtensions": true,
-    "types": ["node"],
+    "types": [
+      "node",
+      "bun"
+    ],
     "plugins": [
       {
         "name": "@effect/language-service",
-        "namespaceImportPackages": ["effect", "@effect/*"],
+        "namespaceImportPackages": [
+          "effect",
+          "@effect/*"
+        ],
         "includeSuggestionsInTsc": false,
         "ignoreEffectWarningsInTscExitCode": true,
         "ignoreEffectErrorsInTscExitCode": true,
@@ -36,5 +46,7 @@
       }
     ]
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

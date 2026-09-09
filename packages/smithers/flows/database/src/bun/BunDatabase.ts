@@ -1,0 +1,49 @@
+/// <reference types="bun" />
+/** Bun SQLite driver using the same SQL, migration and write contracts as Node.
+ * @since 1.0.0
+ */
+import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
+import { Database } from "bun:sqlite"
+import type { Layer } from "effect"
+import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import { statSync } from "node:fs"
+import * as SqliteOpen from "../internal/SqliteOpen.ts"
+
+export { isUnsupportedDatabase, UnsupportedDatabase, UnsupportedDatabaseCode } from "../internal/SqliteOpen.ts"
+
+/** Connection settings; migrations and DurableWriter are composed above the driver.
+ * @since 1.0.0
+ * @category models
+ */
+export interface BunDatabaseOptions {
+  readonly filename: string
+  readonly sqlite?: Omit<SqliteClient.SqliteClientConfig, "filename"> | undefined
+}
+
+const readTableNames = (filename: string): ReadonlyArray<string> | undefined => {
+  let db: Database | undefined
+  try {
+    if (!filename.startsWith("file:") && !statSync(filename).isFile()) return undefined
+    db = new Database(filename, { readonly: true, create: false })
+    return (db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
+      (row) => row.name
+    )
+  } catch (error) {
+    if (String(error).includes("database is locked") || String(error).includes("database is busy")) throw error
+    return undefined
+  } finally {
+    db?.close()
+  }
+}
+
+/** Provides a scoped Bun SQL client; no Node subprocess or secondary ledger.
+ * @since 1.0.0
+ * @category layers
+ */
+export const layer = (options: BunDatabaseOptions): Layer.Layer<SqlClient.SqlClient> =>
+  SqliteOpen.layer(
+    options.filename,
+    readTableNames,
+    SqliteClient.layer({ ...options.sqlite, filename: options.filename }),
+    options.sqlite?.spanAttributes
+  )

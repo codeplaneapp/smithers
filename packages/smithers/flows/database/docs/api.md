@@ -36,7 +36,9 @@ The service tag. `yield* DurableWriter.DurableWriter` resolves the writer.
 
 ```ts
 interface Service {
-  readonly write: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, Exclude<E, SqlError.SqlError> | DatabaseError, R>
+  readonly write: <A, E, R>(
+    effect: Effect.Effect<A, E, R>
+  ) => Effect.Effect<A, Exclude<E, SqlError.SqlError> | DatabaseError, R>
 }
 ```
 
@@ -430,7 +432,7 @@ than a typed failure because neither refusal is recoverable at run time.
 
 | Code                        | Refused when                                                    | Message                                                                              |
 | --------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `unsupported_runtime`       | `process.versions.bun` is set                                   | `1.0.0-rc.0 runs the durable engine on Node.js >=22.19.0 only`                       |
+| `unsupported_runtime`       | `process.versions.bun` is set                                   | `Use @smthrs/database/bun/BunDatabase under Bun; NodeDatabase requires Node.js >=22.19.0`                       |
 | `unsupported_database_file` | the file has at least one table and no `flows_migrations` table | `<path> is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)` |
 | `database_locked`           | a peer held the file for the whole open ladder                  | `<path> could not be inspected because another process holds it`                     |
 
@@ -442,6 +444,17 @@ const isUnsupportedDatabase: (input: unknown) => input is UnsupportedDatabase
 
 Narrows an unknown defect to this driver's refusal. Use it in
 `Effect.catchDefect` and re-raise anything else unchanged.
+
+## BunDatabase
+
+Bun only. `import * as BunDatabase from "@smthrs/database/bun/BunDatabase"`.
+
+`layer(options: BunDatabaseOptions): Layer.Layer<SqlClient.SqlClient>` provides
+`@effect/sql-sqlite-bun` with the same schema guard, bounded open retries and
+failed-commit recovery as NodeDatabase. Options contain `filename` and optional
+`sqlite` settings from that Bun driver. Install its matching optional peer;
+consumers using only Node do not need it. Both subpaths re-export the same
+`UnsupportedDatabase` constructor and refinement.
 
 ## TestDatabase
 

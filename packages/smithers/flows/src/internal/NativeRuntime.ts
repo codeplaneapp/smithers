@@ -1,0 +1,459 @@
+/** Shared native lifecycle; the engine and stores live in Runtime.ts.
+ * @since 1.0.0
+ */
+import * as Capability from "@smthrs/capability/Capability"
+import * as Permission from "@smthrs/capability/Permission"
+import { EngineStore, StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
+import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
+import type * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
+import * as GrantStore from "@smthrs/kernel/GrantStore"
+import * as HostServices from "@smthrs/kernel/HostServices"
+import * as KernelJj from "@smthrs/kernel/Jj"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import * as HostLiveness from "@smthrs/platform-node/HostLiveness"
+import type * as NodeHost from "@smthrs/platform-node/NodeHost"
+import type * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
+import type { Ownership, RunStore } from "@smthrs/run-store"
+import type * as Crypto from "effect/Crypto"
+import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
+import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import { constants } from "node:os"
+import { dirname, resolve } from "node:path"
+import * as Runtime from "../Runtime.ts"
+import type { NativeRuntimeApi } from "./NativeRuntimeApi.ts"
+
+/** Native process and host configuration.
+ * @since 1.0.0
+ * @category models
+ */
+export interface HostOptions {
+  readonly filename: string
+  readonly workspaceRoot: string
+  readonly owner: {
+    readonly hostId: string
+  }
+  readonly isAlive?: Ownership.LivenessCheck | undefined
+  readonly rules?: GrantStore.MakeOptions["rules"]
+  readonly signals?: ReadonlyArray<NodeJS.Signals> | undefined
+  readonly shutdownTimeoutMs?: number | undefined
+  readonly containment?: (ContainedSpawner.Options & ProcessReaper.Options) | undefined
+}
+
+interface NativePlatform {
+  readonly name: string
+  readonly database: (filename: string) => Layer.Layer<SqlClient.SqlClient>
+  readonly host: Pick<typeof NodeHost, "layerAt" | "layerContainedAt">
+  readonly crypto: Layer.Layer<Crypto.Crypto>
+}
+
+type Options = Runtime.Options
+const RuntimeConfigurationError = Runtime.RuntimeConfigurationError
+type RuntimeConfigurationError = Runtime.RuntimeConfigurationError
+
+/** Binds the shared native lifecycle to a platform’s database and host layers.
+ * @since 1.0.0
+ * @category layers
+ */
+export const makeNative = (platform: NativePlatform): NativeRuntimeApi => {
+  const invalidConfiguration = (field: string, message: string): RuntimeConfigurationError =>
+    new RuntimeConfigurationError({ code: "invalid_runtime_configuration", field, message })
+
+  const decodeField = <A>(field: string, schema: Schema.Codec<A>, value: unknown, expectation: string): A => {
+    try {
+      return Schema.decodeUnknownSync(schema)(value)
+    } catch {
+      throw invalidConfiguration(field, `${platform.name} ${field} ${expectation}`)
+    }
+  }
+
+  const nonEmpty = "must be a non-empty string"
+
+  interface ValidatedOptions {
+    readonly filename: string
+    readonly workspaceRoot: string
+    readonly owner: Readonly<{ readonly hostId: string }>
+    readonly isAlive: Ownership.LivenessCheck
+    readonly canExecute?: ((row: RunStore.RunRow) => Effect.Effect<boolean>) | undefined
+  }
+
+  const validate = (options: Options): ValidatedOptions => {
+    const filename = decodeField("filename", Schema.NonEmptyString, options.filename, nonEmpty)
+    const workspaceRoot = decodeField("workspaceRoot", Schema.NonEmptyString, options.workspaceRoot, nonEmpty)
+    // A JavaScript caller can omit `owner` entirely, so the field is read off a
+    // possibly-absent record rather than dereferenced.
+    const owner = options.owner as { readonly hostId?: unknown } | undefined
+    const hostId = decodeField("owner.hostId", Schema.NonEmptyString, owner?.hostId, nonEmpty)
+    const isAlive = options.isAlive
+    if (typeof isAlive !== "function") {
+      throw invalidConfiguration("isAlive", `${platform.name} isAlive must be a function`)
+    }
+    const canExecute = options.canExecute
+    if (canExecute !== undefined && typeof canExecute !== "function") {
+      throw invalidConfiguration("canExecute", `${platform.name} canExecute must be a function when supplied`)
+    }
+    const absoluteFilename = resolve(filename)
+    return Object.freeze({
+      filename: absoluteFilename,
+      workspaceRoot: resolve(workspaceRoot),
+      owner: Object.freeze({ hostId }),
+      isAlive,
+      canExecute
+    })
+  }
+
+  const databaseLayer = (filename: string) =>
+    Layer.unwrap(Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory(dirname(filename), { recursive: true })
+      return platform.database(filename)
+    }))
+
+  const storage = (filename: string, workspaceRoot?: string) => {
+    const validatedFilename = resolve(decodeField("filename", Schema.NonEmptyString, filename, nonEmpty))
+    const root = workspaceRoot === undefined
+      ? undefined
+      : resolve(decodeField("workspaceRoot", Schema.NonEmptyString, workspaceRoot, nonEmpty))
+    return Runtime.storage(validatedFilename, root).pipe(
+      Layer.provideMerge(databaseLayer(validatedFilename)),
+      Layer.provide(Path.layer)
+    )
+  }
+
+  const composition = <
+    BoundaryError,
+    BoundaryRequirements,
+    SandboxError,
+    SandboxRequirements,
+    Registered,
+    RegistrationError,
+    RegistrationRequirements,
+    RegistryOut,
+    RegistryError,
+    RegistryRequirements
+  >(
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+    registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+  ) => {
+    const validated = validate(options)
+    return Runtime.layer(validated, stepBoundary, workspaceSandbox, registerFlows, registry).pipe(
+      Layer.provideMerge(databaseLayer(validated.filename)),
+      Layer.provide(Path.layer)
+    )
+  }
+
+  const makeWithRegistry = <
+    BoundaryError,
+    BoundaryRequirements,
+    SandboxError,
+    SandboxRequirements,
+    Registered,
+    RegistrationError,
+    RegistrationRequirements,
+    RegistryOut,
+    RegistryError,
+    RegistryRequirements
+  >(
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+    registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+  ) => Layer.build(composition(options, stepBoundary, workspaceSandbox, registerFlows, registry))
+
+  const make: NativeRuntimeApi["make"] = (
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, any, any>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, any, any>,
+    registerFlows: Layer.Layer<any, any, any>,
+    registry?: Layer.Layer<any, any, any>
+  ) => makeWithRegistry(options, stepBoundary, workspaceSandbox, registerFlows, registry ?? Layer.empty)
+
+  const layerWithRegistry = <
+    BoundaryError,
+    BoundaryRequirements,
+    SandboxError,
+    SandboxRequirements,
+    Registered,
+    RegistrationError,
+    RegistrationRequirements,
+    RegistryOut,
+    RegistryError,
+    RegistryRequirements
+  >(
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+    registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+  ) =>
+    Layer.effectContext(
+      makeWithRegistry(options, stepBoundary, workspaceSandbox, registerFlows, registry)
+    )
+
+  const layer: NativeRuntimeApi["layer"] = (
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, any, any>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, any, any>,
+    registerFlows: Layer.Layer<any, any, any>,
+    registry?: Layer.Layer<any, any, any>
+  ) => layerWithRegistry(options, stepBoundary, workspaceSandbox, registerFlows, registry ?? Layer.empty)
+
+  const defaultSignals: ReadonlyArray<NodeJS.Signals> = Object.freeze(["SIGINT", "SIGTERM"])
+
+  const defaultShutdownTimeoutMs = 30_000
+
+  const maximumShutdownTimeoutMs = 2_147_483_647
+
+  const catchableSignals = new Set<NodeJS.Signals>(
+    Object.keys(constants.signals)
+      .filter((signal) => signal !== "SIGKILL" && signal !== "SIGSTOP") as Array<NodeJS.Signals>
+  )
+
+  const snapshotSignals = (
+    signals: ReadonlyArray<NodeJS.Signals> | undefined
+  ): ReadonlyArray<NodeJS.Signals> => {
+    const configured = signals ?? defaultSignals
+    if (!Array.isArray(configured)) {
+      throw invalidConfiguration("signals", `${platform.name} signals must be an array`)
+    }
+    const snapshot: Array<NodeJS.Signals> = []
+    const seen = new Set<NodeJS.Signals>()
+    for (const candidate of configured as ReadonlyArray<unknown>) {
+      if (typeof candidate !== "string" || !catchableSignals.has(candidate as NodeJS.Signals)) {
+        throw invalidConfiguration("signals", `${platform.name} cannot install signal ${String(candidate)}`)
+      }
+      const signal = candidate as NodeJS.Signals
+      if (!seen.has(signal)) {
+        seen.add(signal)
+        snapshot.push(signal)
+      }
+    }
+    return Object.freeze(snapshot)
+  }
+
+  const snapshotShutdownTimeout = (timeoutMs: number | undefined): number => {
+    const timeout = timeoutMs ?? defaultShutdownTimeoutMs
+    if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > maximumShutdownTimeoutMs) {
+      throw invalidConfiguration(
+        "shutdownTimeoutMs",
+        `${platform.name} shutdownTimeoutMs must be an integer from 0 through ${maximumShutdownTimeoutMs}`
+      )
+    }
+    return timeout
+  }
+
+  const snapshotRule = (rule: Permission.Rule): Permission.Rule =>
+    new Permission.Rule({
+      effect: rule.effect,
+      pattern: new Capability.CapabilityPattern({
+        action: rule.pattern.action,
+        resource: rule.pattern.resource
+      })
+    })
+
+  const snapshotRules = (
+    rules: GrantStore.MakeOptions["rules"]
+  ): GrantStore.MakeOptions["rules"] => {
+    if (rules === undefined) return undefined
+    if (!Array.isArray(rules)) {
+      throw invalidConfiguration("rules", `${platform.name} rules must be an array`)
+    }
+    if (rules.length > 0 && Array.isArray(rules[0])) {
+      return Object.freeze(
+        (rules as ReadonlyArray<ReadonlyArray<Permission.Rule>>).map((ruleset) => {
+          if (!Array.isArray(ruleset)) {
+            throw invalidConfiguration("rules", `${platform.name} rulesets must be arrays`)
+          }
+          return Object.freeze(ruleset.map(snapshotRule))
+        })
+      )
+    }
+    return Object.freeze((rules as ReadonlyArray<Permission.Rule>).map(snapshotRule))
+  }
+
+  const snapshotContainment = (
+    options: (ContainedSpawner.Options & ProcessReaper.Options) | undefined
+  ): (ContainedSpawner.Options & ProcessReaper.Options) | undefined => {
+    if (options === undefined) return undefined
+    const graceMs = options.graceMs
+    const platform = options.platform
+    const ownerPid = options.ownerPid
+    const system = options.system
+    const systemSnapshot = system === undefined
+      ? undefined
+      : Object.freeze({
+        isAlive: system.isAlive,
+        startedAtMs: system.startedAtMs,
+        ownGroup: system.ownGroup,
+        bootedAtMs: system.bootedAtMs,
+        refuseTarget: system.refuseTarget,
+        killTree: system.killTree
+      })
+    return Object.freeze({
+      ...(graceMs === undefined ? {} : { graceMs }),
+      ...(platform === undefined ? {} : { platform }),
+      ...(ownerPid === undefined ? {} : { ownerPid }),
+      ...(systemSnapshot === undefined ? {} : { system: systemSnapshot })
+    })
+  }
+
+  interface ValidatedHostOptions extends ValidatedOptions {
+    readonly rules: GrantStore.MakeOptions["rules"]
+    readonly signals: ReadonlyArray<NodeJS.Signals>
+    readonly shutdownTimeoutMs: number
+    readonly containment: (ContainedSpawner.Options & ProcessReaper.Options) | undefined
+  }
+
+  const validateHost = (options: HostOptions): ValidatedHostOptions => {
+    const filename = options.filename
+    const owner = options.owner
+    const hostId = decodeField("owner.hostId", Schema.NonEmptyString, owner?.hostId, nonEmpty)
+    const configuredLiveness = options.isAlive
+    const rules = options.rules
+    const signals = options.signals
+    const shutdownTimeoutMs = options.shutdownTimeoutMs
+    const containment = options.containment
+    const validated = validate({
+      filename,
+      workspaceRoot: options.workspaceRoot,
+      owner: { hostId },
+      isAlive: configuredLiveness ?? HostLiveness.isAlive({ hostId })
+    })
+    return Object.freeze({
+      ...validated,
+      rules: snapshotRules(rules),
+      signals: snapshotSignals(signals),
+      shutdownTimeoutMs: snapshotShutdownTimeout(shutdownTimeoutMs),
+      containment: snapshotContainment(containment)
+    })
+  }
+
+  const signalExitCode = (signal: NodeJS.Signals): number =>
+    128 + ((constants.signals as Record<string, number>)[signal] ?? constants.signals.SIGTERM)
+
+  const onSignal = (
+    signals: ReadonlyArray<NodeJS.Signals>,
+    runtime: Scope.Closeable,
+    timeoutMs: number
+  ): Effect.Effect<void, never, Scope.Scope> =>
+    Effect.gen(function*() {
+      let closing = false
+      let deadline: NodeJS.Timeout | undefined
+      const leave = (signal: NodeJS.Signals) => {
+        process.exit(signalExitCode(signal))
+      }
+      const handlers = signals.map((signal) => {
+        const handler = () => {
+          if (closing) {
+            // The operator asked twice. Whatever the shutdown is waiting for, it
+            // has stopped being this program's decision.
+            leave(signal)
+            return
+          }
+          closing = true
+          Effect.runFork(Scope.close(runtime, Exit.void))
+          deadline = setTimeout(() => leave(signal), timeoutMs)
+          // A shutdown that finishes on time must not be held open by its own
+          // deadline timer.
+          deadline.unref()
+        }
+        return { signal, handler }
+      })
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (deadline !== undefined) clearTimeout(deadline)
+        })
+      )
+      for (const { handler, signal } of handlers) {
+        yield* Effect.acquireRelease(
+          Effect.sync(() => process.on(signal, handler)),
+          () => Effect.sync(() => process.removeListener(signal, handler))
+        )
+      }
+    })
+
+  const layerHostWithRegistry = <
+    Registered,
+    RegistrationError,
+    RegistrationRequirements,
+    RegistryOut,
+    RegistryError,
+    RegistryRequirements
+  >(
+    options: HostOptions,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+    registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+  ) => {
+    const validated = validateHost(options)
+    const workspaceRoot = validated.workspaceRoot
+    // The layering is the design decision this function makes, and it has two
+    // sides. The engine's MACHINERY — the SQLite storage, the step boundary, the
+    // workspace sandbox — runs on the raw host: a database directory the engine
+    // must create to exist at all cannot be something the engine asks permission
+    // for, and a whole-tree sandbox copy is engine bookkeeping, not an agent
+    // reaching for a file. Everything the engine then hands a FLOW BODY is the
+    // guarded surface, because a body is exactly what the capability check
+    // exists for. That is why the engine is built over the kernel here and not
+    // beside it: an action resolves its host services from the engine's context.
+    const raw = Layer.mergeAll(platform.host.layerAt(workspaceRoot), platform.crypto).pipe(
+      Layer.provideMerge(RedactedLogger.layer())
+    )
+    const privilegedJj = Layer.effect(KernelJj.Jj, KernelJj.Jj).pipe(Layer.provide(raw))
+    const store = storage(validated.filename, workspaceRoot).pipe(Layer.provideMerge(raw))
+    const execution = Layer.merge(StepBoundary.layer, WorkspaceSandbox.layerFileSystem()).pipe(
+      Layer.provideMerge(store)
+    )
+    const guarded = HostServices.layer.pipe(
+      Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules: validated.rules }))),
+      Layer.provideMerge(platform.host.layerContainedAt(workspaceRoot, validated.containment)),
+      Layer.provideMerge(ProcessLedger.layer({ hostId: validated.owner.hostId, ownerPid: process.pid })),
+      Layer.provideMerge(execution)
+    )
+    const engine = EngineStore.layerWithPrivilegedJj(
+      {
+        owner: validated.owner,
+        journalSource: `${validated.owner.hostId}-engine`,
+        isAlive: validated.isAlive
+      },
+      privilegedJj
+    ).pipe(Layer.provideMerge(guarded))
+    // Registration stays the final startup phase, exactly as in `layer`: no
+    // persisted run can resume through this composition before its flow is
+    // registered. The registry sits directly beneath it, so a registration built
+    // from a discovered catalog reads the catalog on the guarded host this
+    // composition already built.
+    const composed = registerFlows.pipe(Layer.provideMerge(registry), Layer.provideMerge(engine))
+    return Layer.effectContext(Effect.gen(function*() {
+      const parent = yield* Scope.Scope
+      // The composition is built into a scope this module can close, because a
+      // signal has to be able to shut the runtime down without the program
+      // having handed anything over. Forking from the caller's scope keeps the
+      // ordinary path unchanged: closing the caller's scope closes this one.
+      const runtime = yield* Scope.fork(parent)
+      const context = yield* Effect.provideService(Layer.build(composed), Scope.Scope, runtime)
+      yield* onSignal(
+        validated.signals,
+        runtime,
+        validated.shutdownTimeoutMs
+      )
+      return context
+    }))
+  }
+
+  const layerHost: NativeRuntimeApi["layerHost"] = (
+    options: HostOptions,
+    registerFlows: Layer.Layer<any, any, any>,
+    registry?: Layer.Layer<any, any, any>
+  ) => layerHostWithRegistry(options, registerFlows, registry ?? Layer.empty)
+
+  return { storage, make, layer, layerHost, signalExitCode, defaultShutdownTimeoutMs, maximumShutdownTimeoutMs }
+}
