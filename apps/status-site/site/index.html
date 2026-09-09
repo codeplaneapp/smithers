@@ -292,6 +292,18 @@
           var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
           return m ? { y: +m[1], m: +m[2] - 1, d: +m[3] } : null;
         }
+        /**
+         * Newest first. A missing or unparsable timestamp sorts last and keeps
+         * its feed order, so text like "soon" never outranks a real instant.
+         */
+        function newestFirst(a, b) {
+          var ta = Date.parse(a);
+          var tb = Date.parse(b);
+          if (isNaN(ta) && isNaN(tb)) return 0;
+          if (isNaN(ta)) return 1;
+          if (isNaN(tb)) return -1;
+          return tb - ta;
+        }
         function fmtStamp(value) {
           var t = Date.parse(value);
           if (isNaN(t)) return String(value || "");
@@ -341,7 +353,7 @@
             return;
           }
           items.sort(function (a, b) {
-            return String(b.startedAt || "").localeCompare(String(a.startedAt || ""));
+            return newestFirst(a.startedAt, b.startedAt);
           });
           var list = el("div", "incidents");
           items.forEach(function (incident) {
@@ -358,7 +370,7 @@
             var updates = Array.isArray(incident.updates) ? incident.updates.slice() : [];
             if (updates.length) {
               updates.sort(function (a, b) {
-                return String(b.at || "").localeCompare(String(a.at || ""));
+                return newestFirst(a.at, b.at);
               });
               var ul = el("ul", "updates");
               updates.forEach(function (update) {
