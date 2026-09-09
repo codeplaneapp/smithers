@@ -8,6 +8,13 @@ import { defineConfig } from "vitest/config"
 // workerd, and the create-app plugin would regenerate routes.gen.ts on every
 // run. Regeneration is `pnpm routes`.
 export default defineConfig({
+  plugins: [{
+    name: "bootstrap-test-imports",
+    // The bootstrap suite mocks rendering; no app/Vite plugins run in tests.
+    resolveId(id) {
+      if (id === "virtual:smthrs-app/brand.css") return id
+    }
+  }],
   test: {
     include: ["flows/**/*.e2e.ts", "test/**/*.test.ts"],
     environment: "node",

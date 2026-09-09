@@ -76,9 +76,13 @@ overwrite any session id it guesses. Set it before the first deploy.
 `GET /api/health` reports `auth: "none"` or `auth: "token"`, so you can tell
 which mode a running instance is in without a credential.
 
-Open the deployed app once as `https://<your domain>/?token=<the token>`. The
-shell stores it and strips it back out of the address bar (`src/shell/token.ts`),
-and every later request carries it.
+Open the deployed app as `https://<host>/#token=<APP_API_TOKEN>` (URL-encode the
+value). The fragment is not sent in the HTTP request. Before redirecting to
+`/build`, the shell stores the token in `sessionStorage` and strips it from the
+address bar (`src/shell/token.ts`). API requests carry it for this tab's session,
+including reloads; closing the tab clears it. Bootstrap again for a new session.
+Legacy `?token=` links work for one release with a console warning; use the
+fragment form to keep credentials out of HTTP request URLs.
 
 Two bounds come with it and need no configuration: a JSON body over 64 KiB is
 refused with 413, and a session id must be a flat identifier of at most 128

@@ -20,6 +20,10 @@ import { RegistryContext } from "./shell/registry.ts"
 import { redirect, startRouter } from "./shell/router.ts"
 import { actions, useRoute } from "./shell/store.ts"
 import { houseBridgeCss } from "./shell/theme.ts"
+import { readToken } from "./shell/token.ts"
+
+// Claim the bootstrap credential before routing can replace the URL.
+readToken()
 
 /** Where `/` sends the browser. The root page renders Build either way. */
 const HOME = "/build"

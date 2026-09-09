@@ -37,6 +37,13 @@ import { defineConfig } from "vitest/config"
 const here = (path: string): string => fileURLToPath(new URL(path, import.meta.url))
 
 export default defineConfig({
+  plugins: [{
+    name: "bootstrap-test-imports",
+    // The bootstrap suite mocks rendering; no app/Vite plugins run in tests.
+    resolveId(id) {
+      if (id === "virtual:smthrs-app/brand.css") return id
+    }
+  }],
   test: {
     include: ["template/*/test/**/*.test.ts"],
     exclude: ["template/*/test/tevm.test.ts"],
@@ -61,6 +68,7 @@ export default defineConfig({
       { find: /^@smthrs\/(core|kernel|plan)\/(.*)$/, replacement: here("../flows/$1/src/$2.ts") },
       { find: /^@smthrs\/std$/, replacement: here("../agent/std/src/index.ts") },
       { find: /^@smthrs\/std\/(.*)$/, replacement: here("../agent/std/src/$1.ts") },
+      { find: /^@smthrs\/ui$/, replacement: here("../ui/src/index.ts") },
       { find: /^tevm(\/.*)?$/, replacement: here("./test/support/tevmAbsent.ts") }
     ]
   }

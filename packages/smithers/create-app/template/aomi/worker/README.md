@@ -116,9 +116,13 @@ three bounds and `test/worker.test.ts` drives each of them.
 Leaving `APP_API_TOKEN` unset is deliberate: a local `pnpm dev` run wants an
 open API, and failing closed there would only teach the reader to hardcode a
 token. `GET /api/health` reports `auth: "none"` or `auth: "token"` so an
-operator can tell which mode a deploy is in from outside. The browser shell
-takes the token from `?token=<value>` once and remembers it
-(`src/shell/token.ts`).
+operator can tell which mode a deploy is in from outside. Open the browser shell
+as `https://<host>/#token=<APP_API_TOKEN>` (URL-encode the value). The fragment
+stays out of HTTP requests. The shell claims it before redirecting to `/build`,
+strips it from the URL, and stores it in `sessionStorage` (`src/shell/token.ts`).
+It survives reloads for this tab's session; closing the tab clears it. Bootstrap
+again for a new session. Legacy `?token=` links work for one release with a
+console warning; use the fragment form to avoid sending credentials in URLs.
 
 What is still NOT bounded, and what a production app would add: per-session
 Durable Object storage growth, model spend, and request rate. One shared token
