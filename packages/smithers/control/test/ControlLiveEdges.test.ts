@@ -363,7 +363,9 @@ describe("ControlLive when the journal cannot commit", () => {
     const error = await run(
       Effect.gen(function*() {
         const control = yield* Control
-        const card = yield* control.plan({ flowId: "system/test", input: { suite: "no-journal" } })
+        const runtime = yield* ControlRuntime
+        // Seed the approval directly: Control.plan also requires a transaction.
+        const { card } = yield* runtime.plan({ flowId: "system/test", input: { suite: "no-journal" } })
         return yield* control.approve({ ...card.approval, idempotencyKey: "approve:no-journal" }).pipe(Effect.flip)
       }),
       live({

@@ -3,7 +3,7 @@
  * reach: refusals, the idempotency seams, and every state a released fence
  * leaves behind.
  */
-import { Effect } from "effect"
+import { Deferred, Effect, Exit } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   AlreadyResolved,
@@ -87,7 +87,7 @@ describe("ControlRuntime.layerMemory", () => {
         const first = yield* runtime.plan({ flowId: "system/test", input: { a: 1 }, idempotencyKey: "plan:key" })
         const replay = yield* runtime.plan({ flowId: "system/test", input: { a: 1 }, idempotencyKey: "plan:key" })
         // The second ask under one key is a replay of the stored card, and it
-        // says so: `Control.plan` journals a creation only when it created one.
+        // says so: `Control.plan` checks the journal before repairing a replay.
         const reused = yield* Effect.flip(
           runtime.plan({ flowId: "system/test", input: { a: 2 }, idempotencyKey: "plan:key" })
         )
@@ -102,6 +102,45 @@ describe("ControlRuntime.layerMemory", () => {
     expect((observed.reused as InvalidInput).issue).toBe("idempotency key plan:key was used for another plan")
     // The refused plan allocated nothing: one key, one stored plan.
     expect(observed.listed).toEqual([observed.first.card.planId])
+  })
+
+  it.each([false, true])("settles concurrent keyed memory plans (different input: %s)", async (different) => {
+    const ready = Deferred.makeUnsafe<void>()
+    let arrivals = 0
+    const observed = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        const outcomes = yield* Effect.all(
+          [1, different ? 2 : 1].map((value) =>
+            Effect.exit(runtime.plan({ flowId: "race", input: { value }, idempotencyKey: "race:key" }))
+          ),
+          { concurrency: 2 }
+        )
+        return { outcomes, ids: yield* runtime.listPlanIds }
+      }), {
+      flows: [{
+        flowId: "race",
+        description: "Concurrent planning",
+        deployClass: false,
+        envelope,
+        decode: (input) =>
+          Effect.gen(function*() {
+            if (++arrivals === 2) yield* Deferred.succeed(ready, undefined)
+            yield* Deferred.await(ready)
+            return input
+          })
+      }]
+    })
+
+    expect(observed.ids).toHaveLength(1)
+    const successes = observed.outcomes.filter(Exit.isSuccess).map((exit) => exit.value)
+    expect(successes).toHaveLength(different ? 1 : 2)
+    expect(successes.filter((outcome) => outcome.created)).toHaveLength(1)
+    for (const outcome of successes) expect(outcome.card).toEqual(successes[0]!.card)
+    if (different) {
+      const failure = observed.outcomes.find(Exit.isFailure)!
+      const error = await Effect.runPromise(Effect.flip(failure))
+      expect(error).toBeInstanceOf(InvalidInput)
+    }
   })
 
   it("reports a missing approval token against the identifier its target names", async () => {

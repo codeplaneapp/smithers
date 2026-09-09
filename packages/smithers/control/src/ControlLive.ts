@@ -1117,21 +1117,50 @@ export const layer: Layer.Layer<
 
     const service: Service = {
       plan: Effect.fn("Control.plan")((input) =>
-        Effect.gen(function*() {
-          // Both runtimes answer a key they have seen before with the STORED
-          // card, so journaling unconditionally appended one more creation per
-          // retry. `Channels.ingest` passes a key on every webhook redelivery,
-          // so a watcher of the plan partition replayed N creations of one plan.
-          const { card, created } = yield* runtime.plan(input)
-          if (created) {
-            yield* emit(`plan:${card.planId}`, "control.plan.created", {
+        mutationSemaphore.withPermits(1)(
+          journal.transact(Effect.gen(function*() {
+            // The SQL runtime's plan, key and token writes join this transaction.
+            // Memory publication cannot roll back, and older SQL writes could
+            // commit without an entry, so a stored card also needs a journal check.
+            const { card, created } = yield* runtime.plan(input)
+            const runId = JournalEvent.RunId.make(`plan:${card.planId}`)
+            if (!created) {
+              let after: JournalEvent.Seq | undefined
+              while (true) {
+                const page = yield* journal.entries({
+                  runId,
+                  ...(after === undefined ? {} : { after }),
+                  limit: snapshotPageSize
+                })
+                if (
+                  page.entries.some((entry) =>
+                    entry.sourceId === sourceId && entry.eventType === "control.plan.created"
+                  )
+                ) {
+                  return card
+                }
+                if (!page.hasMore) break
+                after = page.entries[page.entries.length - 1]!.seq
+              }
+            }
+            yield* emit(runId, "control.plan.created", {
               planId: card.planId,
               flowId: card.flowId,
               digest: card.digest
             })
-          }
-          return card
-        })
+            return card
+          })).pipe(
+            Effect.mapError((cause) =>
+              cause instanceof Journal.JournalError
+                ? new PersistenceError({
+                  operation: "plan",
+                  message: "Failed to commit plan and its creation entry atomically",
+                  cause
+                })
+                : cause
+            )
+          )
+        )
       ),
       run: Effect.fn("Control.run")((submitted) =>
         Effect.gen(function*() {

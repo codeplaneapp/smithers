@@ -6,12 +6,12 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Migrations, SqlJournal } from "@smthrs/journal"
+import { JournalEvent, Migrations, SqlJournal } from "@smthrs/journal"
 import * as Journal from "@smthrs/journal/Journal"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Registry } from "@smthrs/registry"
 import { Migrations as RunStoreMigrations, Ownership, RunStore } from "@smthrs/run-store"
-import { type Crypto, Deferred, Effect, Fiber, Layer, Stream } from "effect"
+import { Context, type Crypto, Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import { Control, type Service as ControlService } from "../src/Control.ts"
@@ -124,6 +124,87 @@ const started = Effect.gen(function*() {
 })
 
 describe("SqlControlRuntime", () => {
+  it.each([false, true])(
+    "rolls back plan, key, token and event on journal failure (after insert: %s)",
+    async (afterInsert) => {
+      const observed = await Effect.runPromise(
+        Effect.gen(function*() {
+          const journal = yield* Journal.Journal
+          const sql = yield* SqlClient.SqlClient
+          const request = { flowId: "system/test", input: { atomic: true }, idempotencyKey: "atomic:plan" }
+          const failing = Journal.make({
+            ...journal,
+            emitDurableUnfenced: (input) =>
+              Effect.gen(function*() {
+                if (afterInsert) yield* journal.emitDurableUnfenced(input)
+                return yield* new Journal.JournalError({ code: "sink_failed", message: "injected plan event failure" })
+              })
+          })
+          const control = Context.get(
+            yield* Layer.build(Layer.fresh(ControlLive.layer)).pipe(
+              Effect.provide(Registry.layerNoop()),
+              Effect.provideService(Journal.Journal, failing)
+            ),
+            Control
+          )
+          const first = yield* Effect.flip(control.plan(request))
+          const plans = yield* sql`SELECT * FROM control_plans`
+          const keys = yield* sql`SELECT * FROM control_plan_keys`
+          const tokens = yield* sql`SELECT * FROM control_tokens`
+          const events = yield* journal.entries({ runId: JournalEvent.RunId.make("plan:plan-1"), limit: 10 })
+          const restarted = yield* SqlControlRuntime.make()
+          const retryControl = Context.get(
+            yield* Layer.build(Layer.fresh(ControlLive.layer)).pipe(
+              Effect.provide(Registry.layerNoop()),
+              Effect.provideService(ControlRuntime, restarted)
+            ),
+            Control
+          )
+          const card = yield* retryControl.plan(request)
+          const replay = yield* retryControl.plan(request)
+          const committed = yield* journal.entries({ runId: JournalEvent.RunId.make(`plan:${card.planId}`), limit: 10 })
+          return { first, plans, keys, tokens, events, card, replay, committed }
+        }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+      )
+
+      expect(observed.first).toBeInstanceOf(PersistenceError)
+      expect(observed.plans).toHaveLength(0)
+      expect(observed.keys).toHaveLength(0)
+      expect(observed.tokens).toHaveLength(0)
+      expect(observed.events.entries).toHaveLength(0)
+      expect(observed.replay).toEqual(observed.card)
+      expect(observed.committed.entries.map((entry) => entry.eventType)).toEqual(["control.plan.created"])
+    }
+  )
+
+  it("repairs a plan committed without its creation event after restart", async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const journal = yield* Journal.Journal
+        const request = { flowId: "system/test", input: { legacy: true }, idempotencyKey: "legacy:plan" }
+        // This is the state left by a crash between the old implementation's two writes.
+        const original = yield* runtime.plan(request)
+        const restarted = yield* SqlControlRuntime.make()
+        const control = Context.get(
+          yield* Layer.build(Layer.fresh(ControlLive.layer)).pipe(
+            Effect.provide(Registry.layerNoop()),
+            Effect.provideService(ControlRuntime, restarted)
+          ),
+          Control
+        )
+        const repaired = yield* control.plan(request)
+        const replay = yield* control.plan(request)
+        const events = yield* journal.entries({ runId: JournalEvent.RunId.make(`plan:${repaired.planId}`), limit: 10 })
+        return { original, repaired, replay, events }
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.repaired).toEqual(observed.original.card)
+    expect(observed.replay).toEqual(observed.repaired)
+    expect(observed.events.entries.map((entry) => entry.eventType)).toEqual(["control.plan.created"])
+  })
+
   it("survives a restart: a second runtime over the same database sees the run", async () => {
     const shared = durableJournal
     const observed = await Effect.runPromise(

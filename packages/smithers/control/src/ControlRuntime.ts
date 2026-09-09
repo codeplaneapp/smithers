@@ -706,6 +706,22 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
               idempotencyKey: submitted.idempotencyKey
             }).pipe(Effect.provideService(Crypto.Crypto, crypto))
           )
+          // Decoding, planning and hashing may yield to another keyed plan.
+          // Recheck immediately before publication, with no yield between a
+          // successful check and the three map writes below.
+          if (submitted.idempotencyKey !== undefined) {
+            const prior = planKeys.get(submitted.idempotencyKey)
+            if (prior !== undefined) {
+              if (prior.fingerprint !== planFingerprint) {
+                return yield* new InvalidInput({
+                  issue: `idempotency key ${submitted.idempotencyKey} was used for another plan`
+                })
+              }
+              const stored = plans.get(prior.planId)
+              /* v8 ignore next -- this map never loses a plan a key names; `SqlControlRuntime` covers the storage that can */
+              if (stored !== undefined) return { card: snapshot(stored.card), created: false }
+            }
+          }
           plans.set(planId, { card, decodedInput: snapshot(decoded), decision: "pending" })
           tokens.set(approvalKey(card.approval.target), {
             tokenId: planId,

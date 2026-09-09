@@ -1077,6 +1077,8 @@ const makeRuntime = (
         // primary key, so a bare insert made two runtimes planning under one
         // key a race the loser lost with a constraint violation surfaced as
         // `PersistenceError`, instead of the winner's card the key promises.
+        // Under Control.plan this write joins the journal transaction, so the
+        // card, key, token and creation entry commit or roll back together.
         const outcome = yield* writer.write(Effect.gen(function*() {
           if (input.idempotencyKey !== undefined) {
             yield* sql`
