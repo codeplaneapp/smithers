@@ -23,6 +23,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import { renderDiagnostic } from "../internal/Diagnostic.ts"
 import { actionKey, ordinalScope, uncanonicalKey } from "./ActionKey.ts"
 import type { ActionExecuteOptions, Encoded } from "./Encoded.ts"
@@ -68,12 +69,12 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
    * following the lineage needs the declaration back to decode the next
    * round's payload and to read its round budget.
    */
-  const declarations = new Map<string, Array<{ readonly flow: Flow.Any }>>()
+  const declarations = new Map<string, Array<{ readonly flow: Flow.Any; readonly scope: Scope.Scope }>>()
   return FlowRuntime.FlowRuntime.of({
     // Untraced because registering a flow recursively re-enters the engine.
     register: Effect.fnUntraced(function*(flow, execute) {
       const services = yield* Effect.context<FlowRuntime.FlowRuntime>()
-      const registration = { flow }
+      const registration = { flow, scope: yield* Effect.scope }
       const existing = declarations.get(flow._tag)
       const entries = existing ?? []
       if (existing === undefined) declarations.set(flow._tag, entries)
@@ -177,6 +178,15 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
           // link (`RunDriver.cancelOwned`), so this path is the prompt
           // delivery and not the guarantee.
           return options.interrupt(roundFlow, roundExecutionId).pipe(
+            // Finalizers inherit an uninterruptible region. Restore delivery's
+            // interruptibility so the timeout can stop a blocked store call.
+            Effect.interruptible,
+            Effect.timeoutOption("5 seconds"),
+            Effect.flatMap((delivered) =>
+              Option.isNone(delivered)
+                ? Effect.logWarning(`engine: linked cancellation timed out for child execution ${roundExecutionId}`)
+                : Effect.void
+            ),
             Effect.catch((error) =>
               Effect.logWarning(
                 `engine: could not record the linked cancellation of child execution ${roundExecutionId}`,
@@ -196,7 +206,7 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
         options.execute(roundFlow, {
           executionId: roundExecutionId,
           payload: roundPayload,
-          discard: opts.discard ?? false,
+          discard: false,
           parent,
           round
         }) as Effect.Effect<Flow.Result<Success["Type"], Error["Type"]>>
@@ -208,124 +218,138 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
         Option.getOrUndefined(parentInstance)
       )
 
-      if (opts.discard) {
-        yield* current
-        return executionId
-      }
-
-      // The lineage this caller is following. Round 0 is the execution it
-      // asked for; every later round is a separate execution with its own
-      // journal, derived from the lineage and the ordinal so a restart lands
-      // on the same one (`docs/specs/Concepts/Trampoline Loops.md`).
-      let resumeAttempt = 0
-      // The expiration origin for the resume loop is in-process by design:
-      // the loop itself only lives as long as this caller, and a restart
-      // re-enters `execute` with a fresh budget. What must not happen is the
-      // bound being silently inert (issue #45): `expirationMs` on the
-      // suspended retry policy caps the wall-clock time this caller keeps
-      // polling a suspended execution.
-      const resumeStartMs = yield* Clock.currentTimeMillis
-      while (true) {
-        const wrapped = Option.isSome(parentInstance)
-          ? yield* Flow.wrapActionResult(
-            current,
-            (result) => result._tag === "Suspended"
+      const follow = Effect.gen(function*() {
+        // The lineage this caller is following. Round 0 is the execution it
+        // asked for; every later round is a separate execution with its own
+        // journal, derived from the lineage and the ordinal so a restart lands
+        // on the same one (`docs/specs/Concepts/Trampoline Loops.md`).
+        let resumeAttempt = 0
+        // The expiration origin for the resume loop is in-process by design:
+        // the loop itself only lives as long as this caller, and a restart
+        // re-enters `execute` with a fresh budget. What must not happen is the
+        // bound being silently inert (issue #45): `expirationMs` on the
+        // suspended retry policy caps the wall-clock time this caller keeps
+        // polling a suspended execution.
+        const resumeStartMs = yield* Clock.currentTimeMillis
+        while (true) {
+          const wrapped = !opts.discard && Option.isSome(parentInstance)
+            ? yield* Flow.wrapActionResult(
+              current,
+              (result) => result._tag === "Suspended"
+            )
+            : yield* current
+          result = Option.some(wrapped)
+          if (wrapped._tag === "Complete") {
+            return yield* wrapped.exit as Exit.Exit<any>
+          }
+          if (wrapped._tag === "Handoff") {
+            // The round settled by naming the next one. Following it here is
+            // what makes the trampoline transparent to the caller: one
+            // `execute` answers with the LINEAGE's value, and each round keeps
+            // its own execution id and journal underneath.
+            // DECIDED (2026-08-11, pending review): `maxRounds` belongs to the
+            // lineage originator. A multi-flow handoff cannot reset or replace
+            // the budget by naming a target with a different declaration.
+            const advanced = yield* Round.next(round, {
+              flowName: self._tag,
+              maxRounds: lineageBudget
+            }).pipe(Effect.catch((error) => Effect.die(error)))
+            // DECIDED (2026-08-11, pending review): a caller that cannot
+            // resolve the target dies rather than answering with the raw
+            // handoff. The round is durable either way, so the lineage is not
+            // lost — what is wrong is this caller's wiring, and saying so is
+            // the same posture `execute` takes for an unregistered flow.
+            const target = declarations.get(wrapped.flow)?.at(-1)?.flow
+            if (target === undefined) {
+              return yield* Effect.die(
+                new FlowNotRegistered({
+                  flowName: wrapped.flow,
+                  message:
+                    `${roundFlow._tag} handed off to flow ${wrapped.flow}, which is not registered with this engine`
+                })
+              )
+            }
+            // A handoff payload travels encoded, so the next round's own schema
+            // is what turns it back into the payload that round is planned with.
+            const decoded = yield* Effect.orDie(
+              Schema.decodeUnknownEffect(Schema.toCodecJson(target.payloadSchema))(wrapped.payload)
+            ) as Effect.Effect<object>
+            const previousExecutionId = roundExecutionId
+            round = advanced.round
+            roundFlow = target
+            roundExecutionId = advanced.executionId
+            roundPayload = decoded
+            current = runRound(
+              roundFlow,
+              roundExecutionId,
+              roundPayload,
+              { ...round, previousExecutionId },
+              Option.getOrUndefined(parentInstance)
+            )
+            continue
+          }
+          if (!opts.discard && Option.isSome(parentInstance)) {
+            return yield* Flow.suspend(parentInstance.value)
+          }
+          // The resume delay is derived from the attempt count (data policy) so
+          // backoff survives a restart.
+          resumeAttempt = resumeAttempt + 1
+          const elapsedMs = (yield* Clock.currentTimeMillis) - resumeStartMs
+          const delay = yield* RetryPolicy.nextDelayEffect(
+            suspendedRetryPolicy,
+            resumeAttempt,
+            { elapsedMs }
           )
-          : yield* current
-        result = Option.some(wrapped)
-        if (wrapped._tag === "Complete") {
-          return yield* wrapped.exit as Exit.Exit<any>
-        }
-        if (wrapped._tag === "Handoff") {
-          // The round settled by naming the next one. Following it here is
-          // what makes the trampoline transparent to the caller: one
-          // `execute` answers with the LINEAGE's value, and each round keeps
-          // its own execution id and journal underneath.
-          // DECIDED (2026-08-11, pending review): `maxRounds` belongs to the
-          // lineage originator. A multi-flow handoff cannot reset or replace
-          // the budget by naming a target with a different declaration.
-          const advanced = yield* Round.next(round, {
-            flowName: self._tag,
-            maxRounds: lineageBudget
-          }).pipe(Effect.catch((error) => Effect.die(error)))
-          // DECIDED (2026-08-11, pending review): a caller that cannot
-          // resolve the target dies rather than answering with the raw
-          // handoff. The round is durable either way, so the lineage is not
-          // lost — what is wrong is this caller's wiring, and saying so is
-          // the same posture `execute` takes for an unregistered flow.
-          const target = declarations.get(wrapped.flow)?.at(-1)?.flow
-          if (target === undefined) {
+          if (Option.isNone(delay)) {
+            // Distinguish the wall-clock give-up from attempt exhaustion: the
+            // delay is only elapsed-dependent when dropping `elapsedMs` would
+            // have allowed another attempt.
+            const expired = Option.isSome(
+              RetryPolicy.nextDelay(suspendedRetryPolicy, resumeAttempt)
+            )
+            const reason = expired ? "expired" : "exhausted"
             return yield* Effect.die(
-              new FlowNotRegistered({
-                flowName: wrapped.flow,
-                message:
-                  `${roundFlow._tag} handed off to flow ${wrapped.flow}, which is not registered with this engine`
+              new SuspendedResumeGaveUp({
+                flowName: self._tag,
+                executionId,
+                attempt: resumeAttempt,
+                elapsedMs,
+                reason,
+                message: `${self._tag}.execute: suspendedRetryPolicy ${reason}`
               })
             )
           }
-          // A handoff payload travels encoded, so the next round's own schema
-          // is what turns it back into the payload that round is planned with.
-          const decoded = yield* Effect.orDie(
-            Schema.decodeUnknownEffect(Schema.toCodecJson(target.payloadSchema))(wrapped.payload)
-          ) as Effect.Effect<object>
-          const previousExecutionId = roundExecutionId
-          round = advanced.round
-          roundFlow = target
-          roundExecutionId = advanced.executionId
-          roundPayload = decoded
+          const sleep = Effect.sleep(delay.value)
+          yield* (options.resumeSignal === undefined
+            ? sleep
+            : Effect.raceFirst(sleep, options.resumeSignal(roundFlow, roundExecutionId)))
+          yield* options.resume(roundFlow, roundExecutionId)
           current = runRound(
             roundFlow,
             roundExecutionId,
             roundPayload,
-            { ...round, previousExecutionId },
-            undefined
-          )
-          continue
-        }
-        if (Option.isSome(parentInstance)) {
-          return yield* Flow.suspend(parentInstance.value)
-        }
-        // The resume delay is derived from the attempt count (data policy) so
-        // backoff survives a restart.
-        resumeAttempt = resumeAttempt + 1
-        const elapsedMs = (yield* Clock.currentTimeMillis) - resumeStartMs
-        const delay = yield* RetryPolicy.nextDelayEffect(
-          suspendedRetryPolicy,
-          resumeAttempt,
-          { elapsedMs }
-        )
-        if (Option.isNone(delay)) {
-          // Distinguish the wall-clock give-up from attempt exhaustion: the
-          // delay is only elapsed-dependent when dropping `elapsedMs` would
-          // have allowed another attempt.
-          const expired = Option.isSome(
-            RetryPolicy.nextDelay(suspendedRetryPolicy, resumeAttempt)
-          )
-          const reason = expired ? "expired" : "exhausted"
-          return yield* Effect.die(
-            new SuspendedResumeGaveUp({
-              flowName: self._tag,
-              executionId,
-              attempt: resumeAttempt,
-              elapsedMs,
-              reason,
-              message: `${self._tag}.execute: suspendedRetryPolicy ${reason}`
-            })
+            round,
+            Option.getOrUndefined(parentInstance)
           )
         }
-        const sleep = Effect.sleep(delay.value)
-        yield* (options.resumeSignal === undefined
-          ? sleep
-          : Effect.raceFirst(sleep, options.resumeSignal(roundFlow, roundExecutionId)))
-        yield* options.resume(roundFlow, roundExecutionId)
-        current = runRound(
-          roundFlow,
-          roundExecutionId,
-          roundPayload,
-          round,
-          undefined
-        )
+      })
+      if (opts.discard) {
+        // Acknowledge admission before returning, then follow settlements in
+        // the registration's scope so closing the submitting scope cannot
+        // truncate the lineage. A low-level adapter without a local handler
+        // uses the caller's scope instead.
+        yield* options.execute(self, {
+          executionId,
+          payload: roundPayload,
+          discard: true,
+          parent: Option.getOrUndefined(parentInstance),
+          round
+        })
+        const scope = declarations.get(self._tag)?.at(-1)?.scope ?? (yield* Effect.scope)
+        yield* Effect.forkIn(follow, scope)
+        return executionId
       }
+      return yield* follow
     }),
     poll: options.poll,
     interrupt: options.interrupt,

@@ -8,7 +8,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { FlowEngine } from "../src/index.ts"
 import { withCrypto } from "./Crypto.ts"
 
@@ -40,7 +41,8 @@ const boundaryNode = "root.flow.map"
  */
 const scripted = (
   result: Flow.Result<unknown, unknown>,
-  interruptFailure?: FlowRuntime.CancelRequestFailed
+  interruptFailure?: FlowRuntime.CancelRequestFailed,
+  interruptDelivery: Effect.Effect<void> = Effect.void
 ) => {
   const requests: Array<{ readonly executionId: string; readonly parent: string | undefined }> = []
   const interrupts: Array<string> = []
@@ -58,7 +60,7 @@ const scripted = (
     interrupt: (_flow, executionId) =>
       Effect.sync(() => void interrupts.push(executionId)).pipe(
         Effect.andThen(
-          interruptFailure === undefined ? Effect.void : Effect.fail(interruptFailure)
+          interruptFailure === undefined ? interruptDelivery : Effect.fail(interruptFailure)
         )
       ),
     interruptUnsafe: () => Effect.void,
@@ -174,7 +176,11 @@ describe("a child boundary on the real engine", () => {
       const instance = FlowEngine.makeInstance(Parent, "boundary-interrupt-failure")
       instance.interrupted = true
 
-      const exit = yield* drive(engine, instance)
+      const logs: Array<{ logLevel: string; message: unknown }> = []
+      const logger = Logger.make((entry) => {
+        logs.push(entry)
+      })
+      const exit = yield* drive(engine, instance).pipe(Effect.provide(Logger.layer([logger])))
 
       expect(Exit.isFailure(exit)).toBe(true)
       expect(interrupts).toEqual([
@@ -187,7 +193,83 @@ describe("a child boundary on the real engine", () => {
           )
         )
       ])
+      const warnings = logs.filter((entry) => entry.logLevel === "Warn")
+      expect(warnings).toHaveLength(1)
+      expect(String(warnings[0]!.message)).toContain(interrupts[0])
+      expect(String(warnings[0]!.message)).toContain("could not record the linked cancellation")
+      expect(warnings[0]!.message).toContainEqual(expect.objectContaining({
+        _tag: failure._tag,
+        reason: "database unavailable"
+      }))
     }))
+
+  it.effect("bounds linked-cancellation delivery when the store blocks", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const blocked = yield* Deferred.make<void>()
+      const { engine, interrupts } = scripted(
+        new Flow.Suspended({}),
+        undefined,
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(blocked)))
+      )
+      const instance = FlowEngine.makeInstance(Parent, "boundary-interrupt-blocked")
+      instance.interrupted = true
+      const logs: Array<{ logLevel: string; message: unknown }> = []
+      const logger = Logger.make((entry) => {
+        logs.push(entry)
+      })
+      const fiber = yield* engine.execute(Child, {
+        executionId: "boundary-blocked-child",
+        payload: { value: 4 },
+        discard: true
+      }).pipe(
+        Effect.scoped,
+        Effect.provideService(FlowRuntime.FlowInstance, instance),
+        Effect.provide(Logger.layer([logger])),
+        Effect.forkChild
+      )
+      yield* Deferred.await(entered)
+      yield* TestClock.adjust("4999 millis")
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust("1 millis")
+      for (let attempt = 0; attempt < 100 && fiber.pollUnsafe() === undefined; attempt++) {
+        yield* Effect.yieldNow
+      }
+      const closed = fiber.pollUnsafe()
+      // Release even on the unfixed implementation, so the regression fails
+      // an assertion instead of hanging the test's own finalizers.
+      yield* Deferred.succeed(blocked, undefined)
+      yield* Fiber.await(fiber)
+      expect(closed).toBeDefined()
+      const warnings = logs.filter((entry) => entry.logLevel === "Warn")
+      expect(warnings).toHaveLength(1)
+      expect(String(warnings[0]!.message)).toContain(interrupts[0])
+      expect(String(warnings[0]!.message)).toContain("timed out")
+    }))
+
+  it.effect("does not suspend the parent of a discarded child", () =>
+    Effect.gen(function*() {
+      const { engine, requests } = scripted(new Flow.Suspended({}))
+      const instance = FlowEngine.makeInstance(Parent, "boundary-discard-parent")
+      yield* engine.register(Child, () => Effect.succeed(5))
+      const id = yield* engine.execute(Child, {
+        executionId: "boundary-discard-child",
+        payload: { value: 4 },
+        discard: true
+      }).pipe(
+        Effect.scoped,
+        Effect.provideService(FlowRuntime.FlowInstance, instance)
+      )
+      expect(id).toBe("boundary-discard-child")
+      for (let attempt = 0; attempt < 100 && requests.length < 2; attempt++) {
+        yield* Effect.yieldNow
+      }
+      expect(requests).toEqual([
+        { executionId: id, parent: instance.executionId },
+        { executionId: id, parent: instance.executionId }
+      ])
+      expect(instance.suspended).toBe(false)
+    }).pipe(Effect.scoped))
 
   it.effect("runs the child as a separate registered execution on the real engine", () =>
     Effect.gen(function*() {

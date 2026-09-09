@@ -21,6 +21,12 @@ target's own payload schema, derives the next round's execution id, and runs
 it. One `execute` call therefore answers with the LINEAGE's value, and every
 round underneath keeps its own identity.
 
+With `discard: true`, admission returns round 0's execution id and the engine
+follows handoffs in the flow registration's scope. Closing the submitting
+caller's scope does not stop that work. Keep the registration open while the
+lineage runs. A child lineage keeps its original parent on every round, so a
+later round's completion wakes a parent parked behind it.
+
 Two consequences follow from resolving the target by tag:
 
 - The target must be registered with this engine. A handoff to an unregistered

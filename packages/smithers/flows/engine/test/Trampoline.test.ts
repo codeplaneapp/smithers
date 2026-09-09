@@ -305,6 +305,85 @@ describe("a lineage on the memory engine", () => {
       expect(calls).toEqual([0, 1, 2])
     }))
 
+  it.effect("follows discarded lineages after the submitting scope closes", () =>
+    Effect.gen(function*() {
+      const { calls, layer } = wire(Interpreter.layer(Counter))
+      yield* withCrypto(
+        Effect.gen(function*() {
+          const engine = yield* FlowRuntime.FlowRuntime
+          const id = yield* Effect.scoped(
+            Counter.execute({ value: 0, target: 3 }, { executionId: "memory-discard-lineage", discard: true })
+          )
+          expect(id).toBe("memory-discard-lineage")
+          for (const ordinal of [1, 2]) {
+            const roundId = yield* FlowEngine.Round.executionId({ lineageId: id, ordinal })
+            let settled = Option.none<Flow.Result<number, never>>()
+            for (let attempt = 0; attempt < 300; attempt++) {
+              settled = yield* engine.poll(Counter, roundId).pipe(Effect.catch(() => Effect.succeedNone))
+              if (Option.isSome(settled)) break
+              yield* Effect.yieldNow
+            }
+            expect(Option.isSome(settled) && settled.value._tag).toBe(ordinal === 1 ? "Handoff" : "Complete")
+            if (Option.isSome(settled) && settled.value._tag === "Complete") {
+              expect(settled.value.exit).toEqual(Exit.succeed(3))
+            }
+          }
+          expect(calls).toEqual([0, 1, 2])
+        }).pipe(Effect.provide(layer))
+      )
+    }))
+
+  it.effect("wakes a suspended parent when a later child round completes", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        let ready = false
+        let parentPasses = 0
+        yield* engine.register(Counter, ({ value }) =>
+          Effect.gen(function*() {
+            const instance = yield* FlowRuntime.FlowInstance
+            if (value === 0) {
+              instance.handoff = new Flow.Handoff({ flow: Counter._tag, payload: { value: 1, target: 2 } })
+              return 0
+            }
+            if (!ready) return yield* Flow.suspend(instance)
+            return 2
+          }))
+        yield* engine.register(Parent, () =>
+          Effect.gen(function*() {
+            parentPasses++
+            return yield* engine.execute(Counter, {
+              executionId: "memory-parked-child",
+              payload: { value: 0, target: 2 }
+            }).pipe(Effect.orDie)
+          }))
+        const pollTag = (poll: ReturnType<typeof Counter.poll>, tag: string) =>
+          Effect.gen(function*() {
+            let last = "unsettled"
+            for (let attempt = 0; attempt < 300; attempt++) {
+              const result = yield* poll.pipe(Effect.catch(() => Effect.succeedNone))
+              last = Option.isSome(result) ? result.value._tag : "unsettled"
+              if (last === tag) break
+              yield* Effect.yieldNow
+            }
+            return last
+          })
+        yield* engine.execute(Parent, {
+          executionId: "memory-parked-parent",
+          payload: { target: 2 },
+          discard: true
+        })
+        const childId = yield* FlowEngine.Round.executionId({ lineageId: "memory-parked-child", ordinal: 1 })
+        expect(yield* pollTag(engine.poll(Parent, "memory-parked-parent"), "Suspended")).toBe("Suspended")
+        expect(yield* pollTag(engine.poll(Counter, childId), "Suspended")).toBe("Suspended")
+        ready = true
+        yield* engine.resume(Counter, childId)
+        expect(yield* pollTag(engine.poll(Counter, childId), "Complete")).toBe("Complete")
+        expect(yield* pollTag(engine.poll(Parent, "memory-parked-parent"), "Complete")).toBe("Complete")
+        expect(parentPasses).toBe(2)
+      }).pipe(Effect.scoped, Effect.provide(FlowEngine.layerMemory))
+    ))
+
   it.effect("fails the lineage with the typed refusal once the round budget is spent", () =>
     Effect.gen(function*() {
       const { calls, layer } = wire(Interpreter.layer(Bounded))
