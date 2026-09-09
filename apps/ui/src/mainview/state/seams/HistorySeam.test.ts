@@ -6,7 +6,8 @@ import { createAppController } from "../AppController"
 import type { AppServices } from "../AppController"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
-import { emptyHistorySentence, MAX_CHANGE_PAGES, parseNote } from "./HistorySeam"
+import { emptyHistorySentence, listNotedCommits, MAX_CHANGE_PAGES, NOTES_TREE_CONCURRENCY, parseNote, readNotes } from "./HistorySeam"
+import type { SeamContext } from "./SeamContext"
 
 // The first controller in a file pays the module warm-up; under machine load that alone passes 5 s.
 setDefaultTimeout(30_000)
@@ -511,6 +512,70 @@ describe("history seam: the mythical history", () => {
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") expect(outcome.error).toBe("The history of will/flows couldn't be read: the mirror did not list its refs.")
     expect(store.collections.cards.get("history-will/flows")).toBeUndefined()
+  })
+})
+
+describe("listNotedCommits", () => {
+  /** A notes tree fanned out into `count` sibling directories, each holding one note; every listing answers after one timer tick. */
+  const fannedOutMirror = (count: number, failing?: string) => {
+    const seen: Array<string> = []
+    let active = 0
+    let peak = 0
+    const http = async (url: string): Promise<Response> => {
+      seen.push(url)
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      active -= 1
+      const dir = new URL(url, "https://mirror.invalid").pathname.split("/contents/")[1] ?? ""
+      if (dir === failing) return json(500, { status: "error", message: "boom" })
+      const body = dir === ""
+        ? listing(Array.from({ length: count }, (_, index) => [index.toString(16).padStart(2, "0"), "dir", index.toString(16).padStart(2, "0")] as const))
+        : listing([["a".repeat(38), "file", `${dir}/${"a".repeat(38)}`]])
+      return json(200, body)
+    }
+    const ctx = { http, baseUrl: "https://mirror.invalid" } as unknown as SeamContext
+    return { ctx, seen, peak: () => peak, active: () => active }
+  }
+
+  test("sibling directories of the notes tree are listed through a bounded concurrent queue: one request per directory, more than one in flight, never past the bound", async () => {
+    const mirror = fannedOutMirror(64)
+    const noted = await listNotedCommits(mirror.ctx, REPO, NOTES)
+    expect(noted?.size).toBe(64)
+    expect(noted?.get(`03${"a".repeat(38)}`)).toBe(`03/${"a".repeat(38)}`)
+    // The root plus one listing per directory, nothing probed twice.
+    expect(mirror.seen.length).toBe(65)
+    expect(new Set(mirror.seen).size).toBe(65)
+    expect(mirror.seen[0]).toBe(`${REPO}/contents/?ref=${NOTES}`)
+    expect(mirror.peak()).toBeGreaterThan(1)
+    expect(mirror.peak()).toBeLessThanOrEqual(NOTES_TREE_CONCURRENCY)
+    expect(mirror.active()).toBe(0)
+  })
+
+  test("a sibling directory the mirror will not list makes the whole tree unread, even when its peers listed", async () => {
+    const mirror = fannedOutMirror(64, "2a")
+    expect(await listNotedCommits(mirror.ctx, REPO, NOTES)).toBeNull()
+    expect(mirror.active()).toBe(0)
+    expect(await readNotes(mirror.ctx, REPO, NOTES, [`03${"a".repeat(38)}`])).toEqual({ state: "unread" })
+    expect(mirror.active()).toBe(0)
+  })
+
+  test("queued descendants retain their prefix and stop listing at the depth guard", async () => {
+    const seen: Array<string> = []
+    const http = async (url: string): Promise<Response> => {
+      const dir = new URL(url, "https://mirror.invalid").pathname.split("/contents/")[1] ?? ""
+      seen.push(dir)
+      const depth = dir === "" ? 0 : dir.split("/").length
+      return json(200, [
+        { name: "a", type: "dir" },
+        ...(depth === 20 ? [{ name: "b".repeat(20), type: "file" }] : [])
+      ])
+    }
+    const ctx = { http } as unknown as SeamContext
+    const noted = await listNotedCommits(ctx, REPO, NOTES)
+    expect(seen.length).toBe(21)
+    expect(noted?.size).toBe(1)
+    expect(noted?.get("a".repeat(20) + "b".repeat(20))).toBe(`${Array(20).fill("a").join("/")}/${"b".repeat(20)}`)
   })
 })
 

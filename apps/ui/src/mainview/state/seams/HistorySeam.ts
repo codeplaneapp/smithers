@@ -39,6 +39,8 @@ const PAGE_SIZE = 100
 export const MAX_CHANGE_PAGES = 20
 /** Bounds the notes tree listing: git fans notes out two hex characters per directory, so 40 hex is at most 20 levels. */
 const MAX_NOTES_TREE_DEPTH = 20
+/** Maximum outstanding notes directory listings. */
+export const NOTES_TREE_CONCURRENCY = 8
 /** Bounds one epic's second-parent chain, so a malformed history cannot spin. */
 const MAX_EPIC_COMMITS = 500
 
@@ -282,15 +284,22 @@ const HEX = /^[0-9a-f]+$/
  * The commits the notes commit's tree names, each with the path its note
  * lives at: git stores a note at `<sha>` or fans it out as `<2>/<38>` (and
  * deeper, two characters per directory). The tree is listed through
- * /contents/<dir>?ref=<notes sha>, one directory at a time. Null when the
+ * /contents/<dir>?ref=<notes sha>, with bounded concurrent listings. Null when the
  * mirror would not list a directory, so the caller can say the notes were not
  * read instead of rendering absence.
  */
 export const listNotedCommits = async (ctx: SeamContext, base: string, notesSha: string): Promise<ReadonlyMap<string, string> | null> => {
   const noted = new Map<string, string>()
-  const walk = async (dir: string, prefix: string, depth: number): Promise<boolean> => {
+  const queue = [{ dir: "", prefix: "", depth: 0 }]
+  const active = new Set<Promise<void>>()
+  let next = 0
+  let failed = false
+  const walk = async (dir: string, prefix: string, depth: number): Promise<void> => {
     const answer = await readJson(ctx, `${base}/contents/${dir}?ref=${encodeURIComponent(notesSha)}`)
-    if (answer.status !== 200 || !Array.isArray(answer.body)) return false
+    if (answer.status !== 200 || !Array.isArray(answer.body)) {
+      failed = true
+      return
+    }
     for (const entry of answer.body) {
       if (!isRecord(entry) || typeof entry.name !== "string" || typeof entry.type !== "string") continue
       const name = entry.name.toLowerCase()
@@ -299,12 +308,21 @@ export const listNotedCommits = async (ctx: SeamContext, base: string, notesSha:
       const path = dir === "" ? entry.name : `${dir}/${entry.name}`
       if (entry.type === "file" && sha.length === 40) noted.set(sha, path)
       else if (entry.type === "dir" && sha.length < 40 && depth < MAX_NOTES_TREE_DEPTH) {
-        if (!(await walk(path, sha, depth + 1))) return false
+        queue.push({ dir: path, prefix: sha, depth: depth + 1 })
       }
     }
-    return true
   }
-  return (await walk("", "", 0)) ? noted : null
+  while (!failed && (next < queue.length || active.size > 0)) {
+    while (next < queue.length && active.size < NOTES_TREE_CONCURRENCY) {
+      const { dir, prefix, depth } = queue[next++]!
+      const request = walk(dir, prefix, depth).finally(() => active.delete(request))
+      active.add(request)
+    }
+    await Promise.race(active)
+  }
+  // Settle already-started reads before returning an unread tree.
+  await Promise.all(active)
+  return failed ? null : noted
 }
 
 /** The note at one path of the notes commit's tree, read through /contents; null when the mirror did not answer the blob. */
