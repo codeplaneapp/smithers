@@ -31,7 +31,7 @@ their dependencies, regardless of the dependencies' own kinds.
 | `lint`    | kind includes `lint`                    | Yes, unless `--plan` |
 | `docs`    | kind includes `docs`                    | Yes, unless `--plan` |
 | `run`     | kind includes `run`                     | Yes, unless `--plan` |
-| `ci`      | lint, build, and test plans, merged     | Yes, unless `--plan` |
+| `ci`      | lint, build, test, and docs plans, merged     | Yes, unless `--plan` |
 | `install` | the `Install` flow, not a label pattern | Yes                  |
 | `query`   | every target the expression matches     | No                   |
 | `graph`   | every target the pattern matches        | No                   |
@@ -39,12 +39,14 @@ their dependencies, regardless of the dependencies' own kinds.
 An exact label that does not participate in the requested verb fails with
 `target selected by <pattern> does not support the <verb> verb`. A recursive
 pattern that selects nothing for one verb returns an empty graph. `ci` tolerates
-a per-kind refusal as long as at least one of lint, build, or test accepts the
+a per-kind refusal as long as at least one of lint, build, test, or docs accepts the
 pattern.
 
 `run` is intentionally outside `ci`: it selects operational targets such as
-cleaning, watch processes, source generation, and release actions. `docs` is an
-on-demand documentation gate and is also outside `ci`.
+cleaning, watch processes, source generation, and release actions. `ci` includes
+`docs` checks but plans with `unattended: true`, which excludes agent-backed
+writers such as [Docs.Page](../reference/targets/docs-page.md). The `docs` verb
+can run those writers directly.
 
 ## What executes
 
@@ -57,8 +59,11 @@ The executor gives each target its own in-memory runtime and provides:
 - GitHub workflow and documentation checks;
 - LLM review and package scaffolding.
 
-The irreversible-exec implementation is intentionally absent. A target that
-calls it fails at interpretation with `unresolved_action`.
+The runtime also supplies `ExecIrreversibleLive`. `NpmPublish` and `JsrPublish`
+are selected only by `run`; their verb gate also rejects dependency inclusion
+under other verbs. Both default the resolved `dryRun` attribute to `true`,
+which appends `--dry-run`. With `dryRun: false`, execution can publish to the
+registry. `--plan` remains non-executing.
 
 | Target                                                         | Root verb       | Executes today                                            |
 | -------------------------------------------------------------- | --------------- | --------------------------------------------------------- |
@@ -74,8 +79,9 @@ calls it fails at interpretation with `unresolved_action`.
 | `NewPackage`                                                   | `run`           | Yes; requires `--name` and creates a package              |
 | `PnpmWorkspace`                                                | `run`           | Yes                                                       |
 | `Clean`, `Dev`, `VitestWatch`                                  | `run`           | Yes; the watch processes hold their execution slot        |
-| `Changesets`                                                   | `run`           | `status` yes; `version` lacks the irreversible-exec layer |
-| `NpmPublish`, `JsrPublish`                                     | `run`           | No; both require the absent irreversible-exec layer       |
+| `Changesets.Version` | `run`, `lint` | Yes; `run` writes, `lint` checks in a scratch copy |
+| `Changesets.Publish` | `run` | Refuses at the outward-action gate; publication is not implemented |
+| `NpmPublish`, `JsrPublish`                                     | `run`           | Yes; `--dry-run` by default, real publication with `dryRun: false`       |
 
 An `LlmLint` target now runs through `LlmReviewLive`; it is no longer a
 plan-only declaration. It is the only target under the `review` verb, and it is

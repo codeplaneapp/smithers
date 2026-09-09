@@ -16,10 +16,15 @@ import { Smithers } from "@smthrs/targets"
 
 The CLI executor supplies the shared exec, generated-file write/check,
 documentation-parity, filegroup, LLM-review,
-package-manifest, output-capture, scaffold, and install implementations. It
-deliberately does not supply the irreversible-exec implementation, so a target
-that publishes externally or applies release versioning fails at interpretation
-with an `unresolved_action` refusal.
+package-manifest, output-capture, scaffold, install, and irreversible-exec
+implementations. `NpmPublish` and `JsrPublish` are `run`-only roots with a verb
+gate that also rejects dependency inclusion under other verbs. Their resolved
+`dryRun` attribute defaults to `true`, appending `--dry-run`; `dryRun: false`
+allows real publication. `--plan` never executes.
+
+`Changesets.Version` applies versioning under `run` and checks it under `lint`.
+`Changesets.Publish` is a separate `run`-only target whose outward-action gate
+currently refuses publication. See [Changesets](changesets.md).
 
 **Cacheable** is the target's own declaration. Under a declared
 [Nix environment](../../concepts/environments.md) the planner overrides `Never`
@@ -93,7 +98,8 @@ exists for future additions and is unused. See
 | ---------------------------------- | ----- | --------- | ----------------------------- | --------------------------------------------------------------------- |
 | [PnpmWorkspace](pnpm-workspace.md) | `run` | Never     | Executes                      | Runs the smithers-build install flow for a pnpm workspace.            |
 | [NewPackage](new-package.md)       | `run` | Never     | Executes                      | Scaffolds one package named with the invocation's `--name` option.    |
-| [Changesets](changesets.md)        | `run` | Never     | Executes                      | Reports Changesets status or applies versioning.                      |
+| [Changesets.Version](changesets.md) | `run`, `lint` | Check only | Executes | Applies versioning or checks for drift. |
+| [Changesets.Publish](changesets.md) | `run` | Never | Refuses at outward gate | Declares a release train publication; transport is not implemented. |
 | [NpmPublish](npm-publish.md)       | `run` | Never     | Executes (dry-run by default) | Publishes a package to an npm registry.                               |
 | [JsrPublish](jsr-publish.md)       | `run` | Never     | Executes (dry-run by default) | Publishes a package to JSR.                                           |
 | [Clean](clean.md)                  | `run` | Never     | Executes                      | Deletes explicitly declared generated paths.                          |

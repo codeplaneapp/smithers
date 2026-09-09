@@ -51,9 +51,11 @@ of `ci`, whose merged graph plans lint, build, test, and docs.
 The CLI executor supplies implementations for process execution, output
 capture, filegroups, generated files, package-manifest synchronization,
 workflow and documentation checks, LLM review, package scaffolding, and the
-pnpm install actions. The irreversible-exec layer is intentionally absent, so
-`NpmPublish`, `JsrPublish`, and the `version` operation of `Changesets` fail
-with an `unresolved_action` refusal. The per-target status is on each page under
+pnpm install actions, including `ExecIrreversibleLive`. `NpmPublish` and
+`JsrPublish` have a `run` verb gate and default to `--dry-run`; setting the
+resolved attribute `dryRun: false` allows real publication. `Changesets.Version`
+executes versioning, while `Changesets.Publish` currently refuses at its
+separate outward-action gate. The per-target status is on each page under
 [Target catalog](../reference/targets/README.md), and the summary table is in
 [Running targets](../workspace/running-targets.md).
 

@@ -60,15 +60,20 @@ Collected from the attrs: `config`, plus every declaration in `sources`.
 
 ## Status
 
-|           |                                                                                                                                                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Kinds     | `run`                                                                                                                                                                                                              |
-| Cacheable | Never                                                                                                                                                                                                              |
-| Executes  | **No.** The CLI executor does not provide `ExecIrreversibleLive`, so the `smithers-build/exec-irreversible` action has no implementation in scope and the target fails at interpretation with `unresolved_action`. |
+|           |                                                   |
+| --------- | ------------------------------------------------- |
+| Kinds     | `run`                                             |
+| Cacheable | Never                                             |
+| Executes  | Yes, through the CLI's `ExecIrreversibleLive` layer. |
 
-The target is selected by `smithers-build run`, but the normal executor refuses before
-publication because the irreversible layer is absent. `build`, `test`, `lint`,
-and `ci` never select it as a root.
+`smithers-build run` selects this target. Its `run` verb gate rejects inclusion
+under other verbs, including through dependency edges, so `build`, `test`,
+`lint`, `docs`, and `ci` cannot include it.
+
+The resolved `dryRun` attribute defaults to `true` and appends `--dry-run`.
+Setting `dryRun: false` removes that flag and allows real publication. The CLI
+supplies the irreversible execution layer; it does not unconditionally refuse
+publication. `--plan` only plans and never executes.
 
 ## See also
 

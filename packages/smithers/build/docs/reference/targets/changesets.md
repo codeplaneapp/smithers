@@ -1,97 +1,72 @@
 ---
 title: "Changesets"
-description: "Reports Changesets release status, or applies versioning."
+description: "Checks or applies Changesets versioning and declares release publication."
 ---
 
-Reports Changesets status, or applies versioning.
+`Smithers.Changesets` is a namespace with `Version` and `Publish` targets.
 
-```ts
-import { Smithers } from "@smthrs/targets"
+## Changesets.Version
 
-export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
-export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
-
-export const releaseStatus = Smithers.Changesets({
-  packageManager,
-  operation: "status",
-  changesets: [Smithers.glob(".changeset/*.md")],
-  config: Smithers.file("//.changeset/config.json"),
-  rootPackageJson: Smithers.file("//package.json"),
-  lockfile: Smithers.file("//pnpm-lock.yaml"),
-  deps: [],
-  since: "origin/main"
-})
-```
-
-## Attributes
-
-| Name              | Type                            | Default  | Description                                                                                |
-| ----------------- | ------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `packageManager`  | `PackageManager.PackageManager` | required | The declared package manager the tool runs through; its name and version are key material. |
-| `operation`       | `"status" \| "version"`         | required | Report, or apply versioning.                                                               |
-| `changesets`      | `Array<Input.Declared>`         | required | The changeset files, digested as key material.                                             |
-| `config`          | `Input.File`                    | required | The Changesets config.                                                                     |
-| `rootPackageJson` | `Input.File`                    | required | The root manifest.                                                                         |
-| `lockfile`        | `Input.File`                    | required | The lockfile.                                                                              |
-| `deps`            | `Array<Target.Target>`          | required | Dependency targets.                                                                        |
-| `since`           | `string \| null`                | required | A base revision for `status`, passed as `--since`. Ignored by `version`.                   |
-
-There is no `cwd`. Both operations run at the workspace root.
-
-## Commands
-
-Both argvs are `PackageManager.exec` of the declared package manager.
-
-`status` runs through the shared sealed exec action. With the pnpm declaration:
-
-```text
-pnpm exec changeset status [--since <since>]
-```
-
-`version` runs through the irreversible exec action, because it mutates manifests
-and changelogs. With the pnpm declaration:
+Runs `changeset version` through the workspace's declared Node package manager.
+With pnpm, the command is:
 
 ```text
 pnpm exec changeset version
 ```
 
-The irreversible tier means the engine refuses to retry it blindly, and no
-verification, replay, or cache-population path may execute it.
+| Name      | Type              | Default  | Description                                                   |
+| --------- | ----------------- | -------- | ------------------------------------------------------------- |
+| `config`  | `Input.File`      | required | Changesets configuration.                                     |
+| `data`    | `Attr.Data`       | optional | Additional declared inputs and target dependencies.            |
+| `changes` | `Array<string>`   | required | Allowed write patterns for manifests, changelogs, and changesets. |
 
-## Inputs
+|           |                                                                                       |
+| --------- | ------------------------------------------------------------------------------------- |
+| Kinds     | `run`, `lint`                                                                         |
+| Cacheable | Check mode only                                                                       |
+| Executes  | Yes. `run` applies versioning; `lint` checks for drift by running in a scratch copy.    |
 
-Collected from the attrs: every declaration in `changesets`, plus `config`,
-`rootPackageJson`, and `lockfile`.
+`ci` includes the `lint` check. An explicit `--write` or `--fix` requests write
+mode. Changes must stay within the declared `changes` patterns. There is no
+`dryRun` attribute on this target; check mode controls whether changes reach
+the working tree. `--plan` never executes the command.
 
-## Channels
+## Changesets.Publish
 
-| Channel | Type             |
-| ------- | ---------------- |
-| Success | `Exec.Result`    |
-| Error   | `Exec.ExecError` |
+Declares publication of a release train after packing and validation gates.
 
-## Status
+| Name         | Type                  | Default  | Description                                           |
+| ------------ | --------------------- | -------- | ----------------------------------------------------- |
+| `config`     | `Input.File`          | required | Changesets configuration.                             |
+| `pack`       | `Target.Target`       | required | Package artifact target.                              |
+| `gates`      | `Attr.Gates`          | required | Validation targets.                                   |
+| `provenance` | `boolean`             | optional | Provenance policy.                                    |
+| `secrets`    | `Attr.Secrets`        | optional | Declared credentials; the outward gate requires `NPM_TOKEN`. |
+| `sandbox`    | `Attr.Sandbox`        | optional | Sandbox policy.                                       |
+| `approval`   | `Attr.Approval`       | optional | `required` needs an approval the package runner cannot grant. |
 
-|           |                                                                                                                                                                                                              |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Kinds     | `run`                                                                                                                                                                                                        |
-| Cacheable | Never                                                                                                                                                                                                        |
-| Executes  | `status` yes, through `ExecLive`, as a `run` root or dependency. `version` **no**: the CLI executor does not provide `ExecIrreversibleLive`, so the target fails at interpretation with `unresolved_action`. |
+|           |                                                                                          |
+| --------- | ---------------------------------------------------------------------------------------- |
+| Kinds     | `run`                                                                                    |
+| Cacheable | Never                                                                                    |
+| Executes  | Refuses at the outward-action gate. The package runner does not implement this publication. |
 
-Both operations are selected by `smithers-build run`; `build`, `test`, `lint`, and
-`ci` never select them as roots.
+The gate checks declared credentials and required approval. Even when those
+checks pass, the current outward action reports `NotImplemented`.
 
-## Release order
+## Irreversible execution
 
-The intended order is status, version, build and package lint, npm publish, then
-JSR publish.
+The `@smthrs/targets/Changesets` module exports `ExecIrreversible` and
+`ExecIrreversibleLive`. The CLI supplies that layer. It is used by
+[NpmPublish](npm-publish.md) and [JsrPublish](jsr-publish.md), which execute
+through the action runtime and can publish. Each has a `run` verb gate that
+rejects other verbs even through dependencies, and a resolved `dryRun`
+attribute that defaults to `true` and appends `--dry-run`. Setting
+`dryRun: false` enables real publication.
 
-## Shared exports
-
-This module also declares the `ExecIrreversible` action and its
-`ExecIrreversibleLive` layer. Both [NpmPublish](npm-publish.md) and
-[JsrPublish](jsr-publish.md) use them. The action carries the same payload,
-result, and error as the sealed exec action, declared at the `irreversible` tier.
+The irreversible tier prevents blind retries, verification, replay, and cache
+population from executing the action. It does not block an ordinary CLI run.
+The `Changesets.Publish` refusal is specific to its outward-action path.
 
 ## See also
 

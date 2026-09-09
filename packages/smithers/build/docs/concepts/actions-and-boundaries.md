@@ -118,11 +118,13 @@ at once and the engine refuses with `ConcurrentKeylessDispatch`.
 | `scaffold-package`, `not-implemented`           | `sealed`       | Yes                          |
 | `smithers-build/install/measure`, `fetch/*`     | `sealed`       | Yes, under pnpm              |
 | `smithers-build/install/link`                   | `irreversible` | Yes, under pnpm              |
-| `smithers-build/exec-irreversible`              | `irreversible` | No                           |
+| `smithers-build/exec-irreversible`              | `irreversible` | Yes                          |
 
 The ordinary implementations are re-exported from the `@smthrs/targets` package
-root. `ExecIrreversibleLive` remains an explicit opt-in from the Changesets
-module and is intentionally absent from the normal executor.
+root. The CLI also supplies `ExecIrreversibleLive` from the Changesets module.
+`NpmPublish` and `JsrPublish` use it with a `run` verb gate and a resolved
+`dryRun` attribute that defaults to `true`. Setting `dryRun: false` allows real
+publication; the irreversible tier does not itself prevent execution.
 
 An action call with no implementation in scope is a wiring error, not a runtime
 contingency. The interpreter refuses with `unresolved_action` before it runs

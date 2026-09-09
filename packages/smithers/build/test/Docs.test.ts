@@ -142,6 +142,24 @@ describe("packages/smithers/build prose", () => {
     }
   })
 
+  it("does not claim the CLI lacks irreversible execution", () => {
+    expect(read("build-cli/src/TargetExecution.ts")).toContain("ExecIrreversibleLive({ workspaceRoot })")
+    const absentLayer =
+      /does not (?:provide|supply)\s+`?ExecIrreversibleLive|does not supply the irreversible-exec|irreversible(?:-exec)? (?:layer|implementation) is (?:intentionally )?absent|(?:absent|lacks the) irreversible-exec layer|ExecIrreversibleLive[\s\S]{0,160}intentionally absent/i
+    const stale = proseFiles().filter((file) => file.startsWith("docs/") && absentLayer.test(read(file)))
+    expect(stale, "pages claiming the CLI lacks irreversible execution").toEqual([])
+  })
+
+  it("describes the current Changesets namespace", () => {
+    const source = read("targets/src/ChangesetsTarget.ts")
+    const page = read("docs/reference/targets/changesets.md")
+    for (const name of ["Version", "Publish"]) {
+      expect(source).toContain(`Target.make("Changesets.${name}"`)
+      expect(page).toContain(`Changesets.${name}`)
+    }
+    expect(page).not.toContain("Smithers.Changesets({")
+  })
+
   it("keeps prose on the kinds ci actually merges", () => {
     // `ciKinds` gained "docs" with the workspace import, so pages carried over
     // from the standalone repo still claimed the docs verb stays out of ci.
@@ -150,6 +168,10 @@ describe("packages/smithers/build prose", () => {
     expect(literal, "Cli.ts no longer declares ciKinds").not.toBeNull()
     const kinds = [...literal![1]!.matchAll(/"([^"]+)"/g)].map((match) => match[1]!)
     expect(kinds).toContain("docs")
+    const running = read("docs/workspace/running-targets.md")
+    const ciRow = running.split("\n").find((line) => /^\|\s*`ci`\s*\|/.test(line))
+    expect(ciRow, "running-targets.md has no ci selection row").toBeDefined()
+    for (const kind of kinds) expect(ciRow, `ci selection omits ${kind}`).toContain(kind)
     // The claims wrap across lines, so the scan is per paragraph: one that
     // speaks of documentation may not also call it excluded from ci.
     const exclusion = /(?:\bnot\b|\bnever\b)[\s\S]{0,60}?(?:part of|merged into|folded into)[\s\S]{0,60}?\bci\b/i
@@ -159,6 +181,12 @@ describe("packages/smithers/build prose", () => {
         expect(paragraph, `${file} claims the docs verb stays out of ci`).not.toMatch(exclusion)
       }
     }
+  })
+
+  it("does not exclude the docs gate from ci in the running guide", () => {
+    expect(read("docs/workspace/running-targets.md")).not.toMatch(
+      /`docs`[^.]*\boutside `ci`/i
+    )
   })
 
   it("does not promise a declared-manager check the actions no longer make", () => {
