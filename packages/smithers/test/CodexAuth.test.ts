@@ -494,20 +494,31 @@ describe("CodexAuth refresh", () => {
     expect(error.message).toContain(CodexAuth.refreshUrl)
   })
 
-  it("fails typed when the rotated tokens cannot be written back, leaving no temporary", async () => {
+  it("fails typed when the rotated tokens cannot be written back, leaving no temporary and no lock", async () => {
+    // The obstruction has to land *after* the lock is taken and the endpoint
+    // has answered, or the test only proves lock acquisition can fail. The
+    // store stages `<file>.tmp-<pid>-<uuid>` beside the credentials, so a stem
+    // long enough that only the staged name exceeds NAME_MAX refuses the
+    // write-back and nothing else: the directory stays writable, so the refresh
+    // lock is still created and released around the failure.
     const directory = storeDirectory()
-    const file = join(directory, "auth.json")
+    const stem = "a".repeat(212)
+    const file = join(directory, `${stem}.json`)
     writeFileSync(file, authJson({ access_token: expiredJwt(), refresh_token: "fake-refresh-0" }), { mode: 0o600 })
-    const { executor } = respondingExecutor(() =>
-      new Response(JSON.stringify({ access_token: freshJwt() }), { status: 200 })
+    const original = readFileSync(file, "utf8")
+    const { executor, seen } = respondingExecutor(() =>
+      new Response(JSON.stringify({ access_token: freshJwt(), refresh_token: "fake-refresh-1" }), { status: 200 })
     )
-    chmodSync(directory, 0o500)
 
     const error = await signError(file, executor)
 
+    expect(seen).toHaveLength(1)
     expect(error).toMatchObject({ code: "authentication" })
+    expect(error.message).toContain("could not be written back")
     expect(error.message).toContain(file)
-    chmodSync(directory, 0o700)
-    expect(readdirSync(directory)).toEqual(["auth.json"])
+    expect(readFileSync(file, "utf8")).toBe(original)
+    // The only survivor is the untouched store: no `.tmp-` stage, no
+    // `.refresh.lock` wedging the next refresh.
+    expect(readdirSync(directory)).toEqual([`${stem}.json`])
   })
 })

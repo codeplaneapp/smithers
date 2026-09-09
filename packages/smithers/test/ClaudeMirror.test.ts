@@ -6,7 +6,7 @@
  * answer RPC) and `continuedAs` is gone (rc.0 has no `continued` status).
  */
 import type { ControlSchema } from "@smthrs/control"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -102,11 +102,36 @@ describe("subscriptions", () => {
       .toBe(join(Project.stateDirectory("/work"), "claude-mirror-subscriptions.json"))
   })
 
-  it("stays silent when the registry cannot be written", () => {
-    // A read-only project directory is an operator's problem, not a reason to
-    // fail the frame the plugin is waiting on.
-    const root = join(project(), "absent", "deeper")
+  it("stays silent when the registry cannot be written, leaving the existing one byte for byte", () => {
+    // A registry the filesystem refuses is an operator's problem, not a reason
+    // to fail the frame the plugin is waiting on. The write stages
+    // `<registry>.<pid>.tmp`, so a directory parked on that exact path refuses
+    // the staging write deterministically, on every platform and for every uid.
+    const root = project()
+    const path = ClaudeMirror.subscriptionsPath(root)
+    const kept = [{ runId: "run-1", sessionId: "session-a", updatedAtMs: 1000 }]
+    writeFileSync(path, `${JSON.stringify(kept, null, 2)}\n`, "utf8")
+    const before = readFileSync(path, "utf8")
+    mkdirSync(`${path}.${process.pid}.tmp`)
+
+    expect(() => ClaudeMirror.subscribe(root, "run-2", "session-b", 1000)).not.toThrow()
+    expect(() => ClaudeMirror.unsubscribe(root, "run-1", "session-a", 1000)).not.toThrow()
+
+    expect(readFileSync(path, "utf8")).toBe(before)
+    expect(ClaudeMirror.readSubscriptions(root, 1000)).toEqual(kept)
+  })
+
+  it("stays silent when the state directory cannot even be created", () => {
+    // A regular file where an ancestor directory belongs refuses the recursive
+    // mkdir, which is the shape a stray file in the project tree produces.
+    const obstruction = join(project(), "not-a-directory")
+    writeFileSync(obstruction, "an operator's file", "utf8")
+    const root = join(obstruction, "inner")
+
     expect(() => ClaudeMirror.subscribe(root, "run-1", "session-a", 0)).not.toThrow()
+    expect(() => ClaudeMirror.unsubscribe(root, "run-1", "session-a", 0)).not.toThrow()
+
+    expect(readFileSync(obstruction, "utf8")).toBe("an operator's file")
   })
 })
 
