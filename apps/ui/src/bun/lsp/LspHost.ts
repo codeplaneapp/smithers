@@ -17,7 +17,7 @@ import { lspPolicy, wrapSandbox } from "../Sandbox"
 import type { SandboxHost } from "../Sandbox"
 import { languageFor, resolveServer, serverFor } from "./LanguageServers"
 import type { LanguageId, ServerLookup } from "./LanguageServers"
-import { createLspSession } from "./LspSession"
+import { createLspSession, LspRequestError } from "./LspSession"
 import type { LspSession } from "./LspSession"
 
 export const LSP_MAX_SERVERS = 4
@@ -125,6 +125,14 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
   const maxServers = options.maxServers ?? LSP_MAX_SERVERS
   const idleMs = options.idleMs ?? LSP_IDLE_MS
   const live = new Map<string, Live>()
+  const pending = new Set<{
+    readonly repoId: string
+    readonly cancel: () => void
+    readonly settled: Promise<void>
+  }>()
+  const closingRepos = new Map<string, Promise<void>>()
+  let stopping = false
+  const closedError = () => new LspRequestError("language_server_failed", 503, "Language server acquisition cancelled: repository closed or host stopping.")
   const keyOf = (repoId: string, language: LanguageId): string => `${repoId}\n${language}`
 
   const retire = (entry: Live, reason: string): Promise<void> => {
@@ -192,46 +200,90 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
   }
 
   const session: LspHost["session"] = async (repoId, repoRoot, path) => {
-    const language = languageFor(path)
-    if (language === null) return { status: "unsupported" }
-    const key = keyOf(repoId, language)
-    const existing = live.get(key)
-    if (existing?.retiring !== undefined) {
-      await existing.retiring
-      return session(repoId, repoRoot, path)
+    if (stopping || closingRepos.has(repoId)) throw closedError()
+    const cancelled = Promise.withResolvers<never>()
+    const settled = Promise.withResolvers<void>()
+    let stale = false
+    const acquisition = {
+      repoId,
+      cancel: () => { stale = true; cancelled.reject(closedError()) },
+      settled: settled.promise
     }
-    if (existing !== undefined && existing.session.state !== "exited") return { status: "ok", session: existing.session }
-    const root = safeRealpath(repoRoot)
-    const node = await options.node
-    // The await above is the one window a second caller could open the same key in.
-    const raced = live.get(key)
-    if (raced?.retiring !== undefined) {
-      await raced.retiring
-      return session(repoId, repoRoot, path)
+    pending.add(acquisition)
+    // Cancellation settles the caller even if discovery never resolves. The
+    // token survives retries, and every resumed continuation checks it before
+    // it can return a session or spawn a process.
+    const wait = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, cancelled.promise])
+    const acquire = async (): Promise<LspSessionResult> => {
+      if (stale) throw closedError()
+      const language = languageFor(path)
+      if (language === null) return { status: "unsupported" }
+      const key = keyOf(repoId, language)
+      const existing = live.get(key)
+      if (existing?.retiring !== undefined) {
+        await wait(existing.retiring)
+        return acquire()
+      }
+      if (existing !== undefined && existing.session.state !== "exited") return { status: "ok", session: existing.session }
+      const root = safeRealpath(repoRoot)
+      const node = await wait(options.node)
+      if (stale) throw closedError()
+      // The await above is the one window a second caller could open the same key in.
+      const raced = live.get(key)
+      if (raced?.retiring !== undefined) {
+        await wait(raced.retiring)
+        return acquire()
+      }
+      if (raced !== undefined && raced.session.state !== "exited") return { status: "ok", session: raced.session }
+      const spec = serverFor(language)
+      const resolved = resolveServer(spec, lookup, node)
+      if ("missing" in resolved) return { status: "missing", language, install: resolved.missing }
+      while (live.size >= maxServers) {
+        const oldest = [...live.values()].sort((left, right) => left.session.lastUsed - right.session.lastUsed)[0]
+        if (oldest === undefined) break
+        await wait(retire(oldest, `room for ${repoId}`))
+        if (stale) throw closedError()
+      }
+      // Another caller may have filled this same key while capacity was freed.
+      if (live.has(key)) return acquire()
+      return { status: "ok", session: start(repoId, root, language, resolved.argv, node).session }
     }
-    if (raced !== undefined && raced.session.state !== "exited") return { status: "ok", session: raced.session }
-    const spec = serverFor(language)
-    const resolved = resolveServer(spec, lookup, node)
-    if ("missing" in resolved) return { status: "missing", language, install: resolved.missing }
-    while (live.size >= maxServers) {
-      const oldest = [...live.values()].sort((left, right) => left.session.lastUsed - right.session.lastUsed)[0]
-      if (oldest === undefined) break
-      await retire(oldest, `room for ${repoId}`)
+    try {
+      const result = await wait(acquire())
+      if (stale) throw closedError()
+      return result
+    } finally {
+      pending.delete(acquisition)
+      settled.resolve()
     }
-    // Another caller may have filled this same key while capacity was freed.
-    if (live.has(key)) return session(repoId, repoRoot, path)
-    return { status: "ok", session: start(repoId, root, language, resolved.argv, node).session }
   }
 
   const list: LspHost["list"] = () =>
     [...live.values()].map((entry) => ({ repoId: entry.repoId, language: entry.session.language, state: entry.session.state }))
 
-  const closeRepo: LspHost["closeRepo"] = async (repoId) => {
-    await Promise.all([...live.values()].filter((entry) => entry.repoId === repoId).map((entry) => retire(entry, "repository closed")))
+  const cancelPending = (repoId?: string): ReadonlyArray<Promise<void>> =>
+    [...pending].filter((entry) => repoId === undefined || entry.repoId === repoId).map((entry) => {
+      entry.cancel()
+      return entry.settled
+    })
+
+  const closeRepo: LspHost["closeRepo"] = (repoId) => {
+    const existing = closingRepos.get(repoId)
+    if (existing !== undefined) return existing
+    const closing = Promise.all([
+      ...cancelPending(repoId),
+      ...[...live.values()].filter((entry) => entry.repoId === repoId).map((entry) => retire(entry, "repository closed"))
+    ]).then(() => {}).finally(() => { closingRepos.delete(repoId) })
+    closingRepos.set(repoId, closing)
+    return closing
   }
 
   const killAll: LspHost["killAll"] = async () => {
-    await Promise.all([...live.values()].map((entry) => retire(entry, "server stopping")))
+    stopping = true
+    await Promise.all([
+      ...cancelPending(),
+      ...[...live.values()].map((entry) => retire(entry, "server stopping"))
+    ])
   }
 
   return { session, list, closeRepo, killAll }

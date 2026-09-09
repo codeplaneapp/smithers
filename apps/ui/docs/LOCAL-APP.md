@@ -124,7 +124,12 @@ environment of its own (`HOME`, `PATH`, `TMPDIR`, locale, zone — none of the
 provider keys, SSH agent or config dirs the PTY allowlist hands a harness).
 At most four run; the least recently used makes room; ten idle minutes with
 no request in flight, `POST /api/repo/close` and shutdown end them (LSP
-`shutdown`/`exit`, SIGKILL after two seconds). Requests are bounded: 64 KiB
+`shutdown`/`exit`, SIGKILL after two seconds). Repository close cancels pending
+session acquisitions before resolving, including waits for Node discovery or
+server retirement. Requests during close are refused; a later request may
+start a fresh session after the repository is reopened. Host shutdown cancels
+all pending acquisitions and permanently refuses new ones. Cancelled
+acquisitions return `503 language_server_failed`. Requests are bounded: 64 KiB
 bodies, 8 in flight per server, 5 s each. What the server writes in free text
 (hover markdown, diagnostic messages, its last stderr line) has the host's
 absolute paths made repository-relative, or cut to their last segment

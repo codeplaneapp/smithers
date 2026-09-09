@@ -1,9 +1,12 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
+import * as fs from "node:fs"
 import { createHash } from "node:crypto"
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { LspDiagnosticsMessageSchema, LspDiagnosticsResponseSchema, LspHoverSchema } from "@smthrs/rpc/LocalApp"
+import type { NodeSidecar } from "../Node"
+import type { ServerLookup } from "./LanguageServers"
 import { findNode } from "../Node"
 import { ENV_ALLOWLIST } from "../Pty"
 import { currentSandboxHost, sandboxEnforced } from "../Sandbox"
@@ -72,6 +75,17 @@ describe("the registry", () => {
     expect(TYPESCRIPT_SERVER.documentLanguageId("a.js")).toBe("javascript")
   })
 
+  test("global fallback discovery works with an empty PATH and home", () => {
+    const globalBin = "/opt/homebrew/bin/typescript-language-server"
+    const globalLookup: ServerLookup = {
+      ...emptyLookup("/fixture/home"),
+      isFile: (path) => path === globalBin,
+      realpath: () => "/fixture/global/server.mjs"
+    }
+    expect(resolveServer(TYPESCRIPT_SERVER, globalLookup, { path: "/fixture/node", version: "22.19.0" }))
+      .toEqual({ argv: ["/fixture/node", "/fixture/global/server.mjs", "--stdio"] })
+  })
+
   test("a missing binary answers the install line verbatim and spawns nothing", async () => {
     const missing = createLspHost({
       publish: () => {},
@@ -99,6 +113,13 @@ describe("the registry", () => {
    */
   test("a language-server binary inside the repository is never resolved, so opening a repository runs nothing it ships", async () => {
     const trap = await realpath(await mkdtemp(join(tmpdir(), "smithers-lsp-trap-")))
+    // Simulate a global install even on machines without one. This must not
+    // affect the fixture-owned lookup used to test repository refusal.
+    const statSync = fs.statSync
+    const globalBin = "/opt/homebrew/bin/typescript-language-server"
+    const stat = spyOn(fs, "statSync").mockImplementation(((path, options) =>
+      path === globalBin ? { isFile: () => true } : statSync(path, options)
+    ) as typeof fs.statSync)
     try {
       await writeFixtureProject(trap)
       const proof = join(trap, "PROOF")
@@ -106,8 +127,16 @@ describe("the registry", () => {
       await mkdir(bin, { recursive: true })
       await writeFile(join(bin, "typescript-language-server"), `#!/bin/sh\necho owned > "${proof}"\nexec cat\n`)
       await chmod(join(bin, "typescript-language-server"), 0o755)
-      // The host's own lookup sees the whole filesystem; the environment names no PATH and an empty home, so the repository's copy is the only candidate anywhere.
-      const hostOnly = { ...defaultServerLookup({ PATH: "" }, tmpdir()), home: await mkdtemp(join(tmpdir(), "smithers-lsp-home-")) }
+      // Only fixture-owned paths exist to this lookup. Real global installs
+      // cannot turn this repository-executable refusal into a server start.
+      const hostOnly: ServerLookup = {
+        env: { PATH: "" },
+        home: join(trap, "home"),
+        listDir: (path) => path === bin ? ["typescript-language-server"] : [],
+        isFile: (path) => path === join(bin, "typescript-language-server"),
+        realpath: (path) => path
+      }
+      expect(hostOnly.isFile(globalBin)).toBe(false)
       expect(resolveServer(TYPESCRIPT_SERVER, hostOnly, node)).toEqual({ missing: TYPESCRIPT_SERVER.install })
       const trapped = createLspHost({
         publish: () => {},
@@ -123,8 +152,111 @@ describe("the registry", () => {
       await Bun.sleep(50)
       expect(await Bun.file(proof).exists()).toBe(false)
     } finally {
+      stat.mockRestore()
       await rm(trap, { recursive: true, force: true })
     }
+  })
+})
+
+describe("pending session acquisitions", () => {
+  for (const action of ["closeRepo", "killAll"] as const) {
+    test(`${action} cancels Node discovery before cleanup resolves and never spawns afterward`, async () => {
+      const discovery = Promise.withResolvers<NodeSidecar | null>()
+      const spawn = spyOn(Bun, "spawn").mockImplementation(() => { throw new Error("unexpected spawn") })
+      const pendingHost = createLspHost({
+        publish: () => {}, node: discovery.promise, home: root,
+        sandbox: currentSandboxHost(), log: () => {},
+        lookup: { ...emptyLookup(root), isFile: () => true, realpath: () => "/fixture/server.mjs" }
+      })
+      let outcome: unknown
+      const opening = pendingHost.session("pending", root, "a.ts").then(
+        (result) => { outcome = result }, (error) => { outcome = error }
+      )
+      try {
+        if (action === "closeRepo") await pendingHost.closeRepo("pending")
+        else await pendingHost.killAll()
+        const settledAtCleanup = outcome
+        discovery.resolve({ path: process.execPath, version: "22.19.0" })
+        await opening
+        expect(spawn).not.toHaveBeenCalled()
+        expect(settledAtCleanup).toBeInstanceOf(LspRequestError)
+        expect(outcome).toMatchObject({ code: "language_server_failed", http: 503 })
+        expect(pendingHost.list()).toEqual([])
+      } finally {
+        discovery.resolve(null)
+        await opening
+        await pendingHost.killAll()
+        spawn.mockRestore()
+      }
+    })
+  }
+
+  test("cleanup cancels every queued Node continuation before it can spawn", async () => {
+    // Exercise cleanup between discovery, the cancellation race, and the
+    // acquisition continuation; checking only inside a wait helper is too early.
+    for (const action of ["closeRepo", "killAll"] as const) {
+      for (let ticks = 0; ticks < 6; ticks++) {
+        const discovery = Promise.withResolvers<NodeSidecar | null>()
+        let closing = false
+        let lateSpawn = false
+        const spawn = spyOn(Bun, "spawn").mockImplementation(() => {
+          lateSpawn ||= closing
+          throw new Error("spawn intercepted")
+        })
+        const pendingHost = createLspHost({
+          publish: () => {}, node: discovery.promise, home: root,
+          sandbox: currentSandboxHost(), log: () => {},
+          lookup: { ...emptyLookup(root), isFile: () => true, realpath: () => "/fixture/server.mjs" }
+        })
+        const opening = pendingHost.session("pending", root, "a.ts").catch((error: unknown) => error)
+        try {
+          discovery.resolve({ path: process.execPath, version: "22.19.0" })
+          for (let tick = 0; tick < ticks; tick++) await Promise.resolve()
+          closing = true
+          if (action === "closeRepo") await pendingHost.closeRepo("pending")
+          else await pendingHost.killAll()
+          await opening
+          expect(lateSpawn).toBe(false)
+        } finally {
+          await pendingHost.killAll()
+          spawn.mockRestore()
+        }
+      }
+    }
+  })
+
+  test("repository close cancels only that repository and allows a fresh acquisition", async () => {
+    const discovery = Promise.withResolvers<NodeSidecar | null>()
+    const pendingHost = createLspHost({
+      publish: () => {}, node: discovery.promise, home: root,
+      sandbox: currentSandboxHost(), lookup: emptyLookup(root), log: () => {}
+    })
+    const closed = pendingHost.session("closed", root, "a.ts").catch((error: unknown) => error)
+    const other = pendingHost.session("other", root, "a.ts")
+    try {
+      await pendingHost.closeRepo("closed")
+      discovery.resolve(null)
+      expect(await closed).toBeInstanceOf(LspRequestError)
+      expect(await other).toMatchObject({ status: "missing" })
+      expect(await pendingHost.session("closed", root, "a.ts")).toMatchObject({ status: "missing" })
+    } finally {
+      discovery.resolve(null)
+      await pendingHost.killAll()
+    }
+  })
+
+  test("host shutdown rejects new acquisitions, including unsupported files", async () => {
+    const stopped = createLspHost({
+      publish: () => {}, node: Promise.resolve(null), home: root,
+      sandbox: currentSandboxHost(), lookup: emptyLookup(root), log: () => {}
+    })
+    await stopped.killAll()
+    for (const path of ["a.ts", "README.md"]) {
+      await expect(stopped.session("repo", root, path)).rejects.toMatchObject({
+        code: "language_server_failed", http: 503
+      })
+    }
+    await stopped.killAll()
   })
 })
 
@@ -401,12 +533,13 @@ describe.skipIf(skipReason !== undefined)("the real typescript-language-server o
     await host.closeRepo(repoId)
     expect(mine.state).toBe("exited")
     expect(host.list()).toEqual([{ repoId: "repo-other", language: "typescript", state: "ready" }])
-    await host.killAll()
-    expect(other.session.state).toBe("exited")
-    expect(host.list()).toEqual([])
-    // The next request after a close starts a fresh server.
+    // The next request after a repository close starts a fresh server.
     const fresh = await session()
     expect(fresh.pid).not.toBe(mine.pid)
     expect((await fresh.hover("src/index.ts", { line: 3, character: 7 })).hover).not.toBeNull()
+    await host.killAll()
+    expect(other.session.state).toBe("exited")
+    expect(fresh.state).toBe("exited")
+    expect(host.list()).toEqual([])
   }, 30_000)
 })
