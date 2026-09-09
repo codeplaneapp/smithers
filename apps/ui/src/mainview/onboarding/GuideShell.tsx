@@ -134,7 +134,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
     runCommandGuide("close")
     requestAnimationFrame(() => {
       if (previousFocus.current?.isConnected) previousFocus.current.focus()
-      else opener.current?.focus()
+      else (opener.current ?? document.querySelector<HTMLElement>(".guide-shell"))?.focus()
     })
   }
   const runCommandLive = (name: string) => {
@@ -142,6 +142,10 @@ export function GuideShell({ children }: { children: ReactNode }) {
     if (!controller.runCommand(name)) controller.send(`/${name}`)
   }
   const runCommandNext = () => runCommandGuide("next")
+  const runCommandSound = () => {
+    runCommandGuide("sound")
+    if (!guide.sound) chime()
+  }
   const keyHint = (keys = "↵ Enter") => (
     <kbd className="guide-button-key" aria-hidden="true" title={keys === "Tab ↵" ? "Tab to this button, then press Enter" : undefined}>{keys}</kbd>
   )
@@ -170,19 +174,28 @@ export function GuideShell({ children }: { children: ReactNode }) {
       data-theme={sessions[0]?.theme ?? "light"}
       tabIndex={-1}
       ref={(node) => {
-        if (node && document.activeElement === document.body) node.focus()
+        if (!node) return
+        if (document.activeElement === document.body) node.focus()
+        // The composer is portaled and focus can fall back to the document.
+        // Shell dismissal must work even when the key has no React ancestor.
+        const onKeyDown = (event: globalThis.KeyboardEvent) => {
+          if (event.isComposing) return
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+            event.preventDefault()
+            event.stopPropagation()
+            guide.conversationOpen ? runCommandClose() : runCommandOpen()
+          } else if (event.key === "Escape" && guide.conversationOpen) {
+            event.preventDefault()
+            event.stopPropagation()
+            runCommandClose()
+          }
+        }
+        document.addEventListener("keydown", onKeyDown, true)
+        return () => document.removeEventListener("keydown", onKeyDown, true)
       }}
       onKeyDownCapture={(event) => {
         if (event.nativeEvent.isComposing) return
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-          event.preventDefault()
-          event.stopPropagation()
-          guide.conversationOpen ? runCommandClose() : runCommandOpen()
-        } else if (event.key === "Escape" && guide.conversationOpen) {
-          event.preventDefault()
-          event.stopPropagation()
-          runCommandClose()
-        } else if (
+        if (
           !guide.conversationOpen &&
           !event.metaKey &&
           !event.ctrlKey &&
@@ -192,6 +205,11 @@ export function GuideShell({ children }: { children: ReactNode }) {
           const target = event.target instanceof Element ? event.target : null
           // Text editing retains arrows/Enter. Enter on a focused button retains its native action.
           if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+          if (event.key.toLowerCase() === "s") {
+            event.preventDefault()
+            if (!event.repeat) runCommandSound()
+            return
+          }
           if (event.key === "Enter" && target?.closest("button, a")) return
           if (stage === 4 && event.key.toLowerCase() === "r") {
             event.preventDefault()
@@ -622,15 +640,13 @@ export function GuideShell({ children }: { children: ReactNode }) {
       <footer className="guide-footer">
         <button
           data-flow="onboarding.act"
-          onClick={() => {
-            runCommandGuide("sound")
-            if (!guide.sound) chime()
-          }}
+          onClick={runCommandSound}
+          aria-keyshortcuts="s"
           aria-label={guide.sound ? "Mute tutorial sounds" : "Enable tutorial sounds"}
         >
           {guide.sound ? <Volume2 size={15} /> : <VolumeX size={15} />}
           <span>Sound {guide.sound ? "on" : "off"}</span>
-          {keyHint("Tab ↵")}
+          {keyHint("S")}
         </button>
         <div className="guide-progress" aria-label={`Lesson ${stage + 1} of 16`}>
           {Array.from({ length: 16 }, (_, i) => (

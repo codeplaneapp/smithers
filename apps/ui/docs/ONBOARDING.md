@@ -93,3 +93,5 @@ The flows lesson has “Run a flow · R”: a real five-second asynchronous wait
 Command K displays only the composer, including in the Library lesson. There is no greeting, transcript, or “Meet the Library” panel inside the overlay. Tutorial and real chat history remain in the main view.
 
 The summoned UI is the composer input itself, without an outer card, repository header, origin label, + menu, or Chat/Connect/Wiki/Flows toolbar. Repository selection lives in the left workspace sidebar, including before plugin installation. The picker retains keyboard menu navigation and Escape restores focus.
+
+Sound toggles directly with **S**, shown inline on its button; character shortcuts never interrupt text entry. Prefer direct shortcuts over instructing users to Tab to controls. **Escape** dismisses the summoned composer even after focus leaves the input, preserving the draft and restoring workspace focus.
