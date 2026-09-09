@@ -1,4 +1,5 @@
 import type { StorageApi } from "@tanstack/db"
+import type { DurableRowDelta } from "./DurableCollection"
 import { PERSISTED_KEY_PREFIX, SCHEMA_VERSION_STORAGE_KEY } from "./SchemaVersion"
 import { InvalidSchemaStampError, parseSchemaStamp } from "./SchemaStamp"
 import { sqliteRecoveryCopyId } from "./RecoveryCopy"
@@ -32,6 +33,8 @@ export interface SqliteRowStorage {
   readonly beginBatch: () => void
   readonly commitBatch: () => void
   readonly abortBatch: () => void
+  /** Persist row transitions directly, without routing them through collection JSON. */
+  readonly applyRows: (collectionId: string, deltas: ReadonlyArray<DurableRowDelta>) => void
   readonly flush: () => Promise<void>
   readonly close: () => Promise<void>
   /** A raw committed snapshot serialized with writes; never invokes row validators or repairs. */
@@ -59,6 +62,11 @@ interface StoredItem {
   readonly versionKey: string
   readonly data: unknown
 }
+
+/** One SQL statement's worth of scheduled work, resolved before it is queued. */
+type RowWrite =
+  | { readonly kind: "metadata"; readonly key: string; readonly value: string | null }
+  | { readonly kind: "row"; readonly collectionId: string; readonly rowKey: string; readonly row: { readonly versionKey: string; readonly value: string } | undefined }
 
 const SCHEMA_VERSION_KEY = "schema-version"
 const LEGACY_IMPORT_KEY = "legacy-import-complete"
@@ -359,17 +367,17 @@ export const openSqliteRowStorage = async (
     throw error
   }
 
-  let scheduled = new Map<string, string>()
+  // The scheduled view of every declared collection, held as rows so a commit
+  // never reparses or reserializes the collections it did not change.
+  const scheduledRows = new Map<string, Map<string, StoredItem>>()
   for (const collection of options.collections) {
-    scheduled.set(
-      collectionStorageKey(collection.id),
-      serializeStoredCollection(byCollection.get(collection.id) ?? new Map())
-    )
+    scheduledRows.set(collection.id, new Map(byCollection.get(collection.id) ?? []))
   }
   // Keep the StorageApi view aligned with the physical SQLite schema version.
-  scheduled.set(SCHEMA_VERSION_STORAGE_KEY, String(options.schemaVersion))
+  const scheduledMetadata = new Map<string, string>([[SCHEMA_VERSION_STORAGE_KEY, String(options.schemaVersion)]])
 
   let pending: Map<string, string | null> | undefined
+  let pendingRows: Map<string, Array<DurableRowDelta>> | undefined
   let batchDepth = 0
   let tail: Promise<void> = Promise.resolve()
   let failure: unknown
@@ -379,50 +387,37 @@ export const openSqliteRowStorage = async (
     options.collections.map((collection) => [collectionStorageKey(collection.id), collection.id])
   )
 
-  const persistChanges = async (
-    before: ReadonlyMap<string, string>,
-    after: ReadonlyMap<string, string>,
-    changedKeys: ReadonlyArray<string>
-  ): Promise<void> => {
+  const persistChanges = async (writes: ReadonlyArray<RowWrite>): Promise<void> => {
     await database.execute("BEGIN IMMEDIATE")
     try {
-      for (const storageKey of changedKeys) {
-        const collectionId = storageKeyToCollection.get(storageKey)
-        if (collectionId === undefined) {
-          const value = after.get(storageKey)
-          if (value === undefined) {
-            await database.execute(`DELETE FROM ${METADATA_TABLE_NAME} WHERE key = ?`, [storageKey])
+      for (const write of writes) {
+        if (write.kind === "metadata") {
+          if (write.value === null) {
+            await database.execute(`DELETE FROM ${METADATA_TABLE_NAME} WHERE key = ?`, [write.key])
           } else {
             await database.execute(
               `INSERT INTO ${METADATA_TABLE_NAME} (key, value) VALUES (?, ?)
                ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-              [storageKey, value]
+              [write.key, write.value]
             )
           }
           continue
         }
-        const oldRows = parseStoredCollection(before.get(storageKey) ?? null)
-        const nextRows = parseStoredCollection(after.get(storageKey) ?? null)
-        for (const rowKey of oldRows.keys()) {
-          if (!nextRows.has(rowKey)) {
-            await database.execute(
-              `DELETE FROM ${ROW_TABLE_NAME} WHERE collection_id = ? AND row_key = ?`,
-              [collectionId, rowKey]
-            )
-          }
-        }
-        for (const [rowKey, row] of nextRows) {
-          const prior = oldRows.get(rowKey)
-          if (prior?.versionKey === row.versionKey) continue
+        if (write.row === undefined) {
           await database.execute(
-            `INSERT INTO ${ROW_TABLE_NAME} (collection_id, row_key, version_key, value)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(collection_id, row_key) DO UPDATE SET
-               version_key = excluded.version_key,
-               value = excluded.value`,
-            [collectionId, rowKey, row.versionKey, JSON.stringify(row.data)]
+            `DELETE FROM ${ROW_TABLE_NAME} WHERE collection_id = ? AND row_key = ?`,
+            [write.collectionId, write.rowKey]
           )
+          continue
         }
+        await database.execute(
+          `INSERT INTO ${ROW_TABLE_NAME} (collection_id, row_key, version_key, value)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(collection_id, row_key) DO UPDATE SET
+             version_key = excluded.version_key,
+             value = excluded.value`,
+          [write.collectionId, write.rowKey, write.row.versionKey, write.row.value]
+        )
       }
       await database.execute("COMMIT")
     } catch (error) {
@@ -431,47 +426,158 @@ export const openSqliteRowStorage = async (
     }
   }
 
-  const enqueue = (changes: ReadonlyMap<string, string | null>): void => {
+  /** Diff a whole replacement collection; only the compatibility path needs this. */
+  const replaceCollection = (collectionId: string, next: Map<string, StoredItem> | undefined): Array<RowWrite> => {
+    const before = scheduledRows.get(collectionId)
+    const writes: Array<RowWrite> = []
+    for (const rowKey of before?.keys() ?? []) {
+      if (next?.has(rowKey) !== true) writes.push({ kind: "row", collectionId, rowKey, row: undefined })
+    }
+    for (const [rowKey, row] of next ?? []) {
+      if (before?.get(rowKey)?.versionKey === row.versionKey) continue
+      writes.push({ kind: "row", collectionId, rowKey, row: { versionKey: row.versionKey, value: JSON.stringify(row.data) } })
+    }
+    if (next === undefined) scheduledRows.delete(collectionId)
+    else scheduledRows.set(collectionId, next)
+    return writes
+  }
+
+  const applyRowDeltas = (collectionId: string, deltas: ReadonlyArray<DurableRowDelta>): Array<RowWrite> => {
+    const rows = scheduledRows.get(collectionId) ?? new Map<string, StoredItem>()
+    const writes: Array<RowWrite> = []
+    for (const delta of deltas) {
+      // DurableCollection accepts historical unprefixed string keys. Remove
+      // that physical alias when its row changes, without scanning history.
+      const legacyKey = delta.key.startsWith("s:") ? delta.key.slice(2) : undefined
+      if (legacyKey !== undefined && !legacyKey.startsWith("s:") && !legacyKey.startsWith("n:") && rows.delete(legacyKey)) {
+        writes.push({ kind: "row", collectionId, rowKey: legacyKey, row: undefined })
+      }
+      if (delta.versionKey === undefined) {
+        if (!rows.delete(delta.key)) continue
+        writes.push({ kind: "row", collectionId, rowKey: delta.key, row: undefined })
+        continue
+      }
+      const row: StoredItem = { versionKey: delta.versionKey, data: delta.data }
+      rows.set(delta.key, row)
+      writes.push({ kind: "row", collectionId, rowKey: delta.key, row: { versionKey: row.versionKey, value: JSON.stringify(row.data) } })
+    }
+    scheduledRows.set(collectionId, rows)
+    return writes
+  }
+
+  /**
+   * A collection this host never declared has no normalized rows; it keeps the
+   * historical whole-collection metadata value, so its cost is unchanged.
+   */
+  const applyUndeclaredDeltas = (collectionId: string, deltas: ReadonlyArray<DurableRowDelta>): Array<RowWrite> => {
+    const key = collectionStorageKey(collectionId)
+    const current = scheduledMetadata.get(key) ?? null
+    const rows = parseStoredCollection(current)
+    for (const delta of deltas) {
+      if (delta.versionKey === undefined) rows.delete(delta.key)
+      else rows.set(delta.key, { versionKey: delta.versionKey, data: delta.data })
+    }
+    const value = serializeStoredCollection(rows)
+    if (current === value) return []
+    scheduledMetadata.set(key, value)
+    return [{ kind: "metadata", key, value }]
+  }
+
+  const enqueue = (
+    changes: ReadonlyMap<string, string | null>,
+    rowChanges: ReadonlyMap<string, ReadonlyArray<DurableRowDelta>> | undefined
+  ): void => {
     if (closed) throw new Error("SQLite row storage is closed.")
     if (failure !== undefined) throw failure
-    const before = scheduled
-    const after = new Map(before)
+    const writes: Array<RowWrite> = []
     for (const [key, value] of changes) {
-      if (value === null) after.delete(key)
-      else after.set(key, value)
+      const collectionId = storageKeyToCollection.get(key)
+      if (collectionId === undefined) {
+        if ((scheduledMetadata.get(key) ?? null) === value) continue
+        if (value === null) scheduledMetadata.delete(key)
+        else scheduledMetadata.set(key, value)
+        writes.push({ kind: "metadata", key, value })
+        continue
+      }
+      writes.push(...replaceCollection(collectionId, value === null ? undefined : parseStoredCollection(value)))
     }
-    const changedKeys = [...changes.keys()].filter((key) => before.get(key) !== after.get(key))
-    scheduled = after
-    if (changedKeys.length === 0) return
+    for (const [collectionId, deltas] of rowChanges ?? []) {
+      if (storageKeyToCollection.has(collectionStorageKey(collectionId))) {
+        writes.push(...applyRowDeltas(collectionId, deltas))
+        continue
+      }
+      writes.push(...applyUndeclaredDeltas(collectionId, deltas))
+    }
+    if (writes.length === 0) return
     tail = tail.then(() => {
       // A queued delta assumes all earlier deltas committed. After a rollback,
       // applying it would skip unchanged rows that never reached the database.
       if (failure !== undefined) throw failure
-      return persistChanges(before, after, changedKeys)
+      return persistChanges(writes)
     }).catch((error) => {
       failure = error
     })
   }
 
+  /** The scheduled rows with any deltas buffered by the open batch applied. */
+  const rowsView = (collectionId: string): Map<string, StoredItem> | undefined => {
+    const storageKey = collectionStorageKey(collectionId)
+    const replacement = pending?.has(storageKey) === true ? pending.get(storageKey) ?? null : undefined
+    const base = replacement === undefined
+      ? scheduledRows.get(collectionId)
+      : replacement === null ? undefined : parseStoredCollection(replacement)
+    const deltas = pendingRows?.get(collectionId)
+    if (deltas === undefined) return base
+    const rows = new Map(base ?? [])
+    for (const delta of deltas) {
+      if (delta.versionKey === undefined) rows.delete(delta.key)
+      else rows.set(delta.key, { versionKey: delta.versionKey, data: delta.data })
+    }
+    return rows
+  }
+
   const storage: StorageApi = {
     getItem: (key) => {
+      const collectionId = storageKeyToCollection.get(key)
+      if (collectionId !== undefined) {
+        const rows = rowsView(collectionId)
+        return rows === undefined ? null : serializeStoredCollection(rows)
+      }
       if (pending?.has(key)) return pending.get(key) ?? null
-      return scheduled.get(key) ?? null
+      return scheduledMetadata.get(key) ?? null
     },
     setItem: (key, value) => {
       // Parse eagerly so malformed adapter output cannot poison the async queue.
       if (storageKeyToCollection.has(key)) parseStoredCollection(value)
-      if (pending !== undefined) pending.set(key, value)
-      else enqueue(new Map([[key, value]]))
+      if (pending !== undefined) {
+        pendingRows?.delete(storageKeyToCollection.get(key) ?? "")
+        pending.set(key, value)
+      } else enqueue(new Map([[key, value]]), undefined)
     },
     removeItem: (key) => {
-      if (pending !== undefined) pending.set(key, null)
-      else enqueue(new Map([[key, null]]))
+      if (pending !== undefined) {
+        pendingRows?.delete(storageKeyToCollection.get(key) ?? "")
+        pending.set(key, null)
+      } else enqueue(new Map([[key, null]]), undefined)
     }
   }
 
+  const applyRows = (collectionId: string, deltas: ReadonlyArray<DurableRowDelta>): void => {
+    if (deltas.length === 0) return
+    if (pendingRows !== undefined) {
+      const changes = pendingRows.get(collectionId) ?? []
+      for (const delta of deltas) changes.push(delta)
+      pendingRows.set(collectionId, changes)
+      return
+    }
+    enqueue(new Map(), new Map([[collectionId, deltas]]))
+  }
+
   const beginBatch = (): void => {
-    if (batchDepth === 0) pending = new Map()
+    if (batchDepth === 0) {
+      pending = new Map()
+      pendingRows = new Map()
+    }
     batchDepth += 1
   }
   const commitBatch = (): void => {
@@ -479,12 +585,15 @@ export const openSqliteRowStorage = async (
     batchDepth -= 1
     if (batchDepth !== 0) return
     const changes = pending ?? new Map()
+    const rowChanges = pendingRows
     pending = undefined
-    enqueue(changes)
+    pendingRows = undefined
+    enqueue(changes, rowChanges)
   }
   const abortBatch = (): void => {
     batchDepth = 0
     pending = undefined
+    pendingRows = undefined
   }
   const flush = async (): Promise<void> => {
     await tail
@@ -510,5 +619,5 @@ export const openSqliteRowStorage = async (
     try { await flush() } finally { await database.close?.() }
   }
 
-  return { storage, beginBatch, commitBatch, abortBatch, flush, close, readRecovery }
+  return { storage, beginBatch, commitBatch, abortBatch, applyRows, flush, close, readRecovery }
 }

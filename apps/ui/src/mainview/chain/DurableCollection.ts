@@ -13,6 +13,18 @@ export interface DurableBatch {
   readonly abortBatch: () => void
 }
 
+/** One committed row transition. An absent `versionKey` removes the row. */
+export interface DurableRowDelta {
+  readonly key: string
+  readonly versionKey: string | undefined
+  readonly data: unknown
+}
+
+/** A host that stores rows individually, so a commit costs its own rows only. */
+export interface DurableRowSink {
+  readonly applyRows: (collectionId: string, deltas: ReadonlyArray<DurableRowDelta>) => void
+}
+
 interface PersistedTransaction {
   readonly mutations: ReadonlyArray<{
     readonly collection: { readonly id: string }
@@ -61,16 +73,29 @@ const readRows = (storage: StorageApi, id: string): Map<string, StoredItem> => {
   return rows
 }
 
-/** One serialized durable commit per transaction, with no optimistic row cache. */
+/** One serialized durable commit per transaction, with rollback of uncommitted rows. */
 export const createCollectionPersistence = (options: {
   readonly storage: StorageApi
   readonly batch?: DurableBatch
   readonly flush?: () => Promise<void>
+  /** Given a normalized host, commits carry row deltas instead of collection JSON. */
+  readonly rows?: DurableRowSink
 }): CollectionPersistence => {
   const registered = new Set<string>()
+  // The registered projection of every durable row, so neither the stale-state
+  // check nor a commit has to reparse a whole collection out of the store.
+  const projected = new Map<string, Map<string, StoredItem>>()
   let tail: Promise<void> = Promise.resolve()
   let generation = 0
   let priorFailure: unknown
+
+  const projection = (id: string): Map<string, StoredItem> => {
+    const known = projected.get(id)
+    if (known !== undefined) return known
+    const rows = readRows(options.storage, id)
+    projected.set(id, rows)
+    return rows
+  }
 
   const persist = (transaction: PersistedTransaction): Promise<void> => {
     const acceptedGeneration = generation
@@ -79,30 +104,57 @@ export const createCollectionPersistence = (options: {
       // Already queued transitions may have been derived from the failed
       // optimistic state. Reject them too; a later fresh dispatch may retry.
       if (acceptedGeneration !== generation) throw priorFailure
-      const changed = new Map<string, Map<string, StoredItem>>()
-      for (const mutation of mutations) {
-        const id = mutation.collection.id
-        const rows = changed.get(id) ?? readRows(options.storage, id)
-        const prior = rows.get(rowKey(mutation.key))
-        if (mutation.type === "insert" ? prior !== undefined : prior === undefined || comparableJson(prior.data) !== comparableJson(mutation.original)) {
-          // A rejection handler can dispatch while another failed optimistic
-          // transaction is still rolling back. Its generation is current but
-          // its original row is not; never persist that stale derived state.
-          throw new StaleDurableMutationError(id, mutation.key)
-        }
-        if (mutation.type === "delete") rows.delete(rowKey(mutation.key))
-        else rows.set(rowKey(mutation.key), { versionKey: crypto.randomUUID(), data: mutation.modified })
-        changed.set(id, rows)
-      }
-      // Serialize every projection before opening the synchronous batch.
-      const writes = [...changed].map(([id, rows]) => [storageKey(id), JSON.stringify(Object.fromEntries(rows))] as const)
-      options.batch?.beginBatch()
+      const deltas = new Map<string, Array<DurableRowDelta>>()
+      const localRows = new Map<string, Map<string, StoredItem>>()
+      // The projection advances in place; a refused commit rewinds these.
+      const applied: Array<{ readonly rows: Map<string, StoredItem>; readonly key: string; readonly prior: StoredItem | undefined }> = []
       try {
-        for (const [key, value] of writes) options.storage.setItem(key, value)
-        options.batch?.commitBatch()
-        await options.flush?.()
+        for (const mutation of mutations) {
+          const id = mutation.collection.id
+          const rows = options.rows === undefined
+            ? localRows.get(id) ?? readRows(options.storage, id)
+            : projection(id)
+          localRows.set(id, rows)
+          const key = rowKey(mutation.key)
+          const prior = rows.get(key)
+          if (mutation.type === "insert" ? prior !== undefined : prior === undefined || comparableJson(prior.data) !== comparableJson(mutation.original)) {
+            // A rejection handler can dispatch while another failed optimistic
+            // transaction is still rolling back. Its generation is current but
+            // its original row is not; never persist that stale derived state.
+            throw new StaleDurableMutationError(id, mutation.key)
+          }
+          applied.push({ rows, key, prior })
+          const delta: DurableRowDelta = mutation.type === "delete"
+            ? { key, versionKey: undefined, data: undefined }
+            : { key, versionKey: crypto.randomUUID(), data: JSON.parse(JSON.stringify(mutation.modified)) as unknown }
+          if (delta.versionKey === undefined) rows.delete(key)
+          else rows.set(key, { versionKey: delta.versionKey, data: delta.data })
+          const changed = deltas.get(id) ?? []
+          changed.push(delta)
+          deltas.set(id, changed)
+        }
+        // Serialize every projection before opening the synchronous batch. A
+        // normalized host takes the deltas instead, so neither side pays for
+        // the rows this transaction did not touch.
+        const writes = options.rows === undefined
+          ? [...deltas.keys()].map((id) => [storageKey(id), JSON.stringify(Object.fromEntries(localRows.get(id)!))] as const)
+          : []
+        options.batch?.beginBatch()
+        try {
+          if (options.rows === undefined) for (const [key, value] of writes) options.storage.setItem(key, value)
+          else for (const [id, rowDeltas] of deltas) options.rows.applyRows(id, rowDeltas)
+          options.batch?.commitBatch()
+          await options.flush?.()
+        } catch (error) {
+          options.batch?.abortBatch()
+          throw error
+        }
       } catch (error) {
-        options.batch?.abortBatch()
+        for (let index = applied.length - 1; index >= 0; index -= 1) {
+          const entry = applied[index]!
+          if (entry.prior === undefined) entry.rows.delete(entry.key)
+          else entry.rows.set(entry.key, entry.prior)
+        }
         throw error
       }
     }).catch((error: unknown) => {
@@ -119,7 +171,10 @@ export const createCollectionPersistence = (options: {
   return {
     register: (id) => {
       registered.add(id)
-      return [...readRows(options.storage, id).values()].map((row) => row.data)
+      // Re-read: a caller may have replaced the stored collection since boot.
+      const rows = readRows(options.storage, id)
+      if (options.rows !== undefined) projected.set(id, rows)
+      return [...rows.values()].map((row) => row.data)
     },
     persist
   }

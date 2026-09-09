@@ -1,7 +1,10 @@
 import { createCollection, createLiveQueryCollection, createTransaction } from "@tanstack/db"
-import { describe, expect, test } from "bun:test"
+import type { StorageApi } from "@tanstack/db"
+import { Database } from "bun:sqlite"
+import { describe, expect, spyOn, test } from "bun:test"
 import { z } from "zod"
 import { createCollectionPersistence, durableCollectionOptions } from "./DurableCollection"
+import { openSqliteRowStorage, ROW_TABLE_NAME, type SqliteRowDatabase } from "./SqliteRowStorage"
 import { ENVELOPE_STORAGE_KEY, openTransactionalStorage } from "./TransactionalStorage"
 
 const Widget = z.object({ id: z.string(), label: z.string() })
@@ -61,6 +64,193 @@ const observedFixture = async (initialRows: Array<z.infer<typeof Widget>>) => {
     dispose: async () => { subscription.unsubscribe(); await query.cleanup(); await app.collection.cleanup() }
   }
 }
+
+const PADDING = "x".repeat(1000)
+
+const normalizedFixture = async () => {
+  const sqlite = new Database(":memory:")
+  const executed: Array<{ readonly sql: string; readonly params: ReadonlyArray<unknown> }> = []
+  const database: SqliteRowDatabase = {
+    execute: async <TRow>(sql: string, params: ReadonlyArray<unknown> = []) => {
+      executed.push({ sql, params })
+      const statement = sqlite.query(sql)
+      if (/^\s*(?:SELECT|PRAGMA)/i.test(sql)) return statement.all(...params as []) as ReadonlyArray<TRow>
+      statement.run(...params as [])
+      return []
+    },
+    close: () => sqlite.close()
+  }
+  const host = await openSqliteRowStorage(database, { collections: [{ id: spec.id, schema: Widget }], schemaVersion: 1 })
+  return { sqlite, host, executed }
+}
+
+// Count both the compatibility envelope traffic and JSON parsing during commits.
+const appendToNormalizedHost = async (retained: number) => {
+  const { sqlite, host, executed } = await normalizedFixture()
+  host.storage.setItem("smithers-mvp.widgets", JSON.stringify(Object.fromEntries(
+    Array.from({ length: retained }, (_, index) => [`s:${index}`, { versionKey: `v${index}`, data: { id: String(index), label: PADDING } }])
+  )))
+  await host.flush()
+
+  let collectionChars = 0
+  const measured: StorageApi = {
+    getItem: (key) => {
+      const value = host.storage.getItem(key)
+      if (key === "smithers-mvp.widgets") collectionChars += value?.length ?? 0
+      return value
+    },
+    setItem: (key, value) => {
+      if (key === "smithers-mvp.widgets") collectionChars += value.length
+      host.storage.setItem(key, value)
+    },
+    removeItem: (key) => { host.storage.removeItem(key) }
+  }
+  const persistence = createCollectionPersistence({ storage: measured, batch: host, flush: host.flush, rows: host })
+  persistence.register(spec.id)
+  collectionChars = 0
+  executed.length = 0
+
+  const appended = Array.from({ length: 5 }, (_, index) => ({ id: `appended-${index}`, label: `label-${index}` }))
+  const expectedWrites: Array<{ rowKey: string; data: z.infer<typeof Widget> }> = []
+  let original = { id: "0", label: PADDING }
+  let parseCalls = 0
+  let parsedChars = 0
+  const parse = JSON.parse
+  const probe = spyOn(JSON, "parse").mockImplementation((...args: Parameters<typeof JSON.parse>) => {
+    parseCalls += 1
+    parsedChars += args[0].length
+    return parse(...args)
+  })
+  try {
+    for (const row of appended) {
+      const modified = { id: "0", label: row.label }
+      await persistence.persist({
+        mutations: [
+          { collection: { id: spec.id }, key: row.id, type: "insert", original: undefined, modified: row },
+          { collection: { id: spec.id }, key: "0", type: "update", original, modified }
+        ]
+      })
+      expectedWrites.push({ rowKey: `s:${row.id}`, data: row }, { rowKey: "s:0", data: modified })
+      original = modified
+    }
+    await host.flush()
+  } finally {
+    probe.mockRestore()
+  }
+  const stored = sqlite.query(`SELECT row_key, value FROM ${ROW_TABLE_NAME} ORDER BY row_key`).all() as Array<{ row_key: string; value: string }>
+  await host.close()
+  return {
+    appended,
+    collectionChars,
+    parseCalls,
+    parsedChars,
+    expectedWrites,
+    statements: executed.length,
+    rowWrites: executed
+      .filter((entry) => entry.sql.includes(`INSERT INTO ${ROW_TABLE_NAME}`))
+      .map((entry) => ({ rowKey: entry.params[1], data: JSON.parse(String(entry.params[3])) as unknown })),
+    storedCount: stored.length,
+    appendedRows: stored.filter((row) => row.row_key.startsWith("s:appended-")).map((row) => JSON.parse(row.value) as unknown)
+  }
+}
+
+describe("durable persistence against a normalized row host", () => {
+  test("an append writes only its own row, and its cost does not grow with retained history", async () => {
+    const small = await appendToNormalizedHost(40)
+    const large = await appendToNormalizedHost(400)
+
+    // No collection envelope is read or rewritten, at either retained size.
+    expect(small.collectionChars).toBe(0)
+    expect(large.collectionChars).toBe(0)
+    // Parsing is bounded by changed rows, regardless of retained history.
+    expect(large.parseCalls).toBe(small.parseCalls)
+    expect(large.parsedChars).toBe(small.parsedChars)
+    expect(large.parsedChars).toBeLessThan(10_000)
+    // One BEGIN, two row upserts and one COMMIT per append, at either size.
+    expect(small.statements).toBe(20)
+    expect(large.statements).toBe(small.statements)
+
+    expect(small.rowWrites).toEqual(small.expectedWrites)
+    expect(large.rowWrites).toEqual(large.expectedWrites)
+    expect(small.storedCount).toBe(45)
+    expect(large.storedCount).toBe(405)
+    expect(large.appendedRows).toEqual(large.appended)
+  })
+  test("row deltas update and delete historical unprefixed SQLite keys", async () => {
+    const { sqlite, host } = await normalizedFixture()
+    host.storage.setItem("smithers-mvp.widgets", JSON.stringify({
+      one: { versionKey: "legacy", data: { id: "one", label: "old" } },
+      two: { versionKey: "legacy", data: { id: "two", label: "removed" } }
+    }))
+    await host.flush()
+    const persistence = createCollectionPersistence({ storage: host.storage, batch: host, flush: host.flush, rows: host })
+    const collection = createCollection(durableCollectionOptions(persistence, spec))
+    await collection.preload()
+    await collection.update("one", (draft) => { draft.label = "updated" }).isPersisted.promise
+    await collection.delete("two").isPersisted.promise
+    expect(sqlite.query(`SELECT row_key, value FROM ${ROW_TABLE_NAME}`).all()).toEqual([
+      { row_key: "s:one", value: JSON.stringify({ id: "one", label: "updated" }) }
+    ])
+    await collection.cleanup()
+    await host.close()
+  })
+
+  test("SQLite rollback rejects queued deltas and restores optimistic rows", async () => {
+    const { sqlite, host, executed } = await normalizedFixture()
+    const persistence = createCollectionPersistence({ storage: host.storage, batch: host, flush: host.flush, rows: host })
+    const collection = createCollection(durableCollectionOptions(persistence, spec))
+    await collection.preload()
+    await collection.insert({ id: "one", label: "before" }).isPersisted.promise
+    sqlite.run(`CREATE TRIGGER refuse_insert BEFORE INSERT ON ${ROW_TABLE_NAME}
+      WHEN NEW.row_key = 's:refused' BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+    const first = createTransaction({ mutationFn: async ({ transaction }) => {
+      await persistence.persist(transaction)
+      collection.utils.acceptMutations(transaction)
+    } })
+    first.mutate(() => {
+      collection.delete("one")
+      collection.insert({ id: "refused", label: "bad" })
+    })
+    const second = collection.insert({ id: "queued", label: "never written" })
+    const results = await Promise.allSettled([first.isPersisted.promise, second.isPersisted.promise])
+    expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"])
+    expect([...collection.values()].map(({ id, label }) => ({ id, label }))).toEqual([{ id: "one", label: "before" }])
+    expect(sqlite.query(`SELECT row_key, value FROM ${ROW_TABLE_NAME}`).all()).toEqual([
+      { row_key: "s:one", value: JSON.stringify({ id: "one", label: "before" }) }
+    ])
+    expect(executed.some(({ params }) => params[1] === "s:queued")).toBe(false)
+    await collection.cleanup()
+    await expect(host.close()).rejects.toThrow("refused")
+  })
+
+  test("a rejected row batch rewinds the coordinator before a fresh retry", async () => {
+    const { sqlite, host } = await normalizedFixture()
+    let refuse = false
+    const persistence = createCollectionPersistence({
+      storage: host.storage, batch: host, flush: host.flush,
+      rows: { applyRows: (id, deltas) => {
+        host.applyRows(id, deltas)
+        if (refuse) throw new Error("batch refused")
+      } }
+    })
+    persistence.register(spec.id)
+    const original = { id: "one", label: "before" }
+    await persistence.persist({ mutations: [{ collection: spec, key: original.id, type: "insert", original: undefined, modified: original }] })
+    refuse = true
+    await expect(persistence.persist({ mutations: [
+      { collection: spec, key: original.id, type: "delete", original, modified: undefined },
+      { collection: spec, key: "two", type: "insert", original: undefined, modified: { id: "two", label: "new" } }
+    ] })).rejects.toThrow("batch refused")
+    refuse = false
+    await persistence.persist({ mutations: [{ collection: spec, key: original.id, type: "update", original, modified: { ...original, label: "fresh" } }] })
+    expect(sqlite.query(`SELECT row_key, value FROM ${ROW_TABLE_NAME}`).all()).toEqual([
+      { row_key: "s:one", value: JSON.stringify({ id: "one", label: "fresh" }) }
+    ])
+    await persistence.persist({ mutations: [{ collection: spec, key: original.id, type: "delete", original: { ...original, label: "fresh" }, modified: undefined }] })
+    expect(sqlite.query(`SELECT row_key FROM ${ROW_TABLE_NAME}`).all()).toEqual([])
+    await host.close()
+  })
+})
 
 describe("durable local-only collection adapter", () => {
   test("rows adopted from the historical unprefixed-key layout remain editable", async () => {

@@ -78,9 +78,15 @@ use their own streaming paths.
 
 `PERSISTED_COLLECTION_SPECS` in `state/AppStore.ts` is the authority for every
 persisted collection and its Standard Schema validator. Both backends expose
-the same `StorageApi` shape to `DurableCollection.ts`. That coordinator seeds
-TanStack local-only collections from validated rows and persists transaction
+a `StorageApi` view for loading validated rows. `DurableCollection.ts` seeds
+TanStack local-only collections from that view and persists transaction
 mutations before confirming them through the collection's sync interface.
+SQLite commits use `applyRows(collectionId, deltas)` directly; only changed
+rows are encoded and written. The coordinator retains committed rows for
+stale-state checks and rewinds tentative changes after a refused commit.
+Retained collection history is neither parsed nor serialized on an append.
+localStorage and older injected hosts without `applyRows` retain the full
+collection envelope path.
 The store remains the only write authority: UI components project collections
 and mutations enter through the controller/dispatcher.
 
@@ -146,7 +152,7 @@ secure deletion mechanism. Deleting account state also removes the snapshots.
   non-collection storage keys.
 - `smithers_row_quarantine(...)` for rejected rows and pre-normalization originals.
 
-`beginBatch()` buffers the coordinator's synchronous collection writes.
+`beginBatch()` buffers the coordinator's synchronous row deltas.
 `commitBatch()` schedules exactly one `BEGIN IMMEDIATE` transaction that
 inserts, updates, and deletes all changed rows; any error rolls it back.
 `AppStore.persist()` awaits `flush()` before reporting persistence complete.
