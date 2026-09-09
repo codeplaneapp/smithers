@@ -152,6 +152,7 @@ describe("CachedModel", () => {
         yield* Stream.runDrain(CachedModel.make({ live: live.live, fixture: recording }).stream(request("Balance?")))
         expect(yield* live.count()).toBe(1)
 
+        yield* recording.flush()
         const written = yield* decode(JSON.parse(readFileSync(path, "utf8")))
         expect(written.calls).toHaveLength(1)
         expect(written.calls[0]!.events).toEqual(events)
@@ -199,6 +200,7 @@ describe("FixtureStore", () => {
           { concurrency: "unbounded" }
         )
         expect(Option.getOrThrow(yield* store.load()).calls).toHaveLength(5)
+        yield* store.flush()
         expect((yield* decode(JSON.parse(readFileSync(path, "utf8")))).calls).toHaveLength(5)
       })
     ))

@@ -6,9 +6,10 @@
  *
  * @since 0.0.0
  */
-import { Context, Effect, Layer, Option, Ref, SynchronizedRef } from "effect"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { Context, Effect, Exit, Layer, Option, Ref, SynchronizedRef } from "effect"
+import { randomUUID } from "node:crypto"
+import { appendFile, mkdir, readFile, rename, rm, rmdir, truncate, writeFile } from "node:fs/promises"
+import { dirname, resolve } from "node:path"
 import { decode, type Fixture, type RecordedCall } from "./Fixture.ts"
 import { maximumDepth, snapshot } from "./internal/Structural.ts"
 
@@ -128,51 +129,150 @@ export const makeMemory = (initial?: Fixture): Effect.Effect<FixtureStore> =>
 export const layerMemory = (initial?: Fixture): Layer.Layer<FixtureStore> =>
   Layer.effect(FixtureStore)(makeMemory(initial))
 
-const readFixture = (path: string): Effect.Effect<Option.Option<Fixture>> =>
-  Effect.suspend(() =>
-    existsSync(path)
-      ? decode(JSON.parse(readFileSync(path, "utf8"))).pipe(
-        Effect.map((fixture) => Option.some(recorded(fixture))),
-        Effect.orDie
-      )
-      : Effect.succeed(Option.none())
-  )
+const fileError = (path: string, cause: unknown): Error =>
+  new Error(`Fixture file ${path}: ${String(cause)}`, { cause })
 
-const writeFixture = (path: string, fixture: Fixture): Effect.Effect<void> =>
-  Effect.sync(() => {
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, `${JSON.stringify(fixture, undefined, 2)}\n`)
+const io = <A>(path: string, run: () => Promise<A>): Effect.Effect<A> =>
+  Effect.tryPromise({ try: run, catch: (cause) => fileError(path, cause) }).pipe(Effect.orDie)
+
+const readOptional = (path: string): Effect.Effect<string | undefined> =>
+  io(path, () =>
+    readFile(path, "utf8").catch((cause: NodeJS.ErrnoException) => {
+      if (cause.code === "ENOENT") return undefined
+      throw cause
+    }))
+
+const parse = (path: string, text: string): Effect.Effect<unknown> =>
+  Effect.try({ try: () => JSON.parse(text) as unknown, catch: (cause) => fileError(path, cause) }).pipe(Effect.orDie)
+
+const decodeFile = (path: string, value: unknown): Effect.Effect<Fixture> =>
+  decode(value).pipe(Effect.mapError((cause) => fileError(path, cause)), Effect.orDie)
+
+// Called only while holding the path lock. A rename may have published JSON
+// before a killed writer removed its journal, so skip already-published indexes.
+const readFixture = (path: string): Effect.Effect<Option.Option<Fixture>> =>
+  Effect.gen(function*() {
+    const text = yield* readOptional(path)
+    const initial = text === undefined ? undefined : yield* decodeFile(path, yield* parse(path, text))
+    const calls = [...(initial?.calls ?? [])]
+    const journalPath = `${path}.journal`
+    const journal = yield* readOptional(journalPath)
+    if (journal !== undefined) {
+      const end = journal.lastIndexOf("\n") + 1
+      const complete = journal.slice(0, end)
+      let previous: number | undefined
+      for (const line of complete.split("\n").slice(0, -1)) {
+        const value = yield* parse(journalPath, line)
+        const entry = value as { index?: unknown; call?: unknown } | null
+        const index = entry?.index
+        if (
+          typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index > calls.length ||
+          (previous !== undefined && index !== previous + 1)
+        ) {
+          return yield* Effect.die(fileError(journalPath, new Error("Invalid journal call index")))
+        }
+        const decoded = yield* decodeFile(journalPath, { calls: [entry!.call] })
+        if (index === calls.length) calls.push(decoded.calls[0]!)
+        previous = index
+      }
+      // A killed append can leave a partial final record, including a partial
+      // UTF-8 sequence. Only the complete newline-terminated prefix survives.
+      if (end !== journal.length) yield* io(journalPath, () => truncate(journalPath, Buffer.byteLength(complete)))
+    }
+    return initial === undefined && calls.length === 0
+      ? Option.none()
+      : Option.some(recorded({ calls }))
   })
 
-/**
- * Builds a store over a JSON file. Node only.
- *
- * The file is read once, when the store is built, and every `append` rewrites
- * it, so a recording run leaves a committable fixture behind even if a later
- * test in the same run fails. Writes are serialized: concurrent model calls
- * would otherwise each rewrite the file from its own snapshot and drop the
- * calls recorded in between.
- *
- * @category constructors
- * @since 0.0.0
- */
-export const makeFile = (path: string): Effect.Effect<FixtureStore> =>
+const writeFixture = (path: string, fixture: Fixture): Effect.Effect<void> =>
   Effect.gen(function*() {
-    const state = yield* SynchronizedRef.make(yield* readFixture(path))
-    return make({
-      load: () => SynchronizedRef.get(state),
-      append: (call) =>
-        SynchronizedRef.updateEffect(state, (current) => {
-          const next = appended(current, call)
-          return writeFixture(path, next).pipe(Effect.as(Option.some(next)))
-        })
+    const staging = `${path}.${randomUUID()}.tmp`
+    yield* io(path, async () => {
+      try {
+        await writeFile(staging, `${JSON.stringify(fixture, undefined, 2)}\n`, { flag: "wx" })
+        await rename(staging, path)
+      } finally {
+        await rm(staging, { force: true })
+      }
+      await rm(`${path}.journal`, { force: true })
     })
   })
 
 /**
- * Provides {@link makeFile}.
+ * Builds a store over a JSON file and an append-only journal. Node only.
+ *
+ * Each append asynchronously persists only the new call. Call `flush` to
+ * atomically publish the complete JSON and release the path's writer lock.
+ * `layerFile` does this on scope close. One store may record at a path until
+ * it flushes; competing stores fail with a path-naming defect. After a killed
+ * process, remove the abandoned `.lock` directory before reopening. Completed
+ * journal lines are recovered, and an incomplete last line is discarded.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const makeFile = (path: string): Effect.Effect<
+  FixtureStore & {
+    readonly flush: () => Effect.Effect<void>
+  }
+> =>
+  Effect.gen(function*() {
+    path = resolve(path)
+    const lockPath = `${path}.lock`
+    let locked = false
+    const acquire = io(path, async () => {
+      await mkdir(dirname(path), { recursive: true })
+      await mkdir(lockPath)
+      locked = true
+    })
+    const release = Effect.suspend(() =>
+      locked
+        ? io(path, async () => {
+          await rmdir(lockPath)
+          locked = false
+        })
+        : Effect.void
+    )
+    const initial = yield* Effect.acquireUseRelease(acquire, () => readFixture(path), () => release)
+    const state = yield* SynchronizedRef.make(initial)
+    const current = (value: Option.Option<Fixture>) =>
+      locked
+        ? Effect.succeed(value)
+        : acquire.pipe(Effect.andThen(readFixture(path)))
+    return {
+      ...make({
+        load: () => SynchronizedRef.get(state),
+        append: (call) =>
+          SynchronizedRef.updateEffect(state, (value) =>
+            Effect.gen(function*() {
+              const next = appended(yield* current(value), call)
+              const index = next.calls.length - 1
+              const journalPath = `${path}.journal`
+              yield* io(journalPath, () =>
+                appendFile(
+                  journalPath,
+                  `${JSON.stringify({ index, call: next.calls[index] })}\n`
+                ))
+              return Option.some(next)
+            }).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? release : Effect.void))).pipe(Effect.uninterruptible)
+      }),
+      flush: () =>
+        SynchronizedRef.updateEffect(state, (value) =>
+          Effect.gen(function*() {
+            const latest = yield* current(value)
+            if (Option.isSome(latest) && (yield* readOptional(`${path}.journal`)) !== undefined) {
+              yield* writeFixture(path, latest.value)
+            }
+            return latest
+          }).pipe(Effect.ensuring(release))).pipe(Effect.uninterruptible)
+    }
+  }).pipe(Effect.uninterruptible)
+
+/**
+ * Provides {@link makeFile}, flushing the JSON fixture on scope close.
  *
  * @category layers
  * @since 0.0.0
  */
-export const layerFile = (path: string): Layer.Layer<FixtureStore> => Layer.effect(FixtureStore)(makeFile(path))
+export const layerFile = (path: string): Layer.Layer<FixtureStore> =>
+  Layer.effect(FixtureStore)(Effect.acquireRelease(makeFile(path), (store) => store.flush()))

@@ -94,7 +94,10 @@ import { fileURLToPath } from "node:url"
 const fixture = fileURLToPath(new URL("./fixtures/balance.json", import.meta.url))
 
 const modelLayer = Layer.unwrap(
-  Effect.map(FixtureStore.makeFile(fixture), (store) => CachedModel.layer({ live: liveModel(), fixture: store }))
+  Effect.map(
+    Effect.acquireRelease(FixtureStore.makeFile(fixture), (store) => store.flush()),
+    (store) => CachedModel.layer({ live: liveModel(), fixture: store })
+  )
 )
 ```
 

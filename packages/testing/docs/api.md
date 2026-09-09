@@ -1155,15 +1155,19 @@ exist yet.
 ### FixtureStore.makeFile and layerFile
 
 ```ts
-const makeFile: (path: string) => Effect.Effect<FixtureStore>
+const makeFile: (path: string) => Effect.Effect<
+  FixtureStore & {
+    readonly flush: () => Effect.Effect<void>
+  }
+>
 const layerFile: (path: string) => Layer.Layer<FixtureStore>
 ```
 
-A store over a JSON file. Node only. The file is read once, when the store is
-built, and every `append` rewrites it, so a recording run leaves a committable
-fixture behind even if a later test in the same run fails. Writes are
-serialized: concurrent model calls would otherwise each rewrite the file from
-their own snapshot and drop the calls recorded in between.
+A store over a JSON file and an append-only journal. Node only. `append`
+asynchronously persists only the new call. `flush` atomically publishes the
+complete JSON and releases the writer lock; `layerFile` flushes on scope close.
+The store recovers completed journal lines when reopened. Competing writers
+fail with a path-naming defect. See [file persistence and recovery](concepts/fixtures.md#file-persistence-and-recovery).
 
 ## RecordingModel
 

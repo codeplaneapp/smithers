@@ -12,6 +12,41 @@ there was one.
 
 Because a fixture is executable state, the rules around it are strict.
 
+## File persistence and recovery
+
+`FixtureStore.makeFile(path)` reads the JSON fixture and recovers completed
+records from `path.journal`. Each `append` asynchronously writes one numbered
+call followed by a newline to that journal. It does not rewrite earlier calls
+or the JSON fixture. `load` returns the store's immutable in-memory snapshot.
+
+Call the file store's `flush()` after recording to materialize the committable
+JSON. `FixtureStore.layerFile(path)` flushes automatically when its scope closes,
+including on test failure. Direct callers can use
+`Effect.acquireRelease(FixtureStore.makeFile(path), (store) => store.flush())`.
+A flush writes a unique temporary file beside the target and renames it over
+the target only when complete. The JSON path always contains the previous or
+next complete fixture. Commit the JSON file, not the journal or temporary files.
+
+A fixture path permits one active writer. The first append acquires the
+`path.lock` directory until `flush` releases it. Concurrent appends through one
+store are serialized. Competing stores or processes fail with a defect naming
+the path instead of overwriting calls. Construction also takes this lock while
+reading, so open another store after the current writer flushes. An idle store
+refreshes from disk before its next recording session; `load` alone does not
+refresh changes from other stores. Do not address the same fixture through
+symlink aliases.
+
+After a killed process, confirm that no writer remains, remove `path.lock`,
+and reopen the store. Complete journal lines are recovered; an unfinished last
+line is discarded. Numbered records prevent duplication if the process died
+after publishing JSON but before deleting the journal. Flush the recovered
+store to publish those calls. Abandoned `path.*.tmp` files can then be removed.
+These guarantees cover process interruption, not power loss: writes do not
+issue `fsync`. Never edit or delete the JSON or journal while a writer is active.
+
+Read, parse, and schema failures are defects whose messages name the failing
+file and whose `cause` retains the underlying error.
+
 ## Identity is the canonical encoding, not a hash
 
 `Fixture.canonicalRequestDigest` sorts object keys recursively, retains array
