@@ -1,6 +1,6 @@
 import { Catalog, Chain, Journal, Prompt, QuickJsRunner, Steering, SubChains } from "@smthrs/chain"
 import type { Author, Event, Outcome, ScriptRunner } from "@smthrs/chain"
-import { Effect, Fiber, Layer, Ref } from "effect"
+import { Effect, Exit, Fiber, Layer, Ref } from "effect"
 import { CardPatchSchema, CardSchema } from "@smthrs/rpc/Cards"
 import type { AgentChatMessage, AgentTurnFrame, FetchLike, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { CommandRegistry } from "../flows/Commands"
@@ -200,7 +200,6 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
   const running = new Map<string, Fiber.Fiber<Outcome.RunResult, unknown>>()
   const steerable = new Map<string, Steering.Service>()
-  const cancelled = new Set<string>()
   /* Session-scoped: grants and one-shot denials survive across turns, not reloads. */
   const policy = createChainPolicy()
   /*
@@ -328,7 +327,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
               runId: lineage,
               chain: true,
               background: true,
-              ...(ask === undefined ? {} : { command: ask.name })
+              ...(ask === undefined ? {} : { flow: ask.name })
             }
           }
         })
@@ -444,7 +443,6 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
     if (running.has(request.runId)) {
       return { status: "error", message: "That Smithers turn is already running." } as const
     }
-    cancelled.delete(request.runId)
 
     const commandCatalog = commandEntries(options.commands)
     const surfaces = surfaceEntries(emit, request.runId, options.store)
@@ -532,16 +530,11 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
 
     const fiber = Effect.runFork(program)
     running.set(request.runId, fiber)
-    void Effect.runPromise(Fiber.await(fiber) as Effect.Effect<unknown, never, never>).then((exit) => {
+    void Effect.runPromise(Fiber.await(fiber)).then((exit) => {
       running.delete(request.runId)
       steerable.delete(request.runId)
-      const settled = exit as { readonly _tag: string; readonly value?: unknown; readonly cause?: unknown }
-      if (cancelled.delete(request.runId)) {
-        emit({ runId: request.runId, type: "done", reason: "cancelled" })
-        return
-      }
-      if (settled._tag === "Success") {
-        const outcome = settled.value as Outcome.RunResult
+      if (Exit.isSuccess(exit)) {
+        const outcome = exit.value
         if (outcome._tag === "ApprovalWait") {
           /*
            * An approval park ends the turn awaiting the human: the card
@@ -567,7 +560,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
                   : `Smithers wants to run /${ask.name}`,
                 runId: request.runId,
                 chain: true,
-                ...(ask === undefined ? {} : { command: ask.name })
+                ...(ask === undefined ? {} : { flow: ask.name })
               }
             }
           })
@@ -576,10 +569,16 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
         emit({ runId: request.runId, type: "done", reason: "stop" })
         return
       }
+      const { cause } = exit
+      // A late stop cannot cancel an already settled approval boundary.
+      if (Exit.hasInterrupts(exit)) {
+        emit({ runId: request.runId, type: "done", reason: "cancelled" })
+        return
+      }
       emit({
         runId: request.runId,
         type: "done",
-        error: `The chain failed: ${String(settled.cause ?? "unknown cause")}`
+        error: `The chain failed: ${String(cause)}`
       })
     })
     return { status: "started" } as const
@@ -591,7 +590,6 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
     cancelTurn: async (runId) => {
       const fiber = running.get(runId)
       if (fiber === undefined) return
-      cancelled.add(runId)
       await Effect.runPromise(Fiber.interrupt(fiber) as Effect.Effect<unknown, never, never>)
     },
     steer: async (runId, text) => {
@@ -633,10 +631,15 @@ export const createAgentSeat = (
 ): AgentPort & { readonly bindChain: (chain: AgentPort) => void } => {
   const listeners = new Set<(frame: AgentTurnFrame) => void>()
   const startedBy = new Map<string, AgentPort>()
+  const parked = new Set<string>()
   let chain: AgentPort | undefined
 
   const forward = (frame: AgentTurnFrame): void => {
-    if (frame.type === "done") startedBy.delete(frame.runId)
+    if (frame.type === "park" && frame.code === "approval") parked.add(frame.runId)
+    if (frame.type === "done") {
+      const waiting = parked.delete(frame.runId)
+      if (!waiting || frame.reason === "cancelled" || frame.error !== undefined) startedBy.delete(frame.runId)
+    }
     for (const listener of listeners) listener(frame)
   }
   if (native !== undefined) native.subscribe(forward)
@@ -655,13 +658,21 @@ export const createAgentSeat = (
     startTurn: async (request) => {
       // A resume reuses its lineage's runId: route it to the agent that
       // started the run.
-      const backend = startedBy.get(request.runId) ?? current()
+      const previous = startedBy.get(request.runId)
+      const backend = previous ?? current()
       startedBy.set(request.runId, backend)
-      return backend.startTurn(request)
+      try {
+        const result = await backend.startTurn(request)
+        if (result.status !== "started" && previous === undefined) startedBy.delete(request.runId)
+        return result
+      } catch (error) {
+        if (previous === undefined) startedBy.delete(request.runId)
+        throw error
+      }
     },
     cancelTurn: async (runId) => {
+      // The terminal frame owns cleanup; a late cancel may leave a park intact.
       await (startedBy.get(runId) ?? current()).cancelTurn(runId)
-      startedBy.delete(runId)
     },
     steer: async (runId, text) => {
       const backend = startedBy.get(runId) ?? current()

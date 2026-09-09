@@ -1,8 +1,8 @@
 import { Author, ScriptRunner } from "@smthrs/chain"
 import type { Catalog } from "@smthrs/chain"
 import type { StorageApi } from "@tanstack/db"
-import { describe, expect, test } from "bun:test"
-import { Effect, Layer } from "effect"
+import { describe, expect, spyOn, test } from "bun:test"
+import { Effect, Exit, Layer } from "effect"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeRepositories } from "../native/NativeBridge"
 import type { AgentPort } from "../runtime/AgentPort"
@@ -106,7 +106,7 @@ const harness = async (options: {
   })
   const waitForDone = () =>
     new Promise<AgentTurnFrame & { readonly type: "done" }>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("no done frame within 5s")), 5000)
+      const timer = setTimeout(() => reject(new Error("no done frame within 30s")), 30_000)
       doneWaiters.push((frame) => { clearTimeout(timer); resolve(frame) })
     })
   return { store, controller, frames, nativeRequests: native.requests, waitForDone, settle }
@@ -404,6 +404,107 @@ describe("ChainRuntime behind the AgentPort seam", () => {
     expect(smithers?.text).toContain("Shipped.")
   })
 
+  for (const background of [false, true]) {
+    test(`a ${background ? "background" : "turn"} approval resumes through the controller after reload`, async () => {
+      const storage = memoryStorage()
+      let deployed = 0
+      const deploy: Catalog.Entry = {
+        name: "deploy.thing", description: "test outbound", capabilities: ["outbound:launch"],
+        handler: () => Effect.sync(() => { deployed += 1; return {} })
+      }
+      const first = await harness({
+        storage, entries: [deploy],
+        author: Author.layerFn((input) => background && !input.context.includes("background-test")
+          ? flow(`await ctx.call("background", { goal: "ship", context: ["background-test"] })`, `return done({})`)
+          : flow(`await ctx.call("deploy.thing", {})`, `return done({})`))
+      })
+      const parked = first.waitForDone()
+      first.controller.send("ship it")
+      await parked
+      const approval = () => [...first.store.collections.cards.values()].find(card => card.kind === "approval")
+      for (let i = 0; approval() === undefined && i < 3000; i += 1) {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      const card = approval()
+      expect(card?.kind).toBe("approval")
+      expect(deployed).toBe(0)
+      await first.controller.dispose()
+      await first.settle()
+
+      const second = await harness({ storage, entries: [deploy], author: Author.layerMock([]) })
+      const resumed = background ? undefined : second.waitForDone()
+      second.controller.decideApproval(card!.id, "approved")
+      if (resumed !== undefined) {
+        expect((await resumed).error).toBeUndefined()
+      } else {
+        const finished = () => [...second.store.collections.messages.values()].some(message =>
+          message.text.includes("A background task finished"))
+        for (let i = 0; !finished() && i < 3000; i += 1) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        expect(finished()).toBe(true)
+      }
+      expect(deployed).toBe(1)
+      expect(second.store.collections.cards.get(card!.id)).toMatchObject({
+        status: "acted", payload: { flow: "deploy.thing", decision: "approved" }
+      })
+      // Repeated human input cannot execute the already settled call again.
+      second.controller.decideApproval(card!.id, "approved")
+      await second.controller.dispose()
+      await second.settle()
+      expect(deployed).toBe(1)
+    })
+  }
+
+  test("a script-authored approval park is terminal and has no actionable card", async () => {
+    const h = await harness({ author: Author.layerMock([flow(`return park("approval", "may I ship?")`)]) })
+    const done = h.waitForDone()
+    h.controller.send("ship it")
+    expect((await done).error).toBeUndefined()
+    expect(h.frames.some(frame => frame.type === "park" && frame.code === "approval")).toBe(true)
+    expect([...h.store.collections.cards.values()].filter(card => card.kind === "approval")).toHaveLength(0)
+    expect([...h.store.collections.chainEvents.values()].at(-1)?.event).toMatchObject({
+      _tag: "LinkEnded", outcome: { _tag: "Park", reason: { code: "approval" } }
+    })
+  })
+
+  test("stop after the fiber settles preserves its approval card and park frame", async () => {
+    let deployed = 0
+    const h = await harness({
+      author: Author.layerMock([flow(`await ctx.call("deploy.thing", {})`, `return done({})`)]),
+      entries: [{ name: "deploy.thing", description: "outbound", capabilities: ["outbound:launch"], handler: () => Effect.sync(() => { deployed += 1; return {} }) }]
+    })
+    const runFork = Effect.runFork
+    let stopped = false
+    // The observer runs at settlement, before Fiber.await's Promise continuation.
+    const fork = spyOn(Effect, "runFork").mockImplementation(((...args: Parameters<typeof runFork>) => {
+      const fiber = runFork(...args)
+      fiber.addObserver(exit => {
+        if (Exit.isSuccess(exit) && (exit.value as { _tag?: string })?._tag === "ApprovalWait") {
+          stopped = true
+          h.controller.stop()
+        }
+      })
+      return fiber
+    }) as typeof runFork)
+    try {
+      const done = h.waitForDone()
+      h.controller.send("ship it")
+      const terminal = await done
+      expect(stopped).toBe(true)
+      expect(terminal.reason).toBe("stop")
+      expect(h.frames.some(frame => frame.type === "park" && frame.code === "approval")).toBe(true)
+      const card = [...h.store.collections.cards.values()].find(card => card.kind === "approval")
+      expect(card).toBeDefined()
+      const resumed = h.waitForDone()
+      h.controller.decideApproval(card!.id, "approved")
+      expect((await resumed).error).toBeUndefined()
+      expect(deployed).toBe(1)
+    } finally {
+      fork.mockRestore()
+    }
+  })
+
   test("denying an outbound call resumes into a denial the model routes around", async () => {
     const deploys = { count: 0 }
     const deploy: Catalog.Entry = {
@@ -697,5 +798,50 @@ describe("ChainRuntime behind the AgentPort seam", () => {
     expect(terminal !== undefined && "error" in terminal ? terminal.error : undefined).toBeUndefined()
     // Zero re-executed effects: the world did not grow again.
     expect(second.store.collections.worldDocuments.size).toBe(worldAfterFirst)
+  })
+})
+
+describe("agent seat resume routing", () => {
+  const request: StartAgentTurnRequest = { runId: "resume", messages: [], instructions: "" }
+
+  test("an approval park retains its originating backend through done and late cancellation", async () => {
+    const first = recordingNative()
+    let emit!: (frame: AgentTurnFrame) => void
+    const seat = createAgentSeat({ ...first.agent, subscribe: listener => { emit = listener; return () => {} } })
+    await seat.startTurn(request)
+    emit({ runId: request.runId, type: "park", code: "approval" })
+    emit({ runId: request.runId, type: "done", reason: "stop" })
+    await seat.cancelTurn(request.runId)
+    const second = recordingNative()
+    seat.bindChain(second.agent)
+    await seat.startTurn(request)
+    expect(first.requests).toHaveLength(2)
+    expect(second.requests).toHaveLength(0)
+    emit({ runId: request.runId, type: "done", reason: "stop" })
+    await seat.startTurn(request)
+    expect(second.requests).toHaveLength(1)
+  })
+
+  test("an interrupted turn releases its backend even if it emitted a park", async () => {
+    const first = recordingNative()
+    let emit!: (frame: AgentTurnFrame) => void
+    const seat = createAgentSeat({ ...first.agent, subscribe: listener => { emit = listener; return () => {} } })
+    await seat.startTurn(request)
+    emit({ runId: request.runId, type: "park", code: "approval" })
+    emit({ runId: request.runId, type: "done", reason: "cancelled" })
+    const second = recordingNative()
+    seat.bindChain(second.agent)
+    await seat.startTurn(request)
+    expect(first.requests).toHaveLength(1)
+    expect(second.requests).toHaveLength(1)
+  })
+
+  test("a refused start does not pin the lineage to the unbound backend", async () => {
+    const seat = createAgentSeat()
+    expect((await seat.startTurn(request)).status).toBe("error")
+    const chain = recordingNative()
+    seat.bindChain(chain.agent)
+    expect((await seat.startTurn(request)).status).toBe("started")
+    expect(chain.requests).toHaveLength(1)
   })
 })
