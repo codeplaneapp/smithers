@@ -14,17 +14,25 @@ import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import { spawnSync } from "node:child_process"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { spawnBounded } from "./helpers/spawnBounded.ts"
 
-const packageRoot = fileURLToPath(new URL("../", import.meta.url))
 const fixture = fileURLToPath(new URL("./fixtures/crash-put.ts", import.meta.url))
 
-const run = (filename: string, mode: "commit" | "crash") =>
-  spawnSync(process.execPath, [fixture, filename, mode], { cwd: packageRoot, encoding: "utf8" })
+/**
+ * Per-child budget. The fixture is synchronous, so the suite timeout below
+ * cannot fire while it is stuck; this is the bound that holds. A run migrates
+ * a fresh file and writes one entry, under a second idle, so this leaves room
+ * for the ~12x load multiplier the package `testTimeout` budgets for. The
+ * suite budget stays above the sum of both runs so a wedged fixture fails as
+ * a child timeout naming the mode, not as an opaque suite timeout.
+ */
+const budget = 45_000
+
+const run = (filename: string, mode: "commit" | "crash") => spawnBounded([fixture, filename, mode], budget)
 
 /** Counts both durable tables through a cold connection to the file. */
 const rowCounts = (filename: string) =>
@@ -56,6 +64,8 @@ describe("a process killed inside a put", () => {
             // The kill is real: the fixture dies by signal rather than
             // returning, which is what makes the next assertion about crash
             // durability and not about a rolled-back error path.
+            // `spawnBounded` has already ruled out the other way to end with
+            // this signal and status: a fixture the budget had to kill.
             expect(killed.signal).toBe("SIGKILL")
             expect(killed.status).toBe(null)
 
@@ -75,6 +85,6 @@ describe("a process killed inside a put", () => {
           }),
         (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true }))
       ),
-    120_000
+    budget * 2 + 30_000
   )
 })
