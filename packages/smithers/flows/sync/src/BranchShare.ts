@@ -53,7 +53,9 @@ export const MintRequest = Schema.Struct({
   branchId: BranchId,
   capabilityId: Schema.NonEmptyString,
   access: Access,
-  ttlMs: Schema.Int.check(Schema.isGreaterThan(0))
+  ttlMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  /** Absolute expiry ceiling for a capability delegated from a parent. */
+  maxExpiresAtMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
 })
 
 /**
@@ -68,8 +70,8 @@ export type MintRequest = typeof MintRequest.Type
  * Share capability operations.
  *
  * `mint` fails with a `SyncError` when the Web Crypto signing operation
- * rejects; `verify` fails with a `SyncError` when signing rejects or the
- * capability is refused.
+ * rejects or the absolute expiry ceiling has elapsed; `verify` fails with a
+ * `SyncError` when signing rejects or the capability is refused.
  *
  * @category models
  * @since 0.1.0
@@ -187,12 +189,16 @@ export const makeHmac = (
       const mint = Effect.fn("BranchShare.mint")(function*(request: MintRequest) {
         yield* Effect.annotateCurrentSpan({ branchId: request.branchId, access: request.access })
         const issuedAtMs = yield* Clock.currentTimeMillis
+        const maxExpiresAtMs = request.maxExpiresAtMs ?? Infinity
+        if (issuedAtMs >= maxExpiresAtMs) {
+          return yield* Effect.fail(denied("The share capability has expired"))
+        }
         const claims = new ShareClaims({
           branchId: request.branchId,
           capabilityId: request.capabilityId,
           access: request.access,
           issuedAtMs,
-          expiresAtMs: issuedAtMs + request.ttlMs
+          expiresAtMs: Math.min(issuedAtMs + request.ttlMs, maxExpiresAtMs)
         })
         return new ShareCapability({ claims, signature: yield* sign(claims) })
       })

@@ -117,14 +117,11 @@ export const layerHandlers: Layer.Layer<
             branchId: capability.claims.branchId,
             access: "write"
           })
+          const capabilityId = yield* ids.fresh
           const nowMs = yield* Clock.currentTimeMillis
-          // `verify` reads the clock inside its own generator, after awaiting
-          // the HMAC; this reads it again. A parent that expires between the
-          // two used to clamp the ttl to zero and return a capability that
-          // `verify` refuses on first use. Refuse here instead: a success
-          // carrying an unusable capability is worse than a refusal.
-          const remainingMs = claims.expiresAtMs - nowMs
-          if (remainingMs <= 0) {
+          // ID generation may outlast the parent. Refuse before minting, and
+          // pass the absolute ceiling so the signing clock cannot extend it.
+          if (nowMs >= claims.expiresAtMs) {
             return yield* new SyncError({
               code: "unauthorized",
               message: "The share capability has expired"
@@ -133,9 +130,10 @@ export const layerHandlers: Layer.Layer<
           // A link never outlives the capability it was minted from.
           return yield* share.mint({
             branchId: claims.branchId,
-            capabilityId: yield* ids.fresh,
+            capabilityId,
             access,
-            ttlMs: Math.min(ttlMs, remainingMs)
+            ttlMs,
+            maxExpiresAtMs: claims.expiresAtMs
           })
         }),
       "Branch.Submit": (payload) => commands.submit(payload),

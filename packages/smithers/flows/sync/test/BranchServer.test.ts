@@ -245,6 +245,58 @@ describe("BranchRpcs over the wire", () => {
       expect(linkExpiry).toBeLessThanOrEqual(ownerExpiry)
     }))
 
+  for (const delayMs of [200, 1_000, 1_001]) {
+    it.effect(`preserves the parent expiry after ${delayMs} ms of ID generation`, () =>
+      program(Effect.gen(function*() {
+        const share = yield* BranchShare.BranchShare
+        const branchId = "delayed-branch" as BranchId
+        const parent = yield* share.mint({
+          branchId,
+          capabilityId: "parent",
+          access: "write",
+          ttlMs: 1_000
+        })
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const delayedIds = BranchIds.make({
+          fresh: Effect.gen(function*() {
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(release)
+            return "child"
+          })
+        })
+        const client = yield* connect(yield* TestSocket.makePair()).pipe(
+          Effect.provideService(BranchIds.BranchIds, delayedIds)
+        )
+        const pending = yield* client["Branch.MintShare"]({
+          capability: parent,
+          access: "read",
+          ttlMs: 60_000
+        }).pipe(Effect.result, Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(started)
+        yield* TestClock.adjust(delayMs)
+        yield* Deferred.succeed(release, undefined)
+        const result = yield* Fiber.join(pending)
+        if (delayMs >= 1_000) {
+          expect(Result.isFailure(result)).toBe(true)
+          if (Result.isFailure(result)) {
+            expect(result.failure).toMatchObject({ code: "unauthorized" })
+            expect(result.failure.message).toContain("expired")
+          }
+        } else {
+          expect(Result.isSuccess(result)).toBe(true)
+          if (Result.isSuccess(result)) {
+            const child = result.success
+            yield* share.verify(child, { branchId, access: "read" })
+            yield* TestClock.adjust(1_000 - delayMs)
+            const verification = yield* Effect.result(share.verify(child, { branchId, access: "read" }))
+            expect(Result.isFailure(verification)).toBe(true)
+            expect(child.claims.expiresAtMs).toBe(parent.claims.expiresAtMs)
+          }
+        }
+      })))
+  }
+
   // `share.verify` reads the clock inside its own generator, after awaiting the
   // HMAC, and the handler reads it again. A parent that expires between the two
   // used to clamp the ttl to zero and hand back a capability `verify` refuses

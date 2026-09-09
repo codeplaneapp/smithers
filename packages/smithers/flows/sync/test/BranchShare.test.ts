@@ -64,6 +64,36 @@ describe("BranchShare", () => {
       expect(claims.capabilityId).toBe("cap-1")
     }))
 
+  it.effect("keeps a shorter requested TTL within an absolute expiry limit", () =>
+    run(Effect.gen(function*() {
+      const share = yield* authority
+      yield* TestClock.adjust(100)
+      const capability = yield* share.mint({
+        branchId,
+        capabilityId: "short-child",
+        access: "read",
+        ttlMs: 200,
+        maxExpiresAtMs: 1_000
+      })
+      expect(capability.claims.issuedAtMs).toBe(100)
+      expect(capability.claims.expiresAtMs).toBe(300)
+    })))
+
+  it.effect("refuses an absolute expiry limit elapsed by the signing clock read", () =>
+    run(Effect.gen(function*() {
+      const share = yield* authority
+      yield* TestClock.adjust(1_000)
+      const failure = yield* Effect.flip(share.mint({
+        branchId,
+        capabilityId: "expired-child",
+        access: "read",
+        ttlMs: 60_000,
+        maxExpiresAtMs: 1_000
+      }))
+      expect(failure).toMatchObject({ code: "unauthorized" })
+      expect(failure.message).toContain("expired")
+    })))
+
   it.effect("rejects a tampered signature without leaking its length", () =>
     Effect.gen(function*() {
       const failures = yield* run(

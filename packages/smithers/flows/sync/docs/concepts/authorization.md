@@ -98,7 +98,11 @@ credential.
 
 `Branch.MintShare` requires write access to the branch, so only a collaborator
 can invite one, and the minted link never outlives the capability it was minted
-from.
+from. The handler rechecks the parent expiry after generating the child ID.
+It passes the parent's absolute expiry as `BranchShare.mint`'s
+`maxExpiresAtMs`; the authority clamps the requested TTL against that ceiling
+using the clock read that sets `issuedAtMs`. If the ceiling has elapsed,
+minting fails with `unauthorized`.
 
 ## Related pages
 
