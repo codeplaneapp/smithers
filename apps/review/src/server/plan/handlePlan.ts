@@ -2,8 +2,7 @@ import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
 import { monthKey } from "../monthKey.ts";
 import { authenticateProxyRequest, type ProxyAuth } from "../proxy/authenticateProxyRequest.ts";
-import { repoMonthlyCapUsd } from "../repoMonthlyCapUsd.ts";
-import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
+import { assertRepoUnderMonthlyCap } from "../assertRepoUnderMonthlyCap.ts";
 import { lookupRepo } from "../sessions/lookupRepo.ts";
 
 interface CountRow {
@@ -21,13 +20,14 @@ export async function handlePlan(request: Request, env: ReviewWorkerEnv, url: UR
   const registration = await lookupRepo(env.DB, repo);
   if (!registration) return jsonError(404, "repo not registered");
 
+  const budget = await assertRepoUnderMonthlyCap(env.DB, registration, repo, now);
+  if (budget instanceof Response) return budget;
+  const { monthlyCapUsd, monthSpendUsd: monthlySpendUsd } = budget;
   const month = monthKey(now);
   const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM reviewed_prs WHERE repo = ? AND month = ?")
     .bind(repo, month)
     .first<CountRow>();
   const prsUsed = Number(countRow?.count ?? 0);
-  const monthlySpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
-  const monthlyCapUsd = repoMonthlyCapUsd(registration);
 
   return Response.json({
     repo,

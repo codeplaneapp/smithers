@@ -20,4 +20,8 @@ The metered Anthropic proxy (`POST /anthropic/v1/messages` only).
 
 See [proxy budget admission](../../../docs/proxy-budget.md) for limits and
 recovery. Ambiguous upstream failures retain their budget holds for operator
-reconciliation. API keys enforce repository and optional key caps.
+reconciliation. API keys require a registered, authorized repository and enforce
+its monthly cap plus the optional key cap on cumulative repository monthly
+spend, including outstanding reservations. Sessions minted with an API key
+retain its hash, inherit its live cap and lose access when it is revoked or
+unscoped. Minting bounds the session cap by the remaining key budget.

@@ -22,15 +22,16 @@ export async function mintSession(
   pr: number,
   spendCapUsd: number,
   now: number,
+  apiKeyHash: string | null = null,
 ): Promise<MintedSession> {
   const token = `srs_${randomTokenHex(32)}`;
   const hash = await sha256Hex(token);
   const expiresAt = now + SESSION_TTL_MS;
   await db
     .prepare(
-      "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+      "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at, api_key_hash) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
     )
-    .bind(hash, repo, pr, expiresAt, spendCapUsd, now)
+    .bind(hash, repo, pr, expiresAt, spendCapUsd, now, apiKeyHash)
     .run();
   return { token, hash, expiresAt };
 }

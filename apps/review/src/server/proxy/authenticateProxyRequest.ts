@@ -1,7 +1,8 @@
 import type { D1Database } from "../d1.ts";
 import type { ReviewWorkerEnv } from "../env.ts";
 import { sha256Hex } from "../sha256Hex.ts";
-import { lookupApiKey } from "../sessions/lookupApiKey.ts";
+import { lookupApiKeyByHash } from "../sessions/lookupApiKeyByHash.ts";
+import { lookupApiKey, type ApiKeyRecord } from "../sessions/lookupApiKey.ts";
 
 export interface AuthedSession {
   kind: "session";
@@ -11,6 +12,7 @@ export interface AuthedSession {
   expiresAt: number;
   spendCapUsd: number;
   spentUsd: number;
+  apiKey: ApiKeyRecord | null;
 }
 
 export interface AuthedApiKey {
@@ -29,6 +31,7 @@ interface SessionRow {
   expires_at: number;
   spend_cap_usd: number;
   spent_usd: number;
+  api_key_hash: string | null;
 }
 
 /**
@@ -52,12 +55,14 @@ export async function authenticateProxyRequest(
 
   const hash = await sha256Hex(credential);
   const session = await env.DB.prepare(
-    "SELECT hash, repo, pr, expires_at, spend_cap_usd, spent_usd FROM sessions WHERE hash = ?",
+    "SELECT hash, repo, pr, expires_at, spend_cap_usd, spent_usd, api_key_hash FROM sessions WHERE hash = ?",
   )
     .bind(hash)
     .first<SessionRow>();
   if (session) {
     if (session.expires_at <= now) return null;
+    const apiKey = session.api_key_hash ? await lookupApiKeyByHash(env.DB, session.api_key_hash) : null;
+    if (session.api_key_hash && (!apiKey || !apiKey.repos.includes(session.repo))) return null;
     return {
       kind: "session",
       hash: session.hash,
@@ -66,6 +71,7 @@ export async function authenticateProxyRequest(
       expiresAt: session.expires_at,
       spendCapUsd: session.spend_cap_usd,
       spentUsd: session.spent_usd,
+      apiKey,
     };
   }
   if (credential.startsWith("srk_")) {

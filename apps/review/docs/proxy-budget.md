@@ -32,3 +32,25 @@ holds for operator reconciliation. Holds never expire automatically, including
 across UTC month boundaries. This prevents a stalled or interrupted call from
 reopening budget that may already have been spent. Operators must reconcile
 unresolved holds against provider usage before removing them.
+
+Operator API keys must authorize a registered repository. Their optional
+spend cap is a threshold on that repository's cumulative UTC calendar-month
+spend, including direct requests and sessions from any credential; it is not
+a separate per-key ledger or a budget pooled across repositories. Proxy
+admission also counts all outstanding repository reservations against it.
+
+Sessions minted with an API key persist its hash. Minting rejects revoked or
+exhausted keys before claiming PR quota and limits the session cap to the
+smaller of the repository's per-session cap and the key's remaining monthly
+budget. Every session authentication reloads its parent key: deletion,
+revocation or removal of repository access invalidates the session. Proxy
+admission enforces the live parent cap, including later reductions and other
+sessions' spend and reservations. OIDC sessions and sessions issued before
+this migration have no recorded parent; existing sessions expire within two
+hours and cannot retroactively inherit a key identity.
+
+Session minting, proxy admission and `GET /api/plan` use the same repository
+monthly-cap check. At exhaustion they return 402 with `error` set to
+`repo monthly spend cap exhausted` and fields `repo`, `month` (`YYYY-MM`
+in UTC), `monthlyCapUsd` and `spentUsd`. Below the cap, the plan endpoint
+returns its usual plan and quota data.

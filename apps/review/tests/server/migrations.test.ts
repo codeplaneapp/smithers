@@ -26,6 +26,20 @@ function alterFailingD1(message: string): D1Database {
 }
 
 describe("ensureSchema", () => {
+  test("adds a nullable issuing key to existing sessions idempotently", async () => {
+    const db = sqliteD1();
+    await db.exec(`CREATE TABLE sessions (
+      hash TEXT PRIMARY KEY, repo TEXT NOT NULL, pr INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL, spend_cap_usd REAL NOT NULL,
+      spent_usd REAL NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+    )`);
+    await db.prepare("INSERT INTO sessions VALUES ('legacy', 'octo/widgets', 1, 100, 5, 0, 1)").run();
+    await ensureSchema(db);
+    await ensureSchema({ prepare: (q) => db.prepare(q), exec: (q) => db.exec(q), batch: (s) => db.batch(s) });
+    expect(await db.prepare("SELECT api_key_hash FROM sessions WHERE hash = 'legacy'").first<{ api_key_hash: string | null }>())
+      .toEqual({ api_key_hash: null });
+  });
+
   test("upgrades existing walkthroughs to complete and indexes session counts idempotently", async () => {
     const db = sqliteD1();
     await db.exec(`CREATE TABLE walkthroughs (

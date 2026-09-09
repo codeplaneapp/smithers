@@ -1,10 +1,8 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
-import { monthKey as monthKeyFor } from "../monthKey.ts";
-import { repoMonthlyCapUsd } from "../repoMonthlyCapUsd.ts";
-import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
+import { assertRepoUnderMonthlyCap } from "../assertRepoUnderMonthlyCap.ts";
 import { claimReviewSlot } from "./claimReviewSlot.ts";
-import { lookupApiKey } from "./lookupApiKey.ts";
+import { lookupApiKey, type ApiKeyRecord } from "./lookupApiKey.ts";
 import { lookupRepo } from "./lookupRepo.ts";
 import { mintSession } from "./mintSession.ts";
 import { verifyOidc } from "./verifyOidc.ts";
@@ -87,6 +85,7 @@ export async function handleSessions(
 
   let repo: string;
   let pr: number;
+  let apiKey: ApiKeyRecord | null = null;
 
   if (typeof body.oidcToken === "string" && body.oidcToken.length > 0) {
     const outcome = await verifyOidc(body.oidcToken, deps.jwksUrl, now, deps.fetchUpstream);
@@ -121,6 +120,7 @@ export async function handleSessions(
     }
     repo = body.repo;
     pr = body.pr;
+    apiKey = record;
   } else {
     return jsonError(400, "expected oidcToken or apiKey");
   }
@@ -137,15 +137,18 @@ export async function handleSessions(
   // per-session cap resets on every mint, so without this a caller can re-mint
   // sessions for an already-reviewed PR to reset the budget and spend without
   // limit. Rejecting here means a blocked request never consumes a quota slot.
-  const monthlyCapUsd = repoMonthlyCapUsd(registration);
-  const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
-  if (monthSpendUsd >= monthlyCapUsd) {
-    return jsonError(402, "monthly spend cap exhausted", {
-      repo,
-      monthlyCapUsd,
-      spentUsd: monthSpendUsd,
-      month: monthKeyFor(now),
-    });
+  const budget = await assertRepoUnderMonthlyCap(env.DB, registration, repo, now);
+  if (budget instanceof Response) return budget;
+  let spendCapUsd = registration.spend_cap_usd;
+  if (apiKey?.spendCapUsd != null) {
+    if (budget.monthSpendUsd >= apiKey.spendCapUsd) {
+      return jsonError(402, "api key spend cap exhausted", {
+        repo,
+        keyCapUsd: apiKey.spendCapUsd,
+        spentUsd: budget.monthSpendUsd,
+      });
+    }
+    spendCapUsd = Math.min(spendCapUsd, apiKey.spendCapUsd - budget.monthSpendUsd);
   }
 
   const quota = await claimReviewSlot(env.DB, repo, pr, registration.prs_per_month, now);
@@ -158,7 +161,7 @@ export async function handleSessions(
     });
   }
 
-  const minted = await mintSession(env.DB, repo, pr, registration.spend_cap_usd, now);
+  const minted = await mintSession(env.DB, repo, pr, spendCapUsd, now, apiKey?.hash ?? null);
 
   const used = quota.used;
   const nowDate = new Date(now);

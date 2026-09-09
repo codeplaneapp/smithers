@@ -1,7 +1,6 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
-import { repoMonthlyCapUsd } from "../repoMonthlyCapUsd.ts";
-import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
+import { assertRepoUnderMonthlyCap } from "../assertRepoUnderMonthlyCap.ts";
 import { lookupRepo } from "../sessions/lookupRepo.ts";
 import { anthropicEndpointAllowed } from "./anthropicEndpointAllowed.ts";
 import { authenticateProxyRequest } from "./authenticateProxyRequest.ts";
@@ -153,16 +152,19 @@ export async function handleAnthropic(
     // The per-session cap above resets whenever a session is re-minted; the
     // per-repo month-to-date total does not. Enforce it so re-minted sessions
     // cannot drive unbounded spend on an already-reviewed PR. Skipped when the
-    // repo has no live registration (nothing to derive a ceiling from).
+    // repo has no live registration for a legacy or OIDC session. Sessions
+    // issued by an API key still require the same registered repo as the key.
     const registration = await lookupRepo(env.DB, repo);
+    if (!registration && auth.apiKey) return jsonError(403, "repo not registered", { repo });
     if (registration) {
-      const monthlyCapUsd = repoMonthlyCapUsd(registration);
-      repoCapUsd = monthlyCapUsd;
-      const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
-      if (monthSpendUsd >= monthlyCapUsd) {
-        return jsonError(402, "repo monthly spend cap exhausted", {
-          monthlyCapUsd,
-          spentUsd: monthSpendUsd,
+      const budget = await assertRepoUnderMonthlyCap(env.DB, registration, repo, now);
+      if (budget instanceof Response) return budget;
+      repoCapUsd = Math.min(budget.monthlyCapUsd, auth.apiKey?.spendCapUsd ?? budget.monthlyCapUsd);
+      if (auth.apiKey?.spendCapUsd != null && budget.monthSpendUsd >= auth.apiKey.spendCapUsd) {
+        return jsonError(402, "api key spend cap exhausted", {
+          repo,
+          keyCapUsd: auth.apiKey.spendCapUsd,
+          spentUsd: budget.monthSpendUsd,
         });
       }
     }
@@ -192,17 +194,10 @@ export async function handleAnthropic(
     if (!registration) {
       return jsonError(403, "repo not registered", { repo });
     }
-    const monthlyCapUsd = repoMonthlyCapUsd(registration);
+    const budget = await assertRepoUnderMonthlyCap(env.DB, registration, repo, now);
+    if (budget instanceof Response) return budget;
+    const { monthlyCapUsd, monthSpendUsd } = budget;
     repoCapUsd = Math.min(monthlyCapUsd, auth.spendCapUsd ?? monthlyCapUsd);
-    const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
-    if (monthSpendUsd >= monthlyCapUsd) {
-      return jsonError(402, "repo monthly spend cap exhausted", {
-        repo,
-        month: new Date(now).toISOString().slice(0, 7),
-        monthlyCapUsd,
-        spentUsd: monthSpendUsd,
-      });
-    }
     if (auth.spendCapUsd != null && monthSpendUsd >= auth.spendCapUsd) {
       return jsonError(402, "api key spend cap exhausted", {
         repo,
