@@ -15,9 +15,8 @@ const ASSET_HEADERS = {
 } as const;
 
 /**
- * The status feed is the whole point of the page, so it gets a short TTL: a
- * status edit lands within a minute of deploy instead of the 5 minutes the
- * shell HTML is happy with.
+ * The page uses cache: "no-cache" to revalidate on every load. Other clients
+ * may reuse the feed for 60 seconds before revalidating with its validators.
  */
 const FEED_HEADERS = {
   "cache-control": "public, max-age=60, must-revalidate",
@@ -54,11 +53,18 @@ async function fetchAsset(request: Request, env: StatusSiteEnv): Promise<Respons
  */
 async function fetchFeed(request: Request, env: StatusSiteEnv): Promise<Response> {
   const response = await env.ASSETS.fetch(request);
+  if (response.status === 304) return withHeaders(response, FEED_HEADERS);
   const contentType = response.headers.get("content-type") ?? "";
   if (response.status !== 200 || !contentType.includes("json")) {
-    return Response.json(
-      { error: "status feed unavailable" },
-      { status: 404, headers: { "x-content-type-options": "nosniff" } },
+    const reason = response.status === 404 ? "missing" : response.status === 200 ? "not-json" : "unexpected-status";
+    console.warn("status feed refused", {
+      status: response.status,
+      contentType,
+      pathname: new URL(request.url).pathname,
+    });
+    return withHeaders(
+      Response.json({ error: "status feed unavailable", reason }, { status: 404 }),
+      { ...FEED_HEADERS, "cache-control": "no-store" },
     );
   }
   return withHeaders(response, FEED_HEADERS);
@@ -79,7 +85,11 @@ export function createStatusSiteWorker() {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("method not allowed", {
           status: 405,
-          headers: { allow: "GET, HEAD", "content-type": "text/plain; charset=utf-8" },
+          headers: {
+            allow: "GET, HEAD",
+            "content-type": "text/plain; charset=utf-8",
+            ...(url.pathname === "/status.json" ? { ...FEED_HEADERS, "cache-control": "no-store" } : {}),
+          },
         });
       }
 

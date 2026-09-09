@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createStatusSiteWorker, type StatusSiteEnv } from "../src/worker.ts";
 
@@ -35,7 +35,12 @@ function makeEnv(): StatusSiteEnv {
           return new Response(homeHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
         }
         if (url.pathname === "/status.json") {
-          return new Response(statusRaw, { headers: { "content-type": "application/json" } });
+          const etag = '"feed-v1"';
+          if (request.headers.get("if-none-match") === etag) {
+            // A 304 need not include a content type or body.
+            return new Response(null, { status: 304, headers: { etag } });
+          }
+          return new Response(statusRaw, { headers: { "content-type": "application/json", etag } });
         }
         return new Response("not found", { status: 404 });
       },
@@ -147,9 +152,107 @@ describe("status site worker", () => {
       makeEnv(),
     );
     expect(response.status).toBe(200);
+    expect(response.headers.get("etag")).toBe('"feed-v1"');
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("cache-control")).toBe("public, max-age=60, must-revalidate");
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(((await response.json()) as { overall: string }).overall).toBe(status.overall);
+  });
+
+  test("relays conditional feed revalidation with validators and feed headers", async () => {
+    const worker = createStatusSiteWorker();
+    const env = makeEnv();
+    const initial = await worker.fetch(new Request("https://status.smithers.sh/status.json"), env);
+    const etag = initial.headers.get("etag");
+    expect(etag).toBe('"feed-v1"');
+    const request = new Request("https://status.smithers.sh/status.json", {
+      headers: { "if-none-match": etag!, origin: "https://consumer.example" },
+    });
+    const fetch = spyOn(env.ASSETS, "fetch");
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await worker.fetch(request, env);
+      expect(fetch).toHaveBeenCalledWith(request);
+      expect(response.status).toBe(304);
+      expect(response.headers.get("etag")).toBe(etag);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=60, must-revalidate");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.body).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  const refusals = [
+    { status: 404, contentType: "text/plain", reason: "missing" },
+    { status: 200, contentType: "text/html", reason: "not-json" },
+    { status: 503, contentType: "application/json", reason: "unexpected-status" },
+  ];
+
+  for (const refusal of refusals) {
+    function refusedEnv(): StatusSiteEnv {
+      return {
+        ASSETS: {
+          async fetch() {
+            return new Response("unavailable", {
+              status: refusal.status,
+              headers: { "content-type": refusal.contentType },
+            });
+          },
+        },
+      };
+    }
+
+    test(`returns an uncached, cross-origin feed error for ${refusal.reason}`, async () => {
+      const response = await createStatusSiteWorker().fetch(
+        new Request("https://status.smithers.sh/status.json", {
+          headers: { origin: "https://consumer.example" },
+        }),
+        refusedEnv(),
+      );
+      expect(response.status).toBe(404);
+      expect(response.headers.get("content-type")).toContain("json");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ error: "status feed unavailable", reason: refusal.reason });
+    });
+
+    test(`logs the binding response for ${refusal.reason}`, async () => {
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await createStatusSiteWorker().fetch(
+          new Request("https://status.smithers.sh/status.json?private=value"),
+          refusedEnv(),
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith("status feed refused", {
+          status: refusal.status,
+          contentType: refusal.contentType,
+          pathname: "/status.json",
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
+
+  test("keeps CORS on feed method rejections", async () => {
+    const response = await createStatusSiteWorker().fetch(
+      new Request("https://status.smithers.sh/status.json", {
+        method: "POST",
+        headers: { origin: "https://consumer.example" },
+      }),
+      makeEnv(),
+    );
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   test("404s the feed instead of serving HTML when it is missing", async () => {

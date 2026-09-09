@@ -3,6 +3,13 @@
 The public status page. Everything it shows lives in [`site/status.json`](site/status.json);
 [`site/index.html`](site/index.html) fetches that file and renders it.
 
+`/status.json` allows cross-origin reads on success and error responses. The page
+revalidates on every load with `cache: "no-cache"`; other clients may cache the
+feed for 60 seconds. Asset ETags and 304 responses are preserved. Refused feeds
+return an uncached JSON 404 with `error: "status feed unavailable"` and a `reason`:
+`missing` for an asset 404, `not-json` for a non-JSON 200, or `unexpected-status`
+for other statuses. A warning records the asset status, content type, and pathname.
+
 ## Truth rules
 
 These are enforced by `tests/worker.test.ts`, so breaking one fails the build:
