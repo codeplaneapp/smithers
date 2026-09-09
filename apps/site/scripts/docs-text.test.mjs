@@ -52,6 +52,25 @@ test("kernel concept lists exactly the closed host tag surface", () => {
   assert.match(concept, /`CommandLine` is not one either: it is a pure renderer with no host access/)
 })
 
+test("migrate --scan rows describe the scan pipeline: planned units, nothing written", () => {
+  const flow = readFileSync(new URL("../../../packages/smithers/migrate/src/flow/MigrateFlow.ts", import.meta.url), "utf8")
+  const scan = readFileSync(new URL("../../../packages/smithers/migrate/src/Scan.ts", import.meta.url), "utf8")
+  assert.match(flow, /if \(payload\.options\.mode !== "scan"\) \{\s*yield\* Report\.write/, "scan mode writes no report")
+  assert.match(scan, /const planned = Units\.plan\(/, "the scan plans the units")
+
+  const rows = ["../src/content/docs/docs/reference/cli/migrate.mdx", "../src/content/docs/docs/migration/1.0.mdx"]
+    .map((page) => {
+      const source = readFileSync(new URL(page, import.meta.url), "utf8")
+      const row = /^\| `--scan` \|.*$/m.exec(source)
+      assert.ok(row, `${page} carries a --scan flag row`)
+      return row[0]
+    })
+
+  assert.equal(rows[0], rows[1])
+  assert.doesNotMatch(rows[0], /write the report|without planning/)
+  assert.match(rows[0], /plan/)
+})
+
 test("subpackage keys example reuses the derivation vector of the keys API reference", () => {
   const subpackages = readFileSync(new URL("../src/content/docs/docs/reference/subpackages.mdx", import.meta.url), "utf8")
   const reference = readFileSync(new URL("../src/content/docs/docs/reference/api/keys.mdx", import.meta.url), "utf8")

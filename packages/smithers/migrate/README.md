@@ -1,8 +1,9 @@
 # @smthrs/migrate
 
-This package declares `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` as exact
-`4.0.0-rc.112` peer dependencies. Keep the application on that version so
-all Smithers packages share one Effect runtime.
+This package declares `effect` and `@effect/platform-node` as exact `4.0.0-rc.112`
+dependencies and `@effect/platform-node-shared` as an exact `4.0.0-rc.112` peer
+dependency. Keep the application on that version so all Smithers packages share
+one Effect runtime.
 
 **Documentation:** https://migrate.smithers.sh
 

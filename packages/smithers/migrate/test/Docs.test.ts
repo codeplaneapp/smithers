@@ -19,6 +19,12 @@ const read = (relative: string): string => readFileSync(fileURLToPath(new URL(re
 
 const reference = read("../docs/api.md")
 const index = read("../src/index.ts")
+const readme = read("../README.md")
+const flowSource = read("../src/flow/MigrateFlow.ts")
+const manifest = JSON.parse(read("../package.json")) as {
+  dependencies: Record<string, string>
+  peerDependencies: Record<string, string>
+}
 
 /** Every namespace `src/index.ts` re-exports, in source order. */
 const exportedModules = [...index.matchAll(/export \* as (\w+) from/g)].map((match) => match[1] as string)
@@ -56,6 +62,32 @@ describe("scanner installation guides", () => {
 
     expect(commands).toEqual(["pnpm add -D @smthrs/migrate@next"])
     expect(page).toContain("(../installation.md)")
+  })
+})
+
+describe("installation contract", () => {
+  /** The Effect packages a manifest field declares, in the order it declares them. */
+  const effectPackages = (field: Record<string, string>): ReadonlyArray<string> =>
+    Object.keys(field).filter((name) => name === "effect" || name.startsWith("@effect/"))
+
+  it("names each Effect package under the kind package.json declares it as", () => {
+    // The README opened by calling all three peers while the manifest installs
+    // two of them, so a reader following it would omit a hard dependency.
+    const contract = unwrapped(readme).match(/This package declares (.+?)Keep the application/)?.[1]
+
+    expect(contract).toBeDefined()
+    const [hard, peer] = (contract as string).split(" dependencies and ")
+    expect(peer).toBeDefined()
+
+    for (const name of effectPackages(manifest.dependencies)) {
+      expect(hard).toContain(`\`${name}\``)
+      expect(peer).not.toContain(`\`${name}\``)
+    }
+    for (const name of effectPackages(manifest.peerDependencies)) {
+      expect(peer).toContain(`\`${name}\``)
+      expect(hard).not.toContain(`\`${name}\``)
+    }
+    for (const half of [hard, peer]) expect(half).toContain(`\`${manifest.dependencies["effect"]}\``)
   })
 })
 
@@ -97,6 +129,31 @@ describe("reference page", () => {
     expect(unwrapped(index)).toContain("never rewrites or resumes 0.x run state")
     expect(unwrapped(reference)).not.toContain("not a compatibility library")
     expect(unwrapped(reference)).not.toContain("never rewrites or resumes 0.x run state")
+  })
+
+  it("scopes each manifest postcondition to the unit kinds the flow runs it for", () => {
+    // The page put the legacy-dependency check on the dependencies unit too,
+    // where the flow deliberately skips it: the units after it still import
+    // the 0.x facade.
+    const shared = flowSource.indexOf(`check("every manifest the unit owns still exists"`)
+    const legacy = flowSource.indexOf(`check("no manifest declares a 0.x package"`)
+    const pin = flowSource.indexOf(`check("effect is pinned to the version this release ships"`)
+
+    expect(shared).toBeGreaterThan(0)
+    expect(legacy).toBeGreaterThan(shared)
+    expect(pin).toBeGreaterThan(legacy)
+    expect(flowSource.slice(shared, legacy)).toContain(`if (outline.kind === "project") {`)
+    expect(flowSource.slice(legacy, pin)).not.toContain("outline.kind ===")
+
+    const clauses = (unwrapped(reference).match(/There is one set per kind[\s\S]*?facade\./)?.[0] ?? "").split("; ")
+    const legacyClause = clauses.filter((clause) => clause.includes("0.x package"))
+    const pinClause = clauses.find((clause) => clause.includes("pin `effect`"))
+
+    expect(legacyClause).toHaveLength(1)
+    expect(legacyClause[0]).toContain("a project unit's manifests")
+    expect(legacyClause[0]).not.toContain("a dependencies or project unit")
+    expect(pinClause).toBeDefined()
+    expect(pinClause).toContain("a dependencies or project unit")
   })
 
   it("documents the three modes and the three exit codes", () => {
