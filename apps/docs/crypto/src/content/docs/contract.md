@@ -40,10 +40,14 @@ not exported and is reachable only through those two entry points.
 - **Malformed text is refused, not replaced.** A string containing an unpaired
   UTF-16 surrogate fails with `invalid_text` before encoding, so two different
   malformed strings cannot collide on the digest of a replacement character.
-- **The input never reaches an error.** Every `Sha256Error` message is safe to
-  log and never contains the hashed value. The `Sha256` schema sets
-  `reportInput: false`, which overrides a caller that asked for input
-  reporting, so an enclosing schema issue does not retain the value.
+- **Messages omit hash input.** Every `Sha256Error` message omits the hashed
+  value. The `Sha256` schema sets `reportInput: false` for its own node only.
+  When composing it inside a Struct, Array, or Union, callers must pass
+  `reportInput: false` at the outermost decode boundary. With
+  `reportInput: true`, enclosing issues can retain the original input object
+  or array, even when only a sibling field fails validation. A child's parse
+  options cannot redact a parent issue. See the
+  [composition example](/guides/hash-a-structured-value/#compose-the-sha256-schema).
 - **Digests do not run backwards.** Encoding through the `Sha256` schema
   always fails with `A digest cannot be converted back into its source bytes`.
 - **The two entry points agree.** `digest` and `digestSync` produce the same
@@ -101,6 +105,12 @@ what it can protect.
 - **Timing and other side channels.** The package makes no constant-time
   claim, ships no digest comparison function, and comparing two digests with
   `===` is not a constant-time comparison.
+- **Secrets in custom diagnostics.** Input reporting options suppress parser
+  input fields, not arbitrary diagnostics. Original host and encoder failures
+  remain available as `cause`; schema paths, custom messages, and annotations
+  are not sanitized. Keep those free of secrets or sanitize them before
+  serializing or inspecting a complete error. Descendant schemas must not
+  re-enable `reportInput` when the outer boundary disables it.
 - **Secrets left in memory.** The snapshot the package takes is ordinary
   garbage-collected memory. Nothing is zeroed after use, so hashing a secret
   leaves at least the input and its copy reachable until collection.

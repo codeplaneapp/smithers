@@ -19315,7 +19315,7 @@ the explicit synchronous entry point, for pure plan and identity construction.
 ### Digest
 
 ```ts
-const Digest: Schema.Schema<Digest, string>
+const Digest: Schema.Codec<Digest, string>
 type Digest = typeof Digest.Type
 ```
 
@@ -19334,7 +19334,7 @@ The expected-value message is
 ### Sha256
 
 ```ts
-const Sha256: Schema.Schema<Digest, string | Uint8Array> & {
+const Sha256: Schema.Codec<Digest, string | Uint8Array, Crypto.Crypto> & {
   readonly Digest: typeof Digest
   readonly digest: typeof digest
   readonly digestSync: typeof digestSync
@@ -19344,8 +19344,10 @@ const Sha256: Schema.Schema<Digest, string | Uint8Array> & {
 The one-way schema transformation from text or bytes to a `Digest`: the
 schema-composition face of [`digest`](#digest).
 
-- Decoding runs `digest`, so it requires `Crypto.Crypto` and must be run with
-  `Schema.decodeUnknownEffect`. There is no synchronous decode.
+- Decoding runs `digest`, so `Crypto.Crypto` is the codec's decoding
+  requirement, the third type argument above. Decode with
+  `Schema.decodeUnknownEffect` and provide the service. There is no
+  synchronous decode.
 - Encoding always fails with
   `A digest cannot be converted back into its source bytes`.
 - Operational failures become `SchemaError` issues whose message is

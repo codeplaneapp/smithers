@@ -86,8 +86,11 @@ they are readable and runnable from the
   value, a detached buffer, a non-Effect, a defect, or an output buffer it
   reuses and mutates between calls, plus one that mutates the bytes it was
   handed.
-- **Redaction**: no hashed value appears in an error message or a schema
-  issue, even when the caller passed `reportInput: true`.
+- **Redaction**: standalone `Sha256` issues omit parser input even with
+  `reportInput: true`. Struct, Array, and Union tests pin parent input retention
+  with that option and verify that outermost `reportInput: false` removes it,
+  including sibling failures. Checks walk the complete issue tree and inspect
+  JSON and `util.inspect` output for text and byte inputs.
 - **Irreversibility**: encoding through the `Sha256` schema always fails with
   the exact forbidden-encode message.
 

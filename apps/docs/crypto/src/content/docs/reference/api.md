@@ -56,7 +56,7 @@ the explicit synchronous entry point, for pure plan and identity construction.
 ### Digest
 
 ```ts
-const Digest: Schema.Schema<Digest, string>
+const Digest: Schema.Codec<Digest, string>
 type Digest = typeof Digest.Type
 ```
 
@@ -75,7 +75,7 @@ The expected-value message is
 ### Sha256
 
 ```ts
-const Sha256: Schema.Schema<Digest, string | Uint8Array> & {
+const Sha256: Schema.Codec<Digest, string | Uint8Array, Crypto.Crypto> & {
   readonly Digest: typeof Digest
   readonly digest: typeof digest
   readonly digestSync: typeof digestSync
@@ -85,17 +85,37 @@ const Sha256: Schema.Schema<Digest, string | Uint8Array> & {
 The one-way schema transformation from text or bytes to a `Digest`: the
 schema-composition face of [`digest`](#digest).
 
-- Decoding runs `digest`, so it requires `Crypto.Crypto` and must be run with
-  `Schema.decodeUnknownEffect`. There is no synchronous decode.
+- Decoding runs `digest`, so `Crypto.Crypto` is the codec's decoding
+  requirement, the third type argument above. Decode with
+  `Schema.decodeUnknownEffect` and provide the service. There is no
+  synchronous decode.
 - Encoding always fails with
   `A digest cannot be converted back into its source bytes`.
 - Operational failures become `SchemaError` issues whose message is
   `[code] message` and whose annotations carry the stable `code` and the typed
   `Sha256Error` as `cause`.
-- The schema annotates `parseOptions: { reportInput: false }`, which overrides
-  a caller that asked for input reporting, so no enclosing schema issue
-  retains the hashed value.
+- The schema annotates `parseOptions: { reportInput: false }`, overriding
+  input reporting for its own node only. Enclosing Struct, Array, and Union
+  issues use their own options and can retain the original input, including
+  when a sibling field fails. Pass `reportInput: false` at the outermost
+  decode boundary and do not re-enable it on descendant schemas.
 - Identifier: `@smthrs/crypto/Sha256`.
+
+For composed schemas, disable input reporting on the complete decode:
+
+```ts
+import { Sha256 } from "@smthrs/crypto"
+import * as Schema from "effect/Schema"
+
+const Manifest = Schema.Struct({ name: Schema.String, contents: Sha256 })
+const decodeManifest = (input: unknown) => Schema.decodeUnknownEffect(Manifest)(input, { reportInput: false })
+// Provide a Crypto service when running the returned Effect.
+```
+
+This suppresses parser input capture throughout this schema. It does not
+sanitize preserved host or encoder causes, schema paths, custom messages, or
+annotations. Keep those free of secrets or sanitize them before serializing
+or inspecting a complete error.
 
 `Sha256.Digest`, `Sha256.digest`, and `Sha256.digestSync` are the same values
 as the named exports, attached for consumers that reached them through the
