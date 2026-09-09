@@ -12,9 +12,14 @@ recipe; the [API reference](/reference/api/) has the full signatures.
 ## Configure credentials
 
 The client reads its token from explicit configuration first, then
-`SMITHERS_GITHUB_TOKEN`, then `GITHUB_TOKEN`. The webhook secret falls back
-to `SMITHERS_GITHUB_WEBHOOK_SECRET`, and the REST endpoint to
+`SMITHERS_GITHUB_TOKEN`, then `GITHUB_TOKEN`. The REST endpoint reads
 `SMITHERS_GITHUB_API_BASE_URL` for GitHub Enterprise.
+
+`GitHub.Config.resolve` reads `SMITHERS_GITHUB_WEBHOOK_SECRET` when no
+explicit secret is supplied. The webhook channel requires an explicit secret
+resolver: the host must pass the resolved non-empty `webhookSecret` through
+`Core.Channel.constantSecret`, or use `Core.Channel.credentialSecret` with
+its credential store.
 
 ```bash
 export SMITHERS_GITHUB_TOKEN=TOKEN
@@ -91,7 +96,12 @@ same failure in the Effect channel.
 
 Construct a channel with the signing secret and a route, register it with
 `Channels`, and hand every incoming POST to `Channels.ingest`. The example
-uses a Node HTTP server; any transport that can produce the raw bytes works.
+uses a Node HTTP server with a 1 MiB (1,048,576 byte) body limit. It counts
+streamed bytes before ingestion, including chunked requests, and responds
+413 above the limit. It stops reading, clears buffered chunks, and destroys
+the request after flushing the response. Aborted and failed requests also
+release their buffered chunks. Any transport must bound the raw body before
+calling `Channels.ingest`.
 
 ```ts
 import * as Channels from "@smthrs/control/Channels"
@@ -105,14 +115,39 @@ const channel = GitHub.Webhook.channel({
   route: Core.Channel.startFlow("triage")
 })
 
+const maxBodyBytes = 1024 * 1024
 const server = createServer((request, response) => {
   const chunks: Array<Uint8Array> = []
-  request.on("data", (chunk: Uint8Array) => chunks.push(chunk))
+  let receivedBytes = 0
+  let stopped = false
+  const discard = () => {
+    stopped = true
+    chunks.length = 0
+  }
+  request.on("aborted", discard)
+  request.on("error", () => {
+    discard()
+    response.destroy()
+  })
+  request.on("data", (chunk: Uint8Array) => {
+    if (stopped) return
+    receivedBytes += chunk.byteLength
+    if (receivedBytes > maxBodyBytes) {
+      discard()
+      request.pause()
+      response.writeHead(413, { Connection: "close" }).end(() => request.destroy())
+      return
+    }
+    chunks.push(chunk)
+  })
   request.on("end", () => {
+    if (stopped) return
+    const body = Buffer.concat(chunks)
+    discard()
     const program = Effect.gen(function*() {
       const channels = yield* Channels.Channels
       const raw = {
-        body: Buffer.concat(chunks),
+        body,
         headers: request.headers as Record<string, string | undefined>
       }
       return yield* channels.ingest({
@@ -128,7 +163,8 @@ const server = createServer((request, response) => {
 })
 ```
 
-Replace `webhookSecret` with your signing secret, and `channelsLayer` with
+Replace `webhookSecret` with the non-empty secret from
+`GitHub.Config.resolve().webhookSecret`, and `channelsLayer` with
 the layer that provides `Channels` over your control plane (see
 [the control API](https://control.smithers.sh/reference/api/)).
 

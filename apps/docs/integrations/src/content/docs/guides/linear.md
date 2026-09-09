@@ -12,8 +12,13 @@ recipe; the [API reference](/reference/api/) has the full signatures.
 ## Configure the API key
 
 The client reads its key from explicit configuration first, then
-`SMITHERS_LINEAR_API_KEY`. The webhook secret falls back to
-`SMITHERS_LINEAR_WEBHOOK_SECRET`.
+`SMITHERS_LINEAR_API_KEY`.
+
+`Linear.Config.resolve` reads `SMITHERS_LINEAR_WEBHOOK_SECRET` when no
+explicit secret is supplied. The webhook channel requires an explicit secret
+resolver: the host must pass the resolved non-empty `webhookSecret` through
+`Core.Channel.constantSecret`, or use `Core.Channel.credentialSecret` with
+its credential store.
 
 ```bash
 export SMITHERS_LINEAR_API_KEY=KEY
@@ -107,9 +112,12 @@ const channel = Linear.Webhook.channel({
 })
 ```
 
-Replace `webhookSecret` with your signing secret. Registration and the HTTP
-handler match the [GitHub guide](/guides/github/), with one difference in the
-`RawInbound`: the idempotency key also needs the parsed payload, because
+Replace `webhookSecret` with the non-empty secret from
+`Linear.Config.resolve().webhookSecret`. Registration and the HTTP handler
+match the [GitHub guide](/guides/github/), including its streamed 1 MiB
+(1,048,576 byte) body limit. Reject larger bodies with 413 before ingestion
+and release buffered chunks on aborted or failed requests. One difference
+in the `RawInbound`: the idempotency key also needs the parsed payload, because
 `Linear.Webhook.idempotencyKey(raw, payload)` reads the `Linear-Delivery`
 header and falls back to the delivery's own identity (webhook id, entity,
 action, and timestamp) when the header is absent.

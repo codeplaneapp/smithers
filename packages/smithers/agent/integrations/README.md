@@ -69,9 +69,12 @@ import * as Channels from "@smthrs/control/Channels"
 import { Core, GitHub } from "@smthrs/integrations"
 import { Effect, Redacted } from "effect"
 
+const webhookSecret = process.env.SMITHERS_GITHUB_WEBHOOK_SECRET?.trim()
+if (!webhookSecret) throw new Error("SMITHERS_GITHUB_WEBHOOK_SECRET is required")
+
 const channel = GitHub.Webhook.channel({
   credential: Redacted.make({ id: "github-webhook", name: "github-webhook" }),
-  secret: Core.Channel.constantSecret(Redacted.make(process.env.GITHUB_WEBHOOK_SECRET!)),
+  secret: Core.Channel.constantSecret(Redacted.make(webhookSecret)),
   route: Core.Channel.startFlow("triage")
 })
 
@@ -83,6 +86,10 @@ provider redelivery safe to accept. That key is yours to put on the
 `RawInbound`: `GitHub.Webhook.idempotencyKey`, `Linear.Webhook.idempotencyKey`,
 and `Telegram.Source.idempotencyKey` derive it from the provider's own delivery
 identity. An ingress that leaves the field unset has no redelivery protection.
+
+The [GitHub receiver example](https://integrations.smithers.sh/guides/github/#receive-webhooks)
+enforces a 1 MiB body limit while streaming, before calling `Channels.ingest`.
+The Linear guide uses the same limit.
 
 Telegram, which has no webhook signature to verify, ships a `getUpdates`
 long-poll source instead.
@@ -121,11 +128,17 @@ same client is the intended way to reach an endpoint these three do not cover.
 | -------------------------------------------- | -------------------------------------------- |
 | `SMITHERS_GITHUB_TOKEN`, then `GITHUB_TOKEN` | `GitHub.GitHubClient`, `ListenerRegistry`    |
 | `SMITHERS_GITHUB_API_BASE_URL`               | GitHub Enterprise or a fixture server        |
-| `SMITHERS_GITHUB_WEBHOOK_SECRET`             | `GitHub.Webhook`                             |
+| `SMITHERS_GITHUB_WEBHOOK_SECRET`             | `GitHub.Config.resolve`                             |
 | `SMITHERS_LINEAR_API_KEY`                    | `Linear.LinearClient`                        |
-| `SMITHERS_LINEAR_WEBHOOK_SECRET`             | `Linear.Webhook`                             |
+| `SMITHERS_LINEAR_WEBHOOK_SECRET`             | `Linear.Config.resolve`                             |
 | `SMITHERS_LINEAR_API_BASE_URL`               | A fixture server                             |
 | `SMITHERS_TELEGRAM_BOT_TOKEN`                | `Telegram.TelegramClient`, `Telegram.Source` |
+
+`GitHub.Config.resolve` and `Linear.Config.resolve` read the corresponding
+`SMITHERS_*_WEBHOOK_SECRET` variables. Webhook channels require an explicit
+secret resolver. The host must pass the resolved non-empty secret through
+`Core.Channel.constantSecret`, or use `Core.Channel.credentialSecret` with
+its credential store. The example above reads the GitHub variable directly.
 
 Explicit configuration always wins. Every client, and `Telegram.Source`, takes
 an `env` argument that _replaces_ the ambient environment rather than layering
