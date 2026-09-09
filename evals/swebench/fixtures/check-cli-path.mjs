@@ -28,34 +28,26 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 const here = import.meta.dirname
 const rig = resolve(here, "..")
 const root = resolve(rig, "../..")
 const wrapper = readFileSync(join(rig, "flows.sh"), "utf8")
 
-assert.match(
-  wrapper,
-  /BIN="\$ROOT\/packages\/cli\/bin\/smithers\.mjs"/,
-  "flows.sh execs the executable @smthrs/cli declares as its bin"
-)
-assert.ok(
-  existsSync(join(root, "packages/smithers/bin/smithers.mjs")),
-  "the executable flows.sh names is in the tree"
-)
-assert.equal(
-  JSON.parse(readFileSync(join(root, "packages/smithers/package.json"), "utf8")).bin.smithers,
-  "./bin/smithers.mjs",
-  "the executable flows.sh names is the one the package publishes"
-)
+const cliPackage = "packages/smithers"
+const manifest = JSON.parse(readFileSync(join(root, cliPackage, "package.json"), "utf8"))
+const bin = typeof manifest.bin === "string" ? manifest.bin : manifest.bin.smithers
+assert.equal(typeof bin, "string", "the CLI package declares its smithers executable")
+const executable = join(cliPackage, bin)
+assert.ok(existsSync(join(root, executable)), "the declared executable is in the tree")
 
 // The refusal, against a tree shaped like a source checkout with no build.
 const temporary = mkdtempSync(join(tmpdir(), "swebench-cli-path-"))
 try {
-  mkdirSync(join(temporary, "packages/smithers/bin"), { recursive: true })
+  mkdirSync(dirname(join(temporary, executable)), { recursive: true })
   mkdirSync(join(temporary, "evals/swebench"), { recursive: true })
-  writeFileSync(join(temporary, "packages/smithers/bin/smithers.mjs"), "process.exit(0)\n")
+  writeFileSync(join(temporary, executable), "process.exit(0)\n")
   writeFileSync(join(temporary, "evals/swebench/flows.sh"), wrapper, { mode: 0o755 })
 
   const unbuilt = spawnSync("bash", [join(temporary, "evals/swebench/flows.sh"), "--help"], {
@@ -65,7 +57,9 @@ try {
   assert.equal(unbuilt.status, 1, "a checkout with no CLI build is refused, not run against source")
   assert.match(unbuilt.stderr, /would fall back to src\/bin\.ts/)
 
-  writeFileSync(join(temporary, "packages/smithers/bin/smithers.mjs"), "console.log('shim ran')\n")
+  writeFileSync(join(temporary, executable), `
+console.log(JSON.stringify({ executable: process.argv[1], args: process.argv.slice(2), cwd: process.cwd() }))
+`)
   mkdirSync(join(temporary, "packages/smithers/dist/esm"), { recursive: true })
   writeFileSync(join(temporary, "packages/smithers/dist/esm/bin.js"), "\n")
   const built = spawnSync("bash", [join(temporary, "evals/swebench/flows.sh"), "--help"], {
@@ -73,7 +67,11 @@ try {
     env: { ...process.env, SWB_SUBJECT_UNPINNED: "1" }
   })
   assert.equal(built.status, 0, built.stderr)
-  assert.match(built.stdout, /shim ran/, "the wrapper execs the shim, not the build behind it")
+  assert.deepEqual(JSON.parse(built.stdout), {
+    executable: join(temporary, executable),
+    args: ["--help"],
+    cwd: process.cwd()
+  }, "the wrapper executes the declared bin with the caller's arguments and working directory")
 } finally {
   rmSync(temporary, { recursive: true, force: true })
 }

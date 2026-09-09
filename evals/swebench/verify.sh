@@ -1,7 +1,8 @@
 #!/bin/bash
 # Verifies the scorecard generator and instance guidance without model calls.
 #
-#   ./verify.sh
+#   pnpm exec smthrs test //evals/swebench:offline
+#   pnpm exec smthrs run //evals/swebench:prerequisites
 #
 # Builds the fixture journal twice — without and with the harness's exact
 # `ModelSettled.durationMillis` field — scores both, and asserts every reported
@@ -79,10 +80,33 @@
 # lib/rerun-queue.mjs, run-45.sh, compare-runs.mjs, three-way.mjs, regrade.sh,
 # lib/program-evidence.mjs, lib/surgery-evidence.mjs, lib/round3-evidence.mjs,
 # lib/repl-evidence.mjs, lib/excluded.mjs or
-# anything under lib/fullbench-*. The subject check needs a built CLI: run ./preflight.sh first
-# if `packages/smithers/dist` is absent.
+# anything under lib/fullbench-*. The subject and evaluator checks run separately
+# through //evals/swebench:prerequisites after ./preflight.sh and ./bootstrap.sh.
 set -eu
 S="$(cd "$(dirname "$0")" && pwd)"
+
+# The CI tier is self-contained after the workspace install. Operator checks
+# fail explicitly when their prerequisites are absent; they never silently skip.
+case "${1:---offline}" in
+  --offline) ;;
+  --prerequisites)
+    if [ ! -f "$S/../../packages/smithers/dist/esm/bin.js" ]; then
+      echo "verify.sh: build the CLI with ./preflight.sh first" >&2
+      exit 1
+    fi
+    if [ ! -x "$S/.venv-swb/bin/python" ]; then
+      echo "verify.sh: run ./bootstrap.sh to provision the evaluator venv first" >&2
+      exit 1
+    fi
+    node "$S/fixtures/check-subject.mjs"
+    node "$S/fixtures/check-prompt-bytes.mjs"
+    "$S/.venv-swb/bin/python" "$S/fixtures/check-eval-exports.py"
+    exit 0
+    ;;
+  *) echo "usage: verify.sh [--offline|--prerequisites]" >&2; exit 2 ;;
+esac
+
+node "$S/fixtures/check-offline-target.mjs"
 
 score() {
   node "$S/scorecard.ts" \
@@ -119,7 +143,6 @@ node "$S/fixtures/check-capture.mjs"
 
 echo "== the subject under test"
 node "$S/fixtures/check-agreement.mjs"
-node "$S/fixtures/check-subject.mjs"
 
 echo "== the CLI flows.sh execs"
 node "$S/fixtures/check-cli-path.mjs"
@@ -158,13 +181,6 @@ node "$S/fixtures/check-fullbench-drain.mjs"
 
 echo "== the analysis bundle, and what it withholds"
 node "$S/fixtures/check-trace-bundle.mjs"
-
-echo "== what the grader exports inside the eval script"
-if [ -x "$S/.venv-swb/bin/python" ]; then
-  "$S/.venv-swb/bin/python" "$S/fixtures/check-eval-exports.py"
-else
-  echo "  skipped: no evaluator venv at $S/.venv-swb — run ./bootstrap.sh first"
-fi
 
 echo "== the instances excluded from the scoreboard, and why"
 node "$S/fixtures/check-excluded.mjs"
@@ -207,6 +223,3 @@ node "$S/fixtures/check-repl-evidence.mjs"
 
 echo "== every wave in one table"
 node "$S/fixtures/check-n-way.mjs"
-
-echo "== what a wave's prompts weighed"
-node "$S/fixtures/check-prompt-bytes.mjs"

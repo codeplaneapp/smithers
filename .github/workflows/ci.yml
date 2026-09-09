@@ -116,6 +116,11 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: SWE-bench offline fixtures
+        run: pnpm exec smthrs test '//evals/swebench:offline' --jobs 1 --verbose
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: SWE-bench rig typecheck
         run: pnpm exec smthrs build '//evals/swebench:check' --verbose
         env:

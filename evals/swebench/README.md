@@ -2569,18 +2569,33 @@ a journal carrying exactly those numbers and asserts the scorecard reports them:
 ./verify.sh
 ```
 
-That is an offline check of the tooling — no tokens, no docker, no dataset. It
-also replays the repository-specific verification guidance, the patch capture
-(`fixtures/check-capture.mjs`), the subject fingerprint
-(`fixtures/check-subject.mjs`, which needs a built CLI: run `./preflight.sh`
-first if `packages/smithers/dist` is absent), and the whole best-of-n half: the
-per-run naming rule (`fixtures/check-run-paths.mjs`), the matrix scheduler over
-a stub harness command (`fixtures/check-matrix.mjs`), the journal-only selector
-over two real waves (`fixtures/check-selector.mjs`), and the report generator
-over recorded evaluator verdicts (`fixtures/check-matrix-report.mjs`). Run it
-after touching `scorecard.ts`, `prices.ts`, the journal's event shapes,
-`select-candidate.mjs`, `run-matrix.sh`, `matrix-report.mjs`, or anything under
-`lib/`.
+The default `./verify.sh` runs the same serial, token-free fixture suite as CI:
+
+```sh
+pnpm exec smthrs test //evals/swebench:offline --jobs 1
+pnpm run check
+```
+
+Run these from this directory after the workspace dependency install. The offline
+target declares the MJS, shell, Python, TypeScript and recorded fixture inputs.
+It checks the scorecard, prompts, patch capture, CLI wrapper, ledger, scheduler,
+locking and report behavior without a CLI build, Docker, evaluator venv, dataset
+or funded model key. `.github/workflows/ci.yml` is generated from the root
+`PACKAGE.ts`, which selects `//evals/swebench:offline` as a required test step.
+
+The subject fingerprint, prompt-byte measurements and evaluator export checks
+have separate prerequisites:
+
+```sh
+./preflight.sh
+./bootstrap.sh
+pnpm exec smthrs run //evals/swebench:prerequisites
+```
+
+That target requires the built CLI and `.venv-swb/bin/python`; a missing
+prerequisite fails explicitly. It is an operator target and is not selected by
+CI. Docker dry runs (`./fullbench-dryrun.sh`, `./codex-backfill-dryrun.sh`,
+`./network-dryrun.sh`) and funded-model benchmark runs remain operator commands.
 
 ## `flows.sh`
 

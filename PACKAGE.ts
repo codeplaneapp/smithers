@@ -259,9 +259,9 @@ const ci = Smithers.GithubCiGen({
           pattern: "//evals/authoring:test"
         },
         { name: "Authoring eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/authoring:check" },
-        // The SWE-bench rig typechecks here and nowhere else. The benchmark
-        // itself spends real API tokens and needs docker with multi-gigabyte
-        // images, so it stays operator-run and has no target at all.
+        // Offline fixtures need only the workspace install. Docker and funded
+        // benchmark runs remain operator commands.
+        { name: "SWE-bench offline fixtures", verb: Smithers.Verb.Test, pattern: "//evals/swebench:offline", parallelism: 1 },
         { name: "SWE-bench rig typecheck", verb: Smithers.Verb.Build, pattern: "//evals/swebench:check" },
         // The review app, the two Workers, and the seeded-bug eval. Without
         // these steps the only pipeline that ran them was the 0.x one this
