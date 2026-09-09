@@ -29,3 +29,18 @@ The companion `src/37-host-containment-host.ts` prints its process group id only
 after recording the child durably. Startup failures print the Effect cause to
 stderr and exit with status 1. The example summary preserves `hostStderr`,
 including Node runtime warnings such as Node 22's SQLite experimental notice.
+
+## Sandbox filesystem tools
+
+`src/25-agent-tools-in-sandbox.ts` exposes only `read` and `write`, with
+capabilities restricted to the scratch root. Tool paths are relative to that
+root. The host filesystem service rejects absolute paths, `..` components,
+symlinks (including dangling links), and hard-linked files. Nested file creation
+and replacement remain supported. Root names cannot contain capability glob
+characters (`*` or `?`).
+
+The host must exclusively own the scratch tree during the run. Path checks do
+not provide an OS boundary against another host process racing filesystem
+mutations. QuickJS bounds cell evaluation; the supplied host service confines
+tool access. The optional third `main` argument supplies a model for exercising
+other cells; the default model is scripted and requires no API key.
