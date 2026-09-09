@@ -483,10 +483,99 @@ const codeownersPattern = (packagePath: string, glob: string | undefined): strin
   const base = packagePath === "" ? "" : `/${packagePath}/`
   if (glob === undefined) return packagePath === "" ? "*" : base
   if (glob.includes("/")) return `${base === "" ? "/" : base}${glob}`
-  // A bare file glob applies at every depth inside the package, which is what
-  // an unanchored CODEOWNERS pattern means once it is scoped by the directory
-  // line before it.
+  // A bare file glob applies at every depth inside the package; the explicit
+  // prefix scopes it independently of preceding CODEOWNERS lines.
   return `${base === "" ? "" : base}**/${glob}`
+}
+
+/** Intersect wildcard sequences, retaining every possible alignment of stars. */
+const intersectSequences = (
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>,
+  star: string,
+  separator: string,
+  intersect: (left: string, right: string) => ReadonlyArray<string>
+): ReadonlyArray<string> => {
+  const cache = new Map<string, ReadonlyArray<string>>()
+  const visit = (i: number, j: number): ReadonlyArray<string> => {
+    const key = `${i}:${j}`
+    const known = cache.get(key)
+    if (known !== undefined) return known
+    const a = left[i]
+    const b = right[j]
+    const found = new Set<string>()
+    const append = (head: string, tails: ReadonlyArray<string>) => {
+      for (const tail of tails) {
+        // Adjacent stars have the same language as one star.
+        found.add(
+          head === star && (tail === star || tail.startsWith(`${star}${separator}`))
+            ? tail
+            : tail === ""
+            ? head
+            : `${head}${separator}${tail}`
+        )
+      }
+    }
+    if (a === undefined && b === undefined) found.add("")
+    else if (a === star && b === star) {
+      append(star, visit(i + 1, j))
+      append(star, visit(i, j + 1))
+    } else if (a === star) {
+      for (const suffix of visit(i + 1, j)) found.add(suffix)
+      if (b !== undefined) append(b, visit(i, j + 1))
+    } else if (b === star) {
+      for (const suffix of visit(i, j + 1)) found.add(suffix)
+      if (a !== undefined) append(a, visit(i + 1, j))
+    } else if (a !== undefined && b !== undefined) {
+      for (const head of intersect(a, b)) append(head, visit(i + 1, j + 1))
+    }
+    const result = [...found]
+    cache.set(key, result)
+    return result
+  }
+  return visit(0, 0)
+}
+
+/** CODEOWNERS globs use * and ? within a component and ** across directories. */
+const intersectPatterns = (left: string, right: string): ReadonlyArray<string> => {
+  if (left === right) return [left]
+  return intersectSequences(left.split("/"), right.split("/"), "**", "/", (a, b) => {
+    if (a === b) return [a]
+    if (a === "*") return [b]
+    if (b === "*") return [a]
+    return intersectSequences([...a], [...b], "*", "", (x, y) => x === y || y === "?" ? [x] : x === "?" ? [y] : [])
+      .filter((segment) => segment !== "")
+  })
+}
+
+/** Per-file patterns scoped to this package, including every overlap's union. */
+const codeownersRules = (index: PackageIndex, packagePath: string) => {
+  const rules = new Map<string, Set<Owners.Owner>>()
+  const scope = packagePath === "" ? "**" : `${packagePath}/**`
+  for (const ancestor of chainOf(index, packagePath)) {
+    const declaration = index.ownersOf(ancestor)
+    if (declaration === undefined) continue
+    for (const rule of declaration.perFile) {
+      const pattern = codeownersPattern(ancestor, rule.pattern).replace(/^\//, "")
+      for (const projected of intersectPatterns(scope, pattern)) {
+        const additions: Array<readonly [string, ReadonlyArray<Owners.Owner>]> = [[projected, rule.owners]]
+        for (const [existing, owners] of rules) {
+          for (const overlap of intersectPatterns(existing, projected)) {
+            additions.push([overlap, [...owners, ...rule.owners]])
+          }
+        }
+        for (const [pattern, owners] of additions) {
+          const merged = rules.get(pattern) ?? new Set<Owners.Owner>()
+          for (const owner of owners) merged.add(owner)
+          rules.set(pattern, merged)
+        }
+      }
+    }
+    if (declaration.noparent) break
+  }
+  // An intersection contains every owner of its contributing rules, so it
+  // must follow them under last-match semantics. Ties are deterministic.
+  return [...rules].sort(([a, ownersA], [b, ownersB]) => ownersA.size - ownersB.size || byCodeUnit(a, b))
 }
 
 /**
@@ -503,42 +592,48 @@ export const renderCodeowners = (index: PackageIndex, org: string): string => {
     "# PACKAGE.ts is authoritative; regenerate with: smithers-build build <label> --write",
     ""
   ]
-  const claims = claimants(index)
+  const claims = claimants(index).filter((claimant) => claimant.claim.mode === "approve").map((claimant) => ({
+    ...claimant,
+    upstream: new Set(upstreamPackages(index, claimant.packagePath)),
+    owners: packageOwners(index, claimant.packagePath)
+  }))
   const packages = [...index.packages()].sort((left, right) =>
     left.split("/").length - right.split("/").length || byCodeUnit(left, right)
   )
   for (const packagePath of packages) {
     const set = new OwnerSet()
-    for (const entry of packageOwners(index, packagePath)) set.add(entry.owner, "approve", { kind: "direct" })
+    const perFileBase = new OwnerSet()
+    for (const entry of packageOwners(index, packagePath)) {
+      set.add(entry.owner, "approve", { kind: "direct" })
+      // A matching per-file declaration suppresses the workspace fallback,
+      // just as it does in resolve; upstream claims still contribute below.
+      if (!entry.reasons.some((reason) => reason.kind === "workspace")) {
+        perFileBase.add(entry.owner, "approve", { kind: "direct" })
+      }
+    }
     for (const claimant of claims) {
-      if (claimant.packagePath === packagePath || claimant.claim.mode !== "approve") continue
-      if (!new Set(upstreamPackages(index, claimant.packagePath)).has(packagePath)) continue
+      if (claimant.packagePath === packagePath || !claimant.upstream.has(packagePath)) continue
       if (!claimCovers(claimant.claim, packagePath)) continue
-      for (const entry of packageOwners(index, claimant.packagePath)) {
-        set.add(entry.owner, "approve", { kind: "upstream-of", label: packageLabel(claimant.packagePath) })
+      for (const entry of claimant.owners) {
+        const reason: Reason = { kind: "upstream-of", label: packageLabel(claimant.packagePath) }
+        set.add(entry.owner, "approve", reason)
+        perFileBase.add(entry.owner, "approve", reason)
       }
     }
     const owners = set.list()
-    const declaration = index.ownersOf(packagePath)
-    if (owners.length === 0 && (declaration === undefined || declaration.perFile.length === 0)) continue
-    if (owners.length > 0) {
-      lines.push(
-        `${codeownersPattern(packagePath, undefined)} ${
-          owners.map((entry) => codeownersHandle(org, entry.owner)).join(" ")
-        }`
+    // Even an empty directory rule must clear owners from ancestor patterns.
+    lines.push(
+      [codeownersPattern(packagePath, undefined), ...owners.map((entry) => codeownersHandle(org, entry.owner))].join(
+        " "
       )
-    }
-    if (declaration !== undefined) {
-      for (const rule of declaration.perFile) {
-        const merged = new OwnerSet()
-        for (const entry of owners) merged.add(entry.owner, "approve", { kind: "direct" })
-        for (const owner of rule.owners) merged.add(owner, "approve", { kind: "per-file", pattern: rule.pattern })
-        lines.push(
-          `${codeownersPattern(packagePath, rule.pattern)} ${
-            merged.list().map((entry) => codeownersHandle(org, entry.owner)).join(" ")
-          }`
-        )
-      }
+    )
+    const perFileOwners = perFileBase.list()
+    for (const [pattern, ruleOwners] of codeownersRules(index, packagePath)) {
+      const merged = new OwnerSet()
+      for (const entry of perFileOwners) merged.add(entry.owner, "approve", { kind: "direct" })
+      for (const owner of ruleOwners) merged.add(owner, "approve", { kind: "per-file", pattern })
+      const anchored = packagePath === "" && pattern.startsWith("**/") ? pattern : `/${pattern}`
+      lines.push(`${anchored} ${merged.list().map((entry) => codeownersHandle(org, entry.owner)).join(" ")}`)
     }
   }
   return `${lines.join("\n")}\n`
@@ -561,7 +656,11 @@ export const renderOwnersTree = (
   file: string = "OWNERS"
 ): ReadonlyArray<{ readonly path: string; readonly content: string }> => {
   const files: Array<{ readonly path: string; readonly content: string }> = []
-  const claims = claimants(index)
+  const claims = claimants(index).map((claimant) => ({
+    ...claimant,
+    upstream: new Set(upstreamPackages(index, claimant.packagePath)),
+    owners: packageOwners(index, claimant.packagePath).map((entry) => entry.owner)
+  }))
   for (const packagePath of index.packages()) {
     const declaration = index.ownersOf(packagePath)
     const workspaceDefaults = packagePath === "" && declaration === undefined ? index.workspace.owners : undefined
@@ -571,9 +670,9 @@ export const renderOwnersTree = (
     > = []
     for (const claimant of claims) {
       if (claimant.packagePath === packagePath) continue
-      if (!new Set(upstreamPackages(index, claimant.packagePath)).has(packagePath)) continue
+      if (!claimant.upstream.has(packagePath)) continue
       if (!claimCovers(claimant.claim, packagePath)) continue
-      const owners = packageOwners(index, claimant.packagePath).map((entry) => entry.owner)
+      const owners = claimant.owners
       if (owners.length > 0) {
         upstream.push({ label: packageLabel(claimant.packagePath), mode: claimant.claim.mode, owners })
       }

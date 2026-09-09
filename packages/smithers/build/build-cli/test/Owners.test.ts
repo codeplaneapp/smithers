@@ -1,8 +1,12 @@
+import { Smithers as S } from "@smthrs/targets"
+import ignore from "ignore"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it, vi } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import * as Owners from "../src/Owners.ts"
+import { PackageIndex } from "../src/PackageIndex.ts"
 import * as PackageTree from "../src/PackageTree.ts"
 
 const temporaryDirectories: Array<string> = []
@@ -286,4 +290,202 @@ describe("owners resolution", () => {
     expect(result.touched_paths.map((entry) => entry.path)).toEqual(["lib/query.sql"])
     expect(result.required_approvers).toContain("libby")
   })
+})
+
+const renderingIndex = (
+  packages: ReadonlyArray<{ readonly packagePath: string; readonly value: ReturnType<typeof S.Package> }>,
+  workspaceOwners: ReadonlyArray<string> = []
+): PackageIndex => {
+  const packageJson = S.file("//package.json")
+  return PackageIndex.make({
+    root: process.cwd(),
+    factory: undefined,
+    workspace: S.Workspace("rendering", {
+      owners: { owners: workspaceOwners },
+      repository: "git+https://example.invalid/rendering.git",
+      cache: S.Cache({ directory: ".flows" }),
+      runtime: S.Runtime.Node({ version: "26" }),
+      packageManager: S.PackageManager.Yarn({ manifest: packageJson, lockfile: S.file("//yarn.lock") }),
+      nodeModules: S.Npm.NodeModules({ packageJson })
+    }),
+    packages: packages.map((entry) => ({
+      ...entry,
+      file: entry.packagePath === "" ? "PACKAGE.ts" : `${entry.packagePath}/PACKAGE.ts`
+    }))
+  })
+}
+
+// Evaluate each positive CODEOWNERS pattern independently using gitignore
+// semantics, retaining only the owners on the last matching line.
+const generatedOwners = (rendered: string, path: string): ReadonlyArray<string> => {
+  let owners: Array<string> = []
+  for (const line of rendered.split("\n")) {
+    if (line === "" || line.startsWith("#")) continue
+    const [pattern, ...handles] = line.trim().split(/\s+/)
+    if (ignore().add(pattern!).ignores(path)) owners = handles.map((handle) => handle.slice(1))
+  }
+  return owners.sort()
+}
+
+describe("ownership renderer projections", () => {
+  const nestedIndex = () =>
+    renderingIndex([
+      {
+        packagePath: "",
+        value: S.Package({
+          owners: {
+            owners: ["base"],
+            perFile: { "*.sql": ["security"], "nested/migrations/**": ["migration-owner"] }
+          },
+          targets: {}
+        })
+      },
+      {
+        packagePath: "nested",
+        value: S.Package({
+          owners: {
+            owners: ["nested-owner"],
+            perFile: { "schema.*": ["schema-owner"], "migrations/**": ["child-migrations"] }
+          },
+          targets: {}
+        })
+      },
+      { packagePath: "nested/inner", value: S.Package({ targets: {} }) },
+      {
+        packagePath: "nested/isolated",
+        value: S.Package({
+          owners: {
+            owners: ["isolated-owner"],
+            noparent: true,
+            perFile: { "*.sql": ["isolated-sql"] }
+          },
+          targets: {}
+        })
+      },
+      {
+        packagePath: "nested/unowned",
+        value: S.Package({
+          owners: {
+            owners: [],
+            noparent: true,
+            perFile: { "*.md": ["unowned-md"] }
+          },
+          targets: {}
+        })
+      },
+      { packagePath: "sibling", value: S.Package({ owners: { owners: ["sibling-owner"] }, targets: {} }) }
+    ])
+
+  it.each([
+    "nested/query.sql",
+    "nested/inner/query.sql",
+    "nested/schema.sql",
+    "nested/schema.ts",
+    "nested/migrations/001.sql",
+    "nested/migrations/notes.md",
+    "nested/isolated/schema.sql",
+    "nested/isolated/notes.md",
+    "nested/unowned/schema.sql",
+    "sibling/query.sql",
+    "sibling/notes.md"
+  ])("keeps last-match CODEOWNERS equal to resolve for %s", (path) => {
+    const index = nestedIndex()
+    expect(generatedOwners(Owners.renderCodeowners(index, "acme"), path))
+      .toEqual(Owners.resolve(index, [path]).requiredApprovers)
+  })
+
+  it.each([
+    ["a*.sql", "*b.sql"],
+    ["schema.*", "*.sql"],
+    ["**/migrations/*.sql", "migrations/**"],
+    ["**/a/**", "**/b/**"],
+    ["?.sql", "a*.sql"],
+    ["*.sql", "*.sql"]
+  ])("unions overlapping %s and %s without assigning owners outside their matches", (ancestor, child) => {
+    const index = renderingIndex([
+      {
+        packagePath: "",
+        value: S.Package({
+          owners: {
+            owners: ["base"],
+            perFile: { [ancestor]: ["ancestor"] }
+          },
+          targets: {}
+        })
+      },
+      {
+        packagePath: "nested",
+        value: S.Package({
+          owners: {
+            owners: ["nested"],
+            perFile: { [child]: ["child"] }
+          },
+          targets: {}
+        })
+      }
+    ])
+    const rendered = Owners.renderCodeowners(index, "acme")
+    for (const directory of ["", "migrations/", "deep/migrations/", "a/b/", "b/a/", "a/", "b/"]) {
+      for (const file of ["a.sql", "ab.sql", "xb.sql", "schema.sql", "schema.ts", "notes.md"]) {
+        const path = `nested/${directory}${file}`
+        expect(generatedOwners(rendered, path), path).toEqual(Owners.resolve(index, [path]).requiredApprovers)
+      }
+    }
+  })
+
+  it("uses workspace fallback only when no package or per-file owner is declared", () => {
+    const index = renderingIndex([
+      {
+        packagePath: "",
+        value: S.Package({
+          owners: {
+            perFile: { "*.sql": ["security"] }
+          },
+          targets: {}
+        })
+      },
+      { packagePath: "nested", value: S.Package({ targets: {} }) }
+    ], ["workspace-owner"])
+    const rendered = Owners.renderCodeowners(index, "acme")
+    for (const path of ["nested/query.sql", "nested/notes.md"]) {
+      expect(generatedOwners(rendered, path)).toEqual(Owners.resolve(index, [path]).requiredApprovers)
+    }
+  })
+
+  it.each(["renderCodeowners", "renderOwnersTree"] as const)(
+    "%s computes each claimant closure once per call",
+    (renderer) => {
+      const packages: Array<{ packagePath: string; value: ReturnType<typeof S.Package> }> = []
+      let previous = S.Filegroup({ srcs: [] })
+      for (let i = 0; i < 24; i++) {
+        const target = S.Filegroup({ srcs: i === 0 ? [] : [previous] })
+        packages.push({
+          packagePath: `p${i}`,
+          value: S.Package({
+            owners: { owners: [`owner${i}`], ...(i % 6 === 0 ? { upstream: "approve" as const } : {}) },
+            targets: { files: target }
+          })
+        })
+        previous = target
+      }
+      const index = renderingIndex(packages)
+      const scans = vi.spyOn(index, "targets")
+      try {
+        const first = Owners[renderer](index, "acme")
+        expect(scans).toHaveBeenCalledTimes(4)
+        expect(Owners[renderer](index, "acme")).toEqual(first)
+        expect(scans).toHaveBeenCalledTimes(8)
+        if (typeof first === "string") {
+          expect(generatedOwners(first, "p0/file.ts")).toEqual(["owner0", "owner12", "owner18", "owner6"])
+        } else {
+          const content = first.find((file) => file.path === "p0/acme")!.content
+          for (const claimant of [6, 12, 18]) {
+            expect(content).toContain(`owner${claimant}  # upstream-of //p${claimant}`)
+          }
+        }
+      } finally {
+        scans.mockRestore()
+      }
+    }
+  )
 })

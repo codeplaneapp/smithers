@@ -709,3 +709,18 @@ links, and file links that resolve outside scratch, including absolute links bac
 to the original workspace. An internal destination file link is replaced with a
 regular file without changing its target. Replacement files are staged beside the
 destination and renamed into place.
+
+### Ownership projections
+
+`Owners.renderCodeowners(index, org)` emits package directory rules followed
+by their effective per-file rules. Ancestor per-file rules are scoped to each
+nested package, stopping at `noparent`. Overlapping rules emit intersections
+with the union of their owners so the last matching line retains every
+required approver. An empty directory rule clears inherited ownership.
+Use CODEOWNERS-compatible globs: `*` and `?` within path components, and `**`
+across directories.
+
+Both `Owners.renderCodeowners` and `Owners.renderOwnersTree` compute each
+relevant upstream claimant's dependency closure and package owners once per
+render call. Review-only claims appear in the OWNERS tree and are omitted
+from CODEOWNERS.
