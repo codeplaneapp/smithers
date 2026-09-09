@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest"
-import { browserFetch, extractReadableText, isPublicAddress } from "../src/BrowserFetch.ts"
+import {
+  BROWSER_FETCH_MAX_BYTES,
+  BROWSER_FETCH_MAX_TEXT,
+  browserFetch,
+  extractReadableText,
+  isPublicAddress
+} from "../src/BrowserFetch.ts"
 
 /*
  * The browser tool's hard guards (§2d): https only, public hosts only AFTER
@@ -341,6 +347,43 @@ describe("browserFetch guards", () => {
 })
 
 describe("extractReadableText", () => {
+  test.each(["<", "<script ", "<style ", "<noscript ", "<!-- "])(
+    "extracts repeated unclosed %s within 100 ms",
+    (opener) => {
+      // Catch the quadratic regression on a smaller input before trying the full body cap.
+      for (const count of [opener === "<" ? 40_000 : 10_000, opener === "<" ? BROWSER_FETCH_MAX_BYTES : 60_000]) {
+        const html = opener.repeat(count)
+        const started = performance.now()
+        extractReadableText(html)
+        expect(performance.now() - started).toBeLessThan(100)
+      }
+    }
+  )
+
+  test("preserves normal page text, mixed-case blocks, entities, and Unicode", () => {
+    const html = `<!doctype html><html><head><title>İ News</title>
+      <STYLE media="screen">body { color: red; }</STYLE ></head>
+      <body><h1>Hi &amp; bye</h1><!-- hidden <p>comment</p> -->
+      <ScRiPt type="text/javascript">if (a < b) run()</sCrIpT >
+      <noscript>hidden fallback</noscript><p>&nbsp;&lt;tag&gt; &quot;yes&quot; &#39;ok&apos;</p>
+      <scripture>visible</scripture></body></html>`
+    expect(extractReadableText(html)).toBe("İ News Hi & bye <tag> \"yes\" 'ok' visible")
+    expect(extractReadableText(`<p>${"x".repeat(BROWSER_FETCH_MAX_BYTES)}</p>`)).toBe(
+      "x".repeat(BROWSER_FETCH_MAX_TEXT)
+    )
+  })
+
+  test.each(["<script>", "<style>", "<noscript>", "<!--", "<div"])(
+    "drops the rest of an unclosed %s",
+    (opener) => {
+      expect(extractReadableText(`before ${opener} hidden`)).toBe("before")
+    }
+  )
+
+  test("ignores closing block name prefixes until a complete closing tag", () => {
+    expect(extractReadableText("before<script>hidden</scripture>still hidden</script >after")).toBe("before after")
+  })
+
   test("strips scripts, styles, and tags; decodes entities; collapses whitespace", () => {
     expect(extractReadableText("<style>a{}</style><script>b()</script><h1>Hi &amp; bye</h1>  <p>there</p>")).toBe(
       "Hi & bye there"

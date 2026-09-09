@@ -212,12 +212,47 @@ const guardTarget = async (
  * @category conversions
  */
 export const extractReadableText = (html: string): string => {
-  const withoutBlocks = html
-    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, " ")
-    .replace(/<noscript\b[\s\S]*?<\/noscript\s*>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-  const withoutTags = withoutBlocks.replace(/<[^>]*>/g, " ")
+  // Fold ASCII only so case-insensitive tag offsets still index the original Unicode text.
+  const lower = html.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+  const parts: Array<string> = []
+  let cursor = 0
+  while (cursor < html.length) {
+    const start = html.indexOf("<", cursor)
+    if (start === -1) {
+      parts.push(html.slice(cursor))
+      break
+    }
+    parts.push(html.slice(cursor, start), " ")
+    // Every search consumes the region it scans. Missing closers discard the
+    // remainder instead of retrying from each unmatched opener (quadratic work).
+    if (html.startsWith("<!--", start)) {
+      const end = html.indexOf("-->", start + 4)
+      if (end === -1) break
+      cursor = end + 3
+      continue
+    }
+    const block = /^<(script|style|noscript)\b/.exec(lower.slice(start, start + 11))
+    if (block !== null) {
+      const closing = `</${block[1]}`
+      let search = start + block[0].length
+      cursor = html.length
+      while (search < html.length) {
+        const end = lower.indexOf(closing, search)
+        if (end === -1) break
+        search = end + closing.length
+        while (search < html.length && /\s/.test(html[search]!)) search += 1
+        if (html[search] === ">") {
+          cursor = search + 1
+          break
+        }
+      }
+      continue
+    }
+    const end = html.indexOf(">", start + 1)
+    if (end === -1) break
+    cursor = end + 1
+  }
+  const withoutTags = parts.join("")
   const decoded = withoutTags
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
