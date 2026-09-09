@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import test from "node:test"
+import ts from "typescript"
 
 const root = resolve(import.meta.dirname, "../../..")
 const pages = join(root, "apps/site/src/content/docs/docs")
@@ -43,6 +44,48 @@ function command(cwd, executable, args) {
   return result.stdout
 }
 const run = (cwd, file, ...args) => command(cwd, process.execPath, [file, ...args])
+
+test("testing-flows journal assertion fence typechecks and runs", (t) => {
+  const cwd = project(t, "guides/testing-flows")
+  const guide = readFileSync(join(pages, "guides/testing-flows.mdx"), "utf8")
+  const section = guide.split("## 3. Assert on journal entries")[1]?.split("## 4.")[0]
+  const fence = /```ts[^\n]*\n([\s\S]*?)\n```/.exec(section ?? "")?.[1]
+  assert.ok(fence, "the guide includes a journal assertion example")
+  const imports = fence.split("\n").filter((line) => line.startsWith("import ")).join("\n")
+  const body = fence.split("\n").filter((line) => !line.startsWith("import ")).join("\n")
+  // Supply the preceding durable read's entry type. Passing these rows to
+  // expectJournal must not silently stand in for a conformance journal.
+  const file = join(cwd, "journal-assertions.ts")
+  writeFileSync(file, `
+import * as TestEffect from "effect/Effect"
+import type { JournalEvent } from "@smthrs/journal"
+${imports}
+const entries: ReadonlyArray<JournalEvent.Entry> = []
+await TestEffect.runPromise(TestEffect.gen(function*() {
+${body}
+}).pipe(TestEffect.scoped))
+console.log("journal assertions passed")
+`)
+  const program = ts.createProgram({
+    rootNames: [file],
+    options: {
+      noEmit: true,
+      strict: true,
+      skipLibCheck: true,
+      allowImportingTsExtensions: true,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      target: ts.ScriptTarget.ES2022
+    }
+  })
+  const errors = ts.getPreEmitDiagnostics(program)
+  assert.equal(errors.length, 0, ts.formatDiagnosticsWithColorAndContext(errors, {
+    getCanonicalFileName: (file) => file,
+    getCurrentDirectory: () => cwd,
+    getNewLine: () => "\n"
+  }))
+  assert.match(run(cwd, "journal-assertions.ts"), /journal assertions passed/)
+})
 
 test("first-flow creates its named files and reopens the durable result", (t) => {
   const cwd = project(t, "tutorials/first-flow")
