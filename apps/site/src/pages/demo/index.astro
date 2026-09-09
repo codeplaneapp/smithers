@@ -149,13 +149,17 @@ const endpoint = "https://bug.smithers.sh/api/demo-requests"
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(data),
+        signal: AbortSignal.timeout(20_000),
       })
       if (!res.ok) throw new Error(`intake answered ${res.status}`)
       form.hidden = true
       thanks.hidden = false
-    } catch {
-      status.textContent = "Something went wrong sending that. Try again, or email will@smithers.sh."
+    } catch (error) {
+      status.textContent = error?.name === "TimeoutError" || error?.name === "AbortError"
+        ? "Sending timed out. Your entries are still here. Try again, or email will@smithers.sh."
+        : "Something went wrong sending that. Try again, or email will@smithers.sh."
       status.classList.add("error")
+    } finally {
       button.disabled = false
       label.textContent = "Continue"
     }
