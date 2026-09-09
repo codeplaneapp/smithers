@@ -362,12 +362,19 @@ export const createTargetGraphController = (
      * A run this session never folded (started before the app opened, or
      * settled before anything watched it) has no frames left to stream: the
      * live path below would open a RUNNING card that never changes. Its
-     * recording is the timeline, so a settled run paints from the replay.
-     * A run the recording still calls running attaches live as before.
+     * recording is the timeline, so a settled run paints from the replay,
+     * and a run the recording still calls running attaches live as before.
+     *
+     * A run the recording REFUSES (unknown id, a route that 500s) or never
+     * recorded at all has neither. Falling through would attach to a topic no
+     * run publishes on and report the command executed, so the timeline says
+     * what the history row's replay already says: nothing to show.
      */
     if (!liveRuns.has(runIdArg)) {
       const recorded = await fetchReplay(runIdArg)
-      if (typeof recorded === "object" && recorded.run.status !== "running" && recorded.run.status !== "pending") {
+      if (recorded === undefined) return `There is no recording of run ${runIdArg}.`
+      if (typeof recorded === "string") return recorded
+      if (recorded.run.status !== "running" && recorded.run.status !== "pending") {
         paintReplay(repoId, runIdArg, recorded)
         return
       }

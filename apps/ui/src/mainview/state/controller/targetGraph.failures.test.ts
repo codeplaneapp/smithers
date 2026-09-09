@@ -12,12 +12,15 @@ import type { StorageApi } from "@tanstack/db"
 import { afterEach, beforeEach, expect, test } from "bun:test"
 import type { Repo } from "@smthrs/rpc/LocalApp"
 import { TARGET_GRAPH_ROUTES } from "@smthrs/rpc/TargetGraph"
+import type { TargetGraphDevFixtures } from "../../dev/fixtureRunStream"
 import type { NativeRepositories } from "../../native/NativeBridge"
 import type { AgentPort } from "../../runtime/AgentPort"
 import { createAppController } from "../AppController"
 import { createAppStore } from "../AppStore"
 import { repoKeyOf } from "../AppState"
 import type { Card } from "../AppState"
+import type { ControllerContext } from "./context"
+import { createTargetGraphController } from "./targetGraph"
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -301,4 +304,79 @@ test("the timeline of a run this session never watched paints from its recording
   expect(timeline.payload.nodes.map((node) => node.label)).toEqual(["//src:typeCheck"])
   expect(timeline.payload.summary?.ok).toBe(true)
   expect(timeline.status).toBe("acted")
+})
+
+test("the timeline of a run the replay route refuses reports the refusal instead of opening a dead RUNNING card", async () => {
+  // The refusal `target.runs.select` already reports was DISCARDED here: showTimeline read the
+  // replay only to decide whether to paint it, then attached live to a topic no run publishes on.
+  const asked: Array<string> = []
+  restore = answerWith((url) => {
+    asked.push(url)
+    return new Response(JSON.stringify({ error: { message: "No target run with id nope." } }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })
+  })
+  const { store, controller } = await controllerWith(["force"])
+  const result = await controller.commands.run("target.timeline", "force nope")
+  expect(result.status).not.toBe("executed")
+  expect(JSON.stringify(result)).toContain("No target run with id nope.")
+  expect(asked.some((url) => url.endsWith(TARGET_GRAPH_ROUTES.replay))).toBe(true)
+  expect(cardOf(store, "run-timeline-nope")).toBeUndefined()
+})
+
+test("the timeline of a run nothing recorded says so rather than attaching to a dead topic", async () => {
+  /*
+   * `undefined` from the seam is "nothing recorded this run" — the dev fixture seam answers that
+   * way for every run it never scripted. The live path would paint RUNNING with zero nodes for
+   * the rest of the session, so the command refuses the way `target.runs.select` does. The seam
+   * is injected here because only the fixture branch can answer undefined: the route branch turns
+   * a shape it cannot read into a refusal string.
+   */
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const attached: Array<string> = []
+  const ctx = {
+    store,
+    baseUrl: "http://local.test",
+    commandActor: "user" as const,
+    onDispose: () => {}
+  } as unknown as ControllerContext
+  const controller = createTargetGraphController(ctx, {
+    nextOrdinal: () => 1,
+    runs: {
+      attach: (runId: string) => {
+        attached.push(runId)
+        return () => {}
+      },
+      dispose: () => {}
+    },
+    devFixtures: {
+      replay: () => undefined,
+      streamRun: (runId: string) => {
+        attached.push(runId)
+        return () => {}
+      }
+    } as unknown as TargetGraphDevFixtures
+  })
+  expect(await controller.showTimeline("force", "never-recorded")).toBe("There is no recording of run never-recorded.")
+  expect(attached).toEqual([])
+  expect(store.collections.cards.get("run-timeline-never-recorded")).toBeUndefined()
+})
+
+test("the timeline of a run the recording still calls running attaches live", async () => {
+  const replay = {
+    run: { runId: "run-live", repoId: "force", label: "//src:typeCheck", labels: ["//src:typeCheck"], status: "running", startedAt: 1_000 },
+    events: []
+  }
+  restore = answerWith((url) =>
+    url.endsWith(TARGET_GRAPH_ROUTES.replay)
+      ? new Response(JSON.stringify(replay), { status: 200, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ error: { message: "unexpected route" } }), { status: 500, headers: { "content-type": "application/json" } })
+  )
+  const { store, controller } = await controllerWith(["force"])
+  expect((await controller.commands.run("target.timeline", "force run-live")).status).toBe("executed")
+  const timeline = cardOf(store, "run-timeline-run-live")
+  if (timeline?.kind !== "run-timeline") throw new Error("expected a run-timeline card")
+  expect(timeline.payload.status).toBe("running")
+  expect(timeline.status).toBe("active")
 })
