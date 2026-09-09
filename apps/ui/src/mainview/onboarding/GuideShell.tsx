@@ -33,7 +33,7 @@ const lessons = [
   [
     "A small beginning",
     "Hello. I’m Smithers.",
-    "We’re going to make something together. First, let me show you how we’ll work.",
+    "Let me show how Smithers works",
   ],
   [
     "A conversation",
@@ -194,10 +194,11 @@ export function GuideShell({ children }: { children: ReactNode }) {
       className="guide-primary"
       data-flow="onboarding.act"
       data-action={action}
+      aria-keyshortcuts={stage === 0 ? "Enter" : undefined}
       onClick={() => runCommandGuide(action)}
     >
       {label}
-      {icon}
+      {stage === 0 ? <kbd className="guide-button-key" aria-hidden="true">↵ Enter</kbd> : icon}
     </button>
   )
   return (
@@ -598,7 +599,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </button>
             )}
           </div>
-          <p className="guide-key-hint">
+          {stage > 0 && <p className="guide-key-hint">
             <kbd>←</kbd> back <span>·</span> <kbd>→</kbd> or <kbd>enter</kbd>{" "}
             {stage === 5 || stage === 6
               ? "run flow"
@@ -607,7 +608,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 : stage === 7 || stage === 15
                   ? "call Smithers"
                   : "continue"}
-          </p>
+          </p>}
         </section>
       </main>
       <footer className="guide-footer">
