@@ -142,9 +142,13 @@ the result deeply, freezes the snapshot, and never retains the caller's object.
 Undefined array elements are still rejected. Permission failures defensively
 copy capabilities, and their `capability` and `meta` data slots are
 non-writable. A value the journal could not encode fails at the construction
-site naming the key. `formatError` escapes C0 and C1 controls and caps each
-field at `maxDisplayFieldLength`, so an agent-chosen resource cannot forge extra
-log lines.
+site naming the key. `formatError` escapes C0/C1 controls, Unicode format
+characters (`Cf`, including bidi controls), and line/paragraph separators
+(`Zl`/`Zp`). Each encoded field is capped at `maxDisplayFieldLength`, including
+the truncation marker. `toPlatformError` applies the same rules to `module`,
+`method`, and string `pathOrDescriptor` fields, keeping the complete message
+free of raw line separators and bidi controls. The raw capability resource
+remains in the structured cause; the projected path is display text.
 
 **Stable identity.** The schema ids and the `action:resource` text `format`
 renders are identity, not display text: a stored decision keeps those exact

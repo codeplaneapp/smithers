@@ -454,6 +454,26 @@ describe("permission failures", () => {
     expect(rendered).not.toMatch(/[\r\n]/)
   })
 
+  it.each([
+    ["\u202E", "\\u202E"],
+    ["\u2028", "\\u2028"],
+    ["\u2029", "\\u2029"],
+    ["\u200B\u200C\u200D\u200E\u200F", "\\u200B\\u200C\\u200D\\u200E\\u200F"],
+    ["\u202A\u202B\u202C\u202D", "\\u202A\\u202B\\u202C\\u202D"],
+    ["\u2066\u2067\u2068\u2069\uFEFF", "\\u2066\\u2067\\u2068\\u2069\\uFEFF"],
+    ["\u00AD\u061C\u{1BCA0}", "\\u00AD\\u061C\\uD82F\\uDCA0"]
+  ])("escapes Unicode format characters and separators %j", (raw, escaped) => {
+    const error = permissionDenied(makeCapability("fs:write", `/x${raw}`), `no${raw}`)
+    expect(formatError(error)).toBe(`permission_denied: fs:write:/x${escaped}: no${escaped}`)
+    const projected = toPlatformError({ module: "FileSystem", method: "write", pathOrDescriptor: `/x${raw}`, error })
+    expect(projected.message).toBe(
+      `PermissionDenied: FileSystem.write (/x${escaped}): permission_denied: fs:write:/x${escaped}: no${escaped}`
+    )
+    expect(projected.message).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u)
+    expect(Option.getOrThrow(fromPlatformError(projected))).toBe(error)
+    expect(error.capability.resource).toBe(`/x${raw}`)
+  })
+
   it("caps every rendered field with a visible truncation marker", () => {
     const prefix = "permission_denied: fs:write:/workspace/out.txt: "
     const rendered = formatError(permissionDenied(capability, "x".repeat(maxDisplayFieldLength + 20)))
@@ -490,6 +510,53 @@ describe("the PlatformError projection", () => {
     })
     expect(projected.message).toContain("outside the workspace")
     expect(Option.getOrThrow(fromPlatformError(projected))).toBe(error)
+  })
+
+  it("escapes a filename in the complete platform message and retains its raw resource", () => {
+    const resource = "/workspace/out\nFORGED LOG ENTRY\u001b[2J"
+    const error = permissionDenied(makeCapability("fs:write", resource), "denied")
+    const projected = toPlatformError({ module: "FileSystem", method: "writeFile", pathOrDescriptor: resource, error })
+    expect(projected.message).toBe(
+      "PermissionDenied: FileSystem.writeFile (/workspace/out\\nFORGED LOG ENTRY\\u001B[2J): " +
+        "permission_denied: fs:write:/workspace/out\\nFORGED LOG ENTRY\\u001B[2J: denied"
+    )
+    expect(projected.message).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u)
+    expect(Option.getOrThrow(fromPlatformError(projected))).toBe(error)
+    expect(error.capability.resource).toBe(resource)
+  })
+
+  it.each(["module", "method", "pathOrDescriptor"] as const)("escapes and bounds the projected %s", (field) => {
+    const error = permissionDenied(capability, "no")
+    const unsafe = Array.from({ length: 0xa0 }, (_, code) => String.fromCharCode(code))
+      .join("") + "\u2028\u2029\u202E\u2066\uFEFF"
+    for (const character of unsafe) {
+      const projected = toPlatformError({ module: "FileSystem", method: "write", error, [field]: character })
+      expect(projected.message).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u)
+    }
+    for (const unit of ["x", "\u202E", "\u{1BCA0}"]) {
+      const projected = toPlatformError({
+        module: "FileSystem",
+        method: "write",
+        error,
+        [field]: unit.repeat(10_000)
+      })
+      if (projected.reason._tag !== "PermissionDenied") throw new Error("expected PermissionDenied")
+      expect(projected.reason[field]).toMatch(/…\[truncated\]$/)
+      expect(String(projected.reason[field]).length).toBeLessThanOrEqual(maxDisplayFieldLength)
+      expect(projected.message.length).toBeLessThanOrEqual(maxDisplayFieldLength + 100)
+      expect(projected.message).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u)
+    }
+  })
+
+  it("preserves numeric file descriptors", () => {
+    const projected = toPlatformError({
+      module: "FileSystem",
+      method: "write",
+      pathOrDescriptor: 0,
+      error: permissionDenied(capability, "no")
+    })
+    expect(projected.reason).toHaveProperty("pathOrDescriptor", 0)
+    expect(projected.message).toContain("FileSystem.write (0)")
   })
 
   it("omits `pathOrDescriptor` when the operation names no path", () => {

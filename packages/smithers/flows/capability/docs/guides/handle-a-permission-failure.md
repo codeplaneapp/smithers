@@ -73,7 +73,7 @@ Option.isSome(Permission.fromPlatformError(projected))
 // true
 ```
 
-Nothing is lost in the projection. The normalized reason is always
+The structured permission failure is preserved in the projection. The normalized reason is always
 `PermissionDenied`, meaning the operation did not happen because the kernel
 refused, suspended, or could not decide it. `description` carries the
 `Permission.formatError` rendering, and `cause` carries the failure itself, so
@@ -123,11 +123,19 @@ permission_denied: <action:resource>: <reason>
 grant store <code>: <message>
 ```
 
-The resource in that line came from an agent. `formatError` escapes C0 and C1
-control characters, so a resource containing a newline renders as `\n` instead
-of starting a second log line, and it caps each field at
-`Permission.maxDisplayFieldLength` (256 UTF-16 code units) with a visible
-`…[truncated]` marker. Ordinary non-ASCII text passes through unchanged.
+`formatError` escapes C0/C1 controls, Unicode format characters (`Cf`, including
+bidi controls), and line/paragraph separators (`Zl`/`Zp`). Newlines render as
+`\n`; U+2028 and U+202E render as `\u2028` and `\u202E`. These characters
+cannot introduce raw line breaks or bidi controls into the diagnostic.
+Each encoded field is capped at `Permission.maxDisplayFieldLength` (256 UTF-16
+code units), including the visible `…[truncated]` marker. Other non-ASCII text
+passes through unchanged.
+
+`toPlatformError` applies the same escaping and limit to `module`, `method`,
+and string `pathOrDescriptor` fields, so the complete `PlatformError.message`
+has the same one-line guarantee. Numeric descriptors are unchanged. The raw
+capability resource remains in `reason.cause` and is recovered by
+`fromPlatformError`; the projected path is display text.
 
 ## Put only journal-safe context in `meta`
 

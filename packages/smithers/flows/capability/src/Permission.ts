@@ -633,9 +633,10 @@ const displayChunk = (unit: string): string => {
   if (unit === "\t") {
     return "\\t"
   }
-  const codePoint = unit.codePointAt(0)!
-  return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
-    ? `\\u${codePoint.toString(16).toUpperCase().padStart(4, "0")}`
+  // Encode each UTF-16 code unit so astral format characters also use
+  // complete \uXXXX escapes, kept together by displayField's chunk budget.
+  return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(unit)
+    ? unit.split("").map((part) => `\\u${part.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`).join("")
     : unit
 }
 
@@ -666,7 +667,8 @@ const displayField = (value: string): string => {
  * Renders a permission failure as the one-line `description` a `SystemError`
  * carries, which is the string a log line or an unattended report shows.
  *
- * Every field escapes C0 and C1 controls. Each encoded field is limited to
+ * Every field escapes C0/C1 controls, Unicode format characters (including
+ * bidi controls), and line/paragraph separators. Each encoded field is limited to
  * {@link maxDisplayFieldLength} UTF-16 code units and ends with a visible
  * marker when truncated. Ordinary non-ASCII text remains unchanged.
  *
@@ -697,12 +699,15 @@ export const formatError = (error: PermissionErrorPayload): string => {
  * difference is a wider error type, the kernel decorates those tags in place
  * and maps its own failures through here.
  *
- * Nothing is lost: the normalized reason is always `PermissionDenied` — the
+ * The structured failure is preserved: the normalized reason is always `PermissionDenied` — the
  * operation did not happen because the capability kernel refused, suspended,
  * or could not decide it — `description` carries the human rendering from
  * {@link formatError}, and `cause` carries the structured failure itself, so
  * {@link fromPlatformError} hands the attended surface back the original
  * `capability`, `tier`, `requestId`, and `reason`.
+ * Module, method, and string paths use the same escaping and field limit as
+ * the description. The projected path is display text; the raw capability
+ * resource remains in the cause. Numeric descriptors are unchanged.
  *
  * @category constructors
  * @since 0.1.0
@@ -716,10 +721,14 @@ export const toPlatformError = (options: {
 }): PlatformError =>
   systemError({
     _tag: "PermissionDenied",
-    module: options.module,
-    method: options.method,
+    module: displayField(options.module),
+    method: displayField(options.method),
     description: formatError(options.error),
-    ...(options.pathOrDescriptor === undefined ? {} : { pathOrDescriptor: options.pathOrDescriptor }),
+    ...(options.pathOrDescriptor === undefined ? {} : {
+      pathOrDescriptor: typeof options.pathOrDescriptor === "string"
+        ? displayField(options.pathOrDescriptor)
+        : options.pathOrDescriptor
+    }),
     cause: options.error
   })
 
