@@ -72,5 +72,6 @@ developer-tool entry points share a hard-linked inode: choosing a different
 hard-link name can dispatch the wrong tool. The shared host resolves the interpreter's parent directory and
 follows actual leaf symlinks while preserving a hard-linked executable's entry
 name. Explicit configuration still uses `AtomicFileSystem.layerWith`; domain
-flows do not choose interpreters. The same executable, workspace confinement,
-isolated environment and process limits are enforced on Node and Bun.
+flows do not choose interpreters. Preserve executable identity, workspace confinement,
+environment isolation and process limits in the shared host layer for both
+runtimes; do not recreate those policies inside domain flows.
