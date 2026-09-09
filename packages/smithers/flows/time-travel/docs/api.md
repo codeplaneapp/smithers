@@ -391,7 +391,6 @@ const guard: <A, E, R>(
   action: Effect<A, E, R>
 ) => Effect<A, E | TimeTravelError, R | Journal.Journal>
 
-const fromEntry: (entry: JournalEvent.Entry) => EffectRecord | undefined
 const decodeEntry: (entry: JournalEvent.Entry) => Effect<EffectRecord | undefined, TimeTravelError>
 const fromRecords: (records: ReadonlyArray<EffectRecord>) => Effect<ReadonlyArray<EffectRecord>, TimeTravelError>
 const fromEntries: (entries: ReadonlyArray<JournalEvent.Entry>) => Effect<ReadonlyArray<EffectRecord>, TimeTravelError>
@@ -407,8 +406,9 @@ and the optional `input`, `cacheKey`, `changeId`, `idempotencyKey`,
 `nonce`, and `metadata`. `EffectRecord` is the normalized record read back from
 the journal, carrying the same identity plus `status`, `seq`, and `output`.
 
-Prefer `decodeEntry` over `fromEntry`: the first fails closed on a corrupt
-payload, the second returns `undefined`.
+`decodeEntry` answers `undefined` for an entry of another event type, so a
+projection over a shared journal stays total, and fails `invalid` for a corrupt
+payload under this module's own event type.
 
 ## CompensationHandlers
 

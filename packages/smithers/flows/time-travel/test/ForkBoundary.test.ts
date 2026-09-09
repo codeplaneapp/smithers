@@ -498,10 +498,10 @@ describe("the compensation descriptor on a boundary record", () => {
           )
         )
       )
-      const decoded = EffectBoundary.fromEntry({
+      const decoded = Effect.runSync(EffectBoundary.decodeEntry({
         ...emitted[1],
         seq: 1
-      } as unknown as JournalEvent.Entry)
+      } as unknown as JournalEvent.Entry))
 
       expect(decoded?.compensation).toBe("billing/refund@v2")
       expect(decoded?.status).toBe("succeeded")

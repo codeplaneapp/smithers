@@ -14,7 +14,7 @@
  * `@smthrs/time-travel` depends on `@smthrs/engine-store` (it decodes
  * `RunState`), so the arrow cannot be reversed without a cycle. The record is
  * therefore a **wire contract**, not a shared type: this module writes the
- * shape `EffectBoundary.fromEntry` reads, under the event type that module
+ * shape `EffectBoundary.decodeEntry` reads, under the event type that module
  * owns, and `packages/smithers/flows/time-travel/test/EngineIntegration.test.ts` pins the two
  * together by rewinding across a boundary record this module produced.
  *

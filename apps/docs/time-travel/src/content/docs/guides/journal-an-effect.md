@@ -72,6 +72,9 @@ action's error channel. It never swallows the action's own failure.
 | `attempt`, `nonce`  | Attempt identity, so a retry's records are distinguishable from the original's.                  |
 | `input`, `metadata` | Diagnostic payload carried on the record and its journal metadata.                               |
 
+A `metadata` record merges into the entry's journal metadata field by field.
+Any other value is carried under `upstream`, and an unset one adds no key.
+
 Three declarations are refused before the action runs, all as `invalid`: a
 description that does not decode, a `sourceSeq` at `Number.MAX_SAFE_INTEGER`
 (there is no room for a terminal record above it), and an `irreversible` tier
@@ -99,9 +102,8 @@ const effects = EffectBoundary.fromEntries(entries)
 ```
 
 - `decodeEntry(entry)` decodes one known boundary event and **fails closed**
-  with `invalid` when its durable payload is corrupt.
-- `fromEntry(entry)` returns `undefined` for the same corruption. Prefer
-  `decodeEntry` unless you genuinely want a forward-compatible skip.
+  with `invalid` when its durable payload is corrupt. An entry of another event
+  type answers `undefined`, so the projection stays total over a shared journal.
 - `fromRecords(records)` folds decoded records to one per effect.
 - `fromEntries(entries)` does both, and is what a rewind uses.
 

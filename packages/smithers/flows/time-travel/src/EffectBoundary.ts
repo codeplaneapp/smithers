@@ -8,7 +8,6 @@ import type * as JournalEvent from "@smthrs/journal/JournalEvent"
 import { OwnerId } from "@smthrs/journal/OwnerId"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { error, type TimeTravelError } from "./TimeTravelError.ts"
 
@@ -51,21 +50,19 @@ export type EffectStatus = typeof EffectStatus.Type
 export const eventType = "flows.time-travel.effect-boundary"
 
 /**
- * A normalized effect reconstructed from boundary journal entries.
+ * The evidence one effect carries across its boundary.
  *
- * @since 0.1.0
- * @category models
+ * {@link EffectRecord}, {@link Description}, and the persisted `BoundaryRecord`
+ * are the same effect at three points in its life, so they share this field
+ * list and each adds only what its own end knows.
  */
-export const EffectRecord = Schema.Struct({
+const effectFields = {
   id: Schema.NonEmptyString,
   kind: Schema.NonEmptyString,
   tier: EffectTier,
-  status: EffectStatus,
   runId: Schema.NonEmptyString,
   lineageId: Schema.NonEmptyString,
-  seq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   input: Schema.optionalKey(Schema.Unknown),
-  output: Schema.optionalKey(Schema.Unknown),
   cacheKey: Schema.optionalKey(Schema.NonEmptyString),
   changeId: Schema.optionalKey(Schema.NonEmptyString),
   idempotencyKey: Schema.optionalKey(Schema.NonEmptyString),
@@ -77,10 +74,27 @@ export const EffectRecord = Schema.Struct({
    */
   compensation: Schema.optionalKey(Schema.NonEmptyString),
   residue: Schema.optionalKey(Schema.String),
-  durableBoundary: Schema.Boolean,
-  providerStream: Schema.Boolean,
   attempt: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   nonce: Schema.optionalKey(Schema.NonEmptyString)
+} as const
+
+/**
+ * A normalized effect reconstructed from boundary journal entries.
+ *
+ * A reader knows everything a description carries plus the journal's own
+ * evidence: the recorded `status`, the `seq` it was recorded at, the terminal
+ * `output`, and the two booleans a decode resolves to their defaults.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const EffectRecord = Schema.Struct({
+  ...effectFields,
+  status: EffectStatus,
+  seq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  output: Schema.optionalKey(Schema.Unknown),
+  durableBoundary: Schema.Boolean,
+  providerStream: Schema.Boolean
 })
 /**
  * The value form of {@link EffectRecord}.
@@ -93,34 +107,20 @@ export type EffectRecord = typeof EffectRecord.Type
 /**
  * Description supplied before an action crosses its effect boundary.
  *
+ * A producer knows who owns the write and where it sits in the source stream,
+ * may carry additive `metadata` for the journal entry, and may leave the two
+ * booleans to their defaults; it never supplies journal evidence.
+ *
  * @since 0.1.0
  * @category models
  */
 export const Description = Schema.Struct({
-  id: Schema.NonEmptyString,
-  kind: Schema.NonEmptyString,
-  tier: EffectTier,
-  runId: Schema.NonEmptyString,
-  lineageId: Schema.NonEmptyString,
+  ...effectFields,
   owner: OwnerId,
   sourceId: Schema.NonEmptyString,
   sourceSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  input: Schema.optionalKey(Schema.Unknown),
-  cacheKey: Schema.optionalKey(Schema.NonEmptyString),
-  changeId: Schema.optionalKey(Schema.NonEmptyString),
-  idempotencyKey: Schema.optionalKey(Schema.NonEmptyString),
-  /**
-   * The stable compensation descriptor the adapter that performed this effect
-   * owns. `docs/specs/Concepts/Time Travel Compensation.md` puts it in the
-   * entry so a rewind's handler preflight resolves against recorded evidence
-   * rather than inferring a compensation from the effect kind alone.
-   */
-  compensation: Schema.optionalKey(Schema.NonEmptyString),
-  residue: Schema.optionalKey(Schema.String),
   durableBoundary: Schema.optionalKey(Schema.Boolean),
   providerStream: Schema.optionalKey(Schema.Boolean),
-  attempt: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  nonce: Schema.optionalKey(Schema.NonEmptyString),
   metadata: Schema.optionalKey(Schema.Unknown)
 })
 /**
@@ -134,11 +134,24 @@ export type Description = typeof Description.Type
 const Metadata = Schema.Record(Schema.String, Schema.Unknown)
 const isMetadata = Schema.is(Metadata)
 
+/**
+ * A caller's additive metadata, merged into the journal entry's `meta`.
+ *
+ * A record merges field by field. A non-record value a caller still wants
+ * carried is nested under `upstream` rather than dropped, and no metadata at
+ * all contributes no key, so an unset description never writes
+ * `upstream: undefined` into every boundary entry.
+ */
+const additive = (description: Description): Readonly<Record<string, unknown>> => {
+  if (description.metadata === undefined) return {}
+  return isMetadata(description.metadata) ? description.metadata : { upstream: description.metadata }
+}
+
 const metadata = (
   description: Description,
   status: EffectStatus
 ): Readonly<Record<string, unknown>> => ({
-  ...(isMetadata(description.metadata) ? description.metadata : { upstream: description.metadata }),
+  ...additive(description),
   lineageId: description.lineageId,
   ...(description.cacheKey === undefined ? {} : { cacheKey: description.cacheKey }),
   timeTravel: {
@@ -250,29 +263,11 @@ export const guard = <A, E, R>(
   })
 
 const BoundaryRecord = Schema.Struct({
-  id: Schema.NonEmptyString,
-  kind: Schema.NonEmptyString,
-  tier: EffectTier,
+  ...effectFields,
   status: EffectStatus,
-  runId: Schema.NonEmptyString,
-  lineageId: Schema.NonEmptyString,
-  input: Schema.optionalKey(Schema.Unknown),
   output: Schema.optionalKey(Schema.Unknown),
-  cacheKey: Schema.optionalKey(Schema.NonEmptyString),
-  changeId: Schema.optionalKey(Schema.NonEmptyString),
-  idempotencyKey: Schema.optionalKey(Schema.NonEmptyString),
-  /**
-   * The stable compensation descriptor the adapter that performed this effect
-   * owns. `docs/specs/Concepts/Time Travel Compensation.md` puts it in the
-   * entry so a rewind's handler preflight resolves against recorded evidence
-   * rather than inferring a compensation from the effect kind alone.
-   */
-  compensation: Schema.optionalKey(Schema.NonEmptyString),
-  residue: Schema.optionalKey(Schema.String),
   durableBoundary: Schema.optionalKey(Schema.Boolean),
-  providerStream: Schema.optionalKey(Schema.Boolean),
-  attempt: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  nonce: Schema.optionalKey(Schema.NonEmptyString)
+  providerStream: Schema.optionalKey(Schema.Boolean)
 })
 const BoundaryPayload = Schema.Struct({
   version: Schema.Literal(1),
@@ -280,31 +275,12 @@ const BoundaryPayload = Schema.Struct({
 })
 
 /**
- * Decodes one boundary record from a journal entry.
+ * Decodes one boundary record from a journal entry, failing closed when its
+ * durable payload is corrupt.
  *
- * Unknown event types and malformed additive metadata are ignored so this
- * projection remains forward-compatible with unrelated journal records.
- *
- * @since 0.1.0
- * @category decoders
- */
-export const fromEntry = (
-  entry: JournalEvent.Entry
-): EffectRecord | undefined => {
-  if (entry.eventType !== eventType) return undefined
-  const payload = Option.getOrUndefined(Schema.decodeUnknownOption(BoundaryPayload)(entry.payload))
-  if (payload === undefined) return undefined
-  const effect = payload.effect
-  return {
-    ...effect,
-    seq: entry.seq,
-    durableBoundary: effect.durableBoundary !== false,
-    providerStream: effect.providerStream === true
-  }
-}
-
-/**
- * Decodes a known boundary event, failing closed when its durable payload is corrupt.
+ * An entry of another event type answers `undefined` so this projection stays
+ * forward-compatible over a shared journal, but a corrupt record under this
+ * module's own event type is evidence a rewind must not read past.
  *
  * @since 0.1.0
  * @category decoders
@@ -327,28 +303,20 @@ export const decodeEntry = (
 }
 
 /**
- * The fields every record of one effect must agree on.
+ * The fields every record of one effect must agree on: every {@link EffectRecord}
+ * field except the ones a legal crossing is allowed to change.
  *
  * `guard` writes the `intended` and the terminal record from one
  * {@link Description}, so a disagreement here means two different effects
- * share an id, or a record was rewritten. `input`, `output`, and `residue` are
- * outside the list on purpose: `output` exists only on the terminal record,
- * and the other two are disclosure, not identity.
+ * share an id, or a record was rewritten. `id` groups the records and `seq`
+ * and `status` are what the fold is comparing. `input`, `output`, and
+ * `residue` are outside the list on purpose: `output` exists only on the
+ * terminal record, and the other two are disclosure, not identity.
  */
-const identityFields = [
-  "kind",
-  "tier",
-  "runId",
-  "lineageId",
-  "cacheKey",
-  "changeId",
-  "idempotencyKey",
-  "compensation",
-  "attempt",
-  "nonce",
-  "durableBoundary",
-  "providerStream"
-] as const
+const foldedFields = new Set(["id", "seq", "status", "input", "output", "residue"])
+const identityFields = Object.keys(EffectRecord.fields).filter((field) => !foldedFields.has(field)) as ReadonlyArray<
+  keyof EffectRecord
+>
 
 const conflict = (id: string, detail: string): TimeTravelError =>
   error("invalid", `effect ${id} has conflicting boundary evidence: ${detail}`)

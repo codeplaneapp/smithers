@@ -84,7 +84,7 @@ describe("EffectHandlerRegistry", () => {
       })
     }))
 
-  it("decodes only complete boundary records and retains every supported optional field", () => {
+  it("decodes a complete boundary record, keeps every optional field, and fails closed on a corrupt one", () => {
     const valid = (overrides: Record<string, unknown> = {}): JournalEvent.Entry => ({
       runId: "run" as JournalEvent.RunId,
       seq: 4 as JournalEvent.Seq,
@@ -117,7 +117,7 @@ describe("EffectHandlerRegistry", () => {
       },
       meta: {}
     })
-    const decoded = EffectBoundary.fromEntry(valid())
+    const decoded = Effect.runSync(EffectBoundary.decodeEntry(valid()))
 
     expect(decoded).toEqual({
       id: "effect",
@@ -140,18 +140,20 @@ describe("EffectHandlerRegistry", () => {
     })
     for (const tier of ["sealed", "compensable", "irreversible"] as const) {
       for (const status of ["intended", "succeeded", "unknown"] as const) {
-        expect(EffectBoundary.fromEntry(valid({ tier, status }))).toMatchObject({ tier, status })
+        expect(Effect.runSync(EffectBoundary.decodeEntry(valid({ tier, status })))).toMatchObject({ tier, status })
       }
     }
     for (const payload of [null, [], {}, { effect: null }, { effect: {} }]) {
-      expect(EffectBoundary.fromEntry({ ...valid(), payload })).toBeUndefined()
+      expect(Effect.runSync(Effect.flip(EffectBoundary.decodeEntry({ ...valid(), payload }))))
+        .toMatchObject({ code: "invalid" })
     }
     for (
       const [field, value] of Object.entries({ id: 1, kind: 1, tier: "bad", status: "bad", runId: 1, lineageId: 1 })
     ) {
-      expect(EffectBoundary.fromEntry(valid({ [field]: value }))).toBeUndefined()
+      expect(Effect.runSync(Effect.flip(EffectBoundary.decodeEntry(valid({ [field]: value })))))
+        .toMatchObject({ code: "invalid" })
     }
-    expect(EffectBoundary.fromEntry({ ...valid(), eventType: "other" })).toBeUndefined()
+    expect(Effect.runSync(EffectBoundary.decodeEntry({ ...valid(), eventType: "other" }))).toBeUndefined()
   })
 
   it("uses durable defaults and folds a legal crossing to its terminal record in sequence order", () => {
@@ -169,7 +171,7 @@ describe("EffectHandlerRegistry", () => {
       },
       meta: {}
     })
-    expect(EffectBoundary.fromEntry(entry(1, "a", "intended"))).toMatchObject({
+    expect(Effect.runSync(EffectBoundary.decodeEntry(entry(1, "a", "intended")))).toMatchObject({
       durableBoundary: true,
       providerStream: false
     })
@@ -473,6 +475,45 @@ describe("EffectHandlerRegistry", () => {
           status: "succeeded"
         }
       })
+    }))
+
+  it.effect("carries non-record metadata under `upstream` and writes no key when a description has none", () =>
+    Effect.gen(function*() {
+      const emitted: Array<JournalEvent.Input> = []
+      const journal = Journal.makeNoop({
+        emitDurable: (input) =>
+          Effect.sync(() => {
+            emitted.push(input)
+            return {
+              _tag: "Accepted" as const,
+              seq: emitted.length as JournalEvent.Seq,
+              sourceSeq: emitted.length as JournalEvent.SourceSeq
+            }
+          })
+      })
+      const boundary = (
+        id: string,
+        metadata?: unknown
+      ) =>
+        EffectBoundary.guard({
+          id,
+          kind: "mail.send",
+          tier: "sealed",
+          runId: "run",
+          lineageId: "run/root",
+          sourceId: "adapter",
+          ...boundaryAuthority,
+          ...(metadata === undefined ? {} : { metadata })
+        }, Effect.succeed("sent")).pipe(Effect.provide(Layer.succeed(Journal.Journal, journal)))
+
+      yield* boundary("string-metadata", "legacy metadata")
+      yield* boundary("no-metadata")
+
+      expect(emitted[0]?.meta).toMatchObject({ upstream: "legacy metadata", lineageId: "run/root" })
+      // An unset description contributes no key at all: `{ upstream: undefined }`
+      // would put a dead key on every boundary entry the engine writes.
+      expect(Object.keys(emitted[2]?.meta ?? {})).not.toContain("upstream")
+      expect(emitted[2]?.meta).toMatchObject({ lineageId: "run/root" })
     }))
 
   it.effect("fences the intended append and refuses to re-execute a duplicate boundary", () =>
