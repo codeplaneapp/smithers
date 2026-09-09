@@ -18,9 +18,20 @@ import type { NativeRepositories } from "../mainview/native/NativeBridge"
 import type { AgentPort } from "../mainview/runtime/AgentPort"
 import { createAppController } from "../mainview/state/AppController"
 import { createAppStore } from "../mainview/state/AppStore"
-import { DOTTED_IDENTIFIER, extractLiterals, ID_PREFIX, segmentsOf, sourceFiles } from "./Literals"
+import {
+  DOTTED_IDENTIFIER,
+  extractLiterals,
+  FIXTURE_TREE,
+  ID_PREFIX,
+  segmentsOf,
+  sourceFiles,
+  TEST_FILE
+} from "./Literals"
 
 const from = (relative: string): string => fileURLToPath(new URL(relative, import.meta.url))
+
+/** The shape of a dotted key's static head: `smithers-mvp.`, `command.form.`. */
+const DOTTED_HEAD = /^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*\.$/
 
 /** `apps/ui`. */
 export const UI_APP = from("../../")
@@ -48,10 +59,22 @@ export const COMPONENT_LIBRARY = from("../../node_modules/@smthrs/ui/src")
 export const GATEWAY_LIBRARY = from("../../node_modules/@smthrs/gateway/src")
 
 /**
+ * Whether a file asserts against the app instead of building it.
+ *
+ * A unit test and the fixtures it imports spell the same literals a browser
+ * suite does, so counting them as the authority makes the presence rule say
+ * "some test still mentions this name" — the answer this pin exists to reject.
+ * A retired flow id or card-id prefix would then survive for as long as one
+ * stale test kept spelling it, which is longer than the rename it hides.
+ */
+export const assertsAgainstTheApp = (file: string): boolean => TEST_FILE.test(file) || FIXTURE_TREE.test(file)
+
+/**
  * Product source: everything the app is built from, minus the trees under
- * test. Excluding the checklist and this directory is what makes the presence
- * rule mean "the app still uses this name" rather than "some test still
- * mentions it".
+ * test and the files that only assert against it. Excluding the checklist,
+ * this directory, and every test and fixture is what makes the presence rule
+ * mean "the app still spells this name" rather than "some test still mentions
+ * it".
  */
 export const productSourceFiles = (): ReadonlyArray<string> =>
   [
@@ -63,7 +86,13 @@ export const productSourceFiles = (): ReadonlyArray<string> =>
       .map((entry) => join(UI_APP, entry.name)),
     ...sourceFiles(UI_SRC),
     ...sourceFiles(SHARED_SRC)
-  ].filter((file) => !file.startsWith(LAUNCH_CHECKLIST) && !file.startsWith(CONFORMANCE))
+  ].filter((file) =>
+    !file.startsWith(LAUNCH_CHECKLIST) && !file.startsWith(CONFORMANCE) && !assertsAgainstTheApp(file)
+  )
+
+/** The gateway source the app reads through, its own suites left out. */
+const gatewaySourceFiles = (): ReadonlyArray<string> =>
+  sourceFiles(GATEWAY_LIBRARY).filter((file) => !assertsAgainstTheApp(file))
 
 /**
  * The words card kinds and card-id prefixes are built from. A runner's own id
@@ -166,11 +195,15 @@ export const manifestFlowNames = async (): Promise<ReadonlySet<string>> => {
  * call, and a `dataset` property write. Sources are the app's own components
  * and the component library the app renders through — a CDP selector naming
  * anything else matches nothing, which is exactly what seventeen stale
- * `data-command` selectors did after the rename.
+ * `data-command` selectors did after the rename. Tests are left out for the
+ * same reason they are left out of the source corpus: an attribute only a
+ * test renders is not one the app puts on the page.
  */
 export const emittedDataAttributes = (): ReadonlySet<string> => {
   const emitted = new Set<string>()
-  for (const file of [...sourceFiles(UI_SRC), ...sourceFiles(COMPONENT_LIBRARY)]) {
+  const rendered = [...sourceFiles(UI_SRC), ...sourceFiles(COMPONENT_LIBRARY)]
+    .filter((candidate) => !assertsAgainstTheApp(candidate))
+  for (const file of rendered) {
     const parsed = ts.createSourceFile(
       file,
       readFileSync(file, "utf8"),
@@ -250,12 +283,42 @@ export const stampedDataAttributes = (trees: ReadonlyArray<string>): ReadonlySet
  */
 export const productDottedIdentifiers = (): ReadonlySet<string> => {
   const owned = new Set<string>()
-  for (const file of [...productSourceFiles(), ...sourceFiles(GATEWAY_LIBRARY)]) {
+  for (const file of [...productSourceFiles(), ...gatewaySourceFiles()]) {
     for (const literal of extractLiterals(file, readFileSync(file, "utf8"))) {
       if (literal.form === "string" && DOTTED_IDENTIFIER.test(literal.value)) owned.add(literal.value)
     }
   }
   return owned
+}
+
+/**
+ * The static heads of the dotted keys the app composes rather than spells.
+ *
+ * `DurableCollection.ts` writes every collection to `` `smithers-mvp.${id}` ``,
+ * so no file spells `smithers-mvp.app-messages` whole even though it is the
+ * app's own storage key. A head here plus a word the app spells is what lets
+ * the rule accept such a key without accepting every dotted string: rename
+ * either half and the literal orphans again.
+ */
+export const composedDottedHeads = (): ReadonlySet<string> => {
+  const heads = new Set<string>()
+  for (const file of [...productSourceFiles(), ...gatewaySourceFiles()]) {
+    for (const literal of extractLiterals(file, readFileSync(file, "utf8"))) {
+      if (literal.form === "template-head" && DOTTED_HEAD.test(literal.value)) heads.add(literal.value)
+    }
+  }
+  return heads
+}
+
+/** Every plain string literal the product source spells, the tail half of a composed key. */
+export const productStringLiterals = (): ReadonlySet<string> => {
+  const spelled = new Set<string>()
+  for (const file of [...productSourceFiles(), ...gatewaySourceFiles()]) {
+    for (const literal of extractLiterals(file, readFileSync(file, "utf8"))) {
+      if (literal.form === "string") spelled.add(literal.value)
+    }
+  }
+  return spelled
 }
 
 /**

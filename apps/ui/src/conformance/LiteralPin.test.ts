@@ -31,9 +31,11 @@ import {
 } from "./Literals"
 import { type Violation, violationsOf, type Vocabularies } from "./Rules"
 import {
+  assertsAgainstTheApp,
   cardIdPrefixes,
   cardKinds,
   cardObjectFields,
+  composedDottedHeads,
   declaredFlowNames,
   E2E,
   emittedDataAttributes,
@@ -42,9 +44,11 @@ import {
   manifestFlowNames,
   productDottedIdentifiers,
   productSourceFiles,
+  productStringLiterals,
   SCRIPTS,
   stampedDataAttributes,
-  UI_APP
+  UI_APP,
+  UI_SRC
 } from "./Vocabulary"
 
 /*
@@ -151,6 +155,8 @@ const vocabularies: Vocabularies = {
   cardIdPrefixes: cardIdPrefixes(),
   dataAttributes: new Set([...emittedDataAttributes(), ...stampedDataAttributes(TREES)]),
   dottedIdentifiers: productDottedIdentifiers(),
+  composedDottedHeads: composedDottedHeads(),
+  productStringLiterals: productStringLiterals(),
   cardObjectFields: cardObjectFields(),
   idVocabularySegments: idVocabularySegments()
 }
@@ -167,22 +173,24 @@ describe("the vocabularies are derived from the app and are never empty", () => 
    * controller behind `expect(listed.length).toBeGreaterThan(40)`.
    */
   test("the product source corpus is the whole app", () => {
-    // 126 files today. A corpus that collapses below half the app is a
-    // broken path, not a smaller app.
+    // 325 files today, the app's own source and the shared wire model, with
+    // every test and fixture dropped. A corpus that collapses below half the
+    // app is a broken path, not a smaller app.
     expect(productSourceFiles().length).toBeGreaterThan(60)
   })
 
-  test("the discovery includes the app's own test files", () => {
+  test("the discovery excludes the app's own test files", () => {
     /*
-     * The corpus is derivation, not hand-listing: sourceFiles takes every
-     * .ts/.tsx under src, tests included, and a filter that quietly
-     * dropped them would shrink the vocabulary without failing any floor.
-     * A name only a test asserts is still product vocabulary, so the
-     * corpus must contain them.
+     * The authority answers "does the app still spell this name", so a file
+     * that only asserts against the app cannot be part of it. Leaving the
+     * unit tests in kept a retired name alive for as long as one stale test
+     * mentioned it, which is the rename this pin exists to catch. The second
+     * expectation is the floor under the first: the tests are really there
+     * to exclude, so a corpus with none of them is an exclusion and not a
+     * broken path.
      */
-    expect(
-      productSourceFiles().some((file) => file.endsWith(".test.ts") || file.endsWith(".test.tsx"))
-    ).toBe(true)
+    expect(productSourceFiles().filter((file) => assertsAgainstTheApp(file))).toEqual([])
+    expect(sourceFiles(UI_SRC).filter((file) => assertsAgainstTheApp(file)).length).toBeGreaterThan(100)
   })
 
   test("every card kind the wire model declares is derived", () => {
@@ -227,7 +235,7 @@ describe("the vocabularies are derived from the app and are never empty", () => 
   })
 
   test("the card id prefixes and dotted identifiers are derived", () => {
-    // 32 prefixes and 184 dotted identifiers today.
+    // 186 prefixes and 477 dotted identifiers today.
     expect(vocabularies.cardIdPrefixes.size).toBeGreaterThan(10)
     expect(vocabularies.cardIdPrefixes.has("flow-run-")).toBe(true)
     expect(vocabularies.dottedIdentifiers.size).toBeGreaterThan(100)

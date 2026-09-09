@@ -471,10 +471,24 @@ export const segmentsOf = (value: string): ReadonlyArray<string> =>
  * have the dotted shape but name a build artifact, so the dotted rule skips
  * them rather than sending every new fixture path to the allowlist. `db` and
  * `sqlite` are here because a script that stands up a real control plane names
- * the database file it writes.
+ * the database file it writes, and `c` because the packaged suite compiles a
+ * throwaway `sleep.c` to hold a second process group open.
  */
 export const FILE_NAME =
-  /\.(ts|tsx|js|jsx|mjs|cjs|json|jsonc|html|css|md|map|txt|lock|toml|ya?ml|png|svg|ico|woff2?|wasm|tar|t?gz|zip|dmg|db|sqlite)$/
+  /\.(ts|tsx|js|jsx|mjs|cjs|json|jsonc|html|css|md|map|txt|lock|toml|ya?ml|png|svg|ico|woff2?|wasm|tar|t?gz|zip|dmg|db|sqlite|c|h)$/
+
+/**
+ * The name of a file that asserts against the app instead of building it:
+ * `AppStore.test.ts`, `onboarding.spec.ts`.
+ */
+export const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/
+
+/**
+ * A tree of canned data only a suite imports, such as
+ * `src/mainview/cards/fixtures/CodingPlan.ts`. Its literals are the suite's,
+ * not the app's.
+ */
+export const FIXTURE_TREE = /(?:^|\/)fixtures\//
 
 /**
  * Every `data-*` attribute name spelled inside a literal.

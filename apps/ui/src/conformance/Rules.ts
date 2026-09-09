@@ -46,6 +46,13 @@ export interface Vocabularies {
   readonly dataAttributes: ReadonlySet<string>
   readonly dottedIdentifiers: ReadonlySet<string>
   /**
+   * The static heads of the dotted keys the app composes rather than spells,
+   * such as the `smithers-mvp.` every durable collection is stored under.
+   */
+  readonly composedDottedHeads: ReadonlySet<string>
+  /** Every plain string literal the product source spells, the tail half of a composed key. */
+  readonly productStringLiterals: ReadonlySet<string>
+  /**
    * The property names a card carries besides `kind`. They are what tells a
    * scripted card frame from the many other objects in the suites with a
    * `kind` of their own — a stream delta, a store config, a submit union.
@@ -89,6 +96,24 @@ const AFFIX_CALLS = new Set(["startsWith", "endsWith"])
 const composedPrefix = (value: string, prefixes: ReadonlySet<string>): boolean =>
   [...prefixes].some((head) =>
     value.length > head.length && value.startsWith(head) && prefixes.has(value.slice(head.length))
+  )
+
+/**
+ * Whether a dotted key is one the app composes out of two names it owns.
+ *
+ * `DurableCollection.ts` stores every collection at `` `smithers-mvp.${id}` ``,
+ * so `smithers-mvp.app-messages` is the app's own key that no file spells
+ * whole. Both halves must be product source — the head a template the app
+ * interpolates into, the tail a word the app spells — so renaming either half
+ * still orphans the literal.
+ */
+const composedDotted = (
+  value: string,
+  heads: ReadonlySet<string>,
+  words: ReadonlySet<string>
+): boolean =>
+  [...heads].some((head) =>
+    value.length > head.length && value.startsWith(head) && words.has(value.slice(head.length))
   )
 
 /**
@@ -214,6 +239,7 @@ export const violationsOf = (literal: ExtractedLiteral, vocabularies: Vocabulari
   if (
     literal.form === "string" && DOTTED_IDENTIFIER.test(literal.value) && !FILE_NAME.test(literal.value)
     && !vocabularies.dottedIdentifiers.has(literal.value)
+    && !composedDotted(literal.value, vocabularies.composedDottedHeads, vocabularies.productStringLiterals)
   ) {
     found.push({
       ...at,
