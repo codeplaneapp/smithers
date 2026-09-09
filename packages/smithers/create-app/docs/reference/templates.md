@@ -125,6 +125,20 @@ in-memory EVM fork, six panes, a full Worker, and a Cloudflare deploy.
 - **Tests.** Every flow replays a fixture, plus suites for the wire contract,
   the stream, the turn, the Worker, and the Tevm fork.
 
+### Session transcript order
+
+`GET /api/session?id=` returns `messages`, `cards`, and ordered `entries`.
+Each entry references a `messageId` or `cardId` and has kind `message` or
+`card`. Both tables share a persistent sequence; timestamps do not determine
+new entry order. Updating a card preserves its original position and timestamp.
+The shell resolves these references directly, including when polling a run.
+
+Existing SQLite sessions migrate once in timestamp order, then table-local
+rowid order, with cards before messages for remaining ties. Old rows cannot
+recover cross-table write order within a timestamp tie or a card's timestamp
+before replacement. Responses from older Workers without `entries` retain the
+legacy messages-then-cards display until the Worker is upgraded.
+
 ### The turn is mocked by default
 
 `APP_MOCK_TURN` defaults to `1`, and the Worker streams a fixed sequence of

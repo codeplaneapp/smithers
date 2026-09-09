@@ -74,12 +74,14 @@ const SCHEMA = [
      id TEXT PRIMARY KEY,
      role TEXT NOT NULL,
      text TEXT NOT NULL,
-     at INTEGER NOT NULL
+     at INTEGER NOT NULL,
+     seq INTEGER NOT NULL
    )`,
   `CREATE TABLE IF NOT EXISTS cards (
      id TEXT PRIMARY KEY,
      json TEXT NOT NULL,
-     at INTEGER NOT NULL
+     at INTEGER NOT NULL,
+     seq INTEGER NOT NULL
    )`,
   `CREATE TABLE IF NOT EXISTS flows (
      id TEXT PRIMARY KEY,
@@ -166,7 +168,10 @@ export class AppSession extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    for (const statement of SCHEMA) ctx.storage.sql.exec(statement)
+    ctx.storage.transactionSync(() => {
+      for (const statement of SCHEMA) ctx.storage.sql.exec(statement)
+      this.migrateTranscript()
+    })
   }
 
   private get sql(): SqlStorage {
@@ -175,15 +180,51 @@ export class AppSession extends DurableObject<Env> {
 
   // -- transcript ----------------------------------------------------------
 
+  /**
+   * Old tables have no shared clock. Recover timestamp order once, breaking
+   * ties by table-local insertion order, then kind (cards before messages).
+   * Exact cross-table order for old timestamp ties cannot be recovered.
+   */
+  private migrateTranscript(): void {
+    let migrate = false
+    for (const table of ["messages", "cards"] as const) {
+      const columns = this.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray()
+      if (columns.some((column) => column.name === "seq")) continue
+      this.sql.exec(`ALTER TABLE ${table} ADD COLUMN seq INTEGER`)
+      migrate = true
+    }
+    if (!migrate) return
+    const rows = this.sql.exec<{ kind: string; id: string }>(`
+      SELECT 'message' AS kind, id, at, rowid AS position FROM messages
+      UNION ALL
+      SELECT 'card' AS kind, id, at, rowid AS position FROM cards
+      ORDER BY at ASC, position ASC, kind ASC
+    `).toArray()
+    for (const [index, row] of rows.entries()) {
+      const table = row.kind === "message" ? "messages" : "cards"
+      this.sql.exec(`UPDATE ${table} SET seq = ? WHERE id = ?`, index + 1, row.id)
+    }
+  }
+
+  /** Synchronous writes share one sequence even within a millisecond. */
+  private nextSequence(): number {
+    return this.sql.exec<{ seq: number }>(`
+      SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM (
+        SELECT seq FROM messages UNION ALL SELECT seq FROM cards
+      )
+    `).toArray()[0]!.seq
+  }
+
   /** Appends one transcript row and returns it. */
   appendMessage(role: Message["role"], text: string): Message {
     const message: Message = { id: crypto.randomUUID(), role, text, at: Date.now() }
     this.sql.exec(
-      "INSERT INTO messages (id, role, text, at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO messages (id, role, text, at, seq) VALUES (?, ?, ?, ?, ?)",
       message.id,
       message.role,
       message.text,
-      message.at
+      message.at,
+      this.nextSequence()
     )
     return message
   }
@@ -191,23 +232,25 @@ export class AppSession extends DurableObject<Env> {
   /** Persists a card, replacing any earlier version with the same id. */
   appendCard(card: AppCard): void {
     this.sql.exec(
-      "INSERT OR REPLACE INTO cards (id, json, at) VALUES (?, ?, ?)",
+      `INSERT INTO cards (id, json, at, seq) VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
       card.id,
       JSON.stringify(card),
-      Date.now()
+      Date.now(),
+      this.nextSequence()
     )
   }
 
   private messages(): Array<Message> {
     return this.sql
-      .exec<MessageRow>("SELECT id, role, text, at FROM messages ORDER BY at ASC")
+      .exec<MessageRow>("SELECT id, role, text, at FROM messages ORDER BY seq ASC")
       .toArray()
       .flatMap((row) => (isRole(row.role) ? [{ id: row.id, role: row.role, text: row.text, at: row.at }] : []))
   }
 
   private cards(): Array<AppCard> {
     return this.sql
-      .exec<CardRow>("SELECT id, json, at FROM cards ORDER BY at ASC")
+      .exec<CardRow>("SELECT id, json, at FROM cards ORDER BY seq ASC")
       .toArray()
       .map((row) => JSON.parse(row.json) as AppCard)
   }
@@ -216,7 +259,15 @@ export class AppSession extends DurableObject<Env> {
 
   /** `GET /api/session?id=` — everything the shell needs to redraw. */
   state(id: string): SessionState {
-    return { id, messages: this.messages(), cards: this.cards(), busy: this.busy }
+    const entries = this.sql.exec<{ kind: string; id: string }>(`
+      SELECT 'message' AS kind, id, seq FROM messages WHERE role IN ('user', 'assistant', 'system')
+      UNION ALL
+      SELECT 'card' AS kind, id, seq FROM cards
+      ORDER BY seq ASC
+    `).toArray().map((row) => row.kind === "message"
+      ? { kind: "message" as const, messageId: row.id }
+      : { kind: "card" as const, cardId: row.id })
+    return { id, messages: this.messages(), cards: this.cards(), entries, busy: this.busy }
   }
 
   /**
@@ -422,7 +473,7 @@ export class AppSession extends DurableObject<Env> {
   /** The session's first user message, which is what the Recent column shows. */
   private title(fallback: string): string {
     const rows = this.sql
-      .exec<{ text: string }>("SELECT text FROM messages WHERE role = 'user' ORDER BY at ASC LIMIT 1")
+      .exec<{ text: string }>("SELECT text FROM messages WHERE role = 'user' ORDER BY seq ASC LIMIT 1")
       .toArray()
     return titleFrom(rows[0]?.text ?? fallback)
   }

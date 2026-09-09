@@ -277,15 +277,24 @@ export const actions = {
       if (!isCurrent() || session.id !== sessionId) return
       const cards: Record<string, AppCard> = {}
       for (const card of session.cards) cards[card.id] = card
-      const entries: ReadonlyArray<TranscriptEntry> = [
-        ...session.messages.map((message): TranscriptEntry => ({
-          kind: "message",
-          id: message.id,
-          role: message.role,
-          text: message.text
-        })),
-        ...session.cards.map((card): TranscriptEntry => ({ kind: "card", id: `card:${card.id}`, cardId: card.id }))
+      const messages = new Map(session.messages.map((message) => [message.id, message]))
+      // Old Workers did not return shared order or card timestamps. Retain
+      // their messages-then-cards fallback until the Worker is upgraded.
+      const order = session.entries ?? [
+        ...session.messages.map((message) => ({ kind: "message" as const, messageId: message.id })),
+        ...session.cards.map((card) => ({ kind: "card" as const, cardId: card.id }))
       ]
+      const entries = order.flatMap((entry): Array<TranscriptEntry> => {
+        if (entry.kind === "card") {
+          return cards[entry.cardId] === undefined
+            ? []
+            : [{ kind: "card", id: `card:${entry.cardId}`, cardId: entry.cardId }]
+        }
+        const message = messages.get(entry.messageId)
+        return message === undefined
+          ? []
+          : [{ kind: "message", id: message.id, role: message.role, text: message.text }]
+      })
       // Cards have no revision timestamp: the same id can hold new HTML or
       // flow progress. Compare the decoded JSON content, retaining unchanged
       // slices so a poll does not remount cards or notify subscribers.

@@ -75,6 +75,12 @@ describe("SessionState", () => {
       { kind: "pane", id: "c1", name: "balances", props: { address: "0xabc" }, fullscreen: false },
       { kind: "html", id: "c2", html: "<p>ok</p>" }
     ],
+    entries: [
+      { kind: "message", messageId: "m1" },
+      { kind: "card", cardId: "c1" },
+      { kind: "message", messageId: "m2" },
+      { kind: "card", cardId: "c2" }
+    ],
     busy: false
   }
 
@@ -84,6 +90,11 @@ describe("SessionState", () => {
 
   test("keeps an empty session decodable", () => {
     const empty: SessionState = { id: "s2", messages: [], cards: [], busy: true }
+    expect(roundTrip(SessionState, empty)).toEqual(empty)
+  })
+
+  test("round-trips an explicitly empty entry sequence", () => {
+    const empty: SessionState = { id: "s2", messages: [], cards: [], entries: [], busy: false }
     expect(roundTrip(SessionState, empty)).toEqual(empty)
   })
 

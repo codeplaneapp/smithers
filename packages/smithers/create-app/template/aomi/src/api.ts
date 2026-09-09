@@ -59,6 +59,11 @@ export const SessionState = Schema.Struct({
   id: Schema.String,
   messages: Schema.Array(Message),
   cards: Schema.Array(AppCard),
+  /** Shared write order. Absent only on responses from older Workers. */
+  entries: Schema.optionalKey(Schema.Array(Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("message"), messageId: Schema.String }),
+    Schema.Struct({ kind: Schema.Literal("card"), cardId: Schema.String })
+  ]))),
   /** True while a turn is streaming for this session. */
   busy: Schema.Boolean
 })

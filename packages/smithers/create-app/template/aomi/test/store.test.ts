@@ -54,6 +54,36 @@ afterEach(() => {
 })
 
 describe("session loads", () => {
+  it("rehydrates interleaved entries and keeps an updated card in place", async () => {
+    const body = {
+      ...session("selected", [runCard()]),
+      messages: [
+        { id: "m1", role: "user", text: "build", at: 1 },
+        { id: "m2", role: "assistant", text: "started", at: 1 }
+      ],
+      entries: [
+        { kind: "message", messageId: "m1" },
+        { kind: "card", cardId: "execution" },
+        { kind: "message", messageId: "m2" }
+      ]
+    }
+    actions.selectSession("selected")
+    await respond(requestAt(0), body)
+    expect(store.getSnapshot().entries.map((entry) => entry.id)).toEqual(["m1", "card:execution", "m2"])
+    const previous = store.getSnapshot().entries
+    const reload = actions.loadSession("selected")
+    await respond(requestAt(1), { ...body, cards: [runCard("completed")] })
+    await reload
+    expect(store.getSnapshot().entries).toBe(previous)
+    expect(store.getSnapshot().cards.execution).toMatchObject({ phase: "completed" })
+  })
+
+  it("still loads legacy responses without entries", async () => {
+    actions.selectSession("legacy")
+    await respond(requestAt(0), session("legacy", [runCard()]))
+    expect(store.getSnapshot().entries.map((entry) => entry.id)).toEqual(["message:legacy", "card:execution"])
+  })
+
   it.each(["newer-first", "older-first"])("keeps the latest selection when responses arrive %s", async (order) => {
     actions.selectSession("older")
     actions.selectSession("newer")
