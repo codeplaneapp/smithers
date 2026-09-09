@@ -536,13 +536,19 @@ const reviewDocsAgainstCode = ReviewDocsAgainstCode({
   ],
   context: [
     Smithers.glob("//packages/*/README.md"),
-    Smithers.glob("//packages/*/docs/*.md"),
     Smithers.glob("//packages/*/*/README.md"),
-    Smithers.glob("//packages/*/*/docs/*.md"),
     Smithers.glob("//packages/*/*/*/README.md"),
-    Smithers.glob("//packages/*/*/*/docs/*.md"),
-    Smithers.glob("//apps/site/src/content/docs/**/*.md"),
-    Smithers.glob("//apps/site/src/content/docs/**/*.mdx")
+    // Keep the shared context below LlmLint's 2 MiB cap. Package-level
+    // reviews can opt into their full local docs; this overview selects
+    // concepts plus the runtime and build API sections explicitly.
+    Smithers.glob("//apps/site/src/content/docs/docs/concepts/*.mdx"),
+    Smithers.glob("//apps/site/src/content/docs/docs/reference/api/flows.mdx"),
+    Smithers.glob("//apps/site/src/content/docs/docs/reference/api/flow.mdx"),
+    Smithers.glob("//apps/site/src/content/docs/docs/reference/api/plan.mdx"),
+    Smithers.glob("//apps/site/src/content/docs/docs/reference/api/journal.mdx"),
+    Smithers.glob("//apps/site/src/content/docs/docs/reference/api/targets.mdx"),
+    Smithers.glob("//apps/site/src/content/docs/docs/reference/api/build.mdx"),
+    Smithers.glob("//apps/site/src/content/docs/docs/reference/api/build-cli.mdx")
   ]
 })
 

@@ -10,9 +10,9 @@
  * the failure threshold.
  *
  * Every glob a macro emits is workspace-rooted. The review matches its
- * `include` and `context` patterns against workspace-relative paths that
- * `git diff` listed, which is a different frame from the package-relative one
- * a PACKAGE.ts writes in, so the macro resolves each declared pattern against
+ * `include` patterns against workspace-relative paths that `git diff` listed
+ * and expands `context` against the workspace. A PACKAGE.ts writes in a
+ * package-relative frame, so the macro resolves each declared pattern against
  * `cwd` and re-roots it. The diff itself is narrowed to the same patterns, so
  * one package's review re-keys on that package's changes alone.
  *
@@ -59,7 +59,9 @@ export interface Options {
   readonly include?: ReadonlyArray<Input.Glob> | undefined
   /**
    * Files read into every batch prompt whether or not they changed. Patterns
-   * resolve the same way `include` does.
+   * resolve the same way `include` does, but execution crosses package boundaries.
+   * A nonempty declaration must match at least one file and fit LlmLint's
+   * 512-file and 2 MiB aggregate context limits.
    */
   readonly context?: ReadonlyArray<Input.Glob> | undefined
   /** @default [] */
@@ -172,9 +174,12 @@ export const ReviewTagsMigrationsAndKeys = (options: Options = {}): ReviewLint =
  * Reviews changed public APIs against the prose that documents them.
  *
  * `context` defaults to the package's own `README.md` and `docs/*.md` plus the
- * documentation site's hand-written pages under
- * `//apps/site/src/content/docs`. Those files are read into every batch prompt
- * whether or not they changed, so the review compares them against the diff.
+ * site API reference pages at
+ * `//apps/site/src/content/docs/docs/reference/api/<package>*.mdx`, where
+ * `<package>` is the last directory in `cwd`. At the workspace root only the
+ * local prose is selected. Override `context` to opt into concept or guide
+ * sections. Context crosses package boundaries and is read into every batch
+ * whether or not it changed; the set must fit LlmLint's 2 MiB aggregate cap.
  * Findings report at `warning` while the rubric is tuned.
  *
  * @example
@@ -187,21 +192,23 @@ export const ReviewTagsMigrationsAndKeys = (options: Options = {}): ReviewLint =
  * @category macros
  * @since 0.1.0
  */
-export const ReviewDocsAgainstCode = (options: Options = {}): ReviewLint =>
-  review(options, {
-    summary: "A cheap Codex review of changed public APIs against the hand-written reference and concept pages.",
+export const ReviewDocsAgainstCode = (options: Options = {}): ReviewLint => {
+  const packageName = Input.resolvePath("", options.cwd ?? ".").replace(/\/$/, "").split("/").at(-1)!
+  return review(options, {
+    summary: "A cheap Codex review of changed public APIs against package prose and matching site API references.",
     include: [Input.glob("src/**")],
     context: [
       Input.glob("README.md"),
       Input.glob("docs/*.md"),
-      Input.glob("//apps/site/src/content/docs/**/*.md"),
-      Input.glob("//apps/site/src/content/docs/**/*.mdx")
+      ...(packageName === "." ? [] : [
+        Input.glob(`//apps/site/src/content/docs/docs/reference/api/${packageName}*.mdx`)
+      ])
     ],
     batchSize: 3,
     failOn: "warning",
     rubric: [
-      "The context files are the hand-written package reference, concept, and guide pages.",
-      "They did not change in this diff. Compare them against the changed source.",
+      "The context files are package prose and selected site reference, concept, or guide pages.",
+      "Compare their current contents against the changed source, whether or not they changed.",
       "1. A public export whose reference page still describes removed, renamed, or changed",
       "   behavior is a warning against the reference page.",
       "2. A new public export absent from its package's reference page is a warning against the",
@@ -211,6 +218,7 @@ export const ReviewDocsAgainstCode = (options: Options = {}): ReviewLint =>
       "Private helpers, tests, and internal modules are out of scope."
     ].join("\n")
   })
+}
 
 /**
  * Reviews changed exports against the JSDoc that describes them.

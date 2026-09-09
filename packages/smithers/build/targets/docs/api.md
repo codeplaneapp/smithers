@@ -192,6 +192,16 @@ your Vitest configuration controls test scheduling.
 Use `LlmLint` with explicit instructions, files, model, and failure threshold.
 Keep repository review rubrics and documentation paths in your own configuration.
 
+`LlmLint.context` accepts workspace-relative reference globs, with an optional
+`//` prefix. Execution expands them across nested `PACKAGE.ts` boundaries and
+reads them into every batch, whether or not they changed. Workspace confinement,
+ignore rules, and symlink rejection still apply. A nonempty context declaration
+that matches no files fails with a `read` diagnostic; individual unmatched globs
+are allowed when another glob supplies context. Use `context: []` for a review
+without references. Context is limited to 512 files, 1 MiB per file, and 2 MiB
+in total. Select specific reference pages or sections instead of an entire
+documentation site.
+
 The emitted Vitest target carries `exclusive: true`, so wildcard `ci` and
 `test` selections omit it regardless of its exported key. Select the matrix
 explicitly with `smithers-build test '//packages/...:faults' --jobs 1`, or opt

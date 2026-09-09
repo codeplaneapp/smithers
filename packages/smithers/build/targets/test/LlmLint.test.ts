@@ -180,6 +180,7 @@ beforeEach(async () => {
   await write("src/a.ts", "export const a = 1\n")
   await write("src/b.ts", "export const b = 2\n")
   await write("README.md", "# base\n")
+  await write("docs/PACKAGE.ts", "export const Package = {}\n")
   await write("docs/reference/a.md", "The `a` export returns 1.\n")
   await git("init", "--initial-branch=main")
   await git("add", ".")
@@ -194,11 +195,20 @@ describe("LlmLint.review context files", () => {
   it("appends every context file to every batch prompt, separated from the changed files", async () => {
     await write("src/a.ts", "export const a = 3\n")
     await write("src/b.ts", "export const b = 4\n")
+    await write("docs/reference/excluded.md", "excluded reference")
+    await write("docs/reference/ignored.md", "ignored reference")
+    await write("docs/.gitignore", "reference/ignored.md\n")
     const cli = await fakeCli("claude", claudeEnvelope("[]"))
     const report = await Effect.runPromise(
       LlmLint.review(
         { workspaceRoot: root, executable: cli.executable },
-        payload({ batchSize: 1, context: [Input.glob("docs/reference/*.md")] })
+        payload({
+          batchSize: 1,
+          context: [
+            Input.glob("//docs/reference/*.md", { exclude: ["//docs/reference/excluded.md"] }),
+            Input.glob("//docs/reference/a.md")
+          ]
+        })
       )
     )
     expect(report.files).toEqual(["src/a.ts", "src/b.ts"])
@@ -209,10 +219,27 @@ describe("LlmLint.review context files", () => {
       expect(prompt).toContain("=== CHANGED FILES (under review) ===")
       expect(prompt).toContain("=== CONTEXT FILES (unchanged reference material) ===")
       expect(prompt).toContain("--- CONTEXT FILE: \"docs/reference/a.md\" ---\nThe `a` export returns 1.")
+      expect(prompt.match(/--- CONTEXT FILE:/g)).toHaveLength(1)
+      expect(prompt).not.toContain("excluded reference")
+      expect(prompt).not.toContain("ignored reference")
       expect(call.args.join(" ")).not.toContain("TypeScript monorepo")
     }
     expect(calls[0]?.stdin).toContain("--- CHANGED FILE: \"src/a.ts\" ---")
     expect(calls[1]?.stdin).toContain("--- CHANGED FILE: \"src/b.ts\" ---")
+  })
+
+  it("fails with a read diagnostic when declared context matches no files", async () => {
+    await write("src/a.ts", "export const a = 3\n")
+    const cli = await fakeCli("missing-context", claudeEnvelope("[]"))
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.review(
+      { workspaceRoot: root, executable: cli.executable },
+      payload({ context: [Input.glob("//missing/**/*.md")] })
+    )))
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).phase).toBe("read")
+    expect((failure as LlmLint.LlmReviewError).message).toContain("context matched no files")
+    expect((failure as LlmLint.LlmReviewError).message).toContain("//missing/**/*.md")
+    expect(await cli.calls()).toEqual([])
   })
 
   it("omits the context section when no context is declared", async () => {
@@ -231,7 +258,7 @@ describe("LlmLint.review context files", () => {
     const report = await Effect.runPromise(
       LlmLint.review(
         { workspaceRoot: root, executable: cli.executable },
-        payload({ context: [Input.glob("README.md")] })
+        payload({ context: [Input.glob("README.md"), Input.glob("optional/*.md")] })
       )
     )
     expect(report.files).toEqual(["src/a.ts"])
@@ -719,6 +746,7 @@ describe("LlmLint.review engines", () => {
 
 describe("LlmLint.review resource and filesystem boundaries", () => {
   it("bounds the aggregate bytes of context files", async () => {
+    await write("context/PACKAGE.ts", "export const Package = {}\n")
     await write("src/a.ts", "export const a = 3\n")
     await Promise.all(
       Array.from({ length: 3 }, (_, index) => write(`context/${index}.txt`, "x".repeat(700_000)))

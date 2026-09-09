@@ -672,13 +672,18 @@ const contextPaths = (
       const found = new Set<string>()
       for (const declaration of declarations) {
         signal.throwIfAborted()
-        for (const raw of await Input.expandGlob(workspaceRoot, "", declaration, { signal })) {
+        for (const raw of await Input.expandGlob(workspaceRoot, "", declaration, { signal, packageScoped: false })) {
           const path = reviewPath(raw)
           found.add(path)
           if (found.size > maximumContextFiles) {
             throw new Error(`LLM review context contains more than ${maximumContextFiles} files`)
           }
         }
+      }
+      if (declarations.length > 0 && found.size === 0) {
+        throw new Error(
+          `LLM review context matched no files: ${declarations.map((entry) => entry.pattern).join(", ")}`
+        )
       }
       return [...found].sort()
     },
@@ -1237,9 +1242,15 @@ export const LlmReviewLive = (options: {
  * `changes` names the base revision whose diff selects the reviewed files.
  * `include` globs match workspace-relative changed paths; a path is reviewed
  * when it matches at least one glob. `context` globs are always read into
- * every batch prompt whether or not they changed. Both sets are caller-owned
- * declared inputs harvested by {@link Target.make}; workspace-wide patterns use
- * the `//` prefix. `engine` selects the model CLI and defaults to `claude`.
+ * every batch prompt whether or not they changed. Execution resolves context
+ * from the workspace root (with optional `//`) and crosses nested `PACKAGE.ts`
+ * boundaries: references can belong to other packages. Workspace confinement,
+ * ignore rules, and symlink checks still apply. Nonempty context declarations
+ * must match at least one file in total; individual unmatched globs are allowed.
+ * Context is bounded by {@link maximumContextFiles}, {@link maximumReviewFileBytes},
+ * and {@link maximumContextContentBytes}. Both sets are caller-owned declared
+ * inputs harvested by {@link Target.make}; planner expansion remains package scoped.
+ * `engine` selects the model CLI and defaults to `claude`.
  * `failOn` fails the target when any finding meets that severity and defaults
  * to `error`.
  *
@@ -1277,10 +1288,10 @@ export type Attrs = typeof Attrs.Type
  *
  * The plan is one {@link LlmReview} call. The git diff against `changes.base`
  * is a declared input the planner expands and digests, so the target re-keys
- * exactly when the committed diff content changes. Every `include` and
- * `context` glob is already a declared input in attrs, so working-tree source
- * edits and unchanged reference files both re-key the target when their
- * content changes. Execution runs through
+ * when the committed diff content changes. The planner also digests declared
+ * `include` and `context` files within its package scope. Cross-package context
+ * is read afresh at execution; model reviews are non-cacheable. Execution runs
+ * through
  * {@link LlmReviewLive}: changed paths filtered by `include`, batched by
  * `batchSize`, one `engine` CLI call per batch selecting `model`, the context
  * files appended to every batch prompt, findings parsed as

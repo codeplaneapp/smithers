@@ -1,3 +1,6 @@
+import { stat } from "node:fs/promises"
+import { fileURLToPath } from "node:url"
+import { maximumContextContentBytes, maximumContextFiles } from "@smthrs/targets/LlmLint"
 import { describe, expect, it } from "vitest"
 import * as Input from "@smthrs/targets/Input"
 import { ReviewDocsAgainstCode, ReviewTagsMigrationsAndKeys, ReviewJsdocAgainstCode, smithersReviewPrompt } from "../src/ReviewLint.ts"
@@ -21,6 +24,24 @@ const attrsOf = (target: Target.AnyTarget): {
   readonly batchSize: number
   readonly failOn: string
 } => Target.metadata(target).attrs as never
+
+const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url))
+
+const expandContext = async (context: ReadonlyArray<Input.Glob>): Promise<ReadonlyArray<string>> => {
+  const files = new Set<string>()
+  for (const declaration of context) {
+    for (const file of await Input.expandGlob(workspaceRoot, "", declaration, { packageScoped: false })) {
+      files.add(file)
+    }
+  }
+  return [...files].sort()
+}
+
+const contextBytes = async (files: ReadonlyArray<string>): Promise<number> => {
+  let bytes = 0
+  for (const file of files) bytes += (await stat(new URL(file, new URL("../../../", import.meta.url)))).size
+  return bytes
+}
 
 describe("ReviewTagsMigrationsAndKeys", () => {
   const target = ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/journal" })
@@ -97,9 +118,41 @@ describe("ReviewDocsAgainstCode", () => {
     expect(attrs.context).toEqual([
       { _tag: "Glob", pattern: "//packages/smithers/flows/journal/README.md", exclude: [] },
       { _tag: "Glob", pattern: "//packages/smithers/flows/journal/docs/*.md", exclude: [] },
-      { _tag: "Glob", pattern: "//apps/site/src/content/docs/**/*.md", exclude: [] },
-      { _tag: "Glob", pattern: "//apps/site/src/content/docs/**/*.mdx", exclude: [] }
+      { _tag: "Glob", pattern: "//apps/site/src/content/docs/docs/reference/api/journal*.mdx", exclude: [] }
     ])
+  })
+
+  it("omits site context at the workspace root", () => {
+    expect(attrsOf(ReviewDocsAgainstCode()).context).toEqual([
+      Input.glob("//README.md"), Input.glob("//docs/*.md")
+    ])
+  })
+
+  it("derives the reference prefix from a normalized cwd", () => {
+    expect(attrsOf(ReviewDocsAgainstCode({ cwd: "./packages/smithers/flows/journal/" })).context)
+      .toEqual(attrs.context)
+  })
+
+  it("expands the default context across real package boundaries", async () => {
+    const files = await expandContext(attrs.context)
+    expect(files).toContain("packages/smithers/flows/journal/README.md")
+    expect(files).toContain("apps/site/src/content/docs/docs/reference/api/journal.mdx")
+  })
+
+  it("keeps the default context within the executor limits", async () => {
+    const files = await expandContext(attrs.context)
+    expect(files.length).toBeGreaterThan(0)
+    expect(files.length).toBeLessThanOrEqual(maximumContextFiles)
+    expect(await contextBytes(files)).toBeLessThanOrEqual(maximumContextContentBytes)
+  })
+
+  it("keeps the featured root review context within the executor limits", async () => {
+    const { Package } = await import(new URL("../../../PACKAGE.ts", import.meta.url).href)
+    const files = await expandContext(attrsOf(Package.reviewDocsAgainstCode).context)
+    expect(files).toContain("packages/smithers/flows/journal/README.md")
+    expect(files).toContain("apps/site/src/content/docs/docs/reference/api/journal.mdx")
+    expect(files.length).toBeLessThanOrEqual(maximumContextFiles)
+    expect(await contextBytes(files)).toBeLessThanOrEqual(maximumContextContentBytes)
   })
 
   it("reports at warning while its rubric is tuned", () => {
