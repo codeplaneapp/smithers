@@ -5,6 +5,7 @@ import { fstatSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import * as DurableWriter from "../src/DurableWriter.ts"
 import * as NodeDatabase from "../src/node/NodeDatabase.ts"
 
 /**
@@ -119,6 +120,65 @@ const holdWriteLock = (filename: string): { readonly release: () => void } => {
 }
 
 describe("NodeDatabase concurrent open", () => {
+  it.effect.each([
+    { label: "default", busyTimeout: undefined, sqlite: undefined, expected: 0 },
+    { label: "top-level override", busyTimeout: Duration.millis(7), sqlite: undefined, expected: 7 },
+    { label: "nested override", busyTimeout: undefined, sqlite: { busyTimeout: 11 }, expected: 11 },
+    { label: "top-level precedence", busyTimeout: 0, sqlite: { busyTimeout: 11 }, expected: 0 }
+  ])("uses the $label busy timeout", ({ busyTimeout, sqlite, expected }) =>
+    Effect.gen(function*() {
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        expect(yield* sql`PRAGMA busy_timeout`).toEqual([{ timeout: expected }])
+      }).pipe(Effect.provide(NodeDatabase.layer({ filename: ":memory:", busyTimeout, sqlite })))
+    }))
+
+  it.live("keeps a 50 ms timer responsive while a default writer retries a peer lock", () =>
+    Effect.gen(function*() {
+      const filename = tempFile()
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        const writer = yield* DurableWriter.DurableWriter
+        yield* sql`CREATE TABLE seeded (id INTEGER PRIMARY KEY)`
+        const peer = holdWriteLock(filename)
+        const started = performance.now()
+        let releasedAfter = Number.POSITIVE_INFINITY
+        const timer = setTimeout(() => {
+          releasedAfter = performance.now() - started
+          peer.release()
+        }, 50)
+        try {
+          yield* writer.write(sql`INSERT INTO seeded (id) VALUES (1)`)
+          expect(yield* sql`SELECT id FROM seeded`).toEqual([{ id: 1 }])
+          // Generous scheduling headroom, still far below the driver's 5 s wait.
+          expect(releasedAfter).toBeLessThan(1_000)
+        } finally {
+          clearTimeout(timer)
+          peer.release()
+        }
+      }).pipe(Effect.provide(Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))))
+    }))
+
+  it.live("keeps a 50 ms timer responsive while a default open retries WAL conversion", () =>
+    Effect.gen(function*() {
+      const filename = tempFile()
+      seedRollbackMode(filename)
+      const peer = holdReadLock(filename)
+      const started = performance.now()
+      let releasedAfter = Number.POSITIVE_INFINITY
+      const timer = setTimeout(() => {
+        releasedAfter = performance.now() - started
+        peer.release()
+      }, 50)
+      try {
+        yield* Effect.scoped(Layer.build(NodeDatabase.layer({ filename })))
+        expect(releasedAfter).toBeLessThan(1_000)
+      } finally {
+        clearTimeout(timer)
+        peer.release()
+      }
+    }))
+
   // Real elapsed time: `it.effect`'s TestClock would stall this.
   it.live("waits for a peer holding the file lock instead of failing the open", () =>
     Effect.gen(function*() {

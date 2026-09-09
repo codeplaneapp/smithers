@@ -398,14 +398,18 @@ configure.
 ```ts
 interface NodeDatabaseOptions {
   readonly filename: string
+  readonly mode?: number | undefined
+  readonly busyTimeout?: Duration.Input | undefined
   readonly sqlite?: Omit<SqliteClient.SqliteClientConfig, "filename"> | undefined
 }
 ```
 
-| Field      | Meaning                                                                                                                                          |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `filename` | The SQLite database filename. A `file:` URI is accepted, and `:memory:` opens a private in-memory database. The parent directory is not created. |
-| `sqlite`   | Additional driver configuration. WAL remains enabled unless explicitly disabled.                                                                 |
+| Field         | Meaning                                                                                                                                                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `filename`    | The SQLite database filename. A `file:` URI is accepted, and `:memory:` opens a private in-memory database. The parent directory is not created.                                                                                              |
+| `mode`        | Creation permissions for a new plain-path database, masked by the process umask. Defaults to `0o600`; WAL and SHM sidecars inherit the main file's mode. Existing files, `file:` URIs, temporary databases and read-only opens are unchanged. |
+| `busyTimeout` | Synchronous SQLite lock wait. Defaults to `0` so open and durable-write retries wait cooperatively. Overrides `sqlite.busyTimeout` when supplied.                                                                                             |
+| `sqlite`      | Additional driver configuration. WAL remains enabled unless explicitly disabled. An explicit `sqlite.busyTimeout` is honored when `busyTimeout` is absent.                                                                                    |
 
 ### UnsupportedDatabaseCode
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, type Exit, Layer, Result } from "effect"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -113,6 +114,52 @@ const defectOf = (exit: Exit.Exit<unknown, unknown>): unknown => {
   expect(Result.isSuccess(found)).toBe(true)
   return Result.isSuccess(found) ? found.success : undefined
 }
+
+describe("NodeDatabase file permissions", () => {
+  it.effect.each([
+    { label: "private default permissions", mode: undefined, mask: 0o022, expected: 0o600, existing: false },
+    { label: "explicit group-readable permissions", mode: 0o640, mask: 0o022, expected: 0o640, existing: false },
+    { label: "the process umask", mode: 0o666, mask: 0o077, expected: 0o600, existing: false },
+    { label: "existing file permissions", mode: 0o600, mask: 0o022, expected: 0o640, existing: true }
+  ])(
+    "creates the database and WAL sidecars with $label",
+    ({ mode, mask, expected, existing }) =>
+      Effect.gen(function*() {
+        const filename = tempFile()
+        const previousMask = process.umask(mask)
+        try {
+          if (existing) writeFileSync(filename, "", { mode: expected })
+          yield* Effect.gen(function*() {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql`CREATE TABLE flows_migrations (migration_id INTEGER PRIMARY KEY)`
+            expect([filename, `${filename}-wal`, `${filename}-shm`].map((path) => statSync(path).mode & 0o777))
+              .toEqual([expected, expected, expected])
+          }).pipe(Effect.provide(NodeDatabase.layer({ filename, mode })))
+        } finally {
+          process.umask(previousMask)
+        }
+      })
+  )
+
+  it.effect("does not create a missing file for a read-only open", () =>
+    Effect.gen(function*() {
+      const filename = tempFile()
+      expect((yield* build({ filename, sqlite: { readonly: true } }))._tag).toBe("Failure")
+      expect(existsSync(filename)).toBe(false)
+    }))
+
+  it.effect("does not create the parent directory", () =>
+    Effect.gen(function*() {
+      const filename = join(tempDirectory(), "missing", "flows.sqlite")
+      expect((yield* build({ filename }))._tag).toBe("Failure")
+      expect(existsSync(filename)).toBe(false)
+    }))
+
+  it.effect("leaves an empty temporary filename to SQLite", () =>
+    Effect.gen(function*() {
+      expect((yield* build({ filename: "", sqlite: { disableWAL: true } }))._tag).toBe("Success")
+    }))
+})
 
 describe("NodeDatabase guard: 0.x database files (X-13)", () => {
   it.effect("refuses a file that has tables and no flows_migrations table", () =>
@@ -395,6 +442,7 @@ describe("NodeDatabase guard: Bun (X-18)", () => {
 
       const defect = defectOf(yield* build({ filename }))
 
+      expect(existsSync(filename)).toBe(false)
       expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
       if (!NodeDatabase.isUnsupportedDatabase(defect)) return
       expect(defect.code).toBe("unsupported_runtime")
