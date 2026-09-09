@@ -490,8 +490,14 @@ const spawnText = (
         Stream.mapError((error) => spawnError(`stderr could not be read: ${subprocessError(error).message}`, "EIO")),
         Stream.runForEach((chunk) => Effect.sync(() => appendTail(stderr, chunk)))
       ),
+      // An executable that exits before draining the prompt closes its stdin
+      // while the write is still queued, and the resulting EPIPE says nothing
+      // about why it stopped. Dropping it keeps the status and stderr fibers
+      // alive so the exit code and the stderr tail, the only diagnosis of a
+      // refusal, reach the caller instead of a pipe error.
       options.stdin === undefined ? Effect.void : Stream.make(Buffer.from(options.stdin, "utf8")).pipe(
         Stream.run(child.stdin),
+        Effect.catchIf((error) => subprocessError(error).code === "EPIPE", () => Effect.void),
         Effect.mapError((error) => spawnError(`stdin could not be written: ${subprocessError(error).message}`, "EIO"))
       )
     ], { concurrency: "unbounded" })

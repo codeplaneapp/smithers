@@ -74,6 +74,19 @@ const scriptCli = async (name: string, body: string): Promise<string> => {
   return executable
 }
 
+/**
+ * A fake model CLI written in `sh`. Its startup is a fork and an exec of a
+ * shell, orders of magnitude cheaper than booting node and loading a module,
+ * so a short deadline the review sets cannot outrun the fixture reporting that
+ * it is ready.
+ */
+const shellCli = async (name: string, body: string): Promise<string> => {
+  const executable = NodePath.join(root, `${name}.sh`)
+  await Fs.writeFile(executable, `#!/bin/sh\n${body}\n`, "utf8")
+  await Fs.chmod(executable, 0o755)
+  return executable
+}
+
 const isErrno = (cause: unknown, code: string): boolean =>
   typeof cause === "object" && cause !== null && "code" in cause && cause.code === code
 
@@ -876,19 +889,48 @@ describe("LlmLint.review resource and filesystem boundaries", () => {
 
   it.skipIf(process.platform === "win32")("kills descendants when a model times out", async () => {
     await write("src/a.ts", "export const a = 3\n")
-    const marker = NodePath.join(root, "escaped-grandchild")
-    const childProgram = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "x"), 200)`
-    const executable = await scriptCli(
+    // The same fifo gate the interrupt test below uses: the grandchild parks
+    // on a fifo nobody ever opens for writing, so it sits in `open(2)` and a
+    // signal is the only thing that can end it, and the model is a `sleep`
+    // that outlives the suite. Neither can end on its own, so an ended pid is
+    // proof of the kill. The earlier form wrote a marker on a 200 ms timer and
+    // asserted its absence after a 300 ms sleep; under load the timer had not
+    // fired yet and a kill that did nothing read back as a kill that worked.
+    const gate = NodePath.join(root, "timeout-gate")
+    expect(spawnSync("mkfifo", [gate]).status).toBe(0)
+    const pidFile = NodePath.join(root, "timeout-pids")
+    const partial = `${pidFile}.partial`
+    const executable = await shellCli(
       "timeout-tree",
-      `import { spawn } from "node:child_process"\n` +
-        `spawn(process.execPath, ["-e", ${JSON.stringify(childProgram)}], { stdio: "ignore" })\n` +
-        "process.stdin.resume()\nsetInterval(() => undefined, 1_000)"
+      `cat ${JSON.stringify(gate)} &\n` +
+        `printf '%s\\n%s\\n' "$$" "$!" > ${JSON.stringify(partial)}\n` +
+        `mv ${JSON.stringify(partial)} ${JSON.stringify(pidFile)}\n` +
+        "exec sleep 3600"
     )
-    await Effect.runPromise(
-      Effect.flip(LlmLint.review({ workspaceRoot: root, executable, timeoutMs: 25 }, payload()))
+    const running = Effect.runPromise(
+      Effect.flip(LlmLint.review({ workspaceRoot: root, executable, timeoutMs: 1_000 }, payload()))
     )
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
+    const started: Array<number> = []
+    try {
+      // The fixture renames the pair into place, so this read is never torn and
+      // still resolves once the deadline has already killed the pair.
+      const [model = Number.NaN, grandchild = Number.NaN] = await readPids(pidFile)
+      started.push(model, grandchild)
+      const failure = await running
+      expect((failure as LlmLint.LlmReviewError).message).toMatch(/timed out after 1000ms/)
+      // The group is gone, asked of the host rather than inferred from a side
+      // effect that never happened.
+      await waitFor(() => processHasEnded(model), `the model process ${model} to end`)
+      await waitFor(() => processHasEnded(grandchild), `the escaped grandchild ${grandchild} to end`)
+    } finally {
+      for (const pid of started) {
+        try {
+          process.kill(pid, "SIGKILL")
+        } catch {
+          // Already gone, which is the point.
+        }
+      }
+    }
   })
 
   it.skipIf(process.platform === "win32")("kills the model process group when its effect is interrupted", async () => {
@@ -1023,6 +1065,28 @@ describe("LlmLint.promptEngine protocol boundary", () => {
     )))
     expect(failure._tag).toBe("smithers-build/LlmReviewError")
     expect((failure as LlmLint.LlmReviewError).phase).toBe("parse")
+  })
+
+  it("reports the exit code and stderr when the engine refuses a prompt it never reads", async () => {
+    // A model CLI that refuses (not logged in, bad flag, rate limited) exits
+    // before draining a multi-megabyte prompt, so the parent's queued stdin
+    // write raises EPIPE. That pipe failure says nothing about the refusal:
+    // the exit code and the stderr tail are the only diagnosis, so they must
+    // outrank it.
+    const executable = await scriptCli(
+      "prompt-refusal",
+      "import { writeSync } from \"node:fs\"\n" +
+        "writeSync(2, \"fake engine: not logged in\")\n" +
+        "process.exit(3)"
+    )
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(
+      { workspaceRoot: root, executable },
+      { engine: "claude", model: "model", prompt: "x".repeat(4 * 1024 * 1024) }
+    )))
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).phase).toBe("review")
+    expect((failure as LlmLint.LlmReviewError).message).toContain("exited 3")
+    expect((failure as LlmLint.LlmReviewError).message).toContain("not logged in")
   })
 
   it("bounds the malformed envelope excerpt in a protocol diagnostic", async () => {
