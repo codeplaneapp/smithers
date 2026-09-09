@@ -19,7 +19,7 @@ function normalizedTextKey(value: string) {
 const maxQuestions = 6;
 
 // Adversarially robust: agents return garbage; keep only questions that are
-// fully answerable (2..5 non-empty options, in-range correctIndex, a real
+// fully answerable (2..5 non-empty options, an integer in-range correctIndex, a real
 // question and explanation, a path from this change), dedupe near-identical
 // questions, clamp to 6, and return null when nothing valid survives.
 export function normalizeQuiz(raw: unknown, changedPaths: string[]): Quiz | null {
@@ -36,6 +36,9 @@ export function normalizeQuiz(raw: unknown, changedPaths: string[]): Quiz | null
     if (!text || !explanation) continue;
     if (options.length < 2 || options.length > 5) continue;
     if (options.some((option) => !option)) continue;
+    // Integer first: the index is a slot number, and 0.5 or NaN passes a bare
+    // bounds check while selecting no option in either renderer.
+    if (!Number.isInteger(question.correctIndex)) continue;
     if (question.correctIndex < 0 || question.correctIndex >= options.length) continue;
     if (path && !knownPaths.has(path)) continue;
     // An empty key (e.g. CJK text with no ascii alphanumerics) carries no

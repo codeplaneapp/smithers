@@ -62,6 +62,11 @@ describe("normalizeQuiz", () => {
     expect(normalizeQuiz({ questions: [question({ correctIndex: -1 })] }, changedPaths)).toBeNull();
   });
 
+  test("fractional or NaN correctIndex is dropped", () => {
+    expect(normalizeQuiz({ questions: [question({ correctIndex: 0.5 })] }, changedPaths)).toBeNull();
+    expect(normalizeQuiz({ questions: [question({ correctIndex: Number.NaN })] }, changedPaths)).toBeNull();
+  });
+
   test("empty question or explanation is dropped", () => {
     expect(normalizeQuiz({ questions: [question({ question: "  " })] }, changedPaths)).toBeNull();
     expect(normalizeQuiz({ questions: [question({ explanation: "" })] }, changedPaths)).toBeNull();

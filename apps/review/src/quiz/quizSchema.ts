@@ -11,7 +11,11 @@ import { arrayOf, withDefault } from "../schema/withDefault.ts";
  *
  * Permissive on purpose: agent output decodes loosely here so a partial answer
  * survives, and `normalizeQuiz` enforces the real invariants (2..5 options, an
- * in-range `correctIndex`, known paths, at most 6 questions).
+ * integer in-range `correctIndex`, known paths, at most 6 questions).
+ *
+ * `correctIndex` stays `Schema.Number` rather than an integer schema on
+ * purpose: a stricter field fails the whole quiz decode, so one seat typo
+ * would drop every question instead of the one it broke.
  *
  * @since 1.0.0
  * @category schemas
