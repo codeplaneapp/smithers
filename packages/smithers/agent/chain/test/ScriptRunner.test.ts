@@ -119,6 +119,46 @@ describe("ScriptRunner", () => {
     expect(ScriptRunner.jsonBoundary({ [`k`.repeat(ScriptRunner.maxJsonSize)]: 1 })._tag).toBe("Refused")
   })
 
+  it("accepts the last value inside each bound and refuses the first outside it", () => {
+    // The bounds are inclusive limits, so what pins them is the pair either
+    // side of the edge: the value that spends the budget exactly and the one
+    // that spends a single unit more. Assert only the far side and
+    // `depth > maxJsonDepth` may become `>=`, or `budget < 0` may become
+    // `<= 0`, and every other assertion here still passes while documented
+    // values are refused.
+    const nest = (links: number): unknown => {
+      let value: unknown = null
+      for (let index = 0; index < links; index = index + 1) value = { value }
+      return value
+    }
+    expect(ScriptRunner.jsonBoundary(nest(ScriptRunner.maxJsonDepth))._tag).toBe("Ok")
+    expect(ScriptRunner.jsonBoundary(nest(ScriptRunner.maxJsonDepth + 1))._tag).toBe("Refused")
+
+    // The budget spends one unit per node plus one per code unit of every
+    // string and key, so a root string costs `1 + length`.
+    expect(ScriptRunner.jsonBoundary("x".repeat(ScriptRunner.maxJsonSize - 1))._tag).toBe("Ok")
+    expect(ScriptRunner.jsonBoundary("x".repeat(ScriptRunner.maxJsonSize))._tag).toBe("Refused")
+
+    // A one-key object costs one unit for itself, one for the value, and the
+    // key's length. The key is charged; only the value's node was before.
+    expect(ScriptRunner.jsonBoundary({ ["k".repeat(ScriptRunner.maxJsonSize - 2)]: 1 })._tag).toBe("Ok")
+    expect(ScriptRunner.jsonBoundary({ ["k".repeat(ScriptRunner.maxJsonSize - 1)]: 1 })._tag).toBe("Refused")
+
+    // Nodes are charged even when they carry no characters, so a wide value
+    // cannot walk past the budget the way a long string cannot: an array of
+    // N nulls costs N + 1.
+    expect(ScriptRunner.jsonBoundary(new Array(ScriptRunner.maxJsonSize - 1).fill(null))._tag).toBe("Ok")
+    expect(ScriptRunner.jsonBoundary(new Array(ScriptRunner.maxJsonSize).fill(null))._tag).toBe("Refused")
+
+    // Length is CODE UNITS, not code points: an astral character costs two.
+    // Charging code points would let a value twice the budget's worth of
+    // UTF-16 through, which is the size `JSON.stringify` actually works in.
+    const astral = "\u{1F600}".repeat((ScriptRunner.maxJsonSize - 2) / 2)
+    expect(astral.length).toBe(ScriptRunner.maxJsonSize - 2)
+    expect(ScriptRunner.jsonBoundary(astral + "x")._tag).toBe("Ok")
+    expect(ScriptRunner.jsonBoundary(astral + "xx")._tag).toBe("Refused")
+  })
+
   it("reads every property exactly once, so a changing accessor cannot smuggle a subtree", () => {
     // The old boundary validated one read and then serialized a SECOND, so a
     // getter that answered differently the second time crossed unvalidated.

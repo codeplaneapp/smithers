@@ -286,6 +286,54 @@ describe.each(runners)("runner conformance: %s", (_name, layer) => {
     const notOutcome = await failWith(layer, `return { nope: true }`, echo) as ScriptRunner.ScriptFailure
     expect(notOutcome.message).toBe(ScriptRunner.notAnOutcome)
   })
+
+  it("crosses a call payload at exactly the boundary depth and refuses the next link", async () => {
+    // Both bindings walk the same limit, so both must agree on the value
+    // AT it, not just on a value far past it. The handler answers a scalar
+    // on purpose: echoing the payload back would nest it under the result
+    // object and again under the outcome wrapper, and those two extra
+    // levels — not the payload's own depth — would decide the boundary.
+    const nested = (links: number) =>
+      [
+        `var deep = null`,
+        `for (var i = 0; i < ${links}; i++) deep = { deep: deep }`,
+        `const answer = await ctx.call("nest", deep).catch(function (error) { return error.message })`,
+        `return done(answer)`
+      ].join("\n")
+    const scalar = (): Effect.Effect<unknown> => Effect.succeed("crossed")
+
+    expect(await runWith(layer, nested(ScriptRunner.maxJsonDepth), scalar)).toEqual({
+      _tag: "Done",
+      value: "crossed"
+    })
+    expect(await runWith(layer, nested(ScriptRunner.maxJsonDepth + 1), scalar)).toEqual({
+      _tag: "Done",
+      value: "ctx.call input must be JSON-serializable"
+    })
+  })
+
+  it("returns a handler result at exactly the boundary depth and refuses the next link", async () => {
+    // The result crosses the same boundary in the same direction, and a
+    // refusal on the way back is a rejected call the script can observe.
+    const nest = (links: number): unknown => {
+      let value: unknown = null
+      for (let index = 0; index < links; index = index + 1) value = { value }
+      return value
+    }
+    // The script keeps a scalar so the outcome's own wrapper cannot be what
+    // the boundary trips on.
+    const report =
+      `const answer = await ctx.call("nest").then(function () { return "crossed" }, function (error) { return error.message })\nreturn done(answer)`
+
+    expect(await runWith(layer, report, () => Effect.succeed(nest(ScriptRunner.maxJsonDepth)))).toEqual({
+      _tag: "Done",
+      value: "crossed"
+    })
+    expect(await runWith(layer, report, () => Effect.succeed(nest(ScriptRunner.maxJsonDepth + 1)))).toEqual({
+      _tag: "Done",
+      value: `the "nest" call result is not JSON-serializable`
+    })
+  })
 })
 
 describe("in-process runner isolation", () => {
@@ -305,6 +353,11 @@ describe("in-process runner isolation", () => {
 })
 
 describe("QuickJs sealed realm", () => {
+  // Comfortably over the 256 KiB floor and comfortably under a 4 MiB cap,
+  // so the two budgets either side of it disagree about this one script.
+  const allocatedChars = 300_000
+  const allocation = `var s = "x".repeat(${allocatedChars})\nreturn done(s.length)`
+
   const layer = QuickJsRunner.layer()
 
   it("deletes the realm's nondeterminism and host escapes", async () => {
@@ -337,13 +390,24 @@ describe("QuickJs sealed realm", () => {
     expect(error.message).toBe("spoofed")
   })
 
-  it("clamps a below-floor memory budget instead of aborting natively", async () => {
+  it("clamps a below-floor memory budget to the floor instead of aborting natively", async () => {
+    // Clamped, not discarded. Booting proves the realm survives a budget
+    // smaller than its own heap needs; the refusal below proves the clamp
+    // lands on the floor rather than dropping the limit altogether.
     const outcome = await runWith(
       QuickJsRunner.layer({ memoryBytes: 1024 }),
       `return done("booted")`,
       echo
     )
     expect(outcome).toEqual({ _tag: "Done", value: "booted" })
+
+    const error = await failWith(
+      QuickJsRunner.layer({ memoryBytes: 1024 }),
+      allocation,
+      echo
+    ) as ScriptRunner.ScriptFailure
+    expect(error.code).toBe("runtime")
+    expect(error.message).toBe("out of memory")
   })
 
   it("interrupts a runaway synchronous loop under a step budget", async () => {
@@ -461,13 +525,45 @@ describe("QuickJs sealed realm", () => {
     if (exit._tag === "Failure") expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
   })
 
-  it("stops a runaway allocation under a memory budget", async () => {
+  it("stops a finite allocation the configured memory budget cannot hold", async () => {
+    // A FINITE allocation, and the exhaustion reason, not just `runtime`.
+    // An unbounded `while (true) s += s` proves nothing about the cap: it
+    // hits the VM's own "string too long" ceiling under every budget, so
+    // such a test still passes with `runtime.setMemoryLimit` deleted. One
+    // `repeat` call is a handful of instructions, far under any step
+    // budget, so the configured cap is the only thing that can decide.
     const error = await failWith(
       QuickJsRunner.layer({ memoryBytes: 256 * 1024 }),
-      `let s = "x"\nwhile (true) s += s\nreturn done(null)`,
+      allocation,
       echo
     ) as ScriptRunner.ScriptFailure
     expect(error.code).toBe("runtime")
+    expect(error.message).toBe("out of memory")
+  })
+
+  it("runs that same allocation under a budget large enough to hold it", async () => {
+    // The other half of the pair: the workload above is refused for its
+    // SIZE against the configured cap, not because the realm cannot run it.
+    const outcome = await runWith(
+      QuickJsRunner.layer({ memoryBytes: 4 * 1024 * 1024 }),
+      allocation,
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: allocatedChars })
+  })
+
+  it("leaves the shared module usable after a memory refusal", async () => {
+    // Every realm is instantiated from one shared WebAssembly module. An
+    // exhausted runtime that took the module down with it would turn the
+    // first oversized script of a process into a permanent outage.
+    const error = await failWith(
+      QuickJsRunner.layer({ memoryBytes: 256 * 1024 }),
+      allocation,
+      echo
+    ) as ScriptRunner.ScriptFailure
+    expect(error.message).toBe("out of memory")
+    const outcome = await runWith(QuickJsRunner.layer(), `return done("still here")`, echo)
+    expect(outcome).toEqual({ _tag: "Done", value: "still here" })
   })
 
   it("fails a return the realm cannot serialize as an outcome", async () => {
