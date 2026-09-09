@@ -293,7 +293,8 @@ const mintOwner: Effect.Effect<OwnerId> = Effect.gen(function*() {
 export interface Options {
   /**
    * Whether the owner recorded on a run is still working, asked before startup
-   * recovery takes an interrupted rewind's run over.
+   * recovery takes an interrupted rewind's run over or rewind cancels a running
+   * detached child under `detachedChildren: "cancel"`.
    *
    * Defaults to `Ownership.leaseLiveness()`: an owner is alive while its
    * persisted heartbeat is younger than `Ownership.heartbeatStaleAfter`. That
@@ -314,7 +315,8 @@ export interface Options {
 }
 
 /**
- * Turns a liveness check into the evidence startup recovery hands `RunStore`.
+ * Turns a liveness check into the evidence recovery and child cancellation
+ * hand `RunStore`.
  *
  * The kind is always `lease-expired`, and deliberately so. It is the only
  * host-neutral kind, and it is the one claim `RunStore.steal` re-verifies for
@@ -327,10 +329,12 @@ export interface Options {
  * A `running` row that records no owner yields no evidence: there is nothing
  * to be alive or dead, and `steal` refuses such a snapshot regardless.
  */
-const recoveryEvidence = (
-  isAlive: Ownership.LivenessCheck
-): NonNullable<Recovery.Options["livenessEvidence"]> =>
-(_audit, row, claimant, nowMs) => {
+const recoveryEvidence = (isAlive: Ownership.LivenessCheck) =>
+(
+  row: RunStore.RunRow,
+  claimant: OwnerId,
+  nowMs: number
+): Effect.Effect<Ownership.LivenessEvidence | undefined> => {
   const expectedOwner = row.owner
   if (expectedOwner === null) return Effect.succeed(undefined)
   return Effect.map(
@@ -358,6 +362,7 @@ export const makeWith = (
     const services = yield* Effect.context<Requirements>()
     const historyLimit = yield* HistoryLimit.resolve(options.maxHistoryEntries, HistoryLimit.defaultMaxHistoryEntries)
     const owner = yield* mintOwner
+    const liveness = recoveryEvidence(options.isAlive ?? Ownership.leaseLiveness())
     // The contribution door (`docs/specs/Concepts/Time Travel Service.md`
     // §"The open gap this leaves"):
     // handlers come from the composition that owns the effect boundary, and the
@@ -399,7 +404,7 @@ export const makeWith = (
     // survives for the next build to pick up.
     const outcomes = yield* provided(Recovery.recover({
       owner,
-      livenessEvidence: recoveryEvidence(options.isAlive ?? Ownership.leaseLiveness())
+      livenessEvidence: (_audit, row, claimant, nowMs) => liveness(row, claimant, nowMs)
     }))
     // A `Failed` outcome closes an audit terminally. Discarding the array made
     // that invisible to the composition, so an operator learned about a rewind
@@ -571,6 +576,7 @@ export const makeWith = (
                         frame: position.frame,
                         owner,
                         detachedChildPolicy,
+                        childLivenessEvidence: (_childRunId, row, claimant, nowMs) => liveness(row, claimant, nowMs),
                         maxEntries,
                         // The tail validation observed, re-checked under the
                         // claim: nothing else binds the refusal to the

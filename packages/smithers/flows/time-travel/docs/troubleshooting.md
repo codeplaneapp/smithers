@@ -50,7 +50,10 @@ An attached child always blocks. A detached child blocks under the default
 
 **What to change.** Let the child finish, or pass
 `detachedChildren: "cancel"` if the child is detached and you accept the
-cancellation. There is no option that cancels an attached child, because
+cancellation. This applies to idle (`pending` or `suspended`) children and
+running children whose owner lease has expired. A live owner still refuses
+with `live_child`; `Options.isAlive` may veto cancellation after lease expiry.
+There is no option that cancels an attached child, because
 truncating history the child still depends on is not a policy choice. See
 [Rewind a run to a frame](./guides/rewind-a-run.md).
 
