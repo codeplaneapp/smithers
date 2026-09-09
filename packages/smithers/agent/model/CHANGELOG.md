@@ -8,17 +8,18 @@
 - Added the OpenAI Chat Completions protocol (`OpenAIChatCompletions`), the wire shape Ollama, Gemini's compatibility layer, Cerebras and most other self-hosted or third-party "OpenAI-compatible" servers actually serve, and exported it from the root barrel.
 - Added the native-structured-output toggle: `OpenAIChatCompletions.protocolWith({ structuredOutput })` and the `structuredOutput` option on the Chat Completions route constructor send `response_format` so the provider enforces the schema. A request that also declares tools fails locally as `invalid_request`, because the provider refuses both together. A request that declares tools and sets `toolChoice: "none"` is lowered instead of refused: that request forbids tool use, the lowering answers it by omitting `tools`, and the two fields never meet on the wire.
 - Added the ChatGPT-subscription Responses route (`OpenAIChatGPT.make`, `OpenAIResponses.chatgptProtocol`, `OpenAIResponses.ChatGPTBody`). That backend rejects `max_output_tokens` and offers no other output cap, so a request that sets `params.maxTokens` fails locally as `invalid_request` with `path: "params.maxTokens"` before signing, rather than being sent without the budget the caller asked for.
-- Added `Route.openaiResponsesCompatible` and `Route.openaiChatCompatible`. Both take the provider origin and append `/v1/responses` or `/v1/chat/completions` themselves, so one origin cannot yield two different URLs. `Route.openaiCompatible` and `OpenAICompatible.make` keep their current behaviour and are deprecated.
+- Added `Route.openaiResponsesCompatible` and `Route.openaiChatCompatible`. Both take the provider origin and append `/v1/responses` or `/v1/chat/completions` themselves, so one origin cannot yield two different URLs. They are the only compatibility constructors the package ships: a caller names the wire shape its provider serves, and no constructor guesses between the two.
 - Added `RequestExecutor.Transport`, `RequestExecutor.fixed`, `RequestExecutor.makeWith` and `RequestExecutor.rebuildAfter`: the executor may now replace the HTTP client it runs on after three consecutive transport failures. A retry ladder repairs a failure by waiting, and an HTTP/2 session the peer has destroyed is the failure waiting does not repair, because every attempt that reuses the pool holding it fails identically. Three is exactly what one `execute` spends when every attempt fails on the transport, so no attempt inside a request ever runs on a client that request discarded, and any response of any kind resets the count because a 429 arrived over a connection that worked. `make` keeps a fixed transport, which is the honest answer in a browser where there is no pool to replace.
 - Added `ToolChoice` and the optional `ModelRequest.toolChoice` field, so a frame that declares no tools can say so in the schema rather than have the value attached to the request afterwards. Every built-in encoder now omits `tools` when it is `"none"`.
 - Added the `context_overflow` `ModelErrorCode` and `ModelError.isContextOverflow`, so a request that did not fit the model's context window is a typed code rather than a phrase a consumer has to re-parse. The protocols and the shared request executor classify their own overflow vocabulary ahead of the generic `invalid_request` branch.
 - Added `ModelError.body` and `ModelError.bodyTruncated`: the redacted, 16 KiB-capped provider response body an executor failure was classified from. Both sit outside the durable schema and are defined non-enumerably, so a journal, a `JSON.stringify` and a structural comparison see exactly what they saw before, because a provider body is diagnostic text and not run state.
 - Added `ModelError.isQuotaExhausted` and `ModelError.path`. The refinement gives an exhausted account one typed code across every provider; the path names the offending request member on a preparation failure and never carries its value.
 - Added `Framing.ndjson` for newline-delimited JSON transports.
-- Added package-owned documentation: `docs/`, `docs/Manifest.ts`, and
-  `scripts/docs.mjs` generate `docs/reference.md`,
-  `docs/pages/api/model.md`, and the public API list in `README.md` from package
-  sources.
+- Added package-owned documentation: an installation page, a quickstart, an API
+  overview, concept pages and guides under `docs/`, alongside `README.md`.
+  `PACKAGE.ts` declares them through the shared `docs` and `docsFiles` targets,
+  so the README parity check runs with the package's other checks and the docs
+  site reads the pages by target label instead of globbing the package.
 
 ### Changed
 
