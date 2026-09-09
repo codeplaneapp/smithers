@@ -3,6 +3,7 @@
  * @since 1.0.0
  */
 import { removedVerbs } from "../Unsupported.ts"
+import * as Argv from "./Argv.ts"
 
 const legacy = new Set([
   ...removedVerbs.map((verb) => verb.name),
@@ -27,36 +28,28 @@ const legacy = new Set([
   "gateway",
   "claude"
 ])
-const valued = new Set(["--root", "--remote", "--credential", "--mcp-config", "--backend", "--audience", "--format"])
-const switches = new Set(["--json", "--quiet", "--silent", "--verbose"])
-
 /**
  * Route only unambiguous old spellings, retaining their existing output contracts.
  * @category constructors
  * @since 1.0.0
  */
-export const legacyArguments = (args: ReadonlyArray<string>): Array<string> | undefined => {
-  let index = 0
-  while (index < args.length && args[index]!.startsWith("-")) {
-    const flag = args[index]!
-    if (switches.has(flag) || [...valued].some((value) => flag.startsWith(`${value}=`))) index++
-    else if (valued.has(flag)) index += 2
-    else return undefined
-  }
-  const command = args[index]
-  if (command === "init" && args.slice(index + 1).some((arg) => arg === "--global" || arg.startsWith("--global="))) {
+export const legacyArguments = (input: ReadonlyArray<string> | Argv.Globals): Array<string> | undefined => {
+  const parsed = Argv.parse(input)
+  const args = parsed.argv
+  const index = parsed.first
+  const [command, ...rest] = parsed.rest
+  if (command === "init" && rest.some((arg) => arg === "--global" || arg.startsWith("--global="))) {
     return [...args]
   }
   if (command === "internal" && args[index + 1] === "claude") return [...args.slice(0, index), ...args.slice(index + 1)]
   // Preserve the existing no-input refusal without constructing either runtime.
-  if ((command === "memory" || command === "mcp" || command === "bug") && args.length === index + 1) return [...args]
+  if ((command === "memory" || command === "mcp" || command === "bug") && rest.length === 0) return [...args]
   if (
-    command === "memory" && ((args[index + 1] === "get" && args.length === index + 2) ||
-      (args[index + 1] === "set" && args.length === index + 3))
+    command === "memory" && ((rest[0] === "get" && rest.length === 1) ||
+      (rest[0] === "set" && rest.length === 2))
   ) return [...args]
   if (command !== undefined && legacy.has(command)) return [...args]
   if (command === "run") {
-    const rest = args.slice(index + 1)
     if (rest.some((arg) => arg === "--resume" || arg.startsWith("--resume=")) || rest[0]?.trimStart().startsWith("{")) {
       return [...args]
     }
@@ -69,19 +62,15 @@ export const legacyArguments = (args: ReadonlyArray<string>): Array<string> | un
  * @category parsing
  * @since 1.0.0
  */
-export const formattedLogArguments = (args: ReadonlyArray<string>): Array<string> | undefined => {
-  let index = 0
-  while (index < args.length && args[index]!.startsWith("-")) {
-    const flag = args[index]!
-    if (switches.has(flag) || [...valued].some((value) => flag.startsWith(`${value}=`))) index++
-    else if (valued.has(flag)) index += 2
-    else return undefined
-  }
+export const formattedLogArguments = (input: ReadonlyArray<string> | Argv.Globals): Array<string> | undefined => {
+  const parsed = Argv.parse(input)
+  const args = parsed.argv
+  const index = parsed.first
+  if (parsed.rest[0] !== "logs" || parsed.json || parsed.backend !== undefined) return undefined
   if (
-    args[index] !== "logs" ||
-    args.some((arg) => arg === "--json" || arg === "--backend" || arg.startsWith("--backend="))
+    parsed.format === undefined &&
+    !parsed.rest.some((arg) => ["--after", "--limit"].includes(arg.split("=")[0]!))
   ) return undefined
-  if (!args.some((arg) => ["--format", "--after", "--limit"].includes(arg.split("=")[0]!))) return undefined
   return ["runs", "logs", ...args.slice(0, index), ...args.slice(index + 1)]
 }
 
@@ -91,21 +80,15 @@ export const formattedLogArguments = (args: ReadonlyArray<string>): Array<string
  * @category parsing
  * @since 1.0.0
  */
-export const agentArguments = (args: ReadonlyArray<string>): Array<string> | undefined => {
+export const agentArguments = (input: ReadonlyArray<string> | Argv.Globals): Array<string> | undefined => {
+  const parsed = Argv.parse(input)
+  const args = parsed.argv
   if (
-    args.some((arg) =>
-      ["--json", "--quiet", "--help", "-h", "--version", "--backend"].includes(arg) ||
-      arg.startsWith("--backend=")
-    )
+    parsed.json || parsed.quiet || parsed.backend !== undefined ||
+    parsed.rest.some((arg) => ["--help", "-h", "--version"].includes(arg))
   ) return undefined
-  let index = 0
-  while (index < args.length && args[index]!.startsWith("-")) {
-    const flag = args[index]!
-    if (switches.has(flag) || [...valued].some((value) => flag.startsWith(`${value}=`))) index++
-    else if (valued.has(flag)) index += 2
-    else return undefined
-  }
-  const command = args[index]
+  const index = parsed.first
+  const command = parsed.rest[0]
   const aliases: Record<string, ReadonlyArray<string>> = {
     up: ["flow", "start"],
     plan: ["flow", "plan"],
@@ -124,13 +107,11 @@ export const agentArguments = (args: ReadonlyArray<string>): Array<string> | und
   // A missing positional still uses the legacy parser's typed, file-free usage error.
   if (
     command !== "ls" && command !== "ps" && command !== "down" &&
-    (args[index + 1] === undefined || args[index + 1]!.startsWith("--"))
+    (parsed.rest[1] === undefined || parsed.rest[1].startsWith("--"))
   ) return undefined
   // Removed 0.x options must keep their specific migration refusal, not become
   // a generic Incur unknown-flag error through a superficially similar alias.
   const allowed = new Set([
-    ...valued,
-    ...switches,
     "--data",
     "--detached",
     "-d",
@@ -139,6 +120,6 @@ export const agentArguments = (args: ReadonlyArray<string>): Array<string> | und
     "--status",
     "--message"
   ])
-  if (args.some((arg) => arg.startsWith("--") && !allowed.has(arg.split("=")[0]!))) return undefined
+  if (parsed.rest.some((arg) => arg.startsWith("--") && !allowed.has(arg.split("=")[0]!))) return undefined
   return [...aliases[command], ...args.slice(0, index), ...args.slice(index + 1)]
 }

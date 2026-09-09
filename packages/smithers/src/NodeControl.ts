@@ -21,6 +21,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
 import * as Application from "./Application.ts"
+import * as Argv from "./cli/Argv.ts"
 import * as CliError from "./CliError.ts"
 import * as Environment_ from "./Environment.ts"
 import { native } from "./internal/NodeControlHost.ts"
@@ -58,15 +59,6 @@ export type ServerOptions = ListenOptions & {
   readonly listen?: boolean | undefined
 }
 
-const valueFromArguments = (args: ReadonlyArray<string>, flag: string): string | undefined => {
-  for (let index = 0; index < args.length; index++) {
-    const argument = args[index]
-    if (argument === `--${flag}`) return args[index + 1]
-    if (argument?.startsWith(`--${flag}=`)) return argument.slice(flag.length + 3)
-  }
-  return undefined
-}
-
 /**
  * Reads and validates the MCP servers named by `--mcp-config`/`SMITHERS_MCP_CONFIG`.
  *
@@ -80,10 +72,10 @@ const valueFromArguments = (args: ReadonlyArray<string>, flag: string): string |
  * @since 0.1.0
  */
 const mcpServersFromArguments = (
-  args: ReadonlyArray<string>,
+  globals: Argv.Globals,
   environment: Environment
 ): ReadonlyArray<McpClient.ConnectOptions> | undefined => {
-  const path = valueFromArguments(args, "mcp-config") ?? Environment_.read(environment, "SMITHERS_MCP_CONFIG")
+  const path = globals.mcpConfig ?? Environment_.read(environment, "SMITHERS_MCP_CONFIG")
   if (path === undefined) return undefined
   if (!existsSync(path)) {
     throw new CliError.UsageError({ message: `--mcp-config ${path}: file not found` })
@@ -126,11 +118,12 @@ const mcpServersFromArguments = (
  * @since 0.1.0
  */
 export const makeConfig = (
-  args: ReadonlyArray<string>,
+  args: ReadonlyArray<string> | Argv.Globals,
   environment: Environment,
   cwd: string
 ): Application.Config => {
-  const remote = valueFromArguments(args, "remote") ?? Environment_.read(environment, "SMITHERS_REMOTE")
+  const globals = Argv.parse(args)
+  const remote = globals.remote ?? Environment_.read(environment, "SMITHERS_REMOTE")
   if (remote !== undefined) {
     let parsed: URL
     try {
@@ -151,20 +144,20 @@ export const makeConfig = (
     // The imported reference gave `--credential` no environment
     // fallback, so a hosted gateway had to spell the token on every command
     // line (the release policy).
-    credential: valueFromArguments(args, "credential") ?? Environment_.read(environment, "SMITHERS_API_KEY"),
-    mcpServers: mcpServersFromArguments(args, environment),
+    credential: globals.credential ?? Environment_.read(environment, "SMITHERS_API_KEY"),
+    mcpServers: mcpServersFromArguments(globals, environment),
     // `--root` is resolved here rather than in a handler because the durable
     // layers are built from it, and they are built before any flag is parsed.
-    root: Project.root(valueFromArguments(args, "root"), cwd),
+    root: Project.root(globals.root, cwd),
     // `migrate` converts a 0.x project, which by definition has no `.flows/`
     // for the root walk to anchor on. Resolved from the same `--root`, and
     // otherwise from the 0.x state beside the invocation directory.
-    migrationRoot: Project.legacyRoot(valueFromArguments(args, "root"), cwd)
+    migrationRoot: Project.legacyRoot(globals.root, cwd)
   }
 }
 
 /**
- * Resolves configuration for the current Node process.
+ * Resolves process configuration using an existing argument parse.
  *
  * The executable reaches for this effect before parsing the command tree. It
  * preserves configuration usage errors so the top-level reporter exits with
@@ -173,19 +166,31 @@ export const makeConfig = (
  * @category configuration
  * @since 0.1.0
  */
-export const config: Effect.Effect<Application.Config, CliError.UsageError> = Effect.try({
-  try: () => {
-    const configured = makeConfig(process.argv.slice(2), process.env, process.cwd())
-    Project.assertRoot(configured.root ?? process.cwd())
-    return configured
-  },
-  catch: (cause) =>
-    cause instanceof CliError.UsageError
-      ? cause
-      : new CliError.UsageError({
-        message: cause instanceof Error ? cause.message : "Smithers configuration could not be read"
-      })
-})
+export const configFromArguments = (
+  args: ReadonlyArray<string> | Argv.Globals
+): Effect.Effect<Application.Config, CliError.UsageError> =>
+  Effect.try({
+    try: () => {
+      const configured = makeConfig(args, process.env, process.cwd())
+      Project.assertRoot(configured.root ?? process.cwd())
+      return configured
+    },
+    catch: (cause) =>
+      cause instanceof CliError.UsageError
+        ? cause
+        : new CliError.UsageError({
+          message: cause instanceof Error ? cause.message : "Smithers configuration could not be read"
+        })
+  })
+
+/**
+ * Resolves configuration for the current process.
+ * @category configuration
+ * @since 0.1.0
+ */
+export const config: Effect.Effect<Application.Config, CliError.UsageError> = Effect.suspend(() =>
+  configFromArguments(process.argv.slice(2))
+)
 
 const websocketUrl = (remote: string): string => {
   const url = new URL(remote)

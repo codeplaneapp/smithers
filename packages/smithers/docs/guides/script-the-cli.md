@@ -30,6 +30,10 @@ Add `--quiet` when banners or progress on stderr are unwanted. It never
 suppresses the stdout document, so `smthrs --json --quiet ps` remains valid
 input to a JSON parser.
 
+Presentation flags can appear before or after a transition alias. `--silent`,
+`--verbose`, and `--audience human` preserve the retained fork workspace for
+`resume <run-id>` and `run <run-id> --resume`.
+
 ## Branch on the status
 
 ```bash

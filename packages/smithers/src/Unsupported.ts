@@ -15,6 +15,7 @@
  *
  * @since 1.0.0
  */
+import * as Argv from "./cli/Argv.ts"
 import * as CliError from "./CliError.ts"
 
 /**
@@ -278,16 +279,22 @@ export const verbError = (verb: RemovedVerb, subcommand?: string | undefined): C
  */
 const survivingParents = new Set(["gateway", "workflow"])
 
-// Recognize the removed initializer before opening local state. Only consume
-// flags with an unambiguous arity; unfamiliar options and boolean values stay
-// with the real parser, as do help, malformed input and arguments after `--`.
-const initGlobalRefusal = (args: ReadonlyArray<string>): CliError.UnsupportedError | undefined => {
+// Recognize the removed initializer before opening local state. The shared
+// globals are read by `Argv`; only `--global` itself is consumed here, and
+// unfamiliar options, boolean values, help, malformed input and arguments
+// after `--` stay with the real parser.
+const initGlobalRefusal = (args: ReadonlyArray<string> | Argv.Globals): CliError.UnsupportedError | undefined => {
+  const parsed = Argv.parse(args)
+  for (const value of [parsed.root, parsed.audience]) {
+    if (value !== undefined && (value.length === 0 || value.startsWith("-"))) return undefined
+  }
+  if (parsed.audience !== undefined && !["auto", "human", "agent"].includes(parsed.audience)) return undefined
   const seen = new Set<string>()
   let command: string | undefined
   let names = 0
   let global = false
-  for (let index = 0; index < args.length; index++) {
-    const argument = args[index]!
+  for (let index = 0; index < parsed.rest.length; index++) {
+    const argument = parsed.rest[index]!
     if (!argument.startsWith("-")) {
       if (command === undefined) {
         if (argument !== "init") return undefined
@@ -295,23 +302,17 @@ const initGlobalRefusal = (args: ReadonlyArray<string>): CliError.UnsupportedErr
       } else if (++names > 1) return undefined
       continue
     }
-    const [flag, inline] = argument.split(/=(.*)/s)
+    const [flag] = argument.split(/=(.*)/s)
     if (seen.has(flag!)) return undefined
     seen.add(flag!)
-    if (flag === "--root" || flag === "--audience") {
-      const value = inline ?? args[++index]
-      if (value === undefined || value.length === 0 || value.startsWith("-")) return undefined
-      if (flag === "--audience" && !["auto", "human", "agent"].includes(value)) return undefined
-    } else if (
+    if (
       argument === "--global=true" ||
-      argument === "--global" && (args[index + 1] === undefined || args[index + 1]!.startsWith("--"))
+      argument === "--global" &&
+        (parsed.rest[index + 1] === undefined || parsed.rest[index + 1]!.startsWith("--"))
     ) {
       if (command !== "init") return undefined
       global = true
-    } else if (
-      !["--json", "--quiet", "--silent", "--verbose"].includes(argument) ||
-      args[index + 1] !== undefined && !args[index + 1]!.startsWith("--")
-    ) return undefined
+    } else return undefined
   }
   return global ? flagError(findFlag("init", "global")) : undefined
 }
@@ -338,8 +339,10 @@ const initGlobalRefusal = (args: ReadonlyArray<string>): CliError.UnsupportedErr
  * @category getters
  * @since 1.0.0
  */
-export const refusal = (args: ReadonlyArray<string>): CliError.UnsupportedError | undefined => {
-  const initializer = initGlobalRefusal(args)
+export const refusal = (input: ReadonlyArray<string> | Argv.Globals): CliError.UnsupportedError | undefined => {
+  const parsed = Argv.parse(input)
+  const args = parsed.argv
+  const initializer = initGlobalRefusal(parsed)
   if (initializer !== undefined) return initializer
   const [name, ...rest] = args
   if (name === undefined || name.startsWith("-")) return undefined

@@ -25,6 +25,7 @@ import * as Ui from "../Ui.ts"
 import * as Unsupported from "../Unsupported.ts"
 import * as Verb from "../Verb.ts"
 import { packageVersion } from "../Version.ts"
+import * as Argv from "./Argv.ts"
 import * as RunProgress from "./RunProgress.ts"
 
 let signalExitCode: 130 | 143 | undefined
@@ -138,8 +139,8 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
  * costs the old startup; misreading a value as one would run a handler with
  * no services behind it.
  */
-const documentRequested = (args: ReadonlyArray<string>): boolean => {
-  for (const argument of args) {
+const documentRequested = (parsed: Argv.Globals): boolean => {
+  for (const argument of parsed.rest) {
     if (!argument.startsWith("-")) continue
     return argument === "--help" || argument === "--version"
   }
@@ -148,8 +149,9 @@ const documentRequested = (args: ReadonlyArray<string>): boolean => {
 
 const main = Effect.gen(function*() {
   const argv = process.argv.slice(2)
+  const parsed = Argv.parse(argv)
   const presentation = Audience.fromArguments(argv)
-  if (documentRequested(argv)) {
+  if (documentRequested(parsed)) {
     // `effect/unstable/cli` renders the document and fails with `ShowHelp`
     // before any handler runs, so the durable services the handlers declare
     // are never requested. Discharging them by type is what keeps the
@@ -164,15 +166,15 @@ const main = Effect.gen(function*() {
   // way to saying the verb is gone. `Unsupported.refusal` reads only the
   // shapes it can read without guessing; everything else still refuses from
   // the command tree.
-  const refused = Unsupported.refusal(argv)
+  const refused = Unsupported.refusal(parsed)
   if (refused !== undefined) return yield* Effect.fail(refused)
-  const applicationConfig = yield* NodeControl.config
+  const applicationConfig = yield* NodeControl.configFromArguments(parsed)
   // `--mcp` is a mode, not a verb: every MCP client configures a launch
   // command, so the flag has to be readable before the command tree parses
   // anything. The server then talks to the same Control layer the verbs do.
-  if (McpServer.requested(argv)) {
+  if (McpServer.requested(parsed)) {
     return yield* McpServer.serve({
-      ...McpServer.optionsFromArguments(argv),
+      ...McpServer.optionsFromArguments(parsed),
       verbs: Verb.shipped,
       version: packageVersion
     }).pipe(Effect.provide(NodeControl.layer(applicationConfig)))
@@ -211,7 +213,7 @@ const main = Effect.gen(function*() {
       // help/usage's file-free contract and never inspect local state for a
       // remote invocation. Flat transition aliases use the same worktree as
       // their canonical runs/approvals equivalents.
-      const runId = applicationConfig.remote === undefined ? LegacyHistory.executionRunId(argv) : undefined
+      const runId = applicationConfig.remote === undefined ? LegacyHistory.executionRunId(parsed) : undefined
       const config = runId === undefined ? applicationConfig : {
         ...applicationConfig,
         ...History.prepare(Project.root(applicationConfig.root, process.cwd()), runId)

@@ -679,6 +679,8 @@ describe("what each tool answers on the path through", () => {
 
 describe("the mode flags read straight off argv", () => {
   it("selects the server on --mcp and on nothing else", () => {
+    expect(McpServer.requested(["--root", "--mcp"])).toBe(false)
+    expect(McpServer.requested(["--", "--mcp"])).toBe(false)
     expect(McpServer.requested(["--mcp"])).toBe(true)
     expect(McpServer.requested(["ps", "--json"])).toBe(false)
   })
@@ -695,6 +697,10 @@ describe("the mode flags read straight off argv", () => {
     // narrowest of the three, which is what a client that sent nothing gets.
     expect(McpServer.optionsFromArguments(["--mcp", "--surface", "everything"]))
       .toEqual({ surface: "semantic", readOnly: false })
+    expect(McpServer.optionsFromArguments(["--root", "--surface=both", "--", "--read-only"]))
+      .toEqual({ surface: "semantic", readOnly: false })
+    expect(McpServer.optionsFromArguments(["--allowed-tools", "--read-only"]))
+      .toEqual({ surface: "semantic", readOnly: false, allowedTools: ["--read-only"] })
     expect(McpServer.optionsFromArguments([])).toEqual({ surface: "semantic", readOnly: false })
   })
 })

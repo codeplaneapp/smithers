@@ -3,6 +3,8 @@ import { normalizeArguments } from "../src/cli/Arguments.ts"
 
 describe("public workspace spelling", () => {
   it.each([
+    [["--quiet", "--root", "/project", "targets"], ["targets", "--quiet", "--workspace", "/project"]],
+    [["--silent=false", "--root=/project", "targets"], ["targets", "--silent=false", "--workspace=/project"]],
     [["targets", "--root", "/project"], ["targets", "--workspace", "/project"]],
     [["--root", "/project", "targets"], ["targets", "--workspace", "/project"]],
     [["build", "//...", "--root=/project"], ["build", "//...", "--workspace=/project"]],

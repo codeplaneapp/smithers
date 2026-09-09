@@ -4,9 +4,12 @@
  */
 import { ControlSchema } from "@smthrs/control"
 import { Schema } from "effect"
+import * as Argv from "../cli/Argv.ts"
 
-const valued = new Set(["--root", "--remote", "--credential", "--mcp-config", "--backend", "--message", "--scope"])
-const switches = new Set(["--json", "--quiet", "--resume"])
+// The verb-specific flags the aliases below accept; the shared globals are
+// `Argv`'s to know.
+const valued = new Set(["--message", "--scope"])
+const switches = new Set(["--resume"])
 
 /**
  * Called only after the real parser selects a handler; never resolves files
@@ -14,13 +17,14 @@ const switches = new Set(["--json", "--quiet", "--resume"])
  * @since 1.0.0
  * @category getters
  */
-export const executionRunId = (args: ReadonlyArray<string>): string | undefined => {
+export const executionRunId = (args: ReadonlyArray<string> | Argv.Globals): string | undefined => {
+  const { rest } = Argv.parse(args)
   const words: Array<string> = []
   let resume = false
-  for (let index = 0; index < args.length; index++) {
-    const argument = args[index]!
+  for (let index = 0; index < rest.length; index++) {
+    const argument = rest[index]!
     if (argument === "--") {
-      words.push(...args.slice(index + 1))
+      words.push(...rest.slice(index + 1))
       break
     }
     if (!argument.startsWith("-")) {
@@ -31,7 +35,7 @@ export const executionRunId = (args: ReadonlyArray<string>): string | undefined 
     const flag = separator === -1 ? argument : argument.slice(0, separator)
     if (valued.has(flag)) {
       if (separator === -1) {
-        if (++index >= args.length) return undefined
+        if (++index >= rest.length) return undefined
       }
       continue
     }

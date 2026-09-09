@@ -244,7 +244,20 @@ describe("control bridge configuration and routing", () => {
   })
 
   it.each(["approve", "deny"])("prepares a node-target %s from its decoded run identity", async (verb) => {
-    await Bridge.invoke([verb, JSON.stringify({ target: { _tag: "Node", runId: "approved-run" } })], local, runtime)
+    // The same complete payload `approvals approve` serializes; the bridge
+    // shares the legacy executable's extraction, which decodes it in full.
+    const payload = {
+      target: {
+        _tag: "Node",
+        runId: "approved-run",
+        requestId: "ask",
+        digest: "reviewed",
+        envelope: { capabilities: [], flows: [], budget: {} }
+      },
+      scope: "once",
+      idempotencyKey: "decision"
+    }
+    await Bridge.invoke([verb, JSON.stringify(payload), "--scope", "once"], local, runtime)
     expect(ports.prepare).toHaveBeenCalledExactlyOnceWith(local.root, "approved-run")
   })
 

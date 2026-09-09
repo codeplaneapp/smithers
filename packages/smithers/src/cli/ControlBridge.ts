@@ -15,6 +15,7 @@ import { format } from "node:util"
 import * as CliError from "../CliError.ts"
 import { cli as legacyCli, doctorCli, migrationCli } from "../Command.ts"
 import * as HistoryWorkspace from "../history/History.ts"
+import * as LegacyHistory from "../history/Legacy.ts"
 import * as CommandStatus from "../internal/CommandStatus.ts"
 import * as NodeControl from "../NodeControl.ts"
 import { layerTriggerScheduler } from "../operator/Triggers.ts"
@@ -134,14 +135,9 @@ export const invoke = async (
   const progressOutput = session?.stderr ?? process.stderr
   let config = configuration(options, runtime)
   if (config.remote === undefined && runtime.executionRoot === undefined) {
-    let runId: string | undefined
-    if (["resume", "cancel", "signal", "steer"].includes(args[0] ?? "")) runId = args[1]
-    if (args[0] === "approve" || args[0] === "deny") {
-      try {
-        const input = JSON.parse(args[1] ?? "") as { target?: { _tag?: string; runId?: unknown } }
-        if (input.target?._tag === "Node" && typeof input.target.runId === "string") runId = input.target.runId
-      } catch { /* The existing approval decoder owns malformed-payload diagnostics. */ }
-    }
+    // The same extraction the legacy executable uses, so a flat alias binds
+    // to the same worktree whichever entry it arrived through.
+    const runId = LegacyHistory.executionRunId(args)
     if (runId !== undefined) {
       config = { ...config, ...HistoryWorkspace.prepare(Project.root(config.root, process.cwd()), runId) }
     }

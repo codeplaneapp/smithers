@@ -28,6 +28,7 @@
 import { Control as ControlService, ControlError, ControlSchema } from "@smthrs/control"
 import * as Redaction from "@smthrs/journal/Redaction"
 import { Cause, Context, Deferred, Effect, Queue, Schema, Stream } from "effect"
+import * as Argv from "./cli/Argv.ts"
 import * as CliError from "./CliError.ts"
 import * as Forensics from "./Forensics.ts"
 import * as History from "./internal/History.ts"
@@ -649,16 +650,7 @@ export const tools = (options: Options = {}): ReadonlyArray<Tool> => {
  * @category predicates
  * @since 1.0.0
  */
-export const requested = (args: ReadonlyArray<string>): boolean => args.includes("--mcp")
-
-const value = (args: ReadonlyArray<string>, flag: string): string | undefined => {
-  for (let index = 0; index < args.length; index++) {
-    const argument = args[index]
-    if (argument === `--${flag}`) return args[index + 1]
-    if (argument?.startsWith(`--${flag}=`)) return argument.slice(flag.length + 3)
-  }
-  return undefined
-}
+export const requested = (args: ReadonlyArray<string> | Argv.Globals): boolean => Argv.parse(args).options.get("--mcp") === true
 
 /**
  * Reads the session's scope out of raw argv.
@@ -670,15 +662,16 @@ const value = (args: ReadonlyArray<string>, flag: string): string | undefined =>
  * @category constructors
  * @since 1.0.0
  */
-export const optionsFromArguments = (args: ReadonlyArray<string>): Options => {
-  const surface = value(args, "surface")
-  const allowed = value(args, "allowed-tools")
+export const optionsFromArguments = (args: ReadonlyArray<string> | Argv.Globals): Options => {
+  const parsed = Argv.parse(args)
+  const surface = parsed.options.get("--surface")
+  const allowed = parsed.options.get("--allowed-tools")
   return {
     surface: surface === "raw" || surface === "both" ? surface : "semantic",
-    ...(allowed === undefined
+    ...(typeof allowed !== "string"
       ? {}
       : { allowedTools: allowed.split(",").map((name) => name.trim()).filter((name) => name !== "") }),
-    readOnly: args.includes("--read-only")
+    readOnly: parsed.options.get("--read-only") === true
   }
 }
 

@@ -12,6 +12,17 @@ describe("legacy history routing", () => {
     }
   )
 
+  it("routes a presentation flag the command accepts, wherever it appears", () => {
+    // `--silent`, `--verbose` and `--audience` are shared globals the legacy
+    // parser accepts; treating them as unknown dropped the fork's worktree.
+    expect(executionRunId(["resume", "fork-run", "--json", "--silent"])).toBe("fork-run")
+    expect(executionRunId(["--audience", "human", "resume", "fork-run"])).toBe("fork-run")
+    expect(executionRunId(["--audience=agent", "steer", "fork-run", "--message", "go", "--verbose"])).toBe("fork-run")
+    expect(executionRunId(["run", "fork-run", "--resume", "--json", "--verbose"])).toBe("fork-run")
+    expect(executionRunId(["resume", "--quiet", "false", "fork-run"])).toBe("fork-run")
+    expect(executionRunId(["resume", "--no-silent", "fork-run"])).toBe("fork-run")
+  })
+
   it("only routes the resume form of legacy run", () => {
     expect(executionRunId(["run", "fork-run", "--resume"])).toBe("fork-run")
     expect(executionRunId(["run", "--resume=true", "fork-run"])).toBe("fork-run")
@@ -46,6 +57,7 @@ describe("legacy history routing", () => {
   it("does not guess at documents, removed flags, missing values, or unknown commands", () => {
     expect(executionRunId(["resume", "fork-run", "--help"])).toBeUndefined()
     expect(executionRunId(["resume", "--unknown", "fork-run"])).toBeUndefined()
+    expect(executionRunId(["resume", "--json=maybe", "fork-run"])).toBeUndefined()
     expect(executionRunId(["steer", "fork-run", "--takeover"])).toBeUndefined()
     expect(executionRunId(["resume", "--root"])).toBeUndefined()
     expect(executionRunId(["status", "fork-run"])).toBeUndefined()

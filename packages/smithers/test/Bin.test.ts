@@ -103,6 +103,32 @@ const inEmptyDirectory = <A>(use: (cwd: string) => A): A => {
   }
 }
 
+describe("legacy fork routing", processBudget, () => {
+  it.each([
+    ["resume", "fork-run", "--silent"],
+    ["--audience", "human", "resume", "fork-run"],
+    ["run", "fork-run", "--resume", "--verbose"]
+  ])("prepares the retained workspace with presentation flags: %j", (...args) => {
+    inEmptyDirectory((cwd) => {
+      mkdirSync(join(cwd, ".flows"))
+      const workspace = join(cwd, "missing-fork-workspace")
+      const database = new DatabaseSync(join(cwd, ".flows", "engine.db"))
+      try {
+        database.exec("CREATE TABLE smthrs_history_workspaces(run_id TEXT PRIMARY KEY, workspace TEXT NOT NULL)")
+        database.prepare("INSERT INTO smthrs_history_workspaces VALUES (?, ?)").run("fork-run", workspace)
+      } finally {
+        database.close()
+      }
+      // Only History.prepare reports this retained-workspace error. It must
+      // run after parsing and before the default executor opens its layers.
+      const result = runIn(cwd, args, { SMITHERS_AUDIENCE: "human", SMITHERS_REMOTE: "" })
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(`Run workspace no longer exists: ${workspace}`)
+      expect(existsSync(join(cwd, ".flows", "control.db"))).toBe(false)
+    })
+  })
+})
+
 describe("bulk cancellation", processBudget, () => {
   it.each([
     { args: ["down"] },

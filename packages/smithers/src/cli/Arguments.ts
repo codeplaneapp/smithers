@@ -3,6 +3,8 @@
  * @since 1.0.0
  */
 
+import * as Argv from "./Argv.ts"
+
 const targets = new Set([
   "build",
   "test",
@@ -27,17 +29,13 @@ const targets = new Set([
   "clean",
   "info"
 ])
-const valued = new Set(["--root", "--workspace", "-w", "--ui", "--format", "--filter", "--fields", "--audience"])
+const valued = new Set(["--workspace", "-w", "--ui", "--filter", "--fields"])
 const switches = new Set([
-  "--json",
   "--help",
   "-h",
   "--schema",
   "--llms",
-  "--verbose",
-  "--no-color",
-  "--silent",
-  "--no-silent"
+  "--no-color"
 ])
 
 /**
@@ -47,13 +45,16 @@ const switches = new Set([
  * @since 1.0.0
  */
 export const normalizeArguments = (args: ReadonlyArray<string>): Array<string> => {
-  let index = 0
-  while (index < args.length && args[index]!.startsWith("-")) {
-    const flag = args[index]!
-    if (switches.has(flag) || [...valued].some((value) => flag.startsWith(`${value}=`))) index++
-    else if (valued.has(flag)) index += 2
+  const parsed = Argv.parse(args)
+  const rest = parsed.rest
+  let offset = 0
+  while (offset < rest.length && rest[offset]!.startsWith("-")) {
+    const flag = rest[offset]!
+    if (switches.has(flag) || [...valued].some((value) => flag.startsWith(`${value}=`))) offset++
+    else if (valued.has(flag)) offset += 2
     else return [...args]
   }
+  const index = parsed.restIndices[offset] ?? args.length
   const command = args[index]
   if (command === undefined) return [...args]
   const bare = command.startsWith("//") || command.startsWith(":")
