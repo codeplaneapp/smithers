@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createStatusSiteWorker, type StatusSiteEnv } from "../src/worker.ts";
 
@@ -295,6 +296,8 @@ describe("status site worker", () => {
   test("reports health without touching static assets", async () => {
     const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/healthz"), makeEnv());
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ ok: true, service: "status-site" });
   });
 
@@ -305,7 +308,82 @@ describe("status site worker", () => {
     );
     expect(response.status).toBe(405);
     expect(response.headers.get("allow")).toBe("GET, HEAD");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await response.text()).toBe("method not allowed");
+  });
+
+  test("locks the page to its one inline script with a content security policy", async () => {
+    // The hash is recomputed from index.html here, so editing the script without
+    // updating the worker's constant fails this test instead of shipping a page
+    // whose only script the browser refuses to run.
+    const script = /<script>([\s\S]*?)<\/script>/.exec(homeHtml)?.[1] ?? "";
+    expect(script).toBeTruthy();
+    const hash = createHash("sha256").update(script, "utf8").digest("base64");
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/"), makeEnv());
+    expect(response.headers.get("content-security-policy")).toBe(
+      [
+        "default-src 'none'",
+        `script-src 'sha256-${hash}'`,
+        "style-src 'self' 'unsafe-inline'",
+        "connect-src 'self'",
+        "img-src 'self'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+      ].join("; "),
+    );
+    expect(response.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    // A hash-only script-src covers exactly one block and no inline handlers.
+    expect(homeHtml.match(/<script/g)).toHaveLength(1);
+    expect(homeHtml).not.toMatch(/\son[a-z]+=["']/i);
+    expect(homeHtml).not.toContain("javascript:");
+  });
+
+  test("keeps the page policy on the SPA fallback under /assets/", async () => {
+    // The real binding answers a missing /assets/x with index.html and a 200.
+    // Stamping that HTML immutable would pin the page at that path for a year.
+    const env: StatusSiteEnv = {
+      ASSETS: {
+        async fetch() {
+          return new Response(homeHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
+        },
+      },
+    };
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/assets/app.js"), env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(response.headers.get("content-security-policy")).toContain("script-src");
+    expect(await response.text()).toContain(BANNERS[status.overall] as string);
+  });
+
+  test("never caches a binding error for an asset", async () => {
+    const env: StatusSiteEnv = {
+      ASSETS: {
+        async fetch() {
+          return new Response("upstream error", { status: 503, headers: { "content-type": "text/plain" } });
+        },
+      },
+    };
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/assets/app.js"), env);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  test("never caches a missing status page", async () => {
+    // A deploy that drops index.html must be gone the moment the next one lands.
+    const env: StatusSiteEnv = {
+      ASSETS: {
+        async fetch() {
+          return new Response("not found", { status: 404 });
+        },
+      },
+    };
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/"), env);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   test("serves static assets with an immutable cache header", async () => {

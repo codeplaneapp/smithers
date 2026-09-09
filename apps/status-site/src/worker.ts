@@ -4,14 +4,47 @@ export interface StatusSiteEnv {
   };
 }
 
+const NOSNIFF = { "x-content-type-options": "nosniff" } as const;
+
+/**
+ * SHA-256 of the one inline `<script>` in site/index.html. The policy allows
+ * exactly that block, so a stray `javascript:` href in the feed or a later
+ * third-party tag cannot run. worker.test.ts recomputes the hash from the file
+ * on every run: editing the script without updating this constant fails the
+ * build instead of shipping a page whose script the browser refuses.
+ */
+const INLINE_SCRIPT_SHA256 = "sha256-SKwTCdmxN7XzWk252l0bIhwomosnZDw1a8afCNDcCzo=";
+
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  `script-src '${INLINE_SCRIPT_SHA256}'`,
+  // The page carries one <style> block and one style attribute.
+  "style-src 'self' 'unsafe-inline'",
+  // fetch("/status.json")
+  "connect-src 'self'",
+  "img-src 'self'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 const HTML_HEADERS = {
   "cache-control": "public, max-age=300",
-  "x-content-type-options": "nosniff",
+  "content-security-policy": CONTENT_SECURITY_POLICY,
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "x-frame-options": "DENY",
+  ...NOSNIFF,
 } as const;
 
 const ASSET_HEADERS = {
   "cache-control": "public, max-age=31536000, immutable",
-  "x-content-type-options": "nosniff",
+  ...NOSNIFF,
+} as const;
+
+/** Errors and health probes must not outlive the deploy that changes them. */
+const UNCACHED_HEADERS = {
+  "cache-control": "no-store",
+  ...NOSNIFF,
 } as const;
 
 /**
@@ -34,15 +67,27 @@ function withHeaders(response: Response, headers: Record<string, string>): Respo
   });
 }
 
-function headersFor(pathname: string): Record<string, string> {
-  if (pathname.startsWith("/assets/")) return { ...ASSET_HEADERS };
+/**
+ * The binding answers any unknown path with index.html and a 200 (see
+ * wrangler.jsonc: not_found_handling is single-page-application), so the path
+ * alone cannot tell an asset from the page. Only a 200 that is not HTML earns
+ * the year-long immutable policy; the fallback page keeps the page policy, and
+ * nothing outside 200/304 is cached at all, so a broken deploy is gone the
+ * moment the next one lands.
+ */
+function headersFor(pathname: string, response: Response): Record<string, string> {
+  if (response.status !== 200 && response.status !== 304) return { ...UNCACHED_HEADERS };
+  const contentType = response.headers.get("content-type") ?? "";
+  if (response.status === 200 && pathname.startsWith("/assets/") && !contentType.includes("text/html")) {
+    return { ...ASSET_HEADERS };
+  }
   return { ...HTML_HEADERS };
 }
 
 async function fetchAsset(request: Request, env: StatusSiteEnv): Promise<Response> {
   const response = await env.ASSETS.fetch(request);
   if (response.status === 404) return response;
-  return withHeaders(response, headersFor(new URL(request.url).pathname));
+  return withHeaders(response, headersFor(new URL(request.url).pathname, response));
 }
 
 /**
@@ -74,7 +119,8 @@ async function fetchIndex(request: Request, env: StatusSiteEnv): Promise<Respons
   const url = new URL(request.url);
   url.pathname = "/index.html";
   url.search = "";
-  return withHeaders(await env.ASSETS.fetch(new Request(url, request)), HTML_HEADERS);
+  const response = await env.ASSETS.fetch(new Request(url, request));
+  return withHeaders(response, headersFor(url.pathname, response));
 }
 
 export function createStatusSiteWorker() {
@@ -88,13 +134,14 @@ export function createStatusSiteWorker() {
           headers: {
             allow: "GET, HEAD",
             "content-type": "text/plain; charset=utf-8",
+            ...NOSNIFF,
             ...(url.pathname === "/status.json" ? { ...FEED_HEADERS, "cache-control": "no-store" } : {}),
           },
         });
       }
 
       if (url.pathname === "/healthz") {
-        return Response.json({ ok: true, service: "status-site" });
+        return Response.json({ ok: true, service: "status-site" }, { headers: UNCACHED_HEADERS });
       }
 
       // A missing status feed must read as missing, not as an HTML page.

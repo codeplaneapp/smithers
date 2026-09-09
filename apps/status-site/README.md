@@ -10,6 +10,14 @@ return an uncached JSON 404 with `error: "status feed unavailable"` and a `reaso
 `missing` for an asset 404, `not-json` for a non-JSON 200, or `unexpected-status`
 for other statuses. A warning records the asset status, content type, and pathname.
 
+The page is served with a Content-Security-Policy that allows only the inline
+script in `index.html` by SHA-256 hash, plus `referrer-policy` and
+`frame-ancestors 'none'`. `tests/worker.test.ts` recomputes the hash from the
+file, so editing the script means updating the constant in `src/worker.ts` in
+the same commit. Only a non-HTML 200 under `/assets/` is cached as immutable;
+the SPA fallback page keeps the five-minute page policy, and any status outside
+200/304 is `no-store`, so a broken deploy is gone as soon as the next one lands.
+
 ## Truth rules
 
 These are enforced by `tests/worker.test.ts`, so breaking one fails the build:
