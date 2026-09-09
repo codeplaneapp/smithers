@@ -404,7 +404,8 @@ export const maximumRequestBodyBytes = 16 * 1024 * 1024
 export const maximumResponseBodyBytes = 16 * 1024 * 1024
 
 /**
- * Wall-clock bound for one proxy-owned upstream request.
+ * Elapsed deadline and socket idle timeout for one proxy-owned upstream request.
+ * The deadline starts when the proxy sends the request and includes its response body.
  * @category constants
  * @since 0.1.0
  */
@@ -583,7 +584,34 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
         // not something HTTP can carry. Outside a handler that throw is an
         // uncaught exception in an event listener, which ends the whole build
         // process instead of this one target.
-        let upstream: NodeHttp.ClientRequest
+        let upstream: NodeHttp.ClientRequest | undefined
+        let incoming: NodeHttp.IncomingMessage | undefined
+        let deadline: ReturnType<typeof setTimeout> | undefined
+        const responseChunks: Array<Buffer> = []
+        let settled = false
+        const clear = () => {
+          clearTimeout(deadline)
+          upstream?.setTimeout(0)
+          chunks.length = 0
+          responseChunks.length = 0
+        }
+        const fail = (message: string) => {
+          if (settled) return
+          settled = true
+          clear()
+          incoming?.destroy()
+          upstream?.destroy()
+          if (response.headersSent || response.destroyed) response.destroy()
+          else response.writeHead(502).end(boundary.redact(message))
+        }
+        const failError = (error: NodeJS.ErrnoException) => {
+          // Error messages can contain secret destinations. Expose only a
+          // bounded transport code, and redact even that request-local value.
+          const code = typeof error.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code)
+            ? `: ${error.code}`
+            : ""
+          fail(`upstream request failed${code}`)
+        }
         try {
           upstream = requestUpstream(
             {
@@ -595,29 +623,32 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
               headers
             },
             (upstreamResponse) => {
-              const encoding = upstreamResponse.headers["content-encoding"]
-              if (encoding !== undefined && encoding !== "identity") {
-                upstreamResponse.resume()
-                response.writeHead(502).end("upstream returned an encoded response")
+              incoming = upstreamResponse
+              upstreamResponse.once("error", failError)
+              const endedEarly = () => fail("upstream request failed: upstream response ended early")
+              upstreamResponse.once("aborted", endedEarly)
+              upstreamResponse.once("close", endedEarly)
+              if (settled) {
+                upstreamResponse.destroy()
                 return
               }
-              const responseChunks: Array<Buffer> = []
+              const encoding = upstreamResponse.headers["content-encoding"]
+              if (encoding !== undefined && encoding !== "identity") {
+                fail("upstream returned an encoded response")
+                return
+              }
               let responseBytes = 0
-              let responseRejected = false
               upstreamResponse.on("data", (chunk: Buffer) => {
-                if (responseRejected) return
+                if (settled) return
                 responseBytes += chunk.byteLength
                 if (responseBytes > maximumResponseBodyBytes) {
-                  responseRejected = true
-                  responseChunks.length = 0
-                  upstreamResponse.destroy()
-                  response.writeHead(502).end("upstream response is too large")
+                  fail("upstream response is too large")
                   return
                 }
                 responseChunks.push(chunk)
               })
               upstreamResponse.on("end", () => {
-                if (responseRejected) return
+                if (settled) return
                 const responseHeaders: Record<string, string | Array<string>> = {}
                 const nominated = connectionHeaders(upstreamResponse.headers)
                 for (const [name, value] of Object.entries(upstreamResponse.headers)) {
@@ -633,6 +664,8 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
                 }
                 const redacted = boundary.redactBytes(Buffer.concat(responseChunks))
                 responseHeaders["content-length"] = String(redacted.byteLength)
+                settled = true
+                clear()
                 response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders)
                 response.end(redacted)
               })
@@ -640,21 +673,20 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           )
         } catch {
           const named = boundary.resolvedDeclarations()
-          response.writeHead(502).end(
+          fail(
             named.length === 0
               ? "the request could not be represented as an http request"
               : `the declared secret ${named.join(", ")} produced an invalid request target`
           )
           return
         }
-        upstream.setTimeout(upstreamTimeoutMs, () => upstream.destroy(new Error("upstream request timed out")))
-        upstream.on("error", () => {
-          if (!response.headersSent) response.writeHead(502)
-          response.end("upstream request failed")
-        })
+        const timedOut = () => fail("upstream request failed: timed out")
+        upstream.setTimeout(upstreamTimeoutMs, timedOut)
+        upstream.once("error", failError)
         response.once("close", () => {
-          if (!response.writableEnded) upstream.destroy()
+          if (!response.writableEnded) fail("upstream request failed: child disconnected")
         })
+        deadline = setTimeout(timedOut, upstreamTimeoutMs)
         upstream.end(body)
       })
     })

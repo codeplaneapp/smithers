@@ -1,6 +1,7 @@
 import * as NodeHttp from "node:http"
 import * as NodeNet from "node:net"
-import { describe, expect, it } from "vitest"
+import * as NodeTimers from "node:timers"
+import { describe, expect, it, vi } from "vitest"
 import * as Secret from "../src/Secret.ts"
 import * as SecretProxy from "../src/SecretProxy.ts"
 
@@ -429,6 +430,41 @@ const throughProxy = async (
   }
 }
 
+// Use a real watchdog even when the proxy deadline runs on a fake clock.
+const boundedProxyRequest = (
+  endpoint: string,
+  path: string,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: string }> =>
+  new Promise((resolve) => {
+    const outgoing = NodeHttp.request({
+      host: "127.0.0.1",
+      port: Number(new URL(endpoint).port),
+      path,
+      headers
+    }, (response) => {
+      const chunks: Array<Buffer> = []
+      response.on("data", (chunk: Buffer) => chunks.push(chunk))
+      response.on("end", () => {
+        NodeTimers.clearTimeout(watchdog)
+        resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") })
+      })
+      response.on("error", (error) => {
+        NodeTimers.clearTimeout(watchdog)
+        resolve({ status: 0, body: error.message })
+      })
+    })
+    const watchdog = NodeTimers.setTimeout(() => {
+      resolve({ status: 0, body: "proxy did not settle within 2 seconds" })
+      outgoing.destroy()
+    }, 2_000)
+    outgoing.on("error", (error) => {
+      NodeTimers.clearTimeout(watchdog)
+      resolve({ status: 0, body: error.message })
+    })
+    outgoing.end()
+  })
+
 describe("SecretProxy server", () => {
   const token = Secret.Secret("PROXY_TEST_TOKEN")
 
@@ -575,26 +611,71 @@ describe("SecretProxy server", () => {
     }
   })
 
-  it("answers 502 when the upstream is unreachable", async () => {
-    const vault = SecretProxy.makeVault({ read: () => "real-value" })
-    const proxy = await SecretProxy.startProxy(vault)
-    try {
-      const port = Number(new URL(proxy.endpoint).port)
-      const status = await new Promise<number>((resolve, reject) => {
-        const outgoing = NodeHttp.request({
-          host: "127.0.0.1",
-          port,
-          path: "http://127.0.0.1:1/unreachable"
-        }, (response) => {
-          response.resume()
-          resolve(response.statusCode ?? 0)
+  it.each(["real-value", "ECONNREFUSED"])(
+    "preserves and redacts the upstream error code (secret: %s)",
+    async (value) => {
+      const vault = SecretProxy.makeVault({ read: () => value })
+      const placeholder = vault.mint(Secret.HttpSecret(token, ["http://127.0.0.1:1"]))
+      const proxy = await SecretProxy.startProxy(vault)
+      try {
+        const result = await boundedProxyRequest(proxy.endpoint, "http://127.0.0.1:1/unreachable", {
+          authorization: `Bearer ${placeholder}`
         })
-        outgoing.on("error", reject)
-        outgoing.end()
-      })
-      expect(status).toBe(502)
+        expect(result.status).toBe(502)
+        expect(result.body).toBe(`upstream request failed: ${value === "ECONNREFUSED" ? placeholder : "ECONNREFUSED"}`)
+        expect(result.body).not.toContain(value)
+      } finally {
+        await proxy.close()
+      }
+    }
+  )
+
+  it("settles the child when the upstream resets after a partial body", async () => {
+    const upstream = NodeHttp.createServer((_request, response) => {
+      response.writeHead(200, { "content-length": "100" })
+      response.write("partial", () => NodeTimers.setTimeout(() => response.destroy(), 20))
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const address = upstream.address() as NodeNet.AddressInfo
+    const proxy = await SecretProxy.startProxy(SecretProxy.makeVault())
+    try {
+      const result = await boundedProxyRequest(proxy.endpoint, `http://127.0.0.1:${address.port}/`)
+      expect(result.status).toBe(502)
+      expect(result.body).toBe("upstream request failed: upstream response ended early")
+      expect(result.body).not.toContain("partial")
     } finally {
       await proxy.close()
+      upstream.closeAllConnections()
+      await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    }
+  })
+
+  it("enforces the elapsed deadline even while the upstream sends data", async () => {
+    let send: NodeHttp.ServerResponse | undefined
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => { started = resolve })
+    const upstream = NodeHttp.createServer((_request, response) => {
+      send = response
+      response.writeHead(200)
+      response.write("partial", started)
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const address = upstream.address() as NodeNet.AddressInfo
+    const proxy = await SecretProxy.startProxy(SecretProxy.makeVault())
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      const result = boundedProxyRequest(proxy.endpoint, `http://127.0.0.1:${address.port}/`)
+      await ready
+      await vi.advanceTimersByTimeAsync(SecretProxy.upstreamTimeoutMs / 2)
+      await new Promise<void>((resolve) => send!.write("still active", () => resolve()))
+      await vi.advanceTimersByTimeAsync(SecretProxy.upstreamTimeoutMs / 2)
+      expect(await result).toEqual({ status: 502, body: "upstream request failed: timed out" })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      await proxy.close()
+      upstream.closeAllConnections()
+      await new Promise<void>((resolve) => upstream.close(() => resolve()))
     }
   })
 

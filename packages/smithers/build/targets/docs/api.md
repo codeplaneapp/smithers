@@ -72,6 +72,14 @@ independent of the child `cwd`. Append cache filenames directly to the token;
 do not prepend a relative path from the working directory. `DepsLint` uses
 this token for both writing its generated knip config and passing `--config`.
 
+`SecretProxy.upstreamTimeoutMs` bounds each proxy-owned upstream HTTP request
+with a two-minute elapsed deadline from sending the request through receiving
+its complete response body, plus a socket idle timer of the same duration.
+Timeouts and truncated responses discard buffered bytes and settle the child
+with HTTP 502, or close its response if headers were already sent. Transport
+failures include a redacted error code when available; timeout failures say
+`timed out`. Raw upstream error messages are never returned.
+
 `ExecSandbox` anchors write grants at the canonical workspace root. A write
 with a symbolic link in any component below that root is refused, including
 internal and dangling links and missing outputs below linked ancestors. File
