@@ -106,6 +106,42 @@ const fakeServer = (
     })
   })
 
+/** Tracks process ownership and every transport fiber independently for each spawn. */
+const trackedServer = (respond: (request: Rpc.Outbound) => unknown) => {
+  const counts = { acquired: 0, released: 0, stopped: 0 }
+  const stopped = Effect.sync(() => {
+    counts.stopped += 1
+  })
+  const spawner = ChildProcessSpawner.makeNoop({
+    spawn: (command) =>
+      Effect.gen(function*() {
+        const server = yield* fakeServer(respond)
+        const handle = yield* server.spawn(command)
+        return yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            counts.acquired += 1
+            return makeHandle({
+              ...handle,
+              stdin: handle.stdin.pipe(Sink.ensuring(stopped)),
+              stdout: handle.stdout.pipe(
+                // Let every transport fiber start before delivering a rejection.
+                Stream.mapEffect((chunk) => Effect.yieldNow.pipe(Effect.as(chunk))),
+                Stream.ensuring(stopped)
+              ),
+              stderr: Stream.never.pipe(Stream.ensuring(stopped)),
+              exitCode: handle.exitCode.pipe(Effect.ensuring(stopped))
+            })
+          }),
+          () =>
+            Effect.sync(() => {
+              counts.released += 1
+            })
+        )
+      })
+  })
+  return { counts, spawner }
+}
+
 const TOOLS = [
   { name: "add", description: "Adds two numbers", inputSchema: { type: "object", properties: { a: {}, b: {} } } }
 ]
@@ -155,6 +191,88 @@ const withFakeServer = <A, E>(
     const spawner = yield* fakeServer(respond, options)
     return yield* provideSpawner(effect, spawner)
   })))
+
+describe("connection attempt scopes", () => {
+  it.each(["negotiation", "catalog", "projection"] as const)(
+    "releases caught %s failures before retrying in an open scope",
+    async (stage) => {
+      const { counts, spawner } = trackedServer((request) => {
+        if (stage === "negotiation" && request.method === "initialize") {
+          return { protocolVersion: "unsupported", capabilities: { tools: {} } }
+        }
+        if (stage === "catalog" && request.method === "tools/list") return { tools: [{}] }
+        return respondToEcho(request)
+      })
+      const snapshots: Array<typeof counts> = []
+      await execute(Effect.scoped(provideSpawner(
+        Effect.gen(function*() {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const options = { server: "retry", command: "mcp", args: [] }
+            const error = yield* Effect.flip(
+              stage === "projection"
+                ? McpFlows.connected({ ...options, include: ["missing"] }).pipe(Effect.asVoid)
+                : McpClient.connect(options).pipe(Effect.asVoid)
+            )
+            expect(error.code).toBe(
+              { negotiation: "protocol_error", catalog: "invalid_response", projection: "tool_not_found" }[stage]
+            )
+            snapshots.push({ ...counts })
+          }
+          expect(snapshots).toEqual([
+            { acquired: 1, released: 1, stopped: 4 },
+            { acquired: 2, released: 2, stopped: 8 },
+            { acquired: 3, released: 3, stopped: 12 }
+          ])
+        }),
+        spawner
+      )))
+      expect({ ...counts }).toEqual({ acquired: 3, released: 3, stopped: 12 })
+    }
+  )
+
+  it.each(["client", "flows"] as const)("releases interrupted %s initialization in an open scope", async (entry) => {
+    const requests: Array<Rpc.Outbound> = []
+    const { counts, spawner } = trackedServer((request) => {
+      requests.push(request)
+    })
+    await execute(Effect.scoped(provideSpawner(
+      Effect.gen(function*() {
+        const options = { server: "interrupted", command: "mcp", args: [] }
+        const pending = yield* Effect.forkChild(
+          entry === "client" ? McpClient.connect(options) : McpFlows.connected(options)
+        )
+        yield* waitFor(() => expect(requests.some((request) => request.method === "initialize")).toBe(true))
+        yield* Fiber.interrupt(pending)
+        expect(Exit.hasInterrupts(yield* Fiber.await(pending))).toBe(true)
+        expect({ ...counts }).toEqual({ acquired: 1, released: 1, stopped: 4 })
+      }),
+      spawner
+    )))
+    expect({ ...counts }).toEqual({ acquired: 1, released: 1, stopped: 4 })
+  })
+
+  it.each(["client", "flows"] as const)(
+    "retains successful %s acquisition until its caller scope closes",
+    async (entry) => {
+      const { counts, spawner } = trackedServer(respondToEcho)
+      await execute(Effect.scoped(provideSpawner(
+        Effect.gen(function*() {
+          const options = { server: "success", command: "mcp", args: [] }
+          if (entry === "client") {
+            const client = yield* McpClient.connect(options)
+            expect((yield* client.callTool("add", { a: 2, b: 3 })).isError).toBe(false)
+          } else {
+            const source = yield* McpFlows.connected(options)
+            expect((yield* source.bindings()).map((binding) => binding.descriptor.name)).toEqual(["mcp/success/add"])
+          }
+          expect({ ...counts }).toEqual({ acquired: 1, released: 0, stopped: 0 })
+        }),
+        spawner
+      )))
+      expect({ ...counts }).toEqual({ acquired: 1, released: 1, stopped: 4 })
+    }
+  )
+})
 
 describe("McpClient.connect", () => {
   it("sends the frozen Smithers initialize payload using the package version", async () => {
@@ -1834,10 +1952,15 @@ describe("McpFlows.mcp", () => {
   })
 
   it("fails connected when namePrefix is empty", async () => {
-    const error = await withFakeServer(
-      respondToEcho,
-      Effect.flip(McpFlows.connected({ server: "checked", command: "mcp", args: [], namePrefix: "" }))
-    )
+    const { counts, spawner } = trackedServer(respondToEcho)
+    const error = await execute(Effect.scoped(provideSpawner(
+      Effect.flip(McpFlows.connected({ server: "checked", command: "mcp", args: [], namePrefix: "" })),
+      spawner
+    )))
+
+    expect(counts.acquired).toBe(0)
+    const troubleshooting = readFileSync(new URL("../docs/troubleshooting.md", import.meta.url), "utf8")
+    expect(troubleshooting).toContain("## MCP server \"...\" option \"namePrefix\" must not be empty")
 
     expect(error).toMatchObject({
       code: "protocol_error",

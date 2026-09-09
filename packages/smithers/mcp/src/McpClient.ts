@@ -11,8 +11,7 @@
  * @since 1.0.0-rc.0
  */
 import { isRecord } from "@smthrs/canonical/Record"
-import { Effect, Result, Schema } from "effect"
-import type { Scope } from "effect"
+import { Effect, Exit, Result, Schema, Scope } from "effect"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as DiagnosticReporter from "./internal/DiagnosticReporter.ts"
 import * as JsonLimits from "./internal/JsonLimits.ts"
@@ -735,7 +734,9 @@ const snapshotArguments = (
 
 /**
  * Connects to an MCP server over stdio, completes the `initialize` handshake,
- * and fetches its tool catalog once, up front.
+ * and fetches its tool catalog once, up front. Failed or interrupted setup
+ * closes its subprocess and I/O fibers before returning to the caller; a
+ * successful session stays open until the caller scope closes.
  *
  * The tool catalog is a snapshot: a server that changes its tools after
  * connecting (a `notifications/tools/list_changed` push) is not re-polled.
@@ -750,106 +751,113 @@ const snapshotArguments = (
 export const connect = (
   options: ConnectOptions
 ): Effect.Effect<McpClient, McpError, ChildProcessSpawner | Scope.Scope> =>
-  Effect.gen(function*() {
-    const diagnostic = yield* DiagnosticReporter.make(options.server)
-    const decodeResponse = <A>(response: unknown, decoded: Result.Result<A, McpError>) =>
-      Effect.fromResult(decoded).pipe(
-        Effect.tapError(() => Effect.sync(() => diagnostic("invalid-response", response)))
-      )
-    const handshakeTimeoutMs = options.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs
-    const maxArgumentBytes = options.maxOutboundFrameBytes ?? defaultMaxOutboundFrameBytes
-    const maxTools = options.maxTools ?? defaultMaxTools
-    const maxToolNameBytes = options.maxToolNameBytes ?? defaultMaxToolNameBytes
-    const maxCatalogPages = options.maxCatalogPages ?? defaultMaxCatalogPages
-    const invalidOption = [
-      ["handshakeTimeoutMs", handshakeTimeoutMs],
-      ["maxTools", maxTools],
-      ["maxToolNameBytes", maxToolNameBytes],
-      ["maxCatalogPages", maxCatalogPages]
-    ].find(([, value]) => !positiveInteger(value as number))
-    if (invalidOption !== undefined) {
-      return yield* Effect.fail(protocolError(
-        options.server,
-        `MCP option "${invalidOption[0]}" must be a positive integer`
-      ))
-    }
+  Effect.acquireUseRelease(
+    Effect.flatMap(Effect.scope, Scope.fork),
+    (scope) =>
+      Effect.gen(function*() {
+        const diagnostic = yield* DiagnosticReporter.make(options.server)
+        const decodeResponse = <A>(response: unknown, decoded: Result.Result<A, McpError>) =>
+          Effect.fromResult(decoded).pipe(
+            Effect.tapError(() => Effect.sync(() => diagnostic("invalid-response", response)))
+          )
+        const handshakeTimeoutMs = options.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs
+        const maxArgumentBytes = options.maxOutboundFrameBytes ?? defaultMaxOutboundFrameBytes
+        const maxTools = options.maxTools ?? defaultMaxTools
+        const maxToolNameBytes = options.maxToolNameBytes ?? defaultMaxToolNameBytes
+        const maxCatalogPages = options.maxCatalogPages ?? defaultMaxCatalogPages
+        const invalidOption = [
+          ["handshakeTimeoutMs", handshakeTimeoutMs],
+          ["maxTools", maxTools],
+          ["maxToolNameBytes", maxToolNameBytes],
+          ["maxCatalogPages", maxCatalogPages]
+        ].find(([, value]) => !positiveInteger(value as number))
+        if (invalidOption !== undefined) {
+          return yield* Effect.fail(protocolError(
+            options.server,
+            `MCP option "${invalidOption[0]}" must be a positive integer`
+          ))
+        }
 
-    const transport = yield* StdioTransport.connect(options)
+        const transport = yield* StdioTransport.connect(options)
 
-    const initialized = yield* transport.request(
-      "initialize",
-      {
-        protocolVersion: supportedProtocolVersions[0],
-        capabilities: {},
-        clientInfo
-      },
-      handshakeTimeoutMs
-    )
-    yield* decodeResponse(initialized, asInitialize(options.server, initialized))
-    // A notification, not a request: the server never replies to it, and the
-    // handshake is not complete until the client sends it.
-    yield* transport.notify("notifications/initialized", undefined, handshakeTimeoutMs)
-
-    const tools: Array<ToolDescription> = []
-    const toolNames = new Set<string>()
-    const cursors = new Set<string>()
-    let params: Record<string, unknown> = {}
-    let pageCount = 0
-    while (true) {
-      const listed = yield* transport.request("tools/list", params, handshakeTimeoutMs)
-      pageCount += 1
-      const page = yield* decodeResponse(
-        listed,
-        asToolPage(
-          options.server,
-          listed,
-          { maxTools, maxToolNameBytes },
-          toolNames,
-          tools
+        const initialized = yield* transport.request(
+          "initialize",
+          {
+            protocolVersion: supportedProtocolVersions[0],
+            capabilities: {},
+            clientInfo
+          },
+          handshakeTimeoutMs
         )
-      )
-      if (page.nextCursor === undefined) break
-      if (cursors.has(page.nextCursor)) {
-        diagnostic("invalid-response", listed)
-        return yield* Effect.fail(invalidResponse(
-          options.server,
-          `MCP server "${options.server}" repeated a tools/list cursor`
-        ))
-      }
-      if (pageCount >= maxCatalogPages) {
-        return yield* Effect.fail(invalidResponse(
-          options.server,
-          `MCP server "${options.server}" returned more than ${maxCatalogPages} tools/list pages`
-        ))
-      }
-      cursors.add(page.nextCursor)
-      params = { cursor: page.nextCursor }
-    }
-    JsonLimits.freezeParsed(tools)
+        yield* decodeResponse(initialized, asInitialize(options.server, initialized))
+        // A notification, not a request: the server never replies to it, and the
+        // handshake is not complete until the client sends it.
+        yield* transport.notify("notifications/initialized", undefined, handshakeTimeoutMs)
 
-    const callTool = (name: string, args: Record<string, unknown>): Effect.Effect<ToolResult, McpError> => {
-      const tool = tools.find((candidate) => candidate.name === name)
-      if (tool === undefined) {
-        return Effect.fail(
-          new McpError({
-            code: "tool_not_found",
-            message: `MCP server "${options.server}" has no requested tool`,
-            server: options.server
-          })
-        )
-      }
-      const snapshot = snapshotArguments(options.server, args, diagnostic, maxArgumentBytes)
-      if (Result.isFailure(snapshot)) {
-        // Do not inspect the rejected object again: it may contain throwing
-        // accessors or proxies. Even diagnostic observers see only the safe
-        // rejection, never a second traversal of executable user properties.
-        return Effect.fail(snapshot.failure)
-      }
-      return Effect.flatMap(
-        transport.request("tools/call", { name, arguments: snapshot.success }),
-        (result) => decodeResponse(result, asToolResult(options.server, result, tool.outputSchema, diagnostic))
-      )
-    }
+        const tools: Array<ToolDescription> = []
+        const toolNames = new Set<string>()
+        const cursors = new Set<string>()
+        let params: Record<string, unknown> = {}
+        let pageCount = 0
+        while (true) {
+          const listed = yield* transport.request("tools/list", params, handshakeTimeoutMs)
+          pageCount += 1
+          const page = yield* decodeResponse(
+            listed,
+            asToolPage(
+              options.server,
+              listed,
+              { maxTools, maxToolNameBytes },
+              toolNames,
+              tools
+            )
+          )
+          if (page.nextCursor === undefined) break
+          if (cursors.has(page.nextCursor)) {
+            diagnostic("invalid-response", listed)
+            return yield* Effect.fail(invalidResponse(
+              options.server,
+              `MCP server "${options.server}" repeated a tools/list cursor`
+            ))
+          }
+          if (pageCount >= maxCatalogPages) {
+            return yield* Effect.fail(invalidResponse(
+              options.server,
+              `MCP server "${options.server}" returned more than ${maxCatalogPages} tools/list pages`
+            ))
+          }
+          cursors.add(page.nextCursor)
+          params = { cursor: page.nextCursor }
+        }
+        JsonLimits.freezeParsed(tools)
 
-    return { server: options.server, tools, callTool }
-  })
+        const callTool = (name: string, args: Record<string, unknown>): Effect.Effect<ToolResult, McpError> => {
+          const tool = tools.find((candidate) => candidate.name === name)
+          if (tool === undefined) {
+            return Effect.fail(
+              new McpError({
+                code: "tool_not_found",
+                message: `MCP server "${options.server}" has no requested tool`,
+                server: options.server
+              })
+            )
+          }
+          const snapshot = snapshotArguments(options.server, args, diagnostic, maxArgumentBytes)
+          if (Result.isFailure(snapshot)) {
+            // Do not inspect the rejected object again: it may contain throwing
+            // accessors or proxies. Even diagnostic observers see only the safe
+            // rejection, never a second traversal of executable user properties.
+            return Effect.fail(snapshot.failure)
+          }
+          return Effect.flatMap(
+            transport.request("tools/call", { name, arguments: snapshot.success }),
+            (result) => decodeResponse(result, asToolResult(options.server, result, tool.outputSchema, diagnostic))
+          )
+        }
+
+        return { server: options.server, tools, callTool }
+      }).pipe(Scope.provide(scope)),
+    // Closing a failed attempt also detaches it from the caller's scope.
+    // Successful sessions remain owned by that scope until it closes.
+    (scope, exit) => Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void
+  )

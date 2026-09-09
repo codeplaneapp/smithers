@@ -178,9 +178,17 @@ held to protocol rules.
 **What happened.** A limit was zero, negative, or fractional. This is raised
 before the process is spawned.
 
-**What to change.** Pass a positive integer. The same message with `namePrefix`
-instead means `McpFlows.connected` was given an empty prefix, which would
-produce flow names starting with `/`.
+**What to change.** Pass a positive integer.
+
+## MCP server "..." option "namePrefix" must not be empty
+
+**Code.** `protocol_error`.
+
+**What happened.** `McpFlows.connected` was given an empty prefix. This is
+raised before the process is spawned.
+
+**What to change.** Pass a non-empty `namePrefix`, or omit it to use
+`mcp/<server>`.
 
 ## MCP server "..." has no requested tool
 
@@ -276,3 +284,11 @@ implementation.
 **What to change.** The default prefix `mcp/<server>` keeps two servers apart, so
 this usually means two entries share a `server` name, or a custom `namePrefix`
 collides with another source. Give each server a distinct name.
+
+## Recovering from connection setup failure
+
+`McpClient.connect` and `McpFlows.connected` release the subprocess and I/O
+fibers before returning a failed or interrupted setup attempt. This includes
+negotiation, catalog, and projection validation failures. Catching failures or
+retrying inside an open scope does not retain failed connections. Successful
+connections remain open until the caller scope closes.
