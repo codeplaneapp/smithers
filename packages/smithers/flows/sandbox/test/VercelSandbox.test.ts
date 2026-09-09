@@ -1,6 +1,6 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Path, Stream } from "effect"
+import { Effect, Layer, Logger, Path, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import {
@@ -224,6 +224,35 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("VercelSandbox", () => {
+  it.effect("omits vendor credentials from teardown warnings", () =>
+    Effect.gen(function*() {
+      const secret = "TEARDOWN_CANARY_CREDENTIAL"
+      const fake = fakeSdk({ stopFailure: new Error(`Authorization: Bearer ${secret}`) })
+      const lines: Array<string> = []
+      const records: Array<unknown> = []
+      const capture = Logger.make((options) => {
+        records.push({ message: options.message, cause: options.cause.reasons })
+      })
+      const keep = (line: string) => {
+        lines.push(line)
+      }
+      yield* acquired(VercelSandbox.make({ sdk: fake.sdk, workdir: dir("safe-stop") }), Effect.succeed).pipe(
+        Effect.provide(
+          Logger.layer([capture, Logger.map(Logger.formatJson, keep), Logger.map(Logger.formatLogFmt, keep)])
+        )
+      )
+      expect(fake.recorded.stopped).toHaveLength(1)
+      expect(lines).toHaveLength(2)
+      for (const line of lines) {
+        expect(line).not.toContain(secret)
+        expect(line).toContain("unknown")
+      }
+      expect(records).toEqual([{
+        message: ["sandbox teardown failed", { provider: "vercel", operation: "stop", code: "unknown" }],
+        cause: []
+      }])
+    }))
+
   it.effect("deletes guest inherited environment separately from command defaults", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()

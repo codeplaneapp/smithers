@@ -11,6 +11,7 @@ import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
+import { warnTeardown } from "../internal/teardownWarning.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
@@ -144,8 +145,7 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
               () => options.sdk.delete(sandbox, options.deleteTimeoutSeconds ?? 60, true),
               "unknown",
               `could not delete ${name}`
-            ),
-            { log: "Warn" }
+            ).pipe(Effect.tapError((error) => warnTeardown("daytona", "delete", error)))
           )
       )
       if (held.attached) {

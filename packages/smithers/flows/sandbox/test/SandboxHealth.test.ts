@@ -125,6 +125,17 @@ const renderProbeLogs = (provider: SandboxHealth.PingProvider) =>
   })
 
 describe("SandboxHealth.probe logging", () => {
+  it("does not redact a custom provider message", async () => {
+    const message = "caller supplied token=CUSTOM_PROVIDER_CANARY"
+    const { lines, state } = await Effect.runPromise(renderProbeLogs({
+      ping: Effect.fail(new ProviderError({ code: "unavailable", message }))
+    }))
+    expect(state._tag).toBe("Unhealthy")
+    if (state._tag === "Unhealthy") expect(state.message).toBe(message)
+    expect(lines).toHaveLength(2)
+    for (const line of lines) expect(line).toContain(message)
+  })
+
   it("logs the provider code and message and never the failure cause", async () => {
     const records: Array<{ cause: Cause.Cause<unknown>; message: unknown }> = []
     const capture = Logger.make((options) => {

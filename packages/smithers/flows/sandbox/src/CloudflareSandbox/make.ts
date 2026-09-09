@@ -11,6 +11,7 @@ import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
+import { warnTeardown } from "../internal/teardownWarning.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
@@ -104,8 +105,9 @@ export const make = <Binding>(options: CloudflareSandboxOptions<Binding>): Provi
           }),
           (sandbox) =>
             Effect.ignore(
-              attempt(() => sandbox.destroy(), "unknown", `could not destroy ${remoteId}`),
-              { log: "Warn" }
+              attempt(() => sandbox.destroy(), "unknown", `could not destroy ${remoteId}`).pipe(
+                Effect.tapError((error) => warnTeardown("cloudflare", "destroy", error))
+              )
             )
         )
         yield* attempt(

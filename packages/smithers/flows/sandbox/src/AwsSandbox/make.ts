@@ -17,6 +17,7 @@ import { cancelledStatus, cancelMarker, killScript } from "../internal/killScrip
 import { gather, type GatheredRun, providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
+import { warnTeardown } from "../internal/teardownWarning.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
@@ -125,8 +126,7 @@ const stopTasks = (options: AwsSandboxOptions, taskArns: ReadonlyArray<string>):
           `could not stop ${task}`
         ),
       { discard: true }
-    ),
-    { log: "Warn" }
+    ).pipe(Effect.tapError((error) => warnTeardown("aws", "stopTasks", error)))
   )
 
 /** A machine a previous acquire of this session key left behind. */
@@ -232,8 +232,7 @@ const deregisterDefinition = (
         () => options.sdk.deregisterTaskDefinition({ taskDefinition }),
         "unknown",
         `could not deregister ${taskDefinition}`
-      ),
-      { log: "Warn" }
+      ).pipe(Effect.tapError((error) => warnTeardown("aws", "deregisterTaskDefinition", error)))
     )
 }
 
@@ -733,7 +732,9 @@ export const make = (options: AwsSandboxOptions): Provider => ({
               if (result.code !== undefined) ended = true
             }))
           yield* Effect.addFinalizer(() =>
-            ended ? Effect.void : Effect.ignore(kill(pidfile, "SIGTERM"), { log: "Warn" })
+            ended ? Effect.void : Effect.ignore(
+              kill(pidfile, "SIGTERM").pipe(Effect.tapError((error) => warnTeardown("aws", "kill", error)))
+            )
           )
           const process: RemoteProcess = {
             stdout: Stream.unwrap(

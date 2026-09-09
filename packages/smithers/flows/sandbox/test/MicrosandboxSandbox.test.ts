@@ -1,6 +1,6 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Path, Stream } from "effect"
+import { Effect, Layer, Logger, Path, References, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
@@ -13,6 +13,7 @@ import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts
 import type { Provider } from "../src/Sandbox/Provider.ts"
 import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
+import * as SandboxHealth from "../src/SandboxHealth/index.ts"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -91,6 +92,7 @@ interface Recorded {
 interface Controls {
   readonly createFailure?: (() => unknown) | undefined
   readonly stopFailure?: boolean | undefined
+  readonly pingFailure?: Error | undefined
 }
 
 /** Every guest filesystem failure arrives as the SDK's one fs error kind. */
@@ -146,7 +148,10 @@ const fakeSdk = (controls: Controls = {}) => {
         realFs(() => writeFileSync(hostPath(machine, path), bytes))
       },
       read: async (path) => realFs(() => new Uint8Array(readFileSync(hostPath(machine, path)))),
-      readToString: async (path) => realFs(() => readFileSync(hostPath(machine, path), "utf8")),
+      readToString: async (path) => {
+        if (controls.pingFailure !== undefined) throw controls.pingFailure
+        return realFs(() => readFileSync(hostPath(machine, path), "utf8"))
+      },
       mkdir: async (path) => {
         recorded.mkdirs.push(path)
         realFs(() => mkdirSync(hostPath(machine, path), { recursive: true }))
@@ -377,6 +382,35 @@ const output = (process: RemoteProcess) =>
   )
 
 describe("MicrosandboxSandbox", () => {
+  it.effect("keeps vendor credentials out of health messages and debug logs", () =>
+    Effect.gen(function*() {
+      const secret = "HEALTH_CANARY_CREDENTIAL"
+      const cause = new Error(`request failed token=${secret}`)
+      const fake = fakeSdk({ pingFailure: cause })
+      const lines: Array<string> = []
+      const keep = (line: string) => {
+        lines.push(line)
+      }
+      yield* inSession(MicrosandboxSandbox.make({ sdk: fake.sdk }), "safe-health", (session) =>
+        Effect.gen(function*() {
+          const error = yield* Effect.flip(session.ping!)
+          expect(error.cause).toBe(cause)
+          const state = yield* SandboxHealth.probe({ ping: session.ping! }).pipe(
+            Effect.provide(Logger.layer([Logger.map(Logger.formatJson, keep), Logger.map(Logger.formatLogFmt, keep)])),
+            Effect.provideService(References.MinimumLogLevel, "Debug")
+          )
+          expect(state._tag).toBe("Unhealthy")
+          expect(JSON.stringify(state)).not.toContain(secret)
+          expect(error.message).not.toContain(secret)
+          expect(error.message).toContain("did not answer")
+          expect(lines).toHaveLength(2)
+          for (const line of lines) {
+            expect(line).toContain("sandbox ping failed")
+            expect(line).not.toContain(secret)
+          }
+        }))
+    }))
+
   it.effect("refuses deletion with a relative shell before guest execution", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()
@@ -720,7 +754,9 @@ describe("MicrosandboxSandbox", () => {
         )
       )
       expect((unavailable as ProviderError).code).toBe("unavailable")
-      expect((unavailable as ProviderError).message).toContain("no hypervisor")
+      expect((unavailable as ProviderError).message).toContain("could not be opened")
+      expect((unavailable as ProviderError).message).not.toContain("no hypervisor")
+      expect((unavailable as ProviderError).cause).toBe("no hypervisor")
 
       // A real file where the workspace's parent should be refuses the mkdir.
       writeFileSync(join(root, "not-a-directory"), "occupied")

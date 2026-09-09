@@ -8,6 +8,7 @@ import * as Stream from "effect/Stream"
 import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
+import { warnTeardown } from "../internal/teardownWarning.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import type { ProviderErrorCode } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
@@ -126,7 +127,7 @@ const parentOf = (path: string): string | undefined => {
 const messageOf = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
 
 const failure = (code: ProviderErrorCode, message: string, cause: unknown): ProviderError =>
-  new ProviderError({ code, message: `microsandbox: ${message}: ${messageOf(cause)}`, cause })
+  new ProviderError({ code, message: `microsandbox: ${message}`, cause })
 
 const attempt = <A>(
   thunk: () => Promise<A>,
@@ -296,8 +297,9 @@ export const make = (options: MicrosandboxSandboxOptions): Provider => ({
         ({ created, sandbox }) =>
           !sticky || created && !prepared
             ? Effect.ignore(
-              attempt(() => sandbox.stop(), "unavailable", `the microVM ${name} could not be stopped`),
-              { log: "Warn" }
+              attempt(() => sandbox.stop(), "unavailable", `the microVM ${name} could not be stopped`).pipe(
+                Effect.tapError((error) => warnTeardown("microsandbox", "stop", error))
+              )
             )
             : Effect.void
       )
