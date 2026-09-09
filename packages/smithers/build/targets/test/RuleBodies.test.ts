@@ -61,8 +61,14 @@ describe("package-executor rules refuse under a bare Flow runtime", () => {
     ],
     ["Repo.Target", S.Repo.Target("child", "//pkg:test")],
     ["Git.Submodule", S.Git.Submodule({ path: "vendor/x" })],
+    ["Git.Submodules", S.Git.Submodules({ config: manifest, paths: ["vendor/x"] })],
     ["Shell.Serve", S.Shell.Serve({ shell: "node server.js" })],
-    ["Github.Setup", S.Github.Setup({})]
+    ["Github.Setup", S.Github.Setup({})],
+    ["Cargo.AppSet", S.Cargo.AppSet({ manifests: S.glob(["*/Cargo.toml"]) })],
+    ["Cargo.Doc", S.Cargo.Doc({ workspace: true, locked: true, offline: true, data: [], outDirs: ["//target/doc"] })],
+    ["Changesets.Publish", S.Changesets.Publish({ config: manifest, pack: shellBuild, gates: [shellTest] })],
+    ["Go.Generate", S.Go.Generate({ pkgs: ["./..."], changes: ["**/generated.go"] })],
+    ["Go.Packages", S.Go.Packages({ pkgs: ["./..."] })]
   ]
 
   it.each(cases)("%s plans the not-implemented action naming itself", (rule, target) => {

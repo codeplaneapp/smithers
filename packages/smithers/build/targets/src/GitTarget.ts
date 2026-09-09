@@ -86,7 +86,7 @@ const submodulesDefinition = Target.make("Git.Submodules", {
   attrs: SubmodulesAttrs,
   kinds: ["build"],
   cache: true,
-  implementation: Target.catalogNotImplemented
+  implementation: () => Target.notImplemented("Git.Submodules")
 })
 
 /** Materializes submodule trees selected from a .gitmodules file.

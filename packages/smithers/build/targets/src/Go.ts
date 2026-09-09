@@ -184,7 +184,7 @@ export const GenerateAttrs = Schema.Struct({
 const generateDefinition = Target.make("Go.Generate", {
   attrs: GenerateAttrs,
   kinds: ["lint", "run"],
-  implementation: Target.catalogNotImplemented
+  implementation: () => Target.notImplemented("Go.Generate")
 })
 /** */
 export const Generate = generateDefinition

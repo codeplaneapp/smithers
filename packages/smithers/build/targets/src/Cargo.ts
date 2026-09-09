@@ -751,13 +751,13 @@ const packageFmtDefinition = Target.make("Cargo.Fmt", {
 const docDefinition = Target.make("Cargo.Doc", {
   attrs: DocAttrs,
   kinds: ["build", "docs"],
-  implementation: Target.catalogNotImplemented
+  implementation: () => Target.notImplemented("Cargo.Doc")
 })
 
 const appSetDefinition = Target.make("Cargo.AppSet", {
   attrs: AppSetAttrs,
   kinds: [],
-  implementation: Target.catalogNotImplemented
+  implementation: () => Target.notImplemented("Cargo.AppSet")
 })
 
 /**
