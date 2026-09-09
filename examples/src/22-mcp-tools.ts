@@ -48,13 +48,17 @@ export const grant = `proc:spawn:mcp/${serverName}`
 /**
  * Re-declares a source's flows under the capabilities this host grants them.
  *
- * `McpFlows` declares every tool `"*"`, which is the repository's conservative
- * wildcard for authority a projector cannot describe. `MarkdownFlow` uses the
- * same spelling for a skill that declares none. The cell boundary checks a
- * declared capability as an EXACT `namespace:operation:resource` triple, so a
- * wildcard declaration parses as nothing and is refused by every envelope,
- * however wide. That refusal is the current behaviour and this example pins it.
+ * `McpFlows` cannot describe what opaque tool code will reach, so it declares
+ * the widest authority it can name: one entry per host action, `fs:read:**`
+ * through `jj:revert:**`. It spells each one out because the cell boundary
+ * reads a declared capability with `Capability.parse` as an EXACT
+ * `namespace:operation:resource` triple. A bare `"*"` parses as nothing and
+ * counts as unauthorized under every envelope, however wide. `MarkdownFlow`
+ * still uses that bare spelling for a skill that declares none, so a skill is
+ * refused where an MCP tool is merely narrowed.
  *
+ * Only the host knows what this particular server is for, so `granting`
+ * replaces the projector's everything with the one capability it decided on.
  * Narrowing here rather than widening the envelope is the right shape either
  * way: an envelope of `*:*` would grant the run everything, where this grants
  * exactly the tools of exactly this server.

@@ -1,6 +1,7 @@
 import { afterAll, expect, it } from "@effect/vitest"
+import * as McpFlows from "@smthrs/mcp/McpFlows"
 import * as Effect from "effect/Effect"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { main, serverName } from "../src/22-mcp-tools.ts"
@@ -51,3 +52,21 @@ it.live("pins what an undeclarable authority does at the cell boundary", () =>
     expect(summary.ungranted).toContain("capability_refused")
     expect(summary.ungranted).toContain(`mcp/${serverName}/word_count needs`)
   }), { timeout: 60_000 })
+
+it("keeps the granting commentary on the declaration the adapter actually makes", () => {
+  const source = readFileSync(new URL("../src/22-mcp-tools.ts", import.meta.url), "utf8")
+  const opened = source.indexOf("/**\n * Re-declares a source's flows")
+  const commentary = source.slice(opened, source.indexOf("export const granting", opened))
+
+  // The projector stopped declaring the bare wildcard: every entry is a
+  // parseable triple, one per host action. The prose beside `granting` has to
+  // name that shape, or the example teaches a representation it no longer has.
+  const first = McpFlows.capabilities[0] ?? ""
+  const last = McpFlows.capabilities.at(-1) ?? ""
+  expect(McpFlows.capabilities).not.toContain("*")
+  expect(first).not.toBe("")
+  expect(last).not.toBe("")
+  expect(commentary).toContain(first)
+  expect(commentary).toContain(last)
+  expect(commentary).not.toContain(`declares every tool \`"*"\``)
+})
