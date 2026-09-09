@@ -1,11 +1,12 @@
 import * as Sha256 from "@smthrs/crypto/Sha256"
 import { Deferred, Effect, Fiber, Layer, Redacted, Schema, Stream } from "effect"
 import * as Crypto from "effect/Crypto"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as Channels from "../src/Channels.ts"
 import * as Control from "../src/Control.ts"
 import { InvalidInput, PersistenceError, Unauthorized } from "../src/ControlError.ts"
 import * as ControlRuntime from "../src/ControlRuntime.ts"
+import type { RunStatus } from "../src/ControlSchema.ts"
 import * as WebhookChannel from "../src/WebhookChannel.ts"
 
 const accepted = { _tag: "Accepted" as const, receiptId: "receipt" }
@@ -492,6 +493,157 @@ describe("Channels", () => {
       }).pipe(Effect.provide(channelsLayer(retryingControl)))
     )
     expect(attempts).toBe(2)
+  })
+
+  it("registers a typed webhook and maps only its decoded payload", async () => {
+    const mapped: Array<string> = []
+    const webhook = WebhookChannel.make({
+      name: "typed",
+      schema: Schema.Struct({ ref: Schema.String }),
+      credential: Redacted.make({ id: "connection", name: "connection" }),
+      verify: () => Effect.void,
+      map: (payload) => {
+        mapped.push(payload.ref)
+        return Effect.succeed({ _tag: "Start", flowId: "flow", input: payload.ref })
+      },
+      project: () => ({ cursor: "1", operation: "noop", message: null })
+    })
+    await run(Effect.gen(function*() {
+      const channels = yield* Channels.Channels
+      yield* channels.register(webhook)
+      expect((yield* channels.lookup("typed")).schema).toBe(webhook.schema)
+      yield* channels.ingest({
+        channel: "typed",
+        raw: { ...raw(), body: new TextEncoder().encode("{\"ref\":\"main\"}") }
+      })
+      const invalid = yield* Effect.flip(channels.ingest({
+        channel: "typed",
+        raw: { ...raw("invalid"), body: new TextEncoder().encode("{\"ref\":1}") }
+      }))
+      expect(invalid).toBeInstanceOf(InvalidInput)
+    }))
+    expect(mapped).toEqual(["main"])
+  })
+
+  it("bounds terminal delivery history without evicting live message identities", async () => {
+    await run(Effect.gen(function*() {
+      const channels = yield* Channels.Channels
+      const observed = new Map<string, Channels.Delivery | undefined>()
+      yield* channels.register({
+        name: "retention",
+        schema: Schema.Unknown,
+        verify: () => Effect.void,
+        decode: () => Effect.succeed(null),
+        map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+        project: (summary, previous) => {
+          observed.set(summary.runId, previous)
+          return { cursor: summary.status, messageId: summary.runId, operation: "post", message: {} }
+        }
+      })
+      const project = (runId: string, status: RunStatus) =>
+        channels.project({
+          channel: "retention",
+          run: { runId, flowId: "flow", status, createdAt: 0, updatedAt: 0 }
+        })
+      for (const status of ["accepted", "running", "parked", "waiting-approval"] as const) {
+        yield* project(status, status)
+      }
+      yield* project("revived", "failed")
+      yield* project("revived", "running")
+      for (let i = 0; i < 1025; i++) {
+        yield* project(`terminal-${i}`, i % 3 === 0 ? "completed" : i % 3 === 1 ? "failed" : "cancelled")
+      }
+      yield* project("terminal-1024", "completed")
+      expect(observed.get("terminal-1024")?.messageId).toBe("terminal-1024")
+      yield* project("terminal-1", "failed")
+      expect(observed.get("terminal-1")?.messageId).toBe("terminal-1")
+      for (const status of ["accepted", "running", "parked", "waiting-approval"] as const) {
+        yield* project(status, status)
+        expect(observed.get(status)?.messageId).toBe(status)
+      }
+      yield* project("revived", "running")
+      expect(observed.get("revived")?.messageId).toBe("revived")
+      yield* project("terminal-0", "completed")
+      expect(observed.get("terminal-0")).toBeUndefined()
+    }))
+  })
+
+  it("retires existing identities on terminal noops and retains message identity edits", async () => {
+    await run(Effect.gen(function*() {
+      const channels = yield* Channels.Channels
+      const observed: Array<Channels.Delivery | undefined> = []
+      yield* channels.register({
+        name: "terminal-noop",
+        schema: Schema.Unknown,
+        verify: () => Effect.void,
+        decode: () => Effect.succeed(null),
+        map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+        project: (summary, previous) => {
+          observed.push(previous)
+          return {
+            cursor: "same",
+            messageId: String(summary.updatedAt),
+            operation: summary.status === "completed" ? "noop" : "edit",
+            message: {}
+          }
+        }
+      })
+      const summary = { runId: "run", flowId: "flow", status: "running" as const, createdAt: 0, updatedAt: 0 }
+      const project = (runId: string, status: RunStatus, updatedAt = 0) =>
+        channels.project({ channel: "terminal-noop", run: { ...summary, runId, status, updatedAt } })
+      yield* project("run", "running")
+      yield* project("run", "running", 1)
+      yield* project("run", "completed", 2)
+      expect(observed.at(-1)).toEqual({ cursor: "same", messageId: "1" })
+      yield* project("run", "completed", 3)
+      expect(observed.at(-1)).toEqual({ cursor: "same", messageId: "1" })
+      for (let i = 0; i < 1024; i++) {
+        yield* project(`terminal-${i}`, "failed")
+      }
+      yield* project("run", "completed")
+      expect(observed.at(-1)).toBeUndefined()
+    }))
+  })
+
+  it("does not copy delivery history or replace records for unchanged projections", async () => {
+    await run(Effect.gen(function*() {
+      const channels = yield* Channels.Channels
+      const observed: Array<Channels.Delivery | undefined> = []
+      let operation: Channels.DeliveryProjection["operation"] = "post"
+      yield* channels.register({
+        name: "constant-time",
+        schema: Schema.Unknown,
+        verify: () => Effect.void,
+        decode: () => Effect.succeed(null),
+        map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+        project: (_summary, previous) => {
+          observed.push(previous)
+          return { cursor: "1", messageId: "message", operation, message: {} }
+        }
+      })
+      const summary = { runId: "live", flowId: "flow", status: "running" as const, createdAt: 0, updatedAt: 0 }
+      yield* channels.project({ channel: "constant-time", run: summary })
+      const iterator = Map.prototype[Symbol.iterator]
+      let copied = 0
+      const spy = vi.spyOn(Map.prototype, Symbol.iterator).mockImplementation(function(this: Map<unknown, unknown>) {
+        if (this.has("constant-time:live")) copied += this.size
+        return iterator.call(this)
+      })
+      try {
+        yield* channels.project({ channel: "constant-time", run: summary })
+        operation = "noop"
+        yield* channels.project({ channel: "constant-time", run: summary })
+        yield* channels.project({ channel: "constant-time", run: summary })
+        expect(copied).toBe(0)
+        expect(observed[2]).toBe(observed[1])
+        expect(observed[3]).toBe(observed[1])
+        yield* channels.project({ channel: "constant-time", run: { ...summary, runId: "silent" } })
+        yield* channels.project({ channel: "constant-time", run: { ...summary, runId: "silent" } })
+        expect(observed.at(-1)).toBeUndefined()
+      } finally {
+        spy.mockRestore()
+      }
+    }))
   })
 
   it("retains delivery cursors for edit projections and redacts credentials", async () => {

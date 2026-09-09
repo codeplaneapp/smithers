@@ -60,6 +60,11 @@ const program = Effect.gen(function*() {
 })
 ```
 
+`register` accepts `Channel<A>` directly, including typed webhook payloads.
+`lookup` returns a `RegisteredChannel`: the declared schema and transport
+metadata remain available, while `decodeAndMap` keeps the hidden payload type
+inside the adapter. Use `ingest` for verified dispatch through `Control`.
+
 `Channels.layer` builds the coordinator over `ControlRuntime`'s durable
 mutation store, so inbound idempotency survives a coordinator restart. Only
 registration and outbound projection cursors are process-local.
@@ -147,8 +152,20 @@ the network call after the projection is journaled:
 | `edit`      | Update the message `messageId` names. |
 | `noop`      | Nothing changed worth sending.        |
 
-Keeping delivery out of the projection is what lets a reconnect update an
-existing platform message instead of posting a second one.
+The coordinator keeps delivery identities for live runs, including parked runs
+and runs waiting for approval, so later projections can edit the same message.
+Completed, failed, and cancelled runs share a FIFO window of 1,024 delivery
+records across channels. Repeated terminal projections do not extend that
+window. A run projected as live again leaves the terminal window.
+
+A `noop` does not create or replace a delivery record. Unchanged cursor and
+message identities reuse the previous record. Terminal status still moves an
+existing record into the retention window even when the projection is a noop.
+
+Outbound records are process-local. After terminal eviction or coordinator
+restart, the adapter receives no previous delivery and may post a new message.
+Hosts needing edits beyond this window must keep remote message identities in
+their own durable transport storage.
 
 ## Where to go next
 

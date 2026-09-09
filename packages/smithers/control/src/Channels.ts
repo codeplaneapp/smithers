@@ -40,7 +40,7 @@ export type InboundResult =
   | { readonly _tag: "Signal"; readonly runId: RunId; readonly signal: SignalPayload }
 
 /**
- * A persisted per-channel delivery record. `messageId` identifies an existing
+ * A process-local per-channel delivery record. `messageId` identifies an existing
  * platform message, so a reconnect can update it instead of posting again.
  *
  * @category models
@@ -95,6 +95,26 @@ export interface Channel<A = unknown> {
 }
 
 /**
+ * A registered channel with its payload type hidden. Decoding and mapping stay
+ * paired, so lookup never exposes a mapper accepting arbitrary unknown data.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface RegisteredChannel extends Omit<Channel, "decode" | "map"> {
+  readonly decodeAndMap: (raw: RawInbound) => Effect.Effect<InboundResult, InvalidInput>
+}
+
+const eraseChannel = <A>(channel: Channel<A>): RegisteredChannel => ({
+  name: channel.name,
+  schema: channel.schema,
+  fingerprintHeaders: channel.fingerprintHeaders,
+  verify: (raw) => channel.verify(raw),
+  decodeAndMap: (raw) => Effect.flatMap(channel.decode(raw), (payload) => channel.map(payload)),
+  project: (run, delivery) => channel.project(run, delivery)
+})
+
+/**
  * Arguments for ingesting one authenticated channel request.
  *
  * @category models
@@ -126,8 +146,8 @@ export interface ProjectRequest {
  * @slop
  */
 export interface Channels {
-  readonly register: (channel: Channel) => Effect.Effect<void>
-  readonly lookup: (name: string) => Effect.Effect<Channel, Unavailable>
+  readonly register: <A>(channel: Channel<A>) => Effect.Effect<void>
+  readonly lookup: (name: string) => Effect.Effect<RegisteredChannel, Unavailable>
   readonly ingest: (request: IngestRequest) => Effect.Effect<Receipt, ControlError>
   readonly project: (request: ProjectRequest) => Effect.Effect<DeliveryProjection, Unavailable>
 }
@@ -259,7 +279,7 @@ const snapshotRequest = (
       })
   })
 
-const normalizedFingerprintHeaders = (channel: Channel): ReadonlyArray<string> =>
+const normalizedFingerprintHeaders = (channel: RegisteredChannel): ReadonlyArray<string> =>
   Array.from(new Set((channel.fingerprintHeaders ?? []).map((name) => name.toLowerCase()))).sort()
 
 /** Digests the body plus only the adapter-declared, non-secret semantic headers. */
@@ -309,25 +329,31 @@ interface InboundReceiptStore {
 
 const makeWith = (runtime: InboundReceiptStore) =>
   Effect.gen(function*() {
-    const channels = yield* Ref.make(new Map<string, Channel>())
-    const deliveries = yield* Ref.make(new Map<string, Delivery>())
+    const channels = yield* Ref.make(new Map<string, RegisteredChannel>())
+    const deliveries = new Map<string, Delivery>()
+    // Live identities are never evicted. Terminal identities have a FIFO window
+    // for reconnects; retaining one per historical run would grow without bound.
+    const terminalDeliveries = new Set<string>()
+    const maximumTerminalDeliveries = 1024
     const ingestion = yield* Semaphore.make(1)
     const control = yield* Control
 
-    const lookup = Effect.fn("Channels.lookup")(function*(name: string): Effect.fn.Return<Channel, Unavailable> {
-      return yield* Effect.flatMap(Ref.get(channels), (registered) => {
-        const channel = registered.get(name)
-        return channel === undefined
-          ? Effect.fail(unavailable(`channel "${name}" is not registered`))
-          : Effect.succeed(channel)
-      })
-    })
+    const lookup = Effect.fn("Channels.lookup")(
+      function*(name: string): Effect.fn.Return<RegisteredChannel, Unavailable> {
+        return yield* Effect.flatMap(Ref.get(channels), (registered) => {
+          const channel = registered.get(name)
+          return channel === undefined
+            ? Effect.fail(unavailable(`channel "${name}" is not registered`))
+            : Effect.succeed(channel)
+        })
+      }
+    )
 
     return Channels.of({
-      register: Effect.fn("Channels.register")((channel) =>
+      register: Effect.fn("Channels.register")(<A>(channel: Channel<A>) =>
         Ref.update(channels, (registered) => {
           const next = new Map(registered)
-          next.set(channel.name, channel)
+          next.set(channel.name, eraseChannel(channel))
           return next
         })
       ),
@@ -348,8 +374,7 @@ const makeWith = (runtime: InboundReceiptStore) =>
             const prior = yield* runtime.lookupMutation(durableKey, bodyFingerprint)
             if (prior !== undefined) return externalReceipt(prior, externalKey)
 
-            const payload = yield* channel.decode(snapshot.raw)
-            const mapped = yield* channel.map(payload)
+            const mapped = yield* channel.decodeAndMap(snapshot.raw)
             const key = scopedKey(snapshot.channel, externalKey)
             let receipt: Receipt
             if (mapped._tag === "Signal") {
@@ -383,14 +408,33 @@ const makeWith = (runtime: InboundReceiptStore) =>
       project: Effect.fn("Channels.project")(function*(request) {
         const channel = yield* lookup(request.channel)
         const key = deliveryKey(request.channel, request.run)
-        const prior = yield* Ref.get(deliveries).pipe(Effect.map((map) => map.get(key)))
-        const projection = channel.project(request.run, prior)
-        yield* Ref.update(deliveries, (current) => {
-          const next = new Map(current)
-          next.set(key, { cursor: projection.cursor, messageId: projection.messageId })
-          return next
+        // Keep the read, projection and update synchronous so concurrent fibers
+        // cannot project from the same stale delivery identity.
+        return yield* Effect.sync(() => {
+          const prior = deliveries.get(key)
+          const projection = channel.project(request.run, prior)
+          if (
+            projection.operation !== "noop" &&
+            (prior === undefined || prior.cursor !== projection.cursor || prior.messageId !== projection.messageId)
+          ) {
+            deliveries.set(key, { cursor: projection.cursor, messageId: projection.messageId })
+          }
+          if (deliveries.has(key)) {
+            const status = request.run.status
+            if (status === "completed" || status === "failed" || status === "cancelled") {
+              terminalDeliveries.add(key)
+              if (terminalDeliveries.size > maximumTerminalDeliveries) {
+                // The set is nonempty because it just exceeded the limit.
+                const oldest = terminalDeliveries.values().next().value!
+                terminalDeliveries.delete(oldest)
+                deliveries.delete(oldest)
+              }
+            } else {
+              terminalDeliveries.delete(key)
+            }
+          }
+          return projection
         })
-        return projection
       })
     })
   })

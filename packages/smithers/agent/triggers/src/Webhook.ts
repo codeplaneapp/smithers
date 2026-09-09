@@ -131,7 +131,7 @@ const invalidInput = (issue: string): InvalidInput => new InvalidInput({ issue }
 
 const toControlChannel = <Payload, Outbound>(
   config: Config<Payload, Outbound>
-): ControlChannels.Channel => {
+): ControlChannels.Channel<Payload> => {
   const channel = ControlWebhook.make({
     name: config.name,
     schema: config.schema,
@@ -178,16 +178,7 @@ const toControlChannel = <Payload, Outbound>(
       }
     }
   })
-  return {
-    ...channel,
-    // The record keeps the declared schema. Overwriting it with
-    // `Schema.Unknown` left the registry advertising a schema that its own
-    // `decode` closure, which closed over the real one, disagreed with. Only
-    // `map` needs a cast: `ControlChannels.Channel<unknown>` hands it an
-    // `unknown` payload that `decode` has already produced as a `Payload`.
-    schema: channel.schema,
-    map: (payload) => channel.map(payload as Payload)
-  }
+  return channel
 }
 
 /**
