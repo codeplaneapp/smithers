@@ -298,14 +298,33 @@ not how often a result was reused. See
 
 ## flows_step_cache_recorded grows and nothing reclaims it
 
-No verb in this package deletes a ledger row. Whole-run reclamation belongs to
-[`@smthrs/engine-store`](/api/engine-store), whose retention pass erases a
-terminal run's ledger rows by `recorded_run_id` together with the journal that
-could have replayed them.
+By default, `sweepExpired` preserves the ledger. Whole-run reclamation belongs
+to [`@smthrs/engine-store`](/api/engine-store), whose retention pass erases a
+terminal run's ledger rows by `recorded_run_id` together with its journal.
+That pass cannot match a write-back recorded by a run on another host.
 
-Rows whose `recorded_run_id` names no run on this host match no run-scoped
-delete and are never reclaimed. That is every row `CombinedCacheStore`'s
-write-back lands from a shared tier, because the recording run lives on another
-machine. A host composing a shared tier accepts ledger growth proportional to
-the remote entries it has read. See
+Configure `sweepExpired(olderThanMs, { canReclaimRecorded })` on the local or
+combined store to collect old, unreferenced imports. The callback receives
+`{ keyDigest, recordedRunId, recordedEventSeq }` and returns an Effect of
+`true` only when no retained local journal, fork, or run needs that exact
+provenance. Keep locally owned run evidence until its journal is retired.
+Unknown reference state must return `false` or fail. Absence of the recording
+run on this host alone is not proof: local frames can reference remote runs.
+
+Pause execution and replay on every process sharing the database from before
+reading references until the sweep commits. A writer transaction protects the
+check and deletion, but cannot protect a reader that has obtained a cache row
+and has not yet journalled its reference. Run the policy as a local read, with
+no network calls or writes, inside that transaction.
+
+The same age floor applies to heads and ledger candidates. Ledger candidates
+are visited in pages of 100 identities; retained candidates do not prevent
+later candidates from being checked. A callback failure rolls back the entire
+sweep. The return value remains the number of heads deleted. The combined
+store forwards the policy only to its local tier.
+
+Schedule this sweep with the host's retention pass. Releasing the last local
+reference lets the next sweep collect an old import, including imports made
+before this policy existed. Without the callback, ledger retention remains
+conservative and foreign rows continue to accumulate. See
 [the head and the ledger](./concepts/head-and-ledger.md).

@@ -57,22 +57,43 @@ interface Service {
     keyDigest: string,
     options?: EvictOptions
   ) => Effect.Effect<boolean, CacheStoreError>
-  readonly sweepExpired: (olderThanMs: number) => Effect.Effect<number, CacheStoreError>
+  readonly sweepExpired: (olderThanMs: number, options?: SweepOptions) => Effect.Effect<number, CacheStoreError>
 }
 ```
 
-| Method         | Answers                                                                                                                                                         |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get`          | The entry under `keyDigest`: the mutable head by default, the version a named provenance recorded when `options.recordedBy` is set, `Option.none()` for a miss. |
-| `put`          | `Inserted`, `ExistingSame`, or `Conflict`. One call writes the head row and the provenance row in a single transaction.                                         |
-| `evict`        | `true` when a row was deleted, `false` when none matched. With `options.ifRecordedBy` the delete is one fenced compare-and-swap.                                |
-| `sweepExpired` | How many head rows were deleted. Rows recorded strictly before the floor go; a row recorded exactly at it stays. The ledger is never swept.                     |
+| Method         | Answers                                                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get`          | The entry under `keyDigest`: the mutable head by default, the version a named provenance recorded when `options.recordedBy` is set, `Option.none()` for a miss.   |
+| `put`          | `Inserted`, `ExistingSame`, or `Conflict`. One call writes the head row and the provenance row in a single transaction.                                           |
+| `evict`        | `true` when a row was deleted, `false` when none matched. With `options.ifRecordedBy` the delete is one fenced compare-and-swap.                                  |
+| `sweepExpired` | How many head rows were deleted. Rows recorded strictly before the floor go; a row recorded exactly at it stays. Ledger collection requires `canReclaimRecorded`. |
 
 `get` and `evict` validate their arguments before any statement is issued, so a
 malformed key, provenance, or age bound fails with `invalid_cache` rather than
 reading as an ordinary miss. See
 [read the result one event recorded](./guides/read-a-recorded-result.md) and
 [evict a poisoned entry](./guides/evict-a-poisoned-entry.md).
+
+### SweepOptions
+
+```ts
+interface SweepOptions {
+  readonly canReclaimRecorded?: (
+    reference: Pick<CacheEntry, "keyDigest" | "recordedRunId" | "recordedEventSeq">
+  ) => Effect.Effect<boolean, CacheStoreError>
+}
+```
+
+Optional host policy for old ledger rows. Return `true` only after all local
+references to that exact provenance have been released. No callback means no
+ledger collection. It runs inside the sweep's writer transaction and a failure
+rolls back the sweep. The head deletion count remains the return value.
+`CombinedCacheStore` forwards these options to the local tier only.
+
+Quiesce all execution and replay while checking references and sweeping. See
+[ledger retention](./troubleshooting.md#flows_step_cache_recorded-grows-and-nothing-reclaims-it)
+for coordination requirements. The callback must use local reads and preserve
+rows when reference state is unknown.
 
 ### CacheEntry
 

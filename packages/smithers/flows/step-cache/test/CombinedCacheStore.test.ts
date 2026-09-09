@@ -12,6 +12,7 @@ import * as Fiber from "effect/Fiber"
 import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as CacheStore from "../src/CacheStore.ts"
 import * as CacheStoreMetrics from "../src/CacheStoreMetrics.ts"
 import * as CombinedCacheStore from "../src/CombinedCacheStore.ts"
@@ -295,12 +296,43 @@ describe("lookups", () => {
     }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())))
 })
 
-const withSqlStore = <A, E>(effect: Effect.Effect<A, E, CacheStore.CacheStore>) =>
+const withSqlStore = <A, E>(effect: Effect.Effect<A, E, CacheStore.CacheStore | SqlClient.SqlClient>) =>
   effect.pipe(
     Effect.provide(CacheStore.layer),
     Effect.provide(Migrations.layer),
     Effect.provide(TestDatabase.layer)
   )
+
+describe("imported provenance retention", () => {
+  it.effect("collects released imports while preserving local replay references", () =>
+    withSqlStore(Effect.gen(function*() {
+      const local = yield* CacheStore.CacheStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      const remote = tier()
+      const imported = { ...entry, recordedRunId: "foreign-run", createdAtMs: 0 }
+      remote.rows.set(entry.keyDigest, imported)
+      const combined = CombinedCacheStore.make({ local, remote: remote.store })
+      expect(Option.getOrThrow(yield* combined.get(entry.keyDigest))).toEqual(imported)
+
+      // The host's journal owns these references, including references to a
+      // foreign producer. A retention pass runs while execution is quiescent.
+      const references = new Set(["foreign-run"])
+      const retention = {
+        canReclaimRecorded: (record: { readonly recordedRunId: string }) =>
+          Effect.succeed(!references.has(record.recordedRunId))
+      }
+      yield* TestClock.adjust("10 seconds")
+      expect(yield* combined.sweepExpired(1000, retention)).toBe(1)
+      const recordedBy = { runId: imported.recordedRunId, eventSeq: imported.recordedEventSeq }
+      expect(Option.getOrThrow(yield* local.get(entry.keyDigest, { recordedBy }))).toEqual(imported)
+
+      references.clear()
+      expect(yield* combined.sweepExpired(1000, retention)).toBe(0)
+      expect(yield* sql`SELECT * FROM flows_step_cache_recorded`).toEqual([])
+      expect(yield* local.get(entry.keyDigest, { recordedBy })).toEqual(Option.none())
+      expect(remote.calls).toEqual(["get"])
+    })))
+})
 
 describe("age-bounded SQL composition", () => {
   const recordedBy = { runId: entry.recordedRunId, eventSeq: entry.recordedEventSeq }

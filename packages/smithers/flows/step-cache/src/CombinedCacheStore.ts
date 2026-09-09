@@ -105,7 +105,9 @@ export const make = (options: Options): CacheStore.Service => {
       if (Option.isNone(shared)) return shared
       // Write-back, exactly as `downloadActionResultFromRemote` does: the
       // shared entry becomes a local row so this machine's next lookup — and
-      // every sibling run on it — is a local hit.
+      // every sibling run on it — is a local hit. Its original provenance must
+      // survive for local replay; reference-aware sweeps reclaim it once the
+      // host has released all frames that could read it.
       const written = yield* local.put(shared.value)
       if (written._tag === "Inserted") return shared
       // The write-back lost: a sibling run recorded its own row under the key
@@ -183,11 +185,11 @@ export const make = (options: Options): CacheStore.Service => {
   )
 
   const sweepExpired: CacheStore.Service["sweepExpired"] = Effect.fn("CombinedCacheStore.sweepExpired")(
-    (olderThanMs) =>
+    (olderThanMs, options) =>
       // Local-only for the same reason eviction is: retention on this machine
       // says nothing about what a sibling machine still needs, and the shared
       // tier owns its own collection policy.
-      local.sweepExpired(olderThanMs)
+      local.sweepExpired(olderThanMs, options)
   )
 
   return { get, put, evict, sweepExpired }

@@ -279,6 +279,30 @@ export type EvictOptions = {
 }
 
 /**
+ * Optional collection policy for ledger evidence, including remote imports.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface SweepOptions {
+  /**
+   * Authorizes deleting one old provenance only after every local journal,
+   * fork, and run reference has been released. Omitting the policy preserves
+   * all rows.
+   * A foreign run id alone does not prove the absence of local references.
+   *
+   * Runs as a local read inside the sweep's writer transaction. Failure rolls
+   * back the entire sweep. The host must quiesce execution and replay across
+   * all database users before checking references and until the sweep commits:
+   * a write lock alone cannot protect a lookup not yet journalled. Do not
+   * perform network I/O or mutate the store from this callback.
+   */
+  readonly canReclaimRecorded?: (
+    reference: Pick<CacheEntry, "keyDigest" | "recordedRunId" | "recordedEventSeq">
+  ) => Effect.Effect<boolean, CacheStoreError>
+}
+
+/**
  * Result of recording an entry under a content digest.
  *
  * @category models
@@ -324,20 +348,17 @@ export interface Service {
    *
    * The sweep is the collection half of {@link GetOptions.maxAgeMs}: the
    * bound decides what a read serves, this decides what the database keeps.
-   * The append-only `flows_step_cache_recorded` ledger is never swept: an old
-   * frame's projection is a function of what that event recorded, and
-   * deleting the evidence would change a replayed answer.
+   * The immutable `flows_step_cache_recorded` ledger is preserved unless
+   * {@link SweepOptions.canReclaimRecorded} explicitly authorizes collecting
+   * an old row. Both checks and deletion share the writer transaction. The
+   * return value counts heads only, even when ledger rows are reclaimed.
    *
-   * No verb in this package reclaims a ledger row. Whole-run reclamation is
-   * `@smthrs/engine-store`'s Retention, which deletes ledger rows by
-   * `recorded_run_id` when it erases that run's journal, so the evidence and
-   * the frames that would read it go together. Rows whose `recorded_run_id`
-   * names no run on this host, which is every row
-   * `CombinedCacheStore`'s write-back lands from a shared tier, match no
-   * run-scoped delete and are never reclaimed: a host composing a shared tier
-   * accepts ledger growth proportional to the remote entries it has read.
+   * Whole-run reclamation remains `@smthrs/engine-store`'s Retention, which
+   * deletes ledger rows with the run's journal. Foreign imports cannot match
+   * that run-scoped delete; a host composing a shared tier must schedule a
+   * reference-aware sweep to bound unreferenced imported evidence.
    */
-  readonly sweepExpired: (olderThanMs: number) => Effect.Effect<number, CacheStoreError>
+  readonly sweepExpired: (olderThanMs: number, options?: SweepOptions) => Effect.Effect<number, CacheStoreError>
 }
 
 /**
@@ -729,22 +750,54 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     })
   )
 
-  const sweepExpired: Service["sweepExpired"] = Effect.fn("CacheStore.sweepExpired")((olderThanMs) =>
+  const sweepExpired: Service["sweepExpired"] = Effect.fn("CacheStore.sweepExpired")((olderThanMs, options) =>
     Effect.gen(function*() {
       yield* validateAge("olderThanMs", olderThanMs)
       const floorMs = (yield* Clock.currentTimeMillis) - olderThanMs
       yield* Effect.annotateCurrentSpan({ floorMs })
-      // Only the head table is swept. The recorded ledger is the durable
-      // evidence a replay of an old frame reads, so no verb in this package
-      // deletes from it; the one policy that does is `@smthrs/engine-store`'s
-      // Retention, erasing a terminal run's ledger rows together with the
-      // journal that could have replayed them.
-      const deleted = yield* writer.write(
-        sql`DELETE FROM flows_step_cache WHERE created_at_ms < ${floorMs}`.raw
-      ).pipe(
-        Effect.flatMap(affectedRows),
-        Effect.mapError(mapPersistenceError)
-      )
+      const canReclaimRecorded = options?.canReclaimRecorded
+      const deleted = yield* writer.write(Effect.gen(function*() {
+        const heads = yield* sql`DELETE FROM flows_step_cache WHERE created_at_ms < ${floorMs}`.raw.pipe(
+          Effect.flatMap(affectedRows)
+        )
+        if (canReclaimRecorded !== undefined) {
+          // Keyset pagination bounds memory without starving later imports
+          // behind a page of retained evidence. The empty key sorts before
+          // every admitted digest. Keep the cursor even when its row is deleted.
+          type ReferenceRow = Pick<CacheRow, "key_digest" | "recorded_run_id" | "recorded_event_seq">
+          let cursor: ReferenceRow = { key_digest: "", recorded_run_id: "", recorded_event_seq: 0 }
+          while (true) {
+            const rows = yield* sql<ReferenceRow>`
+              SELECT key_digest, recorded_run_id, recorded_event_seq
+              FROM flows_step_cache_recorded
+              WHERE created_at_ms < ${floorMs}
+                AND (key_digest, recorded_run_id, recorded_event_seq) >
+                  (${cursor.key_digest}, ${cursor.recorded_run_id}, ${cursor.recorded_event_seq})
+              ORDER BY key_digest, recorded_run_id, recorded_event_seq
+              LIMIT 100
+            `
+            if (rows.length === 0) break
+            for (const row of rows) {
+              const reclaim = yield* canReclaimRecorded({
+                keyDigest: row.key_digest,
+                recordedRunId: row.recorded_run_id,
+                recordedEventSeq: row.recorded_event_seq
+              })
+              if (reclaim) {
+                yield* sql`
+                  DELETE FROM flows_step_cache_recorded
+                  WHERE key_digest = ${row.key_digest}
+                    AND recorded_run_id = ${row.recorded_run_id}
+                    AND recorded_event_seq = ${row.recorded_event_seq}
+                    AND created_at_ms < ${floorMs}
+                `
+              }
+            }
+            cursor = rows[rows.length - 1]!
+          }
+        }
+        return heads
+      })).pipe(Effect.mapError(mapPersistenceError))
       return deleted
     })
   )

@@ -146,12 +146,10 @@ describe("expiry sweeps", () => {
       expect(Option.isNone(yield* cache.get("below-floor"))).toBe(true)
     })))
 
-  it.effect("never reclaims a write-back ledger row recorded by a foreign run", () =>
+  it.effect("preserves foreign provenance when no retention policy is supplied", () =>
     withStore(Effect.gen(function*() {
-      // The documented growth: a shared-tier write-back lands a ledger row
-      // under the recording machine's run id. No verb here removes it, and
-      // engine-store's run-scoped retention has no local run to match it to,
-      // so this is the price of composing a shared tier.
+      // Foreign provenance can be referenced by a local journal. Age alone
+      // cannot authorize deleting it; retention requires the host's policy.
       const cache = yield* CacheStore
       const sql = yield* Effect.service(SqlClient.SqlClient)
       const foreign = { ...entry("write-back", 0), recordedRunId: "run-on-another-host" }
@@ -173,6 +171,62 @@ describe("expiry sweeps", () => {
         SELECT recorded_run_id FROM flows_step_cache_recorded WHERE key_digest = 'write-back'
       `.pipe(Effect.orDie)
       expect(ledger.map((row) => row.recorded_run_id)).toEqual(["run-on-another-host"])
+    })))
+
+  it.effect("checks exact provenance and the age floor across retention pages", () =>
+    withStore(Effect.gen(function*() {
+      const cache = yield* CacheStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      for (let index = 0; index < 102; index++) {
+        yield* cache.put({ ...entry("versions", 0), recordedEventSeq: index })
+      }
+      yield* cache.put(entry("at-floor", 1000))
+      yield* cache.put(entry("fresh", 2000))
+      yield* TestClock.adjust("2 seconds")
+      const checked: Array<number> = []
+      expect(
+        yield* cache.sweepExpired(1000, {
+          canReclaimRecorded: (record) =>
+            Effect.sync(() => {
+              expect(record.keyDigest).toBe("versions")
+              expect(record.recordedRunId).toBe("run-1")
+              checked.push(record.recordedEventSeq)
+              return record.recordedEventSeq === 101
+            })
+        })
+      ).toBe(1)
+      expect(checked).toEqual(Array.from({ length: 102 }, (_, index) => index))
+      const remaining = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM flows_step_cache_recorded
+      `
+      expect(remaining[0]!.count).toBe(103)
+      expect(yield* cache.get("versions", { recordedBy: { runId: "run-1", eventSeq: 101 } }))
+        .toEqual(Option.none())
+      expect(Option.isSome(yield* cache.get("versions", { recordedBy: { runId: "run-1", eventSeq: 100 } })))
+        .toBe(true)
+      expect(Option.isSome(yield* cache.get("at-floor"))).toBe(true)
+      expect(Option.isSome(yield* cache.get("fresh"))).toBe(true)
+    })))
+
+  it.effect("rolls back collection if the reference policy fails", () =>
+    withStore(Effect.gen(function*() {
+      const cache = yield* CacheStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* cache.put(entry("a", 0))
+      yield* cache.put(entry("b", 0))
+      yield* TestClock.adjust("1 second")
+      const refused = new CacheStoreLive.CacheStoreError({ code: "unknown", message: "references unavailable" })
+      expect(
+        yield* Effect.flip(cache.sweepExpired(0, {
+          canReclaimRecorded: (record) => record.keyDigest === "a" ? Effect.succeed(true) : Effect.fail(refused)
+        }))
+      ).toEqual(refused)
+      expect(Option.isSome(yield* cache.get("a"))).toBe(true)
+      expect(Option.isSome(yield* cache.get("b"))).toBe(true)
+      const remaining = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM flows_step_cache_recorded
+      `
+      expect(remaining[0]!.count).toBe(2)
     })))
 
   it.effect("refuses a negative sweep bound", () =>

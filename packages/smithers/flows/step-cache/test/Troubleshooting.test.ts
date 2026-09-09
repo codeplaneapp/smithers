@@ -23,3 +23,16 @@ describe("stored-row corruption recovery documentation", () => {
     expect(troubleshooting).toContain("## flows_step_cache_recorded grows and nothing reclaims it")
   })
 })
+
+describe("imported ledger retention documentation", () => {
+  it("requires complete local references and quiescent readers before collection", () => {
+    const retention = troubleshooting.split("## flows_step_cache_recorded grows and nothing reclaims it")[1]!
+      .replace(/\s+/g, " ")
+    expect(retention).toContain("canReclaimRecorded")
+    expect(retention).toContain("keyDigest, recordedRunId, recordedEventSeq")
+    expect(retention).toMatch(/no retained local journal, fork, or run needs that exact provenance/i)
+    expect(retention).toMatch(/Pause execution and replay on every process/i)
+    expect(retention).toMatch(/Unknown reference state must return `false` or fail/i)
+    expect(retention).toMatch(/including imports made before this policy existed/i)
+  })
+})

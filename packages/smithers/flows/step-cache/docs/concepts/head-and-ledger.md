@@ -8,10 +8,10 @@ sidebar:
 The step cache owns two tables, and the difference between them is the whole
 design.
 
-| Table                       | What it is                                                                                                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `flows_step_cache`          | The mutable head. One row per `key_digest`. This is what an ordinary lookup serves and what an eviction or a sweep reclaims.                                                   |
-| `flows_step_cache_recorded` | The append-only ledger. One row per `(key_digest, recorded_run_id, recorded_event_seq)`. This is what a replay of that exact event reads. No verb in this package deletes one. |
+| Table                       | What it is                                                                                                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flows_step_cache`          | The mutable head. One row per `key_digest`. This is what an ordinary lookup serves and what an eviction or a sweep reclaims.                                                                |
+| `flows_step_cache_recorded` | The append-only ledger. One row per `(key_digest, recorded_run_id, recorded_event_seq)`. This is what a replay of that exact event reads. Collection requires an explicit reference policy. |
 
 One `put` writes both, inside a single `DurableWriter` transaction. A crash
 between the two would leave a head a lookup serves without the provenance a
@@ -78,25 +78,27 @@ entries or nothing: there is no torn row and no `decode_failed`.
 
 ## What reclaims a ledger row
 
-Nothing in this package. Whole-run reclamation belongs to
+By default, whole-run reclamation belongs to
 [`@smthrs/engine-store`](/api/engine-store), whose retention pass erases a
-terminal run's ledger rows by `recorded_run_id` together with the journal that
-could have replayed them, so the evidence and the frames that would read it go
-at the same time.
+terminal run's ledger rows by `recorded_run_id` together with its journal.
 
-:::warning
-A ledger row whose `recorded_run_id` names no run on this host is never
-reclaimed by anything. That is every row `CombinedCacheStore`'s write-back
-lands from a shared tier, because the recording run lives on another machine. A
-host composing a shared tier accepts `flows_step_cache_recorded` growth
-proportional to the remote entries it has read.
-:::
+Remote write-back preserves the original provenance because local frames can
+replay it. A foreign run id matches no local run-scoped delete. To bound these
+imports, supply `canReclaimRecorded` to `sweepExpired`. The callback authorizes
+collection of each old provenance only after all local references are released.
+It also applies to existing imports, without a schema migration. An omitted
+policy preserves every ledger row.
+
+Reference checks and deletion share a writer transaction. Hosts must also
+quiesce execution and replay so an in-flight lookup cannot publish a reference
+after collection. See [ledger retention](../troubleshooting.md#flows_step_cache_recorded-grows-and-nothing-reclaims-it)
+for the policy contract and coordination requirements.
 
 ## Related
 
 - [Read the result one event recorded](../guides/read-a-recorded-result.md):
   the provenance fence as a task.
 - [Expire cached results](../guides/expire-cached-results.md): the head's
-  retention, and why the ledger has none.
+  retention and optional ledger collection.
 - [Content addressing](/docs/concepts/content-addressing/): where a
   `keyDigest` comes from.

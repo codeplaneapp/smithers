@@ -122,5 +122,5 @@ The client cannot detect it. Fenced evictions need a conforming server: see
 
 - [Expire cached results](./expire-cached-results.md): reclaiming a whole age
   band rather than one named row.
-- [The head and the ledger](../concepts/head-and-ledger.md): why no verb here
-  deletes a ledger row, and what does.
+- [The head and the ledger](../concepts/head-and-ledger.md): how reference-aware
+  retention collects ledger rows.
