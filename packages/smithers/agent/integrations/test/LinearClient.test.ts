@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Fiber } from "effect"
 import { inspect } from "node:util"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { fromIntegrationError } from "../src/core/ActionFailure.ts"
@@ -406,18 +406,25 @@ describe("LinearClient over a real HTTP server", () => {
   })
 
   it("interrupting the fiber aborts the request in flight", async () => {
-    let closed = false
-    fixture = await startFixture((_request, response) => {
-      response.on("close", () => {
-        closed = true
-      })
+    fixture = await startFixture(() => {
+      // Never answers: the only way out is the interrupt.
     })
+    const server = fixture
+    // The fixture, not a duration, says when the request is in flight and when
+    // its socket closed, so a loaded machine cannot interrupt before the
+    // server ever saw the request. Interrupting the fiber is the interruption
+    // a cancelled run delivers.
     const exit = await Effect.runPromise(
-      Effect.exit(Effect.timeout(client().query("query X { x }"), "50 millis"))
+      Effect.gen(function*() {
+        const fiber = yield* Effect.forkChild(client().query("query X { x }"))
+        yield* Effect.promise(() => server.arrived)
+        yield* Fiber.interrupt(fiber)
+        yield* Effect.timeout(Effect.promise(() => server.closed), "10 seconds")
+        return yield* Effect.exit(Fiber.join(fiber))
+      })
     )
-    expect(exit._tag).toBe("Failure")
-    await Effect.runPromise(Effect.sleep("100 millis"))
-    expect(closed).toBe(true)
+    expect(Exit.hasInterrupts(exit)).toBe(true)
+    expect(server.requests).toHaveLength(1)
   })
 })
 

@@ -1,4 +1,4 @@
-import { type Duration, Effect, Schema } from "effect"
+import { type Duration, Effect, Exit, Fiber, Schema } from "effect"
 import { inspect } from "node:util"
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest"
 import { fromIntegrationError } from "../src/core/ActionFailure.ts"
@@ -272,19 +272,28 @@ describe("GitHubClient over a real HTTP server", () => {
   // point of reading the header: a retry that ignores it walks straight back
   // into the same limit.
   it("waits the interval a rate limit asked for before repeating", async () => {
+    // The asked-for interval is far past the 250 ms base backoff, so a client
+    // that dropped the header would repeat inside the barrier below and only a
+    // client that adds the header's delay can produce the gap this measures.
+    const askedForMs = 2_000
     let calls = 0
+    let refusedAt = 0
     fixture = await startFixture((_request, response) => {
       calls += 1
       if (calls === 1) {
-        json(response, 429, { message: "rate limited" }, { "retry-after": "0.05" })
+        refusedAt = Date.now()
+        json(response, 429, { message: "rate limited" }, { "retry-after": String(askedForMs / 1_000) })
         return
       }
       json(response, 200, { ok: true })
     })
-    const startedAt = Date.now()
-    expect(await Effect.runPromise(client().request("GET", "/x"))).toEqual({ ok: true })
+    const pending = Effect.runPromise(client().request("GET", "/x"))
+    await Effect.runPromise(Effect.sleep("750 millis"))
+    expect(calls).toBe(1)
+    expect(await pending).toEqual({ ok: true })
     expect(calls).toBe(2)
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(50)
+    const repeated = (fixture as Fixture).requests[1]
+    expect((repeated?.receivedAt ?? 0) - refusedAt).toBeGreaterThanOrEqual(askedForMs)
   })
 
   // A rate limit is a refusal, not an ambiguous outcome: the request was not
@@ -421,21 +430,25 @@ describe("GitHubClient over a real HTTP server", () => {
   })
 
   it("interrupting the fiber aborts the request in flight", async () => {
-    let closed = false
-    fixture = await startFixture((_request, response) => {
-      response.on("close", () => {
-        closed = true
-      })
+    fixture = await startFixture(() => {
       // Never answers: the only way out is the interrupt.
     })
-    // `Effect.timeout` interrupts the effect it wraps, which is the same
-    // interruption a cancelled run delivers.
+    const server = fixture
+    // The fixture, not a duration, says when the request is in flight and when
+    // its socket closed, so a loaded machine cannot interrupt before the
+    // server ever saw the request. Interrupting the fiber is the interruption
+    // a cancelled run delivers.
     const exit = await Effect.runPromise(
-      Effect.exit(Effect.timeout(client().request("GET", "/hang"), "50 millis"))
+      Effect.gen(function*() {
+        const fiber = yield* Effect.forkChild(client().request("GET", "/hang"))
+        yield* Effect.promise(() => server.arrived)
+        yield* Fiber.interrupt(fiber)
+        yield* Effect.timeout(Effect.promise(() => server.closed), "10 seconds")
+        return yield* Effect.exit(Fiber.join(fiber))
+      })
     )
-    expect(exit._tag).toBe("Failure")
-    await Effect.runPromise(Effect.sleep("100 millis"))
-    expect(closed).toBe(true)
+    expect(Exit.hasInterrupts(exit)).toBe(true)
+    expect(server.requests).toHaveLength(1)
   })
 
   // A caller that passes its own environment must not have an ambient
