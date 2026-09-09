@@ -9,6 +9,7 @@
  *
  * @since 1.0.0
  */
+import { Duration } from "effect"
 import * as Environment from "../Environment.ts"
 
 /**
@@ -18,6 +19,15 @@ import * as Environment from "../Environment.ts"
  * @since 1.0.0
  */
 export const DEFAULT_API_BASE_URL = "https://api.github.com"
+
+/**
+ * The default deadline for one attempt, covering the response headers and the
+ * body read.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const DEFAULT_REQUEST_TIMEOUT: Duration.Duration = Duration.seconds(30)
 
 const DEFAULT_MAX_RETRIES = 3
 
@@ -46,6 +56,15 @@ export interface GitHubConfig {
   readonly webhookSecret?: string | undefined
   /** Retries for rate-limited and 5xx responses. Defaults to 3. */
   readonly maxRetries?: number | undefined
+  /**
+   * Deadline for one attempt, covering the response headers *and* the body
+   * read. Defaults to 30 seconds, and must be a finite, positive duration.
+   *
+   * The retry budget bounds only completed attempts, so without this a peer
+   * that answers with headers and then trickles the body forever holds the
+   * call open for as long as it likes.
+   */
+  readonly requestTimeout?: Duration.Input | undefined
 }
 
 /**
@@ -59,6 +78,7 @@ export interface ResolvedGitHubConfig {
   readonly apiBaseUrl: string
   readonly webhookSecret: string | undefined
   readonly maxRetries: number
+  readonly requestTimeout: Duration.Input
 }
 
 const firstNonEmpty = (candidates: ReadonlyArray<string | undefined>): string | undefined => {
@@ -85,5 +105,6 @@ export const resolve = (
   token: firstNonEmpty([config.token, env["SMITHERS_GITHUB_TOKEN"], env["GITHUB_TOKEN"]]),
   apiBaseUrl: firstNonEmpty([config.apiBaseUrl, env["SMITHERS_GITHUB_API_BASE_URL"]]) ?? DEFAULT_API_BASE_URL,
   webhookSecret: firstNonEmpty([config.webhookSecret, env["SMITHERS_GITHUB_WEBHOOK_SECRET"]]),
-  maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES
+  maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
+  requestTimeout: config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
 })

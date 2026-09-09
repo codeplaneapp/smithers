@@ -21,12 +21,15 @@
  *   and retained cause messages.
  *
  * One `AbortController` spans each attempt's request *and* its body read, so
- * interrupting the fiber during either tears the exchange down.
+ * interrupting the fiber during either tears the exchange down. Each attempt
+ * also carries its own deadline, `requestTimeout`: the attempt budget counts
+ * completed attempts, so without it a peer that answers with headers and then
+ * trickles the body forever holds the call open.
  *
  * @since 1.0.0
  */
 import { isRecord } from "@smthrs/canonical/Record"
-import { Context, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer, Option } from "effect"
 import { IntegrationError } from "../core/IntegrationError.ts"
 import { redactedError } from "../core/RedactedError.ts"
 import * as Environment from "../Environment.ts"
@@ -369,8 +372,22 @@ export const make = (
   config: LinearConfig = {},
   env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): LinearClient => {
-  const { apiBaseUrl, apiKey } = resolve(config, env)
+  const { apiBaseUrl, apiKey, requestTimeout: configuredTimeout } = resolve(config, env)
   const integrationError = redactedError([apiKey, apiKey?.replace(/^Bearer\s+/i, "")])
+
+  // A zero or infinite deadline is not a deadline: the first would fail every
+  // request and the second is the unbounded wait this option exists to close.
+  const requestTimeout = Option.getOrUndefined(Duration.fromInput(configuredTimeout))
+  if (
+    requestTimeout === undefined || !Duration.isFinite(requestTimeout) || Duration.toMillis(requestTimeout) <= 0
+  ) {
+    throw integrationError(
+      "invalid-config",
+      "Linear requestTimeout must be a finite, positive duration.",
+      { requestTimeout: String(configuredTimeout) }
+    )
+  }
+  const requestTimeoutMs = Duration.toMillis(requestTimeout)
 
   const teamByKey = new Map<string, TeamRef>()
   const statesByTeam = new Map<string, ReadonlyArray<NamedNode>>()
@@ -499,10 +516,28 @@ export const make = (
             )
           }
           return { _tag: "Done" as const, data: (json?.["data"] ?? {}) as Record<string, any> }
-        }).pipe(Effect.ensuring(Effect.promise(async () => {
-          controller.abort()
-          if (!consumed) await pendingResponse?.body?.cancel().catch(() => {})
-        })))
+        }).pipe(
+          Effect.ensuring(Effect.promise(async () => {
+            controller.abort()
+            if (!consumed) await pendingResponse?.body?.cancel().catch(() => {})
+          })),
+          // The deadline spans the whole exchange, headers and body alike. The
+          // timeout interrupts the attempt, whose finalizer aborts the
+          // controller and closes the socket. On a mutation it is the same
+          // ambiguity a 5xx is, so the outcome is reported as unknown rather
+          // than the write repeated.
+          Effect.timeoutOrElse({
+            duration: requestTimeout,
+            orElse: () =>
+              Effect.fail(integrationError(
+                "delivery-failed",
+                retryServerErrors
+                  ? `Linear API request timed out after ${requestTimeoutMs} ms.`
+                  : `Linear API request for a write timed out after ${requestTimeoutMs} ms, so its outcome is unknown.`,
+                { apiBaseUrl, outcomeUnknown: !retryServerErrors, timedOut: true, requestTimeoutMs }
+              ))
+          })
+        )
         if (result._tag === "Done") return result.data
         yield* Effect.sleep(`${result.delayMs} millis`)
       }

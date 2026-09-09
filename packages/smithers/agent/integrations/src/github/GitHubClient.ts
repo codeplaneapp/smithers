@@ -24,11 +24,14 @@
  *   because `new URL` resolves `..` inside a path.
  *
  * Interruption is forwarded to `fetch`, so interrupting the fiber aborts the
- * request in flight rather than leaving it running.
+ * request in flight rather than leaving it running. Every attempt also carries
+ * its own deadline, `requestTimeout`, spanning the response headers and the
+ * body read: the retry budget counts completed attempts, so without a deadline
+ * a peer that answers and then trickles the body forever holds the call open.
  *
  * @since 1.0.0
  */
-import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effect"
 import { IntegrationError, isRetryable } from "../core/IntegrationError.ts"
 import { redactedError } from "../core/RedactedError.ts"
 import * as Environment from "../Environment.ts"
@@ -315,6 +318,19 @@ export const make = (
       { maxRetries: resolved.maxRetries, retryable: false }
     )
   }
+  // A zero or infinite deadline is not a deadline: the first would fail every
+  // request and the second is the unbounded wait this option exists to close.
+  const requestTimeout = Option.getOrUndefined(Duration.fromInput(resolved.requestTimeout))
+  if (
+    requestTimeout === undefined || !Duration.isFinite(requestTimeout) || Duration.toMillis(requestTimeout) <= 0
+  ) {
+    throw integrationError(
+      "invalid-config",
+      "GitHub requestTimeout must be a finite, positive duration.",
+      { requestTimeout: String(resolved.requestTimeout), retryable: false }
+    )
+  }
+  const requestTimeoutMs = Duration.toMillis(requestTimeout)
 
   // Every request carries the bearer token, so an absolute request URL and a
   // `rel="next"` target must stay on the configured API origin. A foreign
@@ -440,7 +456,31 @@ export const make = (
             { method, retryable: mayRepeatAmbiguously, outcomeUnknown: !mayRepeatAmbiguously },
             { cause }
           )
-    })
+      // The deadline spans the whole exchange, headers and body alike. The
+      // timeout interrupts the attempt, which aborts the `fetch` signal and
+      // closes the socket, so a stalled peer stops holding the caller. On a
+      // write it is the same ambiguity a dropped connection is: GitHub may
+      // have applied it, so the outcome is reported as unknown rather than
+      // repeated.
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: requestTimeout,
+        orElse: () =>
+          Effect.fail(integrationError(
+            "delivery-failed",
+            `GitHub request timed out after ${requestTimeoutMs} ms: ${method}${
+              mayRepeatAmbiguously ? "" : " (outcome unknown: the write was not repeated)"
+            }`,
+            {
+              method,
+              retryable: mayRepeatAmbiguously,
+              outcomeUnknown: !mayRepeatAmbiguously,
+              timedOut: true,
+              requestTimeoutMs
+            }
+          ))
+      })
+    )
   }
 
   const requestUrl = (

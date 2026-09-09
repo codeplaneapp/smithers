@@ -4,6 +4,7 @@
  * @since 1.0.0
  */
 import { SmithersError } from "@smthrs/errors/SmithersError"
+import type { Duration } from "effect"
 import * as Environment from "../Environment.ts"
 
 /**
@@ -33,6 +34,14 @@ export interface TelegramConfig {
   readonly maxRateLimitRetries?: number | undefined
   /** Cap on the server-supplied `retry_after` honored per retry, in seconds. Defaults to 30. */
   readonly maxRetryAfterSeconds?: number | undefined
+  /**
+   * Deadline for one request, covering the response headers *and* the body
+   * read. Defaults to 30 seconds, and must be a finite, positive duration.
+   *
+   * `getUpdates` adds the long poll it asked the server to hold, so a poll
+   * that waits 25 seconds for an update is not cancelled by its own deadline.
+   */
+  readonly requestTimeout?: Duration.Input | undefined
 }
 
 /**

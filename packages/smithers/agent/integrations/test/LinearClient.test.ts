@@ -2,8 +2,8 @@ import { Cause, Effect, Exit } from "effect"
 import { inspect } from "node:util"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { fromIntegrationError } from "../src/core/ActionFailure.ts"
-import type { IntegrationError } from "../src/core/IntegrationError.ts"
-import { DEFAULT_API_BASE_URL, resolve } from "../src/linear/Config.ts"
+import { type IntegrationError, isIntegrationError } from "../src/core/IntegrationError.ts"
+import { DEFAULT_API_BASE_URL, DEFAULT_REQUEST_TIMEOUT, resolve } from "../src/linear/Config.ts"
 import { make, normalizePriority, type Priority, retryDelayMs } from "../src/linear/LinearClient.ts"
 import { type Fixture, json, startFixture } from "./Fixture.ts"
 
@@ -81,7 +81,8 @@ describe("Linear config", () => {
     expect(resolve({}, env)).toEqual({
       apiKey: "env-key",
       webhookSecret: "env-secret",
-      apiBaseUrl: "https://linear.test/graphql"
+      apiBaseUrl: "https://linear.test/graphql",
+      requestTimeout: DEFAULT_REQUEST_TIMEOUT
     })
     expect(resolve({}, {}).apiBaseUrl).toBe(DEFAULT_API_BASE_URL)
   })
@@ -946,4 +947,56 @@ it("redacts the raw OAuth token as well as its Authorization header", async () =
   const failure = await Effect.runPromise(Effect.flip(make({ apiKey: `Bearer ${API_KEY}` }, {}).query("query X { x }")))
   expectRedacted(failure, API_KEY)
   expect(failure.summary).toContain("[REDACTED] rejected [REDACTED]; [REDACTED]")
+})
+
+// The five-attempt budget counts completed attempts, so a peer that answers
+// with headers and then trickles the body forever is outside it.
+describe("Linear request deadline", () => {
+  const stalled = (onClose: () => void) =>
+    startFixture((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.write("{\"data\":")
+      response.on("close", onClose)
+    })
+
+  const deadlined = () =>
+    make({ apiKey: API_KEY, apiBaseUrl: (fixture as Fixture).origin, requestTimeout: "200 millis" })
+
+  it("fails a stalled query within the deadline and closes the socket", async () => {
+    let closed!: () => void
+    const socketClosed = new Promise<void>((resolve) => {
+      closed = resolve
+    })
+    fixture = await stalled(closed)
+    const started = Date.now()
+    const failure = await Effect.runPromise(Effect.flip(deadlined().query("query Q { viewer { id } }")))
+    expect(Date.now() - started).toBeLessThan(4_000)
+    expect(failure.reason).toBe("delivery-failed")
+    expect(failure.summary).toContain("timed out")
+    // A query applied nothing, so it is a plain transport failure.
+    expect(failure.details).toMatchObject({ timedOut: true, outcomeUnknown: false })
+    await socketClosed
+  })
+
+  it("reports a timed-out mutation as an unknown outcome", async () => {
+    fixture = await stalled(() => {})
+    const failure = await Effect.runPromise(
+      Effect.flip(deadlined().query("mutation M { issueCreate { success } }", {}, { retryServerErrors: false }))
+    )
+    expect(failure.details).toMatchObject({ timedOut: true, outcomeUnknown: true })
+    expect(failure.summary).toContain("outcome is unknown")
+  })
+
+  it("refuses a deadline that is not finite and positive", () => {
+    for (const requestTimeout of [0, -1, "Infinity"] as const) {
+      let thrown: unknown
+      try {
+        make({ apiKey: API_KEY, requestTimeout }, {})
+      } catch (cause) {
+        thrown = cause
+      }
+      expect(isIntegrationError(thrown) && thrown.reason, String(requestTimeout)).toBe("invalid-config")
+    }
+    expect(resolve({}, {}).requestTimeout).toEqual(DEFAULT_REQUEST_TIMEOUT)
+  })
 })

@@ -16,13 +16,17 @@
  *   the whole message.
  *
  * One `AbortController` per attempt spans the request and the body read, so an
- * interrupt at either stage aborts the exchange.
+ * interrupt at either stage aborts the exchange, and each attempt carries its
+ * own deadline, `requestTimeout`, over both. `getUpdates` adds the long poll it
+ * asked the server to hold, and the best-effort typing action is capped far
+ * shorter, because a reader waiting on the message is not served by a slow
+ * indicator.
  *
  * @since 1.0.0
  */
 import { isRecord } from "@smthrs/canonical/Record"
 import { hasSmithersErrorShape, SmithersError } from "@smthrs/errors/SmithersError"
-import { Context, Duration, Effect, Layer, Schedule } from "effect"
+import { Context, Duration, Effect, Layer, Option, Schedule } from "effect"
 import { isMessageId } from "../core/ActionFailure.ts"
 import { IntegrationError, type Reason, reasons } from "../core/IntegrationError.ts"
 import * as Environment from "../Environment.ts"
@@ -33,6 +37,10 @@ import { clean, toTelegram } from "./Markdown.ts"
 const DEFAULT_API_BASE_URL = "https://api.telegram.org"
 const DEFAULT_MAX_RATE_LIMIT_RETRIES = 3
 const DEFAULT_MAX_RETRY_AFTER_SECONDS = 30
+const DEFAULT_REQUEST_TIMEOUT = Duration.seconds(30)
+// The typing indicator is cosmetic and is awaited before the first chunk, so
+// it gets its own short cap rather than the full request deadline.
+const TYPING_TIMEOUT_MS = 5_000
 
 /**
  * A failure reported by the Bot API.
@@ -74,6 +82,8 @@ export class TelegramApiError extends SmithersError {
     readonly cause?: unknown
     readonly causeDescription?: string | undefined
     readonly outcomeUnknown?: boolean | undefined
+    /** The client's own deadline expired, rather than the API answering. */
+    readonly timedOut?: boolean | undefined
   }) {
     super("TELEGRAM_API_ERROR", message, {
       method: options.method,
@@ -82,7 +92,8 @@ export class TelegramApiError extends SmithersError {
       retryAfterSeconds: options.retryAfterSeconds ?? null,
       deliveredMessageIds: options.deliveredMessageIds ?? [],
       ...(options.causeDescription === undefined ? {} : { cause: options.causeDescription }),
-      ...(options.outcomeUnknown === undefined ? {} : { outcomeUnknown: options.outcomeUnknown })
+      ...(options.outcomeUnknown === undefined ? {} : { outcomeUnknown: options.outcomeUnknown }),
+      ...(options.timedOut === undefined ? {} : { timedOut: options.timedOut })
     }, { cause: options.cause, name: "TelegramApiError" })
     this.reason = options.reason ?? null
     this.errorCode = options.errorCode ?? null
@@ -366,6 +377,32 @@ export const make = (
   const apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "")
   const maxRateLimitRetries = config.maxRateLimitRetries ?? DEFAULT_MAX_RATE_LIMIT_RETRIES
   const maxRetryAfterSeconds = config.maxRetryAfterSeconds ?? DEFAULT_MAX_RETRY_AFTER_SECONDS
+  // A zero or infinite deadline is not a deadline: the first would fail every
+  // request and the second is the unbounded wait this option exists to close.
+  const configuredTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
+  const requestTimeout = Option.getOrUndefined(Duration.fromInput(configuredTimeout))
+  if (
+    requestTimeout === undefined || !Duration.isFinite(requestTimeout) || Duration.toMillis(requestTimeout) <= 0
+  ) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      "Telegram requestTimeout must be a finite, positive duration.",
+      { requestTimeout: String(configuredTimeout) }
+    )
+  }
+  const requestTimeoutMs = Duration.toMillis(requestTimeout)
+  const typingTimeout = Duration.millis(Math.min(requestTimeoutMs, TYPING_TIMEOUT_MS))
+
+  // `getUpdates` asks Telegram to hold the request open for `timeout` seconds,
+  // so its deadline is that poll plus the transport budget. Anything shorter
+  // would cancel every long poll the source asks for.
+  const deadlineFor = (method: string, params?: Record<string, unknown>): Duration.Duration => {
+    const held = params?.["timeout"]
+    if (method !== "getUpdates" || typeof held !== "number" || !Number.isFinite(held) || held <= 0) {
+      return requestTimeout
+    }
+    return Duration.millis(held * 1000 + requestTimeoutMs)
+  }
 
   // Retry only a 429, waiting the capped server-supplied retry_after.
   const rateLimitSchedule = Schedule.forever.pipe(
@@ -381,7 +418,8 @@ export const make = (
 
   const rawCall = (
     method: string,
-    request: { readonly body: BodyInit; readonly headers?: Record<string, string> | undefined }
+    request: { readonly body: BodyInit; readonly headers?: Record<string, string> | undefined },
+    deadline: Duration.Duration = requestTimeout
   ): Effect.Effect<unknown, SmithersError> =>
     Effect.suspend(() => {
       const controller = new AbortController()
@@ -489,17 +527,39 @@ export const make = (
           )
         }
         return payload["result"]
-      }).pipe(Effect.ensuring(Effect.promise(async () => {
-        controller.abort()
-        if (!consumed) await pendingResponse?.body?.cancel().catch(() => {})
-      })))
+      }).pipe(
+        Effect.ensuring(Effect.promise(async () => {
+          controller.abort()
+          if (!consumed) await pendingResponse?.body?.cancel().catch(() => {})
+        })),
+        // The deadline spans the whole exchange, headers and body alike. The
+        // timeout interrupts the attempt, whose finalizer aborts the
+        // controller and closes the socket. A write that ran out of time may
+        // still have been applied, so it says the outcome is unknown rather
+        // than being repeated.
+        Effect.timeoutOrElse({
+          duration: deadline,
+          orElse: () =>
+            Effect.fail(
+              new TelegramApiError(
+                `Telegram API request timed out after ${Duration.toMillis(deadline)} ms for method "${method}".`,
+                {
+                  method,
+                  reason: "delivery-failed",
+                  outcomeUnknown: isWrite,
+                  timedOut: true
+                }
+              )
+            )
+        })
+      )
     })
 
   const call: TelegramClient["call"] = (method, params) =>
     rawCall(method, {
       body: JSON.stringify(params ?? {}),
       headers: { "content-type": "application/json" }
-    }).pipe(Effect.retry(rateLimitSchedule))
+    }, deadlineFor(method, params)).pipe(Effect.retry(rateLimitSchedule))
 
   const sendChunk = (
     base: Record<string, unknown>,
@@ -541,6 +601,18 @@ export const make = (
           action: "typing",
           ...(options.messageThreadId == null ? {} : { message_thread_id: options.messageThreadId })
         }).pipe(
+          // Capped well under the request deadline: the reader is waiting on
+          // the message, and a stalled indicator must not hold it back.
+          Effect.timeoutOrElse({
+            duration: typingTimeout,
+            orElse: () =>
+              Effect.fail(
+                new TelegramApiError(
+                  `Telegram typing action timed out after ${Duration.toMillis(typingTimeout)} ms.`,
+                  { method: "sendChatAction", reason: "delivery-failed", timedOut: true }
+                )
+              )
+          }),
           Effect.catch((error) =>
             Effect.annotateLogs(
               Effect.logWarning("Telegram typing action failed"),

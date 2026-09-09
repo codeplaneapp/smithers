@@ -1,5 +1,5 @@
 import { ERROR_REFERENCE_URL } from "@smthrs/errors/ErrorCode"
-import { Cause, Effect, Exit } from "effect"
+import { Cause, type Duration, Effect, Exit } from "effect"
 import type { ServerResponse } from "node:http"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { fromIntegrationError } from "../src/core/ActionFailure.ts"
@@ -826,4 +826,81 @@ it("interrupts a pending Telegram response body read", async () => {
   expect(exit._tag).toBe("Failure")
   await vi.waitFor(() => expect(closed).toBe(true))
   expect(fixture.requests).toHaveLength(1)
+})
+
+// The rate-limit budget counts completed attempts, so a peer that answers with
+// headers and then trickles the body forever is outside it.
+describe("Telegram request deadline", () => {
+  const stalled = (onClose: () => void, answered: ReadonlyArray<string> = []) =>
+    startFixture((request, response) => {
+      if (answered.includes(method(request.url))) {
+        json(response, 200, ok({ message_id: 11 }))
+        return
+      }
+      response.writeHead(200, { "content-type": "application/json" })
+      response.write("{\"ok\":")
+      response.on("close", onClose)
+    })
+
+  const deadlined = (requestTimeout: Duration.Input = "200 millis") =>
+    make({ botToken: TOKEN, apiBaseUrl: (fixture as Fixture).origin, requestTimeout })
+
+  it("fails a stalled read within the deadline and closes the socket", async () => {
+    let closed!: () => void
+    const socketClosed = new Promise<void>((resolve) => {
+      closed = resolve
+    })
+    fixture = await stalled(closed)
+    const started = Date.now()
+    const failure = await Effect.runPromise(Effect.flip(deadlined().call("getMe")))
+    expect(Date.now() - started).toBeLessThan(4_000)
+    expect(isTelegramApiError(failure)).toBe(true)
+    expect(failure.message).toContain("timed out")
+    expect(failure.details).toMatchObject({ timedOut: true, outcomeUnknown: false })
+    await socketClosed
+  })
+
+  it("reports a timed-out send as an unknown outcome", async () => {
+    fixture = await stalled(() => {})
+    const failure = await Effect.runPromise(
+      Effect.flip(deadlined().call("sendMessage", { chat_id: 1, text: "hi" }))
+    )
+    expect(failure.details).toMatchObject({ timedOut: true, outcomeUnknown: true })
+    expect(isRetryable(toIntegrationError(failure))).toBe(false)
+  })
+
+  // A long poll asks Telegram to hold the request open, so the client's own
+  // deadline has to clear that or every poll would be cancelled mid-flight.
+  it("gives getUpdates its server poll timeout plus the transport budget", async () => {
+    fixture = await stalled(() => {})
+    const started = Date.now()
+    const failure = await Effect.runPromise(
+      Effect.flip(deadlined().call("getUpdates", { timeout: 1, allowed_updates: ["message"] }))
+    )
+    const elapsed = Date.now() - started
+    expect(elapsed).toBeGreaterThanOrEqual(1_000)
+    expect(elapsed).toBeLessThan(6_000)
+    expect(failure.details).toMatchObject({ timedOut: true })
+  })
+
+  it("refuses a deadline that is not finite and positive", () => {
+    for (const requestTimeout of [0, -1, "Infinity"] as const) {
+      expect(() => make({ botToken: TOKEN, requestTimeout }, {}), String(requestTimeout))
+        .toThrow(/finite, positive duration/)
+    }
+  })
+
+  // The indicator is cosmetic and is awaited before the first chunk, so it is
+  // capped far below the request deadline rather than sharing it.
+  it("caps the typing action well under the request deadline and still sends", async () => {
+    fixture = await stalled(() => {}, ["sendMessage"])
+    const started = Date.now()
+    const sent = await Effect.runPromise(
+      make({ botToken: TOKEN, apiBaseUrl: fixture.origin, requestTimeout: "60 seconds" })
+        .sendMessageSmart(7, "hello")
+    )
+    expect(sent.messageIds).toEqual([11])
+    expect(Date.now() - started).toBeLessThan(12_000)
+    expect(fixture.requests.map((request) => method(request.url))).toEqual(["sendChatAction", "sendMessage"])
+  }, 20_000)
 })

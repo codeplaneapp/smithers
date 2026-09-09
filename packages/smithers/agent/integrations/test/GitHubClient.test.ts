@@ -1,9 +1,9 @@
-import { Effect, Schema } from "effect"
+import { type Duration, Effect, Schema } from "effect"
 import { inspect } from "node:util"
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest"
 import { fromIntegrationError } from "../src/core/ActionFailure.ts"
 import { type IntegrationError, isIntegrationError } from "../src/core/IntegrationError.ts"
-import { DEFAULT_API_BASE_URL, resolve } from "../src/github/Config.ts"
+import { DEFAULT_API_BASE_URL, DEFAULT_REQUEST_TIMEOUT, resolve } from "../src/github/Config.ts"
 import { isRateLimitResponse, make, nextPageUrl, retryAfterMs } from "../src/github/GitHubClient.ts"
 import { type Fixture, json, startFixture } from "./Fixture.ts"
 
@@ -549,4 +549,63 @@ it("redacts credentials retained by a schema decoding error", async () => {
     make({ token: TOKEN }, {}).request("GET", "/user", undefined, { schema: Schema.Number })
   ))
   expectRedacted(failure, TOKEN)
+})
+
+// A peer that answers with headers and then trickles the body forever is the
+// case the retry budget cannot bound: the budget counts completed attempts,
+// and this attempt never completes.
+describe("GitHub request deadline", () => {
+  const stalled = (onClose: () => void) =>
+    startFixture((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.write("{\"id\":")
+      response.on("close", onClose)
+    })
+
+  const deadlined = (extra: { readonly requestTimeout?: Duration.Input } = {}) =>
+    make({
+      token: TOKEN,
+      apiBaseUrl: (fixture as Fixture).origin,
+      maxRetries: 0,
+      requestTimeout: "200 millis",
+      ...extra
+    })
+
+  it("fails a stalled read within the deadline and closes the socket", async () => {
+    let closed!: () => void
+    const socketClosed = new Promise<void>((resolve) => {
+      closed = resolve
+    })
+    fixture = await stalled(closed)
+    const started = Date.now()
+    const failure = await Effect.runPromise(Effect.flip(deadlined().request("GET", "/user")))
+    expect(Date.now() - started).toBeLessThan(4_000)
+    expect(failure.reason).toBe("delivery-failed")
+    expect(failure.summary).toContain("timed out")
+    // Nothing was applied by a read, so it stays repeatable.
+    expect(failure.details).toMatchObject({ timedOut: true, outcomeUnknown: false, retryable: true })
+    await socketClosed
+  })
+
+  it("reports a timed-out write as an unknown outcome", async () => {
+    fixture = await stalled(() => {})
+    const failure = await Effect.runPromise(
+      Effect.flip(deadlined().request("POST", "/repos/o/r/issues/1/comments", { body: "hi" }))
+    )
+    expect(failure.details).toMatchObject({ timedOut: true, outcomeUnknown: true, retryable: false })
+    expect(failure.summary).toContain("outcome unknown")
+  })
+
+  it("refuses a deadline that is not finite and positive", () => {
+    for (const requestTimeout of [0, -1, "Infinity"] as const) {
+      let thrown: unknown
+      try {
+        make({ token: TOKEN, requestTimeout }, {})
+      } catch (cause) {
+        thrown = cause
+      }
+      expect(isIntegrationError(thrown) && thrown.reason, String(requestTimeout)).toBe("invalid-config")
+    }
+    expect(resolve({}, {}).requestTimeout).toEqual(DEFAULT_REQUEST_TIMEOUT)
+  })
 })
