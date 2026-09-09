@@ -3,11 +3,19 @@
  *
  * @since 0.1.0
  */
+import { Flow } from "@smthrs/core"
 import * as Descriptor from "@smthrs/registry/Descriptor"
-import { Cause, Context, Effect, Option, Schema, SchemaTransformation } from "effect"
+import { Cause, Context, Effect, Option, SchemaTransformation } from "effect"
+import * as Schema from "effect/Schema"
 import { z } from "incur"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import * as FlowInvoker from "../src/FlowInvoker.ts"
+import * as Incur from "../src/Incur.ts"
 import * as SchemaBridge from "../src/internal/SchemaBridge.ts"
+import * as Route from "../src/Route.ts"
+import { makeRoute } from "./helpers.ts"
+
+vi.mock("effect/Schema", async (importOriginal) => ({ ...await importOriginal<typeof import("effect/Schema")>() }))
 
 const moduleRef = new Descriptor.SchemaRefModule({ path: "/absolute/flow.ts", field: "input" })
 
@@ -230,6 +238,238 @@ describe("SchemaBridge", () => {
     expect(await Effect.runPromise(dictionary.decode(dictionary.assemble([], { input: "{\"a\":\"b\"}" })))).toEqual({
       a: "b"
     })
+  })
+
+  it.each([
+    { name: "empty tuple", schema: Schema.Tuple([]), value: [] },
+    {
+      name: "tuple with rest",
+      schema: Schema.TupleWithRest(Schema.Tuple([Schema.String]), [Schema.Boolean]),
+      value: ["a", true, false]
+    },
+    {
+      name: "tuple with unknown rest",
+      schema: Schema.TupleWithRest(Schema.Tuple([Schema.String]), [Schema.Unknown]),
+      value: ["a", 1, false]
+    },
+    { name: "tuple", schema: Schema.Tuple([Schema.String, Schema.Finite]), value: ["a", 1] },
+    { name: "unknown array", schema: Schema.Array(Schema.Unknown), value: ["a", { value: true }] },
+    { name: "JSON array", schema: Schema.Array(Schema.Json), value: [null, [1]] },
+    { name: "any array", schema: Schema.Array(Schema.Any), value: [1, false] }
+  ])("projects $name without a synchronous defect", async ({ schema, value }) => {
+    const command = await Effect.runPromise(SchemaBridge.toCommandSchema(moduleRef, schema))
+    expect(await Effect.runPromise(command.decode(command.assemble([], { input: value })))).toEqual(value)
+    const advertised = z.toJSONSchema(command.options!, { unrepresentable: "any" })
+    expect(advertised.properties?.input).toMatchObject({ type: "array" })
+  })
+
+  it("advertises tuple positions and refuses missing, extra, or mistyped elements", async () => {
+    const command = await Effect.runPromise(
+      SchemaBridge.toCommandSchema(moduleRef, Schema.Tuple([Schema.String, Schema.Finite]))
+    )
+    expect(z.toJSONSchema(command.options!, { unrepresentable: "any" }).properties?.input).toEqual({
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "number" }],
+      items: false,
+      minItems: 2,
+      maxItems: 2
+    })
+    for (const input of [["a"], ["a", 1, true], [1, "a"]]) {
+      expect((await failure(command.decode(command.assemble([], { input })))).code).toBe("decode_failed")
+    }
+  })
+
+  it("retains nested properties, required keys, literals, and record values", async () => {
+    const nested = Schema.Struct({
+      mode: Schema.Literals(["fast", "slow"]),
+      count: Schema.Finite,
+      label: Schema.optionalKey(Schema.String)
+    }).annotate({ identifier: "Nested" })
+    const command = await Effect.runPromise(SchemaBridge.toCommandSchema(
+      moduleRef,
+      Schema.Struct({
+        nested,
+        rows: Schema.Array(nested),
+        values: Schema.Record(Schema.String, Schema.Boolean)
+      })
+    ))
+    const advertised = z.toJSONSchema(command.options!, { unrepresentable: "any" })
+    const expected = {
+      type: "object",
+      properties: {
+        mode: { type: "string", enum: ["fast", "slow"] },
+        count: { type: "number" },
+        label: { type: "string" }
+      },
+      required: ["mode", "count"],
+      additionalProperties: false
+    }
+    expect(advertised.properties?.nested).toEqual(expected)
+    expect(advertised.properties?.rows).toMatchObject({ type: "array", items: expected })
+    expect(advertised.properties?.values).toMatchObject({ type: "object", additionalProperties: { type: "boolean" } })
+    expect(
+      (await failure(command.decode(command.assemble([], {
+        nested: { mode: "fast" },
+        rows: [],
+        values: {}
+      })))).code
+    ).toBe("decode_failed")
+  })
+
+  it("turns document-generation errors into sanitized typed unsupported_schema failures", async () => {
+    const error = await failure(SchemaBridge.toCommandSchema(
+      moduleRef,
+      Schema.suspend((): typeof Schema.String => {
+        throw new Error("private schema cause")
+      })
+    ))
+    expect(error).toMatchObject({ code: "unsupported_schema", method: "SchemaBridge.toCommandSchema" })
+    expect(JSON.stringify(error)).not.toContain("private schema cause")
+  })
+
+  it.each([
+    { name: "non-string reference", schema: { $ref: 1 }, definitions: {} },
+    { name: "missing reference", schema: { $ref: "#/$defs/Missing" }, definitions: {} },
+    { name: "external reference", schema: { $ref: "https://example.com/schema" }, definitions: {} },
+    { name: "cyclic reference", schema: { $ref: "#/$defs/Loop" }, definitions: { Loop: { $ref: "#/$defs/Loop" } } }
+  ])("refuses a $name through the typed boundary", async ({ schema, definitions }) => {
+    const document = vi.spyOn(Schema, "toJsonSchemaDocument").mockReturnValue({
+      dialect: "draft-2020-12",
+      schema,
+      definitions
+    })
+    try {
+      expect((await failure(SchemaBridge.toCommandSchema(moduleRef, Schema.Unknown))).code).toBe("unsupported_schema")
+    } finally {
+      document.mockRestore()
+    }
+  })
+
+  it.each([
+    { name: "oneOf", node: { oneOf: [{ type: "string" }, { type: "boolean" }] }, value: false },
+    { name: "numeric enum", node: { enum: [1, 2] }, value: 2 },
+    { name: "mixed enum", node: { enum: ["true", false, 1] }, value: "true" },
+    { name: "string constant", node: { const: "true" }, value: "true" },
+    { name: "numeric constant", node: { const: 2 }, value: 2 },
+    { name: "type union", node: { type: ["string", "null"] }, value: null },
+    { name: "open object", node: { type: "object" }, value: { extra: 1 } },
+    { name: "optional tuple", node: { type: "array", prefixItems: [{ type: "string" }], maxItems: 1 }, value: [] },
+    {
+      name: "closed tuple",
+      node: { type: "array", prefixItems: [{ type: "string" }], minItems: 1, items: false },
+      value: ["a"]
+    }
+  ])("projects a $name document without changing its values", async ({ node, value }) => {
+    const document = vi.spyOn(Schema, "toJsonSchemaDocument").mockReturnValue({
+      dialect: "draft-2020-12",
+      schema: { type: "object", properties: { value: node }, required: ["value"] },
+      definitions: {}
+    })
+    try {
+      const command = await Effect.runPromise(SchemaBridge.toCommandSchema(moduleRef, Schema.Unknown))
+      expect(await Effect.runPromise(command.decode(command.assemble([], { value })))).toEqual({ value })
+      expect(z.toJSONSchema(command.options!, { unrepresentable: "any" }).properties?.value).not.toEqual({})
+    } finally {
+      document.mockRestore()
+    }
+  })
+
+  it.each([
+    { type: "unsupported" },
+    { allOf: [{ type: "string" }] },
+    { not: { type: "string" } },
+    { type: "object", properties: { child: { $ref: "#/$defs/Recursive" } } }
+  ])("refuses unsupported structural documents with a typed error", async (schema) => {
+    const document = vi.spyOn(Schema, "toJsonSchemaDocument").mockReturnValue({
+      dialect: "draft-2020-12",
+      schema,
+      definitions: { Recursive: schema }
+    })
+    try {
+      expect((await failure(SchemaBridge.toCommandSchema(moduleRef, Schema.Unknown))).code).toBe("unsupported_schema")
+    } finally {
+      document.mockRestore()
+    }
+  })
+
+  it("follows chained local references and escaped definition names", async () => {
+    const document = vi.spyOn(Schema, "toJsonSchemaDocument").mockReturnValue({
+      dialect: "draft-2020-12",
+      schema: { $ref: "#/$defs/First" },
+      definitions: { First: { $ref: "#/$defs/a~1b~0c" }, "a/b~c": { type: "string" } }
+    })
+    try {
+      const command = await Effect.runPromise(SchemaBridge.toCommandSchema(moduleRef, Schema.String))
+      expect(await Effect.runPromise(command.decode(command.assemble(["value"], {})))).toBe("value")
+    } finally {
+      document.mockRestore()
+    }
+  })
+
+  it("keeps help, OpenAPI, and MCP usable beside an unsupported schema", async () => {
+    const inputs: Record<string, Schema.Top> = {
+      bad: Schema.suspend((): typeof Schema.String => {
+        throw new Error("private schema cause")
+      }),
+      tuple: Schema.Tuple([Schema.String, Schema.Finite]),
+      healthy: Schema.Struct({
+        nested: Schema.Struct({ mode: Schema.Literals(["fast", "slow"]), count: Schema.Finite })
+      })
+    }
+    const load = vi.spyOn(Route, "load").mockImplementation((route) =>
+      Effect.succeed(Flow.make({
+        name: route.name,
+        input: inputs[route.name]!,
+        output: Schema.Void
+      }))
+    )
+    try {
+      const cli = await Effect.runPromise(
+        Incur.createCli("flows", Object.keys(inputs).map((name) => makeRoute(name))).pipe(
+          Effect.provide(FlowInvoker.layerNoop())
+        )
+      )
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await cli.fetch(new Request("http://localhost/openapi.json"))
+        expect(response.status).toBe(200)
+        const spec = await response.json()
+        expect(Object.keys(spec.paths).sort()).toEqual(["/bad", "/healthy", "/tuple", "/tuple/{input}"])
+        expect(spec.paths["/healthy"].post.requestBody.content["application/json"].schema.properties.nested)
+          .toMatchObject({
+            properties: { mode: { enum: ["fast", "slow"] }, count: { type: "number" } },
+            required: ["mode", "count"]
+          })
+      }
+      const writes: Array<string> = []
+      await cli.serve(["--help"], { stdout: (text) => writes.push(text), exit: () => {} })
+      expect(writes.join("")).toContain("healthy")
+      expect(writes.join("")).toContain("bad")
+      const rpc = async (method: string, params: unknown) => {
+        const response = await cli.fetch(
+          new Request("http://localhost/mcp", {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })
+          })
+        )
+        expect(response.status).toBe(200)
+        return response.json()
+      }
+      const listing = await rpc("tools/list", {})
+      expect(listing.result.tools.length).toBeGreaterThan(0)
+      const details = await rpc("tools/call", { name: "get_tool_details", arguments: { name: "healthy" } })
+      expect(JSON.parse(details.result.content[0].text).inputSchema.properties.nested).toMatchObject({
+        properties: { mode: { enum: ["fast", "slow"] }, count: { type: "number" } },
+        required: ["mode", "count"]
+      })
+      const badDetails = await rpc("tools/call", { name: "get_tool_details", arguments: { name: "bad" } })
+      expect(JSON.parse(badDetails.result.content[0].text).name).toBe("bad")
+      const failed = await cli.fetch(new Request("http://localhost/bad"))
+      expect(failed.status).toBeGreaterThanOrEqual(400)
+      expect((await failed.json()).error.code).toBe("unsupported_schema")
+    } finally {
+      load.mockRestore()
+    }
   })
 
   it("snapshots decoded inputs and encoded outputs as inert JSON", async () => {

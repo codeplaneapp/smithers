@@ -62,7 +62,11 @@ is normalized: unconsumed argument text stays exactly as the caller wrote it.
 Every mounted command publishes the JSON Schema of the flow's own Effect input
 schema, so `--help`, `--llms`, `--schema`, the OpenAPI document, and the MCP
 tool list describe the input the flow accepts. Unions and nullable fields keep
-every branch, and a literal set is advertised as its exact values, so
+every branch. Nested objects retain their properties, required keys, and
+additional-property schemas; arrays retain their element types, and tuples
+retain their positional types and rest elements. Arrays without an element
+schema advertise unconstrained items. A literal set is advertised as its exact
+values, so
 `Schema.Number`, which Effect renders as `number | "Infinity" | "-Infinity" |
 "NaN"`, is published with that shape rather than as an untyped value. Building
 the metadata surface loads every command module once and reuses the result;
@@ -84,7 +88,10 @@ JSON. Such a value is refused with `decode_failed` rather than invoked.
 
 A route that cannot be projected at all, such as one declaring an output
 locator as its input, stays advertised because it stays dispatchable. Calling
-it reports the `FsError` that stopped the projection.
+it reports the `FsError` that stopped the projection. Document-generation and
+projection failures report sanitized `unsupported_schema` errors for that
+route. Missing, external, and cyclic schema references are unsupported. Other
+routes remain available through help, OpenAPI, and MCP discovery.
 
 ## Command groups and the reserved `self` segment
 
@@ -169,7 +176,7 @@ to one route declaration.
 | `resource_limit`         | A bounded command, scan, trie, or value exceeded its limit.      |
 | `load_failed`            | The selected module could not be imported or exports no flow.    |
 | `unsupported_body`       | A non-module route was sent to the loader.                       |
-| `unsupported_schema`     | A schema locator cannot describe command input.                  |
+| `unsupported_schema`     | A schema locator or schema cannot describe command input.        |
 | `decode_failed`          | Input failed descriptor or Effect schema decoding.               |
 | `encode_failed`          | Output failed Effect schema encoding.                            |
 | `invocation_unavailable` | Execution is unavailable or failed unexpectedly.                 |
