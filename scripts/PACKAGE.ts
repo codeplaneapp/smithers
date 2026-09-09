@@ -462,8 +462,41 @@ const tierContracts = Smithers.NodeTest({
   deps: []
 })
 
+/** Typecheck the repository conformance suites and their target declarations. */
+const conformanceCheck = Smithers.Typecheck({
+  srcs: sources,
+  tsconfig: Smithers.file("tsconfig.conformance.json"),
+  cwd: "scripts",
+  buildMode: false,
+  incremental: false,
+  deps: []
+})
+
+/**
+ * Repository-wide CI, publication, coverage and containment policy.
+ *
+ * These checks read other packages and root configuration, so they run in the
+ * uncacheable scripts gate. The umbrella library owns only its own behavior.
+ * One runner imports the suites to keep filesystem scans in one process.
+ */
+const repositoryConformance = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/test/repositoryConformance.test.ts")]),
+  srcs: [
+    ...sources,
+    Smithers.file("//scripts/test/ci.test.ts"),
+    Smithers.file("//scripts/test/publication.test.ts"),
+    Smithers.file("//scripts/test/coverage.test.ts"),
+    Smithers.file("//scripts/test/spawnContainment.test.ts"),
+    Smithers.file("//scripts/test/workspaceInventory.test.ts"),
+    Smithers.file("//scripts/test/conformanceOwnership.test.ts")
+  ],
+  deps: [conformanceCheck]
+})
+
 export const Package = Smithers.Package({
   targets: {
+    conformanceCheck,
+    repositoryConformance,
     mutationGate,
     benchmarkGate,
     tierContracts,

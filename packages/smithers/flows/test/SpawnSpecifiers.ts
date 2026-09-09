@@ -13,7 +13,7 @@
  * This module is the reader. Two suites use it —
  * `packages/smithers/agent/std/test/ExecContainment.test.ts` over `packages/smithers/agent/std/src` alone,
  * where it fails fast during work on that package, and
- * `packages/smithers/flows/test/spawnContainment.test.ts` over every package — and
+ * `scripts/test/spawnContainment.test.ts` over every package — and
  * they share one implementation so the tree-wide gate can never be narrower
  * than the package-local one.
  *

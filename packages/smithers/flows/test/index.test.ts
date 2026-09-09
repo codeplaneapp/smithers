@@ -1,8 +1,9 @@
 import * as FlowPackage from "@smthrs/flow"
 import * as Effect from "effect/Effect"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
+import { readWorkspaceInventory } from "../../../../scripts/readWorkspaceInventory.ts"
 import * as Flows from "../src/index.ts"
 
 /**
@@ -14,15 +15,10 @@ import * as Flows from "../src/index.ts"
  * `src/index.ts` re-exports it. A missing or unknown group fails closed below
  * rather than silently excluding a new package.
  */
-// `packages/`, three levels up: this suite lives in `packages/smithers/flows/test`.
-const packagesDir = resolve(import.meta.dirname, "..", "..", "..")
+const umbrellaRoot = resolve(import.meta.dirname, "..")
+const inventory = readWorkspaceInventory(resolve(umbrellaRoot, "../../.."))
 const packageGroups = ["engine", "agent", "tooling"] as const
 type PackageGroup = typeof packageGroups[number]
-type PackageManifest = {
-  readonly smthrs?: {
-    readonly group?: unknown
-  }
-}
 const isPackageGroup = (value: unknown): value is PackageGroup => packageGroups.some((group) => group === value)
 const isFile = (path: string) => {
   try {
@@ -65,21 +61,8 @@ const namespaceName = (directory: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("")
 const isPlatformBundle = (name: string) => leaf(name).startsWith("platform-")
-// The universe descends, so a package that moves under its product keeps its
-// row here instead of quietly leaving the barrel unchecked.
-const packageDirectories = (parent = ""): ReadonlyArray<string> =>
-  readdirSync(join(packagesDir, parent), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
-    .flatMap((entry) => {
-      const directory = parent === "" ? entry.name : `${parent}/${entry.name}`
-      return isFile(join(packagesDir, directory, "package.json"))
-        ? [directory, ...packageDirectories(directory)]
-        : []
-    })
-const packageNames = packageDirectories()
-const packageManifests = packageNames.map((name) => {
-  const manifestPath = join(packagesDir, name, "package.json")
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as PackageManifest
+const packageNames = inventory.manifests.map(({ name }) => name)
+const packageManifests = inventory.manifests.map(({ name, path: manifestPath, manifest }) => {
   const group = manifest.smthrs?.group
   if (!isPackageGroup(group)) {
     throw new Error(
@@ -121,7 +104,12 @@ describe("barrel", () => {
   })
 
   it("ships no unsupported Cloudflare durable-runtime subpath", () => {
-    expect(isFile(join(packagesDir, "flows", "src", "CloudflareRuntime.ts"))).toBe(false)
+    expect(isFile(join(umbrellaRoot, "src", "CloudflareRuntime.ts"))).toBe(false)
+    const manifest = JSON.parse(readFileSync(join(umbrellaRoot, "package.json"), "utf8"))
+    for (const exports of [manifest.exports, manifest.publishConfig.exports]) {
+      expect(exports["./CloudflareRuntime"]).toBeUndefined()
+      expect(Object.entries(exports).filter(([key, target]) => key.includes("*") && target !== null)).toEqual([])
+    }
   })
 
   it("derives a non-trivial universe from the barrel manifest", () => {

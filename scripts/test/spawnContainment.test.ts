@@ -1,8 +1,10 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { join, relative, resolve, sep } from "node:path"
+import assert from "node:assert/strict"
+import { readFileSync, statSync } from "node:fs"
+import { join, relative, sep } from "node:path"
+import { describe, it } from "node:test"
 import * as ts from "typescript"
-import { describe, expect, it } from "vitest"
-import { collectSources, fileBindsSpawningModule } from "./SpawnSpecifiers.ts"
+import { collectSources, fileBindsSpawningModule } from "../../packages/smithers/flows/test/SpawnSpecifiers.ts"
+import { readWorkspaceInventory } from "../readWorkspaceInventory.ts"
 
 /**
  * Containment is a property of the `ChildProcessSpawner` SERVICE, not of any
@@ -42,9 +44,7 @@ import { collectSources, fileBindsSpawningModule } from "./SpawnSpecifiers.ts"
  * spelling it fails to recognize is a bypass that reads as compliance.
  */
 describe("child-process containment conformance", () => {
-  // `packages/`, three levels up: this suite lives in
-  // `packages/smithers/flows/test`.
-  const packagesDir = resolve(import.meta.dirname, "..", "..", "..")
+  const { packagesDir, manifests } = readWorkspaceInventory()
 
   /**
    * Native spawner implementations and explicit callers outside a contained
@@ -105,6 +105,11 @@ describe("child-process containment conformance", () => {
       + "composes the contained host, so everything IT spawns is inside the ledger and the "
       + "kill deadline (`packages/smithers/test/Detached.test.ts`)."
     ],
+    [
+      "smithers/build/build-cli/src/GitHooks.ts",
+      "Build CLI hook installation resolves the Git hooks directory outside a durable host. "
+      + "Its git rev-parse probe has a 10-second timeout and a 64-KiB output limit."
+    ],
     ...[
       "GitCommit.ts",
       "GoExec.ts",
@@ -139,21 +144,7 @@ describe("child-process containment conformance", () => {
    * can be written in rather than `.ts` alone.
    */
   const sources: Array<{ readonly id: string; readonly path: string }> = []
-  // The walk descends. Packages nest — a granular package lives inside the
-  // product package it belongs to — so a reading one directory deep would
-  // scan a handful of packages and pass over every module in the engine. An
-  // id is the module's path under `packages/`, which names one package's file
-  // whatever depth that package sits at.
-  const packageDirectories = (parent: string): ReadonlyArray<string> =>
-    readdirSync(join(packagesDir, parent === "" ? "." : parent), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
-      .flatMap((entry) => {
-        const directory = parent === "" ? entry.name : `${parent}/${entry.name}`
-        return existsSync(join(packagesDir, directory, "package.json"))
-          ? [directory, ...packageDirectories(directory)]
-          : []
-      })
-  for (const name of packageDirectories("")) {
+  for (const { name } of manifests) {
     const root = join(packagesDir, name, "src")
     if (!isDirectory(root)) continue
     for (const path of collectSources(root)) {
@@ -172,17 +163,17 @@ describe("child-process containment conformance", () => {
     // widened universe stated as a requirement, so narrowing the walk back to
     // `.ts` fails here rather than silently un-scanning the 86 `.tsx`
     // components and two `.js` entry points it used to skip.
-    expect(sources.length).toBeGreaterThan(900)
-    expect(sources.map(({ id }) => id)).toContain("smithers/agent/std/src/internal/Exec.ts")
-    expect(sources.some(({ id }) => id.endsWith(".tsx"))).toBe(true)
-    expect(sources.some(({ id }) => id.endsWith(".js"))).toBe(true)
+    assert.ok(sources.length > 900)
+    assert.ok((sources.map(({ id }) => id))!.includes("smithers/agent/std/src/internal/Exec.ts"))
+    assert.equal(sources.some(({ id }) => id.endsWith(".tsx")), true)
+    assert.equal(sources.some(({ id }) => id.endsWith(".js")), true)
   })
 
   it("starts child processes only through the host's spawner", () => {
     // An unlisted importer is a module whose children are outside the kill
     // deadline and outside the ledger. If it belongs there, add it above with
     // its ownership boundary and limitations; the reason is the review, not the entry.
-    expect(importers.filter((id) => !allowed.has(id))).toEqual([])
+    assert.deepEqual(importers.filter((id) => !allowed.has(id)), [])
   })
 
   // Parses every workspace source into a TypeScript AST, so the cost is
@@ -226,16 +217,17 @@ describe("child-process containment conformance", () => {
     // A value lookup belongs in SecretProxy's private vault reader at the
     // instant it constructs the outbound request. Indexing any environment
     // with `secret.env` recreates eager resolution in a job or planner.
-    expect(reads).toEqual([])
+    assert.deepEqual(reads, [])
   })
 
-  it.each([...allowed.keys()].map((id) => ({ id })))(
-    "$id still needs its containment exemption",
-    ({ id }) => {
+  for (const entry of [...allowed.keys()].map((id) => ({ id }))) {
+    it(`${entry.id} still needs its containment exemption`, () => {
+      const { id } = entry
+
       // Self-expiring, like the coverage-gate deferral next door: a file that
       // stopped spawning directly, or moved, must leave the list rather than
       // sit there pre-approving whatever takes its place at that path.
-      expect(importers).toContain(id)
-    }
-  )
+      assert.ok(importers.includes(id))
+    })
+  }
 })
