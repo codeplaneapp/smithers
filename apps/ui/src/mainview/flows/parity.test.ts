@@ -83,7 +83,6 @@ const PRESENTATION_ONLY = [
   // runCommand("chat.surfaces"). The wrappers stay listed only
   // because the registry call is one indirection away from the onClick.
   "openNamespace", // slash-menu tree: opening a namespace rewrites the draft to `/ns.` — a draft edit, never a command
-  "changeDraft(", // composer prefill (the issue card's Link to Linear…): a draft edit, never a command — same class as openNamespace
   "openMenu", // dispatches runCommand("chat.surfaces") — the /chat.surfaces command
   "closeMenu", // dispatches runCommand("chat.surfaces"); the entry itself runs its own command
   "onCopy(", // delegated: App.tsx binds it to runCommandArgs("chat.copy-message", ...)
@@ -203,7 +202,7 @@ describe("launch-law parity: every affordance is a command", () => {
       "../SurfaceChrome.tsx": 3,
       "../ToastStack.tsx": 1,
       /* The multi-parity domain cards: every handler routes through onRunCommand. */
-      /* 3 = 2 + the issue card's Link to Linear… composer prefill (lane sync). */
+      /* 3 = 2 + the issue card's Link to Linear…, the door onto issues.link-linear's form (lane sync). */
       "../cards/IssueCards.tsx": 3,
       "../cards/LandingCards.tsx": 4,
       "../cards/FileCards.tsx": 3,

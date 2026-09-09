@@ -386,6 +386,13 @@ describe("IssueCardBody — the Linear link (lane sync)", () => {
     }
   })
 
+  /** The same issue before anyone linked it: the DTO carries no mapping, so the card offers the act instead. */
+  const unlinkedCard = (): Extract<Card, { kind: "issue" }> => {
+    const { payload, ...rest } = issueCard("https://linear.app/acme/issue/ENG-482/flaky")
+    const { linear: _linear, ...unlinked } = payload
+    return { ...rest, payload: unlinked }
+  }
+
   test("an https linear.app URL off the DTO is the link; any other scheme or host renders the identifier as text", async () => {
     /* Review finding 10: the href was rendered straight off the DTO while the install URL was origin-vetted. */
     const controller = await controllerWithRepositories()
@@ -398,6 +405,23 @@ describe("IssueCardBody — the Linear link (lane sync)", () => {
       expect(host.querySelector("a")).toBeNull()
       expect(host.textContent).toContain("Linear ENG-482")
     }
+  })
+
+  test("Link to Linear is the button door of issues.link-linear: it rides onRunCommand and the body needs no controller", () => {
+    /*
+     * Review finding ui-cards-tabs/maintainability/6: the button carried
+     * data-flow="issues.link-linear" while calling controller.changeDraft, so
+     * the file's own header promise (every act rides onRunCommand) was false
+     * and the act never ran the flow it named. Rendered bare here: a reach
+     * back for the controller throws out of useController.
+     */
+    const commands: Array<{ name: string; args?: string }> = []
+    const { host } = render(<IssueCardBody card={unlinkedCard()} onRunCommand={(name, args) => commands.push({ name, args })} />)
+    const button = buttonNamed(host, "Link to Linear")
+    expect(button.getAttribute("data-flow")).toBe("issues.link-linear")
+    flushSync(() => button.click())
+    /* Only the number is carried: the identifier is the field THE FORM LAW renders, prefilled with what the button gave. */
+    expect(commands).toEqual([{ name: "issues.link-linear", args: "90" }])
   })
 })
 

@@ -451,9 +451,10 @@ Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
   5,000 · resets 12:40 · Retry after` — as does a status answer whose
   remaining budget drops under a fifth; a plain 429 invents no reset.
 - **`issue`** names the Linear link the DTO carries (`Linear ENG-482`,
-  linked) or offers Link to Linear… (a composer prefill for
-  `/issues.link-linear <n> `); the link act and its routes are plue#473, so
-  the flow refuses with the wording and nothing is called.
+  linked) or offers Link to Linear…, the button door of
+  `issues.link-linear` carrying the issue number, so THE FORM LAW renders
+  the form that asks for the identifier; the link act and its routes are
+  plue#473, so the flow refuses with the wording and nothing is called.
 
 The Connectors surface's rows read only what the app has read: GitHub's
 count is the App statuses its own act filed, Linear's per-team state is the

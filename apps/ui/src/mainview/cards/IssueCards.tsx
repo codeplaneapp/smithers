@@ -3,12 +3,12 @@
  * act binds a command through onRunCommand — the one delegated dispatch
  * CardView threads from App.tsx (parity.test.ts allowlists it). List rows open
  * the detail (issues.view); the detail carries the one state toggle
- * (issues.close / issues.reopen). Every interactive element carries
- * data-flow with its registered command name.
+ * (issues.close / issues.reopen) and, on an unlinked issue, the door onto
+ * issues.link-linear. Every interactive element carries data-flow with its
+ * registered command name.
  */
 import { Badge, Button, Markdown } from "@smthrs/ui"
 import { MessageSquare } from "lucide-react"
-import { useController } from "../ControllerContext"
 import type { Card } from "../state/AppState"
 import { trustedHttpsUrl } from "../state/seams/SeamContext"
 import type { CardFamily } from "./CardFamily"
@@ -79,7 +79,6 @@ export const IssueCardBody = ({
 }: { readonly card: Extract<Card, { kind: "issue" }> } & IssueCardActions) => {
   const { repo, number, title, state, author, issueBody, labels, comments, linear } = card.payload
   const toggleCommand = state === "open" ? "issues.close" : "issues.reopen"
-  const controller = useController()
   /* The DTO's URL is vetted like the install URL (review finding 10): https on linear.app, or no link at all. */
   const linearHref = linear != null ? trustedLinearUrl(linear.url) : null
   return (
@@ -94,7 +93,12 @@ export const IssueCardBody = ({
         {repo}
         {author !== null ? ` · opened by ${author}` : ""}
       </p>
-      {/* Lane sync (ADR 0005): the Linear link the DTO carries, or the act that would set it. */}
+      {/*
+        * Lane sync (ADR 0005): the Linear link the DTO carries, or the act
+        * that would set it. The act is a door ONTO the flow's form (THE FORM
+        * LAW, superseding the ADR's composer prefill): it carries the issue
+        * number it knows and issues.link-linear asks for the identifier.
+        */}
       {linear != null ?
         (
           <p className="world-card-path">
@@ -110,7 +114,7 @@ export const IssueCardBody = ({
               variant="ghost"
               size="sm"
               data-flow="issues.link-linear"
-              onClick={() => controller.changeDraft(`/issues.link-linear ${number} `)}
+              onClick={() => onRunCommand("issues.link-linear", String(number))}
             >
               Link to Linear…
             </Button>

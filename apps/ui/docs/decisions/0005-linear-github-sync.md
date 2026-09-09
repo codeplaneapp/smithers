@@ -78,9 +78,12 @@ word at all.
 ## Link an issue to Linear
 
 The `issue` card gains one line when a mapping exists, `Linear ENG-482`,
-and one action when none does, `Link to Linear…`, which focuses the
-composer with `/issues.link-linear 90 ` prefilled. The flow posts the
-mapping; the line appears; unlink is `/issues.unlink-linear 90` (confirm).
+and one action when none does, `Link to Linear…`. THE FORM LAW (will,
+2026-09-03, `AGENTS.md`) supersedes the composer prefill written here: the
+action is the button door of `issues.link-linear` carrying the issue
+number, and the flow renders the form that asks for the identifier. The
+flow posts the mapping; the line appears; unlink is
+`/issues.unlink-linear 90` (confirm).
 
 ## Connect the GitHub App
 
