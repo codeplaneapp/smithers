@@ -55,7 +55,20 @@ The package ships ESM, CommonJS, and TypeScript declarations.
 | a POSIX host                                       | Windows has none of the primitives below and is unsupported                                               |
 | CPython 3 at `/usr/bin/python3`                    | `AtomicFileSystem` runs every filesystem syscall through it                                               |
 | that interpreter's `os` module supporting `dir_fd` | with `O_NOFOLLOW` and `O_DIRECTORY`, for `open`, `mkdir`, `readlink`, `rename`, `rmdir`, `stat`, `unlink` |
-| `jj` on `PATH`                                     | only for `Jj` operations; every other tag works without it                                                |
+| `jj` 0.39.0 or newer on `PATH`                     | required at construction by every complete `NodeHost` layer                                               |
+
+### jj is checked at construction
+
+Every complete host bundle, `NodeHost.layer`, `NodeHost.layerAt`,
+`NodeHost.layerContained`, and `NodeHost.layerContainedAt`, builds a
+version-checked `Jj` layer before providing its services. This requires jj
+0.39.0 or newer even when the program requests only the filesystem or process
+spawner. Check the installed version with `jj --version`.
+
+If the executable is missing, bundle construction fails with a typed `JjError`
+whose code is `not_installed`. An older version fails with
+`unsupported_version`. The version probe runs outside the host process ledger;
+repository commands use the selected process runner.
 
 ### The interpreter fails late, on purpose
 
@@ -78,8 +91,27 @@ const filesystem = AtomicFileSystem.layerWith({ executable: "/usr/local/bin/pyth
 For the rest of what `layerWith` configures, see
 [Configure the filesystem helper](/guides/configure-the-filesystem-helper/).
 
-Without `jj` on `PATH`, `Jj` operations fail with a typed `JjError` whose code
-is `not_installed`. Nothing else in the bundle is affected.
+## Individual services without jj
+
+Applications that do not need `Jj` can provide individual service layers.
+This composition supplies the bundle's filesystem, path, process spawner, and
+HTTP client without constructing a `Jj` layer:
+
+```ts
+import { NodeHost } from "@smthrs/platform-node"
+import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+
+const platform = Layer.mergeAll(NodeHost.AtomicFileSystem.layer, Path.layer)
+const spawner = NodeHost.NodeChildProcessSpawner.layer.pipe(Layer.provide(platform))
+const hostWithoutJj = Layer.mergeAll(platform, spawner, NodeHost.NodeHttpClient.layerUndici)
+```
+
+Provide `hostWithoutJj` to a program that needs these services, or provide only
+the individual layer it needs. The spawner requires both filesystem and path
+services, supplied by `platform` above. The filesystem still requires the
+CPython interpreter described above. This composition does not provide `Jj`
+and cannot satisfy consumers that require the complete five-tag host.
 
 ## Import forms
 

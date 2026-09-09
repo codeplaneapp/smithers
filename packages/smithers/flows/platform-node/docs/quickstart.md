@@ -14,6 +14,10 @@ which layer is responsible for each.
 
 - Node.js 22.19.0 or later, on a POSIX host.
 - CPython 3 at `/usr/bin/python3`. Check with `/usr/bin/python3 --version`.
+- `jj` 0.39.0 or newer on `PATH`. Check with `jj --version`. Every complete
+  `NodeHost` layer checks jj at construction, including this quickstart's
+  filesystem and process examples. For applications that do not need jj, see
+  [Individual services without jj](./installation.md#individual-services-without-jj).
 - `@smthrs/platform-node`, [`@smthrs/kernel`](/api/kernel), and their `effect`
   peers resolvable from the file you are about to write.
   [Installation](./installation.md) has the workspace form.
