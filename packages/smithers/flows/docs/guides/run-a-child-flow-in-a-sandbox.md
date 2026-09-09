@@ -108,9 +108,9 @@ const SandboxedGreeting = Flow.make("app/SandboxedGreeting", {
 })
 
 const stack = Layer.mergeAll(
-  SandboxedFlow.toLayer(RunGreet, Greet, ({ executionId }) => ({
+  SandboxedFlow.toLayer(RunGreet, Greet, ({ executionId, callId }) => ({
     provider,
-    session: `greet:${executionId}`,
+    session: `greet:${executionId}:${callId}`,
     entry: new URL("./child.ts", import.meta.url)
   })),
   Interpreter.layer(SandboxedGreeting)
@@ -118,7 +118,8 @@ const stack = Layer.mergeAll(
 ```
 
 The action's tag is `app/Greet/sandboxed` unless you pass
-`{ name: "..." }` as `action`'s second argument. Its success schema is
+`{ name: "..." }` as `action`'s second argument. Both forms preserve the literal
+name in the type, so each declaration requires its own implementation. Its success schema is
 `resultSchema(Greeting)`, which is `{ output, diff }`, and its error schema is
 `SandboxedFlowError`.
 
@@ -126,14 +127,15 @@ Compose the returned layer beside `Interpreter.layer(parent)` over one
 `Action.layerImplementations`, exactly as you would any other action
 implementation.
 
-## Derive the session key from the execution
+## Derive the session key from the execution and call
 
 `toLayer`'s third argument is either the placement itself or a function of the
-call's context, which carries the decoded payload and the parent's
-`executionId`. Deriving the key from `executionId`, as above, is the recommended
-shape: the claim is exclusive per execution and stable across a resume, because
-a crash that left a machine behind is reattached by the next execution with the
-same key.
+call's context: the decoded payload, the parent's `executionId`, and `callId`.
+Derive the session key from both `executionId` and `callId`, as above. The engine
+assigns a distinct `callId` to each call, including parallel calls with identical
+payloads, and preserves it across retries and resume. A crash that left a machine
+behind is reattached by the resumed call with the same key. The parent id or
+payload alone cannot distinguish repeated calls.
 
 Because the whole sandboxed execution is one durable action, a second run of the
 parent over the same database answers from the journal and never asks the

@@ -17,10 +17,13 @@ import * as Node from "@smthrs/plan/Node"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, RemoteChildProcessSpawner, type Sandbox } from "@smthrs/sandbox"
 import * as Crypto from "effect/Crypto"
+import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -28,7 +31,7 @@ import { spawnSync } from "node:child_process"
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Action, Engine, Flow, Interpreter } from "../src/index.ts"
+import { Action, Engine, Flow, FlowRuntime, Interpreter, RetryPolicy } from "../src/index.ts"
 import * as Guest from "../src/internal/SandboxedFlowGuest.ts"
 import * as SandboxedFlow from "../src/SandboxedFlow.ts"
 import * as childEntry from "./fixtures/sandboxed-child.ts"
@@ -661,7 +664,7 @@ describe("SandboxedFlow.action on an engine", () => {
     body: (payload) => RunSum.call(payload)
   })
 
-  const engine = <R>(implementation: Layer.Layer<Action.Requirement<string>, never, R>) =>
+  const engine = <R>(implementation: Layer.Layer<Action.Requirement<typeof RunSum.name>, never, R>) =>
     Layer.mergeAll(implementation, Interpreter.layer(Parent)).pipe(
       Layer.provideMerge(Action.layerImplementations),
       Layer.provideMerge(Engine.FlowEngine.layerMemory),
@@ -674,6 +677,196 @@ describe("SandboxedFlow.action on an engine", () => {
     expect(RunSum.payloadSchema).toBe(Sum.payloadSchema)
     expect(RunSum.errorSchema).toBe(SandboxedFlow.SandboxedFlowError)
   })
+
+  it("keeps distinct implementation requirements for default and custom names", () => {
+    const Other = SandboxedFlow.action(Sum, { name: "custom/OtherSum" })
+    const Both = Flow.make("flows/SandboxedFlow/test/Both", {
+      payload: { n: Schema.Number },
+      success: Schema.Struct({ first: RunSum.successSchema, second: Other.successSchema }),
+      error: SandboxedFlow.SandboxedFlowError,
+      body: (payload) => Node.all({ first: RunSum.call(payload), second: Other.call(payload) })
+    })
+    const first = RunSum.toLayer(() => Effect.succeed({ output: 1, diff: [] }))
+    const second = Other.toLayer(() => Effect.succeed({ output: 2, diff: [] }))
+    const partial = Layer.mergeAll(first, Interpreter.layer(Both)).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(Engine.FlowEngine.layerMemory),
+      Layer.provideMerge(NodeCrypto.layer)
+    )
+    const complete = Layer.mergeAll(first, second, Interpreter.layer(Both)).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(Engine.FlowEngine.layerMemory),
+      Layer.provideMerge(NodeCrypto.layer)
+    )
+    const requiresNoServices = <A, E>(_effect: Effect.Effect<A, E>) => {}
+    // @ts-expect-error implementing RunSum must not discharge Other's requirement
+    requiresNoServices(Both.execute({ n: 1 }).pipe(Effect.provide(partial)))
+    requiresNoServices(Both.execute({ n: 1 }).pipe(Effect.provide(complete)))
+    const defaultName: "flows/SandboxedFlow/fixtures/Sum/sandboxed" = RunSum.name
+    const customName: "custom/OtherSum" = Other.name
+    expect(defaultName).toBe("flows/SandboxedFlow/fixtures/Sum/sandboxed")
+    expect(customName).toBe("custom/OtherSum")
+  })
+
+  it.live(
+    "gives identical parallel calls distinct session keys without overlapping a key",
+    () =>
+      Effect.gen(function*() {
+        const directory = yield* provider
+        const bothAcquired = yield* Deferred.make<void>()
+        const keys: Array<string> = []
+        const active = new Map<string, number>()
+        let peakPerKey = 0
+        let peakTotal = 0
+        const exclusive: Sandbox.Provider = {
+          acquire: (key) =>
+            Effect.gen(function*() {
+              yield* Effect.acquireRelease(
+                Effect.sync(() => {
+                  keys.push(key)
+                  active.set(key, (active.get(key) ?? 0) + 1)
+                  peakPerKey = Math.max(peakPerKey, active.get(key)!)
+                  peakTotal = Math.max(peakTotal, [...active.values()].reduce((a, b) => a + b, 0))
+                }),
+                () =>
+                  Effect.sync(() => {
+                    active.set(key, active.get(key)! - 1)
+                  })
+              )
+              if (keys.length === 2) yield* Deferred.succeed(bothAcquired, undefined)
+              yield* Deferred.await(bothAcquired)
+              if (peakPerKey > 1) {
+                return yield* Effect.fail(new ProviderError({ code: "unknown", message: "overlapping session key" }))
+              }
+              return yield* directory.acquire(key)
+            })
+        }
+        const Parallel = Flow.make("flows/SandboxedFlow/test/Parallel", {
+          payload: { n: Schema.Number },
+          success: Schema.Struct({ first: RunSum.successSchema, second: RunSum.successSchema }),
+          error: SandboxedFlow.SandboxedFlowError,
+          body: (payload) => Node.all({ first: RunSum.call(payload), second: RunSum.call(payload) })
+        })
+        const implementation = SandboxedFlow.toLayer(RunSum, Sum, ({ executionId, callId }) => ({
+          provider: exclusive,
+          session: `child:${executionId}:${callId}`,
+          entry
+        }))
+        const layers = Layer.mergeAll(implementation, Interpreter.layer(Parallel)).pipe(
+          Layer.provideMerge(Action.layerImplementations),
+          Layer.provideMerge(Engine.FlowEngine.layerMemory),
+          Layer.provideMerge(NodeCrypto.layer)
+        )
+        const exit = yield* Parallel.execute({ n: 5 }, { executionId: "parent-parallel" }).pipe(
+          Effect.provide(layers),
+          Effect.exit
+        )
+        expect(keys).toHaveLength(2)
+        expect(new Set(keys).size).toBe(2)
+        expect(keys.every((key) => key.startsWith("child:parent-parallel:"))).toBe(true)
+        expect(peakTotal).toBe(2)
+        expect(peakPerKey).toBe(1)
+        expect([...active.values()]).toEqual([0, 0])
+        expect(Exit.isSuccess(exit) && exit.value).toEqual({
+          first: { output: 16, diff: [] },
+          second: { output: 16, diff: [] }
+        })
+      }),
+    60_000
+  )
+
+  for (const recovery of ["retry", "resume"] as const) {
+    it.live(`preserves the call identity across ${recovery}`, () =>
+      Effect.gen(function*() {
+        const directory = yield* provider
+        const keys: Array<string> = []
+        const callIds: Array<string> = []
+        const Recover = Action.make(`flows/SandboxedFlow/test/${recovery}/action`, {
+          payload: Sum.payloadSchema,
+          success: RunSum.successSchema,
+          error: SandboxedFlow.SandboxedFlowError,
+          retryPolicy: RetryPolicy.make({ initialMs: 1, factor: 1, maxMs: 1, maxAttempts: 2 })
+        })
+        const Recovering = Flow.make(`flows/SandboxedFlow/test/${recovery}`, {
+          payload: Sum.payloadSchema,
+          success: RunSum.successSchema,
+          error: SandboxedFlow.SandboxedFlowError,
+          body: (payload) => Recover.call(payload)
+        })
+        const interrupted: Sandbox.Provider = {
+          acquire: (key) =>
+            Effect.gen(function*() {
+              keys.push(key)
+              if (keys.length === 1) {
+                if (recovery === "retry") {
+                  return yield* Effect.fail(new ProviderError({ code: "unknown", message: "retry acquisition" }))
+                }
+                const instance = yield* Effect.serviceOption(FlowRuntime.FlowInstance)
+                return yield* Flow.suspend(Option.getOrThrow(instance))
+              }
+              return yield* directory.acquire(key)
+            })
+        }
+        const implementation = SandboxedFlow.toLayer(Recover, Sum, ({ executionId, callId }) => {
+          callIds.push(callId)
+          return { provider: interrupted, session: `child:${executionId}:${callId}`, entry }
+        })
+        const layers = Layer.mergeAll(implementation, Interpreter.layer(Recovering)).pipe(
+          Layer.provideMerge(Action.layerImplementations),
+          Layer.provideMerge(Engine.FlowEngine.layerMemory),
+          Layer.provideMerge(NodeCrypto.layer)
+        )
+        const executionId = `parent-${recovery}`
+        const result = yield* Effect.gen(function*() {
+          if (recovery === "resume") {
+            yield* Recovering.execute({ n: 5 }, { executionId, discard: true })
+            let parked = yield* Recovering.poll(executionId)
+            for (let i = 0; i < 1000 && Option.isNone(parked); i++) {
+              yield* Effect.sleep("1 milli")
+              parked = yield* Recovering.poll(executionId)
+            }
+            expect(Option.isSome(parked) && parked.value._tag).toBe("Suspended")
+            yield* Recovering.resume(executionId)
+          }
+          return yield* Recovering.execute({ n: 5 }, { executionId })
+        }).pipe(Effect.provide(layers))
+        expect(result).toEqual({ output: 16, diff: [] })
+        expect(callIds).toHaveLength(2)
+        expect(callIds[0]).toEqual(expect.any(String))
+        expect(callIds[0]!.length).toBeGreaterThan(0)
+        expect(callIds[1]).toBe(callIds[0])
+        expect(keys).toEqual([`child:${executionId}:${callIds[0]}`, `child:${executionId}:${callIds[0]}`])
+      }), 60_000)
+  }
+
+  it.live("refuses a runtime without a stable invocation key before acquiring a session", () =>
+    Effect.gen(function*() {
+      const directory = yield* provider
+      const keys: Array<string> = []
+      const instance = Engine.FlowEngine.makeInstance(Parent, "parent-unidentified")
+      const exit = yield* Effect.gen(function*() {
+        const runtime = yield* FlowRuntime.FlowRuntime
+        const unidentified = FlowRuntime.FlowRuntime.of({
+          ...runtime,
+          actionExecute: (action) =>
+            Effect.map(Effect.exit(action.executeEncoded), (exit) => new Flow.Complete({ exit }))
+        })
+        return yield* Interpreter.interpret(RunSum.call({ n: 1 })).pipe(
+          Effect.provideService(FlowRuntime.FlowRuntime, unidentified),
+          Effect.provideService(FlowRuntime.FlowInstance, instance),
+          Effect.exit
+        )
+      }).pipe(Effect.provide(engine(SandboxedFlow.toLayer(RunSum, Sum, {
+        provider: recording(directory, keys),
+        session: "unidentified",
+        entry
+      }))))
+      expect(Exit.isFailure(exit) && exit.cause.reasons[0]).toMatchObject({
+        _tag: "Die",
+        defect: expect.stringContaining("Action.CurrentInvocationKey")
+      })
+      expect(keys).toEqual([])
+    }))
 
   it.live("runs the child as one action of the parent's plan", () =>
     Effect.gen(function*() {

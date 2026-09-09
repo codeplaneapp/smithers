@@ -333,7 +333,7 @@ It is Node-only: it bundles with esbuild and it starts a guest runtime.
 const run = Effect.gen(function*() {
   const result = yield* SandboxedFlow.execute(Child, { n: 31 }, {
     provider,
-    session: `child:${executionId}`,
+    session: "child-1",
     entry: new URL("./child.ts", import.meta.url),
     runtime: "node",
     collectDiff: true
@@ -504,16 +504,22 @@ type SandboxedAction<Tag, Payload, Success> = Action.Declared<
   typeof SandboxedFlowError
 >
 
-const action: <Tag, Payload, Success, Error, Requires>(
+function action<Tag, Payload, Success, Error, Requires, const Name extends string>(
   flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
-  options?: { readonly name?: string | undefined }
-) => SandboxedAction<string, Payload, Success>
+  options: { readonly name: Name }
+): SandboxedAction<Name, Payload, Success>
+function action<Tag, Payload, Success, Error, Requires, const Name extends string = never>(
+  flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
+  options?: { readonly name?: Name | undefined }
+): SandboxedAction<Name | `${Tag}/sandboxed`, Payload, Success>
 ```
 
 Declares the durable action a parent flow calls to run `flow` in a sandbox. Its
 payload schema is the flow's, its success schema is `resultSchema` over the
 flow's, and its error schema is `SandboxedFlowError`. The tag is
-`<flow tag>/sandboxed` unless `options.name` says otherwise.
+`<flow tag>/sandboxed` unless `options.name` says otherwise. Both forms preserve
+the literal name, so providing one declaration's implementation cannot satisfy
+a differently named declaration. An optional name retains both possible tags.
 
 From the parent's point of view the whole sandboxed execution is one action: the
 engine journals one attempt, applies one retry policy, and replays one recorded
@@ -525,12 +531,16 @@ result.
 interface ExecuteContext<Payload> {
   readonly payload: Payload
   readonly executionId: string
+  readonly callId: string
 }
 ```
 
-What `toLayer` hands an options function: the decoded payload of the call and
-the parent execution's id, which is the natural material for a session key that
-is exclusive per execution and stable across a resume.
+What `toLayer` hands an options function: the decoded payload, the parent
+execution's id, and the engine's invocation key as `callId`. Combine `executionId`
+and `callId` for a session key exclusive to this call, including parallel calls
+with identical payloads. `callId` is preserved across retries and resume.
+A runtime that supplies no `Action.CurrentInvocationKey` is refused as a defect
+before acquiring a session.
 
 ### `toLayer`
 
@@ -546,9 +556,9 @@ Implements an `action` declaration with `execute`. `options` is either the
 placement itself or a function of the call's `ExecuteContext`:
 
 ```ts
-SandboxedFlow.toLayer(RunChild, Child, ({ executionId }) => ({
+SandboxedFlow.toLayer(RunChild, Child, ({ executionId, callId }) => ({
   provider,
-  session: `child:${executionId}`,
+  session: `child:${executionId}:${callId}`,
   entry: new URL("./child.ts", import.meta.url)
 }))
 ```

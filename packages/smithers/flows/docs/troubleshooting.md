@@ -161,13 +161,15 @@ executions appear to share a workspace.
 **Cause.** A session key is an exclusive claim. Two live executions with one key
 share a machine, and the first to finish tears it down under the other.
 
-**Fix.** Derive the key from the parent execution id, which is unique per
-execution and stable across a resume:
+**Fix.** Derive the key from both the parent `executionId` and the action's
+`callId`. The engine preserves `callId` across retries and resume and assigns
+distinct identities to parallel calls, even with identical payloads. The parent
+id alone gives every call in one execution the same machine:
 
 ```ts
-SandboxedFlow.toLayer(RunChild, Child, ({ executionId }) => ({
+SandboxedFlow.toLayer(RunChild, Child, ({ executionId, callId }) => ({
   provider,
-  session: `child:${executionId}`,
+  session: `child:${executionId}:${callId}`,
   entry
 }))
 ```

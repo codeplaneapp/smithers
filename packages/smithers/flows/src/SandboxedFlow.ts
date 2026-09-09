@@ -645,7 +645,29 @@ export type SandboxedAction<
  * @category constructors
  * @since 1.0.0
  */
-export const action = <
+export function action<
+  Tag extends string,
+  Payload extends Flow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  Requires,
+  const Name extends string
+>(
+  flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
+  options: { readonly name: Name }
+): SandboxedAction<Name, Payload, Success>
+export function action<
+  Tag extends string,
+  Payload extends Flow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  Requires,
+  const Name extends string = never
+>(
+  flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
+  options?: { readonly name?: Name | undefined }
+): SandboxedAction<Name | `${Tag}/sandboxed`, Payload, Success>
+export function action<
   Tag extends string,
   Payload extends Flow.AnyStructSchema,
   Success extends Schema.Top,
@@ -654,22 +676,24 @@ export const action = <
 >(
   flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
   options: { readonly name?: string | undefined } = {}
-): SandboxedAction<string, Payload, Success> =>
+): SandboxedAction<string, Payload, Success> {
   // `Action.make` answers with `Payload extends Fields ? Struct<Payload> :
   // Payload`, which is `Payload` itself for a schema rather than a field
   // record. The compiler defers that conditional while the type parameter is
   // unresolved, so the identity is asserted here, as `Action.make` itself
   // does for the flow form of a declaration.
-  Action.make(options.name ?? `${flow._tag}/sandboxed`, {
+  return Action.make(options.name ?? `${flow._tag}/sandboxed`, {
     payload: flow.payloadSchema,
     success: resultSchema(flow.successSchema),
     error: SandboxedFlowError
   }) as unknown as SandboxedAction<string, Payload, Success>
+}
 
 /**
  * What {@link toLayer} hands an options function: the decoded payload of the
- * call and the parent execution's id, which is the natural material for a
- * session key that is exclusive per execution and stable across a resume.
+ * call, the parent execution's id, and the engine's stable invocation key.
+ * Combine `executionId` and `callId` for a session key exclusive to this call,
+ * including identical parallel calls, and stable across retries and resume.
  *
  * @category models
  * @since 1.0.0
@@ -677,18 +701,20 @@ export const action = <
 export interface ExecuteContext<Payload> {
   readonly payload: Payload
   readonly executionId: string
+  /** The engine's invocation key for this call, unchanged by retry or resume. */
+  readonly callId: string
 }
 
 /**
  * Implements a {@link action} declaration with {@link execute}.
  *
  * `options` is either the placement itself or a function of the call's
- * {@link ExecuteContext}, for a session key derived from the parent execution:
+ * {@link ExecuteContext}, for a session key derived from the parent execution and call:
  *
  * ```ts
- * SandboxedFlow.toLayer(RunChild, Child, ({ executionId }) => ({
+ * SandboxedFlow.toLayer(RunChild, Child, ({ executionId, callId }) => ({
  *   provider,
- *   session: `child:${executionId}`,
+ *   session: `child:${executionId}:${callId}`,
  *   entry: new URL("./child.ts", import.meta.url)
  * }))
  * ```
@@ -722,8 +748,15 @@ export const toLayer = <
   declared.toLayer((payload) =>
     Effect.gen(function*() {
       const instance = yield* FlowRuntime.FlowInstance
+      const callId = yield* Action.CurrentInvocationKey
+      if (callId === undefined) {
+        return yield* Effect.die(
+          "SandboxedFlow.toLayer requires a runtime that supplies Action.CurrentInvocationKey " +
+            "to identify each sandboxed action call."
+        )
+      }
       const placement = typeof options === "function"
-        ? options({ payload, executionId: instance.executionId })
+        ? options({ payload, executionId: instance.executionId, callId })
         : options
       return yield* execute(flow, payload, placement)
     })
