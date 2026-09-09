@@ -49,6 +49,16 @@ const unpadded = (text: string): string =>
     )
     .join("\n")
 
+describe("scanner installation guides", () => {
+  it.each(["embed-the-scanners", "scan-a-project"])("%s keeps the native compiler installed", (guide) => {
+    const page = read(`../docs/guides/${guide}.md`)
+    const commands = [...page.matchAll(/^pnpm add -D @smthrs\/migrate@next.*$/gm)].map((match) => match[0])
+
+    expect(commands).toEqual(["pnpm add -D @smthrs/migrate@next"])
+    expect(page).toContain("(../installation.md)")
+  })
+})
+
 describe("reference page", () => {
   it("documents every module the package exports", () => {
     expect(exportedModules.length).toBeGreaterThan(0)

@@ -13,13 +13,16 @@ facade, or a report rendered your way.
 Nothing here writes to the project, installs anything, evaluates project code,
 or opens a database except read only.
 
-## Install the scan-only half
+## Install the scanner API
 
 ```bash
-pnpm add -D @smthrs/migrate@next --no-optional
+pnpm add -D @smthrs/migrate@next
 ```
 
-`--no-optional` leaves out the `@smthrs/*` packages that only `apply` needs.
+Keep optional dependencies enabled: TypeScript 7 supplies the native compiler
+the scanners need through a platform-specific optional package. See
+[Installation](../installation.md) for the dependency requirements.
+
 The scanners import `effect`, `@effect/platform-node`, `typescript`, and Node
 built-ins, and nothing else.
 

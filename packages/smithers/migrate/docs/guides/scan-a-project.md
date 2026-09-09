@@ -1,6 +1,6 @@
 ---
 title: "Scan a project without changing it"
-description: "Read a 0.x project and get the full inventory, mapping decisions, and unit plan, with no install of the 1.0 runtime and no write to the tree."
+description: "Read a 0.x project and get the full inventory, mapping decisions, and unit plan, without running the migration."
 sidebar:
   order: 1
 ---
@@ -63,15 +63,19 @@ The read-only guarantee is what makes `scan` and `plan` safe on a project
 nobody has decided about yet, and it is also why they need no provider
 credentials.
 
-## Scan without installing the runtime
+## Install the scanner API
 
 The scanner modules import only `effect`, `@effect/platform-node`,
-`typescript`, and Node built-ins. The `@smthrs/*` packages that `apply` needs
-are optional dependencies, so a scan-only install can leave them out:
+`typescript`, and Node built-ins. Install the package with optional dependencies
+enabled so TypeScript 7's platform-specific native compiler is available:
 
 ```bash
-pnpm add -D @smthrs/migrate@next --no-optional
+pnpm add -D @smthrs/migrate@next
 ```
+
+The optional `@smthrs/*` packages are installed too, but importing the scanners
+does not load the migration runtime. See [Installation](../installation.md)
+for the dependency requirements.
 
 ## When a scan could not read everything
 
