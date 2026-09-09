@@ -49,6 +49,31 @@ const rows = (journal: Journal.Service) =>
 const record = (entry: JournalEvent.Entry) => entry.payload as Record<string, unknown>
 
 describe("private engine journal projection", () => {
+  it("does not invent missing evidence from native sequence reservations abandoned on rollback", () =>
+    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const f = yield* setup
+      yield* emit(f.engineJournal, "native-root", { committed: "before" }, "before")
+      const rollback = yield* Effect.result(f.engineJournal.transact(Effect.gen(function*() {
+        yield* emit(f.engineJournal, "native-root", { uncommitted: true }, "rolled-back")
+        return yield* Effect.fail("abandon native attempt")
+      })))
+      expect(rollback._tag).toBe("Failure")
+      yield* emit(f.engineJournal, "native-root", { committed: "after" }, "after")
+      const native = yield* f.engineJournal.entries({ runId: "native-root" as JournalEvent.RunId, limit: 10 })
+      expect(native.entries.map((entry) => entry.seq)).toEqual([0, 2])
+      const projector = yield* Projection.make(f.options)
+      yield* projector.catchUp
+      const projected = yield* rows(f.controlJournal)
+      expect(projected.map((entry) => entry.eventType)).toEqual([Projection.eventKind, Projection.eventKind])
+      expect(projected.map(record)).toMatchObject([
+        { sequence: 0, payload: { committed: "before" } },
+        { sequence: 2, payload: { committed: "after" } }
+      ])
+      const restarted = yield* Projection.make(f.options)
+      yield* restarted.catchUp
+      expect(yield* rows(f.controlJournal)).toEqual(projected)
+    }))))
+
   it("discards a page crossed by a rewind without acquiring the native write transaction", () =>
     Effect.runPromise(Effect.scoped(Effect.gen(function*() {
       const f = yield* setup
@@ -251,20 +276,19 @@ describe("private engine journal projection", () => {
         state: null
       }, owner)
       expect((yield* f.engineJournal.compact({ runId: "native-root" as JournalEvent.RunId }, owner)).deleted).toBe(1)
-      yield* f.sql`DELETE FROM flows_journal_events WHERE run_id = 'native-root' AND seq = 2`
       const projector = yield* Projection.make(f.options)
       yield* projector.catchUp
       const projected = yield* rows(f.controlJournal)
       expect(projected.map((entry) => entry.eventType)).toEqual([
         Projection.gapKind,
         Projection.eventKind,
-        Projection.gapKind,
+        Projection.eventKind,
         Projection.eventKind
       ])
       expect(projected.map(record)).toMatchObject([
         { reason: "compacted", throughSequence: 0 },
         { sequence: 1, payload: { value: 1 } },
-        { reason: "sequence-gap", fromSequence: 2, throughSequence: 2 },
+        { sequence: 2, payload: { value: 2 } },
         { sequence: 3, payload: { value: 3 } }
       ])
       const restarted = yield* Projection.make(f.options)

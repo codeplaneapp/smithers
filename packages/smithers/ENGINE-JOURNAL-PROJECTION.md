@@ -67,8 +67,11 @@ decision as the control root's own lifecycle. Existing wire schemas remain
 unchanged; readers opt into the native envelope explicitly.
 
 `control.engine.projection-gap` records the execution, generation, and reason:
-`rewound`, `compacted`, `sequence-gap`, or an actual journal read failure code.
-Applicable native sequence boundaries accompany it. A gap is evidence of missing
+`rewound`, `compacted`, or an actual journal read failure code.
+Applicable native sequence boundaries accompany it. Native sequences are ordered
+but are not contiguous: SqlJournal reserves them before commit and deliberately
+leaves abandoned transaction reservations unused. Such holes cannot establish
+missing evidence and do not produce a projection gap. A gap is evidence of missing
 or discontinuous observation, never a fabricated completion or passing check.
 If a source generation lookup fails, the gap has
 `generation: null` and preserves `lastObservedGeneration` separately. It does not
@@ -176,7 +179,7 @@ workspace executor ownership.
 Tests use real SQLite journal/store layers. They cover native outcome preservation,
 multiple producers, durable child edges and prefix lookalikes, restart deduplication,
 lost destination acknowledgements, changed values at a reused sequence after
-rewind, compaction and missing sequences, multi-page replay, new children, source
+rewind, compaction, legitimate rollback allocation holes, multi-page replay, new children, source
 read failure/recovery, and a separate SQLite writer whose local notifications
 cannot wake the source journal. The last test exercises the durable recheck.
 Settlement coverage commits final evidence between the earlier page read and the

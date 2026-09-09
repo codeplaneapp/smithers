@@ -168,13 +168,9 @@ export const make = (options: Options) =>
                 })
               )
             }
-            if (entry.seq > cursor + 1) {
-              yield* gap(executionId, generation.generation, {
-                reason: "sequence-gap",
-                fromSequence: cursor + 1,
-                throughSequence: entry.seq - 1
-              })
-            }
+            // Seq is ordered, not contiguous: SqlJournal deliberately leaves
+            // reservations unused after rollback. Only the owning journal's
+            // compaction/rewind/refusal evidence can establish an omission.
             yield* copy(entry, generation.generation).pipe(Effect.catch((error) =>
               error.code === "invalid_event"
                 ? gap(executionId, generation.generation, {
