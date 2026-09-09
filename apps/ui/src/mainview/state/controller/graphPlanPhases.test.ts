@@ -75,6 +75,29 @@ const routeWith = (planned: () => Promise<Response>): { bodies: Array<Record<str
   return { bodies, restore: () => { globalThis.fetch = real } }
 }
 
+/*
+ * A plan the test holds open. `started` settles the moment the controller
+ * asks for the plan facts, which is the exact window the DAG has to be
+ * navigable in; `release` answers the request. Without this seam a test can
+ * only see the state both phases left behind, and moving the graph patch
+ * after the plan would keep every final assertion green.
+ */
+const heldPlan = (answer: () => Promise<Response>) => {
+  let markStarted!: () => void
+  const started = new Promise<void>((accept) => { markStarted = accept })
+  let release!: () => void
+  const released = new Promise<void>((accept) => { release = accept })
+  return {
+    started,
+    release,
+    respond: async () => {
+      markStarted()
+      await released
+      return await answer()
+    }
+  }
+}
+
 let restore = () => {}
 beforeEach(() => {
   restore = () => {}
@@ -101,10 +124,26 @@ const graphCard = (store: Awaited<ReturnType<typeof boot>>["store"]) => {
 }
 
 test("a plan that fails still leaves the DAG painted", async () => {
-  const route = routeWith(async () => { throw new Error("seam timeout") })
+  const plan = heldPlan(async () => { throw new Error("seam timeout") })
+  const route = routeWith(plan.respond)
   restore = route.restore
   const { store, controller } = await boot()
-  await controller.commands.run("target.graph")
+  const running = controller.commands.run("target.graph")
+
+  /*
+   * The plan is in flight and the DAG is ALREADY on the card. This is the
+   * whole point of the split: the graph a human navigates cannot wait on the
+   * facts only the drawer reads.
+   */
+  await plan.started
+  const painted = graphCard(store)
+  expect(painted.payload.status).toBe("done")
+  expect(painted.payload.graph?.nodes.map((node) => node.label)).toEqual(["//src:typeCheck"])
+  expect(painted.payload.graph?.edges).toEqual([])
+  expect(painted.payload.error).toBeUndefined()
+
+  plan.release()
+  await running
 
   const card = graphCard(store)
   /* The graph arrived, so the card is done — not blanked by the plan. */
@@ -119,12 +158,23 @@ test("a plan that fails still leaves the DAG painted", async () => {
 })
 
 test("a plan that succeeds patches its facts into the painted card", async () => {
-  const route = routeWith(async () =>
+  const plan = heldPlan(async () =>
     new Response(JSON.stringify(PLANNED), { status: 200, headers: { "content-type": "application/json" } })
   )
+  const route = routeWith(plan.respond)
   restore = route.restore
   const { store, controller } = await boot()
-  await controller.commands.run("target.graph")
+  const running = controller.commands.run("target.graph")
+
+  /* The bare DAG is painted before the plan answers, plan facts and all. */
+  await plan.started
+  const painted = graphCard(store)
+  expect(painted.payload.status).toBe("done")
+  expect(painted.payload.graph?.nodes.length).toBe(1)
+  expect(painted.payload.graph?.nodes[0]?.plan).toBeUndefined()
+
+  plan.release()
+  await running
 
   const card = graphCard(store)
   expect(card.payload.status).toBe("done")
