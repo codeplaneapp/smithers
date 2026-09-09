@@ -122,6 +122,12 @@ in-memory EVM fork, six panes, a full Worker, and a Cloudflare deploy.
 
 `APP_MOCK_TURN` defaults to `1`, and the Worker streams a fixed sequence of
 frames so the shell, the pane host, and cancellation all work end to end.
+The mock emits a `chain-balance` pane with `chain`, `address`, `native`, and
+`tokens` props. Its native balance is `1234567890123456789` wei on mainnet.
+Card ids include the turn's persisted user-message id, so later turns retain
+earlier cards. An unrouted flow emits one error frame and settles as `failed`,
+including when the flow registry is empty.
+
 Setting it to `0` asks for the real agent path, which is written out in full
 but refuses with a message naming two upstream blockers: the QuickJS sandbox
 compiles its WebAssembly at runtime, which workerd refuses, and there is no

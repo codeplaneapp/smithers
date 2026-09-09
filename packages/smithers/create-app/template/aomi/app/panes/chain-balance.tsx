@@ -6,29 +6,14 @@
  */
 import { definePane } from "@smthrs/create-app/ui"
 import { KpiStat, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@smthrs/ui"
-import * as Schema from "effect/Schema"
+import { ChainBalanceProps } from "../../src/ChainBalanceProps.ts"
 import { AddressPill } from "../../src/ui/chain/AddressPill.tsx"
 import { TokenAmount } from "../../src/ui/chain/TokenAmount.tsx"
-
-const TokenBalance = Schema.Struct({
-  symbol: Schema.String,
-  /** Base units as a decimal string. */
-  amount: Schema.String,
-  decimals: Schema.Number,
-  token: Schema.optionalKey(Schema.String)
-})
 
 export const Pane = definePane({
   title: "Balances",
   fullscreen: true,
-  props: Schema.Struct({
-    chain: Schema.String,
-    address: Schema.String,
-    label: Schema.optionalKey(Schema.String),
-    /** Native currency in wei. */
-    native: TokenBalance,
-    tokens: Schema.Array(TokenBalance)
-  }),
+  props: ChainBalanceProps,
   render: (props, context) => (
     <div className="aomi-pane-grid" data-fullscreen={context.fullscreen ? "true" : undefined}>
       <div className="aomi-pane-row">

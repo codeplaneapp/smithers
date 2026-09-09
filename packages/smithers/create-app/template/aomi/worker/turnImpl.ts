@@ -28,6 +28,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Context from "effect/Context"
 import type { AppCard, FlowSummary, Message, SessionSummary, TurnFrame, TurnRequest } from "../src/api.ts"
+import { ChainBalanceProps } from "../src/ChainBalanceProps.ts"
 import { flows, paneNames } from "../routes.gen.ts"
 import { CellHistory, type ExecutedCell, FlowStore, makeCells, promoteSource } from "../tools/promote.ts"
 import { CardSink, makePanes, PaneNames, uiSource } from "../tools/ui.ts"
@@ -219,11 +220,10 @@ export const runTurn = (options: TurnOptions): ReadableStream<Uint8Array> => {
 const mockTurn = async (options: TurnOptions, emit: (frame: TurnFrame) => void): Promise<void> => {
   const { request, session, signal } = options
   const route = routeFor(request.flowId)
-  if (route === undefined && flows.length > 0) {
-    emit({ type: "error", message: `No flow is routed as "${request.flowId}".` })
-    return
+  if (route === undefined) {
+    throw new Error(`No flow is routed as "${request.flowId}".`)
   }
-  session.appendMessage("user", request.message)
+  const turnMessage = session.appendMessage("user", request.message)
 
   const deltas = [
     "Checking the balance",
@@ -246,15 +246,16 @@ const mockTurn = async (options: TurnOptions, emit: (frame: TurnFrame) => void):
 
   const card: AppCard = {
     kind: "pane",
-    id: `${request.sessionId}:chain-balance`,
+    // The persisted user message identifies this turn even across DO eviction.
+    id: `${request.sessionId}:${turnMessage.id}:chain-balance`,
     name: "chain-balance",
     title: "Balance",
-    props: {
+    props: ChainBalanceProps.make({
+      chain: "mainnet",
       address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-      chainId: 1,
-      balanceWei: "1234567890123456789",
-      symbol: "ETH"
-    },
+      native: { symbol: "ETH", amount: "1234567890123456789", decimals: 18 },
+      tokens: []
+    }),
     fullscreen: false
   }
   session.appendCard(card)
