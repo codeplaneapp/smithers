@@ -173,8 +173,13 @@ export const cascade = (filename: string): Effect.Effect<CascadeSummary> =>
         yield* journal.flush
         const page = yield* journal.entries({ runId: deployRunId as JournalEvent.RunId, limit: 500 })
         // The interruption record names every run the cascade reached. It is
-        // written in the same transaction as the parent's terminal row, which
-        // is what makes "cancelled parent, live child" unrepresentable.
+        // written in the same transaction as the parent's terminal row, so a
+        // cancelled parent with an attached child that has no recorded
+        // cancellation request is unrepresentable. Termination is not in that
+        // transaction: each child's driver settles its own request, which is
+        // why the wait above accepts a pending request as well as a cancelled
+        // child. A caller that needs confirmed termination waits for each
+        // child's terminal state.
         const cascadedTo = page.entries
           .filter((entry) => entry.eventType === "flows.engine.interrupted")
           .flatMap((entry) => (entry.payload as { readonly cascadedTo?: ReadonlyArray<string> }).cascadedTo ?? [])
