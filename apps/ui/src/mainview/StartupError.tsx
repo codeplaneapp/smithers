@@ -1,16 +1,33 @@
+import type { CSSProperties } from "react"
 import { errorMessage } from "./state/ClientErrors"
 import { createStartupRecovery, mountStartupRecovery } from "./StartupRecovery"
 
-const PANEL_STYLE = [
-  "font-family: ui-monospace, SFMono-Regular, Menlo, monospace",
-  "max-width: 44rem",
-  "margin: 4rem auto",
-  "padding: 2rem",
-  "color: #1a1a1a"
-].join(";")
+/*
+ * Both panels below render the same declarations. They are written once, as
+ * React style objects, and the DOM builder derives its `style` attribute from
+ * them — a cosmetic edit here reaches both paths. Every value is a string so
+ * that neither path has to reproduce React's unit handling for numbers.
+ */
+const PANEL_STYLE = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  maxWidth: "44rem",
+  margin: "4rem auto",
+  padding: "2rem",
+  color: "#1a1a1a"
+} as const satisfies CSSProperties
 
-const DETAIL_STYLE =
-  "white-space: pre-wrap; word-break: break-word; background: #f4f1ea; padding: 1rem; border-radius: 8px"
+const DETAIL_STYLE = {
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  background: "#f4f1ea",
+  padding: "1rem",
+  borderRadius: "8px"
+} as const satisfies CSSProperties
+
+const cssText = (style: Readonly<Record<string, string>>): string =>
+  Object.entries(style)
+    .map(([property, value]) => `${property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}: ${value}`)
+    .join("; ")
 
 const HEADING = "Smithers failed to start"
 const HINT = "Reload to try again. If this persists, share the error above with the team."
@@ -35,27 +52,9 @@ export const startupErrorMessage = (reason: unknown, earlier?: unknown): string 
 /** The panel React renders when a boot failure reaches the error boundary. */
 export function StartupErrorPanel({ message }: { readonly message: string }) {
   return (
-    <main
-      style={{
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        maxWidth: "44rem",
-        margin: "4rem auto",
-        padding: "2rem",
-        color: "#1a1a1a"
-      }}
-    >
+    <main style={PANEL_STYLE}>
       <h1>{HEADING}</h1>
-      <pre
-        style={{
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          background: "#f4f1ea",
-          padding: "1rem",
-          borderRadius: "8px"
-        }}
-      >
-				{message}
-      </pre>
+      <pre style={DETAIL_STYLE}>{message}</pre>
       <p>{HINT}</p>
       <div ref={mountStartupRecovery} />
     </main>
@@ -68,11 +67,11 @@ export function StartupErrorPanel({ message }: { readonly message: string }) {
  */
 export const createStartupErrorElement = (documentTarget: Document, message: string) => {
   const panel = documentTarget.createElement("main")
-  panel.setAttribute("style", PANEL_STYLE)
+  panel.setAttribute("style", cssText(PANEL_STYLE))
   const heading = documentTarget.createElement("h1")
   heading.textContent = HEADING
   const detail = documentTarget.createElement("pre")
-  detail.setAttribute("style", DETAIL_STYLE)
+  detail.setAttribute("style", cssText(DETAIL_STYLE))
   detail.textContent = message
   const hint = documentTarget.createElement("p")
   hint.textContent = HINT
