@@ -6,7 +6,8 @@
 import { Effect, Option, Schema } from "effect"
 import * as CanonicalJson from "./CanonicalJson.ts"
 import * as DeferredTools from "./DeferredTools.ts"
-import { isContextOverflow, isQuotaExhausted, ModelError } from "./ModelError.ts"
+import { classifyHttpStatus } from "./HttpStatusClassifier.ts"
+import { ModelError } from "./ModelError.ts"
 import * as ModelEvent from "./ModelEvent.ts"
 import {
   JsonObject,
@@ -378,40 +379,6 @@ const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =
     ? value as Readonly<Record<string, unknown>>
     : undefined
 
-const providerReason = (
-  status: number | undefined,
-  code: string | undefined,
-  message: string
-): ModelError["code"] => {
-  const normalized = `${code ?? ""} ${message}`.toLowerCase()
-  // One shared vocabulary for an exhausted account, so a provider that spells
-  // it "credit balance" is parked exactly like one that spells it
-  // `insufficient_quota`.
-  if (isQuotaExhausted(code, message)) return "quota_exceeded"
-  if (
-    status === 401 ||
-    status === 403 ||
-    /authentication|invalid[-_\s]?api[-_\s]?key|incorrect[-_\s]?api[-_\s]?key|permission[-_\s]?denied/.test(normalized)
-  ) return "authentication"
-  if (status === 429 || /rate[-_\s]?limit|too many requests/.test(normalized)) return "rate_limited"
-  if (/content[-_\s]?policy|content[-_\s]?filter|safety/.test(normalized)) return "content_policy"
-  // `context_length_exceeded` arrives as a 400 with an `invalid_request_error`
-  // type, so it has to be recognized before the generic bad-request branch.
-  if (isContextOverflow(code, message)) return "context_overflow"
-  if (
-    status === 400 ||
-    status === 404 ||
-    status === 409 ||
-    status === 413 ||
-    status === 422 ||
-    /invalid[-_\s]?request/.test(normalized)
-  ) return "invalid_request"
-  if (status !== undefined && status >= 500 || /server[-_\s]?error|internal[-_\s]?error/.test(normalized)) {
-    return "provider_internal"
-  }
-  return "unknown"
-}
-
 const providerError = (
   value: OpenAIEvent
 ): { readonly code: string | undefined; readonly message: string } => {
@@ -681,7 +648,7 @@ const stepEvent = (
   if (type === "response.failed" || type === "error") {
     const error = providerError(value)
     return new ModelError({
-      code: providerReason(undefined, error.code, error.message),
+      code: classifyHttpStatus(undefined, error.code, error.message),
       message: error.message,
       providerCode: error.code
     })
@@ -724,7 +691,7 @@ const classifyError = (status: number, body: string): ModelError => {
   const message = string(error?.message) ?? string(parsed?.message) ?? string(parsed?.detail) ??
     `OpenAI Responses request failed with HTTP ${status}`
   return new ModelError({
-    code: providerReason(status, code, message),
+    code: classifyHttpStatus(status, code, message),
     message,
     httpStatus: status,
     providerCode: code

@@ -11,7 +11,8 @@
  * @since 0.1.0
  */
 import { Effect, Option, Schema } from "effect"
-import { isContextOverflow, isQuotaExhausted, ModelError } from "./ModelError.ts"
+import { classifyHttpStatus } from "./HttpStatusClassifier.ts"
+import { ModelError } from "./ModelError.ts"
 import * as ModelEvent from "./ModelEvent.ts"
 import { JsonObject, type Message, type ModelRequest, type StopReason, type ToolDefinition } from "./ModelRequest.ts"
 import * as Protocol from "./Protocol.ts"
@@ -471,7 +472,6 @@ const providerReason = (
   code: string | undefined,
   message: string
 ): ModelError["code"] => {
-  const normalized = `${code ?? ""} ${message}`.toLowerCase()
   // A chat-compatible gateway reporting a failure inside an HTTP 200 stream has
   // no status to hand us and puts the one it would have sent in `code`
   // instead: OpenRouter sends `{"error":{"code":429}}`. A purely numeric
@@ -481,32 +481,9 @@ const providerReason = (
   const numeric = code === undefined ? Number.NaN : Number(code)
   const httpLike = Number.isInteger(numeric) && numeric >= 400 && numeric <= 599 ? numeric : undefined
   const effective = status ?? httpLike
-  // One shared vocabulary for an exhausted account, so a gateway that spells it
-  // "credit balance" is parked exactly like one that spells it
-  // `insufficient_quota`.
-  if (isQuotaExhausted(code, message)) return "quota_exceeded"
-  if (
-    effective === 401 || effective === 403 ||
-    /authentication|invalid[-_\s]?api[-_\s]?key|permission[-_\s]?denied/.test(normalized)
-  ) {
-    return "authentication"
-  }
-  if (effective === 429 || /rate[-_\s]?limit|too many requests/.test(normalized)) return "rate_limited"
-  if (/content[-_\s]?policy|content[-_\s]?filter|safety/.test(normalized)) return "content_policy"
-  if (isContextOverflow(code, message)) return "context_overflow"
-  if (
-    effective === 400 || effective === 404 || effective === 409 || effective === 413 || effective === 422 ||
-    /invalid[-_\s]?request/.test(normalized)
-  ) {
-    return "invalid_request"
-  }
-  if (
-    (effective !== undefined && effective >= 500) ||
-    /server[-_\s]?error|internal[-_\s]?error|overloaded/.test(normalized)
-  ) {
-    return "provider_internal"
-  }
-  return "unknown"
+  const reason = classifyHttpStatus(effective, code, message)
+  if (reason === "unknown" && /overloaded/i.test(`${code ?? ""} ${message}`)) return "provider_internal"
+  return reason
 }
 
 const classifyError = (status: number, body: string): ModelError => {

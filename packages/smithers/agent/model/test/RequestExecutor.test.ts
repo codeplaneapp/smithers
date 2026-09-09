@@ -1250,6 +1250,26 @@ describe("RequestExecutor", () => {
     ).toMatchObject({ code: "invalid_request", httpStatus: 400 })
   })
 
+  it("preserves HTTP classification when a protocol returns unknown", async () => {
+    const error = await run(
+      Effect.gen(function*() {
+        const executor = yield* RequestExecutor.RequestExecutor
+        return yield* execute(executor, request(), {
+          classifyError: () =>
+            new ModelError({ code: "unknown", message: "gateway diagnostic", providerCode: "custom" })
+        }).pipe(Effect.flip)
+      }),
+      executorLayer([{ status: 402, body: "{}" }], [])
+    )
+    expect(error).toMatchObject({
+      code: "quota_exceeded",
+      message: "gateway diagnostic",
+      providerCode: "custom",
+      httpStatus: 402,
+      retryable: false
+    })
+  })
+
   it("classifies each status that is not a rate limit", async () => {
     expect((await errorFor({ status: 403, body: "{}" })).code).toBe("authentication")
     expect((await errorFor({ status: 400, body: "blocked by content_filter" })).code).toBe("content_policy")

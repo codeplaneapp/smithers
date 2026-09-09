@@ -5,7 +5,8 @@
  */
 import { Effect, Option, Result, Schema } from "effect"
 import * as DeferredTools from "./DeferredTools.ts"
-import { isContextOverflow, isQuotaExhausted, ModelError, type ModelErrorCode } from "./ModelError.ts"
+import { classifyHttpStatus } from "./HttpStatusClassifier.ts"
+import { ModelError, type ModelErrorCode } from "./ModelError.ts"
 import { ModelEvent, type Usage } from "./ModelEvent.ts"
 import { JsonObject, type Message, type ModelRequest, type StopReason, type ToolDefinition } from "./ModelRequest.ts"
 import { jsonEvent, make as makeProtocol, type Protocol } from "./Protocol.ts"
@@ -739,25 +740,13 @@ const providerReason = (
   providerType: string | undefined,
   message: string
 ): ModelErrorCode => {
+  const reason = classifyHttpStatus(status, providerType, message)
+  if (reason === "quota_exceeded" || reason === "authentication") return reason
   const normalized = `${providerType ?? ""} ${message}`.toLowerCase()
-  // Anthropic bills a refusal as an ordinary `invalid_request_error`, so an
-  // exhausted balance has to be recognized before that branch claims it:
-  // `quota_exceeded` is what parks a seat, and `invalid_request` terminates it.
-  if (isQuotaExhausted(providerType, message)) return "quota_exceeded"
-  if (status === 401 || status === 403 || normalized.includes("authentication")) return "authentication"
-  if (status === 429 || status === 529 || normalized.includes("rate_limit") || normalized.includes("overloaded")) {
-    return "rate_limited"
-  }
-  if (normalized.includes("content_policy") || normalized.includes("safety")) return "content_policy"
-  // Anthropic reports an oversized prompt as an ordinary `invalid_request_error`,
-  // so overflow has to be recognized before that branch swallows it.
-  if (isContextOverflow(providerType, message)) return "context_overflow"
-  if (status === 400 || normalized.includes("invalid_request")) return "invalid_request"
-  if (
-    (status !== undefined && status >= 500) ||
-    normalized.includes("api_error")
-  ) return "provider_internal"
-  return "unknown"
+  // Anthropic overloads are transient rate limits, including HTTP 529.
+  if (status === 529 || normalized.includes("overloaded")) return "rate_limited"
+  if (reason === "unknown" && normalized.includes("api_error")) return "provider_internal"
+  return reason
 }
 
 const streamError = (event: AnthropicEvent): ModelError => {

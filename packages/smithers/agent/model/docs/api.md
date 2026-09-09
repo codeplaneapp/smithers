@@ -319,9 +319,13 @@ instead of holding the process.
 HTTP status classification maps 401 and 403 to `authentication`; 402 and the
 quota vocabulary to `quota_exceeded`; 429 to `rate_limited`; content-policy
 wording to `content_policy`; overflow wording to `context_overflow`; 400,
-404, 409, 413, and 422 to `invalid_request`; 5xx and the retryable 503, 504,
-and 529 to `provider_internal`; anything else to `unknown`. A protocol's
-`classifyError` runs first and wins. Reset instants are also read from the
+404, 409, 413, and 422 to `invalid_request`; 5xx to `provider_internal`;
+anything else to `unknown`. The executor and built-in protocols share these
+rules, including bare 402 responses and incorrect API key wording. Anthropic
+overrides 529 and overload errors to `rate_limited`. A protocol's
+`classifyError` code wins when it is more specific than `unknown`; otherwise
+the executor keeps the shared classification. Protocol diagnostics are retained.
+Reset instants are also read from the
 `x-ratelimit-reset-*` and `anthropic-ratelimit-*-reset` header families and
 from reset fields in a JSON error body, preferring the exhausted resource's
 window so a parked run wakes exactly once.

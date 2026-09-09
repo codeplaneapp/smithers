@@ -29,7 +29,8 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as Auth from "./Auth.ts"
-import { isContextOverflow, isQuotaExhausted, ModelError } from "./ModelError.ts"
+import { classifyHttpStatus } from "./HttpStatusClassifier.ts"
+import { ModelError } from "./ModelError.ts"
 
 const BODY_LIMIT = 16_384
 const RAW_BODY_LIMIT = 65_536
@@ -117,9 +118,6 @@ const requestId = (headers: Record<string, string>): string | undefined =>
     headers["x-amz-request-id"] ??
     headers["x-goog-request-id"] ??
     headers["cf-ray"]
-
-const retryableStatus = (status: number): boolean =>
-  status === 429 || status === 503 || status === 504 || status === 529
 
 const finiteNonNegative = (value: string | undefined): number | undefined => {
   if (value === undefined || value.trim() === "") return undefined
@@ -332,13 +330,6 @@ const providerFields = (body: unknown): {
   }
 }
 
-const quotaBody = (parsed: unknown): boolean => {
-  const fields = providerFields(parsed)
-  return fields.code !== undefined &&
-    /^(?:insufficient[-_]?quota|quota[-_]?exceeded|billing[-_]?hard[-_]?limit(?:[-_]?reached)?|credit[-_]?balance[-_]?too[-_]?low)$/i
-      .test(fields.code)
-}
-
 const addSecret = (values: Set<string>, value: string): void => {
   if (value.length === 0) return
   values.add(value)
@@ -523,21 +514,8 @@ const providerMessage = (
 
 const reasonForStatus = (status: number, body: string | undefined, parsed: unknown): ModelError["code"] => {
   const fields = providerFields(parsed)
-  if (status === 401 || status === 403) return "authentication"
-  if (quotaBody(parsed) || isQuotaExhausted(fields.code, fields.message ?? "") || status === 402) {
-    return "quota_exceeded"
-  }
-  if (status === 429) return "rate_limited"
-  const contentSignal = isRecord(parsed) ? `${fields.code ?? ""} ${fields.message ?? ""}` : body ?? ""
-  if (/content[-_\s]?policy|content_filter|safety/i.test(contentSignal)) return "content_policy"
-  // Overflow is reported as a bad request by every provider this executor
-  // fronts, so it has to be recognized before the bad-request branch claims it.
-  if (isContextOverflow(undefined, body ?? "")) return "context_overflow"
-  if (status === 400 || status === 404 || status === 409 || status === 413 || status === 422) {
-    return "invalid_request"
-  }
-  if (status >= 500 || retryableStatus(status)) return "provider_internal"
-  return "unknown"
+  // Parsed metadata is diagnostic context, not a provider error signal.
+  return classifyHttpStatus(status, fields.code, isRecord(parsed) ? fields.message ?? "" : body ?? "")
 }
 
 const sanitizedField = (
@@ -639,7 +617,9 @@ const statusError = (
       : responseBody(classified.message, request, redactedNames).body
 
     const error = new ModelError({
-      code: classified?.code ?? reasonForStatus(response.status, body, parsed),
+      code: classified !== undefined && classified.code !== "unknown"
+        ? classified.code
+        : reasonForStatus(response.status, body, parsed),
       message: classifiedMessage ?? providerMessage(response.status, details),
       retryAfterMillis: classified?.retryAfterMillis ?? retry.retryAfterMillis,
       resetAtEpochMillis: classified?.resetAtEpochMillis ?? reset?.at,
