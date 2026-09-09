@@ -585,15 +585,18 @@ describe("Journal.compact", () => {
 
         yield* Deferred.succeed(gate, undefined)
         const compacted = yield* Fiber.join(compacting)
-        expect(compacted).toEqual({ runId: run, checkpointSeq: 1, deleted: 1 })
-        expect((yield* Fiber.join(lateAdmission)).seq).toBe(2)
+        // The overtaken reservation commits at 2, above this checkpoint, so
+        // compaction must retain it for replay after the checkpoint.
+        expect(compacted).toEqual({ runId: run, checkpointSeq: 1, deleted: 0 })
+        expect((yield* Fiber.join(lateAdmission)).seq).toBe(3)
         yield* service.flush
 
-        const rows = yield* sql<{ readonly seq: number }>`
-          SELECT seq FROM flows_journal_events WHERE run_id = ${run} ORDER BY seq ASC
+        const rows = yield* sql<{ readonly seq: number; readonly source_seq: number }>`
+          SELECT seq, source_seq FROM flows_journal_events WHERE run_id = ${run} ORDER BY seq ASC
         `
         const floor = Option.getOrThrow(yield* service.latestCheckpoint(run)).seq
-        expect(rows.map((row) => row.seq)).toEqual([1, 2])
+        expect(rows.map((row) => row.seq)).toEqual([1, 2, 3])
+        expect(rows.map((row) => row.source_seq)).toEqual([1, 0, 2])
         expect(rows.every((row) => row.seq >= floor)).toBe(true)
 
         const behind = yield* Effect.flip(service.entries({ runId: run, limit: 10 }))

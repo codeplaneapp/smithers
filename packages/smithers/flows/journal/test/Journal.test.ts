@@ -1894,14 +1894,14 @@ describe("Journal", () => {
     )
   })
 
-  effect("reports sequence conflicts introduced by another writer after initialization", () =>
+  effect("appends above sequences committed by another writer after initialization", () =>
     Effect.scoped(
       Effect.gen(function*() {
         const sql = yield* Effect.service(SqlClient.SqlClient)
         const journal = yield* Journal
         // The floor is read on first use, so a foreign row written before this
-        // process ever touched the run is simply seen. The conflict this cell
-        // is about needs the foreign write to land AFTER the floor is cached.
+        // process ever touched the run is simply seen. This foreign write
+        // lands AFTER the floor is cached, overtaking the next reservation.
         yield* journal.emitLossy(
           input(runId("sequence-conflict"), sourceId("producer"), "first", {})
         )
@@ -1918,7 +1918,10 @@ describe("Journal", () => {
         yield* journal.emitLossy(
           input(runId("sequence-conflict"), sourceId("other-producer"), "event", {})
         )
-        expect((yield* Effect.flip(journal.flush)).code).toBe("sequence_conflict")
+        yield* journal.flush
+        const page = yield* journal.entries({ runId: runId("sequence-conflict"), limit: 10 })
+        expect(page.entries.map((entry) => entry.seq)).toEqual([0, 1, 2])
+        expect(page.entries.map((entry) => entry.sourceId)).toEqual(["producer", "external", "other-producer"])
       }).pipe(
         Effect.provide(SqlJournal.layer({ capacity: 4, overflow: "reject" })),
         Effect.provide(migratedDatabase())

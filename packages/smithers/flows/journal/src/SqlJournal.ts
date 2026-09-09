@@ -11,9 +11,9 @@
  *
  * The replay-then-follow stream follows Effect's `EventJournal` and OpenCode's
  * upstream event stream design. The bounded send queue deliberately deviates
- * from their synchronous durable writes by allocating the canonical per-run
- * sequence before admission. SQLite retry and transaction behavior comes
- * through `@smthrs/database`.
+ * from their synchronous durable writes by reserving a provisional per-run
+ * sequence before admission. Both channels finalize canonical order at commit.
+ * SQLite retry and transaction behavior comes through `@smthrs/database`.
  *
  * @since 0.1.0
  */
@@ -1326,6 +1326,8 @@ export const layer = (
                   Effect.map((page) => {
                     const last = page.entries.at(-1)
                     if (last !== undefined) {
+                      // Both channels append above the committed tail, so no
+                      // pending reservation can later commit below this cursor.
                       reader.cursor = last.seq
                     }
                     return [
@@ -1479,6 +1481,9 @@ export const layer = (
               return duplicate
             }
           }
+          // Admission reservations are provisional. Allocate above the durable
+          // tail in this transaction so a queued entry can never commit behind
+          // a reader's cursor, even when another connection overtook it.
           const insert = enforceCompactionFloor
             ? sql<JournalRow>`
               INSERT INTO flows_journal_events (
@@ -1487,7 +1492,8 @@ export const layer = (
               )
               SELECT
                 ${queued.runId},
-                ${queued.seq},
+                (SELECT MAX(${queued.seq}, COALESCE(MAX(seq), -1) + 1)
+                  FROM flows_journal_events WHERE run_id = ${queued.runId}),
                 ${queued.eventId},
                 ${queued.sourceId},
                 ${queued.sourceSeq},
@@ -1500,6 +1506,9 @@ export const layer = (
                 WHERE run_id = ${queued.runId}
                   AND compacted_at_ms IS NOT NULL
                   AND seq >= ${queued.seq}
+              ) AND NOT EXISTS (
+                SELECT 1 FROM flows_journal_events
+                WHERE run_id = ${queued.runId} AND seq >= ${Number.MAX_SAFE_INTEGER - 1}
               )
               ON CONFLICT DO NOTHING
               RETURNING run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
@@ -1573,8 +1582,8 @@ export const layer = (
             return racedDuplicate
           }
           // The insert produced no row and names no committed identity. Before
-          // blaming a racing writer, ask whether a compaction moved the floor
-          // above this sequence: that is a drop, not a sequence conflict, and
+          // reporting sequence exhaustion, ask whether compaction moved the
+          // floor above this reservation: that is a drop, and
           // the caller needs the floor to resync from. A durable write cannot
           // reach this case, because it allocates above the surviving
           // checkpoint row, so the read costs nothing on that path.
@@ -1593,8 +1602,8 @@ export const layer = (
           }
           return yield* Effect.fail(
             error(
-              "sequence_conflict",
-              `sequence ${queued.seq} for run ${queued.runId} was committed by another writer`
+              "invalid_event",
+              "journal sequence is outside the allocatable safe integer range"
             )
           )
         })
@@ -2275,16 +2284,7 @@ export const layer = (
         commits: ReadonlyArray<SettledCommit>
       ): void => {
         for (const { commit, queued } of commits) {
-          retain(
-            sourceEventKey(queued.runId, queued.sourceId, queued.sourceSeq),
-            {
-              seq: commit.entry.seq,
-              eventType: queued.eventType,
-              payloadJson: queued.payloadJson,
-              metaJson: queued.metaJson,
-              status: "committed"
-            }
-          )
+          rememberCommitted(queued, commit.entry.seq)
         }
       }
 

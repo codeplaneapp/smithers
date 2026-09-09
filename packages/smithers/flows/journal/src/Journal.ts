@@ -103,9 +103,11 @@ export type OverflowPolicy = typeof OverflowPolicy.Type
  * Receipt for a newly admitted event.
  *
  * On the lossy channel, `seq` and `sourceSeq` are allocated synchronously and
- * returned before SQL commits. On the durable channel, the same receipt shape
- * is returned only after the entry commits. `seq` orders the run; `sourceSeq`
- * identifies producer retries.
+ * returned before SQL commits. This `seq` is provisional: the SQL writer
+ * moves it above the committed tail if another commit overtakes its reservation.
+ * Use committed entries for durable cursors. On the durable channel, the same
+ * receipt shape is returned only after the entry commits. `seq` orders the run;
+ * `sourceSeq` identifies producer retries and does not change at commit.
  *
  * @category models
  * @since 0.1.0
@@ -130,8 +132,9 @@ export type Accepted = typeof Accepted.Type
 /**
  * Receipt for an exact retry of an already pending or committed source event.
  *
- * `seq` is the original event's canonical sequence. A duplicate does not
- * allocate another sequence or enqueue another write. `status` distinguishes
+ * `seq` is the original event's sequence, provisional while pending and
+ * canonical after commit. A duplicate does not allocate another sequence or
+ * enqueue another write. `status` distinguishes
  * an optimistic retry from one whose original event is already durable.
  *
  * @category models
@@ -387,14 +390,15 @@ export type Compacted = typeof Compacted.Type
  *
  * There are two sequence domains:
  *
- * - `seq` is assigned synchronously by the selected channel per run. It is the
- *   canonical durable order used by replay, paging, streams, and projections.
+ * - `seq` is reserved synchronously per run. A lossy reservation is provisional;
+ *   the SQL writer moves it above the committed tail if overtaken. The committed
+ *   sequence is the canonical order for replay, paging, streams, and projections.
  * - `sourceSeq` is assigned synchronously per `(runId, sourceId)`, or supplied
  *   by the producer, and is the idempotency key for producer retries.
  *
  * Rejected or dropped admissions consume both allocations, so gaps are valid.
  * A retry the in-process index still holds returns `Duplicate` with the
- * original canonical `seq` and consumes neither allocation.
+ * original `seq` (provisional while pending) and consumes neither allocation.
  *
  * A retry it no longer holds is admitted optimistically and settled by
  * `UNIQUE (run_id, source_id, source_seq)` at the insert: admission issues no
