@@ -162,7 +162,15 @@ export const operations = (options: { readonly root: string; readonly output: st
   })
   const check = (specs: readonly PageSpec[], requireVerified = false) => Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
-    const text = yield* fs.readFileString(path.resolve(options.output, "current.json"))
+    // A workspace root can have a logical OS alias (for example /var on
+    // macOS). Compare immutable files under the same canonical output root
+    // used by publication, while still refusing a linked output directory.
+    const requestedRoot = path.resolve(options.output)
+    const root = yield* fs.realPath(requestedRoot)
+    if (root !== path.join(yield* fs.realPath(path.dirname(requestedRoot)), path.basename(requestedRoot))) {
+      return yield* Effect.fail(fail("output-conflict", "Output must be a real, dedicated directory"))
+    }
+    const text = yield* fs.readFileString(path.join(root, "current.json"))
     const current = yield* Effect.try({ try: () => JSON.parse(text) as { artifactDigest: string; directory: string; verification: string; pages: { id: string; inputDigest: string; body: string }[] }, catch: () => fail("output-conflict", "Invalid snapshot pointer") })
     if (!/^[a-f0-9]{64}$/.test(current.artifactDigest) || current.directory !== `snapshots/${current.artifactDigest}`) return yield* Effect.fail(fail("output-conflict", "Invalid snapshot directory"))
     if (JSON.stringify(current.pages.map((page) => page.id)) !== JSON.stringify(specs.map((spec) => spec.id))) return yield* Effect.fail(fail("stale-source", "The wiki catalog changed"))
@@ -170,10 +178,10 @@ export const operations = (options: { readonly root: string; readonly output: st
       const page = current.pages.find((page) => page.id === spec.id)!
       const source = yield* collect(spec)
       if (source.inputDigest !== page.inputDigest) return yield* Effect.fail(fail("stale-source", `Stale wiki page: ${spec.id}`))
-      if ((yield* fs.readFileString(path.resolve(options.output, current.directory, "pages", `${spec.id}.md`))) !== page.body) return yield* Effect.fail(fail("output-conflict", `Generated page was edited: ${spec.id}`))
-      for (const input of source.sources) if ((yield* fs.readFileString(path.resolve(options.output, current.directory, "sources", input.path))) !== input.text) return yield* Effect.fail(fail("output-conflict", `Captured source was edited: ${input.path}`))
+      if ((yield* fs.readFileString(path.resolve(root, current.directory, "pages", `${spec.id}.md`))) !== page.body) return yield* Effect.fail(fail("output-conflict", `Generated page was edited: ${spec.id}`))
+      for (const input of source.sources) if ((yield* fs.readFileString(path.resolve(root, current.directory, "sources", input.path))) !== input.text) return yield* Effect.fail(fail("output-conflict", `Captured source was edited: ${input.path}`))
     }
-    const archiveRoot = path.resolve(options.output, current.directory)
+    const archiveRoot = path.resolve(root, current.directory)
     const archived = JSON.parse(yield* fs.readFileString(path.join(archiveRoot, "snapshot.json"))) as Record<string, unknown>
     const pointer = JSON.parse(text) as Record<string, unknown>
     for (const key of ["smithersWikiProjection", "artifactDigest", "directory"]) delete pointer[key]

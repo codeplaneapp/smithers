@@ -153,6 +153,22 @@ test("unowned or symlink current pointers are never overwritten", async (t) => {
   assert.equal(await readFile(join(f.root, "page.md"), "utf8"), "# A small page\n\nThe answer is 42.\n")
 })
 
+test("verification accepts an aliased parent but refuses linked output or immutable files", async (t) => {
+  const f = await fixture(t), evidence = await run(f.ops.collect(f.spec))
+  await symlink(f.root, join(f.root, "logical-root"), "dir")
+  const logical = operations({ root: f.root, output: join(f.root, "logical-root", "output") })
+  await run(logical.write([{ evidence, review: supported(evidence), reviewer: "scripted-test" }], "verified"))
+  assert.equal((await run(logical.check([f.spec], true))).verification, "verified")
+  await symlink(f.output, join(f.root, "linked-output"), "dir")
+  await assert.rejects(run(operations({ root: f.root, output: join(f.root, "linked-output") }).check([f.spec], true)), /real, dedicated directory/)
+  const current = JSON.parse(await readFile(join(f.output, "current.json"), "utf8"))
+  const page = join(f.output, current.directory, "pages", "answer.md")
+  await writeFile(join(f.root, "copied-page.md"), await readFile(page))
+  await rm(page)
+  await symlink(join(f.root, "copied-page.md"), page)
+  await assert.rejects(run(logical.check([f.spec], true)), /cannot be symlinks/)
+})
+
 test("real AgentAction review and flow replay use the existing engine", { timeout: 90_000 }, async (t) => {
   const { Action, Interpreter } = await import("@smthrs/flow")
   const { FlowEngine } = await import("@smthrs/engine")
