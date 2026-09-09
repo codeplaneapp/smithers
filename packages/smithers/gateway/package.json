@@ -47,7 +47,8 @@
     "./SuperviseRuntime": "./src/SuperviseRuntime.ts",
     "./index": "./src/index.ts",
     "./node/NodeGateway": "./src/node/NodeGateway.ts",
-    "./test/TestSuperviseRuntime": "./src/test/TestSuperviseRuntime.ts"
+    "./test/TestSuperviseRuntime": "./src/test/TestSuperviseRuntime.ts",
+    "./bun/BunGateway": "./src/bun/BunGateway.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -127,6 +128,11 @@
         "types": "./dist/esm/test/TestSuperviseRuntime.d.ts",
         "import": "./dist/esm/test/TestSuperviseRuntime.js",
         "require": "./dist/cjs/test/TestSuperviseRuntime.js"
+      },
+      "./bun/BunGateway": {
+        "types": "./dist/esm/bun/BunGateway.d.ts",
+        "import": "./dist/esm/bun/BunGateway.js",
+        "require": "./dist/cjs/bun/BunGateway.js"
       }
     }
   },
@@ -142,7 +148,8 @@
   "dependencies": {
     "@smthrs/control": "1.0.0-rc.0",
     "@smthrs/run-store": "1.0.0-rc.0",
-    "@smthrs/sync": "1.0.0-rc.0"
+    "@smthrs/sync": "1.0.0-rc.0",
+    "@effect/platform-bun": "4.0.0-rc.112"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.2",

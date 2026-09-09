@@ -1,0 +1,28 @@
+/** Bun HTTP adapter for the same authenticated workspace gateway protocol.
+ * @since 1.0.0
+ */
+import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
+import { Effect, Layer } from "effect"
+import { GatewayError } from "../GatewayError.ts"
+import type * as GatewayServer from "../GatewayServer.ts"
+import * as NativeGateway from "../internal/NativeGateway.ts"
+
+/** TCP bind and existing gateway policy options supported by the Bun host.
+ * @since 1.0.0
+ * @category models
+ */
+export type ServerOptions = Pick<NativeGateway.ServerOptions,
+  "host" | "port" | "allowedHosts" | "listen" | "credential" | "heartbeatMillis" | "maxRequestBodyBytes">
+
+const native = NativeGateway.makeLayer(options => BunHttpServer.layerServer({
+  hostname: options.host ?? "127.0.0.1",
+  port: options.port ?? 7331
+}).pipe(Layer.catchCause(() => Layer.effectContext(Effect.fail(new GatewayError({
+  code: "bind_failed", message: "The gateway socket could not be bound"
+}))))))
+
+/** Serves the existing HTTP/WebSocket gateway using Bun.serve in the caller's scope.
+ * @since 1.0.0
+ * @category layers
+ */
+export const layer = (health: GatewayServer.Health, options: ServerOptions = NativeGateway.defaultServerOptions) => native(health, options)

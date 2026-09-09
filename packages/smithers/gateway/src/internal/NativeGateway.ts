@@ -1,0 +1,237 @@
+/**
+ * Shared native gateway bind policy, credential policy,
+ * and the one composition a `smithers serve` verb hosts.
+ *
+ * Two rules decide whether a bind is allowed, and both fail closed:
+ *
+ * 1. A non-loopback host requires an explicit `listen` opt-in. Binding
+ *    `0.0.0.0` because a port was free is how a workspace gateway ends up on
+ *    a shared network by accident.
+ * 2. A non-loopback bind requires a bearer credential. The control plane can
+ *    launch runs, cancel them, and approve capability grants; reachable from
+ *    another machine, an unauthenticated one is a remote execution service.
+ *
+ * A loopback bind with no credential is allowed and is the local default:
+ * ingress checks Host and Origin so a web page cannot exercise that trust.
+ *
+ * @since 1.0.0
+ */
+import { ControlRpcs } from "@smthrs/control"
+import { Effect, Layer } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+import type { HttpServer } from "effect/unstable/http/HttpServer"
+import type { ServeError } from "effect/unstable/http/HttpServerError"
+import { RpcSerialization } from "effect/unstable/rpc"
+import type { ListenOptions } from "node:net"
+import { GatewayError, settingRefusal } from "../GatewayError.ts"
+import * as GatewayServer from "../GatewayServer.ts"
+
+/**
+ * Where the gateway binds, and whether a non-loopback bind was asked for.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface ServerOptions extends ListenOptions {
+  /** Additional accepted Host header names (without ports), for network or proxy access. */
+  readonly allowedHosts?: ReadonlyArray<string> | undefined
+  /** The `--listen` opt-in required for a non-loopback host. */
+  readonly listen?: boolean | undefined
+  /** The shared bearer credential, required for a non-loopback bind. */
+  readonly credential?: string | undefined
+  /**
+   * How often an idle followed `Watch` emits a keepalive frame on `/rpc/ws`,
+   * defaulting to `Projections.heartbeatIntervalMillis`. A relay with an idle
+   * cut shorter than that one needs a shorter cadence here.
+   */
+  readonly heartbeatMillis?: number | undefined
+  /** Maximum bytes accepted on one HTTP RPC request. Default one MiB. */
+  readonly maxRequestBodyBytes?: number | undefined
+}
+
+/**
+ * The default bind: loopback, port 7331, no credential.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const defaultServerOptions: ServerOptions = { host: "127.0.0.1", port: 7331 }
+
+/**
+ * Whether a host names this machine only.
+ *
+ * @param host the host to classify
+ * @since 1.0.0
+ * @category predicates
+ */
+export const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" || host === "::1" || host === "localhost"
+
+/**
+ * The typed refusal a requested bind earns, or `undefined` when it is allowed.
+ *
+ * Every start-time rule this module enforces answers here as a `bind_failed`
+ * `GatewayError`, so a host that wants to report a refusal rather than crash on
+ * one asks this before it composes a layer. {@link listenOptions} and
+ * {@link layer} fail with exactly what this returns.
+ *
+ * @param options the requested bind
+ * @since 1.0.0
+ * @category constructors
+ */
+export const bindRefusal = (options: ServerOptions): GatewayError | undefined => {
+  const setting = settingRefusal("The gateway keepalive cadence", options.heartbeatMillis) ??
+    settingRefusal("The gateway request body limit", options.maxRequestBodyBytes)
+  if (setting !== undefined) return setting
+  const host = options.host ?? "127.0.0.1"
+  if (isLoopbackHost(host)) return undefined
+  if (options.listen !== true) {
+    return new GatewayError({
+      code: "bind_failed",
+      message: `Refusing non-loopback gateway bind ${host} without an explicit --listen opt-in`
+    })
+  }
+  if (options.credential === undefined || options.credential === "") {
+    return new GatewayError({
+      code: "bind_failed",
+      message: `Refusing non-loopback gateway bind ${host} without a bearer credential`
+    })
+  }
+  return undefined
+}
+
+/**
+ * Applies the bind policy, returning the admitted Node options or a typed
+ * `bind_failed` refusal.
+ *
+ * @param options the requested bind
+ * @since 1.0.0
+ * @category constructors
+ */
+export const listenOptions = (options: ServerOptions): Effect.Effect<ListenOptions, GatewayError> =>
+  Effect.suspend(() => {
+    const refusal = bindRefusal(options)
+    if (refusal !== undefined) return Effect.fail(refusal)
+    // `credential`, `listen`, and the keepalive cadence are this module's, not
+    // `node:net`'s: they are named here so the rest is exactly a bind.
+    const {
+      allowedHosts: _allowedHosts,
+      credential: _credential,
+      heartbeatMillis: _cadence,
+      listen: _listen,
+      maxRequestBodyBytes: _maxBody,
+      ...node
+    } = options
+    return Effect.succeed({ ...node, host: node.host ?? "127.0.0.1" })
+  })
+
+/**
+ * The authentication both RPC mounts run under.
+ *
+ * A configured credential authenticates every request that presents it and
+ * stamps the same server-owned principal. With no credential the composition
+ * is loopback-only (see {@link listenOptions}) and every request runs as the
+ * local operator.
+ *
+ * @param options the requested bind
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.ControlAuth> =>
+  options.credential === undefined || options.credential === ""
+    // The credential-free local operator requires both the loopback bind and
+    // the ingress Host/Origin checks that exclude browser-originated attacks.
+    // eslint-disable-next-line no-restricted-syntax -- loopback-only bind, see above
+    ? ControlRpcs.layerNoopAuth({ id: "local", kind: "operator", stampedAt: 0 })
+    : ControlRpcs.layerBearerAuth({
+      token: options.credential,
+      principal: bearerPrincipal
+    })
+
+/**
+ * The identity stamped only after this gateway verifies its configured token.
+ * Hosts may explicitly delegate operator decisions to this exact identity.
+ * @category constants
+ * @since 1.0.0
+ */
+export const bearerPrincipal = Object.freeze({ id: "gateway", kind: "bearer" })
+
+/** Authenticates protected HTTP paths before any request body is read. */
+const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions => {
+  const maxRequestBodyBytes = options.maxRequestBodyBytes
+  const host = options.host ?? "127.0.0.1"
+  const allowedHosts = ["127.0.0.1", "localhost", "[::1]", ...options.allowedHosts ?? []]
+  const bindAuthority = URL.parse(`http://${host.includes(":") ? `[${host}]` : host}`)
+  if (host !== "0.0.0.0" && host !== "::" && bindAuthority !== null) allowedHosts.push(bindAuthority.hostname)
+  if (options.credential === undefined || options.credential === "") {
+    return {
+      loopbackOnly: true,
+      ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }),
+      allowedHosts
+    }
+  }
+  const authenticator = ControlRpcs.bearerAuthenticator({
+    token: options.credential,
+    principal: bearerPrincipal
+  })
+  return {
+    allowedHosts,
+    ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }),
+    authorize: (headers) =>
+      authenticator.authenticate(headers).pipe(
+        Effect.match({ onFailure: () => false, onSuccess: () => true })
+      )
+  }
+}
+
+const bindFailure = (failure: ServeError | GatewayError): GatewayError =>
+  new GatewayError({
+    code: "bind_failed",
+    message: "The gateway socket could not be bound",
+    cause: { _tag: failure._tag }
+  })
+
+const mapServeError = <A, R>(server: Layer.Layer<A, ServeError | GatewayError, R>): Layer.Layer<A, GatewayError, R> =>
+  server.pipe(
+    Layer.catch((failure) => Layer.effectContext<A, GatewayError, never>(Effect.fail(bindFailure(failure))))
+  )
+
+/**
+ * Hosts the assembled gateway on an injected native HTTP server.
+ *
+ * Supplies the bind policy, the shared-credential authentication both RPC
+ * mounts run under, and newline-delimited JSON as the wire serialization. The
+ * caller supplies what the mounts read through: `Control`, `Projections`,
+ * `SyncServer`, and the `SyncAuth` middleware.
+ *
+ * The returned layer retains the concrete `HttpServer` service, so a caller
+ * that bound port 0 can read the ephemeral address it got.
+ *
+ * Policy refusals and operating-system listen failures both fail the layer as
+ * sanitized `bind_failed` `GatewayError` values.
+ *
+ * @param health the identity `GET /health` answers with
+ * @param options the requested bind
+ * @since 1.0.0
+ * @category layers
+ */
+export const makeLayer = (
+  server: (options: ListenOptions) => Layer.Layer<HttpServer, ServeError | GatewayError>
+) => (
+  health: GatewayServer.Health,
+  options: ServerOptions = defaultServerOptions
+) =>
+  Layer.unwrap(
+    Effect.map(listenOptions(options), (nodeOptions) =>
+      HttpRouter.serve(
+        GatewayServer.layer(health, {
+          ...(options.heartbeatMillis === undefined ? {} : { heartbeatMillis: options.heartbeatMillis }),
+          ingress: ingressOptions(options)
+        }).pipe(
+          Layer.provide(layerAuth(options)),
+          Layer.provide(RpcSerialization.layerNdjson)
+        ),
+        { disableListenLog: true, disableLogger: true }
+      ).pipe(
+        Layer.provideMerge(mapServeError(server(nodeOptions)))
+      ))
+  )

@@ -45,6 +45,7 @@ The root entry point exports these namespaces; local modules are also importable
 | `SuperviseRuntime`          | `StaleRunningCandidate`, `QuotaDueCandidate`, `StaleClaimCandidate`, `Candidate`, `ResumeLease`, `ResumeErrorCode`, `ResumeError`, `Service`, `SuperviseRuntime`, `make`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                              | Declares the host seam used to discover and resume stale or quota-due work.                                  |
 | `Sync`                      | `RunCatalog`, `SyncClient`, `SyncError`, `SyncProtocol`, `SyncRpcs`, `SyncServer`                                                                                                                                                                                                                                                                                                                                                                                              | Re-exports `@smthrs/sync`, the read-only journal replication protocol.                                       |
 | `node/NodeGateway`          | `ServerOptions`, `defaultServerOptions`, `isLoopbackHost`, `bindRefusal`, `listenOptions`, `layerAuth`, `bearerPrincipal`, `layer`                                                                                                                                                                                                                                                                                                                                             | Binds the assembled gateway to a Node HTTP server under the bind and credential policy.                      |
+| `bun/BunGateway` | `ServerOptions`, `layer` | Bun HTTP/WebSocket adapter using the same bind, bearer, ingress and RPC policies. |
 | `test/TestSuperviseRuntime` | `TestSuperviseRuntimeOptions`, `TestSuperviseRuntime`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                         | Provides a controllable supervision test service.                                                            |
 
 ## Hosting it
@@ -90,3 +91,17 @@ const program = Effect.gen(function*() {
 ```
 
 `@smthrs/gateway/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
+
+The concrete Bun adapter serves the same protocol without a Node sidecar:
+
+```ts
+import * as BunGateway from "@smthrs/gateway/bun/BunGateway"
+
+const server = BunGateway.layer(health, { host: "127.0.0.1", port: 7331 })
+// Supply the same Control, Projections, SyncServer and SyncAuth layers.
+```
+
+`bun/BunGateway` supports TCP host/port binds. Platform adapters share one private
+policy/router implementation; neither adapter automatically advertises coding
+capabilities. Those belong to a configured host after its catalog and workspace
+binding have been validated.
