@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { contrastRatio, DEFAULT_THEME_KEY, serializeThemeVariant, themeRegistry } from "../src/index.ts";
+import { contrastRatioOf, mixChannels, contrastRatio, DEFAULT_THEME_KEY, serializeThemeVariant, themeRegistry } from "../src/index.ts";
 import {
   AA_MINIMUM,
   KNOWN_ROLE_COLLISIONS,
@@ -37,6 +37,12 @@ const variants = Object.entries(themeRegistry).flatMap(([key, theme]) =>
 );
 
 describe("theme registry", () => {
+  test("One dark success clears AA on the generator's exact 12% tint", () => {
+    const { success, surface } = themeRegistry.one!.dark;
+    expect(contrastRatioOf(mixChannels(success, surface, 1), mixChannels(success, surface, 0.12)))
+      .toBeGreaterThanOrEqual(4.5);
+  });
+
   test("contains the complete ordered suite with Night Owl as default", () => {
     expect(DEFAULT_THEME_KEY).toBe("night-owl");
     expect(Object.keys(themeRegistry)).toEqual([

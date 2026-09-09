@@ -1,9 +1,8 @@
 /**
  * Provides a typecheck-only stand-in for the Bun test API used by this package.
  *
- * This package deliberately declares zero dependencies, so it does not install
- * Bun's type declarations. If the package ever adds a devDependency, replace
- * this file with `bun-types`. Bun never loads this declaration when it runs the
+ * The package uses Shiki only to generate checked-in themes; it does not install
+ * Bun's type declarations. Bun never loads this declaration when it runs the
  * suite.
  */
 /// <reference types="node" />

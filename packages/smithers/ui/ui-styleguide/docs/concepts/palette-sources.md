@@ -41,9 +41,12 @@ after stops being that theme.
 ## Generated palettes are checked in
 
 [`scripts/generate-theme-registry.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts)
-reads `@shikijs/themes` 3.23.0 and writes seven files into `src/themes/`. The
+reads `@shikijs/themes` 4.4.3 and writes seven files into `src/themes/`. The
 output is checked in so that a consumer never resolves a syntax theme at
-runtime.
+runtime. The package pins Shiki as a development dependency and resolves it
+locally. Each generated banner records that resolved package's version.
+Semantic tint thresholds use the audit's exact mixed channels; only stored hex
+colors are rounded.
 
 The script writes the checked-in shape directly, with unquoted identifier keys,
 trailing commas, and two-space indent, so a regeneration that changes nothing is

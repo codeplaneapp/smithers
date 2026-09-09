@@ -23,8 +23,8 @@ const cwd = "packages/smithers/ui/ui-styleguide"
  * `tsc --noEmit` over the sources and tests.
  *
  * The suites import `bun:test`, and `tests/bunTest.d.ts` supplies the local
- * ambient declaration that stands in for `bun-types` while this package keeps
- * zero dependencies.
+ * ambient declaration that stands in for `bun-types`. Runtime sources remain
+ * dependency-free.
  *
  * @since 1.0.0-rc.0
  * @category build
@@ -38,6 +38,22 @@ const check = Smithers.Typecheck({
   tsconfig: Smithers.file("tsconfig.json"),
   buildMode: false,
   incremental: false,
+  cwd
+})
+
+// Shiki is pinned by this package's manifest and the workspace lockfile.
+const shikiThemes = Smithers.Filegroup({
+  srcs: [
+    Smithers.file("package.json"),
+    Smithers.file("//pnpm-lock.yaml"),
+    Smithers.file("node_modules/@shikijs/themes/package.json"),
+    ...[
+      "index", "night-owl", "night-owl-light", "one-dark-pro", "one-light",
+      "github-dark", "github-light", "catppuccin-mocha", "catppuccin-latte",
+      "solarized-dark", "solarized-light", "gruvbox-dark-medium", "gruvbox-light-medium",
+      "rose-pine", "rose-pine-dawn"
+    ].map((id) => Smithers.file(`node_modules/@shikijs/themes/dist/${id}.mjs`))
+  ],
   cwd
 })
 
@@ -55,7 +71,7 @@ const check = Smithers.Typecheck({
  * threshold this suite is gated on, so lowering it must re-key the target
  * rather than land behind a cache hit.
  *
- * So are `README.md` and `docs/*.md`. `tests/docs.test.ts` reads them against
+ * So are `README.md` and every Markdown file under `docs/`. `tests/docs.test.ts` reads them against
  * the barrel and fails when an export goes undocumented, which is how the
  * missing `Rgb` row was found; a documentation edit that drops an export has to
  * re-key this target rather than land behind a cache hit.
@@ -69,13 +85,13 @@ const unitTests = Smithers.NodeTest({
   srcs: [
     Smithers.glob("//packages/smithers/ui/ui-styleguide/src/**/*.ts"),
     Smithers.glob("//packages/smithers/ui/ui-styleguide/tests/**/*.ts"),
-    Smithers.glob("//packages/smithers/ui/ui-styleguide/docs/*.md"),
+    Smithers.glob("//packages/smithers/ui/ui-styleguide/docs/**/*.md"),
     Smithers.file("//packages/smithers/ui/ui-styleguide/README.md"),
     Smithers.file("//packages/smithers/ui/ui-styleguide/bunfig.toml"),
-    Smithers.file("//packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts"),
+    Smithers.glob("//packages/smithers/ui/ui-styleguide/scripts/**/*.ts"),
     Smithers.file("//pnpm-lock.yaml")
   ],
-  deps: [],
+  deps: [shikiThemes],
   cwd
 })
 
@@ -91,5 +107,5 @@ const docsFiles = Smithers.Filegroup({
 })
 
 export const Package = Smithers.Package({
-  targets: { check, docsFiles, unitTests }
+  targets: { check, docsFiles, shikiThemes, unitTests }
 })

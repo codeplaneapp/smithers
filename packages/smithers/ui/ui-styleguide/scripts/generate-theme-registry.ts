@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate Smithers theme records from @shikijs/themes 3.23.0.
+ * Generate Smithers theme records from the locally pinned @shikijs/themes.
  *
  * The registry it writes (`packages/smithers/ui/ui-styleguide/src/themes/*.ts`) is
  * generated and checked in, so a consumer never resolves a syntax theme at
@@ -26,19 +26,22 @@
  * relative specifier does not resolve, and a regeneration without this check
  * would silently take that extension back off.
  */
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { contrastRatioOf, type Rgb } from "../src/contrastRatio.ts";
+import { rgbChannels } from "../src/rgbChannels.ts";
+import { mixChannels, mixColors } from "../src/mixColors.ts";
 import { secondaryText } from "./secondaryText.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const pierre = realpathSync(resolve(root, "packages/smithers/ui/node_modules/@pierre/diffs"));
-const requireFromPierre = createRequire(resolve(pierre, "package.json"));
+const require = createRequire(import.meta.url);
+const shikiManifest = resolve(dirname(require.resolve("@shikijs/themes")), "../package.json");
+const { version: shikiVersion } = JSON.parse(readFileSync(shikiManifest, "utf8")) as { version: string };
 const outputDir = resolve(root, "packages/smithers/ui/ui-styleguide/src/themes");
 
 type Mode = "light" | "dark";
-type Rgb = [number, number, number];
 type UpstreamTheme = { colors: Record<string, string | null>; name: string };
 
 const specs = [
@@ -62,48 +65,12 @@ const accents: Record<string, { dark: string; light: string }> = {
   rosePine: { dark: "#c4a7e7", light: "#907aa9" },
 };
 
-function rgb(hex: string): Rgb {
-  const value = hex.replace("#", "").slice(0, 6);
-  const full = value.length === 3 ? [...value].map((c) => c + c).join("") : value;
-  return [0, 2, 4].map((i) => Number.parseInt(full.slice(i, i + 2), 16)) as Rgb;
-}
-
-function hex(channels: Rgb): string {
-  return `#${channels
-    .map((n) =>
-      Math.round(Math.max(0, Math.min(255, n)))
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`;
-}
-
-function mix(a: string, b: string, amount: number): string {
-  const ar = rgb(a);
-  const br = rgb(b);
-  return hex(ar.map((n, i) => n * amount + br[i]! * (1 - amount)) as Rgb);
-}
-
-function luminance(value: string): number {
-  const channels = rgb(value).map((n) => {
-    const c = n / 255;
-    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
-}
-
-function contrast(a: string, b: string): number {
-  const al = luminance(a);
-  const bl = luminance(b);
-  return (Math.max(al, bl) + 0.05) / (Math.min(al, bl) + 0.05);
-}
-
 /** Adjust a semantic seed until it reaches WCAG AA on its shared soft tint. */
 function contrastSafe(seed: string, surface: string, amount: number, mode: Mode): string {
   let value = seed.slice(0, 7);
   const target = mode === "light" ? "#000000" : "#ffffff";
-  for (let step = 0; step <= 100 && contrast(value, mix(value, surface, amount)) < 4.5; step += 1) {
-    value = mix(target, value, 0.035);
+  for (let step = 0; step <= 100 && contrastRatioOf(rgbChannels(value), mixChannels(value, surface, amount)) < 4.5; step += 1) {
+    value = mixColors(target, value, 0.035);
   }
   return value;
 }
@@ -113,7 +80,7 @@ function opaque(value: string | null | undefined, fallback: string): string {
 }
 
 async function load(id: string): Promise<UpstreamTheme> {
-  const modulePath = requireFromPierre.resolve(`@shikijs/themes/${id}`);
+  const modulePath = require.resolve(`@shikijs/themes/${id}`);
   return (await import(modulePath)).default as UpstreamTheme;
 }
 
@@ -123,7 +90,7 @@ function terminal(theme: UpstreamTheme, bg: string, text: string, semantic: Reco
   // Bright fallbacks repeat that mapping; bright black is a text/background
   // midpoint and bright white uses the editor foreground.
   const ansi = (name: string, fallback: string) => opaque(c[`terminal.ansi${name}`], fallback);
-  const selection = c["terminal.selectionBackground"] ?? `rgba(${rgb(semantic.info).join(",")},0.3)`;
+  const selection = c["terminal.selectionBackground"] ?? `rgba(${rgbChannels(semantic.info).join(",")},0.3)`;
   return {
     background: opaque(c["terminal.background"], bg),
     foreground: opaque(c["terminal.foreground"], text),
@@ -137,7 +104,7 @@ function terminal(theme: UpstreamTheme, bg: string, text: string, semantic: Reco
     magenta: ansi("Magenta", semantic.brand),
     cyan: ansi("Cyan", semantic.info),
     white: ansi("White", text),
-    brightBlack: ansi("BrightBlack", mix(text, bg, 0.45)),
+    brightBlack: ansi("BrightBlack", mixColors(text, bg, 0.45)),
     brightRed: ansi("BrightRed", semantic.danger),
     brightGreen: ansi("BrightGreen", semantic.success),
     brightYellow: ansi("BrightYellow", semantic.warning),
@@ -156,9 +123,9 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
   // surfaces follow the existing zinc semantics: the page background sits one
   // step below a near-white card, inset fills darken from that card, and
   // overlays return to white.
-  const surface = mode === "dark" ? mix(foreground, bg, 0.055) : mix("#ffffff", bg, 0.75);
-  const surface2 = mode === "dark" ? mix(foreground, bg, 0.095) : mix(foreground, surface, 0.055);
-  const surface3 = mode === "dark" ? mix(foreground, bg, 0.135) : "#ffffff";
+  const surface = mode === "dark" ? mixColors(foreground, bg, 0.055) : mixColors("#ffffff", bg, 0.75);
+  const surface2 = mode === "dark" ? mixColors(foreground, bg, 0.095) : mixColors(foreground, surface, 0.055);
+  const surface3 = mode === "dark" ? mixColors(foreground, bg, 0.135) : "#ffffff";
   const textBackgrounds = [bg, surface, surface2, surface3];
   // Leave room for the 5:1 muted token and a visible step below primary text.
   // Surfaces keep their upstream seed so correcting text does not move the
@@ -201,12 +168,12 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
       const amount = name === "success" || name === "warning" ? 0.12 : 0.1;
       let value = contrastSafe(seed, surface, amount, mode);
       const target = mode === "light" ? "#000000" : "#ffffff";
-      for (let step = 0; step <= 100 && contrast(value, surface3) < 4.5; step += 1) value = mix(target, value, 0.035);
+      for (let step = 0; step <= 100 && contrastRatioOf(rgbChannels(value), rgbChannels(surface3)) < 4.5; step += 1) value = mixColors(target, value, 0.035);
       return [name, value];
     }),
   ) as Record<string, string>;
-  const t = rgb(text);
-  const s = rgb(surface);
+  const t = rgbChannels(text);
+  const s = rgbChannels(surface);
   const rgba = (channels: Rgb, alpha: number) => `rgba(${channels.join(",")},${alpha})`;
   const tokens = {
     colorScheme: mode,
@@ -226,7 +193,7 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
     surfaceGlassStrong: rgba(s, 0.85),
     border: rgba(t, mode === "dark" ? 0.09 : 0.08),
     borderStrong: rgba(t, mode === "dark" ? 0.16 : 0.14),
-    borderSolid: mix(text, bg, mode === "dark" ? 0.15 : 0.11),
+    borderSolid: mixColors(text, bg, mode === "dark" ? 0.15 : 0.11),
     hover: surface2,
     hoverSubtle: rgba(t, mode === "dark" ? 0.05 : 0.04),
     inverseBg: text,
@@ -295,7 +262,7 @@ for (const [name, label, shikiDark, shikiLight] of specs) {
     syntax: { shikiDark, shikiLight },
     terminal: { dark: dark.terminal, light: light.terminal },
   };
-  const source = `// Generated by packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts from @shikijs/themes 3.23.0. Do not edit.\nimport type { SmithersTheme } from "../SmithersTheme.ts";\n\nexport const ${name}: SmithersTheme = ${literal(record)};\n`;
+  const source = `// Generated by packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts from @shikijs/themes ${shikiVersion}. Do not edit.\nimport type { SmithersTheme } from "../SmithersTheme.ts";\n\nexport const ${name}: SmithersTheme = ${literal(record)};\n`;
   const file = resolve(outputDir, `${name}.ts`);
   if (!check) {
     outputs.push({ file, source });

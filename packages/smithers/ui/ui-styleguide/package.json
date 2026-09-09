@@ -21,5 +21,8 @@
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
+  },
+  "devDependencies": {
+    "@shikijs/themes": "4.4.3"
   }
 }

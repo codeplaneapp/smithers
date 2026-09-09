@@ -131,9 +131,9 @@ describe("mixChannels", () => {
     const one = themeRegistry.one!.dark;
     const exact = contrastRatioOf(
       [0x64, 0xbc, 0x9d],
-      mixChannels(one.success, one.surface, 0.12),
+      mixChannels("#64bc9d", "#2f333c", 0.12),
     );
-    const rounded = contrastRatio(one.success, mixColors(one.success, one.surface, 0.12));
+    const rounded = contrastRatio("#64bc9d", mixColors("#64bc9d", "#2f333c", 0.12));
     // The shipped recipe, scored the same exact way. `amount: 1` is the pure
     // foreground: `rgbChannels` is internal, so the barrel reaches it through
     // a full-strength mix.
