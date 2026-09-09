@@ -7,7 +7,8 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Stream from "effect/Stream"
-import { defaultCheckTimeout, expired } from "../internal/deadline.ts"
+import { boundedCheck } from "../internal/boundedCheck.ts"
+import { defaultCheckTimeout } from "../internal/deadline.ts"
 import * as check_ from "../ProviderConformance/check.ts"
 import type { Commands } from "../ProviderConformance/Commands.ts"
 import type { Violation } from "../ProviderConformance/Violation.ts"
@@ -34,9 +35,7 @@ const inSession = <A>(
   deadline: Duration.Input,
   body: (session: Session) => Effect.Effect<A, unknown, never>
 ): Effect.Effect<Exit.Exit<A, unknown>> =>
-  Effect.exit(
-    Effect.raceFirst(Effect.scoped(Effect.flatMap(provider.acquire(session), body)), expired(deadline))
-  )
+  boundedCheck(Effect.scoped(Effect.flatMap(provider.acquire(session), body)), deadline)
 
 /** Standard output as text plus the exit status, the shape most checks compare. */
 const output = (process: RemoteProcess): Effect.Effect<string, ProviderError> =>
@@ -99,8 +98,8 @@ export interface CheckOptions {
   readonly commands?: Commands | undefined
   /**
    * How long any single check may take, machine acquisition included, before
-   * it is convicted as hung. Default 240 seconds, sized for a backend that
-   * provisions a real machine per check.
+   * it is convicted as hung. Default 10 seconds. Raise it explicitly for slow
+   * machine provisioning and size the test budget for the whole suite.
    */
   readonly checkTimeout?: Duration.Input | undefined
   /** Capabilities the provider's sessions are declared to have. */
@@ -202,15 +201,13 @@ export const check = (
         yield* run(live, "printf 'from-process' > conformance-produced.txt")
         return new TextDecoder().decode(yield* live.readFile(`${live.workdir}/conformance-produced.txt`))
       }))
-    const reacquired = yield* Effect.exit(
-      Effect.raceFirst(
-        Effect.andThen(
-          Effect.scoped(Effect.asVoid(provider.acquire(session))),
-          Effect.scoped(Effect.flatMap(provider.acquire(session), (live) =>
-            run(live, "printf 'again'")))
-        ),
-        expired(deadline)
-      )
+    const reacquired = yield* boundedCheck(
+      Effect.andThen(
+        Effect.scoped(Effect.asVoid(provider.acquire(session))),
+        Effect.scoped(Effect.flatMap(provider.acquire(session), (live) =>
+          run(live, "printf 'again'")))
+      ),
+      deadline
     )
     // The delegated suite gets the same deadline. It used to be called outside
     // every race this generator sets up, so a provider that hung on spawn hung

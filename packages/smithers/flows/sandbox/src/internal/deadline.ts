@@ -30,11 +30,9 @@ export const elapsed = (duration: Duration.Input): Effect.Effect<void> =>
  * provides one), where a clock-based timeout never fires; a conformance suite
  * whose hang protection depends on the very layer a host may freeze would
  * hang exactly when it is needed. The timer here is the platform's own, so a
- * stuck check is convicted under any clock, and losing the race interrupts
- * the check, which closes its scope and ends whatever it spawned.
- *
- * Both conformance suites share this, so neither can be hang-proof while the
- * other is not.
+ * stuck check is convicted under any clock. `boundedCheck` races observation
+ * of the check against this failure and requests cleanup without waiting for
+ * uninterruptible provider acquisition or finalizers.
  *
  * @category constructors
  * @since 0.1.0
@@ -60,9 +58,10 @@ export const timedOut = (deadline: Duration.Input): ProviderError =>
 
 /**
  * How long any single conformance check may take before it is convicted as
- * hung. Sized for a backend that provisions a real machine per check.
+ * hung. Below bundled provider test budgets; slow machine provisioning must
+ * opt into a longer deadline and a matching whole-suite test budget.
  *
  * @category models
  * @since 0.1.0
  */
-export const defaultCheckTimeout: Duration.Input = Duration.seconds(240)
+export const defaultCheckTimeout: Duration.Input = Duration.seconds(10)

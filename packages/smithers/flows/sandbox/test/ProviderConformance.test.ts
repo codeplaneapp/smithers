@@ -7,7 +7,8 @@
  * honors the contract reports nothing, and each way of missing it is named.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { Deferred, Duration, Effect, Fiber, Stream } from "effect"
+import { defaultCheckTimeout, elapsed } from "../src/internal/deadline.ts"
 import * as ProviderConformance from "../src/ProviderConformance/index.ts"
 import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
@@ -36,6 +37,103 @@ const checks = (violations: ReadonlyArray<ProviderConformance.Violation>) =>
   violations.map((violation) => violation.check)
 
 describe("ProviderConformance", () => {
+  for (const phase of ["acquire", "body", "release"] as const) {
+    it.effect(`bounds a stuck transport ${phase} and starts cleanup`, () =>
+      Effect.gen(function*() {
+        const gate = yield* Deferred.make<void>()
+        const cleanups: Array<Deferred.Deferred<void>> = []
+        let releases = 0
+        const base = RemoteChildProcessSpawner.TestRemote.make({ scripts })
+        const provider: RemoteChildProcessSpawner.Provider = {
+          ...base,
+          open: () =>
+            Effect.acquireRelease(
+              Effect.gen(function*() {
+                const done = yield* Deferred.make<void>()
+                cleanups.push(done)
+                if (phase === "acquire") yield* Deferred.await(gate)
+                return done
+              }),
+              (done) =>
+                Effect.gen(function*() {
+                  releases++
+                  if (phase === "release") yield* Deferred.await(gate)
+                  yield* Deferred.succeed(done, undefined)
+                })
+            ).pipe(Effect.asVoid),
+          spawn: (command, options) =>
+            phase === "body"
+              ? Effect.andThen(Deferred.await(gate), base.spawn(command, options))
+              : base.spawn(command, options)
+        }
+        const running = yield* Effect.forkDetach(
+          ProviderConformance.check(provider, commands, { checkTimeout: "20 millis" })
+        )
+        yield* Effect.gen(function*() {
+          const violations = yield* Effect.raceFirst(Fiber.join(running), Effect.as(elapsed("2 seconds"), undefined))
+          expect(violations, "the deadline must return before the stuck boundary is released").toBeDefined()
+          expect(violations?.map(({ check }) => check)).toEqual(["writes-its-output", "reports-a-nonzero-exit"])
+          for (const violation of violations ?? []) {
+            expect(violation.actual).toContain("did not finish within 20 milliseconds")
+          }
+          if (phase !== "acquire") expect(releases).toBeGreaterThan(0)
+        }).pipe(Effect.ensuring(Effect.andThen(Deferred.succeed(gate, undefined), Fiber.interrupt(running))))
+        yield* Effect.all(cleanups.map(Deferred.await))
+        expect(releases).toBe(cleanups.length)
+      }))
+  }
+
+  it.effect("requests cleanup when the caller cancels without awaiting a stuck release", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const releasing = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      const released = yield* Deferred.make<void>()
+      const provider: RemoteChildProcessSpawner.Provider = {
+        ...RemoteChildProcessSpawner.TestRemote.make({ scripts }),
+        open: () =>
+          Effect.acquireRelease(Effect.void, () =>
+            Effect.gen(function*() {
+              yield* Deferred.succeed(releasing, undefined)
+              yield* Deferred.await(gate)
+              yield* Deferred.succeed(released, undefined)
+            })),
+        spawn: () => Effect.andThen(Deferred.succeed(entered, undefined), Effect.never)
+      }
+      const running = yield* Effect.forkDetach(ProviderConformance.check(provider, commands))
+      yield* Effect.gen(function*() {
+        yield* Deferred.await(entered)
+        const interrupted = yield* Effect.raceFirst(
+          Effect.as(Fiber.interrupt(running), true),
+          Effect.as(elapsed("1 second"), false)
+        )
+        expect(interrupted).toBe(true)
+        const cleanupStarted = yield* Effect.raceFirst(
+          Effect.as(Deferred.await(releasing), true),
+          Effect.as(elapsed("1 second"), false)
+        )
+        expect(cleanupStarted).toBe(true)
+      }).pipe(Effect.ensuring(Effect.andThen(Deferred.succeed(gate, undefined), Fiber.interrupt(running))))
+      yield* Deferred.await(released)
+    }))
+
+  it.effect("uses the wall clock for a no-op kill under a frozen TestClock", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts, kill: true, killIsNoop: true })
+      const violations = yield* ProviderConformance.check(provider, { ...commands, stopsWithin: "20 millis" }, {
+        checkTimeout: "500 millis"
+      })
+      expect(checks(violations)).toEqual(["signals-a-running-command"])
+      expect(violations[0]?.actual).toBe("the command was still running after the signal")
+    }))
+
+  it("defaults to a deadline below the shortest bundled provider test budget", () => {
+    expect(Duration.toMillis(defaultCheckTimeout)).toBeLessThan(30_000)
+    expect(Duration.toMillis(defaultCheckTimeout)).toBeGreaterThan(
+      Duration.toMillis(ProviderConformance.defaultStopsWithin)
+    )
+  })
+
   it.live("reports nothing for a provider that honors the whole contract", () =>
     Effect.gen(function*() {
       const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts, kill: true, ping: Effect.void })

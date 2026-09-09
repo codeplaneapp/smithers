@@ -213,7 +213,7 @@ boots `nixos/nix`.
 ## "the check did not finish within N milliseconds"
 
 **What happened.** A conformance check outlived `CheckOptions.checkTimeout`
-(240 seconds by default), measured on the platform timer rather than the
+(10 seconds by default), measured on the platform timer rather than the
 ambient `Clock`.
 
 **What to change.** Find what does not answer. A common cause is a provider

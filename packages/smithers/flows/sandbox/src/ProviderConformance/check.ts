@@ -6,12 +6,12 @@
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { defaultCheckTimeout, elapsed, timedOut } from "../internal/deadline.ts"
+import { boundedCheck } from "../internal/boundedCheck.ts"
+import { defaultCheckTimeout, elapsed } from "../internal/deadline.ts"
 import { layer } from "../RemoteChildProcessSpawner/layer.ts"
 import type { Provider } from "../RemoteChildProcessSpawner/Provider.ts"
 import { fromProvider } from "../SandboxHealth/fromProvider.ts"
@@ -31,33 +31,12 @@ const shown = (exit: Exit.Exit<unknown, unknown>): string =>
  * consumption included: every one of `open`, `spawn`, a stdout stream that
  * never ends, `ping`, and `kill` can hang, and only the wait after a
  * successful kill was ever bounded.
- *
- * The check runs in a detached fiber and the deadline is a race against
- * WAITING for it, not against the check itself. Racing the check directly
- * bounded only its body: losing the race interrupts it, interruption closes
- * the process scope, and that scope's finalizer sends the signal the provider
- * is already failing to answer, uninterruptibly and under its own separate
- * five-second bound. A caller who asked for a hundred-millisecond deadline
- * waited five seconds and more per hung check, and the suite convicted checks
- * that were still queued behind that wait. So the fiber is abandoned instead:
- * the interruption is started and left to finish on its own, which is what
- * bounding a signal rather than waiting on it means one layer down.
  */
 const inSession = <A>(
   provider: Provider,
   deadline: Duration.Input,
   effect: Effect.Effect<A, unknown, ChildProcessSpawner>
-): Effect.Effect<Exit.Exit<A, unknown>> =>
-  Effect.gen(function*() {
-    const running = yield* Effect.forkDetach(Effect.exit(Effect.provide(effect, layer(provider))))
-    const settled = yield* Effect.raceFirst(
-      Effect.map(Fiber.join(running), (exit) => ({ exit })),
-      Effect.as(elapsed(deadline), undefined)
-    )
-    if (settled !== undefined) return settled.exit
-    yield* Effect.forkDetach(Fiber.interrupt(running))
-    return Exit.fail(timedOut(deadline))
-  })
+): Effect.Effect<Exit.Exit<A, unknown>> => boundedCheck(Effect.provide(effect, layer(provider)), deadline)
 
 const writesItsOutput = (
   provider: Provider,
@@ -137,9 +116,9 @@ const signalsARunningCommand = (
         // HOW it stopped is not the subject. A provider that reports a
         // signalled process as a failed `exitCode` is as conforming as one that
         // reports a status, so the exit is captured rather than awaited.
-        const stopped = yield* Effect.timeoutOption(
-          Effect.exit(handle.exitCode),
-          commands.stopsWithin ?? defaultStopsWithin
+        const stopped = yield* Effect.raceFirst(
+          Effect.map(Effect.exit(handle.exitCode), Option.some),
+          Effect.as(elapsed(commands.stopsWithin ?? defaultStopsWithin), Option.none())
         )
         if (Option.isNone(stopped) || commands.survivor === undefined) return { stopped, survived: false }
         // The handle is the wrapper shell, and a shell that dies while its
@@ -203,7 +182,8 @@ const deliversStandardInput = (
 export interface CheckOptions {
   /**
    * How long any single check may take, session acquisition included, before
-   * it is convicted as hung. Default 240 seconds.
+   * it is convicted as hung. Default 10 seconds. Raise it explicitly for slow
+   * machine provisioning and size the test budget for the whole suite.
    */
   readonly checkTimeout?: Duration.Input | undefined
 }

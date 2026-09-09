@@ -6,13 +6,14 @@
  * whose truthful half is fake would prove the suite agrees with the fake.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, vi } from "vitest"
 import * as DirectorySandbox from "../src/DirectorySandbox/index.ts"
+import { elapsed } from "../src/internal/deadline.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
@@ -46,6 +47,60 @@ const checkNames = (violations: ReadonlyArray<{ readonly check: string }>): Read
   violations.map((violation) => violation.check)
 
 describe("SandboxConformance", () => {
+  for (const phase of ["acquire", "body", "release"] as const) {
+    it.effect(`bounds a stuck session ${phase}, including reacquire, and starts cleanup`, () =>
+      Effect.gen(function*() {
+        const gate = yield* Deferred.make<void>()
+        const cleanups: Array<Deferred.Deferred<void>> = []
+        let releases = 0
+        const body = phase === "body" ? Deferred.await(gate) : Effect.void
+        const session: Sandbox.Session = {
+          id: "bounded",
+          remoteId: "bounded",
+          workdir: "/bounded",
+          writeFile: () => body,
+          readFile: () => Effect.as(body, new Uint8Array()),
+          spawn: () =>
+            Effect.as(body, {
+              stdout: Stream.empty,
+              stderr: Stream.empty,
+              exitCode: Effect.succeed(0)
+            })
+        }
+        const provider: Sandbox.Provider = {
+          acquire: () =>
+            Effect.acquireRelease(
+              Effect.gen(function*() {
+                const done = yield* Deferred.make<void>()
+                cleanups.push(done)
+                if (phase === "acquire") yield* Deferred.await(gate)
+                return { session, done }
+              }),
+              ({ done }) =>
+                Effect.gen(function*() {
+                  releases++
+                  if (phase === "release") yield* Deferred.await(gate)
+                  yield* Deferred.succeed(done, undefined)
+                })
+            ).pipe(Effect.map(({ session }) => session))
+        }
+        const running = yield* Effect.forkDetach(SandboxConformance.check(provider, { checkTimeout: "20 millis" }))
+        yield* Effect.gen(function*() {
+          const violations = yield* Effect.raceFirst(Fiber.join(running), Effect.as(elapsed("2 seconds"), undefined))
+          expect(violations, "the deadline must return before the stuck boundary is released").toBeDefined()
+          for (const name of ["round-trips-binary-bytes", "reacquires-its-session", "writes-its-output"]) {
+            expect(violations?.find(({ check }) => check === name)?.actual).toContain(
+              "did not finish within 20 milliseconds"
+            )
+          }
+          if (phase !== "acquire") expect(releases).toBeGreaterThan(0)
+        }).pipe(Effect.ensuring(Effect.andThen(Deferred.succeed(gate, undefined), Fiber.interrupt(running))))
+        // Timed-out checks still own their release, even after the suite returns.
+        yield* Effect.all(cleanups.map(Deferred.await))
+        expect(releases).toBe(cleanups.length)
+      }))
+  }
+
   // These trials run real OS processes. A cleanup observation may need a
   // clock-driven retry after native exit; a frozen TestClock never advances
   // that retry. Keep real deadlines here, as in ProviderConformance's trials.
