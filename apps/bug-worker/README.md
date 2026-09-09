@@ -11,9 +11,9 @@ the app handoff, API, notification configuration, and deployment requirements.
 
 ## The payload
 
-Two shapes reach this endpoint and both are stored. The worker is deployed once
-and talks to every CLI version ever installed, so bouncing a shape would drop
-the report of the user most likely to be hitting a bug.
+The current and 0.x CLI envelopes are accepted and stored without conversion.
+Installed 0.x CLIs still target this endpoint with `title` and an object-valued
+`platform`, so the intake retains both forms.
 
 ### rc.0, what `smithers bug` posts today
 
@@ -59,14 +59,19 @@ run.
 0.x sent `workflowName` and `workflowPath` instead of `flowId`, a five-status
 vocabulary, and events keyed `seq`/`timestampMs`/`type`.
 
-The one thing the worker insists on is a headline: `summary` or `title`, at
-least one, non-empty. `tests/smithersBugPayload.test.ts` pins both shapes and
-builds the run DTOs through `@smthrs/control`'s schemas, so a control-plane DTO
-change fails there rather than in triage.
+At least one of `summary` or `title` must contain non-whitespace text. Each
+headline, when supplied and non-null, must be a string of 1 to 500 characters.
+`platform` may be a string or an object with arbitrary fields. Optional fields
+may be omitted or null; unknown fields are preserved.
+
+`tests/smithersBugPayload.test.ts` pins both shapes, including a POST/admin-GET
+round trip of the 0.x example, and builds current run DTOs through
+`@smthrs/control`'s schemas. `tests/bugWorker.test.ts` also round-trips a
+title-only report.
 
 ## Routes
 
-- `POST /api/bugs` — zod-validated report: one of `summary` or `title` is
+- `POST /api/bugs` — zod-validated report: a non-blank `summary` or `title` is
   required, every other key is optional, and the object stays loose. 256KB cap
   (stream-counted, so a missing/spoofed content-length can't buffer past the
   cap), per-IP rate limit of 20/hour via a

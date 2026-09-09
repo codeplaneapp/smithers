@@ -8,8 +8,9 @@ deploy instructions live in `../README.md`).
   buffer the platform cap), timing-safe admin auth for `GET /api/bugs/:id`.
   `createBugWorker(deps)` exists so tests can inject a clock; the default
   export uses `Date.now`.
-- `bugReportSchema.ts` — deliberately loose zod schema (only `title` is
-  required): better to store an odd report than bounce one.
+- `bugReportSchema.ts` — loose zod schema requiring a non-blank `summary` or
+  `title` (1 to 500 characters). Accepts current string and 0.x object platform
+  values, preserves unknown fields, and stores either envelope without conversion.
 - `newBugId.ts` — sortable ulid-ish id (base32 ms timestamp + 16 random chars).
 - `env.ts` — `BugWorkerEnv`/`BugKv` binding interfaces; tests satisfy them with
   `tests/helpers/memoryKv.ts`.

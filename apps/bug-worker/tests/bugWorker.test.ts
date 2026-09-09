@@ -66,7 +66,21 @@ describe("bug worker", () => {
     expect(res.status).toBe(201);
   });
 
-  test("invalid payload (missing summary) rejected 400", async () => {
+  test("title-only reports round-trip through POST and admin GET", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const report = { title: "engine crashed on resume" };
+    const posted = await worker.fetch(postBug(report), env);
+    expect(posted.status).toBe(201);
+    const { id, url } = (await posted.json()) as { id: string; url: string };
+    const stored = JSON.parse((await env.BUGS.get(`bug:${id}`))!);
+    expect(stored.report).toEqual(report);
+    const read = await worker.fetch(new Request(url, { headers: { "x-bug-admin": ADMIN } }), env);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual(stored);
+  });
+
+  test("invalid payload (missing headline) rejected 400", async () => {
     const worker = createBugWorker();
     const res = await worker.fetch(postBug({ version: "1.0.0-rc.0" }), makeEnv());
     expect(res.status).toBe(400);

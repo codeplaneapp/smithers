@@ -46,6 +46,16 @@ const payload = {
   digest: { runId: runSummary.runId, events: controlEvents },
 };
 
+// The complete 0.x example in README.md.
+const legacyPayload = {
+  title: "Run run-01JQ… failed: the review step exhausted its correction budget",
+  body: "It failed the same way twice on a clean checkout.",
+  smithersVersion: "0.35.0",
+  platform: { os: "darwin", arch: "arm64", nodeVersion: "v22.19.0" },
+  createdAtMs: 1788000050000,
+  run: { runId: "r-123", workflowName: "build-and-review", status: "failed", events: [] },
+};
+
 function makeEnv(): BugWorkerEnv & { BUGS: ReturnType<typeof memoryKv> } {
   return { BUGS: memoryKv(), BUG_ADMIN_TOKEN: "admin", PUBLIC_BASE_URL: "https://bug.smithers.sh" };
 }
@@ -59,6 +69,30 @@ function post(body: unknown): Request {
 }
 
 describe("the smithers bug payload contract", () => {
+  test("round-trips the documented 0.x payload through POST and admin GET", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const response = await worker.fetch(post(legacyPayload), env);
+    expect(response.status).toBe(201);
+
+    const { id, url } = (await response.json()) as { id: string; url: string };
+    const stored = JSON.parse((await env.BUGS.get(`bug:${id}`))!) as { report: typeof legacyPayload };
+    expect(stored.report).toEqual(legacyPayload);
+    const read = await worker.fetch(new Request(url, { headers: { "x-bug-admin": "admin" } }), env);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual(stored);
+  });
+
+  test("accepts an object platform with a summary and preserves unknown platform fields", async () => {
+    const report = { ...payload, platform: { os: "darwin", arch: "arm64", bunVersion: "1.4.1", extra: true } };
+    const env = makeEnv();
+    const response = await createBugWorker().fetch(post(report), env);
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    const stored = JSON.parse((await env.BUGS.get(`bug:${id}`))!) as { report: typeof report };
+    expect(stored.report).toEqual(report);
+  });
+
   test("accepts and stores the CLI payload", async () => {
     expect(bugReportSchema.safeParse(payload).success).toBe(true);
     const env = makeEnv();
@@ -88,8 +122,11 @@ describe("the smithers bug payload contract", () => {
     expect(response.status).toBe(201);
   });
 
-  test("requires a non-empty summary", () => {
+  test("requires a non-empty headline", () => {
     expect(bugReportSchema.safeParse({ version: "1.0.0-rc.0", runs: [] }).success).toBe(false);
     expect(bugReportSchema.safeParse({ summary: "" }).success).toBe(false);
+    for (const report of [{ title: "" }, { summary: "   ", title: "\t" }, { summary: null, title: null }]) {
+      expect(bugReportSchema.safeParse(report).success).toBe(false);
+    }
   });
 });
