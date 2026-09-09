@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { gzipSync } from "node:zlib";
 
 let cached: string | null = null;
@@ -11,7 +12,7 @@ let cached: string | null = null;
  */
 export function mermaidRuntimeGzipBase64(): string {
   if (cached === null) {
-    const source = readFileSync(require.resolve("mermaid/dist/mermaid.min.js"));
+    const source = readFileSync(createRequire(import.meta.url).resolve("mermaid/dist/mermaid.min.js"));
     cached = gzipSync(source, { level: 9 }).toString("base64");
   }
   return cached;

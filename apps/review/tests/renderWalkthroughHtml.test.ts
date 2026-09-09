@@ -173,6 +173,7 @@ describe("renderWalkthroughHtml", () => {
     expect(html).toContain('<pre class="mermaid">graph TD; A--&gt;B</pre>');
     expect(html).toContain("The flow");
     expect(html).toContain("mermaid.initialize");
+    expect(html).toMatch(/<script type="text\/plain" id="mermaid-runtime-gz">[A-Za-z0-9+/=]+<\/script>/);
 
     const plain = await renderWalkthroughHtml({
       title: "Nothing",
@@ -191,6 +192,7 @@ describe("renderWalkthroughHtml", () => {
       generatedAt: "2026-06-10T00:00:00.000Z",
     });
     expect(plain).not.toContain("mermaid.initialize");
+    expect(plain).not.toContain('id="mermaid-runtime-gz"');
   });
 
   test("embeds Pierre diffs with shared assets hoisted once and shows the overview chart", async () => {
