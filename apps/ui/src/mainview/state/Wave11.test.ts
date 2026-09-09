@@ -78,6 +78,8 @@ const relay = (options: {
   readonly flows?: ReadonlyArray<{ flowId: string; description?: string }>
   readonly provision?: () => unknown
   readonly readsFail?: () => boolean
+  readonly events?: () => ReadonlyArray<Record<string, unknown>>
+  readonly eventReadsFail?: () => boolean
   /** Make provisioning slow enough to cross the toast debounce (the 300ms law). */
   readonly provisionDelayMs?: number
 } = {}) => {
@@ -177,6 +179,9 @@ const relay = (options: {
         }
         const selector = (payload.selector ?? {}) as { _tag?: string }
         if (selector._tag === "approvals") return snapshot(approvals, "approvals")
+        if (selector._tag === "run-events") return options.eventReadsFail?.() === true
+          ? json(200, { ok: false, error: { message: "engine evidence unavailable" } })
+          : snapshot(options.events?.() ?? [], "run-events")
         return snapshot([summaryRow()], "run-summary")
       }
       default:
@@ -487,6 +492,60 @@ describe("wave 11 — the loaded repositories are the universe", () => {
 })
 
 describe("wave 11 — the run card never silently stalls", () => {
+  test("a terminal control verdict keeps observing until the native projection settles, without repeating the verdict", async () => {
+    const store = await webStore()
+    const events: Array<Record<string, unknown>> = [{
+      sequence: 1, occurredAt: 1, kind: "control.engine.projection-started",
+      payload: { version: 1, executionId: "run-w11", generation: 0 }
+    }]
+    const double = relay({ events: () => events })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    double.finish()
+    await controller.commands.run("flow.run", "review-pr")
+    await settle(25)
+    expect(runCard(store)?.payload.phase).toBe("completed")
+    const reads = () => double.calls.filter((call) =>
+      (call.body as { payload?: { selector?: { _tag?: string } } })?.payload?.selector?._tag === "run-events"
+    ).length
+    const whilePending = reads()
+    await settle(15)
+    expect(reads()).toBeGreaterThan(whilePending)
+    events.push({ sequence: 2, occurredAt: 2, kind: "control.engine.projection-settled", payload: { version: 1, executionId: "run-w11", generation: 0 } })
+    await settle(20)
+    expect(runCard(store)?.payload.events?.at(-1)?.kind).toBe("control.engine.projection-settled")
+    const finishedReads = reads()
+    await settle(15)
+    expect(reads()).toBe(finishedReads)
+    expect([...store.collections.messages.values()].filter((message) => message.text === double.state.verdict)).toHaveLength(1)
+  })
+
+  test("reload resumes incomplete terminal observations and a read refusal preserves the real terminal phase", async () => {
+    const storage = memoryStorage()
+    let store = await createAppStore({ kind: "localStorage", storage })
+    let unavailable = false
+    const events = [{ sequence: 1, occurredAt: 1, kind: "control.engine.projection-started", payload: { version: 1, executionId: "run-w11", generation: 0 } }]
+    const double = relay({ events: () => events, eventReadsFail: () => unavailable })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    double.finish()
+    await controller.commands.run("flow.run", "review-pr")
+    await settle(20)
+    expect(runCard(store)?.payload.phase).toBe("completed")
+    await controller.dispose()
+    unavailable = true
+    store = await createAppStore({ kind: "localStorage", storage })
+    const resumed = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    // Session reconciliation invokes this after the account is authenticated.
+    resumed.resumeWorkflowRuns()
+    await settle(25)
+    expect(runCard(store)?.payload.phase).toBe("completed")
+    expect(runCard(store)?.payload.error).toContain("engine evidence unavailable")
+    const reads = double.calls.length
+    await settle(15)
+    expect(double.calls.length).toBe(reads)
+  })
+
   test("stream loss flips the card to the honest reconnecting state, then it catches up", async () => {
     const store = await webStore()
     let broken = false

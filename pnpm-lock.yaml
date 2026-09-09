@@ -1406,6 +1406,12 @@ importers:
       '@smthrs/database':
         specifier: workspace:*
         version: link:../../packages/smithers/flows/database
+      '@smthrs/engine-store':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/engine-store
+      '@smthrs/flow':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/flow
       '@smthrs/gateway':
         specifier: workspace:*
         version: link:../../packages/smithers/gateway

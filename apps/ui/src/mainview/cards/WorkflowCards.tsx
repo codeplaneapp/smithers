@@ -154,13 +154,18 @@ export const WorkflowRunCardBody = ({
           </div>
         ) :
         null}
-      {(phase === "failed" || phase === "cancelled" || phase === "no-capacity") && error !== undefined ?
+      {(phase === "completed" || phase === "failed" || phase === "cancelled" || phase === "no-capacity") && error !== undefined ?
         (
           <p className="sui-approval-error" role="alert">
             {error}
           </p>
         ) :
         null}
+      {TERMINAL_RUN_PHASES.has(phase) && (error !== undefined || card.payload.events?.some((event) => event.kind === "control.engine.projection-gap")) ? (
+        <Button size="sm" data-flow="flow.run.retry" onClick={() => onRetryRun(card.id)}>
+          Check again
+        </Button>
+      ) : null}
       {/*
        * Lane runs — the lifecycle acts. Stop is available on every
        * non-terminal phase (the flow confirms); Resume answers a wait the

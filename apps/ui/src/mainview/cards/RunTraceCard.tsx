@@ -110,7 +110,7 @@ export const RunTraceBody = ({
   const filter: TraceFilter = filters.some(([id]) => id === card.payload.filter) ? card.payload.filter ?? "all" : "all"
   const selected = selectedSpan(card, model)
   const path = spanPath(model, selected.id)
-  const frame = path.find((span) => span.kind === "frame")
+  const frame = path.find((span) => span.kind === "frame" || span.kind === "execution")
   const frameIndex = frame === undefined ? -1 : model.rows.findIndex((span) => span.id === frame.id)
   const scopeEnd = frame === undefined
     ? -1
@@ -120,6 +120,9 @@ export const RunTraceBody = ({
     span.kind === "run" || spanMatches(span, filter)
   )
   const turns = turnNarratives(model).filter((turn) => spanMatches(turn.frame, filter))
+  const native = model.root.children.filter((span) =>
+    (span.kind === "execution" || span.id.startsWith("engine-gap:") || span.id.startsWith("engine-invalid:")) && spanMatches(span, filter)
+  )
   // Following a run is cheap. The debugger appears only after an explicit selection or timeline request.
   const inspecting = view === "timeline" || card.payload.selection !== undefined
   const wall = model.extent.end - model.extent.start
@@ -210,6 +213,25 @@ export const RunTraceBody = ({
           </ol>
         ) :
         null}
+      {view === "turns" && native.length > 0 ? (
+        <ol className="run-turns" aria-label="Recorded engine work">
+          {native.map((span) => (
+            <li key={span.id}>
+              <button
+                type="button"
+                className="run-turn"
+                data-flow="runs.trace.select"
+                data-engine-span={span.id}
+                aria-pressed={card.payload.selection !== undefined && path.some((entry) => entry.id === span.id)}
+                onClick={() => onRunCommand("runs.trace.select", `${runId} ${span.id}`)}
+              >
+                <span className="run-turn-text">{span.label} · {span.status}</span>
+                <span className="run-trace-duration">{durationOf(span, model) ?? ""}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : null}
       {model.counts.spans === 0 && !inspecting
         ? (
           <EmptyState

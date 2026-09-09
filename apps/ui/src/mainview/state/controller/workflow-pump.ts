@@ -1,6 +1,7 @@
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import type { ApprovalRow, RunStatus, RunSummaryRow } from "./gateway"
+import { engineProjectionPending } from "../../cards/EngineTrace"
 
 export interface WorkflowPumpController {
   readonly pumpWorkflowRun: (cardId: string) => Promise<void>
@@ -57,7 +58,8 @@ export const createWorkflowPumpController = (
         (card.payload.phase === "launching" ||
           card.payload.phase === "running" ||
           card.payload.phase === "waiting-approval" ||
-          card.payload.phase === "reconnecting")
+          card.payload.phase === "reconnecting" ||
+          (TERMINAL_PHASES.has(card.payload.phase) && engineProjectionPending(card.payload.events)))
     ) as Array<Extract<Card, { kind: "run-trace" }>>
 
   const pokeableWait = (cardId: string, ms: number): Promise<void> =>
@@ -145,7 +147,7 @@ export const createWorkflowPumpController = (
    * failures flip the card to the honest reconnecting state; the pump never
    * stops silently.
    */
-  const pumpWorkflowRun = async (cardId: string): Promise<void> => {
+  const pumpWorkflowRun = async (cardId: string, observeOnce = false): Promise<void> => {
     if (ctx.runPumps.has(cardId)) return
     const pump = { stopped: false }
     ctx.runPumps.set(cardId, pump)
@@ -161,16 +163,16 @@ export const createWorkflowPumpController = (
         if (pump.stopped) return
         const card = store.collections.cards.get(cardId)
         if (card === undefined || card.kind !== "run-trace") return
+        const alreadyTerminal = TERMINAL_PHASES.has(card.payload.phase)
         if (
-          card.payload.phase === "completed" ||
-          card.payload.phase === "failed" ||
-          card.payload.phase === "cancelled" ||
+          (alreadyTerminal && !observeOnce && !engineProjectionPending(card.payload.events)) ||
           card.payload.phase === "no-capacity" ||
           card.payload.phase === "quiet" ||
           card.payload.phase === "stopped"
         ) {
           return
         }
+        observeOnce = false
         /*
          * Nothing has moved for a very long time. Say so and stop — an
          * endlessly reconnecting or endlessly "running" card that nobody can
@@ -178,7 +180,9 @@ export const createWorkflowPumpController = (
          */
         const quietFor = Date.now() - lastProgressAt
         if (quietFor >= RUN_QUIET_AFTER_MS) {
-          patchRunCard(cardId, { phase: "quiet", quietForMs: quietFor })
+          patchRunCard(cardId, alreadyTerminal
+            ? { error: "The run has settled, but its recorded engine evidence has not finished synchronizing." }
+            : { phase: "quiet", quietForMs: quietFor })
           return
         }
         const { repo, runId } = card.payload
@@ -187,7 +191,13 @@ export const createWorkflowPumpController = (
         if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
         if (summary.status !== "ok" || summary.value === undefined) {
           failures += 1
-          if (failures >= 2 && !pump.stopped) patchRunCard(cardId, { phase: "reconnecting" })
+          if (failures >= 2 && !pump.stopped) {
+            if (alreadyTerminal) {
+              patchRunCard(cardId, { error: "The run has settled, but its latest engine evidence could not be read." })
+              return
+            }
+            patchRunCard(cardId, { phase: "reconnecting" })
+          }
           await pokeableWait(cardId, RUN_POLL_MS)
           continue
         }
@@ -236,13 +246,15 @@ export const createWorkflowPumpController = (
          * standing; a read that fails leaves the journal in hand untouched.
          */
         let events: Extract<Card, { kind: "run-trace" }>["payload"]["events"]
+        let eventReadError: string | undefined
         {
           const journal = await gateway.runEvents(repo, runId)
           if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
           if (journal.status === "ok") {
             events = journal.value.map((event) => ({ ...(event as unknown as Record<string, unknown>) }))
-          }
+          } else eventReadError = journal.message
         }
+        if (events !== undefined && (events.at(-1)?.sequence ?? -1) !== (card.payload.events?.at(-1)?.sequence ?? -1)) lastProgressAt = Date.now()
 
         /*
          * Why the run is not moving, in the control plane's word. `accepted`
@@ -260,12 +272,15 @@ export const createWorkflowPumpController = (
         const phase = PHASE_OF_STATUS[row.status]
         if (TERMINAL_PHASES.has(phase)) {
           const steps = [...card.payload.steps, ...newSteps].slice(-RUN_STEPS_TAIL)
+          const observationError = eventReadError === undefined ? {} : {
+            error: `The run has settled, but its recorded engine evidence could not be read: ${eventReadError}`
+          }
           if (phase === "completed") {
             // The run summary's own verdict, which is what `whatHappened`
             // used to answer out of the engine database.
             const result = row.verdict
-            patchRunCard(cardId, { phase, steps, lastSeq: row.updatedAt, result, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(events === undefined ? {} : { events }) }, "acted")
-            store.dispatch({ type: "message.appended", actor: "system", text: result })
+            patchRunCard(cardId, { phase, steps, lastSeq: row.updatedAt, result, waiting: undefined, steeringPending, error: undefined, ...observationError, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(events === undefined ? {} : { events }) }, "acted")
+            if (!alreadyTerminal) store.dispatch({ type: "message.appended", actor: "system", text: result })
           } else {
             // Lead with the run's own diagnosis; the generic line is the
             // fallback, never a cover for it.
@@ -275,10 +290,15 @@ export const createWorkflowPumpController = (
               : "The run was cancelled."
             patchRunCard(
               cardId,
-              { phase, steps, lastSeq: row.updatedAt, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(events === undefined ? {} : { events }), ...(detail === undefined ? {} : { error: detail }) },
+              { phase, steps, lastSeq: row.updatedAt, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(events === undefined ? {} : { events }), ...(detail === undefined ? {} : { error: detail }), ...observationError },
               "error"
             )
-            store.dispatch({ type: "message.appended", actor: "system", text: message })
+            if (!alreadyTerminal) store.dispatch({ type: "message.appended", actor: "system", text: message })
+          }
+          if (events !== undefined && engineProjectionPending(events)) {
+            previous = row
+            await pokeableWait(cardId, RUN_POLL_MS)
+            continue
           }
           return
         }
@@ -362,10 +382,11 @@ export const createWorkflowPumpController = (
     const card = runCardFor(cardId)
     if (card === undefined) return "That isn't a run card."
     patchRunCard(cardId, {
-      phase: "running",
+      phase: TERMINAL_PHASES.has(card.payload.phase) ? card.payload.phase : "running",
+      error: undefined,
       steps: [...card.payload.steps, "Checking the run again…"].slice(-RUN_STEPS_TAIL)
     })
-    void pumpWorkflowRun(cardId)
+    void pumpWorkflowRun(cardId, true)
     return undefined
   }
 

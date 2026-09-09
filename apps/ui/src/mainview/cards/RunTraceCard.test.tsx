@@ -108,6 +108,52 @@ const click = (element: Element | null): void => {
 }
 
 describe("the run card as a trace", () => {
+  test("an observation refusal keeps the completed verdict and offers the existing keyboard-reachable retry", () => {
+    const retried: Array<string> = []
+    const host = render(<WorkflowRunCardBody
+      card={runCard({ phase: "completed", result: "Finished the implementation.", error: "Engine evidence could not be read." })}
+      onStopRun={noop} onRetryRun={(id) => retried.push(id)} onRunCommand={noop}
+    />)
+    expect(host.textContent).toContain("Finished the implementation.")
+    expect(host.querySelector("[role='alert']")?.textContent).toContain("Engine evidence could not be read.")
+    const retry = host.querySelector("[data-flow='flow.run.retry']") as HTMLButtonElement
+    retry.focus()
+    expect(document.activeElement).toBe(retry)
+    click(retry)
+    expect(retried).toEqual(["flow-run-run-1"])
+  })
+  test("native work uses the same keyboard-focusable selection and reveals results only at their recorded cursor", () => {
+    const native = (sequence: number, terminal: boolean) => ({
+      sequence, kind: "control.engine.event", occurredAt: 1000 + sequence,
+      payload: {
+        version: 1, executionId: "native", generation: 0, sequence, eventId: `native/${sequence}`,
+        sourceId: "engine", sourceSequence: sequence, emittedAtMs: sequence + 100,
+        eventType: "flows.engine.run-decision", meta: { lineageId: "native" },
+        payload: {
+          decision: terminal ? "transitioned" : "created", ...(terminal ? { status: "completed" } : {}),
+          state: { version: 1, flowName: "coding/RunPlan", payload: {}, ...(terminal ? {
+            result: { _tag: "Complete", exit: { _tag: "Success", value: { checks: ["typecheck"] } } }
+          } : {}) }
+        }
+      }
+    })
+    const events = [native(1, false), native(2, true)]
+    const compact = renderTrace({ events, traceView: "turns", phase: "completed" })
+    const row = compact.host.querySelector("[data-engine-span]") as HTMLButtonElement
+    expect(row.tagName).toBe("BUTTON")
+    row.focus()
+    expect(document.activeElement).toBe(row)
+    expect(row.textContent).toContain("coding/RunPlan · completed")
+    expect(compact.host.querySelector("[data-testid='run-trace-pane-run-1']")).toBeNull()
+    click(row)
+    expect(compact.dispatched).toEqual([{ name: "runs.trace.select", args: "run-1 engine:native:0" }])
+    const before = renderTrace({ events, traceView: "turns", selection: "engine:native:0", cursorSeq: 1, liveTail: false })
+    expect(before.host.querySelector("[data-testid='run-trace-pane-run-1']")?.textContent).not.toContain("typecheck")
+    const after = renderTrace({ events, traceView: "turns", selection: "engine:native:0", cursorSeq: 2, liveTail: false })
+    expect(after.host.querySelector("[data-testid='run-trace-pane-run-1']")?.textContent).toContain('"checks":["typecheck"]')
+    expect(after.host.querySelector("[aria-label='Recorded call path']")?.textContent).toContain("coding/RunPlan")
+    expect(after.host.querySelector("[data-flow='runs.open']")).toBeNull()
+  })
   test("the default view is a cheap turn list and expands recorded detail only after a persisted selection", () => {
     const { host, dispatched } = renderTrace({ events: JOURNAL, traceView: undefined })
     expect(host.querySelector("[aria-label='Turn explanations']")?.textContent).toContain("Calls: target.run")

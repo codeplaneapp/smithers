@@ -29,6 +29,8 @@
     "@smthrs/core": "workspace:*",
     "@smthrs/crypto": "workspace:*",
     "@smthrs/database": "workspace:*",
+    "@smthrs/engine-store": "workspace:*",
+    "@smthrs/flow": "workspace:*",
     "@smthrs/gateway": "workspace:*",
     "@smthrs/harness": "workspace:*",
     "@smthrs/jj": "workspace:*",

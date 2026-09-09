@@ -15,6 +15,7 @@
  *
  * Pure: the card renders the model, the tests read it from a fixture.
  */
+import { engineTraceFromJournal } from "./EngineTrace"
 
 /** One control journal record, as the run card stores it (the run-events projection's row shape). */
 export interface JournalRecord {
@@ -28,7 +29,7 @@ export interface JournalRecord {
  * What kind of node a span is in the tree. `fork` is the row 0 of a forked run
  * (spec 06 §1); no journal record folds into it yet, so no fold produces one.
  */
-export type SpanKind = "run" | "frame" | "model" | "cell" | "call" | "approval" | "resolved" | "event" | "fork"
+export type SpanKind = "run" | "frame" | "model" | "cell" | "call" | "approval" | "resolved" | "event" | "fork" | "execution" | "attempt"
 
 /** What the journal said about the span; the run root wears the run's own status word. */
 export type SpanStatus = "running" | "completed" | "failed" | "waiting" | "approved" | "denied" | string
@@ -92,16 +93,18 @@ export interface TraceModel {
   readonly counts: { readonly spans: number; readonly running: number; readonly failed: number }
 }
 
-interface Builder {
+/** Mutable draft shared by the control and native journal folds; never persisted. */
+export interface TraceBuilder {
   readonly id: string
   readonly kind: SpanKind
   label: string
   status: SpanStatus
   startedAt: number
   endedAt?: number
-  readonly children: Array<Builder>
+  readonly children: Array<TraceBuilder>
   detail: SpanDetail
 }
+type Builder = TraceBuilder
 
 const TERMINAL_RUN: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "no-capacity"])
 
@@ -210,6 +213,11 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
     lastAt = Math.max(lastAt, at)
     const opened = { sequence: record.sequence, event: kind }
     switch (kind) {
+      case "control.engine.event":
+      case "control.engine.projection-gap":
+        // Native records have their own identities and lifecycle. Never put
+        // them under whichever agent frame happened to be open at ingestion.
+        break
       case "control.agent.turn-opened": {
         closeFrame(at)
         frames += 1
@@ -381,6 +389,7 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
       }
     }
   }
+  root.children.push(...engineTraceFromJournal(ordered))
   // A settled run leaves no frame open: the last frame ends where the journal does.
   if (TERMINAL_RUN.has(run.status)) {
     closeFrame(lastAt)
@@ -459,7 +468,7 @@ export const spanMatches = (span: TraceSpan, filter: TraceFilter): boolean => {
     : filter === "model"
     ? span.kind === "model"
     : filter === "flow"
-    ? span.kind === "call"
+    ? span.kind === "call" || span.kind === "execution" || span.kind === "attempt"
     : filter === "forks"
     ? span.kind === "fork"
     : span.kind === "call" && MESSAGE_FLOWS.has(span.label)
