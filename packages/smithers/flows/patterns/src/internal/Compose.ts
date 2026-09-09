@@ -5,7 +5,6 @@
  *
  * @since 0.1.0
  */
-import { isRecord } from "@smthrs/canonical/Record"
 import { Annotations, Effects, Flow, Node } from "@smthrs/core"
 import type * as Context from "effect/Context"
 import * as Schema from "effect/Schema"
@@ -217,6 +216,12 @@ const schemaDocument = (schema: Schema.Top): unknown | undefined => {
 }
 
 const step = (path: string, key: string): string => path === "" ? key : `${path}.${key}`
+
+// The comparison walks JSON Schema documents, whose only containers are
+// objects and arrays. Keeping that one-line container guard here is what lets
+// the package compose `@smthrs/core` alone.
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const firstDifference = (expected: unknown, actual: unknown, path: string): string | undefined => {
   if (isRecord(expected) && isRecord(actual)) {

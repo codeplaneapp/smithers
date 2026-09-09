@@ -4668,9 +4668,6 @@ importers:
 
   packages/smithers/flows/patterns:
     dependencies:
-      '@smthrs/canonical':
-        specifier: 1.0.0-rc.0
-        version: link:../canonical
       '@smthrs/core':
         specifier: 1.0.0-rc.0
         version: link:../core

@@ -248,8 +248,7 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/core": "1.0.0-rc.0",
-    "@smthrs/canonical": "1.0.0-rc.0"
+    "@smthrs/core": "1.0.0-rc.0"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.2",
