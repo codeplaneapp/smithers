@@ -49,7 +49,9 @@ previous call, not the run's whole journal.
 Eviction is always safe, and so is an interleaved fold: a fold reads the cached
 value, pages what has been committed since, and writes a fresh, self-consistent
 pair back, so the worst case is one extra page on the next call. No fold can
-report a state the journal does not hold.
+report a state the journal does not hold: a fold taken inside a transaction is
+published through `Journal.whenCommitted`, so a rollback leaves behind neither
+the condition it observed nor the cursor it stopped at.
 
 ## Foreign entries are not errors
 

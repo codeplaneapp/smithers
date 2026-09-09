@@ -760,9 +760,18 @@ export const layer = (
             observe(checked, detectors, entry, payload, open)
           }
           const next: Watched = { open, delivered, cursor }
-          watched.delete(runId)
-          watched.set(runId, next)
-          if (watched.size > maximumWatchedRuns) watched.delete(watched.keys().next().value!)
+          // Published at commit, exactly as `NotificationQueue.load` publishes
+          // its fold. A tick inside an enclosing transaction reads that
+          // transaction's uncommitted rows, and caching them would outlive the
+          // rollback that erased them: the run would page about a condition
+          // durable history never held.
+          // Re-inserting moves the run to the end, so the key evicted below is
+          // always the least recently folded one.
+          yield* journal.whenCommitted(Effect.sync(() => {
+            watched.delete(runId)
+            watched.set(runId, next)
+            if (watched.size > maximumWatchedRuns) watched.delete(watched.keys().next().value!)
+          }))
           return next
         })
 

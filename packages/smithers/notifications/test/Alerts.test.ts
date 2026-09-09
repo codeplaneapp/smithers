@@ -1179,3 +1179,77 @@ describe("Alerts over a policy that states only delays", () => {
     })
   })
 })
+
+/** Journals the beat a monitor writes when a run stops making progress. */
+const stalled = Effect.flatMap(Journal.Journal, (journal) =>
+  journal.emitDurableUnfenced(
+    new JournalEvent.Input({
+      runId: JournalEvent.RunId.make(runId),
+      sourceId: JournalEvent.SourceId.make("/monitor"),
+      eventType: "control.monitor.beat",
+      payload: { runId, health: "stalled" }
+    })
+  ))
+
+const rollback = Effect.fail(new Journal.JournalError({ code: "unknown", message: "injected before commit" }))
+
+/**
+ * A tick reads the journal on the caller's connection, so one taken inside an
+ * enclosing transaction folds rows that have not committed. The fold is a
+ * cache, and a cache that keeps those rows outlives the rollback that erased
+ * them.
+ */
+describe("Alerts commit ownership", () => {
+  it("does not page about a condition whose transaction rolled back", async () => {
+    const sink = controllableSink()
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const alerts = yield* Alerts.AlertRuntime
+        yield* journal.transact(Effect.gen(function*() {
+          yield* parkForApproval
+          // Before the delay: this tick reads and folds, but pages nothing and
+          // writes nothing, so only the fold can survive the rollback.
+          expect((yield* alerts.tick(runId)).delivered).toEqual([])
+          return yield* rollback
+        })).pipe(Effect.exit)
+        const durable = yield* journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 512 })
+        yield* TestClock.adjust("2 minutes")
+        const tick = yield* alerts.tick(runId)
+        return { durable: durable.entries.length, tick, pending: yield* countEntries(Alerts.deliveredEventType) }
+      }).pipe(Effect.provide(stack(sink.layer)), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.durable).toBe(0)
+    expect(observed.tick.delivered).toEqual([])
+    expect(observed.pending).toBe(0)
+    expect(sink.sent).toEqual([])
+  })
+
+  it("folds a rolled-back tick's run from durable history alone", async () => {
+    const sink = controllableSink()
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const alerts = yield* Alerts.AlertRuntime
+        let parked: number | undefined
+        yield* journal.transact(Effect.gen(function*() {
+          parked = (yield* parkForApproval).seq
+          expect((yield* alerts.tick(runId)).delivered).toEqual([])
+          return yield* rollback
+        })).pipe(Effect.exit)
+        // The rolled-back park does not free its sequence, so the beat lands
+        // above the cursor the tick inside the transaction stopped at: what a
+        // cached fold would carry forward is the condition, not a skipped row.
+        const beat = yield* stalled
+        yield* TestClock.adjust("2 minutes")
+        const tick = yield* alerts.tick(runId)
+        return { parked, beat: beat.seq, tick }
+      }).pipe(Effect.provide(stack(sink.layer)), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.beat).toBeGreaterThan(observed.parked!)
+    expect(observed.tick.delivered.map((alert) => alert.condition)).toEqual(["stalled"])
+    expect(sink.sent.map((alert) => alert.condition)).toEqual(["stalled"])
+  })
+})
