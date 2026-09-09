@@ -28,6 +28,7 @@ import * as SqlJournal from "@smthrs/journal/SqlJournal"
 import * as AttemptStore from "@smthrs/run-store/AttemptStore"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
@@ -230,6 +231,72 @@ const seqOf = (
 ): number => committed.filter((entry) => entry.eventType === eventType)[nth - 1]!.seq
 
 describe("time travel over an engine-written journal", () => {
+  it.effect("blocks rewind past a real detached spawn while the child is running", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const scope = yield* Effect.scope
+        const childStarted = yield* Deferred.make<void>()
+        const releaseChild = yield* Deferred.make<string>()
+        const child = Flow.make("time-travel/Spawned", {
+          payload: {},
+          success: Schema.String,
+          body: () => Post.call({})
+        })
+        const parent = Flow.make("time-travel/Spawner", {
+          payload: {},
+          success: Schema.String,
+          body: () => Post.call({})
+        })
+        const engine = yield* FlowRuntime.FlowRuntime
+        yield* engine.register(child, () =>
+          Deferred.succeed(childStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseChild))))
+        yield* engine.register(parent, () =>
+          Effect.gen(function*() {
+            yield* Action.make({
+              name: "time-travel/SpawnStage",
+              tier: "compensable",
+              success: Schema.Void,
+              idempotencyKey: "spawn-stage",
+              execute: Effect.void
+            })
+            yield* engine.execute(child, { executionId: "spawn-child", payload: {}, discard: true }).pipe(
+              Effect.forkIn(scope)
+            )
+            yield* Deferred.await(childStarted)
+            return yield* DurableDeferred.await(Settled)
+          }))
+        yield* engine.execute(parent, { executionId: "spawn-parent", payload: {}, discard: true })
+        const runs = yield* RunStore.RunStore
+        expect((yield* runs.get("spawn-child")).status).toBe("running")
+        expect((yield* runs.get("spawn-parent")).status).toBe("suspended")
+        const journal = yield* Journal.Journal
+        yield* journal.flush
+        const page = yield* journal.entries({ runId: "spawn-parent" as JournalEvent.RunId, limit: 100 })
+        const spawn = page.entries.find((entry) =>
+          entry.eventType === "flows.time-travel.effect-boundary"
+          && (entry.payload as { effect?: { kind?: string } }).effect?.kind === "flows/engine-store/child-spawn"
+        )!
+        expect(spawn).toBeDefined()
+        const frame = { lineageId: FlowEngine.Lineage.root("spawn-parent"), seq: spawn.seq - 1 }
+        const store = yield* SqlTimeTravelStore.make
+        expect(yield* store.descendants("spawn-parent", frame)).toEqual({
+          attached: [],
+          detached: [{
+            parentRunId: "spawn-parent",
+            parentSeq: spawn.seq,
+            childRunId: "spawn-child",
+            kind: "child",
+            attached: false
+          }]
+        })
+        const timeTravel = yield* TimeTravel
+        expect(yield* Effect.flip(timeTravel.rewind({ runId: "spawn-parent", frame }))).toMatchObject({
+          code: "live_child"
+        })
+        yield* Deferred.succeed(releaseChild, "done")
+      }).pipe(Effect.provide(engineLayer({ notifications: [], jjCalls: [] }, [])))
+    ))
+
   it.effect("folds an ordinary engine journal with no hand-emitted metadata", () =>
     Effect.gen(function*() {
       const result = yield* drive([], () =>

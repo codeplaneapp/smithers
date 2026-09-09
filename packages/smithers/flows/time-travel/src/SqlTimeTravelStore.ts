@@ -133,6 +133,22 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     sql`CREATE INDEX IF NOT EXISTS flows_journal_events_lineage_idx
     ON flows_journal_events (run_id, json_extract(meta_json, '$.lineageId'), seq)`
   )
+  // These partial indexes contain only lineage-producing journal records.
+  // Keep their predicates identical to the literal predicates in edgesUnder.
+  yield* step(
+    "flows_journal_events_child_spawn_idx on flows_journal_events",
+    sql`CREATE INDEX IF NOT EXISTS flows_journal_events_child_spawn_idx
+    ON flows_journal_events (run_id, seq)
+    WHERE event_type = 'flows.time-travel.effect-boundary'
+      AND json_extract(payload_json, '$.effect.kind') = 'flows/engine-store/child-spawn'`
+  )
+  yield* step(
+    "flows_journal_events_handoff_idx on flows_journal_events",
+    sql`CREATE INDEX IF NOT EXISTS flows_journal_events_handoff_idx
+    ON flows_journal_events (run_id, seq)
+    WHERE event_type = 'flows.engine.run-decision'
+      AND json_extract(payload_json, '$.decision') = 'handed-off'`
+  )
   yield* step(
     "flows_time_travel_edges",
     sql`CREATE TABLE IF NOT EXISTS flows_time_travel_edges (
@@ -390,50 +406,65 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
      * which is the only one of the three stores of this tree that carries the
      * `parentSeq` a frame needs.
      *
-     * The union is scoped to the runs reachable downward from `runId` before
-     * it leaves the database. It used to be the whole tree of every run the
-     * database held, decoded in full and then filtered in memory, so the cost
-     * of answering one run's descendants was the size of the fleet. The
-     * reachable set ignores attachment and frame on purpose: it is a superset
-     * of what the walk in `descendantsFrom` visits, so the fold gives the same
-     * answer over fewer rows.
+     * Each recursive step probes fork edges by parent_run_id and journal
+     * edges by run_id through the partial lineage indexes. The final edge
+     * projection makes the same probes for each reachable parent; unrelated
+     * runs are never materialized. CROSS JOIN keeps reachable as the outer
+     * loop, and literal producer predicates let SQLite use the partial indexes.
+     * UNION deduplicates the reachable run ids so cycles terminate. The set
+     * ignores attachment and frame on purpose: descendantsFrom applies those
+     * policies to this superset of the edges it visits.
      */
     const edgesUnder = (runId: string) =>
       sql<EdgeRow>`
-      WITH RECURSIVE lineage_edges (parent_run_id, parent_seq, child_run_id, kind, attached) AS (
-        SELECT parent_run_id, parent_seq, child_run_id, kind, attached
-        FROM flows_time_travel_edges
-        UNION ALL
-        SELECT run_id AS parent_run_id,
-               seq AS parent_seq,
-               json_extract(payload_json, '$.effect.output.childRunId') AS child_run_id,
-               'child' AS kind,
-               CASE WHEN json_extract(payload_json, '$.effect.output.attached') = 1 THEN 1 ELSE 0 END AS attached
-        FROM flows_journal_events
-        WHERE event_type = 'flows.time-travel.effect-boundary'
-          AND json_extract(payload_json, '$.effect.kind') = ${spawnEffectKind}
-          AND json_extract(payload_json, '$.effect.status') = 'succeeded'
-          AND json_extract(payload_json, '$.effect.output.childRunId') IS NOT NULL
-        UNION ALL
-        SELECT run_id AS parent_run_id,
-               seq AS parent_seq,
-               json_extract(payload_json, '$.nextExecutionId') AS child_run_id,
-               'continuation' AS kind,
-               0 AS attached
-        FROM flows_journal_events
-        WHERE event_type = ${handoffEventType}
-          AND json_extract(payload_json, '$.decision') = 'handed-off'
-          AND json_extract(payload_json, '$.nextExecutionId') IS NOT NULL
-      ),
-      reachable (run_id) AS (
+      WITH RECURSIVE reachable (run_id) AS (
         SELECT ${runId}
         UNION
-        SELECT lineage_edges.child_run_id
-        FROM lineage_edges JOIN reachable ON lineage_edges.parent_run_id = reachable.run_id
+        SELECT flows_time_travel_edges.child_run_id
+        FROM reachable CROSS JOIN flows_time_travel_edges
+        WHERE flows_time_travel_edges.parent_run_id = reachable.run_id
+        UNION
+        SELECT json_extract(payload_json, '$.effect.output.childRunId')
+        FROM reachable CROSS JOIN flows_journal_events
+        WHERE flows_journal_events.run_id = reachable.run_id
+          AND event_type = 'flows.time-travel.effect-boundary'
+          AND json_extract(payload_json, '$.effect.kind') = ${sql.literal(`'${spawnEffectKind}'`)}
+          AND json_extract(payload_json, '$.effect.status') = 'succeeded'
+          AND json_extract(payload_json, '$.effect.output.childRunId') IS NOT NULL
+        UNION
+        SELECT json_extract(payload_json, '$.nextExecutionId')
+        FROM reachable CROSS JOIN flows_journal_events
+        WHERE flows_journal_events.run_id = reachable.run_id
+          AND event_type = ${sql.literal(`'${handoffEventType}'`)}
+          AND json_extract(payload_json, '$.decision') = 'handed-off'
+          AND json_extract(payload_json, '$.nextExecutionId') IS NOT NULL
       )
       SELECT parent_run_id, parent_seq, child_run_id, kind, attached
-      FROM lineage_edges
-      WHERE parent_run_id IN (SELECT run_id FROM reachable)
+      FROM reachable CROSS JOIN flows_time_travel_edges
+      WHERE flows_time_travel_edges.parent_run_id = reachable.run_id
+      UNION ALL
+      SELECT flows_journal_events.run_id AS parent_run_id,
+             seq AS parent_seq,
+             json_extract(payload_json, '$.effect.output.childRunId') AS child_run_id,
+             'child' AS kind,
+             CASE WHEN json_extract(payload_json, '$.effect.output.attached') = 1 THEN 1 ELSE 0 END AS attached
+      FROM reachable CROSS JOIN flows_journal_events
+      WHERE flows_journal_events.run_id = reachable.run_id
+        AND event_type = 'flows.time-travel.effect-boundary'
+        AND json_extract(payload_json, '$.effect.kind') = ${sql.literal(`'${spawnEffectKind}'`)}
+        AND json_extract(payload_json, '$.effect.status') = 'succeeded'
+        AND json_extract(payload_json, '$.effect.output.childRunId') IS NOT NULL
+      UNION ALL
+      SELECT flows_journal_events.run_id AS parent_run_id,
+             seq AS parent_seq,
+             json_extract(payload_json, '$.nextExecutionId') AS child_run_id,
+             'continuation' AS kind,
+             0 AS attached
+      FROM reachable CROSS JOIN flows_journal_events
+      WHERE flows_journal_events.run_id = reachable.run_id
+        AND event_type = ${sql.literal(`'${handoffEventType}'`)}
+        AND json_extract(payload_json, '$.decision') = 'handed-off'
+        AND json_extract(payload_json, '$.nextExecutionId') IS NOT NULL
     `.pipe(Effect.flatMap(decodeEdges), Effect.mapError(mapError))
 
     /**

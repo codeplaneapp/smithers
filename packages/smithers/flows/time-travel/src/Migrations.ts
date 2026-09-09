@@ -42,7 +42,8 @@ export const set: DatabaseMigrations.MigrationSet = {
   idOffset: DatabaseMigrations.idBlock * 5,
   migrations: {
     "0001_initial": migrate,
-    "0002_archive_generation": migrate
+    "0002_archive_generation": migrate,
+    "0003_lineage_probes": migrate
   }
 }
 

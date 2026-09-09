@@ -9,6 +9,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import type * as Statement from "effect/unstable/sql/Statement"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -180,6 +181,91 @@ describe("SqlTimeTravelStore.snapshotAt", () => {
 })
 
 describe("SqlTimeTravelStore.descendants", () => {
+  it.effect("probes journal lineage by reachable run in descendants and archive", () =>
+    run((_store, sql) =>
+      Effect.gen(function*() {
+        const queries: Array<ReturnType<Statement.Statement<unknown>["compile"]>> = []
+        const instrumented = new Proxy(sql, {
+          apply(target, thisArg, args) {
+            const statement: Statement.Statement<unknown> = Reflect.apply(target, thisArg, args)
+            const compiled = statement.compile()
+            if (compiled[0].includes("WITH RECURSIVE") && compiled[0].includes("flows_time_travel_edges")) {
+              queries.push(compiled)
+            }
+            return statement
+          }
+        })
+        const store = yield* SqlTimeTravelStore.make.pipe(Effect.provideService(SqlClient.SqlClient, instrumented))
+        yield* insertOwnedRun(sql, "parent")
+        yield* store.descendants("parent", { lineageId: "main", seq: 0 })
+        yield* store.archiveAndTruncate("parent", { lineageId: "main", seq: 0 }, [], owner)
+        expect(queries).toHaveLength(2)
+        for (const [query, parameters] of queries) {
+          const plan = yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${query}`, parameters)
+          const journalReads = plan.map((row) => row.detail).filter((detail) => detail.includes("flows_journal_events"))
+          expect(journalReads).toHaveLength(4)
+          expect(journalReads.filter((detail) => detail.includes("flows_journal_events_child_spawn_idx"))).toHaveLength(
+            2
+          )
+          expect(journalReads.filter((detail) => detail.includes("flows_journal_events_handoff_idx"))).toHaveLength(2)
+          const forkReads = plan.map((row) => row.detail).filter((detail) => detail.includes("flows_time_travel_edges"))
+          expect(forkReads).toHaveLength(2)
+          for (const detail of forkReads) {
+            expect(detail).toContain("flows_time_travel_edges_parent_idx (parent_run_id=?)")
+          }
+          for (const detail of journalReads) {
+            expect(detail).toMatch(/SEARCH .*\(run_id=\?\)/)
+          }
+        }
+      })
+    ))
+
+  it.effect("derives the detached spawn edge from the engine boundary payload at its journal seq", () =>
+    run((store, sql) =>
+      Effect.gen(function*() {
+        // EffectRecords.boundary as emitted by RunDriver.create for a detached child.
+        const payload = {
+          version: 1,
+          effect: {
+            id: "parent:spawn:child",
+            kind: "flows/engine-store/child-spawn",
+            tier: "irreversible",
+            status: "succeeded",
+            runId: "parent",
+            lineageId: "parent/root",
+            attempt: 1,
+            durableBoundary: true,
+            providerStream: false,
+            output: { childRunId: "child", flowName: "Child", attached: false },
+            residue: "Child run child exists and keeps its own journal; rewinding past its spawn orphans it."
+          }
+        }
+        yield* sql`INSERT INTO flows_journal_events
+          (run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json)
+          VALUES ('parent', 4, 'spawn', 'engine:effect:parent:spawn:child:succeeded', 0, 0,
+            'flows.time-travel.effect-boundary', ${JSON.stringify(payload)},
+            ${
+          JSON.stringify({
+            lineageId: "parent/root",
+            timeTravel: {
+              effectId: payload.effect.id,
+              kind: payload.effect.kind,
+              tier: payload.effect.tier,
+              status: payload.effect.status
+            }
+          })
+        })`
+        expect(yield* store.descendants("parent", { lineageId: "parent/root", seq: 3 })).toEqual({
+          attached: [],
+          detached: [{ parentRunId: "parent", parentSeq: 4, childRunId: "child", kind: "child", attached: false }]
+        })
+        expect(yield* store.descendants("parent", { lineageId: "parent/root", seq: 4 })).toEqual({
+          attached: [],
+          detached: []
+        })
+      })
+    ))
+
   it.effect("walks attached descendants transitively and reports detached edges separately", () =>
     Effect.gen(function*() {
       const result = yield* run((store, sql) =>

@@ -47,6 +47,10 @@ under them:
 
 It also indexes `meta_json.lineageId` on the journal's own
 `flows_journal_events`, so a lineage-filtered read is not a full run scan.
+Two partial indexes on `(run_id, seq)` select child-spawn boundaries and
+handoff decisions. Descendant and archive queries probe these indexes for
+each reachable parent run. Migration `5003` adds them to existing databases;
+building `SqlTimeTravelStore` installs them through the same DDL.
 
 **The store is SQLite dialect only.** Its DDL uses `typeof()` and `json_valid`
 CHECK constraints, and its reads use `json_extract` with `$` paths. Any

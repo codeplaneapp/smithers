@@ -20,6 +20,46 @@ const withDatabase = <A>(
 ) => Effect.scoped(effect.pipe(Effect.provide(database(filename))))
 
 describe("time-travel migrations", () => {
+  for (const door of ["ladder", "store"] as const) {
+    it.effect(`adds run-scoped journal indexes to an existing database through the ${door}`, () =>
+      Effect.gen(function*() {
+        const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "flows-time-travel-indexes-")))
+        try {
+          const indexes = yield* withDatabase(
+            join(directory, "indexes.sqlite"),
+            Effect.gen(function*() {
+              yield* EngineMigrations.run
+              yield* SqlTimeTravelStore.migrate
+              const sql = yield* SqlClient.SqlClient
+              // Simulate the schema before the lineage-probe indexes existed.
+              yield* sql`DROP INDEX IF EXISTS flows_journal_events_child_spawn_idx`
+              yield* sql`DROP INDEX IF EXISTS flows_journal_events_handoff_idx`
+              yield* sql`INSERT INTO flows_migrations (migration_id, created_at, name)
+              VALUES (5001, datetime('now'), 'time-travel_initial'),
+                     (5002, datetime('now'), 'time-travel_archive_generation')`
+              if (door === "ladder") yield* Migrations.run
+              else yield* SqlTimeTravelStore.make
+              return yield* sql<{ readonly name: string; readonly sql: string }>`
+              SELECT name, sql FROM sqlite_master WHERE type = 'index'
+              AND name IN ('flows_journal_events_child_spawn_idx', 'flows_journal_events_handoff_idx')
+              ORDER BY name`
+            })
+          )
+          expect(indexes.map((index) => index.name)).toEqual([
+            "flows_journal_events_child_spawn_idx",
+            "flows_journal_events_handoff_idx"
+          ])
+          for (const index of indexes) {
+            expect(index.sql).toContain("(run_id, seq)")
+            expect(index.sql).toContain("WHERE event_type =")
+            expect(index.sql).toContain("json_extract(payload_json,")
+          }
+        } finally {
+          yield* Effect.promise(() => rm(directory, { recursive: true, force: true }))
+        }
+      }))
+  }
+
   it.effect("widens a legacy snapshots table that predates plan_digest", () =>
     Effect.gen(function*() {
       const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "flows-time-travel-legacy-")))
