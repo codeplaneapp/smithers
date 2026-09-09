@@ -18,7 +18,13 @@ const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheck
  * so `//packages/...:bunTest` is the whole matrix and nothing central lists
  * which packages are in it.
  */
-const bunTest = Smithers.BunSuite({ cwd: "packages/smithers/flows/platform-bun" })
+const bunTest = Smithers.NodeTest({
+  runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
+  runner: Smithers.entrypoint(Smithers.file("scripts/run-bun-tests.mjs")),
+  srcs: [Smithers.glob("src/**/*.ts"), Smithers.glob("test/**/*.ts"), Smithers.file("vitest.config.ts")],
+  deps: [],
+  cwd: "packages/smithers/flows/platform-bun"
+})
 
 export const Package = Smithers.Package({
   targets: { bunTest, check, circular, docs, docsFiles, fmt, lib, lint, test }

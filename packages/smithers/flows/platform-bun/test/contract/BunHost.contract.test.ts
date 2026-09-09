@@ -1,13 +1,8 @@
 /**
  * Contract for the layer `BunHost` selects on the current runtime.
  *
- * This runs under Node. `//packages/smithers/flows/platform-bun:bunTest` re-runs the file
- * through Bun's package runner (`bun x vitest`, with no `--bun`), but the
- * `vitest` bin that resolves to is pnpm's `/bin/sh` shim, and every branch of
- * it `exec`s `node`, so that lane is Node too. It costs little here:
- * `@effect/platform-bun`'s `BunChildProcessSpawner` is
- * `@effect/platform-node-shared`'s spawner re-exported, so process spawning is
- * literally the same implementation on both runtimes and needs no Bun fake.
+ * The Node lane collects coverage; `:bunTest` re-runs these contracts in Bun
+ * workers to exercise native fetch, subprocesses, and filesystem helpers.
  *
  * The HTTP probes run against a loopback server started for the run, so the
  * success path is asserted rather than only connection refusal; a client that
@@ -171,7 +166,7 @@ const waitForEsrch = (pid: number) =>
     { times: 400, schedule: Schedule.spaced(5) }
   )
 
-describe.skipIf(process.platform === "win32")("BunHost child-process lifecycle under Node", () => {
+describe.skipIf(process.platform === "win32")("BunHost child-process lifecycle", () => {
   it.effect("reaps the child OS process when its owning fiber is interrupted", () =>
     Effect.gen(function*() {
       const pid = yield* (

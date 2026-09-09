@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Jj } from "@smthrs/jj"
 import * as Effect from "effect/Effect"
+import { execFileSync, spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -30,4 +32,60 @@ describe("BunHost startup", () => {
         }),
       (root) => Effect.promise(() => rm(root, { recursive: true, force: true }))
     ))
+})
+
+describe("test lane", () => {
+  it("runs Bun compatibility assertions inside a Bun worker", () => {
+    if (process.env.SMITHERS_PLATFORM_BUN_LANE === "1") {
+      expect(process.versions.bun).toMatch(/^\d+\.\d+\.\d+/)
+    }
+  })
+
+  it.skipIf(process.env.SMITHERS_PLATFORM_BUN_LANE === "1")("executes the declared Bun lane in a Bun worker", () => {
+    const cwd = join(import.meta.dirname, "..")
+    const plan = JSON.parse(execFileSync("node", [
+      "--input-type=module",
+      "-e",
+      `
+      import { Package } from "./PACKAGE.ts";
+      import { plannedCalls } from "../../build/targets/test/plan.ts";
+      console.log(JSON.stringify(plannedCalls(Package.bunTest)[0].payload));
+    `
+    ], { cwd, encoding: "utf8", timeout: 60_000 })) as {
+      argv: [string, ...Array<string>]
+      env?: Record<string, string>
+    }
+    const result = spawnSync(plan.argv[0], [
+      ...plan.argv.slice(1),
+      "test/BunHostVersion.test.ts",
+      "-t",
+      "runs Bun compatibility assertions"
+    ], {
+      cwd,
+      env: { ...process.env, ...plan.env, SMITHERS_PLATFORM_BUN_LANE: "1" },
+      encoding: "utf8",
+      timeout: 60_000
+    })
+    expect(result.error).toBeUndefined()
+    expect(result.status, result.stdout + result.stderr).toBe(0)
+    expect(result.stdout).toContain("1 passed")
+  }, 90_000)
+
+  it("allocates private coverage output and removes it when the runner exits", () => {
+    const output = execFileSync("node", [
+      "--input-type=module",
+      "-e",
+      `
+      import config from "./vitest.config.ts";
+      import { statSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const directory = config.test.coverage.reportsDirectory;
+      console.log(JSON.stringify({ directory, mode: statSync(directory).mode & 0o777 }));
+      writeFileSync(join(directory, "probe.json"), "{}");
+    `
+    ], { cwd: join(import.meta.dirname, ".."), encoding: "utf8" })
+    const { directory, mode } = JSON.parse(output) as { directory: string; mode: number }
+    expect(mode).toBe(0o700)
+    expect(existsSync(directory)).toBe(false)
+  })
 })

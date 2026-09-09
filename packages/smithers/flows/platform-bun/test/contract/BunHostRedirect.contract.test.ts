@@ -1,9 +1,8 @@
 /**
  * Redirect fail-closed contract for BunHost's HttpClient.
  *
- * This runs under Node, like every other suite in the package:
- * `//packages/smithers/flows/platform-bun:bunTest` re-runs it through Bun's package runner,
- * but that resolves a `/bin/sh` shim every branch of which `exec`s `node`.
+ * Both the Node coverage lane and the Bun compatibility lane run this suite.
+ * Each lane exercises its runtime's native fetch implementation.
  * `redirect: "manual"` is the whole subject, so the assertion is that the
  * second origin is never reached.
  */

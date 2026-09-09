@@ -9,10 +9,8 @@
  * bundle actually installs: a guarded read, write, and rename, plus one
  * symlink-swap refusal.
  *
- * It runs under Node. `//packages/smithers/flows/platform-bun:bunTest` re-runs the file
- * through Bun's package runner, but that resolves a `/bin/sh` shim every
- * branch of which `exec`s `node`, so this does not yet answer whether the
- * helper starts under the Bun runtime.
+ * The Node coverage lane and the Bun compatibility lane both run this file,
+ * so each runtime must start the helper and complete the guarded operations.
  *
  * The byte ceilings, the Unicode matrix, and the full refusal matrix already
  * run against the byte-identical module in
