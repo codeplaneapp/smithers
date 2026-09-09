@@ -2,34 +2,101 @@
  * The generated half of the catalog.
  *
  * `src/internal/FacadeExports.ts` is committed so the package builds without a 0.x
- * checkout beside it. That makes it a file that can rot. This test regenerates
- * it from the old checkout and fails when the committed copy has drifted, and
- * skips with a reason on a machine that has no old checkout. Point
- * `SMITHERS_0X_CHECKOUT` at a 0.x tree to run it.
+ * checkout beside it. That makes it a file that can rot. The first case pins the
+ * surface the scanner reads out of the committed copy. The second drives
+ * `scripts/generate-facade-exports.mjs` end to end over a fixture 0.x tree, so
+ * the script stays runnable with the dependencies this package declares even
+ * though the 0.x checkout it was originally generated from is gone.
  *
  * @since 0.1.0
  */
 import { describe, expect, it } from "@effect/vitest"
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { componentProps, facadeExports } from "../src/internal/FacadeExports.ts"
 
-// The path the 0.x tree occupied before the migration converted it in place, so
-// on this machine it now holds the 1.0 repository rather than a 0.x checkout and
-// the regeneration case below skips. Read from the environment first so a
-// machine that still keeps a 0.x tree somewhere can run the case.
-//
-// The guard identifies a 0.x tree positively rather than testing that a path
-// exists: `packages/smithers` is a 0.x-only package, and its manifest has to
-// carry the 0.x name, so a 1.0 checkout sitting at the same path can never be
-// mistaken for one and regenerated against.
-const oldCheckout = process.env["SMITHERS_0X_CHECKOUT"] ?? "/Users/williamcory/smithers"
-const legacyManifest = join(oldCheckout, "packages/smithers/package.json")
-const present = existsSync(legacyManifest) &&
-  (JSON.parse(readFileSync(legacyManifest, "utf8")) as { name?: string }).name === "smithers"
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
+const catalogFile = join(packageRoot, "src/internal/FacadeExports.ts")
+
+/** Writes one fixture file, creating the directories above it. */
+const write = (root: string, path: string, content: string) => {
+  const file = join(root, path)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, content)
+}
+
+/**
+ * A 0.x checkout in miniature.
+ *
+ * It carries every shape the generator has to walk: a facade manifest with a
+ * root entry and a subpath, a barrel that re-exports a workspace package and
+ * declares values of its own, and the `<Name>Props.ts` files the component rows
+ * come from, one of them an alias into a sibling file.
+ */
+const fixtureCheckout = () => {
+  const root = mkdtempSync(join(tmpdir(), "migrate-facade-"))
+  write(
+    root,
+    "packages/smithers/package.json",
+    JSON.stringify({
+      name: "smthrs",
+      version: "0.35.0",
+      exports: { "./package.json": "./package.json", ".": "./src/index.js", "./testing": "./src/testing.js" }
+    })
+  )
+  write(
+    root,
+    "packages/smithers/src/index.js",
+    `export * from "@smthrs/widgets"
+export { renderTask } from "./internal/task.js"
+export const facadeConstant = 1
+export function facadeFunction() {}
+`
+  )
+  write(root, "packages/smithers/src/testing.js", `export * from "@smthrs/testing"\n`)
+  write(
+    root,
+    "packages/widgets/package.json",
+    JSON.stringify({ name: "@smthrs/widgets", exports: { ".": "./src/index.js" } })
+  )
+  write(root, "packages/widgets/src/index.js", `export const widgetHelper = () => {}\n`)
+  write(
+    root,
+    "packages/testing/package.json",
+    JSON.stringify({ name: "@smthrs/testing", exports: { ".": "./src/index.js" } })
+  )
+  write(root, "packages/testing/src/index.js", `export const virtualClock = () => {}\n`)
+  write(
+    root,
+    "packages/components/src/components/Task/TaskProps.ts",
+    `export interface TaskProps {
+  readonly hijack?: boolean
+  readonly prompt: string
+}
+`
+  )
+  write(
+    root,
+    "packages/components/src/components/Loop/LoopProps.ts",
+    `export interface LoopProps {
+  readonly maxIterations?: number
+  readonly onMaxReached?: () => void
+}
+`
+  )
+  write(
+    root,
+    "packages/components/src/components/Ralph/RalphProps.ts",
+    `import type { LoopProps } from "../Loop/LoopProps"
+
+export type RalphProps = LoopProps
+`
+  )
+  return root
+}
 
 describe("the generated catalog", () => {
   it("carries the whole old root entry point and the component props", () => {
@@ -45,25 +112,36 @@ describe("the generated catalog", () => {
     expect(componentProps["Ralph"]).toContain("onMaxReached")
   })
 
-  it.skipIf(!present)("matches what the old checkout generates today", () => {
-    const result = execFileSync(
-      process.execPath,
-      [join(packageRoot, "scripts/generate-facade-exports.mjs"), oldCheckout, "--check"],
-      { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
-    )
+  it("regenerates from a 0.x export graph with the dependencies this package declares", () => {
+    const checkout = fixtureCheckout()
+    const generated = join(checkout, "FacadeExports.ts")
+    const committed = readFileSync(catalogFile, "utf8")
+    try {
+      execFileSync(
+        process.execPath,
+        [join(packageRoot, "scripts/generate-facade-exports.mjs"), checkout, "--out", generated],
+        { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+      )
 
-    expect(result).toBe("")
-  })
-
-  it.skipIf(present)("is skipped because the 0.x checkout is not on this machine", () => {
-    // The same positive identification the guard uses, not "the path is
-    // absent". `packages/smithers` is a real directory in the 1.0 tree — it is
-    // where `@smthrs/cli` lives now that packages nest — so its existence says
-    // nothing, while the manifest's name still says exactly which repository
-    // this is.
-    const manifest = existsSync(legacyManifest)
-      ? (JSON.parse(readFileSync(legacyManifest, "utf8")) as { name?: string }).name
-      : undefined
-    expect(manifest).not.toBe("smithers")
+      const catalog = readFileSync(generated, "utf8")
+      // The root barrel's own declarations, the workspace package it re-exports
+      // through, and the module a named re-export names.
+      expect(catalog).toContain(`{ name: "facadeConstant", subpath: "", module: "smthrs" }`)
+      expect(catalog).toContain(`{ name: "facadeFunction", subpath: "", module: "smthrs" }`)
+      expect(catalog).toContain(`{ name: "widgetHelper", subpath: "", module: "@smthrs/widgets" }`)
+      expect(catalog).toContain(`{ name: "renderTask", subpath: "", module: "./internal/task.js" }`)
+      // A subpath barrel that is one `export * from` a workspace package.
+      expect(catalog).toContain(`{ name: "virtualClock", subpath: "testing", module: "@smthrs/testing" }`)
+      // Props, including the alias the generator has to follow into a sibling.
+      expect(catalog).toContain(`"Task": ["hijack", "prompt"]`)
+      expect(catalog).toContain(`"Ralph": ["maxIterations", "onMaxReached"]`)
+      // The emitted `@since` is the one the committed catalog carries, so a
+      // regeneration never rewrites the tag on every symbol in the file.
+      expect(catalog).toContain(" * @since 1.0.0-rc.0")
+      // `--out` wrote beside the fixture, not over the committed catalog.
+      expect(readFileSync(catalogFile, "utf8")).toBe(committed)
+    } finally {
+      rmSync(checkout, { recursive: true, force: true })
+    }
   })
 })

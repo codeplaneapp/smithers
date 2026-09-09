@@ -11,25 +11,29 @@
  * is how a `skipIf` or a `maxConcurrency` slips through as automatic.
  *
  * Usage: node scripts/generate-facade-exports.mjs [old-checkout] [--check]
+ *                                                  [--out <file>]
  *
  * The default checkout is `/Users/williamcory/smithers`. The generated file is
- * committed, so the old tree is needed only when the surface changes.
+ * committed, so the old tree is needed only when the surface changes. `--out`
+ * writes the catalog somewhere else, which is how the test drives the whole
+ * generator over a fixture checkout without touching the committed copy.
  */
+import ts from "@typescript/typescript6"
 import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-const require = createRequire(import.meta.url)
-const ts = require("typescript")
-
 const here = dirname(fileURLToPath(import.meta.url))
-const check = process.argv.includes("--check")
-const args = process.argv.slice(2).filter((value) => value !== "--check")
+const argv = process.argv.slice(2)
+const check = argv.includes("--check")
+const outAt = argv.indexOf("--out")
+// The index `--out` consumes, so its value is never read as the checkout path.
+const outValueAt = outAt === -1 ? -1 : outAt + 1
+const args = argv.filter((value, index) => !value.startsWith("--") && index !== outValueAt)
 const oldRoot = resolve(args[0] ?? "/Users/williamcory/smithers")
 const facadeDir = join(oldRoot, "packages/smithers")
-const target = join(here, "../src/internal/FacadeExports.ts")
+const target = outAt === -1 ? join(here, "../src/internal/FacadeExports.ts") : resolve(argv[outValueAt])
 
 if (!existsSync(join(facadeDir, "package.json"))) {
   console.error(`no Smithers 0.x checkout at ${oldRoot}; nothing to regenerate`)
@@ -297,14 +301,14 @@ const body = `/**
  * turns each row into a catalog entry, and a name that is missing here is a
  * name the scanner drops on the floor.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 
 /**
  * One value export of the old facade.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface FacadeExport {
   /** The identifier application code imports. */
@@ -319,7 +323,7 @@ export interface FacadeExport {
  * The generated export list, sorted by subpath then name.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const facadeExports: ReadonlyArray<FacadeExport> = [
 ${lines.join(",\n")}
@@ -333,7 +337,7 @@ ${lines.join(",\n")}
  * the old component accepted.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const componentProps: Readonly<Record<string, ReadonlyArray<string>>> = {
 ${propLines.join(",\n")}
@@ -358,4 +362,4 @@ if (check) {
 }
 
 writeFileSync(target, formatted)
-console.log(`wrote ${sorted.length} export rows and ${propLines.length} prop rows to src/internal/FacadeExports.ts`)
+console.log(`wrote ${sorted.length} export rows and ${propLines.length} prop rows to ${target}`)
