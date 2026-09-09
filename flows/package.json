@@ -7,9 +7,11 @@
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.112",
     "@effect/platform-node": "4.0.0-rc.112",
     "@smthrs/agent": "workspace:*",
     "@smthrs/cli": "workspace:*",
+    "@smthrs/control": "workspace:*",
     "@smthrs/core": "workspace:*",
     "@smthrs/engine": "workspace:*",
     "@smthrs/engine-store": "workspace:*",

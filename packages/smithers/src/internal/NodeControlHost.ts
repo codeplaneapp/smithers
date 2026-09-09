@@ -72,7 +72,7 @@ const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer
  * @since 1.0.0
  * @private
  */
-export const native = NativeControl.make({
+export const platform: NativeControl.Platform = {
   host: Layer.provideMerge(AtomicFileSystem.layer, NodeServices.layer),
   crypto: NodeCrypto.layer,
   database: file => ControlDatabase.layer(file).pipe(Layer.orDie),
@@ -81,4 +81,10 @@ export const native = NativeControl.make({
   requestExecutor: layerRequestExecutor,
   gateway: NodeGateway.layer,
   bearerPrincipal: NodeGateway.bearerPrincipal
-})
+}
+
+/** Default CLI composition; private configured hosts reuse the same adapters.
+ * @since 1.0.0
+ * @private
+ */
+export const native = NativeControl.make(platform)

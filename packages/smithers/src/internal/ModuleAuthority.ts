@@ -3,6 +3,7 @@
  * @since 1.0.0
  */
 import * as AgentSession from "@smthrs/agent/AgentSession"
+import * as AgentAction from "@smthrs/agent/AgentAction"
 import * as Budget from "@smthrs/agent/Budget"
 import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import { LaunchFailed } from "@smthrs/control/ControlError"
@@ -10,8 +11,12 @@ import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import * as RunState from "@smthrs/engine-store/RunState"
 import { FlowRuntime } from "@smthrs/flow"
+import { HarnessError } from "@smthrs/harness/HarnessError"
+import * as Notifications from "@smthrs/harness/Notifications"
+import * as Steering from "@smthrs/harness/Steering"
 import { Journal } from "@smthrs/journal"
 import * as CapabilitySet from "@smthrs/kernel/CapabilitySet"
+import { NotificationQueue } from "@smthrs/notifications"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import type * as Executable from "@smthrs/registry/Executable"
 import * as Registry from "@smthrs/registry/Registry"
@@ -23,7 +28,7 @@ import { Effect, Option, RcMap, Schema } from "effect"
  * @since 1.0.0
  * @private
  */
-export const make = (catalog: Effect.Effect<Executable.Catalog>) =>
+export const make = (catalog: Effect.Effect<Executable.Catalog>, actionHost: AgentAction.Host) =>
   Effect.gen(function*() {
     const engine = yield* FlowRuntime.FlowRuntime
     const state = yield* DurableEngineState.DurableEngineState
@@ -32,6 +37,9 @@ export const make = (catalog: Effect.Effect<Executable.Catalog>) =>
     const journal = yield* Journal.Journal
     const quota = yield* QuotaPolicy.QuotaClassifier
     const registry = yield* Registry.Registry
+    // Native execution has its own journal, but the queue is the existing
+    // owning control queue, captured before any handler context is installed.
+    const notifications = yield* NotificationQueue.NotificationQueue
     const refuse = (runId: string, message: string) => Effect.die(new LaunchFailed({ runId, message }))
 
     const owner = (executionId: string) =>
@@ -119,7 +127,24 @@ export const make = (catalog: Effect.Effect<Executable.Catalog>) =>
         })
     })
 
-    return FlowRuntime.FlowRuntime.of({
+    const source = Effect.gen(function*() {
+      const instance = yield* Effect.serviceOption(FlowRuntime.FlowInstance)
+      if (Option.isNone(instance)) return yield* new HarnessError({
+        code: "assembly_failed", message: "Native steering requires an approved execution context"
+      })
+      const { rootId } = yield* owner(instance.value.executionId)
+      const steering = yield* Notifications.make({ runId: rootId, lineageId: rootId }).pipe(
+        Effect.provideService(NotificationQueue.NotificationQueue, notifications)
+      )
+      return { steering, executionId: instance.value.executionId }
+    })
+    const steering = Steering.make({
+      read: () => source.pipe(Effect.flatMap(({ steering }) => steering.read())),
+      drain: input => source.pipe(Effect.flatMap(({ steering, executionId }) => steering.drain({
+        ...input, boundary: JSON.stringify([executionId, input.boundary])
+      })))
+    })
+    const runtime = FlowRuntime.FlowRuntime.of({
       ...engine,
       register: (flow, handler) =>
         engine.register(flow, (payload, executionId) =>
@@ -143,9 +168,13 @@ export const make = (catalog: Effect.Effect<Executable.Catalog>) =>
             }
             return yield* handler(payload, executionId).pipe(
               CapabilitySet.attenuate(AgentSession.patterns(envelope.capabilities)),
+              Effect.provideService(AgentAction.Host, { ...actionHost,
+                capabilityEnvelope: AgentSession.patterns(envelope.capabilities) }),
               Effect.provideService(Budget.Budget, shared),
+              Effect.provideService(Steering.Source, steering),
               Effect.provideService(QuotaPolicy.QuotaClassifier, quota)
             )
           })))
     })
+    return { runtime, steering }
   })

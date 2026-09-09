@@ -20,6 +20,9 @@ import { Action, FlowRuntime } from "@smthrs/flow"
 import type * as NodeFlowsRuntime from "@smthrs/flows/NodeRuntime"
 import type * as GatewayServer from "@smthrs/gateway/GatewayServer"
 import type * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
+import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
+import type * as Sandbox from "@smthrs/harness/Sandbox"
+import * as Steering from "@smthrs/harness/Steering"
 import * as GatewayProjections from "@smthrs/gateway/Projections"
 import type * as NodeJj from "@smthrs/jj/node/NodeJj"
 import { SqlJournal } from "@smthrs/journal"
@@ -82,6 +85,8 @@ export type ModuleRegistration = Layer.Layer<
   never,
   | Executable.Registration
   | AgentAction.Host
+  | Sandbox.Sandbox
+  | Steering.Source
   | Exclude<Effect.Services<ReturnType<typeof AgentSession.make>>, Scope.Scope>
   | FileSystem.FileSystem
   | Path.Path
@@ -117,7 +122,7 @@ const secureSqliteFiles = (file: string) => Effect.gen(function*() {
  * @since 1.0.0
  * @private
  */
-export const make = (native: Platform) => {
+export const make = (native: Platform, seats = layerSeatResolver) => {
 /**
  * The flow sources a local CLI discovers: the project `flows/` directory, whose
  * per-directory layout is the convention in
@@ -547,12 +552,13 @@ const executorFromEngine = (
         ...testFlows(shellServices, container, runner),
         ...mcp
       ]
-      const actionHost = AgentAction.layerHost({
+      const actionHost = AgentAction.makeHost({
         registry: yield* Registry.Registry,
         limits: cellLimits,
         flows: sources
       })
       const catalogReady = yield* Deferred.make<Executable.Catalog>()
+      const authority = modules === undefined ? undefined : yield* ModuleAuthority.make(Deferred.await(catalogReady), actionHost)
       const catalog = modules === undefined ? undefined : Context.get(
         yield* Layer.build(modules.pipe(
           // No approved card exists at registration. ModuleAuthority installs
@@ -560,10 +566,10 @@ const executorFromEngine = (
           // eslint-disable-next-line no-restricted-syntax -- construction-time dependency only
           Layer.provide(Budget.layerUnbounded()),
           Layer.provide(Action.layerImplementations),
-          Layer.provide(actionHost),
-          Layer.provide(
-            Layer.succeed(FlowRuntime.FlowRuntime, yield* ModuleAuthority.make(Deferred.await(catalogReady)))
-          )
+          Layer.provide(AgentAction.layerHost(actionHost)),
+          Layer.provide(QuickJSSandbox.layer.pipe(Layer.orDie)),
+          Layer.provide(Layer.succeed(Steering.Source, authority!.steering)),
+          Layer.provide(Layer.succeed(FlowRuntime.FlowRuntime, authority!.runtime))
         )),
         Executable.Catalog
       )
@@ -627,7 +633,7 @@ const executorFromEngine = (
       // between a run that can prove fails-before without reverting its own
       // work and one that cannot.
       Checkpoints.layerGit(checkpointStore(environment, workspaceRoot)),
-      layerSeatResolver(environment).pipe(Layer.provide(requestExecutor))
+      seats(environment).pipe(Layer.provide(requestExecutor))
     ])
   )
   const nativeRuntime = native.runtime(

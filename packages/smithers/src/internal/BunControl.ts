@@ -16,7 +16,7 @@ import * as NativeControlDatabase from "./NativeControlDatabase.ts"
  * @since 1.0.0
  * @private
  */
-export const native = NativeControl.make({
+export const platform: NativeControl.Platform = {
   host: Layer.provideMerge(AtomicFileSystem.layer, BunServices.layer),
   crypto: BunCrypto.layer,
   database: file => NativeControlDatabase.make(filename => Database.layer({ filename }))(file).pipe(
@@ -28,4 +28,10 @@ export const native = NativeControl.make({
   requestExecutor: RequestExecutor.layer.pipe(Layer.provide(BunHttpClient.layer)),
   gateway: Gateway.layer,
   bearerPrincipal: Gateway.bearerPrincipal
-})
+}
+
+/** Default Bun composition; private configured hosts reuse the same adapters.
+ * @since 1.0.0
+ * @private
+ */
+export const native = NativeControl.make(platform)

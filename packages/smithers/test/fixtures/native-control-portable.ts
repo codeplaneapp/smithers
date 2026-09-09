@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Control } from "@smthrs/control"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Steering from "@smthrs/harness/Steering"
 import * as Executable from "@smthrs/registry/Executable"
 import { Deferred, Effect, Layer, Schema, Stream } from "effect"
 import * as CoreFlow from "../../flows/core/src/Flow.ts"
@@ -33,9 +34,21 @@ export default Flow.make({ description: "Portable native delegate", input: Schem
   const calls: string[] = []
   const entered = Deferred.makeUnsafe<void>()
   let interrupted = false
+  const steeringSeen: string[] = []
   const registrations = Layer.mergeAll(Interpreter.layer(Delegate), Probe.toLayer(({ value }) => Effect.suspend(() => {
     if ((recovery || drift) && !interrupted) { interrupted = true; return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)) }
-    return Effect.sync(() => { calls.push(value); return value })
+    return Effect.gen(function*() {
+      if (recovery) {
+        const source = yield* Steering.Source
+        const drain = yield* source.drain({ boundary: "frame-0", wouldIdle: false })
+        steeringSeen.push(JSON.stringify(drain.inserts))
+        const replay = yield* source.drain({ boundary: "frame-0", wouldIdle: false })
+        assert.deepEqual(replay.inserts, drain.inserts)
+        assert.equal(replay.duplicate, true)
+      }
+      calls.push(value)
+      return value
+    })
   })))
   const modules = Executable.layer({ delegates: [Delegate], load: () => Effect.succeed({ default: CoreFlow.make({
     description: "Portable native delegate", input: Schema.Struct({ value: Schema.String }), output: Schema.String,
@@ -65,7 +78,15 @@ export default Flow.make({ description: "Portable native delegate", input: Schem
     if (receipt._tag !== "Accepted" || receipt.runId === undefined) throw new Error("expected run")
     runId = receipt.runId
     trace("run accepted")
-    if (recovery || drift) { yield* bounded("the initial native action", Deferred.await(entered)); trace("native action entered"); return }
+    if (recovery || drift) {
+      yield* bounded("the initial native action", Deferred.await(entered))
+      if (recovery) yield* control.steer({
+        runId, message: { messageId: "portable-steer", runId, body: "Keep the durable root steering", principal: { id: "local", kind: "human", stampedAt: 1 }, createdAt: 1 },
+        idempotencyKey: "portable-steer"
+      })
+      trace("native action entered")
+      return
+    }
     const events = yield* control.watch({ runId: receipt.runId, follow: true }).pipe(
       Stream.filter(event => event.kind === "control.run.completed" || event.kind === "control.run.failed"),
       Stream.take(1), Stream.runCollect, effect => bounded("control completion", effect))
@@ -118,6 +139,8 @@ export default Flow.make({ description: "Changed after approval", input: Schema.
         yield* bounded("native recovery", poll)
         trace("native recovery completed")
         assert.deepEqual(calls, ["native-executed"])
+        assert.equal(steeringSeen.length, 1)
+        assert(steeringSeen[0]!.includes("Keep the durable root steering"))
         yield* observe(control, runId!)
         trace("native observation settled")
       }).pipe(Effect.provide(host.layerHost({ root }, modules)))))

@@ -1807,6 +1807,9 @@ importers:
 
   flows:
     dependencies:
+      '@effect/platform-bun':
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112(effect@4.0.0-rc.112)
       '@effect/platform-node':
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112(effect@4.0.0-rc.112)(redis@6.2.1(@opentelemetry/api@1.9.1))
@@ -1816,6 +1819,9 @@ importers:
       '@smthrs/cli':
         specifier: workspace:*
         version: link:../packages/smithers
+      '@smthrs/control':
+        specifier: workspace:*
+        version: link:../packages/smithers/control
       '@smthrs/core':
         specifier: workspace:*
         version: link:../packages/smithers/flows/core
