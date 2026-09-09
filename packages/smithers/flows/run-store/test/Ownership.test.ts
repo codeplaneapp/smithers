@@ -12,7 +12,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { DurableWriter } from "@smthrs/database"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Clock, Duration, Effect } from "effect"
+import { Cause, Clock, Duration, Effect, Exit, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { spawn } from "node:child_process"
@@ -20,7 +20,10 @@ import { once } from "node:events"
 import { vi } from "vitest"
 import * as Migrations from "../src/Migrations.ts"
 import {
+  heartbeatInterval,
+  heartbeatLoop,
   heartbeatStaleAfter,
+  heartbeatWriteTolerance,
   leaseLiveness,
   type LivenessEvidence,
   type OwnerId,
@@ -286,5 +289,107 @@ describe("sameHostPidProbe", () => {
       } finally {
         process.kill = kill
       }
+    }))
+})
+
+describe("heartbeatLoop write deadline", () => {
+  const toleranceMs = Duration.toMillis(heartbeatWriteTolerance)
+  const intervalMs = Duration.toMillis(heartbeatInterval)
+  const heartbeatFailure = new RunStoreLive.RunStoreError({
+    code: "persistence_failed",
+    method: "heartbeat",
+    message: "database unavailable",
+    cause: new Error("SQLITE_BUSY")
+  })
+
+  for (const completion of ["never", "failure", "success"] as const) {
+    it.effect(`interrupts owned work while a ${completion} heartbeat is stalled`, () =>
+      Effect.gen(function*() {
+        let calls = 0
+        let writeInterrupted = false
+        let workInterruptedAtMs: number | undefined
+        let workFinished = false
+        const owning = yield* Effect.raceFirst(
+          Effect.sleep("40 seconds").pipe(
+            Effect.andThen(Effect.sync(() => {
+              workFinished = true
+            })),
+            Effect.onInterrupt(() =>
+              Clock.currentTimeMillis.pipe(
+                Effect.tap((nowMs) =>
+                  Effect.sync(() => {
+                    workInterruptedAtMs = nowMs
+                  })
+                )
+              )
+            )
+          ),
+          heartbeatLoop("stalled-heartbeat", ownerA)
+        ).pipe(
+          Effect.provide(RunStoreLive.layerNoop({
+            heartbeat: (_runId, _owner, atMs) => {
+              calls++
+              const result = completion === "never"
+                ? Effect.never
+                : Effect.sleep("35 seconds").pipe(Effect.andThen(
+                  completion === "failure"
+                    ? Effect.fail(heartbeatFailure)
+                    : Effect.succeed({ _tag: "Updated" as const, heartbeatAtMs: atMs })
+                ))
+              return result.pipe(Effect.onInterrupt(() =>
+                Effect.sync(() => {
+                  writeInterrupted = true
+                })
+              ))
+            }
+          })),
+          Effect.forkChild({ startImmediately: true })
+        )
+
+        yield* TestClock.adjust(toleranceMs - 1)
+        expect(calls).toBe(1)
+        expect(owning.pollUnsafe()).toBeUndefined()
+        yield* TestClock.adjust(1)
+        yield* Effect.yieldNow
+        const exit = owning.pollUnsafe()
+        expect(exit !== undefined && Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect(writeInterrupted).toBe(true)
+        expect(workInterruptedAtMs).toBe(toleranceMs)
+        expect(toleranceMs).toBeLessThan(staleAfterMs)
+
+        // The review probes observed live work at 31 seconds and a side effect at 40.
+        yield* TestClock.adjust(40_000 - toleranceMs)
+        expect(workFinished).toBe(false)
+        expect(calls).toBe(1)
+      }))
+  }
+
+  it.effect("re-arms a delayed success from its persisted timestamp, not its completion time", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const owning = yield* Effect.raceFirst(Effect.never, heartbeatLoop("delayed-heartbeat", ownerA)).pipe(
+        Effect.provide(RunStoreLive.layerNoop({
+          heartbeat: (_runId, _owner, atMs) => {
+            calls++
+            return calls === 1
+              ? Effect.sleep("5 seconds").pipe(
+                Effect.as({ _tag: "Updated" as const, heartbeatAtMs: atMs })
+              )
+              : Effect.never
+          }
+        })),
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* TestClock.adjust(toleranceMs)
+      expect(owning.pollUnsafe()).toBeUndefined()
+      expect(calls).toBe(2)
+      yield* TestClock.adjust(intervalMs - 1)
+      expect(owning.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust(1)
+      yield* Effect.yieldNow
+      const exit = owning.pollUnsafe()
+      expect(exit !== undefined && Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      yield* Fiber.interrupt(owning)
     }))
 })

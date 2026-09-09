@@ -258,7 +258,7 @@ export {
    */
   heartbeatStaleAfter,
   /**
-   * How long the owner may keep working through *failing* heartbeat writes.
+   * How long the owner may keep working through failing or stalled heartbeat writes.
    *
    * @since 0.1.0
    * @category constants
@@ -283,8 +283,13 @@ export {
  * by up to that allowance is still interrupted *before* the peer may steal the
  * run rather than while it is still running side effects. Past that allowance
  * the fence still protects durable writes but non-durable side effects may
- * overlap; see {@link heartbeatWriteTolerance}. Every successful pulse re-arms
- * the window.
+ * overlap; see {@link heartbeatWriteTolerance}.
+ *
+ * An independent deadline races the pulse loop, bounding in-flight writes by
+ * the remaining lease budget even when a write never returns. Each successful
+ * pulse re-arms the deadline from the timestamp sent to the store, not from
+ * its completion time. The deadline re-reads the clock after waking, so delayed
+ * writes cannot hide expiry behind a stale clock reading.
  *
  * @since 0.1.0
  * @category supervision
@@ -296,21 +301,33 @@ export const heartbeatLoop = (
   Effect.gen(function*() {
     const runStore = yield* RunStore
     const toleranceMs = Duration.toMillis(heartbeatWriteTolerance)
-    let lastPulseMs = yield* Clock.currentTimeMillis
-    return yield* Effect.sleep(heartbeatInterval).pipe(
+    const intervalMs = Duration.toMillis(heartbeatInterval)
+    let lastConfirmedPulseMs = yield* Clock.currentTimeMillis
+    const deadline = Effect.gen(function*() {
+      while (true) {
+        const nowMs = yield* Clock.currentTimeMillis
+        const remainingMs = lastConfirmedPulseMs + toleranceMs - nowMs
+        if (remainingMs <= 0) return yield* Effect.interrupt
+        // Check alongside pulse intervals, with a shorter final wait when needed.
+        yield* Effect.sleep(Math.min(remainingMs, intervalMs))
+      }
+    })
+    const pulses = Effect.sleep(heartbeatInterval).pipe(
       Effect.andThen(Clock.currentTimeMillis),
       Effect.flatMap((nowMs) =>
         runStore.heartbeat(runId, owner, nowMs).pipe(
           Effect.flatMap((outcome) =>
             outcome._tag === "Updated"
               ? Effect.sync(() => {
-                lastPulseMs = nowMs
+                lastConfirmedPulseMs = nowMs
               })
               : Effect.interrupt
           ),
-          Effect.catch(() => nowMs - lastPulseMs >= toleranceMs ? Effect.interrupt : Effect.void)
+          // eslint-disable-next-line no-restricted-syntax -- Failed writes preserve the confirmed lease; the independent deadline supervises its expiry.
+          Effect.catch(() => Effect.void)
         )
       ),
       Effect.forever
     )
+    return yield* Effect.raceFirst(pulses, deadline)
   })

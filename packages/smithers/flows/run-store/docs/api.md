@@ -696,8 +696,10 @@ const heartbeatLoop: (runId: string, owner: OwnerId) => Effect<never, never, Run
 Pulses every `heartbeatInterval` on the injected `Clock` and interrupts itself
 when the fence is gone, so race it against the owned work with
 `Effect.raceFirst`. A heartbeat outcome other than `Updated` is durable evidence
-and interrupts immediately; a failed heartbeat write is tolerated for
-`heartbeatWriteTolerance`, and every successful pulse re-arms that window.
+and interrupts immediately. An independent deadline bounds failing or stalled
+writes by `heartbeatWriteTolerance` and interrupts the pending write at expiry.
+Successful pulses re-arm that deadline from the timestamp supplied to the store,
+not their completion time.
 
 ### The heartbeat constants
 
