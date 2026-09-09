@@ -181,7 +181,7 @@ const compile = <Body, Frame, Event, State>(
     )
     const native = route.protocol.supportsDeferred(validatedRequest.modelId)
     const candidate = yield* route.protocol.body.from(validatedRequest, { native })
-    const body = yield* Schema.decodeUnknownEffect(route.protocol.body.schema)(candidate).pipe(
+    const body = yield* Schema.encodeUnknownEffect(route.protocol.body.schema)(candidate).pipe(
       Effect.mapError((error) =>
         withPath(
           "invalid_request",

@@ -54,6 +54,58 @@ const protocol = Protocol.make({
 })
 
 describe("Route.prepare", () => {
+  it("encodes a transforming body codec and round-trips the wire value", async () => {
+    // Regression for correctness-6.ts: body.from returns the codec's decoded
+    // number, while the provider expects its encoded string representation.
+    const bodySchema = Schema.Struct({ limit: Schema.NumberFromString })
+    const body = { limit: 8 }
+    const route = Route.make({
+      id: "codec-probe",
+      protocol: Protocol.make({
+        ...protocol,
+        body: { schema: bodySchema, from: () => Effect.succeed(body) }
+      }),
+      endpoint: endpoint({ url: "https://example.test" }),
+      auth: Auth.bearer(Redacted.make("secret")),
+      framing: Framing.sse
+    })
+
+    expect(Schema.encodeSync(bodySchema)(body)).toEqual({ limit: "8" })
+    const prepared = await Effect.runPromise(Route.prepare(route, request))
+
+    expect(prepared.bodyText).toBe("{\"limit\":\"8\"}")
+    expect(prepared.body).toEqual(new TextEncoder().encode(prepared.bodyText))
+    expect(Schema.decodeUnknownSync(bodySchema)(JSON.parse(prepared.bodyText))).toEqual(body)
+  })
+
+  it("reports an encoded-side body constraint failure as invalid_request", async () => {
+    const bodySchema = Schema.Struct({
+      limit: Schema.String.pipe(
+        Schema.check(Schema.isPattern(/^[0-9]$/)),
+        Schema.decodeTo(Schema.NumberFromString)
+      )
+    })
+    const route = Route.make({
+      id: "codec-constraint",
+      protocol: Protocol.make({
+        ...protocol,
+        body: { schema: bodySchema, from: () => Effect.succeed({ limit: 12 }) }
+      }),
+      endpoint: endpoint({ url: "https://example.test" }),
+      auth: Auth.bearer(Redacted.make("secret")),
+      framing: Framing.sse
+    })
+
+    const error = await Effect.runPromise(Route.prepare(route, request).pipe(Effect.flip))
+
+    expect(error).toMatchObject({
+      code: "invalid_request",
+      message: "test produced an invalid provider request body",
+      path: "limit"
+    })
+    expect(JSON.stringify(error)).not.toContain("12")
+  })
+
   it("is deterministic and excludes credentials from the sealed-step view", async () => {
     const key = "test-secret-api-key"
     const route = Route.make({
@@ -212,7 +264,7 @@ describe("Route.prepare", () => {
     expect(encoded.path).toBeUndefined()
   })
 
-  it("omits the path when schema decoding fails without an issue", async () => {
+  it("omits the path when schema encoding fails without an issue", async () => {
     const schemaWithoutIssue = Schema.declareConstructor<unknown>()(
       [],
       () => () => Effect.fail(undefined as never)
