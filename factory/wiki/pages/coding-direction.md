@@ -10,7 +10,7 @@ Native JJ change identities should survive history rewriting. JJ commit identiti
 
 ## Three builds and optimistic progress
 
-First, build a disposable proof of concept quickly. Save it for feedback and hindsight, then throw away its implementation. Second, implement for real. Fast checks block immediately; slow suites and agent reviews run asynchronously while later work proceeds. A correction to earlier ownership rewrites the earlier change and rebases dependents, invalidating their relevant checks.
+First, build a disposable proof of concept quickly. Save it for feedback and hindsight, then throw away its implementation. Second, implement for real. Fast checks block immediately; slow suites and agent reviews run asynchronously while later work proceeds. A correction to earlier ownership rewrites the earlier change and rebases dependents, invalidating their relevant checks. Third, once validation has passed and the work is marked vibed, rebuild the clean final history and perform the delivery steps described below.
 
 Parallel execution still projects one linear mythical history. The UI should make predicted Changes, atomic steps, file ownership and pending validation easy to inspect. Cheap turn explanations orient the person; recursive debugger-like detail exposes the underlying evidence.
 

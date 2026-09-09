@@ -18,7 +18,8 @@ export type Evidence = typeof Evidence.Type
 export const Review = Schema.Struct({ sections: Schema.Array(Schema.Struct({
   id: Schema.String, verdict: Schema.Literals(["supported", "unsupported", "uncertain"]),
   explanation: Schema.String,
-  citations: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Int, quote: Schema.String }))
+  citations: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Int,
+    quote: Schema.NonEmptyString.check(Schema.isPattern(/^[^\r\n]+$/)) }))
 })) })
 export type Review = typeof Review.Type
 export const ReviewedPage = Schema.Struct({

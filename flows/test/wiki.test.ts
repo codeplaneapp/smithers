@@ -140,9 +140,12 @@ test("real AgentAction review and flow replay use the existing engine", { timeou
   let calls = 0
   const model = Model.make({ stream: () => Stream.suspend(() => {
     calls++
+    const review = { sections: supported(evidence).sections.map((section) => ({ ...section,
+      citations: section.citations.map((citation) => calls === 1 ? { ...citation, quote: `${citation.quote}\ninvalid second line` } : citation)
+    })) }
     return Stream.fromIterable([
       ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "review" }),
-      ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "review", text: `\`\`\`cell\nctx.done(${JSON.stringify(supported(evidence))})\n\`\`\`` }),
+      ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "review", text: `\`\`\`cell\nctx.done(${JSON.stringify(review)})\n\`\`\`` }),
       ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "review" }),
       ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
     ])
@@ -159,7 +162,29 @@ test("real AgentAction review and flow replay use the existing engine", { timeou
     const second = yield* Wiki.execute(input, { executionId: "wiki-replay-test" })
     assert.deepEqual(second, first)
   }).pipe(Effect.provide(layer))))
-  assert.equal(calls, 1, "a replay must not pay the reviewer twice")
+  assert.equal(calls, 2, "the invalid multiline quote consumes one schema correction; replay consumes no model call")
+})
+
+test("independent page reviews finish before exact citation assessment can fail", async (t) => {
+  const { Action, Interpreter } = await import("@smthrs/flow")
+  const { FlowEngine } = await import("@smthrs/engine")
+  const { Layer } = await import("effect")
+  const { ReviewPage, Wiki } = await import("../wiki/workflow.ts")
+  const { actionLayers } = await import("../wiki/runtime.ts")
+  const f = await fixture(t), completed: string[] = []
+  const layer = Layer.mergeAll(actionLayers({ root: f.root, output: f.output }), Interpreter.layer(Wiki),
+    ReviewPage.toLayer(({ evidence }) => Effect.gen(function*() {
+      if (evidence.spec.id === "second") yield* Effect.sleep(20)
+      const review = { sections: supported(evidence).sections.map((section) => ({ ...section,
+        citations: section.citations.map((citation) => evidence.spec.id === "first" ? { ...citation, line: 999 } : citation)
+      })) }
+      completed.push(evidence.spec.id)
+      return review
+    }))
+  ).pipe(Layer.provideMerge(Action.layerImplementations), Layer.provideMerge(FlowEngine.layerMemory), Layer.provideMerge(NodeServices.layer))
+  await assert.rejects(Effect.runPromise(Effect.scoped(Wiki.execute({ pages: [{ ...f.spec, id: "first" }, { ...f.spec, id: "second" }],
+    mode: "verified", reviewer: "scripted-test" }, { executionId: "wiki-assessment-barrier" }).pipe(Effect.provide(layer)))), /exact source evidence/)
+  assert.deepEqual(completed.sort(), ["first", "second"])
 })
 
 test("freshness and verified checks detect stale inputs and altered verification metadata", async (t) => {

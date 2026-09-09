@@ -10,7 +10,7 @@ Full-file digests and the page specification define each input identity. The sna
 
 ## Review meaning, not hashes
 
-The preview mode produces an explicitly unreviewed artifact. Verified mode invokes a real `AgentAction` reviewer with the page and its exact source evidence. Every section requires a supported result, an explanation and exact source citations. A deterministic step checks section coverage and citation integrity.
+The preview mode produces an explicitly unreviewed artifact. Verified mode invokes a real `AgentAction` reviewer with the page and its exact source evidence. Every section requires a supported result, an explanation and exact source citations. Quotes occupy a single source line; multiline output uses the agent's existing bounded schema-correction path. Independent page reviews finish before deterministic steps check section coverage and citation integrity.
 
 The writer checks the source again after review. Changed inputs invalidate the attempt. Unsupported or uncertain sections leave a reviewable artifact and fail the verified flow. A passing model review is recorded evidence, not a formal proof, a passing test suite or a deployment receipt.
 
