@@ -7,6 +7,7 @@
  * to declare a command at all, which is the property the whole module exists
  * for.
  */
+import * as Schema from "effect/Schema"
 import { spawnSync } from "node:child_process"
 import * as Fs from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -23,6 +24,7 @@ import {
   Job,
   MatrixRow,
   render,
+  renderStep,
   satisfiesGate,
   TargetStep,
   toolchainSteps
@@ -177,23 +179,55 @@ jobs:
 
 const attrsOf = (input: unknown): never => GithubCiGen(input as typeof goldenAttrs)[Target.TargetTypeId].attrs as never
 
-/** Every field name reachable from a schema, following struct and union shapes. */
-const fieldNames = (schema: unknown, seen = new Set<unknown>()): ReadonlyArray<string> => {
-  if (schema === null || typeof schema !== "object" || seen.has(schema)) return []
-  seen.add(schema)
-  const names: Array<string> = []
-  const fields = (schema as { readonly fields?: Record<string, unknown> }).fields
-  if (fields !== undefined) {
-    for (const [name, field] of Object.entries(fields)) {
-      names.push(name, ...fieldNames(field, seen))
-    }
+/** The Effect AST node shapes the attrs are built from. Every other node is a leaf. */
+interface AstNode {
+  readonly _tag: string
+  readonly literal?: unknown
+  readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey; readonly type: AstNode }>
+  readonly indexSignatures?: ReadonlyArray<{ readonly type: AstNode }>
+  readonly elements?: ReadonlyArray<AstNode>
+  readonly rest?: ReadonlyArray<AstNode>
+  readonly types?: ReadonlyArray<AstNode>
+  readonly thunk?: () => AstNode
+}
+
+/** The nodes one AST node contains. */
+const children = (node: AstNode): ReadonlyArray<AstNode> => [
+  ...(node.propertySignatures ?? []).map((property) => property.type),
+  ...(node.indexSignatures ?? []).map((signature) => signature.type),
+  ...(node.elements ?? []),
+  ...(node.rest ?? []),
+  ...(node.types ?? []),
+  ...(node.thunk === undefined ? [] : [node.thunk()])
+]
+
+/**
+ * Every field a schema declares, at any depth, as `[name, type]`.
+ *
+ * The walk starts at the AST rather than at the schema value: `Schema.Struct`
+ * returns a callable, so a traversal that rejects everything whose `typeof` is
+ * not `"object"` finds no field at all and makes the rule below vacuous.
+ */
+const fieldsOf = (schema: { readonly ast: unknown }): ReadonlyArray<readonly [string, AstNode]> => {
+  const seen = new Set<AstNode>()
+  const walk = (node: AstNode): ReadonlyArray<readonly [string, AstNode]> => {
+    if (seen.has(node)) return []
+    seen.add(node)
+    return [
+      ...(node.propertySignatures ?? []).map((property) => [String(property.name), property.type] as const),
+      ...children(node).flatMap(walk)
+    ]
   }
-  for (const key of ["members", "schema", "from", "to", "item"]) {
-    const nested = (schema as Record<string, unknown>)[key]
-    if (Array.isArray(nested)) { for (const member of nested) names.push(...fieldNames(member, seen)) }
-    else if (nested !== undefined) names.push(...fieldNames(nested, seen))
-  }
-  return names
+  return walk(schema.ast as AstNode)
+}
+
+/** Whether a type can hold a string at any depth, which is what a command needs. */
+const holdsString = (node: AstNode, seen = new Set<AstNode>()): boolean => {
+  if (seen.has(node)) return false
+  seen.add(node)
+  if (node._tag === "String") return true
+  if (node._tag === "Literal") return typeof node.literal === "string"
+  return children(node).some((child) => holdsString(child, seen))
 }
 
 describe("the declaration surface", () => {
@@ -208,13 +242,34 @@ describe("the declaration surface", () => {
    * target cannot reach the pipeline at all. Adding one back would fail here.
    */
   it("admits no free-form command anywhere in the attrs", () => {
-    const names = new Set(fieldNames(Attrs))
+    const declared = fieldsOf(Attrs)
+    // A positive control first: the walk reaches the nested shapes, so an empty
+    // result cannot make the rule below pass by finding nothing.
+    expect(declared.map(([name]) => name)).toEqual(
+      expect.arrayContaining(["jobs", "steps", "pattern", "verb", "toolchain", "gates"])
+    )
+    // And a command smuggled two levels down is found, not only a top-level one.
     expect(
-      [...names].filter((name) =>
-        ["run", "uses", "command", "commands", "script", "shell", "args", "argv", "install", "entrypoint"]
-          .includes(name)
-      )
-    ).toEqual([])
+      fieldsOf(Schema.Struct({ jobs: Schema.Array(Schema.Struct({ command: Schema.String })) }))
+        .map(([name]) => name)
+    ).toEqual(["jobs", "command"])
+    const forbidden = [
+      "run",
+      "uses",
+      "command",
+      "commands",
+      "script",
+      "shell",
+      "args",
+      "argv",
+      "install",
+      "entrypoint"
+    ]
+    const suspects = declared.filter(([name]) => forbidden.includes(name))
+    // `install` is a toolchain's "run the package manager" toggle, the one
+    // command-shaped name in the tree, and a boolean cannot carry a script.
+    expect(suspects.map(([name, type]) => [name, type._tag])).toEqual([["install", "Boolean"]])
+    expect(suspects.filter(([, type]) => holdsString(type)).map(([name]) => name)).toEqual([])
     // The two things a step CAN say, and nothing else.
     expect(Object.keys(TargetStep.fields).sort()).toEqual(["name", "parallelism", "pattern", "verb"])
     // A gate is a target invocation too, not a command to match in the text.
@@ -271,6 +326,34 @@ describe("the declaration surface", () => {
     expect(Verb.isPipelineVerb({ name: "run" })).toBe(false)
     expect(Verb.isPipelineVerb(Verb.Ci)).toBe(true)
     expect(Verb.isVerb(Verb.Ci)).toBe(false)
+  })
+})
+
+describe("renderStep", () => {
+  it("closes a nameless block scalar before the field that follows it", () => {
+    // A step with a `name` puts `run: |` in the middle of its fields, which
+    // every current job does. A step without one puts it first, and the body
+    // has to follow it there too: emitted last, the script would land under
+    // `shell:` and YAML would read an empty `run` and a three-line `shell`.
+    const lines = renderStep({ run: "a\nb", shell: "bash" }, "      ")
+    expect(lines).toEqual(["      - run: |", "          a", "          b", "        shell: bash"])
+    const steps = parseWorkflow(["jobs:", "  probe:", "    runs-on: ubuntu-latest", "    steps:", ...lines].join("\n"))
+      .jobs[0]!.steps
+    expect(steps.map((step) => [step.run, step.shell])).toEqual([["a\nb", "bash"]])
+  })
+
+  it("keeps a named multi-line script under its own key", () => {
+    const lines = renderStep({ name: "Probe", run: "a\nb", shell: "bash" }, "      ")
+    expect(lines).toEqual([
+      "      - name: Probe",
+      "        run: |",
+      "          a",
+      "          b",
+      "        shell: bash"
+    ])
+    const steps = parseWorkflow(["jobs:", "  probe:", "    runs-on: ubuntu-latest", "    steps:", ...lines].join("\n"))
+      .jobs[0]!.steps
+    expect(steps.map((step) => [step.name, step.run, step.shell])).toEqual([["Probe", "a\nb", "bash"]])
   })
 })
 

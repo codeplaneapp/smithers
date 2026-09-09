@@ -569,7 +569,18 @@ interface RenderedStep {
   readonly env?: Readonly<Record<string, string>>
 }
 
-const renderStep = (step: RenderedStep, indent: string): ReadonlyArray<string> => {
+/**
+ * Renders one step as the YAML lines of a `steps:` item, at `indent`.
+ *
+ * The single renderer for every step shape this module produces, which is why
+ * it is exported: a shape no caller builds today is still one line away from
+ * being built, so each shape is asserted here rather than only through the
+ * jobs that happen to exist.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const renderStep = (step: RenderedStep, indent: string): ReadonlyArray<string> => {
   const lines: Array<string> = []
   const fields: Array<string> = []
   if (step.name !== undefined) fields.push(`name: ${scalar(step.name)}`)
@@ -589,11 +600,16 @@ const renderStep = (step: RenderedStep, indent: string): ReadonlyArray<string> =
   const body = (): void => {
     for (const line of step.run!.split("\n")) lines.push(line === "" ? "" : `${inner}  ${line}`)
   }
+  // A block scalar owns every line below it until the indentation drops back,
+  // so the body follows its `run: |` key immediately, whether that key opened
+  // the step or came after one. Emitted after the remaining fields instead, a
+  // nameless multi-line step reads as an empty `run` and a `shell` that
+  // swallowed the script.
+  if (fields[0] === "run: |") body()
   for (const field of fields.slice(1)) {
     lines.push(`${inner}${field}`)
     if (field === "run: |") body()
   }
-  if (fields[0] === "run: |") body()
   if (step.with !== undefined && Object.keys(step.with).length > 0) {
     lines.push(`${inner}with:`, ...mapping(step.with, `${inner}  `))
   }
