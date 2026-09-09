@@ -5,9 +5,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Archive from "@smthrs/migrate/flow/Archive"
+import * as Scan from "@smthrs/migrate/Scan"
 import * as Effect from "effect/Effect"
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { copyFixture, fixture } from "../fixtures/helpers.ts"
 
 const platform = NodeServices.layer
@@ -366,6 +367,70 @@ describe("Archive.run", () => {
         ["tsconfig.json", "modified"],
         ["preload.js", "archived"]
       ])
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("preserves scanned documentation and command scripts after their in-place rewrites", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const archiveDir = join(root, ".smithers-migrate", "archive")
+      const scripts = {
+        "README.md": "Run `smithers up simple-workflow.jsx`\n",
+        "docs/commands.md": "Run `smithers up simple-workflow.jsx`\n",
+        "Makefile": "start:\n\tsmithers up simple-workflow.jsx\n",
+        "scripts/start.sh": "#!/bin/sh\nsmithers up simple-workflow.jsx\n",
+        "Justfile": "start:\n  smithers up simple-workflow.jsx\n",
+        "scripts/justfile": "start:\n  smithers up simple-workflow.jsx\n",
+        "Procfile": "worker: smithers up simple-workflow.jsx\n",
+        "bunfig.toml": "# smithers up simple-workflow.jsx\n",
+        ".github/workflows/start.yml": "jobs:\n  start:\n    steps:\n      - run: smithers up simple-workflow.jsx\n",
+        ".github/workflows/start.yaml": "jobs:\n  start:\n    steps:\n      - run: smithers up simple-workflow.jsx\n",
+        "docker-compose.yml": "services:\n  worker:\n    command: smithers up simple-workflow.jsx\n",
+        "deploy/docker-compose.dev.yaml": "services:\n  worker:\n    command: smithers up simple-workflow.jsx\n"
+      }
+      for (const [file, text] of Object.entries(scripts)) {
+        mkdirSync(dirname(join(root, file)), { recursive: true })
+        writeFileSync(join(root, file), text)
+      }
+      chmodSync(join(root, "scripts/start.sh"), 0o755)
+      const scan = yield* Scan.scan(root)
+      const project = scan.units.find((unit) => unit.kind === "project")!
+      const rewritten = Object.entries(scripts).map(([file, text]) =>
+        [
+          file,
+          text.replace("smithers up simple-workflow.jsx", "smthrs flow start simple-workflow")
+        ] as const
+      )
+      for (const [file, text] of rewritten) {
+        expect(scan.detection.scripts.some((hit) => hit.file === file)).toBe(true)
+        expect(project.sources).toContain(file)
+        expect(project.targets).not.toContain(file)
+        writeFileSync(join(root, file), text)
+      }
+      const retired = readFileSync(join(root, "preload.js"), "utf8")
+      expect(project.sources).toContain("preload.js")
+
+      const result = yield* Archive.run({
+        ...project,
+        root,
+        unit: project.id,
+        archiveDir,
+        keepOldSources: false
+      })
+
+      for (const [file, text] of rewritten) {
+        expect(existsSync(join(root, file)), file).toBe(true)
+        expect(readFileSync(join(root, file), "utf8")).toBe(text)
+        expect(existsSync(join(archiveDir, file)), file).toBe(false)
+        expect(result.changed.some((entry) => entry.path === file)).toBe(false)
+      }
+      expect(statSync(join(root, "scripts/start.sh")).mode & 0o777).toBe(0o755)
+      expect(existsSync(join(root, "preload.js"))).toBe(false)
+      expect(readFileSync(join(archiveDir, "preload.js"), "utf8")).toBe(retired)
+      expect(result.changed).toContainEqual({
+        path: "preload.js",
+        change: "archived",
+        bytes: new TextEncoder().encode(retired).length
+      })
     }).pipe(Effect.provide(platform)))
 
   it.effect("archives nothing for a unit whose sources are rewritten where they are", () =>

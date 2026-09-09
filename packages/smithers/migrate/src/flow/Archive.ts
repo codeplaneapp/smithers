@@ -278,18 +278,27 @@ export const rewriteGitignore = (text: string, flowsState = ".flows/"): string =
 }
 
 /**
- * Which of a unit's sources this module rewrites in place instead of archiving.
+ * Which project sources are rewritten in place instead of archived.
  *
- * The three kinds a 1.0 project still has: the manifest, the TypeScript
- * configuration, and the ignore file. Every other source a unit owns was
- * replaced by what the migration wrote, and is archived.
+ * Manifests, TypeScript configurations, and ignore files get deterministic
+ * rewrites here. Documentation and command scripts detected by `Detect` are
+ * rewritten by the transform and must keep that content in the project.
  *
  * @category checks
  * @since 1.0.0-rc.0
  */
 export const isRewritable = (file: string): boolean => {
   const name = file.split("/").pop() ?? file
-  return name === "package.json" || name === ".gitignore" || /^tsconfig(\..+)?\.json$/.test(name)
+  return name === "package.json" || name === ".gitignore" || /^tsconfig(\..+)?\.json$/.test(name) ||
+    file.endsWith(".md") ||
+    file.endsWith(".sh") ||
+    file.endsWith("Makefile") ||
+    file.endsWith("Justfile") ||
+    file.endsWith("justfile") ||
+    file.endsWith("Procfile") ||
+    file.endsWith("bunfig.toml") ||
+    /^\.github\/workflows\/.+\.ya?ml$/.test(file) ||
+    /(^|\/)docker-compose[^/]*\.ya?ml$/.test(file)
 }
 
 /**
