@@ -1554,6 +1554,15 @@ the current session's. A copied rig with stub commands also checks archive copy
 failures, interrupted copies, content mismatches, link and publication failures,
 successful publication, and preservation of an earlier attempt before retry.
 
+`fixtures/check-fullbench-status.mjs`, also inside `verify.sh`, runs
+`lib/fullbench-status.mjs` over ledgers carrying every budget the driver
+accepts, and asserts the screen and the checkpoint report print the same figure
+for each. `fullbench.sh` accepts `.50` and `lib/fullbench-row.mjs` only numbers a
+value with a digit before the decimal point, so a budget can reach the ledger as
+text; both renderers read it through `lib/format-money.mjs`, which coerces, so a
+screen an operator reads against a live driver cannot crash on a budget the
+report prints.
+
 `fixtures/check-lock.sh`, also inside `verify.sh`, proves the lock both drivers
 share: one lane at a time, a holder killed with `-9` recovered by the next lane
 within a poll, a stray release that leaves a live lock alone, and a bounded wait

@@ -6,14 +6,15 @@
  * `fullbench-status.sh` is the entry point; it works out whether a driver is
  * running and what the disk says, and this turns the ledger into the screen.
  * The numbers are the same ones `fullbench-report.mjs` computes — this imports
- * `summarise` rather than restating it, so the screen and the report can never
- * disagree about a rate.
+ * `summarise` and `lib/format-money.mjs` rather than restating them, so the
+ * screen and the report can never disagree about a rate, or about a budget the
+ * driver spliced through the shell as text.
  */
+import { formatMoney as money } from "./format-money.mjs"
 import { read } from "./fullbench-manifest.mjs"
 import { summarise } from "../fullbench-report.mjs"
 
 const percent = (value) => `${(value * 100).toFixed(1)}%`
-const money = (value) => (value === undefined || value === null ? "—" : `$${value.toFixed(2)}`)
 const iso = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().replace(".000", "") : "—")
 
 const duration = (seconds) => {

@@ -47,6 +47,7 @@ import { execFileSync } from "node:child_process"
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { denominatorLabel, denominators, renderExclusions } from "./lib/excluded.mjs"
+import { formatMoney as money } from "./lib/format-money.mjs"
 import { read, readRows } from "./lib/fullbench-manifest.mjs"
 import { usd } from "./prices.ts"
 
@@ -105,17 +106,6 @@ export const wilson = (successes, total, z = 1.959963984540054) => {
 }
 
 const percent = (value) => `${(value * 100).toFixed(1)}%`
-
-// A figure the driver spliced through the shell can arrive as a string —
-// `SWB_FULLBENCH_BUDGET_USD=0.50` is text until something reads it as a number
-// — so this coerces rather than trusting the ledger's type. A value that is not
-// a number at all prints as absent instead of stopping a checkpoint: the report
-// generator runs inside the driver, and it losing a row is not worth losing the
-// pause notice that row was carrying.
-const money = (value) => {
-  const number = value === undefined || value === null || value === "" ? Number.NaN : Number(value)
-  return Number.isFinite(number) ? `$${number.toFixed(2)}` : "—"
-}
 
 const duration = (seconds) => {
   if (!Number.isFinite(seconds) || seconds <= 0) return "—"
