@@ -55,19 +55,8 @@ export class InvalidRound extends Schema.TaggedError<InvalidRound>()(
 
 const invalid = (message: string): InvalidRound => new InvalidRound({ message })
 
-const wellFormed = (value: string): boolean => {
-  for (let index = 0; index < value.length; index++) {
-    const unit = value.charCodeAt(index)
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = value.charCodeAt(++index)
-      if (next < 0xdc00 || next > 0xdfff) return false
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
-  }
-  return true
-}
-
 const validLineage = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0 && wellFormed(value)
+  typeof value === "string" && value.length > 0 && value.isWellFormed()
 
 const validOrdinal = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0
@@ -98,8 +87,8 @@ export const initial = (executionId: string): Round => {
 /**
  * The execution id a round runs under.
  *
- * Derived from the lineage and the ordinal alone, so it is the same id in
- * every process and after every restart.
+ * Ordinal zero returns the lineage id unchanged. Later rounds derive their
+ * id from the lineage and ordinal, consistently across processes and restarts.
  *
  * @since 0.1.0
  * @category constructors
@@ -108,11 +97,11 @@ export const initial = (executionId: string): Round => {
 export const executionId = (round: Round): Effect.Effect<string, InvalidRound, Crypto.Crypto> =>
   Effect.suspend(() => {
     const refusal = validate(round)
-    return refusal === undefined
-      ? Schema.decodeUnknownEffect(Sha256)(
-        JSON.stringify(["flow-round/v2", round.lineageId, round.ordinal])
-      ).pipe(Effect.orDie)
-      : Effect.fail(refusal)
+    if (refusal !== undefined) return Effect.fail(refusal)
+    if (round.ordinal === 0) return Effect.succeed(round.lineageId)
+    return Schema.decodeUnknownEffect(Sha256)(
+      JSON.stringify(["flow-round/v2", round.lineageId, round.ordinal])
+    ).pipe(Effect.orDie)
   })
 
 /**

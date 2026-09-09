@@ -56,6 +56,23 @@ the payload difference is unintentional, remember that payload identity is
 structural over the schema: a field added or a value changed makes a new
 identity, while a declared-opaque value is compared by reference.
 
+## One RPC request fails other pending requests
+
+**Symptom.** A handler defect also fails unrelated requests sharing one RPC
+client connection.
+
+**Cause.** `RpcServer.layer` defaults to client-wide fatal defects. A reused
+execution id with a different payload can still raise
+`ExecutionIdentityConflict` as a defect.
+
+**Fix.** Mount flow proxies with
+`RpcServer.layer(MyRpcs, { disableFatalDefects: true })` to scope handler defects
+to their requests. Execute, discard, and resume wire schemas reject empty ids,
+ids longer than 4,096 UTF-16 code units, and ill-formed UTF-16 before the engine
+runs. A trailing unpaired high surrogate is ill-formed. RPC answers these
+decode errors with a request-scoped failure, including with the default server
+options.
+
 ## Compensable action requires SnapshotBoundary
 
 **Symptom.** `Compensable action "<name>" requires SnapshotBoundary`, and the

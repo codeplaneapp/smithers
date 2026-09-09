@@ -51,7 +51,7 @@ import { RpcServer } from "effect/unstable/rpc"
 
 class ReviewRpcs extends FlowProxy.toRpcGroup(flows, { prefix: "flows_" }) {}
 
-const RpcLayer = RpcServer.layer(ReviewRpcs).pipe(
+const RpcLayer = RpcServer.layer(ReviewRpcs, { disableFatalDefects: true }).pipe(
   Layer.provide(FlowProxyServer.layerRpcHandlers(flows, { prefix: "flows_" }))
 )
 ```
@@ -59,6 +59,13 @@ const RpcLayer = RpcServer.layer(ReviewRpcs).pipe(
 Pass the same `prefix` to both calls. The prefix is part of the derived
 operation name, so a group built with one prefix and handlers built with
 another produce a server with no matching handlers.
+
+Set `disableFatalDefects: true` to keep a handler defect scoped to its request
+on a shared RPC connection. See [Troubleshooting](../troubleshooting.md#one-rpc-request-fails-other-pending-requests).
+
+Execute, discard, and resume payloads require an `executionId` with 1 to 4,096
+UTF-16 code units and no unpaired surrogates. RPC and HTTP schemas reject
+invalid ids before invoking the engine.
 
 ## Serve over HTTP
 
@@ -85,7 +92,8 @@ reserved characters, and Unicode normalization distinctions that would
 otherwise collapse two different flows onto one route.
 
 A tag that is not well-formed UTF-16 has no route encoding, and
-`toHttpApiGroup` throws `InvalidFlowTag` before it builds anything.
+`toHttpApiGroup` throws `InvalidFlowTag`. This includes a trailing unpaired
+high surrogate.
 
 ## Collisions are refused before construction
 

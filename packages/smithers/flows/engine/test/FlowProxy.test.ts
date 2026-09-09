@@ -38,6 +38,33 @@ describe("FlowProxy", () => {
       expect(discardPayload).toMatchObject({ executionId: "client-discard", payload: { value: 1 } })
     }))
 
+  it("rejects malformed execution ids in every RPC and HTTP payload schema", () => {
+    const rpcGroup = FlowProxy.toRpcGroup([flow])
+    const httpGroup = FlowProxy.toHttpApiGroup("flows", [flow])
+    for (const operation of [flow._tag, `${flow._tag}Discard`, `${flow._tag}Resume`] as const) {
+      const schemas = [
+        rpcGroup.requests.get(operation)!.payloadSchema,
+        httpGroup.endpoints[operation]!.payload.get("application/json")!.schemas[0]
+      ]
+      for (const schema of schemas) {
+        const decode = Schema.decodeUnknownSync(schema as Schema.Codec<unknown>)
+        for (const executionId of ["", "\ud800", "root-\udbff", "\udc00", "a".repeat(4097)]) {
+          expect(() => decode({ payload: { value: 1 }, executionId })).toThrow()
+        }
+        for (const executionId of ["a".repeat(4096), "round-🚀", "e\u0301"]) {
+          expect(decode({ payload: { value: 1 }, executionId })).toMatchObject({ executionId })
+        }
+      }
+    }
+  })
+
+  it("rejects a trailing high surrogate in an HTTP flow tag", () => {
+    for (const tag of ["\ud800", "FlowProxy/\udbff"]) {
+      const invalid = Flow.make(tag, { payload: {}, body: () => Node.succeed(undefined) })
+      expect(() => FlowProxy.toHttpApiGroup("flows", [invalid])).toThrow(FlowProxy.InvalidFlowTag)
+    }
+  })
+
   effect("keeps schema-encoded exits typed at the proxy boundary", () =>
     Effect.gen(function*() {
       const group = FlowProxy.toRpcGroup([flow])

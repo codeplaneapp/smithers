@@ -203,14 +203,14 @@ The refusal raised for a malformed trampoline identity or resource bound. A `lin
 - **Signature:** `initial(executionId: string): Round`
 - **Since:** `0.1.0`
 
-Returns the round a lineage starts at: ordinal zero, under the caller's execution id. It throws `InvalidRound` synchronously when `executionId` is empty or ill-formed UTF-16.
+Returns the round a lineage starts at: ordinal zero, under the caller's execution id. It throws `InvalidRound` synchronously when `executionId` is empty or ill-formed UTF-16, including a trailing unpaired high surrogate.
 
 #### `FlowEngine.Round.executionId`
 
 - **Signature:** `executionId(round: Round): Effect.Effect<string, InvalidRound, Crypto.Crypto>`
 - **Since:** `0.1.0`
 
-Derives the execution id a round runs under. The id comes from `(lineageId, ordinal)` alone through the injected SHA-256. It is therefore the same id in every process and after every restart, which is what makes a handoff at-most-once. The preimage is `["flow-round/v2", lineageId, ordinal]`, and it is part of the package's durable contract: a lineage opened under one release derives the same round ids under the next.
+Returns `lineageId` unchanged for ordinal zero after validation, so `executionId(initial(id))` returns `id`. For later rounds, derives the execution id from `(lineageId, ordinal)` alone through the injected SHA-256. It is therefore the same id in every process and after every restart, which is what makes a handoff at-most-once. The preimage is `["flow-round/v2", lineageId, ordinal]`, and it is part of the package's durable contract: a lineage opened under one release derives the same round ids under the next.
 
 #### `FlowEngine.Round.next`
 

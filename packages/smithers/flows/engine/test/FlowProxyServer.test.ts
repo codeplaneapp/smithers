@@ -4,10 +4,25 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Cause, Effect, Exit, FileSystem, Layer, Logger, Option, Path, References, Schema, Scope } from "effect"
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  Queue,
+  References,
+  Schema,
+  Scope
+} from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiClient, HttpApiTest } from "effect/unstable/httpapi"
-import { RpcTest } from "effect/unstable/rpc"
+import { Rpc, RpcClient, RpcGroup, RpcMessage, RpcSerialization, RpcServer, RpcTest } from "effect/unstable/rpc"
 import { FlowEngine, FlowProxy, FlowProxyServer } from "../src/index.ts"
 import { withCrypto } from "./Crypto.ts"
 
@@ -82,6 +97,75 @@ describe("FlowProxyServer.layerRpcHandlers", () => {
       Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
     )
   })
+
+  effect(
+    "rejects malformed wire ids without aborting another request on the same RPC client",
+    () =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { calls, layer } = makeLayer((value) =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as(value + 1)
+          )
+        )
+        const requests = yield* Queue.unbounded<readonly [number, RpcMessage.FromClientEncoded]>()
+        const responses = yield* Queue.unbounded<RpcMessage.FromServerEncoded>()
+        const disconnects = yield* Queue.unbounded<number>()
+        const codecFor = RpcSerialization.json.codecFor
+        // Exercise server-side decoding. RpcTest skips serialization, and the
+        // ordinary generated client would reject these ids before sending them.
+        const unchecked = RpcGroup.make(Rpc.make("Proxy/Echo", {
+          payload: { payload: Echo.payloadSchema, executionId: Schema.String },
+          success: Schema.Number,
+          error: Schema.Literal("invalid")
+        }))
+        yield* RpcServer.make(FlowProxy.toRpcGroup(flows)).pipe(
+          Effect.provideService(RpcServer.Protocol, {
+            run: (receive) =>
+              Queue.take(requests).pipe(
+                Effect.flatMap(([clientId, request]) => receive(clientId, request)),
+                Effect.forever
+              ),
+            send: (_, response) => Queue.offer(responses, response).pipe(Effect.asVoid),
+            disconnects,
+            end: () => Effect.void,
+            clientIds: Effect.succeed(new Set([0])),
+            initialMessage: Effect.succeed(Option.none()),
+            supportsAck: false,
+            supportsTransferables: false,
+            supportsSpanPropagation: false,
+            supportsNotifications: false,
+            codecFor
+          }),
+          Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer))),
+          Effect.forkScoped
+        )
+        const client = yield* RpcClient.make(unchecked).pipe(
+          Effect.provideService(RpcClient.Protocol, {
+            run: (_, receive) => Queue.take(responses).pipe(Effect.flatMap(receive), Effect.forever),
+            send: (clientId, request) => Queue.offer(requests, [clientId, request]).pipe(Effect.asVoid),
+            supportsAck: false,
+            supportsTransferables: false,
+            codecFor
+          })
+        )
+        const legitimate = yield* client["Proxy/Echo"]({
+          payload: { value: 41 },
+          executionId: "legitimate"
+        }).pipe(Effect.exit, Effect.forkScoped)
+        yield* Deferred.await(started)
+        const rejected = yield* client["Proxy/Echo"]({
+          payload: { value: 0 },
+          executionId: ""
+        }).pipe(Effect.exit)
+        expect(Exit.isFailure(rejected)).toBe(true)
+        yield* Deferred.succeed(release, undefined)
+        expect(yield* Fiber.join(legitimate)).toEqual(Exit.succeed(42))
+        expect(calls()).toBe(1)
+      })
+  )
 
   effect("deduplicates repeated execute requests for one execution id", () => {
     const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
@@ -419,12 +503,13 @@ describe("FlowProxyServer.layerRpcHandlers", () => {
     }
   )
 
-  effect("resume with an unknown or empty execution id is a no-op success", () => {
+  effect("resume with an unknown execution id is a no-op and an empty id is rejected", () => {
     const { calls, layer } = makeLayer((value) => Effect.succeed(value))
     return Effect.gen(function*() {
       const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
       yield* client["Proxy/EchoResume"]({ executionId: "proxy-never-started" })
-      yield* client["Proxy/SuspendsResume"]({ executionId: "" })
+      const rejected = yield* client["Proxy/SuspendsResume"]({ executionId: "" }).pipe(Effect.exit)
+      expect(Exit.isFailure(rejected)).toBe(true)
       // Nothing was started, dispatched, or invented for the unknown id: the
       // engine still reports it as a typed not-found.
       const error = yield* Effect.flip(Echo.poll("proxy-never-started"))

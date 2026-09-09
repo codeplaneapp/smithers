@@ -97,9 +97,15 @@ export const assertNoCollisions = (
   }
 }
 
+const ExecutionId = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(4096),
+  Schema.makeFilter((value: string) => value.isWellFormed(), { expected: "well-formed UTF-16 text" })
+)
+
 type ExecutePayload<Payload extends Flow.AnyStructSchema> = Schema.Struct<{
   readonly payload: Payload
-  readonly executionId: typeof Schema.String
+  readonly executionId: typeof ExecutionId
 }>
 
 const executePayload = <Payload extends Flow.AnyStructSchema>(
@@ -107,7 +113,7 @@ const executePayload = <Payload extends Flow.AnyStructSchema>(
 ): ExecutePayload<Payload> =>
   Schema.Struct({
     payload,
-    executionId: Schema.String
+    executionId: ExecutionId
   })
 
 /**
@@ -137,7 +143,7 @@ const executePayload = <Payload extends Flow.AnyStructSchema>(
  *
  * // Use FlowProxyServer.layerRpcHandlers to create a layer that implements
  * // the rpc handlers
- * const ApiLayer = RpcServer.layer(MyRpcs).pipe(
+ * const ApiLayer = RpcServer.layer(MyRpcs, { disableFatalDefects: true }).pipe(
  *   Layer.provide(FlowProxyServer.layerRpcHandlers(myFlows))
  * )
  * ```
@@ -264,19 +270,8 @@ export const toHttpApiGroup = <const Name extends string, const Flows extends No
   return group as any
 }
 
-const wellFormed = (value: string): boolean => {
-  for (let index = 0; index < value.length; index++) {
-    const unit = value.charCodeAt(index)
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = value.charCodeAt(++index)
-      if (next < 0xdc00 || next > 0xdfff) return false
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
-  }
-  return true
-}
-
 const tagToPath = (tag: string): string => {
-  if (!wellFormed(tag)) throw new InvalidFlowTag(tag)
+  if (!tag.isWellFormed()) throw new InvalidFlowTag(tag)
   // Routers disagree about whether a percent-encoded slash is decoded before
   // matching. UTF-16 hex is injective, URL-safe, and remains one segment in
   // every adapter while preserving case and normalization distinctions.
@@ -329,4 +324,4 @@ export type ConvertHttpApi<Flows extends Flow.Any> = Flows extends Flow.Flow<
     > :
   never
 
-const ResumePayload = Schema.Struct({ executionId: Schema.String })
+const ResumePayload = Schema.Struct({ executionId: ExecutionId })
