@@ -1,5 +1,6 @@
 /** Files, hashing and publication checks use injected Effect platform services. */
 import { Crypto, Effect, FileSystem, Path, Schema } from "effect"
+import { canonical } from "@smthrs/core/Digest"
 import { Evidence, type ReviewedPage, type PageSpec, type Receipt, WikiError } from "./schema.ts"
 import { reviewEvidence, visibleLine } from "./evidence.ts"
 
@@ -57,7 +58,7 @@ export const operations = (options: { readonly root: string; readonly output: st
     }
     const markdown = sources.find((source) => source.path === spec.document)!.text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "").trim() + "\n"
     const contentDigest = yield* digest(markdown)
-    const inputDigest = yield* digest(JSON.stringify({ policy: 1, spec, sources: sources.map(({ path, digest }) => ({ path, digest })) }))
+    const inputDigest = yield* digest(canonical({ policy: 2, spec, sources: sources.map(({ path, digest }) => ({ path, digest })) }))
     const evidence = { spec, sources, markdown, contentDigest, inputDigest, sections: sections(markdown) }
     yield* Effect.try({ try: () => reviewEvidence(evidence), catch: (error) => error as WikiError })
     return evidence
@@ -99,11 +100,11 @@ export const operations = (options: { readonly root: string; readonly output: st
     }
     const verified = pages.every((page) => page.review !== null && page.reviewer && page.review.sections.every((section) => section.verdict === "supported"))
     const verification = verified ? "verified" as const : pages.some((page) => page.review !== null) ? "needs-changes" as const : "unreviewed" as const
-    const inputDigest = yield* digest(JSON.stringify(pages.map((page) => ({ id: page.evidence.spec.id, digest: page.evidence.inputDigest }))))
+    const inputDigest = yield* digest(canonical(pages.map((page) => ({ id: page.evidence.spec.id, digest: page.evidence.inputDigest }))))
     const sourceRevision = `sha256:${inputDigest}`
     const rendered = yield* Effect.forEach(pages, (page) => Effect.gen(function*() {
       const { evidence, review, reviewer } = page
-      const reviewDigest = review ? yield* digest(JSON.stringify({ policy: 1, inputDigest: evidence.inputDigest, contentDigest: evidence.contentDigest, reviewer, review })) : null
+      const reviewDigest = review ? yield* digest(canonical({ policy: 2, inputDigest: evidence.inputDigest, contentDigest: evidence.contentDigest, reviewer, review })) : null
       const status = review === null ? "unreviewed" : review.sections.every((section) => section.verdict === "supported") ? "verified" : "needs-changes"
       const header = `---\nsmithers_generated: true\nschema_version: 1\nsource_revision: ${JSON.stringify(sourceRevision)}\ninput_digest: ${evidence.inputDigest}\ncontent_digest: ${evidence.contentDigest}\nverification_status: ${status}\nreview_digest: ${reviewDigest ?? "null"}\n---\n\n`
       const notice = `> ${evidence.spec.kind === "intent" ? "Product intent; this page does not assert implementation." : "Current behavior from the captured source snapshot."} ${status === "verified" ? "Model-reviewed against the cited source; this is not a formal proof or deployment receipt." : "Semantic review has not passed. Treat explanations as a draft."}\n\n`
@@ -114,7 +115,7 @@ export const operations = (options: { readonly root: string; readonly output: st
         contentDigest: evidence.contentDigest, bodyDigest: yield* digest(body), inputDigest: evidence.inputDigest,
         sources: evidence.sources.map(({ path, digest }) => ({ path, digest })), verification: { status, reviewer, reviewDigest, review } }
     }))
-    const snapshot = { schemaVersion: 1, sourceRevision, sourceKind: "content-addressed-working-tree", inputDigest, verification, pages: rendered }
+    const snapshot = { schemaVersion: 1, digestPolicy: "canonical-json-v2", sourceRevision, sourceKind: "content-addressed-working-tree", inputDigest, verification, pages: rendered }
     const files: Record<string, string> = { "snapshot.json": JSON.stringify(snapshot, null, 2) + "\n" }
     for (const page of pages) for (const source of page.evidence.sources) files[`sources/${source.path}`] = source.text
     for (const page of rendered) files[`pages/${page.id}.md`] = page.body

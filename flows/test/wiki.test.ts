@@ -4,10 +4,10 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, realpath, symlink } from "node
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { NodeServices } from "@effect/platform-node"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { operations } from "../wiki/operations.ts"
 import { reviewEvidence } from "../wiki/evidence.ts"
-import type { PageSpec, ReviewedPage, Review } from "../wiki/schema.ts"
+import { PageSpec, type ReviewedPage, type Review } from "../wiki/schema.ts"
 
 const fixture = async (t: TestContext) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "smithers-wiki-")))
@@ -32,6 +32,17 @@ test("both owning prose and code invalidate a source snapshot; no input is trunc
   const prose = await run(f.ops.collect(f.spec))
   assert.notEqual(prose.contentDigest, code.contentDigest)
   assert.equal(prose.sources.find((source) => source.path === "src/answer.ts")?.text, "export const answer = 43\n")
+})
+
+test("source identity survives schema decoding and JSON property order changes", async (t) => {
+  const f = await fixture(t)
+  const catalog = { related: [], inputs: ["src/answer.ts"], document: "page.md", kind: "current" as const, purpose: f.spec.purpose, title: f.spec.title, id: f.spec.id }
+  const decoded = Schema.decodeUnknownSync(PageSpec)(catalog)
+  assert.notEqual(JSON.stringify(catalog), JSON.stringify(decoded), "fixture must exercise durable schema field ordering")
+  const before = await run(f.ops.collect(catalog)), after = await run(f.ops.collect(decoded))
+  assert.equal(before.inputDigest, after.inputDigest)
+  await run(f.ops.write([{ evidence: after, review: null, reviewer: null }], "preview"))
+  assert.equal((await run(f.ops.check([catalog]))).verification, "unreviewed")
 })
 
 test("outside-root and private paths cannot become generation input, including symlinks", async (t) => {
