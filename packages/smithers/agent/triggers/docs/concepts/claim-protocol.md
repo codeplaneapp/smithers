@@ -1,17 +1,21 @@
 ---
 title: "The claim protocol"
-description: "How two hosts polling the same trigger fire one occurrence once: revision fencing, launch reservations and their lease, the outcomes a result records, and the two watermarks that decide what is due."
+description: "How hosts coordinate at-least-once launch attempts: revision fencing, launch reservations and their lease, the outcomes a result records, and the two watermarks that decide what is due."
 sidebar:
   order: 3
 ---
 
 Run two hosts against one database and both will notice the 03:00 boundary. The
-claim protocol is how exactly one of them launches it, and how the other one
-finds out.
+claim protocol coordinates their launch reservations. It does not guarantee a
+single call to the runner for that occurrence.
 
-Every rule below lives in the store, not in the scheduler. That placement is the
-design: a decision made inside the claim transaction cannot be made against a
-snapshot that has since gone stale.
+Scheduled dispatch makes at-least-once launch attempts. `RunnerService.start`
+must durably deduplicate by `idempotencyKey` and return the same run identity on
+replay, including across host restarts.
+
+Claim decisions live in the store transaction, so they read current state
+rather than a scheduler snapshot that may have gone stale. Runner deduplication
+covers accepted launches outside that transaction.
 
 ## The store is asked for candidates, not for due work
 
@@ -123,7 +127,11 @@ in-memory store for the SQL one cannot change recovery timing.
 When the lease expires, the store reclaims the reservation and restores its
 unfinished occurrence to pending work, whether the expiry is noticed during an
 active-run read or during a later claim. That is the recovery path for a process
-that died after claiming an occurrence and before launching it. Under
+that died after claiming an occurrence. A launch may already have been accepted
+before its `launched` result is persisted. A crash or result-write failure in
+that window leaves the occurrence retryable. Lease expiry can also allow another
+attempt while an earlier runner call is still in flight. The stable idempotency
+key, not the reservation token, identifies the run across those attempts. Under
 `supersede`, the reservation also retains the predecessor run id, so recovery
 re-attaches to that run and cancels it before launching the replacement rather
 than leaving two runs alive.
@@ -199,7 +207,10 @@ failure from silently losing a boundary.
 The two are different questions. `lastFiredAt` answers "what does this trigger
 owe after downtime". The in-process watermark answers "what has this process
 already handled since it started", and a fresh process has none, which is why
-first sight of a trigger establishes one instead of firing from it.
+first sight of a trigger establishes one and computes catch-up from `lastFiredAt`
+when that durable cursor exists. A first-poll bound breach abandons the entire
+owed list, including the current occurrence; subsequent polls still dispatch
+the current occurrence subject to overlap. See [Overlap and catch-up](./policies.md).
 
 ## Both stores obey this contract
 

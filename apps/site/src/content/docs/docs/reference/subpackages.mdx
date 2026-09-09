@@ -272,7 +272,7 @@ await Effect.runPromise(
 
 ### [@smthrs/triggers](https://triggers.smithers.sh)
 
-Starts workflows on a cron schedule or a verified webhook, so two hosts never fire the same scheduled run twice.
+Starts workflows on a cron schedule or a verified webhook. Scheduled dispatch makes at-least-once launch attempts; the runner must durably deduplicate by idempotency key and return the same run identity on replay.
 
 ```ts
 import * as Trigger from "@smthrs/triggers/Trigger"

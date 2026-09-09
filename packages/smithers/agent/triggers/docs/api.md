@@ -62,6 +62,12 @@ call would drop or rewrite: `undefined`, `NaN`, a `Date`, and a function each
 fail as `invalid_trigger` with `TriggerError.path` set to `input`, at the
 declaration boundary where the caller can still see which field is wrong.
 
+Enumerable getters are accepted when their values are JSON. They are evaluated
+during decoding and again during SQL serialization. SQL registration takes an
+eager serialized snapshot before returning its Effect; later changes to the
+getter's source do not change that snapshot. Use plain JSON values for stable
+input, since a getter can produce different values or throw on a later read.
+
 `Trigger.Overlap` and `Trigger.CatchUp` are re-exports of the schemas and types
 of the same names from `Schedule`.
 
@@ -282,6 +288,19 @@ The occurrences a trigger owes since it last fired, oldest first.
   occurrence may be caught up, so a missed occurrence under `one` is
   `catch_up_bound_exceeded` exactly as three missed occurrences under `all` are.
 
+The scheduler dispatches these occurrences subject to overlap. It waits for
+launch acknowledgement, not completion, so `all` with `skip` can drop work and
+`all` with `buffer-one` can coalesce intermediate occurrences. Use a durable
+queue or a flow that processes its own interval backlog when every boundary
+must be processed.
+
+The scheduler logs a warning annotated with the trigger id and abandons the
+backlog when catch-up exceeds its bound. On the first poll of a trigger in a
+process, including after restart, it drops the entire owed list, including the
+current occurrence, records the current in-process watermark, and waits for a
+later boundary. On subsequent polls, it drops the missed backlog but still
+dispatches the current occurrence subject to overlap.
+
 ## TriggerStore
 
 The durable state contract: registration, listing, the claim protocol, and
@@ -323,8 +342,9 @@ type Claim =
   }
 ```
 
-An occurrence is addressed by its occurrence number, so a retry cannot fire it
-twice.
+An occurrence is addressed by its occurrence number. An unfinished occurrence
+can be claimed again after lease expiry or launch compensation; its runner
+idempotency key stays the same across attempts.
 
 `ClaimFire` deliberately carries no overlap policy. A claim applies the policy
 stored on the trigger row, read inside the same transaction, so a caller holding
@@ -564,6 +584,13 @@ interface RunnerService {
 
 `idempotencyKey` is `<triggerId>:<occurrence ISO instant>`, so two hosts that
 notice the same boundary derive the same key.
+
+Scheduled dispatch makes at-least-once launch attempts. `RunnerService.start`
+must durably deduplicate by `idempotencyKey` and return the same run identity on
+replay, including across host restarts.
+The runner may have accepted a launch before the store persists its `launched`
+result. A crash, result-write failure, or expired reservation can cause another
+attempt with that key, even while the earlier attempt is in flight.
 
 ### Scheduler.Runner and its constructors
 
@@ -974,10 +1001,10 @@ field in `TriggerError.path`. `Scheduler.parkedAttempts` is 8. If the eighth
 Control attempt remains parked awaiting approval, the launch fails with
 `runner`.
 
-A bound the declaration cannot honor is a statement about how much history to
-replay, not a reason to stop scheduling: the scheduler logs a warning annotated
-with the trigger id, abandons the backlog beyond the bound, and still fires the
-current occurrence.
+A bound breach logs a warning and abandons catch-up. On the first poll after
+restart, that includes the current occurrence; scheduling resumes at a later
+boundary. On subsequent polls, the current occurrence is still dispatched
+subject to overlap. See [Overlap and catch-up](./concepts/policies.md).
 
 ## Webhook verification and input ownership
 

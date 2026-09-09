@@ -45,11 +45,12 @@ export type CatchUp = Schedule.CatchUp
  * schedule.
  *
  * `input` is JSON rather than `unknown` because the store persists it with
- * `JSON.stringify` into a `NOT NULL` column. Left as `unknown`, `undefined`
- * serialized to nothing and reached the column as a generic write failure,
- * while `NaN`, a `Date`, and a getter were each silently transformed on the
- * way in. Declaring the type refuses all four here, where the caller can still
- * see which field is wrong.
+ * `JSON.stringify` into a `NOT NULL` column. The schema refuses `undefined`,
+ * `NaN`, a `Date`, and functions at the declaration boundary.
+ * Enumerable getters are accepted when their values are JSON. They are
+ * evaluated during decoding and again during SQL serialization. SQL registration
+ * takes an eager serialized snapshot before returning its Effect; use plain
+ * JSON values for stable input across reads.
  *
  * @category schemas
  * @since 0.1.0

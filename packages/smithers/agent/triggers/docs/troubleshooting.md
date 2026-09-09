@@ -38,7 +38,13 @@ the wrong type, or the `input` has no JSON representation.
 **What to change.** Read `TriggerError.path`, which names the offending field.
 `id`, `flowId`, and `cron` must be non-empty strings; `maxCatchUp` must be an
 integer between 0 and 1000; `input` must be JSON, which excludes `undefined`,
-`NaN`, a `Date`, and a property getter.
+`NaN`, a `Date`, and a function.
+
+Enumerable getters are accepted when their values are JSON. They are evaluated
+during decoding and again during SQL serialization. SQL registration takes an
+eager serialized snapshot before returning its Effect; later changes to the
+getter's source do not change that snapshot. Use plain JSON values for stable
+input, since a getter can produce different values or throw on a later read.
 
 ## invalid_schedule
 
@@ -77,10 +83,15 @@ and `Duration.fromInput` accepts both.
   `Cron.occurrencesBetween` was asked for a window it will not materialize.
 
 **What to change.** For an unusable bound, fix the declaration. For a breached
-bound, raise `maxCatchUp`, or accept the abandonment: the scheduler logs a
-warning annotated with the trigger id, drops the backlog beyond the bound, and
-still fires the current occurrence, so scheduling continues either way. For an
-unbounded search, pass a `limit`.
+bound, raise `maxCatchUp`, or accept the abandonment. For an unbounded search,
+pass a `limit`.
+
+The scheduler logs a warning annotated with the trigger id and abandons the
+backlog when catch-up exceeds its bound. On the first poll of a trigger in a
+process, including after restart, it drops the entire owed list, including the
+current occurrence, records the current in-process watermark, and waits for a
+later boundary. On subsequent polls, it drops the missed backlog but still
+dispatches the current occurrence subject to overlap.
 
 The trap worth naming: `maxCatchUp` defaults to 0, and a declaration that sets
 `catchUp: "one"` without raising it owes one occurrence it is not allowed to
@@ -183,7 +194,7 @@ from `Control.list` carries no `schedulerLastTickMs` in the same case. A
 heartbeat older than `pollInterval` by a wide margin means the scheduler's scope
 closed. Then, four behaviors are correct and surprising.
 
-**The first tick after a restart fires nothing.** A trigger with no
+**A trigger with no durable cursor fires nothing on its first tick.** A trigger with no
 `lastFiredAt` establishes a watermark at the latest boundary on first sight and
 starts from the next one. Registering a weekly trigger on a Sunday evening does
 not fire it for the Monday six days gone. Run a second tick after a boundary has
@@ -191,7 +202,7 @@ passed, or seed a `lastFiredAt` by recording a result.
 
 **A boundary was skipped while a run was in flight.** That is `overlap: "skip"`,
 the default. The occurrence is recorded as `skipped` and the cursor advances.
-Choose `buffer-one` if the work has to happen.
+Choose `buffer-one` if one coalesced follow-up is enough.
 
 **A buffered occurrence has not run yet.** The buffer drains on the next tick
 after the active run settles, and it holds exactly one occurrence: a run that
@@ -202,19 +213,29 @@ trigger.
 **A backlog disappeared after downtime.** Either `catchUp` is `none`, which owes
 nothing, or the backlog exceeded `maxCatchUp` and was abandoned with a warning
 annotated with the trigger id. Check the logs for `A trigger abandoned catch-up
-work beyond its bound`.
+work beyond its bound`. On the first poll after restart, a breached bound also
+drops the current occurrence; scheduling resumes at a later boundary.
 
 ## The trigger fired twice
 
 Check that both launches carry the same `idempotencyKey`. The key is
 `<triggerId>:<occurrence ISO instant>`, so two hosts noticing the same boundary
-produce the same key, and the control plane deduplicates on it. Two different
-keys mean two different occurrences, which is catch-up doing its job.
+produce the same key. Two different keys identify different occurrences or
+trigger ids.
 
-A genuine double launch of one occurrence would require the claim protocol to
-hand out two launch-capable claims for one occurrence number, which the store's
-transaction forbids. If you see one, the two hosts are probably pointed at
-different databases.
+Scheduled dispatch makes at-least-once launch attempts. `RunnerService.start`
+must durably deduplicate by `idempotencyKey` and return the same run identity on
+replay, including across host restarts.
+The Control-backed adapter forwards this key to Control. Custom runners must
+provide the same durable deduplication contract.
+
+The same database can issue another launch-capable claim after lease expiry or
+launch compensation. A launch may have been accepted before its `launched`
+result was persisted; a crash or result-write failure in that window causes a
+retry. An expired lease can also overlap an earlier in-flight attempt. Repeated
+`start` calls with one key are expected during recovery. If they produce
+different run identities, check the runner's durable idempotency records and
+whether the hosts share that deduplication state.
 
 ## A run is stuck holding the trigger
 

@@ -53,13 +53,17 @@ whole path, launch included, on a test clock.
 
 ## What the package does that a cron loop does not
 
-- Fires once when two hosts share a database. The claim protocol runs inside the
-  store's transaction, so one host launches and the other learns it lost.
+- Coordinates claims when two hosts share a database. Lease recovery can retry
+  the same occurrence, so preventing duplicate runs requires runner deduplication.
 - Decides what a boundary means while the previous run is still going: skip it,
   remember the newest one, or cancel the run in flight and replace it.
 - Bounds what a trigger owes after downtime, by a number the declaration states.
 - Accepts an inbound request without handing it authority. A verified payload
   names a flow; it cannot widen what that flow may do.
+
+Scheduled dispatch makes at-least-once launch attempts. `RunnerService.start`
+must durably deduplicate by `idempotencyKey` and return the same run identity on
+replay, including across host restarts.
 
 ## Public API
 
