@@ -8,51 +8,15 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import { execFileSync, spawn } from "node:child_process"
-import { once } from "node:events"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Fork from "../src/internal/Fork.ts"
 import { TimeTravel } from "../src/TimeTravel.ts"
-import { jjInstalled, runReal, runState, withRealFixture } from "./RealTimeTravelHarness.ts"
+import { awaitCheckpoint, jjInstalled, killHard, runReal, runState, withRealFixture } from "./RealTimeTravelHarness.ts"
 
 const childFixture = fileURLToPath(new URL("./fixtures/fork-crash-child.ts", import.meta.url))
-
-const checkpoint = (child: ChildProcessWithoutNullStreams): Promise<{ readonly stage: string }> =>
-  new Promise((resolve, reject) => {
-    let stdout = ""
-    let stderr = ""
-    const timeout = setTimeout(() => reject(new Error(`crash child timed out\n${stderr}\n${stdout}`)), 30_000)
-    child.stdout.setEncoding("utf8")
-    child.stderr.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk
-      const line = stdout.split("\n").find((candidate) => candidate.startsWith("{"))
-      if (line !== undefined) {
-        clearTimeout(timeout)
-        resolve(JSON.parse(line) as { readonly stage: string })
-      }
-    })
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk
-    })
-    child.once("error", (cause) => {
-      clearTimeout(timeout)
-      reject(cause)
-    })
-    child.once("exit", (code, signal) => {
-      clearTimeout(timeout)
-      reject(new Error(`crash child exited before checkpoint: ${code ?? signal}\n${stderr}\n${stdout}`))
-    })
-  })
-
-const killHard = async (child: ChildProcessWithoutNullStreams): Promise<void> => {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  child.kill("SIGKILL")
-  await once(child, "exit")
-}
 
 /** The workspace names jj registers for `repository`, as `jj workspace list` prints them. */
 const workspaceNames = (repository: string): ReadonlyArray<string> =>
@@ -93,7 +57,8 @@ describe.skipIf(!jjInstalled)("fork crash recovery over file SQLite", () => {
               env: { ...process.env, JJ_EDITOR: "true" }
             })
             try {
-              expect(yield* Effect.promise(() => checkpoint(child))).toEqual({ stage: "provisioned" })
+              expect(yield* Effect.promise(() => awaitCheckpoint<{ readonly stage: string }>(child, "crash child")))
+                .toEqual({ stage: "provisioned" })
               yield* Effect.promise(() => killHard(child))
 
               // The crash image: a registered lane, a reservation, and no child.

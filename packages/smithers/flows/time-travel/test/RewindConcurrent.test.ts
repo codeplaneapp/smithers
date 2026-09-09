@@ -3,6 +3,7 @@ import * as Jj from "@smthrs/jj"
 import { Journal } from "@smthrs/journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
 import { RunStore } from "@smthrs/run-store"
+import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import { CacheStore } from "@smthrs/step-cache"
 import * as Deferred from "effect/Deferred"
@@ -10,6 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { TestClock } from "effect/testing"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
 import * as Rewind from "../src/internal/Rewind.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
@@ -19,7 +21,9 @@ const ownerA: OwnerId = { hostId: "test-host", pid: 30, nonce: "owner-a" }
 const ownerB: OwnerId = { hostId: "test-host", pid: 31, nonce: "owner-b" }
 const frame = { lineageId: "run/root", seq: 0 } as const
 
-const makeRuns = (): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
+const makeRuns = (
+  overrides: Partial<RunStore.Service> = {}
+): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
   let row: RunStore.RunRow = {
     runId: "run",
     status: "suspended",
@@ -79,7 +83,8 @@ const makeRuns = (): RunStore.Service & { readonly state: () => RunStore.RunRow 
             })
         }
         return { _tag: "Transitioned" as const }
-      })
+      }),
+    ...overrides
   })
   return Object.assign(service, { state: () => ({ ...row }) })
 }
@@ -96,7 +101,19 @@ describe("Rewind concurrency", () => {
           payload: { eventType: "baseline", payload: {}, meta: { lineageId: "run/root" } }
         }]
       })
-      const runs = makeRuns()
+      // The winner's heartbeat is what keeps the claim from looking abandoned
+      // while the loser is being refused, and it only pulses on the clock the
+      // test drives: a fiber forked onto the default runtime would sleep on
+      // wall time instead, outlive a failed assertion, and hold the claim for
+      // the life of the worker.
+      const pulses: Array<{ readonly runId: string; readonly owner: OwnerId }> = []
+      const runs = makeRuns({
+        heartbeat: (runId, heartbeatOwner) =>
+          Effect.sync(() => {
+            pulses.push({ runId, owner: heartbeatOwner })
+            return { _tag: "Updated" as const }
+          })
+      })
       const journal = Journal.makeNoop({
         entries: ({ runId, after }) =>
           Effect.sync(() => ({
@@ -128,8 +145,8 @@ describe("Rewind concurrency", () => {
         restore: () => Effect.void
       })
       const registry = Effect.runSync(EffectHandlerRegistry.make())
-      const entered = Effect.runSync(Deferred.make<void>())
-      const release = Effect.runSync(Deferred.make<void>())
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
       const provide = <A, E, R>(program: Effect.Effect<A, E, R>) =>
         program.pipe(
           Effect.provide(Layer.succeed(TimeTravelStore, store)),
@@ -142,7 +159,7 @@ describe("Rewind concurrency", () => {
           Effect.provide(Layer.succeed(EffectHandlerRegistry.EffectHandlerRegistry, registry))
         )
 
-      const first = Effect.runFork(
+      const first = yield* Effect.forkChild(
         provide(
           Rewind.rewind({
             runId: "run",
@@ -158,9 +175,12 @@ describe("Rewind concurrency", () => {
                   : Effect.void
             }
           })
-        )
+        ),
+        { startImmediately: true }
       )
       yield* (Deferred.await(entered))
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
+      expect(pulses).toEqual([{ runId: "run", owner: ownerA }])
 
       const second = yield* (
         Effect.flip(
@@ -216,8 +236,8 @@ describe("Rewind concurrency", () => {
           })
       })
       const registry = Effect.runSync(EffectHandlerRegistry.make())
-      const entered = Effect.runSync(Deferred.make<void>())
-      const release = Effect.runSync(Deferred.make<void>())
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
       const provide = <A, E, R>(program: Effect.Effect<A, E, R>) =>
         program.pipe(
           Effect.provide(Layer.succeed(TimeTravelStore, store)),
@@ -235,7 +255,7 @@ describe("Rewind concurrency", () => {
           Effect.provide(Layer.succeed(EffectHandlerRegistry.EffectHandlerRegistry, registry))
         )
 
-      const winner = Effect.runFork(
+      const winner = yield* Effect.forkChild(
         provide(
           Rewind.rewind({
             runId: "run",
@@ -249,7 +269,8 @@ describe("Rewind concurrency", () => {
                   : Effect.void
             }
           })
-        )
+        ),
+        { startImmediately: true }
       )
       yield* (Deferred.await(entered))
 

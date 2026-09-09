@@ -7,13 +7,6 @@ import type { LineageEdge } from "../src/Frame.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
 
-interface Observation {
-  readonly archived: number
-  readonly orphaned: ReadonlyArray<string>
-  readonly remaining: ReadonlyArray<string>
-  readonly edges: ReadonlyArray<string>
-}
-
 const owner = { hostId: "host-a", pid: 1234, nonce: "nonce" } as const
 
 const records: ReadonlyArray<MemoryTimeTravelStore.JournalRecord> = [

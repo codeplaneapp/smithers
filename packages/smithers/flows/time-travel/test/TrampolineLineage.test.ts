@@ -17,7 +17,7 @@ import * as EngineStore from "@smthrs/engine-store/EngineStore"
 import * as EngineMigrations from "@smthrs/engine-store/Migrations"
 import * as OwnerIdentity from "@smthrs/engine-store/OwnerIdentity"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
-import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as Jj from "@smthrs/jj"
 import * as Journal from "@smthrs/journal/Journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
@@ -53,6 +53,7 @@ type CounterFlow = Flow.Flow<
 >
 
 /** The recursion edge a body cannot name inside its own declaration. */
+// eslint-disable-next-line prefer-const -- the body reads `self` before the assignment below binds it.
 let self: CounterFlow
 
 const Counter: CounterFlow = Flow.make("trampoline-lineage/counter", {

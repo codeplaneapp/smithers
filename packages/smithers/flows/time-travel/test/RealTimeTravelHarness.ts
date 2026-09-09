@@ -21,7 +21,9 @@ import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import { execFileSync, spawnSync } from "node:child_process"
+import { once } from "node:events"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -220,6 +222,67 @@ export const runReal = <A, E, R>(
   filename: string,
   effect: Effect.Effect<A, E, R>
 ): Effect.Effect<A> => Effect.scoped(effect.pipe(Effect.provide(realLayer(filename)))) as Effect.Effect<A>
+
+/**
+ * Resolves with the first JSON object line a crash fixture prints on stdout.
+ *
+ * The fixture is a real process that is about to be killed, so every other
+ * outcome has to reject and carry what it printed: a spawn error, an exit
+ * before the checkpoint, and a 30 s ceiling. `settled` keeps whichever
+ * arrives first the answer, and stdout is drained line by line so a chunk
+ * boundary inside the JSON is buffered rather than parsed.
+ *
+ * `description` names the fixture in those rejections.
+ */
+export const awaitCheckpoint = <A>(
+  child: ChildProcessWithoutNullStreams,
+  description: string
+): Promise<A> =>
+  new Promise((resolve, reject) => {
+    let stdout = ""
+    let stderr = ""
+    let settled = false
+    const timeout = setTimeout(
+      () => finish(() => reject(new Error(`${description} timed out\n${stderr}\n${stdout}`))),
+      30_000
+    )
+    const finish = (complete: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      complete()
+    }
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk
+      const lines = stdout.split("\n")
+      stdout = lines.pop() ?? ""
+      for (const line of lines) {
+        if (!line.startsWith("{")) continue
+        finish(() => resolve(JSON.parse(line) as A))
+        return
+      }
+    })
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk
+    })
+    child.once("error", (cause) => finish(() => reject(cause)))
+    child.once(
+      "exit",
+      (code, signal) =>
+        finish(() =>
+          reject(new Error(`${description} exited before checkpoint: ${code ?? signal}\n${stderr}\n${stdout}`))
+        )
+    )
+  })
+
+/** SIGKILLs a still-running fixture and waits for the exit, so no lane outlives its case. */
+export const killHard = async (child: ChildProcessWithoutNullStreams): Promise<void> => {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  child.kill("SIGKILL")
+  await once(child, "exit")
+}
 
 export const runState = (flowName: string): string => JSON.stringify({ version: 1, flowName, payload: {} })
 

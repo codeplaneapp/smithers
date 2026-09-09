@@ -5,14 +5,14 @@ import { heartbeatStaleAfter } from "@smthrs/run-store/Ownership"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import { spawn } from "node:child_process"
-import { once } from "node:events"
 import { fileURLToPath } from "node:url"
 import { TimeTravel } from "../src/TimeTravel.ts"
 import {
+  awaitCheckpoint,
   jjInstalled,
   Journal,
+  killHard,
   parkSealedFlow,
   runReal,
   runRealEngine,
@@ -26,52 +26,6 @@ interface LiveRow {
   readonly heartbeat_at_ms: number | null
   readonly owner_pid: number | null
   readonly status: string
-}
-
-const checkpoint = (child: ChildProcessWithoutNullStreams): Promise<{ readonly status: string }> =>
-  new Promise((resolve, reject) => {
-    let stdout = ""
-    let stderr = ""
-    let settled = false
-    const timeout = setTimeout(
-      () => finish(() => reject(new Error(`in-flight child timed out\n${stderr}\n${stdout}`))),
-      30_000
-    )
-    const finish = (complete: () => void) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      complete()
-    }
-    child.stdout.setEncoding("utf8")
-    child.stderr.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk
-      const lines = stdout.split("\n")
-      stdout = lines.pop() ?? ""
-      for (const line of lines) {
-        if (!line.startsWith("{")) continue
-        finish(() => resolve(JSON.parse(line) as { readonly status: string }))
-        return
-      }
-    })
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk
-    })
-    child.once("error", (cause) => finish(() => reject(cause)))
-    child.once(
-      "exit",
-      (code, signal) =>
-        finish(() =>
-          reject(new Error(`in-flight child exited before checkpoint: ${code ?? signal}\n${stderr}\n${stdout}`))
-        )
-    )
-  })
-
-const killHard = async (child: ChildProcessWithoutNullStreams): Promise<void> => {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  child.kill("SIGKILL")
-  await once(child, "exit")
 }
 
 const readLiveRow = (filename: string, runId: string) =>
@@ -141,7 +95,10 @@ describe.skipIf(!jjInstalled)("rewind versus a genuinely in-flight engine", () =
             const childPid = child.pid
             if (childPid === undefined) throw new Error("spawn did not assign a child pid")
             try {
-              expect(yield* Effect.promise(() => checkpoint(child))).toEqual({ status: "in-flight" })
+              expect(
+                yield* Effect.promise(() => awaitCheckpoint<{ readonly status: string }>(child, "in-flight child"))
+              )
+                .toEqual({ status: "in-flight" })
               const firstLive = yield* readLiveRow(fixture.databaseFile, runId)
               expect(firstLive).toMatchObject({ status: "running", owner_pid: childPid })
               const advanced = yield* waitForHeartbeatAfter(

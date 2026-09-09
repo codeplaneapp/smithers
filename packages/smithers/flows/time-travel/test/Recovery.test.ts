@@ -759,8 +759,8 @@ describe("Recovery", () => {
     Effect.gen(function*() {
       const store = MemoryTimeTravelStore.make()
       seed(store, audit("archive_committed"))
-      const entered = Effect.runSync(Deferred.make<void>())
-      const release = Effect.runSync(Deferred.make<void>())
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
       const runs = RunStore.makeNoop({
         get: () => Effect.succeed(makeRuns().state()),
         transitionOwned: () =>
@@ -778,10 +778,10 @@ describe("Recovery", () => {
           Layer.succeed(EffectHandlerRegistry.EffectHandlerRegistry, EffectHandlerRegistry.makeNoop())
         )
       )
-      const fiber = Effect.runFork(program)
+      const fiber = yield* Effect.forkChild(program, { startImmediately: true })
 
       yield* (Deferred.await(entered))
-      const interrupt = Effect.runFork(Fiber.interrupt(fiber))
+      const interrupt = yield* Effect.forkChild(Fiber.interrupt(fiber), { startImmediately: true })
       yield* (Deferred.succeed(release, undefined))
       yield* (Fiber.join(interrupt))
       const exit = yield* (Fiber.await(fiber))

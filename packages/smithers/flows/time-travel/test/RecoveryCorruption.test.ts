@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Jj from "@smthrs/jj"
-import * as Journal from "@smthrs/journal/Journal"
 import * as SqlJournal from "@smthrs/journal/SqlJournal"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import * as Effect from "effect/Effect"

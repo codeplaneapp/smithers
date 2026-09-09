@@ -59,6 +59,52 @@ export default tseslint.config(
       "unicorn/prefer-array-flat-map": "error"
     }
   },
+  {
+    files: ["test/**/*.ts"],
+    extends: [tseslint.configs.recommended],
+    languageOptions: {
+      parserOptions: {
+        project: ["./tsconfig.test.json"],
+        tsconfigRootDir: import.meta.dirname
+      }
+    },
+    settings: {
+      "import/resolver": {
+        typescript: {
+          project: ["./tsconfig.test.json"]
+        }
+      }
+    },
+    plugins: {
+      unicorn
+    },
+    rules: {
+      "@typescript-eslint/array-type": ["error", { default: "generic", readonly: "generic" }],
+      "@typescript-eslint/consistent-type-imports": ["error", { fixStyle: "inline-type-imports" }],
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-import-type-side-effects": "error",
+      "@typescript-eslint/no-unnecessary-type-constraint": "error",
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-useless-empty-export": "error",
+      "import/no-duplicates": "error",
+      "import/no-empty-named-blocks": "error",
+      "import/no-self-import": "error",
+      "no-await-in-loop": "off",
+      "no-console": "error",
+      "no-empty-pattern": "off",
+      "no-fallthrough": "off",
+      "no-shadow": "off",
+      "no-unneeded-ternary": "error",
+      "no-unused-vars": "off",
+      "no-useless-concat": "error",
+      "no-useless-constructor": "error",
+      "no-var": "error",
+      "object-shorthand": "off",
+      "require-yield": "off",
+      "unicorn/no-abusive-eslint-disable": "error",
+      "unicorn/prefer-array-flat-map": "error"
+    }
+  },
   ...jsdocConvention,
   ...invariants(uninstalledSafety, swallowedCause, ambientAuthority)
 )

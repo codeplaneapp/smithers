@@ -2,45 +2,13 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { spawn } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import * as EffectBoundary from "../src/EffectBoundary.ts"
 import { TimeTravel } from "../src/TimeTravel.ts"
-import { jjInstalled, runReal, runState, withRealFixture } from "./RealTimeTravelHarness.ts"
+import { awaitCheckpoint, jjInstalled, killHard, runReal, runState, withRealFixture } from "./RealTimeTravelHarness.ts"
 
 const childFixture = fileURLToPath(new URL("./fixtures/rewind-crash-child.ts", import.meta.url))
-
-const checkpoint = (child: ChildProcessWithoutNullStreams): Promise<{ readonly stage: string }> =>
-  new Promise((resolve, reject) => {
-    let stdout = ""
-    let stderr = ""
-    const timeout = setTimeout(() => reject(new Error(`crash child timed out\n${stderr}\n${stdout}`)), 30_000)
-    child.stdout.setEncoding("utf8")
-    child.stderr.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk
-      const line = stdout.split("\n").find((candidate) => candidate.startsWith("{"))
-      if (line !== undefined) {
-        clearTimeout(timeout)
-        resolve(JSON.parse(line) as { readonly stage: string })
-      }
-    })
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk
-    })
-    child.once("error", (cause) => {
-      clearTimeout(timeout)
-      reject(cause)
-    })
-    child.once("exit", (code, signal) => {
-      clearTimeout(timeout)
-      reject(new Error(`crash child exited before checkpoint: ${code ?? signal}\n${stderr}\n${stdout}`))
-    })
-  })
-
-const killHard = async (child: ChildProcessWithoutNullStreams): Promise<void> => {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  child.kill("SIGKILL")
-  await once(child, "exit")
-}
 
 describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
   // The finite budget covers four real child processes, SIGKILL, and fresh recovery layers.
@@ -86,7 +54,8 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
               env: { ...process.env, JJ_EDITOR: "true" }
             })
             try {
-              expect(yield* Effect.promise(() => checkpoint(child))).toEqual({ stage })
+              expect(yield* Effect.promise(() => awaitCheckpoint<{ readonly stage: string }>(child, "crash child")))
+                .toEqual({ stage })
               yield* Effect.promise(() => killHard(child))
               const recovered = yield* runReal(
                 fixture.databaseFile,
@@ -326,7 +295,3 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
         }))
     }), { timeout: 60_000 })
 })
-import type { ChildProcessWithoutNullStreams } from "node:child_process"
-import { spawn } from "node:child_process"
-import { once } from "node:events"
-import { fileURLToPath } from "node:url"

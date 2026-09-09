@@ -38,7 +38,7 @@ const makeRuns = (
   initial: RunStore.RunRow,
   overrides: Partial<RunStore.Service> = {}
 ): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
-  let row = { ...initial }
+  const row = { ...initial }
   const service = RunStore.makeNoop({
     // Only the parent has a row here. A descendant edge in this fixture stands
     // for a child whose run row is gone, which the rewind discloses as missing
@@ -1001,9 +1001,9 @@ describe("Rewind protocol fault matrix", () => {
       const store = MemoryTimeTravelStore.make({ records: records() })
       const runs = makeRuns(runRow())
       const jj = makeJj()
-      const entered = Effect.runSync(Deferred.make<void>())
-      const release = Effect.runSync(Deferred.make<void>())
-      const fiber = Effect.runFork(
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fiber = yield* Effect.forkChild(
         provide(
           Rewind.rewind({
             runId: "run",
@@ -1018,7 +1018,8 @@ describe("Rewind protocol fault matrix", () => {
             }
           }),
           { store, runs, jj: jj.service }
-        )
+        ),
+        { startImmediately: true }
       )
 
       yield* (Deferred.await(entered))
@@ -1041,9 +1042,9 @@ describe("Rewind protocol fault matrix", () => {
       const store = MemoryTimeTravelStore.make({ records: records() })
       const runs = makeRuns(runRow())
       const jj = makeJj()
-      const entered = Effect.runSync(Deferred.make<void>())
-      const release = Effect.runSync(Deferred.make<void>())
-      const fiber = Effect.runFork(
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fiber = yield* Effect.forkChild(
         provide(
           Rewind.rewind({
             runId: "run",
@@ -1058,7 +1059,8 @@ describe("Rewind protocol fault matrix", () => {
             }
           }),
           { store, runs, jj: jj.service }
-        )
+        ),
+        { startImmediately: true }
       )
 
       yield* (Deferred.await(entered))

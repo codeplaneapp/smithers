@@ -385,8 +385,8 @@ describe("TimeTravel wiring", () => {
             return { _tag: "Transitioned" as const }
           })
       })
-      const entered = Effect.runSync(Deferred.make<void>())
-      const release = Effect.runSync(Deferred.make<void>())
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
       let suffixReaders = 0
       const blockingJournal = Journal.makeNoop({
         entries: ({ after, limit }) => {
