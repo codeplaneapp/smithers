@@ -47,19 +47,31 @@ const isToolEcho = (blob: string): boolean => {
 }
 
 export const scrubToolEcho = (text: string): string => {
+  // Be conservative with possible Markdown code: even seam spaces can be literal.
+  const preserveSeams = /[`~\t]| {4}/.test(text)
   let out = text
   for (const starter of TOOL_ECHO_STARTS) {
     let cursor = out.indexOf(starter)
     while (cursor !== -1) {
       const end = balancedEnd(out, cursor)
       if (end !== undefined && isToolEcho(out.slice(cursor, end))) {
-        out = `${out.slice(0, cursor)}${out.slice(end)}`
+        let before = out.slice(0, cursor)
+        let after = out.slice(end)
+        if (!preserveSeams) {
+          // Remove at most one separator at this seam; leave indentation,
+          // line breaks and all whitespace elsewhere exactly as received.
+          if (before === "" && /^ \S/.test(after)) after = after.slice(1)
+          else if (/\S $/.test(before) && (after === "" || /^ \S/.test(after))) {
+            before = before.slice(0, -1)
+          }
+        }
+        out = `${before}${after}`
+        cursor = before.length
         cursor = out.indexOf(starter, cursor)
       } else {
         cursor = out.indexOf(starter, cursor + 1)
       }
     }
   }
-  // Collapse the seams a removal leaves behind, without touching real prose.
-  return out.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim()
+  return out
 }
