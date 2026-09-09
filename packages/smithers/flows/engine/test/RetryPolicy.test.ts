@@ -80,7 +80,7 @@ describe("expiration (issue #36)", () => {
 })
 
 describe("flow suspension policy", () => {
-  it("preserves the policy through annotations and forwards it to execution", () => {
+  it.effect("preserves the policy through annotations and forwards it to execution", () => {
     const policy = RetryPolicy.make({ initialMs: 17, factor: 1, maxMs: 17 })
     const suspendedActionDeclaration = Action.make("RetryPolicy/suspended/action", {
       payload: {},
@@ -110,17 +110,22 @@ describe("flow suspension policy", () => {
     )
 
     expect(suspended.suspendedRetryPolicy).toBe(policy)
-    return Effect.gen(function*() {
-      const fiber = yield* suspended.execute({}, { executionId: "suspended-policy" }).pipe(Effect.forkChild)
-      yield* Effect.yieldNow
-      yield* TestClock.adjust(16)
-      expect(attempts).toBe(1)
-      yield* TestClock.adjust(1)
-      yield* Fiber.join(fiber)
-      expect(attempts).toBe(2)
-    }).pipe(
-      Effect.provide(layer),
-      Effect.provide(TestClock.layer())
+    // The declaration's policy is what the engine schedules the resume with:
+    // the suspended round is still waiting one millisecond before the 17ms
+    // delay and runs its second attempt on the millisecond that reaches it.
+    return withCrypto(
+      Effect.gen(function*() {
+        const fiber = yield* suspended.execute({}, { executionId: "suspended-policy" }).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* TestClock.adjust(16)
+        expect(attempts).toBe(1)
+        yield* TestClock.adjust(1)
+        yield* Fiber.join(fiber)
+        expect(attempts).toBe(2)
+      }).pipe(
+        Effect.provide(layer),
+        Effect.provide(TestClock.layer())
+      )
     )
   })
 })

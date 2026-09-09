@@ -249,19 +249,45 @@ describe("FlowEngine.Round", () => {
 })
 
 describe("a lineage on the memory engine", () => {
-  it.effect("tracks nested registrations of the same declaration independently", () =>
+  // `makeUnsafe` keeps its own per-tag declaration stack beside the driver's
+  // registration table, and a handoff resolves its target from the top of it.
+  // A closed inner registration must therefore be spliced back out: the round
+  // decodes its journaled payload under the OUTER declaration's schema, and a
+  // stale inner entry would refuse a payload the lineage is entitled to send.
+  it.effect("resolves a handoff under the outer declaration after an inner registration of the same tag closes", () =>
     Effect.gen(function*() {
-      yield* withCrypto(
+      const OuterV1 = Flow.make("trampoline/scoped-evolved", {
+        payload: { value: Schema.Number },
+        success: Schema.Number,
+        body: ({ value }) => Increment.call({ value })
+      })
+      // The same tag under a payload schema the sender's handoff cannot
+      // satisfy, so serving it instead of the outer declaration is visible.
+      const InnerV2 = Flow.make("trampoline/scoped-evolved", {
+        payload: { value: Schema.Number, gate: Schema.String },
+        success: Schema.Number,
+        body: ({ value }) => Increment.call({ value })
+      })
+      const Sender = Flow.make("trampoline/scoped-evolved-sender", {
+        payload: { value: Schema.Number },
+        success: Schema.Number,
+        body: ({ value }) => OuterV1.to({ value })
+      })
+      const { calls, layer } = wire(Interpreter.layer(Sender), Interpreter.layer(OuterV1))
+
+      const exit = yield* withCrypto(
         Effect.gen(function*() {
           const runtime = yield* FlowRuntime.FlowRuntime
-          yield* Effect.scoped(
-            Effect.gen(function*() {
-              yield* runtime.register(Counter, () => Effect.succeed(0))
-              yield* Effect.scoped(runtime.register(Counter, () => Effect.succeed(0)))
-            })
-          )
-        }).pipe(Effect.provide(FlowEngine.layerMemory))
+          yield* Effect.scoped(runtime.register(InnerV2, () => Effect.succeed(0)))
+          // The inner scope is closed; the handoff must land on `OuterV1`.
+          return yield* Sender.execute({ value: 1 }, { executionId: "memory-scoped-evolved" }).pipe(Effect.exit)
+        }).pipe(Effect.provide(layer))
       )
+
+      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(Exit.isSuccess(exit) && exit.value).toBe(2)
+      // The outer declaration's body ran, so the next round's work dispatched.
+      expect(calls).toEqual([1])
     }))
 
   it.effect("counts to its target across rounds and answers with the lineage's value", () =>
