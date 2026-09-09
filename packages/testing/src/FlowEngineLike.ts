@@ -405,9 +405,6 @@ export const make = (): Effect.Effect<
           ? undefined
           : idempotencyIndex.get(options.idempotencyKey)
         const executionId = joinedId ?? options.executionId ?? freshExecutionId()
-        if (options.idempotencyKey !== undefined) {
-          idempotencyIndex.set(options.idempotencyKey, executionId)
-        }
         const known = executions.get(executionId)
         if (known !== undefined) {
           // A re-submission that matches joins the existing execution; one
@@ -419,7 +416,11 @@ export const make = (): Effect.Effect<
             { flowName: options.flow.name, payload: options.payload }
           )
           if (Option.isSome(difference)) return yield* Effect.fail(difference.value)
-        } else {
+        }
+        if (options.idempotencyKey !== undefined) {
+          idempotencyIndex.set(options.idempotencyKey, executionId)
+        }
+        if (known === undefined) {
           const flow = yield* register(options.flow)
           executions.set(executionId, {
             flow,
@@ -453,11 +454,10 @@ export const make = (): Effect.Effect<
     const result = (executionId: string): Effect.Effect<ExecutionResult, EngineSubjectError> =>
       Effect.gen(function*() {
         const meta = yield* requireMeta(executionId)
-        // A settled attempt is authoritative: it already classified suspension
-        // against abort, which `poll` alone cannot do once `interruptUnsafe`
-        // has torn the execution fiber down.
+        // Cancellation can re-drive a suspended round without entering the
+        // registered body. In that case only the runtime has its latest exit.
         const deferred = settlements.get(executionId)
-        if (deferred !== undefined && Deferred.isDoneUnsafe(deferred)) {
+        if (!interrupted.has(executionId) && deferred !== undefined && Deferred.isDoneUnsafe(deferred)) {
           return yield* Deferred.await(deferred)
         }
         const polled = yield* Effect.exit(engine.poll(meta.flow, executionId))
@@ -474,14 +474,34 @@ export const make = (): Effect.Effect<
       })
 
     const interrupt = (executionId: string): Effect.Effect<void, EngineSubjectError> =>
-      Effect.suspend(() => {
+      Effect.gen(function*() {
         const meta = executions.get(executionId)
-        if (meta === undefined) return Effect.void
+        if (meta === undefined) return
+        const deferred = settlements.get(executionId)
+        const wasSettled = deferred !== undefined && Deferred.isDoneUnsafe(deferred)
+        if (wasSettled) yield* arm(executionId)
         interrupted.add(executionId)
         // `interrupt`, never `interruptUnsafe`: the durable engine refuses the
         // unsafe path with `unsafe_interrupt_unsupported` by contract, and the
         // safe path does deliver the interruption to the live body fiber.
-        return engine.interrupt(meta.flow, executionId)
+        yield* engine.interrupt(meta.flow, executionId)
+        if (!wasSettled) return
+        // A cancelled parked round can self-interrupt before the registered
+        // body installs its onExit. Publish that round's exit to the fresh
+        // latch so run joins and resume cannot reuse its earlier suspension.
+        for (let attempt = 0;; attempt++) {
+          const current = yield* result(executionId)
+          if (current.status !== "suspended") {
+            yield* settle(executionId, current)
+            return
+          }
+          if (attempt >= publicationPasses) {
+            return yield* Effect.fail(unavailable(
+              `Execution ${executionId} did not publish its cancellation result within ${publicationPasses} scheduler passes`
+            ))
+          }
+          yield* Effect.yieldNow
+        }
       })
 
     const resume = (executionId: string): Effect.Effect<ExecutionResult, EngineSubjectError> =>

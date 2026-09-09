@@ -47,6 +47,12 @@ A step body's error channel is `unknown` because the **pin** chooses the
 failure value it wants the subject to journal. It is not a laundered engine
 error, and it is the one place in this package where `unknown` is correct.
 
+## Refused execution claims
+
+A submission that conflicts with an existing execution's flow or payload fails
+with `ExecutionConflictError`. A new idempotency key on that refused submission
+remains available for a later run.
+
 ## What `sealed` selects
 
 `sealed` selects a step's **identity**, not whether a replay may reuse a
@@ -87,6 +93,12 @@ interruption to the live body fiber. It is the durable engine's only
 cancellation path: the release policy requires `interruptUnsafe` to fail there
 with `unsafe_interrupt_unsupported`, so an adapter built on the unsafe path
 could not run a single interrupt pin against the engine that ships.
+
+Cancelling a suspended execution settles it as `aborted`. Subsequent `result`,
+`resume`, and matching `run` calls return that terminal result. The adapter
+refreshes its settlement from the runtime because cancellation can finish a
+parked round before its registered body runs. Missing cancellation publication
+fails with `EngineUnavailableError` after a bounded number of scheduler passes.
 
 ## Race semantics
 

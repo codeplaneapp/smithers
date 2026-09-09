@@ -146,6 +146,50 @@ describe("FlowEngineLike bounds its publication confirmation", () => {
     }).pipe(Effect.provide(neverPublishes)))
 })
 
+describe("FlowEngineLike confirms cancellation of parked rounds", () => {
+  for (const publication of ["delayed", "missing"] as const) {
+    it.scoped(`${publication} cancellation publication is bounded`, () => {
+      let cancelling = false
+      let polls = 0
+      const subject = decorated((real) => ({
+        interrupt: (flow, executionId) => {
+          cancelling = true
+          return real.interrupt(flow, executionId)
+        },
+        poll: (flow, executionId) => {
+          if (cancelling && (publication === "missing" || polls++ < 3)) {
+            return Effect.succeed(Option.none())
+          }
+          return real.poll(flow, executionId)
+        }
+      }))
+      return Effect.gen(function*() {
+        const engine = yield* EngineSubject.EngineSubject
+        const executionId = `testing/engine-like/contract/cancel-${publication}`
+        expect(
+          (yield* engine.run({
+            flow: {
+              name: executionId,
+              steps: [{ key: "park", sealed: false, kind: "step", run: () => Effect.interrupt }]
+            },
+            payload: undefined,
+            executionId
+          })).status
+        ).toBe("suspended")
+
+        if (publication === "missing") {
+          const error = yield* engine.interrupt(executionId).pipe(Effect.flip)
+          expect(error).toMatchObject({ code: "engine_unavailable" })
+          expect((error as EngineUnavailableError).message).toContain("did not publish its cancellation result")
+        } else {
+          yield* engine.interrupt(executionId)
+          expect(yield* engine.resume(executionId)).toEqual({ executionId, status: "aborted" })
+        }
+      }).pipe(Effect.provide(subject))
+    })
+  }
+})
+
 describe("FlowEngineLike projects every runtime result", () => {
   it.scoped("reports a known live execution as suspended when poll has no result", () =>
     Effect.gen(function*() {

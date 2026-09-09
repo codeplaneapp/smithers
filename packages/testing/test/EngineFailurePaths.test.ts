@@ -15,6 +15,7 @@ import * as Latch from "effect/Latch"
 import * as Ref from "effect/Ref"
 import * as Scheduler from "effect/Scheduler"
 import * as Scope from "effect/Scope"
+import * as TestClock from "effect/testing/TestClock"
 import type { EngineSubject as Subject, FlowSpec, StepSpec } from "../src/EngineSubject.ts"
 import * as EngineSubject from "../src/EngineSubject.ts"
 import * as FlowEngineLike from "../src/FlowEngineLike.ts"
@@ -36,6 +37,73 @@ const onEachSubject = (
   it.scoped(`FlowEngineLike ${name}`, () =>
     Effect.flatMap(EngineSubject.EngineSubject, body).pipe(Effect.provide(flowLayer)))
 }
+
+describe("execution lifecycle parity", () => {
+  for (const operation of ["result", "resume", "run"] as const) {
+    onEachSubject(
+      `reports aborted through ${operation} after interrupting a suspended execution`,
+      (engine) =>
+        Effect.gen(function*() {
+          const executionId = `testing/suspended-interrupt/${operation}`
+          const flow: FlowSpec = {
+            name: executionId,
+            steps: [{ key: "park", sealed: false, kind: "step", run: () => Effect.interrupt }]
+          }
+          const options = { flow, payload: undefined, executionId }
+          expect(yield* engine.run(options)).toEqual({ executionId, status: "suspended" })
+
+          yield* engine.interrupt(executionId)
+          const observed = operation === "run" ? engine.run(options) : engine[operation](executionId)
+          expect(yield* TestClock.withLive(observed.pipe(Effect.timeout("3 seconds")))).toEqual({
+            executionId,
+            status: "aborted"
+          })
+        })
+    )
+  }
+
+  onEachSubject("preserves a completed result when interrupted again", (engine) =>
+    Effect.gen(function*() {
+      const executionId = "testing/completed-interrupt"
+      const options = {
+        flow: { name: executionId, steps: [] },
+        payload: "done",
+        executionId
+      }
+      const completed = yield* engine.run(options)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        yield* engine.interrupt(executionId)
+        expect(yield* engine.result(executionId)).toEqual(completed)
+        expect(yield* engine.resume(executionId)).toEqual(completed)
+        expect(yield* engine.run(options)).toEqual(completed)
+      }
+    }))
+
+  for (const field of ["flow", "payload"] as const) {
+    onEachSubject(`does not reserve a key refused by a ${field} conflict`, (engine) =>
+      Effect.gen(function*() {
+        const executionId = `testing/refused-key/${field}`
+        const idempotencyKey = `${executionId}/key`
+        const flow: FlowSpec = {
+          name: executionId,
+          steps: [{ key: "echo", sealed: false, kind: "step", run: (input) => Effect.succeed(input) }]
+        }
+        yield* engine.run({ flow, payload: "original", executionId })
+        const retry = {
+          flow: field === "flow" ? { ...flow, name: `${flow.name}/different` } : flow,
+          payload: field === "payload" ? "different" : "original",
+          idempotencyKey
+        }
+        const error = yield* engine.run({ ...retry, executionId }).pipe(Effect.flip)
+        expect(error).toMatchObject({ _tag: "ExecutionConflictError", field })
+
+        const accepted = yield* engine.run(retry)
+        expect(accepted.executionId).not.toBe(executionId)
+        expect(accepted).toMatchObject({ status: "completed", value: retry.payload })
+        expect(yield* engine.run(retry)).toEqual(accepted)
+      }))
+  }
+})
 
 describe("unknown execution ids", () => {
   onEachSubject("fails reads and resume with engine_unavailable", (engine) =>
