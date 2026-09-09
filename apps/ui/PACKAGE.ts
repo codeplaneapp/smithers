@@ -34,6 +34,9 @@ const buildConfigs = [
 const harnessSources = Smithers.glob("//apps/ui/scripts/**/*.ts")
 const suiteSources = Smithers.glob("//apps/ui/e2e/**/*.ts")
 
+/** The assertion contracts the e2e tiers share; pure, so the unit suite gates them. */
+const contractSources = Smithers.glob("//apps/ui/e2e/contracts/**/*.ts")
+
 /**
  * Projects the pinned Electrobun SDK before a fresh checkout can typecheck.
  * CI installs with scripts disabled, and the SDK is generated outside the
@@ -87,7 +90,8 @@ const check = Smithers.Typecheck({
 })
 
 /**
- * The unit suite: everything under `src/`, hermetic, no server and no browser.
+ * The unit suite: everything under `src/` plus the e2e assertion contracts
+ * under `e2e/contracts/`, hermetic, no server and no browser.
  *
  * @since 0.1.0
  * @category test
@@ -97,8 +101,8 @@ const check = Smithers.Typecheck({
 // scripts/repo-contract/README.md for the denominator exception.
 const unitTests = Smithers.NodeTest({
   runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
-  runner: Smithers.testSuite(["src"]),
-  srcs: [sources, componentSources, styleSources],
+  runner: Smithers.testSuite(["src", "e2e/contracts"]),
+  srcs: [sources, componentSources, styleSources, contractSources],
   deps: [],
   cwd
 })

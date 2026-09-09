@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { PackagedFixtureRun } from "./FixtureRun"
 import type { PackagedTestFixture } from "./FixtureRun"
+import { terminalExecutionProbe } from "../contracts/terminalExecutionProbe"
 import { launchApp } from "./PackagedApp"
 import type { PackagedApp } from "./PackagedApp"
 
@@ -246,6 +247,18 @@ const typeInTerminal = async (app: PackagedApp, sessionId: string, data: string)
         data: ${JSON.stringify(data)},
         inputType: 'insertText'
       }))
+      return true
+    })()
+  `)
+}
+
+/* Enter is delivered on its own, so a test can prove echoed bytes alone run nothing. */
+const submitTerminal = async (app: PackagedApp, sessionId: string): Promise<void> => {
+  await app.eval<boolean>(`
+    (() => {
+      const textarea = document.querySelector('[data-testid="terminal-${sessionId}"] .xterm-helper-textarea')
+      if (!(textarea instanceof HTMLTextAreaElement)) throw new Error('Terminal input is not mounted')
+      textarea.focus()
       const key = { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }
       textarea.dispatchEvent(new KeyboardEvent('keydown', key))
       textarea.dispatchEvent(new KeyboardEvent('keyup', key))
@@ -253,6 +266,24 @@ const typeInTerminal = async (app: PackagedApp, sessionId: string, data: string)
     })()
   `)
 }
+
+/** The PTY session's own byte stream, tail-limited, read through the renderer. */
+const terminalOutput = (sessionId: string): string => `
+  (async () => {
+    const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content') ?? ''
+    const response = await fetch('/api/pty/${sessionId}/output?tail=16384', {
+      headers: { 'x-smithers-local-session': token }
+    })
+    return response.ok ? (await response.json()).output : ''
+  })()
+`
+
+/** The xterm grid as rendered rows, one line each, so a row can be matched whole. */
+const terminalRows = (sessionId: string): string => `
+  Array.from(document.querySelectorAll('[data-testid="terminal-${sessionId}"] .xterm-rows > div'))
+    .map((row) => row.textContent ?? '')
+    .join('\\n')
+`
 
 describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
   beforeAll(async () => {
@@ -553,33 +584,20 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
         expect.objectContaining({ sessionId, kind: "terminal", cwd: await realpath(repository), alive: true })
       ])
 
-      const marker = `PACKAGED_PTY_${crypto.randomUUID().replaceAll("-", "")}`
-      await typeInTerminal(app, sessionId, `printf '${marker}\\n'`)
-      const output = await app.waitFor<string>(
-        `
-        (async () => {
-          const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content') ?? ''
-          const response = await fetch('/api/pty/${sessionId}/output?tail=16384', {
-            headers: { 'x-smithers-local-session': token }
-          })
-          return response.ok ? (await response.json()).output : ''
-        })()
-      `,
-        (value) => value.includes(marker),
-        30_000
-      )
-      expect(output).toContain(marker)
-      expect(
-        await app.waitFor<boolean>(
-          `
-        document.querySelector('[data-testid="terminal-${sessionId}"] .xterm-rows')?.textContent?.includes(${
-            JSON.stringify(marker)
-          }) === true
-      `,
-          (value) => value,
-          30_000
-        )
-      ).toBe(true)
+      // The probe's marker is printed as two quoted halves, so it is absent
+      // from the typed command: echo cannot forge the execution evidence.
+      const probe = terminalExecutionProbe(crypto.randomUUID().replaceAll("-", "").slice(0, 16))
+      await typeInTerminal(app, sessionId, probe.command)
+      const echoed = await app.waitFor<string>(terminalOutput(sessionId), probe.echoed, 30_000)
+      // Enter has not been delivered yet: the bytes are echoed and nothing ran.
+      expect(probe.echoed(echoed)).toBe(true)
+      expect(probe.executed(echoed)).toBe(false)
+
+      await submitTerminal(app, sessionId)
+      const output = await app.waitFor<string>(terminalOutput(sessionId), probe.executed, 30_000)
+      expect(probe.executed(output)).toBe(true)
+      const rows = await app.waitFor<string>(terminalRows(sessionId), probe.executed, 30_000)
+      expect(probe.executed(rows)).toBe(true)
 
       await clickTestId(app, `tab-close-${sessionId}`)
       expect(await app.waitFor<boolean>(`document.querySelector('[role="dialog"]') !== null`)).toBe(true)

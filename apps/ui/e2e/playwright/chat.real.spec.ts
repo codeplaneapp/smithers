@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { assistantReplyEvidence } from "../contracts/assistantReplyEvidence"
+import type { TranscriptBubble } from "../contracts/assistantReplyEvidence"
 
 /*
  * The anonymous path against the real endpoint: chat.smithers.sh with
@@ -8,19 +11,37 @@ import { expect, test } from "@playwright/test"
 
 test.skip(process.env.SMITHERS_CHAT_STUB !== "0", "set SMITHERS_CHAT_STUB=0 to hit the real endpoint")
 
+const PROMPT = "Reply with the single word: ok"
+
+/** Every bubble in transcript order: role, rendered markdown, and whether it still carries a status marker. */
+const transcript = (page: Page): Promise<Array<TranscriptBubble>> =>
+  page.locator(".smithers-chat-message").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      role: node.getAttribute("data-role") ?? "",
+      text: Array.from(node.querySelectorAll(".message-markdown")).map((part) => part.textContent ?? "").join("\n")
+        .trim(),
+      pending: node.querySelector(".bubble-system-note") !== null
+    }))
+  )
+
 test("an anonymous turn gets a non-empty reply from chat.smithers.sh", async ({ page }) => {
   test.setTimeout(120_000)
   await page.goto("/")
   const input = page.getByTestId("composer-input")
-  await input.fill("Reply with the single word: ok")
+  await input.fill(PROMPT)
+  const before = await transcript(page)
+  // The boot transcript already ends in a completed assistant bubble, so a
+  // send that starts no turn must not read as a reply.
+  expect(assistantReplyEvidence(before, before, PROMPT)).toBeUndefined()
+
   await page.getByTestId("composer-send").click()
-  const assistant = page.locator(".smithers-chat-message[data-role=\"assistant\"]").last()
-  await expect(assistant).toBeVisible({ timeout: 90_000 })
+  // Evidence is a completed assistant bubble rendered after this send's own
+  // user turn: no failure marker, so the turn finished rather than errored.
   await expect
-    .poll(async () => ((await assistant.locator(".message-markdown").textContent()) ?? "").trim().length, {
+    .poll(async () => assistantReplyEvidence(before, await transcript(page), PROMPT) !== undefined, {
       timeout: 90_000
     })
-    .toBeGreaterThan(0)
-  // No failure marker on the bubble: the turn completed, it did not error out.
-  await expect(assistant.locator(".bubble-system-note")).toHaveCount(0, { timeout: 90_000 })
+    .toBe(true)
+  const reply = assistantReplyEvidence(before, await transcript(page), PROMPT)
+  expect((reply?.text ?? "").length).toBeGreaterThan(0)
 })

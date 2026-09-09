@@ -35,6 +35,16 @@ continue explicitly. Failure logs, reports, and best-effort screenshots land
 under `test-results/electrobun-packaged/`. T2 currently requires macOS and
 network access to the public fixture remote.
 
+`contracts/` holds the assertion contracts both tiers share: pure predicates
+that decide what counts as evidence, each with its own Bun test.
+`terminalExecutionProbe.ts` builds a shell command that prints its marker from
+two quoted halves, so the marker is absent from the typed bytes and
+line-discipline echo cannot satisfy the execution check.
+`assistantReplyEvidence.ts` requires a completed assistant bubble rendered
+after the user turn a send appended, so the bubbles the app renders at boot
+never read as a reply to it. `//apps/ui:unitTests` runs `contracts/` alongside
+`src`, and `packaged/run.ts` reruns it in preflight.
+
 `native/` holds the main-process subprocess probe driven by
 `src/bun/Main.test.ts`; see `native/README.md`.
 

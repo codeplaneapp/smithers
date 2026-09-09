@@ -209,7 +209,13 @@ const main = async (): Promise<void> => {
     console.log(`[packaged-e2e] executable: ${executable}`)
     await run(
       "bridge and cleanup contracts",
-      [process.execPath, "test", "src/bun/PackagedE2EBridge.test.ts", "e2e/packaged/FixtureRun.test.ts"]
+      [
+        process.execPath,
+        "test",
+        "src/bun/PackagedE2EBridge.test.ts",
+        "e2e/packaged/FixtureRun.test.ts",
+        "e2e/contracts"
+      ]
     )
     await run(
       "Bun packaged-app suite",
