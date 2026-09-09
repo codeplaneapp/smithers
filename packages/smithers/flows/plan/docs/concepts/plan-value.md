@@ -19,7 +19,7 @@ plan.flow //      "example/Review"
 plan.generation // 0
 plan.baseDigest // the digest a human approved
 plan.digest //    the digest as of this generation
-plan.nodes //     every node, in topological order, each with its key
+plan.nodes //     every keyed node, in material-dependency order
 ```
 
 Everything else in this package either produces that value, persists it,
@@ -64,6 +64,10 @@ reconciliation happens by re-keying _future_ steps, never by rewriting history.
 
 ## Nodes
 
+Within each generation, `plan.nodes` follows the topological order of material dependencies.
+Inferred reader-after-writer edges can point to later array entries. Schedule
+nodes from the complete `dependsOn` graph.
+
 Each entry of `plan.nodes` is a `PlanNode`:
 
 | Field        | What it holds                                                                  |
@@ -73,7 +77,7 @@ Each entry of `plan.nodes` is a `PlanNode`:
 | `key`        | The computed step key, in the same `key1_` format the engine dispatches under. |
 | `material`   | The declaration the key was derived from.                                      |
 | `effects`    | The reads, writes, removals, and boundary mode this node declares.             |
-| `dependsOn`  | The edge set.                                                                  |
+| `dependsOn`  | The scheduling edge set, including dependencies on later array entries.         |
 | `conflicts`  | One annotation per overlapping writer no dependency path already orders.       |
 | `strategy`   | This declaration's preferred plan-time verdict for an overlap.                 |
 | `runtime`    | This declaration's preferred response when a predicted overlap actually bites. |

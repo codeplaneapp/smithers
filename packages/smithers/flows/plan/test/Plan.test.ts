@@ -749,14 +749,17 @@ describe("Plan.compile reader-after-writer edges", () => {
       expect(keyOf(plan, "reader")).toBe(keyOf(unrelated, "reader"))
     }))
 
-  it.effect("puts the writer first even when the reader was declared first", () =>
+  it.effect("keeps material order while requiring a reader declared first to wait for its writer", () =>
     Effect.gen(function*() {
       const plan = yield* withCrypto(compile([
         draft("reader", { reads: ["out"] }),
         draft("writer", { writes: ["out"] })
       ]))
+      expect(plan.nodes.map((node) => node.id)).toEqual(["reader", "writer"])
       expect(plan.nodes.find((node) => node.id === "reader")!.dependsOn).toEqual(["writer"])
+      expect(plan.nodes.filter((node) => node.dependsOn.length === 0).map((node) => node.id)).toEqual(["writer"])
       expect(acyclic(plan)).toBe(true)
+      expect(yield* withCrypto(Plan.verify(JSON.parse(JSON.stringify(plan))))).toEqual(plan)
     }))
 
   it.effect("adds nothing when a dependency path already orders the pair", () =>
@@ -903,6 +906,24 @@ describe("Plan.compile reader-after-writer edges", () => {
 })
 
 describe("Plan.append", () => {
+  it.effect("preserves material ordinals and inferred dependencies across appended generations", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([
+        draft("reader", { reads: ["out"] }),
+        draft("writer", { writes: ["out"] })
+      ]))
+      const grown = yield* withCrypto(Plan.append(base, [
+        draft("next-reader", { reads: ["next-out"] }),
+        draft("next-writer", { writes: ["next-out"], inputs: [{ _tag: "Pending", from: "reader" }] })
+      ]))
+      expect(grown.nodes.map((node) => node.id)).toEqual(["reader", "writer", "next-reader", "next-writer"])
+      expect(grown.nodes[0]).toBe(base.nodes[0])
+      expect(grown.nodes[1]).toBe(base.nodes[1])
+      expect(Plan.generationNodes(grown).map((node) => node.dependsOn)).toEqual([["next-writer"], ["reader"]])
+      expect(grown.baseDigest).toBe(base.baseDigest)
+      expect(yield* withCrypto(Plan.verify(JSON.parse(JSON.stringify(grown))))).toEqual(grown)
+    }))
+
   it.effect("counts a frozen generation's inferred edges toward reachability", () =>
     Effect.gen(function*() {
       const base = yield* withCrypto(compile([

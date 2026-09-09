@@ -42,3 +42,20 @@ describe("file-effects documentation", () => {
     expect(section).not.toContain("through a declared dependency or a serialize edge")
   })
 })
+
+describe("plan node order documentation", () => {
+  for (
+    const path of [
+      "guides/compile-a-plan.md",
+      "concepts/plan-value.md",
+      "guides/persist-a-plan.md",
+      "api.md"
+    ]
+  ) {
+    it(`${path} qualifies array order and requires scheduling from dependencies`, () => {
+      const text = readFileSync(new URL(`../docs/${path}`, import.meta.url), "utf8")
+      expect(text).toMatch(/topological order of material dependencies/)
+      expect(text).toMatch(/Schedule[^.]*`dependsOn`/)
+    })
+  }
+})

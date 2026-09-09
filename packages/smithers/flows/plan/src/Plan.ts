@@ -166,6 +166,10 @@ export type PlanNode = typeof PlanNode.Type
 /**
  * A plan: the whole keyed graph plus the digest an approval binds to.
  *
+ * `nodes` follows material-dependency order within each generation. Inferred
+ * edges can point to later entries; schedule from the complete `dependsOn`
+ * graph, never by iterating the array alone.
+ *
  * `baseDigest` is the digest at generation 0: what a human approved and what
  * a `RUNNING` run pins. `digest` advances with every appended elaboration.
  *
@@ -983,8 +987,9 @@ const keyNodes = (
   })
 
 /**
- * Compiles drafts into a plan: topological order, dependency-digest
+ * Compiles drafts into a plan: material-dependency order, dependency-digest
  * substitution, overlap annotation, and the plan digest. No I/O.
+ * Inferred edges extend `dependsOn` without reordering the node array.
  *
  * Traversal uses explicit stacks. Because the conflict and reader/writer
  * passes consider a quadratic number of node pairs, plans are bounded by
@@ -1025,7 +1030,8 @@ export const compile = (options: {
  *
  * The plan GROWS; it is never invalidated. Nodes already in it keep their id,
  * key, edges, and generation byte for byte, and the new nodes arrive pre-keyed
- * against them, so a `hit` shows instantly.
+ * against them, so a `hit` shows instantly. New nodes retain their material
+ * dependency order; scheduling must honor their complete `dependsOn` graph.
  * Re-ordering after a reconciliation happens by re-keying *future* steps,
  * never by rewriting history.
  *
@@ -1071,6 +1077,7 @@ export const append = (
  *
  * Generation boundaries are replayed when reconstructing conflict annotations:
  * an append may annotate new nodes, but cannot rewrite an earlier generation.
+ * Recorded material-dependency order is verified without sorting inferred edges.
  * Keys and approval digests retain their existing format. The returned snapshot
  * is immutable; later caller mutation cannot change the verified value.
  *

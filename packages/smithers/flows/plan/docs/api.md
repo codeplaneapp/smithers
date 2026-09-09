@@ -410,7 +410,9 @@ Stable failures while resolving graph-local dependency references.
 
 [src/Plan.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/src/Plan.ts)
 
-`compile` puts drafts in topological order, substitutes dependency digests, annotates write-set overlaps, and derives the plan digest. `append` adds a pre-keyed subgraph at the next generation, and `generationNodes` reads back the nodes the newest generation added.
+`compile` puts drafts in topological order of material dependencies, substitutes dependency digests, annotates write-set overlaps, and derives the plan digest. `append` adds a pre-keyed subgraph at the next generation, and `generationNodes` reads back the nodes the newest generation added.
+
+Inferred edges extend `dependsOn` without reordering `plan.nodes`, so a reader can precede its writer in the array. Schedule nodes from the complete `dependsOn` graph.
 
 `PlanNode.kind` is `step`, `agent`, or `merge`. `dependsOn` is the edge set: material references, ordering edges from `serialize`, and inferred reader-after-writer edges. Explicit `Ref`/`Pending` dependency paths select the version being read: a read before a writer consumes the initial source or an earlier producer's output, not that later writer's output. Otherwise, the compiler orders a reader after overlapping writers. A contradictory inferred ordering still fails with `cycle`; the diagnostic names both nodes, overlapping paths, and the dependency chain. Ordering edges are deliberately not key material: file content enters dispatch identity through boundary digests. `NodeEffects` carries `reads`, `writes`, optional `removes`, and `boundaryMode` (`hard` or `expected`). Removals participate in ordering just like writes.
 
@@ -525,7 +527,7 @@ const compile: (options: {
 }) => Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
 ```
 
-Compiles drafts into a plan: topological order, dependency-digest substitution, overlap annotation, reader-after-writer ordering, and the plan digest. No I/O. The options are snapshotted before anything else happens, and the result is deep-frozen at generation 0 with `baseDigest` equal to `digest`.
+Compiles drafts into a plan: topological order of material dependencies, dependency-digest substitution, overlap annotation, reader-after-writer ordering, and the plan digest. No I/O. The options are snapshotted before anything else happens, and the result is deep-frozen at generation 0 with `baseDigest` equal to `digest`. Array order follows material dependencies; scheduling follows the complete `dependsOn` graph.
 
 Traversal uses explicit stacks. Because the conflict and reader-after-writer passes consider a quadratic number of node pairs, plans are bounded by `maximumPlanNodes` and fail with `graph_too_large` above that limit or the effect-analysis work budget. Analysis yields periodically.
 
@@ -538,7 +540,7 @@ const append: (
 ) => Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
 ```
 
-Appends an elaborated subgraph at the next generation. Nodes already in the plan keep their id, key, edges, and generation byte for byte, and the new nodes arrive pre-keyed against them. `baseDigest` does not move; `digest` does. An append with no drafts fails as `invalid_node`.
+Appends an elaborated subgraph at the next generation. Nodes already in the plan keep their id, key, edges, and generation byte for byte, and the new nodes arrive pre-keyed against them. `baseDigest` does not move; `digest` does. New nodes retain material-dependency order after the recorded prefix, including when inferred edges point to later entries. An append with no drafts fails as `invalid_node`.
 
 ### Plan.verify
 
@@ -550,7 +552,7 @@ const verify: (input: unknown) => Effect.Effect<
 >
 ```
 
-Reconstructs an imported plan using compiler key, dependency, conflict and generation rules. It verifies both the approval digests and the complete node contract, then returns an immutable snapshot. Compiler-owned immutable plans take a trusted fast path. `Plan.append` verifies imported prefixes through this same boundary. Existing key and digest formats remain unchanged; corrupted records are refused rather than silently rewritten.
+Reconstructs an imported plan using compiler key, dependency, conflict and generation rules. It verifies both the approval digests and the complete node contract, then returns an immutable snapshot. Compiler-owned immutable plans take a trusted fast path. `Plan.append` verifies imported prefixes through this same boundary. Recorded material-dependency order is checked without sorting inferred edges. Existing ordinals, keys, and approval digests remain unchanged; corrupted records are refused rather than silently rewritten.
 
 ### Plan.generationNodes
 
