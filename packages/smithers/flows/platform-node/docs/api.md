@@ -246,6 +246,12 @@ unable to redirect the operation, and it is why the bundle returns
 `PermissionDenied` for an out-of-root path, a hard link, a symlink, or a special
 file rather than performing raw effects.
 
+An aliased workspace root and its canonical `realPath` spelling address the
+same pinned descriptor. Paths returned by `realPath` can therefore be used for
+subsequent reads, writes, and atomic sibling replacement. Capability resources
+remain rooted at the logical workspace name; child symlinks, sibling paths,
+and replacement of the pinned root retain the same refusal checks.
+
 | Constant or constructor               | What it is                                                            |
 | ------------------------------------- | --------------------------------------------------------------------- |
 | `AtomicFileSystem.layer`              | the adapter with every default                                        |

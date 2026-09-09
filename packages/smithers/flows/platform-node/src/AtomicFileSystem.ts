@@ -813,13 +813,16 @@ def main(request, content_limit, response_limit, pinned_root=None):
     options = request.get("options") or {}
     logical_root = request["logicalRoot"]
     def confined(path):
-        relative = os.path.relpath(path, logical_root)
-        if relative == ".." or relative.startswith(".." + os.sep):
-            raise OSError(errno.EPERM, "path is outside the pinned root", path)
-        # The root itself confines to os.sep, whose component list is empty.
-        # Every operation below decides for itself what that means, and
-        # parent() refuses it, which keeps the destructive ones refused.
-        return os.sep if relative == "." else os.sep + relative
+        # realPath returns the canonical boundary spelling. Both that name and
+        # the logical workspace alias must round-trip to the SAME pinned root;
+        # neither permits following a symlink below its descriptor.
+        for base in (logical_root, request["boundaryRoot"]):
+            relative = os.path.relpath(path, base)
+            if relative != ".." and not relative.startswith(".." + os.sep):
+                # The root itself confines to os.sep, whose component list is
+                # empty. parent() still refuses destructive root operations.
+                return os.sep if relative == "." else os.sep + relative
+        raise OSError(errno.EPERM, "path is outside the pinned root", path)
     root = os.dup(pinned_root) if pinned_root is not None else acquire_root(request)
     try:
         if operation == "batch":
@@ -945,8 +948,7 @@ def main(request, content_limit, response_limit, pinned_root=None):
                 info = entry_stat(root, confined_path)
                 if stat.S_ISLNK(info.st_mode):
                     raise OSError(errno.ELOOP, "symbolic links are outside the atomic boundary", request["path"])
-            relative = os.path.relpath(request["path"], logical_root)
-            return os.path.normpath(os.path.join(request["boundaryRoot"], relative))
+            return os.path.normpath(os.path.join(request["boundaryRoot"], confined_path.lstrip(os.sep)))
         if operation in ("writeFile", "writeFileString"):
             path = confined(request["path"])
             if not parts(path):
