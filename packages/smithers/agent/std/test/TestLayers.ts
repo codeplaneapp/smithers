@@ -3,8 +3,8 @@ import * as HostServices from "@smthrs/kernel/HostServices"
 import type * as Path from "@smthrs/kernel/Path"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import * as TestHost from "@smthrs/testing/TestHost"
-import { Effect, type PlatformError } from "effect"
-import type * as FileSystem from "effect/FileSystem"
+import { Effect, Option, type PlatformError } from "effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import { dirname } from "node:path"
 import * as BrowserFileSystem from "../../../flows/platform-browser/src/BrowserFileSystem/index.ts"
@@ -58,4 +58,35 @@ export const layer = (options?: {
     Effect.map(Effect.context<FileSystem.FileSystem | Path.Path>(), PortableSearch.make)
   ).pipe(Layer.provide(host))
   return Layer.merge(host, search)
+}
+
+/**
+ * Builds one `File.Info` for a stubbed `stat`.
+ *
+ * The four flows that stub `stat` care about `type`, `mode` and `size` and
+ * about nothing else in the record, so the rest is fixed here. `mode` defaults
+ * the way a real tree does, by type.
+ */
+export const fileInfo = (options?: {
+  readonly type?: FileSystem.File.Type
+  readonly mode?: number
+  readonly size?: number
+}): FileSystem.File.Info => {
+  const type = options?.type ?? "File"
+  return {
+    type,
+    mtime: Option.none(),
+    atime: Option.none(),
+    birthtime: Option.none(),
+    dev: 0,
+    ino: Option.none(),
+    mode: options?.mode ?? (type === "Directory" ? 0o755 : 0o644),
+    nlink: Option.none(),
+    uid: Option.none(),
+    gid: Option.none(),
+    rdev: Option.none(),
+    size: FileSystem.Size(options?.size ?? 0),
+    blksize: Option.none(),
+    blocks: Option.none()
+  }
 }

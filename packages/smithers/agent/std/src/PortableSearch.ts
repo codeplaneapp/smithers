@@ -8,10 +8,11 @@ import { type Context, Effect, Layer, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Grouping from "./internal/Grouping.ts"
 import * as LinearRegex from "./internal/LinearRegex.ts"
-import * as Contract from "./internal/SearchContract.ts"
+import { escapeRegex, notFound } from "./internal/SearchContract.ts"
 import { notice, truncateBytes } from "./internal/Text.ts"
 import * as Walk from "./internal/Walk.ts"
 import * as Search from "./Search.ts"
+import * as Contract from "./SearchContract.ts"
 import * as StdError from "./StdError.ts"
 
 /**
@@ -69,7 +70,7 @@ const walkFiles = (
   hidden: boolean
 ): Effect.Effect<Walked, StdError.StdError> =>
   Effect.gen(function*() {
-    const info = yield* fileSystem.stat(root).pipe(Effect.mapError(() => Contract.notFound(root)))
+    const info = yield* fileSystem.stat(root).pipe(Effect.mapError(() => notFound(root)))
     if (info.type === "File") return { explicitFile: true, files: [path.normalize(root)] }
     const files: Array<string> = []
     const directories: Array<string> = [root]
@@ -79,7 +80,7 @@ const walkFiles = (
       const children: ReadonlyArray<string> = yield* fileSystem.readDirectory(directory).pipe(
         Effect.catch(() =>
           directory === root
-            ? Effect.fail(Contract.notFound(directory))
+            ? Effect.fail(notFound(directory))
             : Effect.succeed<ReadonlyArray<string>>([])
         )
       )
@@ -151,7 +152,7 @@ const grep = (
     const walked = yield* walkFiles(fileSystem, path, input.root, input.hidden)
     const insensitive = input.ignoreCase || (input.smartCase && !/[A-Z]/.test(input.pattern))
     const regex = LinearRegex.compile(
-      input.fixedStrings ? Contract.escapeRegex(input.pattern) : input.pattern,
+      input.fixedStrings ? escapeRegex(input.pattern) : input.pattern,
       insensitive
     )
     const shownMatches: Array<Search.GrepMatch> = []

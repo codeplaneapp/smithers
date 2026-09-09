@@ -6,8 +6,8 @@
  * (`smartCase`); ordered `-g` include/exclude globs; `-A`, `-B`, and `-C`
  * context; per-file `--max-count`; `--files-with-matches`; `--hidden`; and
  * deterministic path/line ordering. Ignore files and file-type registries are
- * outside v1: callers must use `noIgnore: true` (the default), and any `types`
- * request is rejected. Patterns are capped at 4096 ASCII bytes and counted
+ * outside v1: `noIgnore` accepts only `true` (the default), and there is no
+ * `types` field to pass. Patterns are capped at 4096 ASCII bytes and counted
  * repetitions at 1000. Invalid UTF-8 is replacement-decoded; NUL-bearing
  * files are skipped and counted, while an explicitly named binary file is a
  * typed failure.
@@ -45,10 +45,11 @@
  */
 import * as Flow from "@smthrs/core/Flow"
 import { Effect, Schema } from "effect"
-import { capability, envelope } from "./internal/Declaration.ts"
-import * as Contract from "./internal/SearchContract.ts"
+import { capability, envelope, rootSubtree } from "./internal/Declaration.ts"
+import { invalidInput } from "./internal/SearchContract.ts"
 import { MAX_GREP_MATCHES } from "./internal/Text.ts"
 import * as Search from "./Search.ts"
+import * as Contract from "./SearchContract.ts"
 import * as StdError from "./StdError.ts"
 
 /**
@@ -100,11 +101,8 @@ export const Input = Schema.Struct({
   symbols: Schema.optional(Schema.Boolean).annotate({
     description: "Report the definition enclosing each returned hit; true by default."
   }),
-  noIgnore: Schema.optional(Schema.Boolean).annotate({
-    description: "Must be true in v1; ignore files are not consulted."
-  }),
-  types: Schema.optional(Schema.Array(Schema.String)).annotate({
-    description: "Reserved; file-type registries are not supported in v1."
+  noIgnore: Schema.optional(Schema.Literal(true)).annotate({
+    description: "Ignore files are never consulted; only true is accepted."
   }),
   limit: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))).annotate({
     description: `Global result limit, capped at ${MAX_GREP_MATCHES}.`
@@ -170,7 +168,6 @@ export const Output = Schema.Struct({
   notice: Schema.optional(Schema.String)
 })
 
-const rootSubtree = (root: string): string => root === "/" ? "/**" : `${root.replace(/\/+$/, "")}/**`
 /**
  * Conservative sealed declaration for all workspace files.
  *
@@ -202,23 +199,23 @@ export const capabilities = [capability("fs:read", "/**")]
 export const flow = Flow.make({ name, description, input: Input, output: Output, capabilities, effects })
 
 const normalize = (input: typeof Input.Type): Search.GrepInput | StdError.StdError => {
-  if (input.noIgnore === false) {
-    return Contract.invalidInput("ignore-file handling is not supported; use noIgnore: true")
-  }
-  if (input.types !== undefined && input.types.length > 0) {
-    return Contract.invalidInput("file type filters are not supported")
+  // `Input` admits only `true`, so a decoded call never trips this. `run` is
+  // exported, and a caller reaching it without decoding still gets the refusal
+  // rather than a search that quietly ignored what it asked for.
+  if (input.noIgnore !== undefined && input.noIgnore !== true) {
+    return invalidInput("ignore-file handling is not supported; use noIgnore: true")
   }
   if (input.ignoreCase === true && input.smartCase === true) {
-    return Contract.invalidInput("-i and -S are mutually exclusive")
+    return invalidInput("-i and -S are mutually exclusive")
   }
   if (input.context !== undefined && (input.beforeContext !== undefined || input.afterContext !== undefined)) {
-    return Contract.invalidInput("-C cannot be combined with -A or -B")
+    return invalidInput("-C cannot be combined with -A or -B")
   }
   // `rg --max-count 0` answers nothing at all, not even the summary the native
   // peer parses, so a cap that admits no match is rejected rather than read
   // differently by each peer.
   if (input.maxCount !== undefined && input.maxCount < 1) {
-    return Contract.invalidInput("--max-count must be at least 1")
+    return invalidInput("--max-count must be at least 1")
   }
   const fixedStrings = input.fixedStrings ?? false
   const patternError = Contract.validatePattern(input.pattern, fixedStrings)

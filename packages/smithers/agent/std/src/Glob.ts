@@ -47,10 +47,10 @@
  */
 import * as Flow from "@smthrs/core/Flow"
 import { Effect, Schema } from "effect"
-import { capability, envelope } from "./internal/Declaration.ts"
-import * as Contract from "./internal/SearchContract.ts"
+import { capability, envelope, rootSubtree } from "./internal/Declaration.ts"
 import { MAX_ENTRIES } from "./internal/Text.ts"
 import * as Search from "./Search.ts"
+import * as Contract from "./SearchContract.ts"
 import * as StdError from "./StdError.ts"
 
 /**
@@ -82,8 +82,8 @@ export const Input = Schema.Struct({
     description: "Search root the pattern is relative to; defaults to /. Pass the project directory."
   }),
   hidden: Schema.optional(Schema.Boolean).annotate({ description: "Ripgrep --hidden." }),
-  noIgnore: Schema.optional(Schema.Boolean).annotate({
-    description: "Must be true in v1; ignore files are not consulted."
+  noIgnore: Schema.optional(Schema.Literal(true)).annotate({
+    description: "Ignore files are never consulted; only true is accepted."
   }),
   limit: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))).annotate({
     description: `Maximum paths, capped at ${MAX_ENTRIES}.`
@@ -101,7 +101,6 @@ export const Output = Schema.Struct({
   truncated: Schema.Boolean,
   notice: Schema.optional(Schema.String)
 })
-const rootSubtree = (root: string): string => root === "/" ? "/**" : `${root.replace(/\/+$/, "")}/**`
 /**
  * Conservative sealed declaration for all workspace files.
  *
@@ -141,7 +140,10 @@ export const flow = Flow.make({ name, description, input: Input, output: Output,
 export const run = Effect.fn("Glob.run")(function*(
   input: typeof Input.Type
 ): Effect.fn.Return<typeof Output.Type, StdError.StdError, Search.Search> {
-  if (input.noIgnore === false) {
+  // `Input` admits only `true`, so a decoded call never trips this. `run` is
+  // exported, and a caller reaching it without decoding still gets the refusal
+  // rather than a listing that quietly ignored what it asked for.
+  if (input.noIgnore !== undefined && input.noIgnore !== true) {
     return yield* Effect.fail(
       new StdError.StdError({
         code: "invalid_input",

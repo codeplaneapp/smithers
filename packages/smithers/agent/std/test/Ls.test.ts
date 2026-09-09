@@ -1,31 +1,14 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import { Cause, Effect, Exit, FileSystem, Layer, Option } from "effect"
+import { Cause, Effect, Exit, FileSystem, Layer } from "effect"
 import * as Path from "effect/Path"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as Ls from "../src/Ls.ts"
-import { layer } from "./TestLayers.ts"
+import { fileInfo, layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
-
-const fileInfo = (type: FileSystem.File.Type): FileSystem.File.Info => ({
-  type,
-  mtime: Option.none(),
-  atime: Option.none(),
-  birthtime: Option.none(),
-  dev: 0,
-  ino: Option.none(),
-  mode: type === "Directory" ? 0o755 : 0o644,
-  nlink: Option.none(),
-  uid: Option.none(),
-  gid: Option.none(),
-  rdev: Option.none(),
-  size: FileSystem.Size(0),
-  blksize: Option.none(),
-  blocks: Option.none()
-})
 
 describe("Ls", () => {
   it("sorts directories first and appends their suffix", async () => {
@@ -109,9 +92,9 @@ describe("Ls", () => {
     const entryStats: Array<string> = []
     const host = FileSystem.makeNoop({
       stat: (path) => {
-        if (path === "/work") return Effect.succeed(fileInfo("Directory"))
+        if (path === "/work") return Effect.succeed(fileInfo({ type: "Directory" }))
         entryStats.push(path)
-        return Effect.succeed(fileInfo(path === "/work/d" ? "Directory" : "File"))
+        return Effect.succeed(fileInfo({ type: path === "/work/d" ? "Directory" : "File" }))
       },
       readDirectory: () => Effect.succeed(["e", "d", "c", "b", "a"])
     })

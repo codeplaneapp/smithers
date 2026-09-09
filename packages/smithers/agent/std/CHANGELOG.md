@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `grep` and `glob` now declare `noIgnore` as the literal `true` rather than a boolean. Ignore files are never consulted in v1, so `noIgnore: false` was accepted by the schema and then refused at runtime; the schema now states what it accepts. A caller reaching `run` without decoding still gets the same `invalid_input` refusal.
+
+### Removed
+
+- Removed `grep`'s `types` input. File-type registries are not supported in v1, so every non-empty value failed with `invalid_input` while the field cost its description in every model frame.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

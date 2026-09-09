@@ -595,8 +595,10 @@ for (const [peer, implementation] of peers) {
         Grep.run({ pattern: "(?=needle)", root }),
         implementation
       )))
+      // `Grep.Input` no longer admits `noIgnore: false`; the refusal below is
+      // what a caller reaching `run` without decoding through it still gets.
       const ignoreFiles = await Effect.runPromise(Effect.exit(Effect.provide(
-        Grep.run({ pattern: "needle", root, noIgnore: false }),
+        Grep.run({ pattern: "needle", root, noIgnore: false } as unknown as typeof Grep.Input.Type),
         implementation
       )))
       const emptyExclusion = await Effect.runPromise(Effect.exit(Effect.provide(

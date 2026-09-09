@@ -1,26 +1,9 @@
 import { Cause, Effect, Exit, FileSystem, Option, PlatformError } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Write from "../src/Write.ts"
-import { layer } from "./TestLayers.ts"
+import { fileInfo, layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
-
-const fileInfo = (mode: number): FileSystem.File.Info => ({
-  type: "File",
-  mtime: Option.none(),
-  atime: Option.none(),
-  birthtime: Option.none(),
-  dev: 0,
-  ino: Option.none(),
-  mode,
-  nlink: Option.none(),
-  uid: Option.none(),
-  gid: Option.none(),
-  rdev: Option.none(),
-  size: FileSystem.Size(0),
-  blksize: Option.none(),
-  blocks: Option.none()
-})
 
 const systemError = (
   tag: PlatformError.SystemErrorTag,
@@ -84,7 +67,7 @@ describe("Write", () => {
       realPath: (path) => Effect.succeed(path),
       rename: () => Effect.void,
       remove: () => Effect.void,
-      stat: () => Effect.succeed(fileInfo(mode)),
+      stat: () => Effect.succeed(fileInfo({ mode })),
       writeFileString: (_path, value) =>
         Effect.sync(() => {
           content = value
@@ -115,7 +98,7 @@ describe("Write", () => {
       stat: () => {
         stats++
         return stats === 1
-          ? Effect.succeed(fileInfo(0o100644))
+          ? Effect.succeed(fileInfo({ mode: 0o100644 }))
           : Effect.fail(systemError("PermissionDenied", "stat", "/file.txt"))
       },
       writeFileString: () =>
@@ -143,7 +126,7 @@ describe("Write", () => {
       makeDirectory: () => Effect.void,
       realPath: (path) => Effect.succeed(path),
       remove: () => Effect.void,
-      stat: (path) => Effect.succeed(fileInfo(path === "/file.txt" ? 0o100644 : 0o100755)),
+      stat: (path) => Effect.succeed(fileInfo({ mode: path === "/file.txt" ? 0o100644 : 0o100755 })),
       writeFileString: (_path, value) =>
         Effect.sync(() => {
           staged = value
@@ -180,7 +163,7 @@ describe("Write", () => {
       realPath: (path) => Effect.succeed(path),
       rename: () => Effect.void,
       remove: () => Effect.void,
-      stat: () => Effect.succeed(fileInfo(0o100644)),
+      stat: () => Effect.succeed(fileInfo({ mode: 0o100644 })),
       writeFileString: () =>
         Effect.sync(() => {
           writes++

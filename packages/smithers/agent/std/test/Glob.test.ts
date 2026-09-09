@@ -1,6 +1,7 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Glob from "../src/Glob.ts"
+import * as Grep from "../src/Grep.ts"
 import { layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
@@ -33,8 +34,23 @@ describe("Glob", () => {
     expect(result.notice).toBeDefined()
   })
 
+  it("admits only true for noIgnore", () => {
+    expect(Schema.decodeUnknownSync(Glob.Input)({ pattern: "*.ts", noIgnore: true })).toEqual({
+      pattern: "*.ts",
+      noIgnore: true
+    })
+    expect(() => Schema.decodeUnknownSync(Glob.Input)({ pattern: "*.ts", noIgnore: false })).toThrow()
+  })
+
   it("declares sealed hermetic effects and narrows to the root subtree", () => {
     expect(Glob.effects).toMatchObject({ tier: "sealed", mode: "hermetic" })
     expect(Glob.effectsFor({ root: "/src" }).reads).toEqual(["/src/**"])
+  })
+
+  it("narrows to the same subtree grep does, from one definition", () => {
+    for (const root of ["/", "/src", "/src/", "/src//"]) {
+      expect(Glob.effectsFor({ root }).reads).toEqual(Grep.effectsFor({ root }).reads)
+    }
+    expect(Glob.effectsFor({ root: "/src//" }).reads).toEqual(["/src/**"])
   })
 })

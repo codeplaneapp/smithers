@@ -2,26 +2,9 @@ import { Cause, Effect, Exit, FileSystem, Layer, Option } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Edit from "../src/Edit.ts"
 import * as Read from "../src/Read.ts"
-import { layer } from "./TestLayers.ts"
+import { fileInfo, layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
-
-const fileInfo = (mode: number, size = 0): FileSystem.File.Info => ({
-  type: "File",
-  mtime: Option.none(),
-  atime: Option.none(),
-  birthtime: Option.none(),
-  dev: 0,
-  ino: Option.none(),
-  mode,
-  nlink: Option.none(),
-  uid: Option.none(),
-  gid: Option.none(),
-  rdev: Option.none(),
-  size: FileSystem.Size(size),
-  blksize: Option.none(),
-  blocks: Option.none()
-})
 
 /** Applies one edit and returns the file as the same host then reads it. */
 const editThenRead = (
@@ -307,7 +290,7 @@ describe("Edit anchoring", () => {
     let mode = 0o100644
     let writes = 0
     const host = Layer.succeed(FileSystem.FileSystem)(FileSystem.makeNoop({
-      stat: () => Effect.succeed(fileInfo(mode, stored.byteLength)),
+      stat: () => Effect.succeed(fileInfo({ mode, size: stored.byteLength })),
       readFile: () => Effect.succeed(stored.slice()),
       readFileString: () => Effect.succeed(new TextDecoder().decode(stored)),
       writeFileString: (_path, content) =>
@@ -366,7 +349,7 @@ describe("Edit anchoring", () => {
       realPath: (path) => Effect.succeed(path),
       rename: () => Effect.void,
       remove: () => Effect.void,
-      stat: () => Effect.succeed(fileInfo(mode)),
+      stat: () => Effect.succeed(fileInfo({ mode })),
       readFile: () => Effect.succeed(new TextEncoder().encode("value = 1\n")),
       readFileString: () => Effect.succeed("value = 1\n"),
       writeFileString: (path) =>

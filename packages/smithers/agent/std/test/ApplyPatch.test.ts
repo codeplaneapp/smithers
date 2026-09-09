@@ -10,29 +10,12 @@ import {
   StreamingPatchParser
 } from "../src/internal/ApplyPatch.ts"
 import { sourceLines } from "../src/internal/Text.ts"
-import { layer } from "./TestLayers.ts"
+import { fileInfo, layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
 const executeExit = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromiseExit(effect)
 
 const wrap = (body: string) => `*** Begin Patch\n${body}\n*** End Patch`
-
-const fileInfo = (mode: number, size = 0): FileSystem.File.Info => ({
-  type: "File",
-  mtime: Option.none(),
-  atime: Option.none(),
-  birthtime: Option.none(),
-  dev: 0,
-  ino: Option.none(),
-  mode,
-  nlink: Option.none(),
-  uid: Option.none(),
-  gid: Option.none(),
-  rdev: Option.none(),
-  size: FileSystem.Size(size),
-  blksize: Option.none(),
-  blocks: Option.none()
-})
 
 describe("parsePatch", () => {
   it("rejects a bad first line with Codex's message", () => {
@@ -446,7 +429,7 @@ describe("ApplyPatch.run", () => {
       realPath: (path) => Effect.succeed(path),
       rename: () => Effect.void,
       remove: () => Effect.void,
-      stat: () => Effect.succeed(fileInfo(mode)),
+      stat: () => Effect.succeed(fileInfo({ mode })),
       readFile: () => Effect.succeed(new TextEncoder().encode("old\n")),
       writeFile: (path) =>
         Effect.sync(() => {
@@ -481,7 +464,7 @@ describe("ApplyPatch.run", () => {
     let mode = 0o100644
     let writes = 0
     const host = FileSystem.makeNoop({
-      stat: () => Effect.succeed(fileInfo(mode, stored.byteLength)),
+      stat: () => Effect.succeed(fileInfo({ mode, size: stored.byteLength })),
       readFile: () => Effect.succeed(stored.slice()),
       writeFile: (_path, content) =>
         Effect.sync(() => {

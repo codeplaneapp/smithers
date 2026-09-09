@@ -45,3 +45,15 @@ export const envelope = (options: EnvelopeOptions): Effects.Declaration =>
  * @since 0.1.0
  */
 export const capability = (action: Capability.Action, resource: string): string => `${action}:${resource}`
+
+/**
+ * The read glob covering everything under one search root.
+ *
+ * `glob` and `grep` narrow their conservative `/**` declaration to the root the
+ * call actually names, and a declaration that disagreed between the two would
+ * make the same search reserve different paths depending on which flow ran it.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const rootSubtree = (root: string): string => root === "/" ? "/**" : `${root.replace(/\/+$/, "")}/**`

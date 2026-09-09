@@ -35,13 +35,14 @@ whichever one the host provided. Neither module knows which peer is in play.
 
 `glob` corresponds to `rg --files -g <pattern>`.
 
-Two ripgrep features are outside v1 and are refused rather than approximated.
-Ignore files are never consulted, so `noIgnore` must be `true` or omitted;
-passing `false` fails with `invalid_input`. File-type registries are not
-supported, so a non-empty `types` array fails the same way. `-i` and `-S`
-together, and `-C` combined with `-A` or `-B`, are also `invalid_input`, because
-ripgrep's own precedence for those combinations is not a thing two peers should
-each guess at.
+Two ripgrep features are outside v1, and the input schema says so rather than
+leaving it to a runtime refusal. Ignore files are never consulted, so `noIgnore`
+accepts only `true`; any other value fails to decode, and fails with
+`invalid_input` when it reaches `run` undecoded. File-type registries are not
+supported, so there is no `types` field to pass. `-i` and `-S` together, and
+`-C` combined with `-A` or `-B`, are `invalid_input`, because ripgrep's own
+precedence for those combinations is not a thing two peers should each guess
+at.
 
 ## The pattern grammar
 

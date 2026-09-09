@@ -44,12 +44,13 @@ you think they are.
 ## invalid_input: Invalid ripgrep options
 
 **What happened.** One of the option combinations v1 refuses rather than guesses
-at: `noIgnore: false`, a non-empty `types` array, `ignoreCase` with `smartCase`,
-`context` with `beforeContext` or `afterContext`, or `maxCount` below 1.
+at: `ignoreCase` with `smartCase`, `context` with `beforeContext` or
+`afterContext`, or `maxCount` below 1. A `noIgnore` that is not `true` is
+refused the same way when it reaches `run` without being decoded first.
 
 **What to change.** The message names the constraint. Ignore files and file-type
-registries are outside the contract entirely, so there is no option that enables
-them.
+registries are outside the contract entirely: `noIgnore` accepts only `true`,
+there is no `types` field, and no option enables either.
 
 ## invalid_pattern: Unsupported ripgrep pattern
 

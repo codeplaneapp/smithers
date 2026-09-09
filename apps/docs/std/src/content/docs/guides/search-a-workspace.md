@@ -119,12 +119,13 @@ regular expression grammar entirely.
 These are `invalid_input` rather than a best guess, because two peer
 implementations must not each pick their own reading:
 
-- `noIgnore: false`. Ignore files are never consulted in v1; omit the field or
-  pass `true`.
-- A non-empty `types` array. File-type registries are not supported.
 - `ignoreCase` and `smartCase` both true.
 - `context` together with `beforeContext` or `afterContext`.
 - `maxCount` below 1.
+
+`noIgnore` and file-type registries never reach that check: `noIgnore` accepts
+only `true`, and there is no `types` field, so the schema refuses both before a
+search runs.
 
 An unsupported pattern is `invalid_pattern`, with a message naming the
 construct. A `root` that does not exist is `not_found`.

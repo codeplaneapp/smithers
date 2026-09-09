@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as Std from "../src/index.ts"
+import * as Internal from "../src/internal/SearchContract.ts"
 import * as SearchContract from "../src/SearchContract.ts"
 
 describe("SearchContract", () => {
@@ -13,6 +14,15 @@ describe("SearchContract", () => {
       "unsatisfiableNotice",
       "validateGlob",
       "validatePattern"
+    ])
+  })
+
+  it("keeps only the failure constructors and the literal escape internal", () => {
+    expect(Object.keys(Internal).sort()).toEqual([
+      "escapeRegex",
+      "invalidInput",
+      "invalidPattern",
+      "notFound"
     ])
   })
 

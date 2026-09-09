@@ -132,13 +132,13 @@ listing, so one dangling symlink does not cost the whole directory. Fails with
 Finds files through the Smithers Ripgrep Subset v1 contract, corresponding to
 `rg --files -g`.
 
-| Input      | Type                          | Meaning                                                    |
-| ---------- | ----------------------------- | ---------------------------------------------------------- |
-| `pattern`  | non-empty string              | Ripgrep `-g` pattern, matched relative to `root`.          |
-| `root`     | string, optional              | Search root. Defaults to `/`. Pass the project directory.  |
-| `hidden`   | boolean, optional             | Include dot files. Defaults to false.                      |
-| `noIgnore` | boolean, optional             | Must be true or omitted; ignore files are never consulted. |
-| `limit`    | integer, at least 0, optional | Maximum paths, capped at 1,000.                            |
+| Input      | Type                          | Meaning                                                   |
+| ---------- | ----------------------------- | --------------------------------------------------------- |
+| `pattern`  | non-empty string              | Ripgrep `-g` pattern, matched relative to `root`.         |
+| `root`     | string, optional              | Search root. Defaults to `/`. Pass the project directory. |
+| `hidden`   | boolean, optional             | Include dot files. Defaults to false.                     |
+| `noIgnore` | `true`, optional              | Only true is accepted; ignore files are never consulted.  |
+| `limit`    | integer, at least 0, optional | Maximum paths, capped at 1,000.                           |
 
 | Output      | Type             | Meaning                                         |
 | ----------- | ---------------- | ----------------------------------------------- |
@@ -171,8 +171,7 @@ Searches file contents through the same contract. Results are match-centric:
 | `filesWithMatches` | boolean, optional             | Ripgrep `--files-with-matches`.                         |
 | `hidden`           | boolean, optional             | Ripgrep `--hidden`.                                     |
 | `symbols`          | boolean, optional             | Report the enclosing definition. Defaults to true.      |
-| `noIgnore`         | boolean, optional             | Must be true or omitted.                                |
-| `types`            | array of string, optional     | Reserved; a non-empty value is rejected.                |
+| `noIgnore`         | `true`, optional              | Only true is accepted.                                  |
 | `limit`            | integer, at least 0, optional | Global match budget, capped at 200.                     |
 
 | Output             | Type              | Meaning                                               |
@@ -242,17 +241,17 @@ Runs the declared test runner and returns a reading rather than a log.
 `Output` is `Outcome` plus the attribution fields. `TestRun.Outcome` is exported
 separately, because the base run carries the same shape:
 
-| Outcome            | Type                           | Meaning                                              |
-| ------------------ | ------------------------------ | ---------------------------------------------------- |
-| `command`          | string                         | The logical invocation, without container transport arguments.                             |
-| `exitCode`         | number                         | The runner's exit code.                              |
-| `passed`           | number                         | Tests reported passing. Zero when `parsed` is false. |
-| `failed`           | array of string                | Ids reported failing or erroring.                    |
-| `parsed`           | boolean                        | Whether the complete report could be read.           |
-| `tail`             | string                         | The end of the runner's combined output.             |
-| `tailTruncated`    | boolean                        | Whether `tail` is a fragment.                        |
-| `tailDroppedBytes` | number                         | Bytes omitted from the start of `tail`.              |
-| `invalidProbe`     | `Probe.InvalidProbe`, optional | Present when the exit code describes the command.    |
+| Outcome            | Type                           | Meaning                                                        |
+| ------------------ | ------------------------------ | -------------------------------------------------------------- |
+| `command`          | string                         | The logical invocation, without container transport arguments. |
+| `exitCode`         | number                         | The runner's exit code.                                        |
+| `passed`           | number                         | Tests reported passing. Zero when `parsed` is false.           |
+| `failed`           | array of string                | Ids reported failing or erroring.                              |
+| `parsed`           | boolean                        | Whether the complete report could be read.                     |
+| `tail`             | string                         | The end of the runner's combined output.                       |
+| `tailTruncated`    | boolean                        | Whether `tail` is a fragment.                                  |
+| `tailDroppedBytes` | number                         | Bytes omitted from the start of `tail`.                        |
+| `invalidProbe`     | `Probe.InvalidProbe`, optional | Present when the exit code describes the command.              |
 
 | Output adds   | Type                                        | Meaning                                    |
 | ------------- | ------------------------------------------- | ------------------------------------------ |
@@ -465,7 +464,7 @@ all values.
 | `command_failed`           | The process could not start, or a host operation failed.      |
 | `request_failed`           | The HTTP or language-server request failed.                   |
 | `timeout`                  | The call exceeded its wall-clock budget.                      |
-| `rate_limited`             | Provider rate limit reached; back off before retrying.      |
+| `rate_limited`             | Provider rate limit reached; back off before retrying.        |
 | `provider_unavailable`     | No host bound the service this flow needs, or it refused.     |
 | `unsupported`              | The service does not implement this query.                    |
 | `unsupported_content_type` | The response is not a type this flow renders.                 |

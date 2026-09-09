@@ -9,10 +9,11 @@ import { type Context, Effect, Layer } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Exec from "./internal/Exec.ts"
 import * as Grouping from "./internal/Grouping.ts"
-import * as Contract from "./internal/SearchContract.ts"
+import { notFound } from "./internal/SearchContract.ts"
 import { notice, truncateBytes } from "./internal/Text.ts"
 import * as Walk from "./internal/Walk.ts"
 import * as Search from "./Search.ts"
+import * as Contract from "./SearchContract.ts"
 import * as StdError from "./StdError.ts"
 
 /**
@@ -106,7 +107,7 @@ const resolveRoot = (
   Effect.gen(function*() {
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const info = yield* fileSystem.stat(root).pipe(Effect.mapError(() => Contract.notFound(root)))
+    const info = yield* fileSystem.stat(root).pipe(Effect.mapError(() => notFound(root)))
     const cwd = info.type === "File" ? path.dirname(root) : root
     const target = info.type === "File" ? path.basename(root) : "."
     return {

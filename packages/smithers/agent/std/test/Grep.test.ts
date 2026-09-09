@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Grep from "../src/Grep.ts"
 import { layer } from "./TestLayers.ts"
@@ -6,6 +6,15 @@ import { layer } from "./TestLayers.ts"
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
 
 describe("Grep", () => {
+  it("declares only the options v1 honours", () => {
+    expect(Object.keys(Grep.Input.fields)).not.toContain("types")
+    expect(Schema.decodeUnknownSync(Grep.Input)({ pattern: "a", noIgnore: true })).toEqual({
+      pattern: "a",
+      noIgnore: true
+    })
+    expect(() => Schema.decodeUnknownSync(Grep.Input)({ pattern: "a", noIgnore: false })).toThrow()
+  })
+
   it("searches regexes and literal text with 1-based line numbers", async () => {
     const files = { "/src/a.ts": "one\nfoo.bar\nthree", "/src/b.js": "fooXbar" }
     const regex = await execute(
