@@ -82,4 +82,3 @@ export const native = NativeControl.make({
   gateway: NodeGateway.layer,
   bearerPrincipal: NodeGateway.bearerPrincipal
 })
-
