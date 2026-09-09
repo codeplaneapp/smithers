@@ -130,6 +130,15 @@ type Pending = {
   readonly method: string
 }
 
+type OutboundFrame = {
+  readonly frame: Uint8Array
+  readonly request?: {
+    readonly id: number
+    cancelled: boolean
+    dispatched: boolean
+  }
+}
+
 type ConnectionState = {
   readonly _tag: "Open"
   readonly pending: HashMap.HashMap<number, Pending>
@@ -291,13 +300,13 @@ export const connect = (
     }
 
     const nextId = yield* Ref.make(0)
-    const outbound = yield* Queue.bounded<Uint8Array>(queueCapacity)
+    const outbound = yield* Queue.bounded<OutboundFrame>(queueCapacity)
     const terminalError = yield* Deferred.make<McpError>()
     const state = yield* Ref.make<ConnectionState>({ _tag: "Open", pending: HashMap.empty() })
 
     // Define these before starting the reader: a server can send a request
     // immediately on connection, before our first outbound request exists.
-    const enqueue = (frame: Uint8Array): Effect.Effect<void, McpError> =>
+    const enqueue = (frame: OutboundFrame): Effect.Effect<void, McpError> =>
       Effect.flatMap(Queue.offer(outbound, frame), (offered) =>
         offered
           ? Effect.void
@@ -356,7 +365,17 @@ export const connect = (
     // Writer: drains outbound frames into the process's stdin for the life of
     // the connection scope. A write failure is the same "connection is gone"
     // fact the reader loop reports, so it collapses pending requests too.
-    yield* Stream.fromQueue(outbound).pipe(
+    // Pull one record at a time: batching would mark later records dispatched
+    // while an earlier stdin write is still blocked. Check and mark without a
+    // yield so request cleanup cannot interleave with the dispatch decision.
+    yield* Stream.fromEffectRepeat(Queue.take(outbound)).pipe(
+      Stream.filter((record) => {
+        if (record.request === undefined) return true
+        if (record.request.cancelled) return false
+        record.request.dispatched = true
+        return true
+      }),
+      Stream.map((record) => record.frame),
       Stream.run(handle.stdin),
       Effect.onExit((exit) => closeWith(closed(options.server, "stdin closed"), !Exit.hasInterrupts(exit))),
       Effect.forkScoped
@@ -386,7 +405,7 @@ export const connect = (
             // active tool request's id. Responses share the bounded writer and
             // size guard, never creating another pending request of our own.
             return yield* frameOf("server-response", response).pipe(
-              Effect.flatMap(enqueue),
+              Effect.flatMap((frame) => enqueue({ frame })),
               Effect.timeoutOrElse({
                 duration: requestTimeoutMs,
                 orElse: () => Effect.fail(timeout(options.server, "server-response admission", requestTimeoutMs))
@@ -459,7 +478,7 @@ export const connect = (
         const id = yield* Ref.updateAndGet(nextId, (n) => n + 1)
         const deferred = yield* Deferred.make<unknown, McpError>()
         const frame = yield* frameOf(method, { jsonrpc: "2.0", id, method, params })
-        let sent = false
+        const requestState = { id, cancelled: false, dispatched: false }
         return yield* Effect.gen(function*() {
           const registration = yield* Ref.modify(state, (current) =>
             current._tag === "Closed"
@@ -469,20 +488,20 @@ export const connect = (
                 pending: HashMap.set(current.pending, id, { deferred, method })
               }] as const)
           if (registration !== undefined) return yield* Effect.flatMap(Deferred.await(registration), Effect.fail)
-          yield* enqueue(frame)
-          sent = true
+          yield* enqueue({ frame, request: requestState })
           return yield* Deferred.await(deferred)
         }).pipe(
           Effect.ensuring(Effect.gen(function*() {
+            requestState.cancelled = true
             const pending = yield* takePending(id)
-            if (!sent || !pending || method === "initialize") return
+            if (!requestState.dispatched || !pending || method === "initialize") return
             yield* frameOf("notifications/cancelled", {
               jsonrpc: "2.0",
               method: "notifications/cancelled",
-              params: { requestId: id, reason: cancellationReason }
+              params: { requestId: requestState.id, reason: cancellationReason }
             }).pipe(
               // Best-effort cancellation cannot delay the deadline it reports.
-              Effect.flatMap((frame) => Effect.sync(() => Queue.offerUnsafe(outbound, frame))),
+              Effect.flatMap((frame) => Effect.sync(() => Queue.offerUnsafe(outbound, { frame }))),
               Effect.ignore
             )
           })),
@@ -505,7 +524,7 @@ export const connect = (
         const current = yield* Ref.get(state)
         if (current._tag === "Closed") return yield* Effect.flatMap(Deferred.await(current.error), Effect.fail)
         const frame = yield* frameOf(method, { jsonrpc: "2.0", method, params })
-        yield* enqueue(frame)
+        yield* enqueue({ frame })
       }).pipe(
         Effect.timeoutOrElse({
           duration: timeoutMs,

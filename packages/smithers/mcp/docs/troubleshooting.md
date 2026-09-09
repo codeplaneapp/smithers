@@ -124,8 +124,9 @@ the child's output.
 that never completes, inspect the private stderr diagnostic through a trusted
 host observer: a server that reports a crash is not merely slow.
 
-One `notifications/cancelled` was sent for the timed-out request, unless the
-outbound queue was full or the method was `initialize`.
+If the request was still queued, the writer skips it. If it was already handed
+to the writer, one best-effort `notifications/cancelled` is sent, unless the
+outbound queue is full or the method is `initialize`.
 
 ## MCP server "..." connection scope closed, stdout closed, stdin closed, or exited with code N
 

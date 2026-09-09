@@ -325,3 +325,140 @@ describe("terminal stderr drainage", () => {
     assertDiagnostic(error, events)
   })
 })
+
+type WrittenFrame = {
+  readonly id?: number
+  readonly method?: string
+  readonly params?: { readonly requestId?: number }
+}
+
+const decodeFrame = (chunk: Uint8Array): WrittenFrame => JSON.parse(new TextDecoder().decode(chunk))
+const resultFrame = (id: number, result: string): Uint8Array =>
+  new TextEncoder().encode(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`)
+
+describe("request lifecycle", () => {
+  it.each(["timeout", "interrupt"] as const)("skips a queued request after %s", async (abandon) => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const written: Array<WrittenFrame> = []
+        const occupied = yield* Deferred.make<void>()
+        const releaseWriter = yield* Deferred.make<void>()
+        const drained = yield* Deferred.make<void>()
+        const transport = yield* connect({
+          stdin: Sink.forEach((chunk: Uint8Array) =>
+            Effect.gen(function*() {
+              const frame = decodeFrame(chunk)
+              written.push(frame)
+              if (frame.method === "occupy-writer") {
+                yield* Deferred.succeed(occupied, undefined)
+                yield* Deferred.await(releaseWriter)
+              }
+              if (frame.method === "after-abandon") yield* Deferred.succeed(drained, undefined)
+            })
+          )
+        })
+        yield* transport.notify("occupy-writer")
+        yield* Deferred.await(occupied)
+        const pending = yield* Effect.forkChild(
+          Effect.result(transport.request("tools/call", { name: "mutation", arguments: {} }, 10)),
+          { startImmediately: true }
+        )
+        // Settle queue admission while the stdin sink remains blocked.
+        yield* TestClock.adjust(1)
+        expect(written.map((frame) => frame.method)).toEqual(["occupy-writer"])
+        if (abandon === "timeout") {
+          yield* TestClock.adjust(9)
+          expect(yield* Fiber.join(pending)).toMatchObject({ _tag: "Failure", failure: { code: "timeout" } })
+        } else {
+          yield* Fiber.interrupt(pending)
+        }
+        yield* Deferred.succeed(releaseWriter, undefined)
+        yield* transport.notify("after-abandon")
+        yield* Deferred.await(drained)
+        // The queue has drained past the expired record. Neither the mutation
+        // nor a cancellation for an undispatched request may reach stdin.
+        expect(written.map((frame) => frame.method)).toEqual(["occupy-writer", "after-abandon"])
+      })).pipe(Effect.provide(TestClock.layer()))
+    )
+  })
+
+  it("correlates three simultaneous requests with replies in reverse order", async () => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const methods = ["one", "two", "three"]
+        const written = yield* Effect.forEach(methods, () => Deferred.make<number>())
+        const replies = yield* Effect.forEach(methods, () => Deferred.make<Uint8Array>())
+        const transport = yield* connect({
+          stdin: Sink.forEach((chunk: Uint8Array) => {
+            const frame = decodeFrame(chunk)
+            const index = methods.indexOf(frame.method!)
+            return index < 0 ? Effect.void : Deferred.succeed(written[index]!, frame.id!)
+          }),
+          stdout: Stream.fromIterable(replies).pipe(
+            Stream.flatMap((reply) => Stream.fromEffect(Deferred.await(reply))),
+            Stream.concat(Stream.never)
+          )
+        })
+        const callers = yield* Effect.forEach(
+          methods,
+          (method) => Effect.forkChild(transport.request(method), { startImmediately: true })
+        )
+        const ids = yield* Effect.forEach(written, Deferred.await)
+        expect(new Set(ids).size).toBe(3)
+        for (let index = 0; index < replies.length; index++) {
+          const reverse = replies.length - index - 1
+          yield* Deferred.succeed(replies[index]!, resultFrame(ids[reverse]!, `result-${methods[reverse]}`))
+        }
+        expect(yield* Effect.forEach(callers, Fiber.join)).toEqual(["result-one", "result-two", "result-three"])
+      })).pipe(Effect.provide(TestClock.layer()))
+    )
+  })
+
+  it("isolates one timeout and its late reply from concurrent and subsequent requests", async () => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const methods = ["abandoned", "healthy", "subsequent"]
+        const written = yield* Effect.forEach(methods, () => Deferred.make<number>())
+        const replies = yield* Effect.forEach(methods, () => Deferred.make<Uint8Array>())
+        const cancelled = yield* Deferred.make<void>()
+        const cancellations: Array<number | undefined> = []
+        const transport = yield* connect({
+          stdin: Sink.forEach((chunk: Uint8Array) =>
+            Effect.gen(function*() {
+              const frame = decodeFrame(chunk)
+              if (frame.method === "notifications/cancelled") {
+                cancellations.push(frame.params?.requestId)
+                yield* Deferred.succeed(cancelled, undefined)
+              }
+              const index = methods.indexOf(frame.method!)
+              if (index >= 0) yield* Deferred.succeed(written[index]!, frame.id!)
+            })
+          ),
+          stdout: Stream.fromIterable(replies).pipe(
+            Stream.flatMap((reply) => Stream.fromEffect(Deferred.await(reply))),
+            Stream.concat(Stream.never)
+          )
+        })
+        const abandoned = yield* Effect.forkChild(Effect.flip(transport.request("abandoned", undefined, 10)), {
+          startImmediately: true
+        })
+        const healthy = yield* Effect.forkChild(transport.request("healthy"), { startImmediately: true })
+        const abandonedId = yield* Deferred.await(written[0]!)
+        const healthyId = yield* Deferred.await(written[1]!)
+        yield* TestClock.adjust(10)
+        expect(yield* Fiber.join(abandoned)).toMatchObject({ code: "timeout" })
+        yield* Deferred.await(cancelled)
+        expect(healthy.pollUnsafe()).toBeUndefined()
+        yield* Deferred.succeed(replies[0]!, resultFrame(abandonedId, "late-abandoned-result"))
+        yield* Deferred.succeed(replies[1]!, resultFrame(healthyId, "healthy-result"))
+        expect(yield* Fiber.join(healthy)).toBe("healthy-result")
+        const subsequent = yield* Effect.forkChild(transport.request("subsequent"), { startImmediately: true })
+        const subsequentId = yield* Deferred.await(written[2]!)
+        expect(new Set([abandonedId, healthyId, subsequentId]).size).toBe(3)
+        yield* Deferred.succeed(replies[2]!, resultFrame(subsequentId, "subsequent-result"))
+        expect(yield* Fiber.join(subsequent)).toBe("subsequent-result")
+        expect(cancellations).toEqual([abandonedId])
+      })).pipe(Effect.provide(TestClock.layer()))
+    )
+  })
+})

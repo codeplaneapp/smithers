@@ -107,8 +107,9 @@ never attached to the error.
 
 Every MCP tool flow is declared `irreversible`, so an abandoned in-flight
 mutation is a durability problem rather than a tidiness one. When a `tools/call`
-times out or its fiber is interrupted, the client sends exactly one
-`notifications/cancelled` for that request id.
+times out or its fiber is interrupted before dispatch, the writer skips its
+queued frame. Once handed to the writer, an abandoned request triggers one
+best-effort `notifications/cancelled` for that request id.
 
 The notification is best effort. A full outbound queue drops it rather than
 delaying the deadline it reports, because a cancellation that made a timeout
