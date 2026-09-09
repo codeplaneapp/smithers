@@ -1187,8 +1187,8 @@ export const execute = async (
     let runs = 0
     return {
       factory: {
-        open: (ref) =>
-          base.open(ref).pipe(
+        open: (ref, mcp) =>
+          base.open(ref, mcp).pipe(
             Effect.map((session): AgentSession.AgentSession => ({
               identity: session.identity,
               run: (request) =>

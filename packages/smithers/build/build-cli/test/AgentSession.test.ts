@@ -740,6 +740,68 @@ describe("CLI engine adapters", () => {
     })
   })
 
+  it.each(["direct", "fallback"] as const)("hands codex declared MCP config on %s selection", async (selection) => {
+    const argvPath = NodePath.join(root, "fake-codex-argv.txt")
+    const codex = await fakeExecutable(
+      "fake-codex-argv",
+      `printf '%s\\n' "$@" > "${argvPath}"\ncat > /dev/null\necho '{"type":"item.completed","item":{"type":"agent_message","text":"{}"}}'`
+    )
+    const claude = await fakeExecutable("fake-claude-red", `echo "quota exhausted" >&2\nexit 3`)
+    const factory = AgentSession.makeCliSessionFactory({
+      workspaceRoot: root,
+      agents: selection === "fallback"
+        ? poolAgents
+        : AgentTarget.Agents({ default: AgentTarget.Codex({ model: "m" }) }),
+      executables: { claude, codex },
+      timeoutMs: 10_000
+    })
+    for (
+      const mcp of [[
+        Reference.Mcp.Http("issues", "https://example.test/mcp?q=\"quoted\"&path=\\issues"),
+        Reference.Mcp.Http("docs.api", "https://docs.example.test/mcp")
+      ], []]
+    ) {
+      const session = await Effect.runPromise(factory.open(undefined, mcp))
+      await Effect.runPromise(session.run({ purpose: "diff", prompt: "p" }))
+      const argv = (await Fs.readFile(argvPath, "utf8")).trimEnd().split("\n")
+      expect(argv).toContain("--ignore-user-config")
+      expect(argv).toContain("--strict-config")
+      const flag = argv.indexOf("--config")
+      expect(flag).toBeGreaterThan(-1)
+      expect(argv[flag + 1]).toBe(
+        mcp.length === 0 ?
+          "mcp_servers={}" :
+          "mcp_servers={\"issues\"={url=\"https://example.test/mcp?q=\\\"quoted\\\"&path=\\\\issues\"},\"docs.api\"={url=\"https://docs.example.test/mcp\"}}"
+      )
+    }
+  })
+
+  it.each(["direct", "pool"] as const)(
+    "refuses unsupported Codex MCP names before %s model spend",
+    async (selection) => {
+      const marker = NodePath.join(root, "unsupported-mcp-spawned")
+      const executable = await fakeExecutable("must-not-spawn", `touch "${marker}"\nexit 1`)
+      const factory = AgentSession.makeCliSessionFactory({
+        workspaceRoot: root,
+        agents: selection === "pool" ? poolAgents : AgentTarget.Agents({ default: AgentTarget.Codex({ model: "m" }) }),
+        executables: { claude: executable, codex: executable },
+        timeoutMs: 10_000
+      })
+      const outcome = await Effect.runPromise(
+        factory.open(undefined, [
+          Reference.Mcp.Http("issues with spaces", "https://example.test/mcp")
+        ]).pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }))
+      )
+      expect(outcome).toMatchObject({
+        _tag: "smithers-build/AgentSessionError",
+        phase: "resolve",
+        message: expect.stringContaining("unsupported MCP capability")
+      })
+      expect(outcome?.message).toContain("issues with spaces")
+      expect(await Fs.access(marker).then(() => true, () => false)).toBe(false)
+    }
+  )
+
   it("reports codex's stdout error events when it exits non-zero with an empty stderr", async () => {
     const stream = [
       `{"type":"thread.started","thread_id":"t"}`,

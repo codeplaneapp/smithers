@@ -499,6 +499,15 @@ export const claudeMcpConfig = (mcp: ReadonlyArray<Reference.McpHttp>): string =
     mcpServers: Object.fromEntries(mcp.map((server) => [server.name, { type: "http", url: server.url }]))
   })
 
+/** A TOML inline table replaces Codex's entire MCP server configuration. */
+const codexMcpConfig = (mcp: ReadonlyArray<Reference.McpHttp>): string => {
+  const servers = Object.fromEntries(mcp.map((server) => [server.name, server.url]))
+  const entries = Object.entries(servers).map(([name, url]) =>
+    `${JSON.stringify(name)}={url=${JSON.stringify(url).replace(/\u007f/g, "\\u007f")}}`
+  )
+  return `mcp_servers={${entries.join(",")}}`
+}
+
 const adapters: Record<"claude" | "codex", EngineAdapter> = {
   claude: {
     executable: "claude",
@@ -525,7 +534,7 @@ const adapters: Record<"claude" | "codex", EngineAdapter> = {
   },
   codex: {
     executable: "codex",
-    args: (model) => [
+    args: (model, mcp) => [
       "exec",
       "--json",
       "--skip-git-repo-check",
@@ -535,6 +544,8 @@ const adapters: Record<"claude" | "codex", EngineAdapter> = {
       "--ignore-user-config",
       "--ignore-rules",
       "--strict-config",
+      "--config",
+      codexMcpConfig(mcp),
       "--model",
       model,
       "-"
@@ -576,7 +587,18 @@ export interface CliSessionOptions {
 export const makeCliSessionFactory = (options: CliSessionOptions): SessionFactory => ({
   open: (ref, mcp = []) =>
     Effect.try({
-      try: () => resolveAgents(options.agents, ref),
+      try: () => {
+        const resolved = resolveAgents(options.agents, ref)
+        // Admit every pool member before any member can spend tokens.
+        if (resolved.some((agent) => agent.engine === "codex")) {
+          for (const server of mcp) {
+            if (server.name === "" || /[^a-zA-Z0-9_:@/.-]/.test(server.name)) {
+              throw new Error(`unsupported MCP capability: Codex server name ${JSON.stringify(server.name)}`)
+            }
+          }
+        }
+        return resolved
+      },
       catch: (cause) => sessionError("resolve", cause)
     }).pipe(
       Effect.map((resolved): AgentSession => ({

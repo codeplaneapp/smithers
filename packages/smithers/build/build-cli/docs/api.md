@@ -472,6 +472,15 @@ verdicts. From `@smthrs/build-cli/AgentSession`.
 | `claudeMcpConfig`       | `(mcp: ReadonlyArray<Reference.McpHttp>) => string`                                                  | The `--mcp-config` document for the claude CLI.              |
 | `precheckMcp`           | `(servers, timeoutMs?) => Effect<void, AgentMcpUnreachable>`                                         | Prechecks every declared MCP server before model spend.      |
 
+`SessionFactory.open(ref, mcp)` preserves the declared HTTP MCP servers through
+`Agent.Diff` and `Agent.Pr`, including pool fallback. The CLI factory passes them
+as Claude's `--mcp-config` document or Codex's TOML `--config mcp_servers=...`
+override. An empty declaration supplies an empty server table.
+
+If any selected pool member uses Codex, server names must match
+`^[a-zA-Z0-9_:@/.-]+$`. Unsupported names fail `open` with
+`AgentSessionError` (`phase: "resolve"`) before any member spends tokens.
+
 ### Candidates, gates, and verdicts
 
 | Export                     | Signature                                                                 | What it is                                                                                 |

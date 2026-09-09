@@ -16,14 +16,19 @@
  *   in this package's own `@rsbuild/core` devDependency, so the lane runs
  *   on a clean checkout.
  */
+import * as Reference from "@smthrs/targets/Reference"
+import * as Effect from "effect/Effect"
 import * as NodeChildProcess from "node:child_process"
 import { existsSync } from "node:fs"
 import * as Fs from "node:fs/promises"
+import * as NodeHttp from "node:http"
 import { createRequire } from "node:module"
 import * as NodeNet from "node:net"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it, vi } from "vitest"
+import * as AgentFake from "../src/AgentFake.ts"
+import type * as AgentSession from "../src/AgentSession.ts"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import { graphKeySentinel, keyMaterialWithGraph } from "../src/PackageExec.ts"
 import { executionPresentation } from "./fixtures/presentation.ts"
@@ -567,4 +572,59 @@ export const Package = S.Package({ targets: { srcs, graph, build, dead } })
     expect(fourth.logs).toContain("//:build  ran")
     expect(await Fs.readFile(NodePath.join(root, "dist", "static", "js", "index.js"), "utf8")).toContain("hi ")
   }, 600_000)
+})
+
+describe("agent MCP session forwarding", () => {
+  it.each(["Diff", "Pr"] as const)("forwards declared servers through Agent.%s session counting", async (flavor) => {
+    const root = await temporaryWorkspace()
+    const server = NodeHttp.createServer((_request, response) => response.end("ok"))
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address()
+    if (address === null || typeof address === "string") throw new Error("no port assigned")
+    const mcp = [Reference.Mcp.Http("issues", `http://127.0.0.1:${address.port}/mcp`)]
+    const opened: Array<ReadonlyArray<Reference.McpHttp> | undefined> = []
+    let runs = 0
+    const factory: AgentSession.SessionFactory = {
+      open: (_ref, declared) => {
+        opened.push(declared)
+        return Effect.succeed({
+          identity: "recording",
+          run: () =>
+            Effect.sync(() => {
+              runs += 1
+              return { findings: [], edits: [], note: undefined }
+            })
+        })
+      }
+    }
+    const selection = vi.spyOn(AgentFake, "sessionFactoryFromEnvironment").mockReturnValue(factory)
+    try {
+      await write(root, "WORKSPACE.ts", workspaceModule())
+      await write(root, "prompt.md", "Inspect the declared issues server.\n")
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const agent = S.Agent.${flavor}({
+  prompt: S.file("//prompt.md"), data: [], changes: ["out/**"], gates: [], maxRounds: 1,
+  mcp: [S.Mcp.Http("issues", ${JSON.stringify(mcp[0]!.url)})],
+})
+export const Package = S.Package({ targets: { agent } })
+`
+      )
+      commitAll(root)
+      const result = await serve(root, ["//:agent"])
+      expect(opened, result.output + result.logs).toEqual([mcp])
+      expect(runs).toBe(1)
+      if (flavor === "Diff") expect(result.exitCode).toBe(0)
+      else {
+        // PR publication is unavailable in this binding, after the session runs.
+        expect(result.exitCode).toBe(1)
+        expect(result.logs).toContain("PR settle refused")
+      }
+    } finally {
+      selection.mockRestore()
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    }
+  })
 })
