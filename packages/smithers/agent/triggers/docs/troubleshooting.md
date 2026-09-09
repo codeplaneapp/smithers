@@ -136,7 +136,12 @@ enough because the next tick reads again anyway.
 **What happened.** A webhook request did not authenticate. Either the signature
 did not match, the header was absent or empty, `SignatureConfig.expected`
 returned zero bytes, or the credential could not be resolved. Nothing was
-decoded and no Control operation ran.
+decoded and no Control operation ran. The message does not say which: a
+refusal from `Webhook.ingest` always reads `webhook <name> did not verify the
+request`, and one from the signature verifier itself always reads
+`webhook signature in <header> did not verify`. A failure raised by `expected`
+is the verifier refusal's `cause`, so read it there, on the host side, rather
+than expecting it in the message a sender receives.
 
 **What to change.** Check three things in order.
 

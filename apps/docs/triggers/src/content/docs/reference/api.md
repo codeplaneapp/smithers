@@ -63,6 +63,12 @@ call would drop or rewrite: `undefined`, `NaN`, a `Date`, and a function each
 fail as `invalid_trigger` with `TriggerError.path` set to `input`, at the
 declaration boundary where the caller can still see which field is wrong.
 
+Enumerable getters are accepted when their values are JSON. They are evaluated
+during decoding and again during SQL serialization. SQL registration takes an
+eager serialized snapshot before returning its Effect; later changes to the
+getter's source do not change that snapshot. Use plain JSON values for stable
+input, since a getter can produce different values or throw on a later read.
+
 `Trigger.Overlap` and `Trigger.CatchUp` are re-exports of the schemas and types
 of the same names from `Schedule`.
 
@@ -283,6 +289,19 @@ The occurrences a trigger owes since it last fired, oldest first.
   occurrence may be caught up, so a missed occurrence under `one` is
   `catch_up_bound_exceeded` exactly as three missed occurrences under `all` are.
 
+The scheduler dispatches these occurrences subject to overlap. It waits for
+launch acknowledgement, not completion, so `all` with `skip` can drop work and
+`all` with `buffer-one` can coalesce intermediate occurrences. Use a durable
+queue or a flow that processes its own interval backlog when every boundary
+must be processed.
+
+The scheduler logs a warning annotated with the trigger id and abandons the
+backlog when catch-up exceeds its bound. On the first poll of a trigger in a
+process, including after restart, it drops the entire owed list, including the
+current occurrence, records the current in-process watermark, and waits for a
+later boundary. On subsequent polls, it drops the missed backlog but still
+dispatches the current occurrence subject to overlap.
+
 ## TriggerStore
 
 The durable state contract: registration, listing, the claim protocol, and
@@ -324,8 +343,9 @@ type Claim =
   }
 ```
 
-An occurrence is addressed by its occurrence number, so a retry cannot fire it
-twice.
+An occurrence is addressed by its occurrence number. An unfinished occurrence
+can be claimed again after lease expiry or launch compensation; its runner
+idempotency key stays the same across attempts.
 
 `ClaimFire` deliberately carries no overlap policy. A claim applies the policy
 stored on the trigger row, read inside the same transaction, so a caller holding
@@ -343,12 +363,32 @@ the run it displaced.
 ```ts
 type Outcome = "launched" | "completed" | "skipped" | "buffered" | "superseded" | "failed"
 
-interface Result extends Fire {
-  readonly outcome: Outcome
-  readonly runId?: string | undefined
-  readonly error?: string | undefined
-}
+type Result =
+  & Fire
+  & { readonly error?: string | undefined }
+  & (
+    | { readonly outcome: "launched"; readonly runId: string; readonly reservationId: string }
+    | {
+      readonly outcome: Exclude<Outcome, "launched">
+      readonly runId?: string | undefined
+      readonly reservationId?: string | undefined
+    }
+  )
 ```
+
+A launched result requires a non-empty `runId` and the exact `reservationId`
+returned by its claim. Missing, empty, or whitespace-only run ids fail with
+`invalid_options` at `runId`. Launches commit only while that reservation owns
+an unfinished fire (`null` or `buffered`). Stale ownership or an impermissible
+fire transition fails with `stale_owner` without changing the ledger, cursor,
+lease, or active run. Terminal results may omit `runId` to settle the run
+already recorded for that occurrence. Before launch, pass `reservationId` to
+fence settlement to a particular attempt. Repeated terminal results and
+claim decisions leave the existing row unchanged.
+
+`resultRefusal(result, fire, activeRunId)` returns a `TriggerError` for invalid
+or stale results, or `undefined` for a permissible transition. Store adapters
+call this helper inside their atomic write before mutating state.
 
 ### TriggerStore.Service
 
@@ -364,6 +404,7 @@ interface Service {
     readonly expectedRevision: number
   }) => Effect.Effect<Option.Option<{ readonly occurrence: number; readonly claim: Claim }>, TriggerError>
   readonly recordResult: (result: Result) => Effect.Effect<void, TriggerError>
+  readonly restorePending: (fire: Fire & { readonly reservationId: string }) => Effect.Effect<void, TriggerError>
   readonly setPending: (fire: Fire) => Effect.Effect<void, TriggerError>
   readonly takePending: (triggerId: string) => Effect.Effect<Option.Option<number>, TriggerError>
   readonly activeRun: (triggerId: string) => Effect.Effect<Option.Option<string>, TriggerError>
@@ -379,24 +420,25 @@ interface Service {
 }
 ```
 
-| Method             | Contract                                                                                                                                                                                       |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`         | Upsert. A first write is revision 1; every replacement increments. Re-validates the declaration.                                                                                               |
-| `get`              | One trigger, or `None`.                                                                                                                                                                        |
-| `list`             | Every trigger, ordered by id.                                                                                                                                                                  |
-| `listEnabled`      | Every enabled trigger, ordered by id. Not a due-time query: due-ness is the scheduler's cron computation.                                                                                      |
-| `claimFire`        | The claim protocol for one occurrence.                                                                                                                                                         |
-| `claimPending`     | Reads the buffered occurrence, applies the same claim rules, and clears the buffer only when the decision consumes it, in one transaction.                                                     |
-| `recordResult`     | Records how one occurrence ended and settles the trigger's active run and cursor.                                                                                                              |
-| `setPending`       | Buffers an occurrence, coalescing with any already pending.                                                                                                                                    |
-| `takePending`      | Removes and returns the buffered occurrence.                                                                                                                                                   |
-| `activeRun`        | The run id or launch reservation the trigger currently holds. Expires a stale reservation as a side effect.                                                                                    |
-| `activeOccurrence` | The occurrence owned by one active run or reservation. `lastFiredAt` cannot answer this, because later skipped and buffered occurrences advance that cursor while an older run remains active. |
-| `clearActive`      | Compare-and-swap release of one run id.                                                                                                                                                        |
-| `history`          | The fire ledger, newest occurrence first, filtered and paged by a `HistoryQuery`. A limit that is not a positive safe integer is refused with `invalid_options` and `path` `"limit"`.          |
-| `inspect`          | The run or reservation and the buffered occurrence one trigger holds, read as the row has them. Expires nothing; `activeRun` is the read that expires a stale reservation.                     |
-| `heartbeat`        | Records that `host` polled the store at the store clock's current time. One row per host; a later poll overwrites.                                                                             |
-| `lastHeartbeat`    | The newest heartbeat across every host, or `None` when no scheduler has ever polled. Equal times fall to the lower host name so the answer is one row.                                         |
+| Method             | Contract                                                                                                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `register`         | Upsert. A first write is revision 1; every replacement increments. Re-validates the declaration.                                                                                                                   |
+| `get`              | One trigger, or `None`.                                                                                                                                                                                            |
+| `list`             | Every trigger, ordered by id.                                                                                                                                                                                      |
+| `listEnabled`      | Every enabled trigger, ordered by id. Not a due-time query: due-ness is the scheduler's cron computation.                                                                                                          |
+| `claimFire`        | The claim protocol for one occurrence.                                                                                                                                                                             |
+| `claimPending`     | Reads the buffered occurrence, applies the same claim rules, and clears the buffer only when the decision consumes it, in one transaction.                                                                         |
+| `recordResult`     | Records how one occurrence ended and settles the trigger's active run and cursor.                                                                                                                                  |
+| `restorePending`   | Atomically restores pending work and releases the matching unfinished reservation. Retains a predecessor only if its fire is still launched. Stale tokens fail with `stale_owner`; failed writes retain the lease. |
+| `setPending`       | Buffers an occurrence, coalescing with any already pending.                                                                                                                                                        |
+| `takePending`      | Removes and returns the buffered occurrence.                                                                                                                                                                       |
+| `activeRun`        | The run id or launch reservation the trigger currently holds. Expires a stale reservation as a side effect.                                                                                                        |
+| `activeOccurrence` | The occurrence owned by one active run or reservation. `lastFiredAt` cannot answer this, because later skipped and buffered occurrences advance that cursor while an older run remains active.                     |
+| `clearActive`      | Compare-and-swap release of one run id.                                                                                                                                                                            |
+| `history`          | The fire ledger, newest occurrence first, filtered and paged by a `HistoryQuery`. A limit that is not a positive safe integer is refused with `invalid_options` and `path` `"limit"`.                              |
+| `inspect`          | The run or reservation and the buffered occurrence one trigger holds, read as the row has them. Expires nothing; `activeRun` is the read that expires a stale reservation.                                         |
+| `heartbeat`        | Records that `host` polled the store at the store clock's current time. One row per host; a later poll overwrites.                                                                                                 |
+| `lastHeartbeat`    | The newest heartbeat across every host, or `None` when no scheduler has ever polled. Equal times fall to the lower host name so the answer is one row.                                                             |
 
 Every method addressing one trigger fails with `unknown_trigger` when no such
 row exists, except `clearActive`, whose compare-and-swap cannot tell a missing
@@ -468,13 +510,16 @@ class TriggerStore extends Context.Service<TriggerStore, Service>()("flows/trigg
 ```ts
 const reservationLeaseMs: number
 const reservationPrefix: string
-const reservationId: (triggerId: string, occurrence: number) => string
+const reservationId: (triggerId: string, occurrence: number, attempt?: string) => string
 const isReservation: (runId: string | undefined) => boolean
 const reservationOccurrence: (runId: string) => number | undefined
 ```
 
 `reservationPrefix` is `trigger-reservation:`, and `reservationId` appends the
-trigger id and the occurrence. `reservationLeaseMs` is 300,000 milliseconds, or
+trigger id, optional attempt, and occurrence. Store claims supply a fresh UUID
+for each attempt, including retries. Use the token returned by the claim; do
+not reconstruct it. The two-argument helper reads and constructs legacy ids.
+`reservationLeaseMs` is 300,000 milliseconds, or
 5 minutes, and both store implementations use it so swapping one for the other
 cannot change recovery timing.
 
@@ -541,6 +586,13 @@ interface RunnerService {
 `idempotencyKey` is `<triggerId>:<occurrence ISO instant>`, so two hosts that
 notice the same boundary derive the same key.
 
+Scheduled dispatch makes at-least-once launch attempts. `RunnerService.start`
+must durably deduplicate by `idempotencyKey` and return the same run identity on
+replay, including across host restarts.
+The runner may have accepted a launch before the store persists its `launched`
+result. A crash, result-write failure, or expired reservation can cause another
+attempt with that key, even while the earlier attempt is in flight.
+
 ### Scheduler.Runner and its constructors
 
 ```ts
@@ -563,7 +615,14 @@ const layerControlRunner: Layer.Layer<Runner, never, Control.Control>
 The production launcher, backed by the Control plan, run, list, and cancel API.
 A parked plan waits for approval and retries the same idempotent run request a
 bounded number of times. This adapter never approves a plan and never
-reconstructs an execution envelope.
+reconstructs an execution envelope. The start input is forwarded to `Control.plan`;
+every `Control.run` attempt uses the returned plan ID, digest, and envelope with
+the original start idempotency key.
+
+Cancellation sends ``{ runId, idempotencyKey: `trigger-cancel:${runId}` }`` to
+`Control.cancel`. Only `Accepted`, `AlreadyApplied`, and `Terminal` receipts
+acknowledge cancellation. `Conflict` and `Parked` fail with `TriggerError` code
+`runner`, so supersession retains the predecessor and queues the replacement.
 
 Liveness is read as the complement of the settled statuses `cancelled`,
 `completed`, and `failed`, so a status Control adds later is treated as live
@@ -585,6 +644,10 @@ const parkedAttempts: number
 interface Options {
   readonly pollInterval?: Duration.Input | undefined
   readonly runPollInterval?: Duration.Input | undefined
+  readonly concurrency?: number | undefined
+  readonly startTimeout?: Duration.Input | undefined
+  readonly inspectTimeout?: Duration.Input | undefined
+  readonly cancelTimeout?: Duration.Input | undefined
   readonly host?: string | undefined
 }
 
@@ -593,13 +656,42 @@ interface Service {
 }
 
 const defaultHost: string
+const defaultConcurrency: number
 ```
 
 `pollInterval` defaults to one minute and paces the tick loop.
-`runPollInterval` defaults to one second and paces a launched run's monitor.
+`runPollInterval` defaults to fifteen seconds and paces a launched run's monitor.
 Both must be finite, positive Effect durations; zero polls a CPU-tight loop and
 an infinite interval never completes, and both are refused with
 `invalid_options` and `TriggerError.path` naming the field.
+
+`concurrency` is how many triggers one tick processes at the same time. It
+defaults to `defaultConcurrency`, which is 4, and must be a positive integer;
+anything else is refused with `invalid_options` at `concurrency`. Triggers are
+independent once claimed, because the store fences every claim on its own row,
+so a launch waiting on a parked plan holds one slot rather than every trigger
+listed after it. Each trigger reads the clock when its own processing starts,
+not once for the tick.
+
+`startTimeout`, `inspectTimeout`, and `cancelTimeout` bound one `Runner.start`,
+`Runner.isActive`, and `Runner.cancel` call. They default to four minutes,
+thirty seconds, and thirty seconds, must be finite, positive Effect durations,
+and are refused with `invalid_options` naming the field. The start default
+outlasts `layerControlRunner`'s bounded parked-approval retries and stays below
+the five-minute reservation lease, so an abandoned launch still owns its
+reservation. A deadline above the lease is allowed; a start that answers after
+its lease is reconciled as a late launch. A call that exceeds its deadline is
+interrupted and fails with `runner_timeout`:
+
+- A start that times out is ambiguous, because the runtime may hold the run.
+  The occurrence is neither failed nor forgotten: the reservation is released
+  and the occurrence stays pending, so the next tick retries it under the same
+  `idempotencyKey` and the runtime's durable deduplication answers with the
+  same run. The tick waits at most `startTimeout` for one launch.
+- An inspection that times out is an inspection failure: the monitor retries
+  and then detaches, retaining the durable owner.
+- A cancellation that times out fails the supersede: the prior run is restored
+  as active and the replacement is queued.
 
 `host` is the name every tick records its heartbeat under through
 `TriggerStore.heartbeat`, so a listing can say which host last polled the
@@ -636,6 +728,18 @@ tick rather than the typed error alone.
 Scope closure detaches every run monitor and cancels nothing. The runs are
 durable and outlive the process; the next incarnation re-attaches to them from
 the store. Cancellation happens only through a `supersede` claim.
+
+An inspection failure logs its cause and retries three times. Retry delays
+start at `runPollInterval`, double each time, and are capped at one minute.
+After exhaustion the monitor detaches, retaining the durable active owner and
+local entry. Later ticks inspect that owner again. Only an inspection that
+reports the run stopped permits a completed result; inspection and completion
+write failures never become failed run outcomes.
+
+Every launch child exit completes its acknowledgement, including defects and
+interruption before launch persistence. The waiting tick observes the full
+cause. Non-interruption failures are logged and isolated so later triggers in
+the same tick can launch; interruption propagates and releases the tick permit.
 
 ## DispatchReader
 
@@ -798,6 +902,12 @@ carry in `header`. It returns an Effect so the secret is resolved through the
 host's resolver per request, and so a resolution or HMAC failure arrives as a
 typed `verification_failed` instead of a defect.
 
+Every refusal the verifier raises has the message
+`webhook signature in <header> did not verify`, whether the header was absent,
+the signature mismatched, `expected` answered with zero bytes, or `expected`
+failed. A failure raised by `expected` is kept only in the refusal's `cause`,
+so a resolver's own message never travels toward the sender.
+
 ### Webhook.Config and Webhook
 
 ```ts
@@ -827,6 +937,12 @@ const make: <Payload, Outbound = never>(config: Config<Payload, Outbound>) => We
 Builds the door. It exposes `name`, `register`, and `ingest`, and no direct
 execution method.
 
+When verification fails, `ingest` fails with a `verification_failed`
+`TriggerError` whose message is always `webhook <name> did not verify the
+request`, whatever the declared `verify` reported. The Control `Unauthorized`
+it wrapped is the `cause`. A custom `verify` may say why it refused, but that
+reason stays on the host side of the Control boundary.
+
 ## test/TestTriggers
 
 ### TestTriggers.layer
@@ -845,20 +961,22 @@ testing the protocol rather than the implementation.
 `TriggerError.code` is stable. Branch on the code instead of parsing the
 message.
 
-| Code                      | Raised when                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `unknown_trigger`         | A claim, result, pending-state, active-run, or inspect operation requires a trigger row that does not exist. |
-| `trigger_disabled`        | A claim reads a disabled trigger inside its transaction.                                                     |
-| `revision_mismatch`       | `ClaimFire.expectedRevision` differs from the revision read by the claim transaction.                        |
-| `invalid_schedule`        | `Schedule.make` cannot decode the schedule declaration.                                                      |
-| `invalid_trigger`         | `Trigger.make` cannot decode a trigger, or SQL registration receives input with no JSON representation.      |
-| `invalid_options`         | A cron occurrence limit, a history page limit, or a scheduler polling interval violates its contract.        |
-| `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                                    |
-| `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                                   |
-| `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.           |
-| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.       |
-| `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.                    |
-| `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.           |
+| Code                      | Raised when                                                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `unknown_trigger`         | A claim, result, pending-state, active-run, or inspect operation requires a trigger row that does not exist.            |
+| `trigger_disabled`        | A claim reads a disabled trigger inside its transaction.                                                                |
+| `stale_owner`             | A result or compensation no longer owns a permissible fire transition.                                                  |
+| `revision_mismatch`       | `ClaimFire.expectedRevision` differs from the revision read by the claim transaction.                                   |
+| `invalid_schedule`        | `Schedule.make` cannot decode the schedule declaration.                                                                 |
+| `invalid_trigger`         | `Trigger.make` cannot decode a trigger, or SQL registration receives input with no JSON representation.                 |
+| `invalid_options`         | A cron occurrence limit, a history page limit, or a scheduler interval, deadline, or concurrency violates its contract. |
+| `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                                               |
+| `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                                              |
+| `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.                      |
+| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.                  |
+| `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.                               |
+| `runner_timeout`          | A `Runner.start`, `isActive`, or `cancel` call exceeded `startTimeout`, `inspectTimeout`, or `cancelTimeout`.           |
+| `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.                      |
 
 `TriggerError.path` optionally identifies the offending declaration or option
 as a dotted field path. Schema and option failures set it when they can locate
@@ -887,7 +1005,7 @@ fails with `trigger_disabled`.
 
 A launch-capable claim writes a reservation before it starts a run.
 `TriggerStore.reservationPrefix` is `trigger-reservation:`, and
-`TriggerStore.reservationId` appends the trigger ID and occurrence;
+`TriggerStore.reservationId` appends the trigger ID, optional attempt, and occurrence;
 `TriggerStore.reservationOccurrence` reads that occurrence back. The
 `SqlTriggerStore.reservationLeaseMs` lease is 300,000 milliseconds, or 5
 minutes. `TriggerStore.reservationLeaseMs` owns the shared value and
@@ -902,7 +1020,16 @@ claim rules as `claimFire`, and clears the buffer only when the decision
 consumes it, inside one transaction. A refused claim leaves the buffer intact,
 and a concurrent active run that buffers it again keeps it pending. If a
 process dies after claiming ordinary or buffered work but before launching it,
-expiration of that launch reservation restores the occurrence.
+expiration of that launch reservation restores the occurrence. After a failed
+buffered launch, `restorePending` restores the pointer and releases the matching
+reservation in one transaction. Compensation failures are logged and retain the
+lease for recovery. Cancellation failures use the same operation to restore a
+still-launched predecessor with its pending replacement.
+
+A launched result carries the claim token and a non-empty run id. The store
+checks ownership and unfinished fire state in the transaction that publishes
+the run. A delayed result cannot overwrite a newer owner or revive a terminal
+fire. The scheduler logs `stale_owner` and cancels a losing accepted run unless a retry of that occurrence has adopted it.
 
 The persisted `last_fired_at_ms` watermark only moves forward. A completed
 skip or buffer advances it inside the claim transaction; a fire or supersede
@@ -934,16 +1061,17 @@ selects `none`, `one`, or `all`, and every policy answers to the bound. In
 particular, `one` fails with `catch_up_bound_exceeded` when it owes an
 occurrence and `maxCatchUp` is 0.
 
-`Scheduler.Options.pollInterval` and `runPollInterval` must be finite, positive
-Effect durations. Invalid values fail with `invalid_options` and identify the
-field in `TriggerError.path`. `Scheduler.parkedAttempts` is 8. If the eighth
-Control attempt remains parked awaiting approval, the launch fails with
-`runner`.
+`Scheduler.Options.pollInterval`, `runPollInterval`, `startTimeout`,
+`inspectTimeout`, and `cancelTimeout` must be finite, positive Effect
+durations, and `concurrency` must be a positive integer. Invalid values fail
+with `invalid_options` and identify the field in `TriggerError.path`.
+`Scheduler.parkedAttempts` is 8. If the eighth Control attempt remains parked
+awaiting approval, the launch fails with `runner`.
 
-A bound the declaration cannot honor is a statement about how much history to
-replay, not a reason to stop scheduling: the scheduler logs a warning annotated
-with the trigger id, abandons the backlog beyond the bound, and still fires the
-current occurrence.
+A bound breach logs a warning and abandons catch-up. On the first poll after
+restart, that includes the current occurrence; scheduling resumes at a later
+boundary. On subsequent polls, the current occurrence is still dispatched
+subject to overlap. See [Overlap and catch-up](/concepts/policies/).
 
 ## Webhook verification and input ownership
 
@@ -970,8 +1098,12 @@ to capture a secret in a closure.
 `Webhook.ingest` snapshots `body`, `headers`, and `idempotencyKey` before any
 consumer reads them. The signature verifier receives another copy of `body`.
 Verification, delivery fingerprinting, and decoding therefore read one private
-snapshot even if the caller or verifier mutates its own bytes. This step also
-copies a `SharedArrayBuffer`-backed view out of shared memory.
+snapshot even if the caller or verifier mutates its own bytes. Both copies are
+taken with `Uint8Array.from`, never with the input's own `slice`: a Node
+`Buffer` is a `Uint8Array` whose `slice` returns a view over the same memory,
+so a `Buffer` body is copied the same way as a plain array, an offset view is
+copied over its viewed range only, and a `SharedArrayBuffer`-backed view is
+copied out of shared memory.
 
 `ingest` does not register a channel. Run the separate `register` effect before
 accepting traffic.

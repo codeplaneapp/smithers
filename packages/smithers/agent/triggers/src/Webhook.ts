@@ -59,6 +59,18 @@ export interface SignatureConfig {
 }
 
 /**
+ * Copies request bytes into memory nobody else holds.
+ *
+ * `body.slice()` is not enough: a Node `Buffer` is a `Uint8Array` whose
+ * `slice` is an alias of `subarray` and answers with a view over the same
+ * memory, so a caller that reused its `Buffer` after handing it over changed
+ * what got verified, and a verifier that edited the bytes it was handed edited
+ * the caller's. `Uint8Array.from` always allocates, and it copies only the
+ * viewed range of an offset view and only a snapshot of a `SharedArrayBuffer`.
+ */
+const ownedCopy = (body: Uint8Array): Uint8Array => Uint8Array.from(body)
+
+/**
  * Builds a verifier that compares a signature header in constant time.
  *
  * An absent or empty header is refused before `expected` runs, and an
@@ -69,15 +81,22 @@ export interface SignatureConfig {
  * zero-length expected signature is a misconfigured credential, never a valid
  * one, so the door stays closed instead of opening for everyone.
  *
+ * Every refusal carries the same message, `webhook signature in <header> did
+ * not verify`, whatever the reason. A failure raised by `expected` is kept in
+ * `cause` only: its message names the credential reference or the resolver
+ * that could not produce a secret, which is a host detail, and the refusal
+ * that answers a bad signature answers a broken resolver the same way.
+ *
  * @category constructors
  * @since 0.1.0
  */
 export const makeSignatureVerifier = (config: SignatureConfig): Channel.Verify => (raw, credential) => {
-  const refuse = () =>
+  const refuse = (cause?: TriggerError) =>
     Effect.fail(
       new TriggerError({
         code: "verification_failed",
-        message: `webhook signature in ${config.header} did not verify`
+        message: `webhook signature in ${config.header} did not verify`,
+        ...(cause === undefined ? {} : { cause })
       })
     )
   return Effect.suspend(() => {
@@ -88,12 +107,14 @@ export const makeSignatureVerifier = (config: SignatureConfig): Channel.Verify =
     const actual = new TextEncoder().encode(supplied)
     // The verifier gets its own copy: nothing it does to these bytes can reach
     // the buffer that is about to be fingerprinted and decoded.
-    return config.expected(raw.body.slice(), credential).pipe(
-      Effect.flatMap((expected) =>
-        expected.length > 0 && constantTimeEqual(expected, actual)
-          ? Effect.void
-          : refuse()
-      )
+    return config.expected(ownedCopy(raw.body), credential).pipe(
+      Effect.matchEffect({
+        onFailure: (error) => refuse(error),
+        onSuccess: (expected) =>
+          expected.length > 0 && constantTimeEqual(expected, actual)
+            ? Effect.void
+            : refuse()
+      })
     )
   })
 }
@@ -136,9 +157,14 @@ const toControlChannel = <Payload, Outbound>(
     name: config.name,
     schema: config.schema,
     credential: config.credential,
+    // The message is fixed here rather than forwarded from the verifier: a
+    // custom `verify` may say why it refused, and that reason travels toward
+    // the unauthenticated sender on the same error that answers a bad
+    // signature. `Unauthorized` carries no cause, so nothing else survives
+    // the crossing.
     verify: (raw, credential) =>
       config.verify(raw, credential).pipe(
-        Effect.mapError((error) => new Unauthorized({ message: error.message }))
+        Effect.mapError(() => new Unauthorized({ message: `webhook ${config.name} did not verify the request` }))
       ),
     map: (payload) => {
       const inbound = config.inbound(payload)
@@ -218,7 +244,7 @@ export const make = <Payload, Outbound = never>(
       // eventually runs, or a caller that reuses its own buffer in between
       // changes what gets authenticated.
       const snapshot: Channel.RawInbound = {
-        body: raw.body.slice(),
+        body: ownedCopy(raw.body),
         headers: { ...raw.headers },
         idempotencyKey: raw.idempotencyKey
       }
@@ -230,7 +256,7 @@ export const make = <Payload, Outbound = never>(
           error instanceof Unauthorized
             ? new TriggerError({
               code: "verification_failed",
-              message: error.message,
+              message: `webhook ${config.name} did not verify the request`,
               cause: error
             })
             : error

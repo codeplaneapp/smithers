@@ -901,6 +901,12 @@ carry in `header`. It returns an Effect so the secret is resolved through the
 host's resolver per request, and so a resolution or HMAC failure arrives as a
 typed `verification_failed` instead of a defect.
 
+Every refusal the verifier raises has the message
+`webhook signature in <header> did not verify`, whether the header was absent,
+the signature mismatched, `expected` answered with zero bytes, or `expected`
+failed. A failure raised by `expected` is kept only in the refusal's `cause`,
+so a resolver's own message never travels toward the sender.
+
 ### Webhook.Config and Webhook
 
 ```ts
@@ -929,6 +935,12 @@ const make: <Payload, Outbound = never>(config: Config<Payload, Outbound>) => We
 
 Builds the door. It exposes `name`, `register`, and `ingest`, and no direct
 execution method.
+
+When verification fails, `ingest` fails with a `verification_failed`
+`TriggerError` whose message is always `webhook <name> did not verify the
+request`, whatever the declared `verify` reported. The Control `Unauthorized`
+it wrapped is the `cause`. A custom `verify` may say why it refused, but that
+reason stays on the host side of the Control boundary.
 
 ## test/TestTriggers
 
@@ -1085,8 +1097,12 @@ to capture a secret in a closure.
 `Webhook.ingest` snapshots `body`, `headers`, and `idempotencyKey` before any
 consumer reads them. The signature verifier receives another copy of `body`.
 Verification, delivery fingerprinting, and decoding therefore read one private
-snapshot even if the caller or verifier mutates its own bytes. This step also
-copies a `SharedArrayBuffer`-backed view out of shared memory.
+snapshot even if the caller or verifier mutates its own bytes. Both copies are
+taken with `Uint8Array.from`, never with the input's own `slice`: a Node
+`Buffer` is a `Uint8Array` whose `slice` returns a view over the same memory,
+so a `Buffer` body is copied the same way as a plain array, an offset view is
+copied over its viewed range only, and a `SharedArrayBuffer`-backed view is
+copied out of shared memory.
 
 `ingest` does not register a channel. Run the separate `register` effect before
 accepting traffic.

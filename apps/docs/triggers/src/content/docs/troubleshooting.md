@@ -39,7 +39,13 @@ the wrong type, or the `input` has no JSON representation.
 **What to change.** Read `TriggerError.path`, which names the offending field.
 `id`, `flowId`, and `cron` must be non-empty strings; `maxCatchUp` must be an
 integer between 0 and 1000; `input` must be JSON, which excludes `undefined`,
-`NaN`, a `Date`, and a property getter.
+`NaN`, a `Date`, and a function.
+
+Enumerable getters are accepted when their values are JSON. They are evaluated
+during decoding and again during SQL serialization. SQL registration takes an
+eager serialized snapshot before returning its Effect; later changes to the
+getter's source do not change that snapshot. Use plain JSON values for stable
+input, since a getter can produce different values or throw on a later read.
 
 ## invalid_schedule
 
@@ -55,8 +61,11 @@ integer between 0 and 1000; `input` must be JSON, which excludes `undefined`,
 - A cron occurrence limit was not a non-negative safe integer. `path` is
   `"limit"`, and the message repeats the value it received, including `NaN` and
   `Infinity`.
-- A scheduler interval was not a finite, positive Effect duration. `path` is
-  `"pollInterval"` or `"runPollInterval"`.
+- A scheduler interval or deadline was not a finite, positive Effect duration.
+  `path` is `"pollInterval"`, `"runPollInterval"`, `"startTimeout"`,
+  `"inspectTimeout"`, or `"cancelTimeout"`.
+- A scheduler `concurrency` was not a positive integer. `path` is
+  `"concurrency"`.
 - A `TriggerStore.history` limit was not a positive safe integer. `path` is
   `"limit"`. Zero is refused here because a zero-row page can never carry a
   cursor.
@@ -78,10 +87,15 @@ and `Duration.fromInput` accepts both.
   `Cron.occurrencesBetween` was asked for a window it will not materialize.
 
 **What to change.** For an unusable bound, fix the declaration. For a breached
-bound, raise `maxCatchUp`, or accept the abandonment: the scheduler logs a
-warning annotated with the trigger id, drops the backlog beyond the bound, and
-still fires the current occurrence, so scheduling continues either way. For an
-unbounded search, pass a `limit`.
+bound, raise `maxCatchUp`, or accept the abandonment. For an unbounded search,
+pass a `limit`.
+
+The scheduler logs a warning annotated with the trigger id and abandons the
+backlog when catch-up exceeds its bound. On the first poll of a trigger in a
+process, including after restart, it drops the entire owed list, including the
+current occurrence, records the current in-process watermark, and waits for a
+later boundary. On subsequent polls, it drops the missed backlog but still
+dispatches the current occurrence subject to overlap.
 
 The trap worth naming: `maxCatchUp` defaults to 0, and a declaration that sets
 `catchUp: "one"` without raising it owes one occurrence it is not allowed to
@@ -114,15 +128,21 @@ built from a stale copy is refused rather than obeyed.
 the row. Somebody re-registered the trigger between the read and the claim.
 
 **What to change.** Re-read the trigger and decide again. The scheduler already
-does this: it refreshes once and retries once, which is enough because the next
-tick reads again anyway.
+does this: it refreshes once and recomputes what is due from the refreshed
+declaration rather than retrying the occurrence the old one produced, which is
+enough because the next tick reads again anyway.
 
 ## verification_failed
 
 **What happened.** A webhook request did not authenticate. Either the signature
 did not match, the header was absent or empty, `SignatureConfig.expected`
 returned zero bytes, or the credential could not be resolved. Nothing was
-decoded and no Control operation ran.
+decoded and no Control operation ran. The message does not say which: a
+refusal from `Webhook.ingest` always reads `webhook <name> did not verify the
+request`, and one from the signature verifier itself always reads
+`webhook signature in <header> did not verify`. A failure raised by `expected`
+is the verifier refusal's `cause`, so read it there, on the host side, rather
+than expecting it in the message a sender receives.
 
 **What to change.** Check three things in order.
 
@@ -158,6 +178,28 @@ run, or a plan never got approved.
 - `Control could not ...`: the underlying Control call failed. The cause carries
   the original error.
 
+A run inspection error retains the active owner and overlap protection. The
+monitor logs the cause and retries three times with doubling delays starting
+at `runPollInterval`, capped at one minute. Exhaustion detaches the monitor;
+subsequent ticks inspect the retained owner again. Restore Control access to
+resume completion detection. The default run poll interval is fifteen seconds.
+An inspection outage does not record a failed run or cancel it.
+
+## runner_timeout
+
+**What happened.** One `Runner.start`, `isActive`, or `cancel` call exceeded
+`startTimeout`, `inspectTimeout`, or `cancelTimeout`. The defaults are four
+minutes, thirty seconds, and thirty seconds. The call was interrupted.
+
+**What to change.** Nothing is lost. A start that timed out leaves the
+occurrence pending, so the next tick retries it under the same `idempotencyKey`
+and a runtime that did start the run answers with the same run id. An
+inspection that timed out is retried like any inspection failure. A
+cancellation that timed out restores the prior run as active and queues the
+replacement. If the runtime is healthy and merely slow, raise the deadline in
+`Scheduler.Options`; a parked plan needs a `startTimeout` above the two minutes
+`parkedAttempts` allows.
+
 ## store
 
 **What happened.** A persistence operation failed, or a `TriggerStore.makeNoop`
@@ -184,7 +226,7 @@ from `Control.list` carries no `schedulerLastTickMs` in the same case. A
 heartbeat older than `pollInterval` by a wide margin means the scheduler's scope
 closed. Then, four behaviors are correct and surprising.
 
-**The first tick after a restart fires nothing.** A trigger with no
+**A trigger with no durable cursor fires nothing on its first tick.** A trigger with no
 `lastFiredAt` establishes a watermark at the latest boundary on first sight and
 starts from the next one. Registering a weekly trigger on a Sunday evening does
 not fire it for the Monday six days gone. Run a second tick after a boundary has
@@ -192,7 +234,7 @@ passed, or seed a `lastFiredAt` by recording a result.
 
 **A boundary was skipped while a run was in flight.** That is `overlap: "skip"`,
 the default. The occurrence is recorded as `skipped` and the cursor advances.
-Choose `buffer-one` if the work has to happen.
+Choose `buffer-one` if one coalesced follow-up is enough.
 
 **A buffered occurrence has not run yet.** The buffer drains on the next tick
 after the active run settles, and it holds exactly one occurrence: a run that
@@ -203,19 +245,29 @@ trigger.
 **A backlog disappeared after downtime.** Either `catchUp` is `none`, which owes
 nothing, or the backlog exceeded `maxCatchUp` and was abandoned with a warning
 annotated with the trigger id. Check the logs for `A trigger abandoned catch-up
-work beyond its bound`.
+work beyond its bound`. On the first poll after restart, a breached bound also
+drops the current occurrence; scheduling resumes at a later boundary.
 
 ## The trigger fired twice
 
 Check that both launches carry the same `idempotencyKey`. The key is
 `<triggerId>:<occurrence ISO instant>`, so two hosts noticing the same boundary
-produce the same key, and the control plane deduplicates on it. Two different
-keys mean two different occurrences, which is catch-up doing its job.
+produce the same key. Two different keys identify different occurrences or
+trigger ids.
 
-A genuine double launch of one occurrence would require the claim protocol to
-hand out two launch-capable claims for one occurrence number, which the store's
-transaction forbids. If you see one, the two hosts are probably pointed at
-different databases.
+Scheduled dispatch makes at-least-once launch attempts. `RunnerService.start`
+must durably deduplicate by `idempotencyKey` and return the same run identity on
+replay, including across host restarts.
+The Control-backed adapter forwards this key to Control. Custom runners must
+provide the same durable deduplication contract.
+
+The same database can issue another launch-capable claim after lease expiry or
+launch compensation. A launch may have been accepted before its `launched`
+result was persisted; a crash or result-write failure in that window causes a
+retry. An expired lease can also overlap an earlier in-flight attempt. Repeated
+`start` calls with one key are expected during recovery. If they produce
+different run identities, check the runner's durable idempotency records and
+whether the hosts share that deduplication state.
 
 ## A run is stuck holding the trigger
 

@@ -21,12 +21,35 @@ const Payload = Schema.Union([
 
 type Payload = typeof Payload.Type
 
+const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+
+// Every `Uint8Array` shape a host hands a webhook. A Node `Buffer` is the one
+// that matters: its `slice` is an alias of `subarray`, so a copy taken with
+// `slice()` still shares the caller's memory. The offset view checks that a
+// copy takes only the viewed range, and the shared view that it leaves shared
+// memory.
+const bodyKinds: ReadonlyArray<readonly [name: string, bytes: (text: string) => Uint8Array]> = [
+  ["Uint8Array", encode],
+  ["Buffer", (text) => Buffer.from(text)],
+  ["offset Buffer view", (text) => {
+    const padded = Buffer.from(`<<<<${text}>>>>`)
+    return padded.subarray(4, 4 + Buffer.byteLength(text))
+  }],
+  ["SharedArrayBuffer view", (text) => {
+    const bytes = encode(text)
+    const view = new Uint8Array(new SharedArrayBuffer(bytes.length))
+    view.set(bytes)
+    return view
+  }]
+]
+
 const raw = (
   body: unknown,
   idempotencyKey: string,
-  signature = "valid"
+  signature = "valid",
+  bytes: (text: string) => Uint8Array = encode
 ) => ({
-  body: new TextEncoder().encode(JSON.stringify(body)),
+  body: bytes(JSON.stringify(body)),
   headers: { "x-signature": signature },
   idempotencyKey
 })
@@ -337,17 +360,17 @@ describe("Webhook", () => {
 
   // A verifier that cannot resolve its credential used to throw out of a
   // synchronous callback, which `Effect.suspend` turns into a defect that kills
-  // the fiber rather than a refusal the caller can read.
-  it("reports a failing expected() as a typed refusal, never a defect", async () => {
+  // the fiber rather than a refusal the caller can read. Its message used to be
+  // forwarded verbatim, which sent the resolver's own words toward the sender
+  // on the same error that answers a bad signature.
+  it("reports a failing expected() as a typed refusal with a fixed message, never a defect", async () => {
     const calls: Array<string> = []
+    const hostDetail = "credential events-secret could not be resolved at /secrets/events"
     const webhook = Webhook.make({
       ...declaration(calls),
       verify: Webhook.makeSignatureVerifier({
         header: "x-signature",
-        expected: () =>
-          Effect.fail(
-            new TriggerError({ code: "verification_failed", message: "credential could not be resolved" })
-          )
+        expected: () => Effect.fail(new TriggerError({ code: "verification_failed", message: hostDetail }))
       })
     })
     const exit = await run(
@@ -360,11 +383,62 @@ describe("Webhook", () => {
     )
     expect(exit._tag).toBe("Failure")
     if (exit._tag === "Failure") {
-      expect(Cause.squash(exit.cause)).toBeInstanceOf(TriggerError)
-      expect(Cause.squash(exit.cause)).toMatchObject({
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toBeInstanceOf(TriggerError)
+      expect(failure).toMatchObject({
         code: "verification_failed",
-        message: "credential could not be resolved"
+        message: "webhook events did not verify the request",
+        cause: { _tag: "/control/Unauthorized", message: "webhook events did not verify the request" }
       })
+      expect(JSON.stringify(failure)).not.toContain(hostDetail)
+    }
+  })
+
+  it("keeps the host's resolver failure in the verifier's cause, out of its message", async () => {
+    const host = new TriggerError({ code: "store", message: "resolver /secrets/events is unreachable" })
+    const verify = Webhook.makeSignatureVerifier({
+      header: "x-signature",
+      expected: () => Effect.fail(host)
+    })
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        verify({ body: encode("{}"), headers: { "x-signature": "valid" }, idempotencyKey: "host-1" }, credential)
+      )
+    )
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toBeInstanceOf(TriggerError)
+      expect(failure).toMatchObject({
+        code: "verification_failed",
+        message: "webhook signature in x-signature did not verify"
+      })
+      expect((failure as TriggerError).cause).toBe(host)
+    }
+  })
+
+  it("answers a custom verifier's refusal with the channel's fixed message", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make({
+      ...declaration(calls),
+      verify: () => Effect.fail(new TriggerError({ code: "verification_failed", message: "hmac key file missing" }))
+    })
+    const exit = await run(
+      Effect.exit(
+        webhook.register.pipe(
+          Effect.andThen(webhook.ingest(raw({ _tag: "start", flowId: "review", input: {} }, "custom-1")))
+        )
+      ),
+      calls
+    )
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toMatchObject({
+        code: "verification_failed",
+        message: "webhook events did not verify the request"
+      })
+      expect(JSON.stringify(failure)).not.toContain("hmac key file missing")
     }
   })
 
@@ -400,37 +474,65 @@ describe("Webhook", () => {
   // Verification, delivery fingerprinting, and decoding must all read one
   // private snapshot. Without it a verifier that edits the bytes it was handed
   // authenticates one payload and has another decoded.
-  it("decodes the bytes it authenticated even when the verifier rewrites them", async () => {
-    const calls: Array<string> = []
-    const webhook = Webhook.make({
-      ...declaration(calls),
-      verify: Webhook.makeSignatureVerifier({
-        header: "x-signature",
-        expected: (body) =>
-          Effect.sync(() => {
-            body.fill(0)
-            return new TextEncoder().encode("valid")
-          })
+  it.each(bodyKinds)(
+    "decodes the bytes it authenticated even when the verifier rewrites them (%s)",
+    async (_, bytes) => {
+      const calls: Array<string> = []
+      const webhook = Webhook.make({
+        ...declaration(calls),
+        verify: Webhook.makeSignatureVerifier({
+          header: "x-signature",
+          expected: (body) =>
+            Effect.sync(() => {
+              body.fill(0)
+              return encode("valid")
+            })
+        })
       })
-    })
-    await run(
-      webhook.register.pipe(
-        Effect.andThen(webhook.ingest(raw({ _tag: "start", flowId: "review", input: { pr: 7 } }, "mutating-1")))
-      ),
-      calls
-    )
-    expect(calls).toContain("plan:review")
-  })
+      const payload = { _tag: "start", flowId: "review", input: { pr: 7 } }
+      const request = raw(payload, "mutating-1", "valid", bytes)
+      await run(webhook.register.pipe(Effect.andThen(webhook.ingest(request))), calls)
+      expect(calls).toContain("plan:review")
+      expect(new TextDecoder().decode(request.body)).toBe(JSON.stringify(payload))
+    }
+  )
 
-  it("ignores a caller mutating its own request between building and running ingest", async () => {
-    const calls: Array<string> = []
-    const webhook = Webhook.make(declaration(calls))
-    const request = raw({ _tag: "start", flowId: "review", input: {} }, "swapped-1")
-    const pending = webhook.ingest(request)
-    request.body.fill(0)
-    request.headers["x-signature"] = "tampered"
-    await run(webhook.register.pipe(Effect.andThen(pending)), calls)
-    expect(calls).toContain("plan:review")
+  it.each(bodyKinds)(
+    "ignores a caller mutating its own request between building and running ingest (%s)",
+    async (_, bytes) => {
+      const calls: Array<string> = []
+      const webhook = Webhook.make(declaration(calls))
+      const payload = { _tag: "start", flowId: "review", input: { pr: 7 } }
+      const request = raw(payload, "swapped-1", "valid", bytes)
+      const pending = webhook.ingest(request)
+      request.body.fill(0)
+      request.headers["x-signature"] = "tampered"
+      await run(webhook.register.pipe(Effect.andThen(pending)), calls)
+      expect(calls).toContain(`verify:events-secret:${JSON.stringify(payload)}`)
+      expect(calls).toContain("plan:review")
+    }
+  )
+
+  it.each(bodyKinds)("hands expected() a copy that owns its memory (%s)", async (_, bytes) => {
+    const text = JSON.stringify({ _tag: "start", flowId: "review", input: {} })
+    const body = bytes(text)
+    let copy: Uint8Array | undefined
+    const verify = Webhook.makeSignatureVerifier({
+      header: "x-signature",
+      expected: (handed) =>
+        Effect.sync(() => {
+          copy = handed
+          handed.fill(120)
+          return encode("valid")
+        })
+    })
+    await Effect.runPromise(
+      verify({ body, headers: { "x-signature": "valid" }, idempotencyKey: "owned-1" }, credential)
+    )
+    expect(new TextDecoder().decode(body)).toBe(text)
+    expect(copy?.length).toBe(body.length)
+    expect(copy?.buffer).not.toBeInstanceOf(SharedArrayBuffer)
+    expect(Buffer.isBuffer(copy)).toBe(false)
   })
 
   it("reports a signal payload that is not JSON as invalid input", async () => {
