@@ -198,8 +198,10 @@ What that means in practice, from `src/prompt/PromptInput.tsx`:
   immediately, which is the clear-on-submit behavior the component has always
   had. An **async** handler holds the draft and its blob URLs until the returned
   promise settles, so a handler may `await` and still read the URLs it was
-  handed. Only the attachments actually submitted are revoked: files added while
-  the submit was in flight keep their previews.
+  handed. On acceptance, uncontrolled text clears only if it has not been edited
+  since submission, even if an edit restored the submitted text. Only submitted
+  attachments are removed and their URLs revoked: files added while the submit
+  was in flight remain attached and keep their previews.
 - A rejected `onSubmit` revokes nothing and clears nothing. The draft, its
   attachments, and their URLs survive, and the rejection is reported as
   `submit-failed`.

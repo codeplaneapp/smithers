@@ -44,6 +44,13 @@ function pressEnter(el: HTMLTextAreaElement): void {
   el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
 }
 
+function typeText(text: string): void {
+  const el = textarea();
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!;
+  setter.call(el, text);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function textarea(): HTMLTextAreaElement {
   const el = container?.querySelector<HTMLTextAreaElement>("textarea");
   if (!el) throw new Error("textarea not found");
@@ -90,6 +97,7 @@ describe("an async onSubmit borrows attachments for its whole lifetime", () => {
       }
       await render(
         <PromptInput
+          defaultValue="submitted draft"
           onSubmit={async (message: PromptInputMessage) => {
             await new Promise<void>((resolve) => {
               release = resolve;
@@ -116,6 +124,8 @@ describe("an async onSubmit borrows attachments for its whole lifetime", () => {
       expect(seenInsideHandler).toEqual(["blob:lifetime-0"]);
       expect(revokedAtResume).toEqual([[]]);
       expect(revoked).toEqual(["blob:lifetime-0"]);
+      expect(textarea().value).toBe("");
+      expect(hook.attachments).toEqual([]);
     });
   });
 
@@ -145,30 +155,46 @@ describe("an async onSubmit borrows attachments for its whole lifetime", () => {
     ]);
   });
 
-  test("files added while a submit is in flight keep their previews", async () => {
+  test.each(["unsent second draft", "submitted draft"])("pending acceptance preserves edited text (%s) and later attachments", async (laterText) => {
     await withObjectUrls(async ({ revoked }) => {
       let hook!: ReturnType<typeof usePromptInputAttachments>;
       let release!: () => void;
+      const submitted: PromptInputMessage[] = [];
       function Harness() {
         hook = usePromptInputAttachments();
         return <PromptInputTextarea />;
       }
-      await render(
+      const view = (status: "ready" | "submitted") => (
         <PromptInput
           multiple
-          onSubmit={async () => {
+          defaultValue="submitted draft"
+          status={status}
+          onSubmit={async (message) => {
+            submitted.push(message);
             await new Promise<void>((resolve) => {
               release = resolve;
             });
           }}
         >
           <Harness />
-        </PromptInput>,
+        </PromptInput>
       );
+
+      await render(view("ready"));
 
       await act(async () => hook.add([makeFile("first.png", "image/png")]));
       await act(async () => pressEnter(textarea()));
+      await act(async () => root!.render(view("submitted")));
+      await act(async () => typeText("intermediate edit"));
+      await act(async () => typeText(laterText));
       await act(async () => hook.add([makeFile("second.png", "image/png")]));
+      const laterAttachment = hook.attachments[1]!;
+      expect(submitted.map((message) => ({
+        text: message.text,
+        files: message.attachments.map((item) => item.name),
+      }))).toEqual([{ text: "submitted draft", files: ["first.png"] }]);
+      expect(textarea().value).toBe(laterText);
+      expect(hook.attachments.map((item) => item.name)).toEqual(["first.png", "second.png"]);
       await act(async () => {
         release();
         await Promise.resolve();
@@ -176,6 +202,18 @@ describe("an async onSubmit borrows attachments for its whole lifetime", () => {
 
       // Only the submitted attachment's URL is released.
       expect(revoked).toEqual(["blob:lifetime-0"]);
+      expect({ text: textarea().value, attachments: hook.attachments }).toEqual({
+        text: laterText,
+        attachments: [laterAttachment],
+      });
+      expect(laterAttachment.url).toBe("blob:lifetime-1");
+      await act(async () => hook.remove(laterAttachment.id));
+      expect(hook.attachments).toEqual([]);
+      expect(revoked).toEqual(["blob:lifetime-0", "blob:lifetime-1"]);
+
+      await act(async () => root!.unmount());
+      root = undefined;
+      expect(revoked).toEqual(["blob:lifetime-0", "blob:lifetime-1"]);
     });
   });
 });

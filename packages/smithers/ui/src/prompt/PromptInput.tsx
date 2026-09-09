@@ -236,6 +236,7 @@ export function PromptInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
   const [innerValue, setInnerValue] = useState(defaultValue ?? "");
+  const valueRevisionRef = useRef(0);
   const [innerAttachments, setInnerAttachments] = useState<readonly PromptInputAttachmentItem[]>(
     defaultAttachments ?? [],
   );
@@ -247,7 +248,10 @@ export function PromptInput({
 
   const setValue = useCallback(
     (next: string) => {
-      if (valueProp === undefined) setInnerValue(next);
+      if (valueProp === undefined) {
+        valueRevisionRef.current += 1;
+        setInnerValue(next);
+      }
       onValueChange?.(next);
     },
     [valueProp, onValueChange],
@@ -425,14 +429,21 @@ export function PromptInput({
     if (disabled || busy) return;
     if (value.trim().length === 0 && attachments.length === 0) return;
     const submitted = attachments;
+    const submittedIds = new Set(submitted.map((item) => item.id));
+    const submittedValueRevision = valueRevisionRef.current;
     const result = onSubmit({ text: value, attachments: submitted }, event);
 
-    /** Accept the submission: drop the draft and release its previews. */
+    /** Accept only the submitted draft, preserving edits made while pending. */
     const accept = (): void => {
-      if (valueProp === undefined) setInnerValue("");
+      if (valueProp === undefined && valueRevisionRef.current === submittedValueRevision) {
+        valueRevisionRef.current += 1;
+        setInnerValue("");
+      }
       if (attachmentsProp === undefined) {
         revokeObjectUrlsFor(submitted);
-        setInnerAttachments([]);
+        const next = attachmentsRef.current.filter((item) => !submittedIds.has(item.id));
+        attachmentsRef.current = next;
+        setInnerAttachments(next);
       }
     };
 

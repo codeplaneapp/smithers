@@ -111,9 +111,10 @@ What that means for your `onSubmit`:
 
 - A synchronous handler settles synchronously and the draft clears immediately.
 - An async handler holds the draft and its URLs until the returned promise
-  settles, so you may `await` and still read the URLs you were handed. Only the
-  attachments actually submitted are revoked; files added while the submit was
-  in flight keep their previews.
+  settles, so you may `await` and still read the URLs you were handed. Acceptance
+  clears uncontrolled text only if it has not been edited since submission.
+  Only submitted attachments are removed and their URLs revoked; files added
+  while the submit was in flight remain attached and keep their previews.
 - A rejected handler revokes nothing and clears nothing.
 - Anything you need after the handler settles must be copied from the
   attachment's `file`, which the component does not own.
