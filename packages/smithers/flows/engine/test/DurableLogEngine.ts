@@ -10,11 +10,11 @@
  * settled round results, settled action outcomes, attempt rows, deferred
  * exits, parent edges, cancel requests) survives into the next instance.
  *
- * The execution machinery mirrors `FlowEngine.layerMemory`; the durability
- * hooks diverge where a real driver would: action outcomes are journaled only
- * when they SETTLE (a fiber killed mid-attempt leaves no outcome row, unlike
- * layerMemory's in-process exit cache), attempt rows persist a first-start
- * time and the highest attempt for `actionRetryOrigin`/`actionLatestAttempt`,
+ * The execution machinery mirrors `FlowEngine.layerMemory`: both record only
+ * settled action outcomes, so a fiber killed mid-attempt leaves no outcome
+ * to replay. The durability hooks diverge where a real driver would: attempt
+ * rows persist a first-start time and the highest attempt for
+ * `actionRetryOrigin`/`actionLatestAttempt`,
  * and `interrupt` records the cancel request durably and cascades it over the
  * persisted parent edges (the `RunDriver.cancelOwned` shape) instead of
  * relying on the in-process parent link.

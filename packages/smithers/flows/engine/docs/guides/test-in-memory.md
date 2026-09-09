@@ -82,6 +82,11 @@ a resume to show a settled action is not re-run, and count them across two
 `Action.retry` attempts to show the ordinal was pinned rather than
 reallocated.
 
+Only settled action results are cached. An interrupted dispatch leaves no
+cached result, so a later dispatch executes the action again, including after
+a deferred wake or in another run sharing the same cache key. In-flight
+joiners receive the interrupted dispatch's exit.
+
 ## Drive a park deterministically
 
 A flow parks when it awaits a `DurableDeferred`. In a test, that gives you a

@@ -467,7 +467,12 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           Flow.intoResult,
           Effect.provideService(FlowRuntime.FlowInstance, actionInstance),
           Effect.onExit((exit) => {
-            owner.exit = exit
+            if (Exit.isSuccess(exit)) {
+              owner.exit = exit
+            } else {
+              // An interrupted dispatch has no settlement to replay.
+              actions.delete(actionId)
+            }
             return Deferred.done(owner.settlement, exit)
           }),
           Effect.ensuring(Effect.sync(() => {

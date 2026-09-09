@@ -16,6 +16,7 @@ import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
 import { FlowEngine } from "../src/index.ts"
 import { withCrypto } from "./Crypto.ts"
+import { layerDurable, makeLog } from "./DurableLogEngine.ts"
 
 const effect = (name: string, body: () => Effect.Effect<void, unknown, Crypto.Crypto>) =>
   it.effect(name, () => withCrypto(body().pipe(Effect.provide(TestClock.layer()))))
@@ -45,6 +46,100 @@ const pollComplete = <A, E, R>(
     }
     return result
   })
+
+describe("action dispatch interruption", () => {
+  effect("does not replay a cancelled dispatch into another run sharing a cache key", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      let executions = 0
+      const cached = Action.make({
+        name: "InterruptedCache/shared",
+        success: Schema.String,
+        idempotencyKey: "shared-v1",
+        execute: Effect.gen(function*() {
+          executions += 1
+          yield* Deferred.succeed(entered, undefined)
+          if (executions === 1) return yield* Effect.never
+          return `run-${executions}`
+        })
+      })
+      const step = Action.make("InterruptedCache/step", { payload: {}, success: Schema.String })
+      const flow = Flow.make("InterruptedCache/flow", {
+        payload: {},
+        success: Schema.String,
+        body: (payload) => step.call(payload)
+      })
+      const layer = Layer.mergeAll(step.toLayer(() => cached), Interpreter.layer(flow)).pipe(
+        Layer.provideMerge(Action.layerImplementations),
+        Layer.provideMerge(FlowEngine.layerMemory),
+        Layer.provideMerge(Action.layerCacheEnvironment({ layers: ["shared-model"], capabilities: {} }))
+      )
+      yield* Effect.gen(function*() {
+        const runA = yield* flow.execute({}, { executionId: "run-a", discard: true })
+        yield* Deferred.await(entered)
+        yield* flow.interrupt(runA)
+        const cancelled = yield* pollComplete(flow.poll(runA))
+        expect(Option.isSome(cancelled) && cancelled.value._tag === "Complete" && cancelled.value.exit._tag)
+          .toBe("Failure")
+
+        const runB = yield* flow.execute({}, { executionId: "run-b" }).pipe(Effect.exit)
+        expect(runB).toEqual(Exit.succeed("run-2"))
+        expect(executions).toBe(2)
+      }).pipe(Effect.provide(layer))
+    }))
+
+  for (
+    const [name, engine] of [
+      ["memory", FlowEngine.layerMemory],
+      ["durable", layerDurable(makeLog())]
+    ] as const
+  ) {
+    effect(`${name}: re-executes a raced dispatch after a deferred wake`, () =>
+      Effect.gen(function*() {
+        let executions = 0
+        const slow = Action.make({
+          name: "InterruptedRace/slow",
+          success: Schema.String,
+          execute: Effect.gen(function*() {
+            executions += 1
+            yield* Effect.sleep("1 hour")
+            return "slow"
+          })
+        })
+        const gate = DurableDeferred.make("InterruptedRace/gate", { success: Schema.String })
+        const step = Action.make("InterruptedRace/step", { payload: {}, success: Schema.String })
+        const flow = Flow.make("InterruptedRace/flow", {
+          payload: {},
+          success: Schema.String,
+          body: (payload) => step.call(payload)
+        })
+        const layer = Layer.mergeAll(
+          step.toLayer(() =>
+            Effect.gen(function*() {
+              const first = yield* Effect.raceFirst(slow, Effect.as(Effect.sleep("5 millis"), "timed-out"))
+              const woken = yield* DurableDeferred.await(gate)
+              return `${first}:${woken}`
+            })
+          ),
+          Interpreter.layer(flow)
+        ).pipe(Layer.provideMerge(Action.layerImplementations), Layer.provideMerge(engine))
+        yield* Effect.gen(function*() {
+          const executionId = yield* flow.execute({}, { executionId: "race-run", discard: true })
+          const parked = yield* pollSuspended(flow.poll(executionId))
+          expect(Option.isSome(parked) && parked.value._tag).toBe("Suspended")
+          expect(executions).toBe(1)
+
+          const token = DurableDeferred.tokenFromExecutionId(gate, { flow, executionId })
+          yield* DurableDeferred.succeed(gate, { token, value: "opened" })
+          const woken = yield* pollComplete(flow.poll(executionId))
+          expect(Option.isSome(woken) && woken.value._tag === "Complete" && woken.value.exit).toEqual(
+            Exit.succeed("timed-out:opened")
+          )
+          expect(executions).toBe(2)
+        }).pipe(Effect.provide(layer))
+      }))
+  }
+})
 
 describe("FlowEngine.layerMemory durable waits", () => {
   const ParkedActionDeclaration = Action.make("Memory/Parked/action", {
