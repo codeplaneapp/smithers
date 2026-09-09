@@ -1384,9 +1384,19 @@ export const render = (attrs: Attrs): string => {
   for (const job of attrs.jobs) {
     // A publishing job carries the write credential, so the whole job is
     // guarded to post-merge push runs and its steps get the write entry. Every
-    // other job renders exactly as it would without the split.
+    // other job receives the shared entries and a PR publication namespace.
     const publishes = job.publishesToCache === true
-    const jobEnv = publishes ? { ...cacheEnv, ...writeEnv } : cacheEnv
+    // Namespace PR results even during a shared-token rollout. The Worker
+    // must still enforce read-only credentials: a client can omit this guard.
+    const jobEnv = publishes ? { ...cacheEnv, ...writeEnv } : {
+      ...cacheEnv,
+      ...(attrs.pullRequest && Object.keys(cacheEnv).length > 0 ?
+        {
+          SMITHERS_CACHE_NAMESPACE:
+            "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || '' }}"
+        } :
+        {})
+    }
     const hasJobEnv = Object.keys(jobEnv).length > 0
     // A job id is a mapping KEY, and YAML resolves a plain `no:` or `on:` to a
     // boolean just as it does a value, so an id that reads as one is quoted.

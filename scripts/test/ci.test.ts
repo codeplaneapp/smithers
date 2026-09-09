@@ -5,6 +5,31 @@ import { describe, it } from "node:test"
 import { readWorkspaceInventory } from "../readWorkspaceInventory.ts"
 
 describe("ci conformance", () => {
+  it("keeps cache write credentials out of every pull-request job", () => {
+    const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8")
+    assert.doesNotMatch(ci, /secrets\.SMITHERS_CACHE_TOKEN\b/)
+    const jobs = ci.split("\njobs:\n")[1]!.split(/\n(?= {2}\S)/)
+    const publishers = jobs.filter((job) => job.includes("secrets.SMITHERS_CACHE_WRITE_TOKEN"))
+    assert.equal(publishers.length, 1)
+    assert.match(publishers[0]!, /^ {2}cache-publish:/)
+    assert.match(publishers[0]!, /^ {4}if: \$\{\{ github.event_name == 'push' && github.ref == 'refs\/heads\/main' \}\}$/m)
+    for (const job of jobs) {
+      for (const step of job.split(/\n(?= {6}- )/).slice(1)) {
+        if (!step.includes("run: pnpm exec smthrs")) continue
+        assert.match(step, /SMITHERS_CACHE_READ_TOKEN: "\$\{\{ secrets\.SMITHERS_CACHE_READ_TOKEN \}\}"/)
+        if (job === publishers[0]) continue
+        assert.doesNotMatch(step, /SMITHERS_CACHE_WRITE_TOKEN|SMITHERS_CACHE_TOKEN/)
+        assert.match(step, /SMITHERS_CACHE_NAMESPACE: "\$\{\{ github.event_name == 'pull_request' && format\('pr-\{0\}', github.event.pull_request.number\) \|\| '' \}\}"/)
+      }
+    }
+    const release = readFileSync(new URL("../../.github/workflows/release.yml", import.meta.url), "utf8")
+    assert.match(release, /secrets\.SMITHERS_CACHE_READ_TOKEN/)
+    assert.doesNotMatch(release, /SMITHERS_CACHE_(?:WRITE_)?TOKEN/)
+    const workspace = readFileSync(new URL("../../.smithers/WORKSPACE.ts", import.meta.url), "utf8")
+    assert.match(workspace, /read: S.Secret\("SMITHERS_CACHE_READ_TOKEN"\)/)
+    assert.match(workspace, /write: S.Secret\("SMITHERS_CACHE_WRITE_TOKEN"\)/)
+  })
+
   const { packagesDir, packages } = readWorkspaceInventory()
   for (const entry of packages.map((name) => ({ name }))) {
     it(`${entry.name} retains a real Vitest test script (issue #158)`, () => {
@@ -351,8 +376,8 @@ describe("ci conformance", () => {
     // gating PRs while every run-line regex still matches), or adding an
     // `if:` condition to a named step (its separate `run:` line matches
     // verbatim regardless). Pin the trigger block exactly, and assert the
-    // workflow contains no `if:` key at all — any conditional execution of
-    // an enforcement step must widen this cell in review.
+    // enforcement jobs contain no `if:` key. The separate cache publisher
+    // is guarded to main pushes and cannot satisfy a required PR gate.
     const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
     assert.match(ci, /^on:\n {2}push:\n {4}branches: \[main\]\n {2}pull_request:$/m)
     // Evidence collection must run after a failed gate too. Only these named
@@ -362,6 +387,11 @@ describe("ci conformance", () => {
       /^ {6}- name: (?:Collect|Upload) (?:ci-test-tier-evidence|apps-e2e-artifacts)\n {8}if: always\(\)$/gm,
       ""
     )
-    assert.doesNotMatch(enforcement, /^\s*if:/m)
+    for (const job of enforcement.split("\njobs:\n")[1]!.split(/\n(?= {2}\S)/)) {
+      const checked = job.startsWith("  cache-publish:")
+        ? job.replace(/^ {4}if: \$\{\{ github.event_name == 'push' && github.ref == 'refs\/heads\/main' \}\}$/m, "")
+        : job
+      assert.doesNotMatch(checked, /^\s*if:/m)
+    }
   })
 })

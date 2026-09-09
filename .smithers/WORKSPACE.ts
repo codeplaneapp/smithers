@@ -36,9 +36,16 @@ const rust = S.Rust.Toolchain({
 
 export const Workspace = S.Workspace("smithers", {
   repository: "git+https://github.com/smithersai/smithers.git",
-  // SMITHERS_CACHE_URL overrides the endpoint at the process boundary and
-  // SMITHERS_CACHE_TOKEN is the default remote-cache credential.
-  cache: S.Cache({ directory: ".flows" }),
+  // SMITHERS_CACHE_URL overrides the endpoint at the process boundary.
+  // Only the post-merge CI publisher receives the write credential.
+  cache: S.Cache({
+    directory: ".flows",
+    remote: S.RemoteCache.make({
+      endpoint: "https://build.smithers.sh",
+      read: S.Secret("SMITHERS_CACHE_READ_TOKEN"),
+      write: S.Secret("SMITHERS_CACHE_WRITE_TOKEN")
+    })
+  }),
   runtime,
   packageManager,
   nodeModules,

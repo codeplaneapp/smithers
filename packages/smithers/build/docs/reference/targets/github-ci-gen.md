@@ -190,6 +190,22 @@ explicit `smithers-build build` of a `mode: "write"` target generates a file.
 | `output`           | `string`                        | `".github/workflows/ci.yml"` | Workspace-relative workflow path.                                                                                                                             |
 | `mode`             | `"check" \| "write"`            | `"check"`                    | Output handling described above.                                                                                                                              |
 
+### Cache trust
+
+Declare `cacheTokenSecret` with the read secret and `cacheWriteTokenSecret`
+with a distinct write secret. Mark a separate job `publishesToCache: true`.
+Only that job receives the write secret, guarded to `push` events on the
+listed `pushBranches`. Publishing jobs cannot satisfy `gates`; required PR
+checks need unconditional reader jobs. Configure the same read and write
+secret names in the workspace's `cache.remote` declaration.
+
+For workflows with `pullRequest: true` and declared cache access, non-publishing
+target steps receive `SMITHERS_CACHE_NAMESPACE`. It evaluates to
+`pr-<pull-request-number>` on PRs and an empty string on other events. The
+publisher receives no namespace. This also contains accidental publication
+while shared-token deployments migrate; the cache server must still reject
+writes made with read credentials.
+
 ### Job
 
 | Name              | Type                    | Default                  | Description                                                                                                              |
@@ -213,8 +229,8 @@ explicit `smithers-build build` of a `mode: "write"` target generates a file.
 A matrix job renders `strategy.matrix.os` from the rows, an `include:` entry per
 row carrying that row's `advisory` bit, and `continue-on-error:
 ${{ matrix.advisory }}`. The bit is data rather than a job-level
-`continue-on-error: true`, which would excuse every row, and rather than an
-`if:`, which this renderer never emits. `fail-fast` is the constant
+`continue-on-error: true`, which would excuse every row, and rather than a per-row
+`if:`. `fail-fast` is the constant
 `matrixFailFast` (`false`): a platform matrix asks which platforms are green,
 and cancelling the remaining rows when one fails throws away the answer.
 
@@ -338,11 +354,11 @@ validated as a label.
 
 ### No step conditions
 
-The renderer has no way to emit a job or step `if:` at all, so every rendered
-step runs unconditionally and nobody has to adjudicate in review which
-conditions are load-bearing. Artifact collection is best-effort by construction
-instead: the copies tolerate an empty source and the upload declares
-`if-no-files-found: ignore`, which gives the same result on a green run.
+Target steps have no conditions. A `publishesToCache` job has a generated
+post-merge push guard; reader jobs remain unconditional. Artifact collection
+and upload use `if: always()` to retain evidence after failed target steps.
+The copies tolerate an empty source and the upload declares
+`if-no-files-found: ignore`.
 
 ### The workspace binary
 

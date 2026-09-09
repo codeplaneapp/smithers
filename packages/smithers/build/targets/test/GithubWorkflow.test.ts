@@ -22,7 +22,7 @@ import {
 
 /**
  * The Smithers repository's own pipeline, read from disk. It is the workload
- * this reader exists for: seven jobs, block scalars, `continue-on-error`
+ * this reader exists for: jobs, block scalars, `continue-on-error`
  * advisory lanes, `with:` maps, `env:` maps, and heavy comment traffic.
  */
 const realWorkflowPath = NodePath.resolve(
@@ -614,6 +614,7 @@ describe("parseWorkflow", () => {
     const workflow = parseWorkflow(source)
     expect(workflow.name).toBe("CI")
     expect(workflow.jobs.map((job) => job.id)).toEqual([
+      "cache-publish",
       "test",
       "apps-e2e",
       "rust",

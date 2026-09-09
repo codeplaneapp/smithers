@@ -50,7 +50,7 @@ Two mechanisms enforce it, and only the first is a control:
 A `pull_request`-triggered job receives the read credential and no write
 credential. It pulls at full speed and publishes nothing.
 
-## What GithubCiGen carries, and the adoption that remains
+## Repository CI adoption
 
 `packages/smithers/build/targets/src/GithubCiGen.ts` carries the split. Beside
 `cacheTokenSecret`, the read credential, the attrs declare an optional
@@ -70,47 +70,42 @@ a publishing job in a workflow with no push branches, and a gate that only a
 publishing job would satisfy (its guard means GitHub skips it on every pull
 request, so it proves nothing).
 
-What remains is the adoption in the root `PACKAGE.ts`, which today declares
-`cacheToken = Smithers.Secret("SMITHERS_CACHE_TOKEN")` and passes it as
-`cacheTokenSecret`, the shared-credential posture. The change: declare
-`cacheWriteToken = Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")`, rename
-`cacheToken` to name `SMITHERS_CACHE_READ_TOKEN`, pass both, and mark the
-publishing job. It must wait for steps 1 and 2 of the deployment ordering
-below.
+The root `PACKAGE.ts` declares `SMITHERS_CACHE_READ_TOKEN` and
+`SMITHERS_CACHE_WRITE_TOKEN`. Every target step receives the read credential;
+only `cache-publish`, guarded to pushes on `main`, receives the write
+credential. That job runs the workspace package CI targets. The required PR
+jobs remain unconditional. Release gates receive only the read credential.
 
-Landing that adoption regenerates `.github/workflows/ci.yml`. The workflow is a
-generated root file whose drift is gated, so the regenerated file belongs in
-the same commit as the `GithubCiGen` and `PACKAGE.ts` edits:
+The existing `.smithers/WORKSPACE.ts` declares `cache.remote` with those same
+read and write names. This declaration is necessary: with only an endpoint
+override and no declared remote, the CLI would use the shared
+`SMITHERS_CACHE_TOKEN` default instead of the split credentials.
+
+The workflow is generated and drift-gated. Regenerate and check it together
+with the declarations. Temporarily set the root CI declaration to
+`mode: "write"`, run the build, restore `mode: "check"`, then run lint:
 
 ```sh
 pnpm exec smithers-build build '//:ci'
 pnpm exec smithers-build lint '//:ci'
 ```
 
-The root workspace currently declares only a local cache. With the
-`SMITHERS_CACHE_URL` override and no declared remote, the CLI uses the shared
-`SMITHERS_CACHE_TOKEN` default. Keep the `GithubCiGen` secret wiring in the root
-`PACKAGE.ts`, but configure client credentials in `.smithers/WORKSPACE.ts`
-(or `WORKSPACE.ts`). The CLI reads `Workspace.cache.remote`; a standalone
-`RemoteCache` export in `PACKAGE.ts` does not configure it.
+This repository change does not deploy the Worker or provision GitHub secrets.
+Their live classification is unverified here; complete steps 1 and 2 below to
+restore authenticated cache use, then rotate the old write credential. Do not
+copy the old shared credential into `SMITHERS_CACHE_READ_TOKEN`.
 
-Keep the existing workspace settings and replace its `cache` option as shown:
+As an interim guard, `GithubCiGen` emits this environment entry on target steps
+in non-publishing jobs when the workflow enables PRs and declares cache access:
 
-```ts
-import { Smithers as S } from "@smthrs/targets"
-
-export const Workspace = S.Workspace("smithers", {
-  // Keep the other existing workspace options.
-  cache: S.Cache({
-    directory: ".flows",
-    remote: S.RemoteCache.make({
-      endpoint: "https://build.smithers.sh",
-      read: S.Secret("SMITHERS_CACHE_READ_TOKEN"),
-      write: S.Secret("SMITHERS_CACHE_WRITE_TOKEN")
-    })
-  })
-})
+```yaml
+SMITHERS_CACHE_NAMESPACE: "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || '' }}"
 ```
+
+PR publications stay under `pr-<number>/<key>`; pushes retain the bare trunk
+keyspace. The publisher carries no namespace. The guard also applies to
+shared-token declarations, but remains client-side containment, not server
+authorization. Missing split secrets do not fall back to the old shared token.
 
 See the [remote-cache guide](https://smithers.sh/docs/guides/remote-cache/)
 for declaration and publication/reuse verification. `SMITHERS_CACHE_URL`
@@ -118,8 +113,9 @@ overrides the endpoint without changing the declared credential names.
 
 ## Operational step, and deployment ordering
 
-The deployed Worker must hold both secrets before any of that ships. Deploy in
-this order:
+Provision the split credentials in this order. The repository declaration is
+already adopted; until provisioning finishes, builds may lose remote cache
+reuse and publication but must not receive the old shared credential:
 
 1. **Configure the Worker with both secrets.** Set
    `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN` in the
@@ -135,11 +131,10 @@ this order:
 2. **Add the repository secrets.** Add `SMITHERS_CACHE_READ_TOKEN` holding the
    newly minted read token and `SMITHERS_CACHE_WRITE_TOKEN` holding the current
    value to the GitHub repository.
-3. **Land both declarations above.** Update the root `PACKAGE.ts`'s
-   `GithubCiGen` secret wiring and regenerate CI, so pull-request jobs stop
-   receiving the write credential. In the same adoption, set the existing
-   Workspace's `cache.remote` in `.smithers/WORKSPACE.ts` (or `WORKSPACE.ts`)
-   so the CLI reads the split credentials.
+3. **Verify the adopted declarations.** Confirm the generated CI and release
+   workflows use the read secret and only the main-push `cache-publish` job
+   receives the write secret. Confirm `.smithers/WORKSPACE.ts` declares the
+   same split.
 4. **Rotate.** Only now generate a new write credential, redeploy the Worker
    with the new `SMITHERS_CACHE_WRITE_TOKEN` and the unchanged read token, and
    update the repository secret. Rotating before step 3 breaks every job that
@@ -153,7 +148,7 @@ answers `401` or `403`, and the CLI warns
 `remote cache publication refused; this credential may only read` once and
 keeps reading for the rest of the run. That is the read-only posture, which is
 exactly what a pull-request job should have. Builds stay correct and lose only
-publication, and every cache hit still lands.
+publication, and authorized cache hits still land.
 
 The self-hosted stack under `../terraform/` serves the same protocol and now
 carries the same split: `SMITHERS_CACHE_READ_TOKEN` and

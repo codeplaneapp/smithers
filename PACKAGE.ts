@@ -3,7 +3,8 @@ import { ReviewDocsAgainstCode, ReviewJsdocAgainstCode } from "@smthrs/repo-targ
 import { Smithers } from "@smthrs/targets"
 import project from "./apps/site/src/data/project.json" with { type: "json" }
 
-export const cacheToken = Smithers.Secret("SMITHERS_CACHE_TOKEN")
+export const cacheToken = Smithers.Secret("SMITHERS_CACHE_READ_TOKEN")
+export const cacheWriteToken = Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")
 export const cacheUrl = Smithers.Secret("SMITHERS_CACHE_URL")
 
 export const rootPackageJson = Smithers.file("//package.json")
@@ -188,6 +189,7 @@ const ci = Smithers.GithubCiGen({
   featured: true,
   cacheUrlSecret: cacheUrl,
   cacheTokenSecret: cacheToken,
+  cacheWriteTokenSecret: cacheWriteToken,
   workflowDispatch: false,
   mode: "check",
   gates: [
@@ -198,6 +200,24 @@ const ci = Smithers.GithubCiGen({
   ],
   requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "browser", "e2e-faults", "packages"],
   jobs: [
+    {
+      id: "cache-publish",
+      name: "Publish reviewed workspace results to the cache",
+      runsOn: ubuntu,
+      publishesToCache: true,
+      toolchain: Smithers.CiToolchain.Needs({
+        runtimes: [node, bun],
+        jj,
+        ripgrep,
+        apt: bubblewrap,
+        go,
+        foundry,
+        docker: dockerImageStore
+      }),
+      steps: [
+        { name: "Workspace targets", verb: Smithers.Verb.Ci, pattern: "//packages/...", parallelism: 2 }
+      ]
+    },
     {
       id: "test",
       name: "workspace graph (coverage gates enforced)",

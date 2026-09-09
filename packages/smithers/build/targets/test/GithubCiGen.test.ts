@@ -1188,6 +1188,19 @@ describe("the split cache credential", () => {
     expect(() => parseWorkflow(rendered)).not.toThrow()
   })
 
+  it("namespaces PR publications for shared and split credentials without namespacing trunk", () => {
+    for (const attrs of [splitAttrs, { ...goldenAttrs, cacheTokenSecret: Secret("LEGACY_TOKEN") }]) {
+      const rendered = render(attrsOf(attrs))
+      expect(rendered).toContain(
+        "SMITHERS_CACHE_NAMESPACE: \"${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || '' }}\""
+      )
+      expect(render(attrsOf({ ...attrs, pullRequest: false }))).not.toContain("SMITHERS_CACHE_NAMESPACE")
+    }
+    const rendered = render(attrsOf(splitAttrs))
+    expect(rendered.slice(rendered.indexOf("  publish:"))).not.toContain("SMITHERS_CACHE_NAMESPACE")
+    expect(render(goldenAttrs)).not.toContain("SMITHERS_CACHE_NAMESPACE")
+  })
+
   it("guards a multi-trunk workflow with one ref clause per push branch", () => {
     const rendered = render(attrsOf({ ...splitAttrs, pushBranches: ["main", "release"] }))
     expect(rendered).toContain(
