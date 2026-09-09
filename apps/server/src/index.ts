@@ -2365,6 +2365,13 @@ const CHECKOUT_PATHS: ReadonlyArray<string> = ["/api/billing/checkout", "/api/bi
 const checkoutEnabled = (env: WorkerEnv): boolean => env.BILLING_CHECKOUT_ENABLED?.trim() === "1"
 
 const PLATFORM_PROXY_MAX_BODY = 256 * 1024
+// Plue accepts a 1 MiB binary Yjs update in a base64 JSON envelope (2 MiB cap).
+// Keep the larger allowance on this exact mutation, including /api/cloud's
+// normalized inner route. Other repository writes retain their existing cap.
+const platformBodyLimit = (pathname: string, method: string): number =>
+  method === "POST" && /^\/api\/repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/wiki\/[a-z0-9-]+\/updates$/.test(pathname)
+    ? 2 * 1024 * 1024
+    : PLATFORM_PROXY_MAX_BODY
 
 /**
  * What to tell a reader when Smithers Cloud refuses. The upstream's own body is
@@ -2393,14 +2400,14 @@ const CLIENT_ERROR_WINDOW_MAX = 120
 let clientErrorWindow = { start: 0, count: 0 }
 
 /**
- * Read the report body under the cap: a declared content-length over the cap
+ * Read a body under its byte cap: a declared content-length over the cap
  * is refused before a byte is read, and a chunked body (which declares no
  * length) is cut off the moment the running byte count crosses it — the same
  * discipline readTurnBody keeps. Returns undefined when the cap is exceeded.
  */
-const readClientErrorBody = async (request: Request): Promise<string | undefined> => {
+const readBoundedBody = async (request: Request, limit: number): Promise<ArrayBuffer | undefined> => {
   const declared = Number(request.headers.get("content-length") ?? "0")
-  if (declared > CLIENT_ERROR_MAX_BODY) return undefined
+  if (declared > limit) return undefined
   const reader = request.body?.getReader()
   const chunks: Array<Uint8Array> = []
   let byteLength = 0
@@ -2409,7 +2416,7 @@ const readClientErrorBody = async (request: Request): Promise<string | undefined
       const { done, value } = await reader.read()
       if (done) break
       byteLength += value.byteLength
-      if (byteLength > CLIENT_ERROR_MAX_BODY) {
+      if (byteLength > limit) {
         await reader.cancel().catch(() => {})
         return undefined
       }
@@ -2422,7 +2429,7 @@ const readClientErrorBody = async (request: Request): Promise<string | undefined
     bytes.set(chunk, offset)
     offset += chunk.byteLength
   }
-  return new TextDecoder().decode(bytes)
+  return bytes.buffer
 }
 
 const handleClientError = async (request: Request, env: WorkerEnv): Promise<Response> => {
@@ -2434,10 +2441,11 @@ const handleClientError = async (request: Request, env: WorkerEnv): Promise<Resp
   if (clientErrorWindow.count > CLIENT_ERROR_WINDOW_MAX) {
     return json(429, { status: "error", message: "Too many error reports." })
   }
-  const text = await readClientErrorBody(request)
-  if (text === undefined) {
+  const body = await readBoundedBody(request, CLIENT_ERROR_MAX_BODY)
+  if (body === undefined) {
     return json(413, { status: "error", message: "Error report too large." })
   }
+  const text = new TextDecoder().decode(body)
   console.error("client-error:", text)
   // console.error alone lives exactly as long as someone is tailing. The log
   // is what makes an alpha user's crash readable afterwards, through
@@ -2511,8 +2519,8 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
   }
   let body: ArrayBuffer | undefined
   if (request.method !== "GET" && request.method !== "HEAD") {
-    body = await request.arrayBuffer()
-    if (body.byteLength > PLATFORM_PROXY_MAX_BODY) {
+    body = await readBoundedBody(request, platformBodyLimit(url.pathname, request.method))
+    if (body === undefined) {
       return json(413, { status: "error", message: "Request body too large." })
     }
   }

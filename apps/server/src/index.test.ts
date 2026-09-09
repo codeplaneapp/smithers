@@ -2838,6 +2838,7 @@ describe("the /api/cloud bridge", () => {
     readonly url: string
     readonly method: string
     readonly headers: Headers
+    readonly body: RequestInit["body"]
   }
   /**
    * Identity validates the session and mints `cloud-token-1`; every other
@@ -2852,7 +2853,7 @@ describe("the /api/cloud bridge", () => {
     const original = globalThis.fetch
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-      calls.push({ url, method: init?.method ?? "GET", headers: new Headers(init?.headers) })
+      calls.push({ url, method: init?.method ?? "GET", headers: new Headers(init?.headers), body: init?.body })
       if (url.startsWith("https://identity.test/api/identity/validate")) {
         return new Response(JSON.stringify({ login: "will", allowlisted: true, admin: false, scopes: [] }), {
           status: 200,
@@ -2877,6 +2878,64 @@ describe("the /api/cloud bridge", () => {
     calls.filter((call) => call.url.startsWith("https://cloud.test"))
   const jsonAnswer = (body: unknown): Response =>
     new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+
+  test("wiki CRDT updates carry the full 1 MiB binary envelope through direct and cloud routes", async () => {
+    const body = JSON.stringify({
+      page_id: 42, update_id: "6481dbcb-879f-4db7-b2d5-d8868e325e36", update: btoa("\0".repeat(1024 * 1024))
+    })
+    for (const prefix of ["", "/api/cloud"]) {
+      await withUpstreams(() => jsonAnswer({ accepted_revision: 12 }), async (calls) => {
+        const response = await worker.fetch(new Request(`https://mvp.test${prefix}/api/repos/will/flows/wiki/intent/updates`, {
+          method: "POST", headers: { cookie: "smithers_session=sealed", "content-type": "application/json" }, body
+        }), signedInEnv)
+        expect(response.status).toBe(200)
+        const forwarded = cloudCalls(calls)
+        expect(forwarded).toHaveLength(1)
+        expect(await new Response(forwarded[0]?.body).text()).toBe(body)
+      })
+    }
+  })
+
+  test("the larger wiki allowance does not extend to other mutations or lookalike routes", async () => {
+    for (const [method, path] of [
+      ["POST", "/api/repos/will/flows/issues"],
+      ["PATCH", "/api/repos/will/flows/wiki/intent"],
+      ["PATCH", "/api/repos/will/flows/wiki/intent/updates"],
+      ["POST", "/api/repos/will/flows/wiki/intent/updates/extra"],
+      ["POST", "/api/repos/will/flows/wiki/intent/updates%2fextra"],
+      ["POST", "/api/repos/will/flows/wiki/intent%2fother/updates"]
+    ]) {
+      await withUpstreams(() => jsonAnswer({}), async (calls) => {
+        const response = await worker.fetch(new Request(`https://mvp.test/api/cloud${path}`, {
+          method, headers: { cookie: "smithers_session=sealed" }, body: "x".repeat(256 * 1024 + 1)
+        }), signedInEnv)
+        expect(response.status).toBe(413)
+        expect(cloudCalls(calls)).toHaveLength(0)
+      })
+    }
+  })
+
+  test("wiki envelopes enforce declared and streamed byte caps before forwarding", async () => {
+    const limit = 2 * 1024 * 1024
+    await withUpstreams(() => jsonAnswer({}), async (calls) => {
+      const declared = await worker.fetch(new Request("https://mvp.test/api/repos/will/flows/wiki/intent/updates", {
+        method: "POST", headers: { cookie: "smithers_session=sealed", "content-length": String(limit + 1) }, body: "{}"
+      }), signedInEnv)
+      expect(declared.status).toBe(413)
+      let pulled = 0, cancelled = false
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) { pulled += 1; controller.enqueue(new Uint8Array(256 * 1024)) },
+        cancel() { cancelled = true }
+      }, { highWaterMark: 0 })
+      const streamed = await worker.fetch(new Request("https://mvp.test/api/cloud/api/repos/will/flows/wiki/intent/updates", {
+        method: "POST", headers: { cookie: "smithers_session=sealed" }, body: stream
+      }), signedInEnv)
+      expect(streamed.status).toBe(413)
+      expect(cancelled).toBe(true)
+      expect(pulled).toBe(9)
+      expect(cloudCalls(calls)).toHaveLength(0)
+    })
+  })
 
   test("/api/cloud/api/user/repos bridges with the user's cloud bearer and the inner path arrives without the prefix", async () => {
     await withUpstreams(() => jsonAnswer([{ full_name: "will/smithers" }]), async (calls) => {
