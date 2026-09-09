@@ -841,7 +841,11 @@ export const TargetRunCardBody = ({
   }
   const elapsed = summary?.durationMs ?? (startedAt === undefined ? undefined : (endedAt ?? Date.now()) - startedAt)
   const explainText = (target: string, detail: string): string =>
-    `The target ${target} failed${exitCode !== null ? ` with exit code ${exitCode}` : ""}. Output:\n${detail.slice(-4_000)}`
+    JSON.stringify({
+      kind: "target-failure",
+      request: "Explain why this target failed and the most useful next step.",
+      evidence: { repoId, runId, target, exitCode, output: detail.slice(-4_000) }
+    })
   return (
     <div className="target-run-card" data-run-status={status}>
       <p className="target-run-meta" data-testid={`target-run-head-${card.id}`}>
@@ -857,7 +861,7 @@ export const TargetRunCardBody = ({
               variant="ghost"
               data-flow="target.timeline"
               data-testid={`target-run-timeline-${card.id}`}
-              onClick={() => onRunCommand("target.timeline", `${runId} ${repoId}`)}
+              onClick={() => onRunCommand("target.timeline", `${repoId} ${runId}`)}
             >
               Timeline
             </Button>
@@ -937,7 +941,7 @@ export const TargetRunCardBody = ({
                                             size="sm"
                                             variant="ghost"
                                             data-flow="target.timeline"
-                                            onClick={() => onRunCommand("target.timeline", `${runId} ${repoId}`)}
+                                            onClick={() => onRunCommand("target.timeline", `${repoId} ${runId}`)}
                                           >
                                             Timeline
                                           </Button>

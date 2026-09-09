@@ -274,6 +274,16 @@ labels, bridge messages, or action handlers. Historical HTML cards remain
 decodable for migration and render in a CSP-restricted inert iframe with
 scripts and network access denied.
 
+Target-run Timeline controls invoke `/target.timeline <repoId> <runId>`.
+Run and failed-node Explain controls send `agent.explain` a JSON envelope with
+`kind: "target-failure"`, a fixed `request`, and `evidence` containing `repoId`,
+`runId`, `target`, `exitCode`, and the last 4,000 characters of captured output.
+The explainer keeps the request separate from a delimited JSON evidence
+message. Target metadata and output are untrusted data; higher-priority
+instructions forbid following instructions embedded in them. JSON escapes
+angle brackets so captured text cannot close the evidence delimiter.
+Ordinary `/agent.explain <what>` questions remain plain text.
+
 ## Cards
 
 Every capability's output is an embedded card in the transcript (THE EMBED
