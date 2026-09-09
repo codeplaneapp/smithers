@@ -11,6 +11,14 @@ import type { ControllerContext } from "./context"
 export const ZERO_BALANCE_EXHAUSTED_TEXT =
   "Balance is at $0: flow runs pause until more balance is added. Run /billing.upgrade to add balance; chat stays free in the meantime."
 
+/**
+ * A settled run with nothing to report: the work it named was superseded —
+ * a newer identity or account epoch owns the answer — so it wrote nothing.
+ * `withToast` dismisses the notice instead of resolving it, because stating
+ * "done" for a result that was thrown away is the silent-lie shape.
+ */
+export const TOAST_SUPERSEDED: unique symbol = Symbol("toast.superseded")
+
 export interface FailureController {
   readonly withToast: <T>(
     key: string,
@@ -68,6 +76,15 @@ export const createFailureController = (ctx: ControllerContext): FailureControll
    * toast resolves into the result and dismisses itself.
    */
   /*
+   * Ownership is allocated, never counted: `toastRuns` says who owns a key's
+   * toast right now, and a settled run's terminal delete used to hand its
+   * number straight back. With A pending, B settling and C starting after,
+   * C was issued A's number and A could then resolve C's toast. This
+   * sequence is controller-wide and monotonic, so no deletion can recycle a
+   * number while the run that holds it is still in flight.
+   */
+  let nextRun = 0
+  /*
    * One toast per flow key, so a re-run of the same flow owns the slot: the
    * run counter keeps a finished run from resolving OR auto-dismissing the
    * toast a newer run is using — a running notice must never silently vanish
@@ -79,7 +96,8 @@ export const createFailureController = (ctx: ControllerContext): FailureControll
     doneTitle: string,
     work: () => Promise<T | string>
   ): Promise<T | string> => {
-    const run = (ctx.toastRuns.get(key) ?? 0) + 1
+    nextRun += 1
+    const run = nextRun
     ctx.toastRuns.set(key, run)
     let shown = false
     const debounce = setTimeout(() => {
@@ -99,6 +117,17 @@ export const createFailureController = (ctx: ControllerContext): FailureControll
     }
     // A newer run of the same flow owns the toast now; this one reports nothing.
     if (ctx.toastRuns.get(key) !== run) return outcome
+    // Superseded work has no result to state: whatever it read belongs to an
+    // account the app no longer has open, so the notice leaves silently
+    // rather than resolving into a doneTitle nothing backs.
+    if (outcome === TOAST_SUPERSEDED) {
+      const id = `toast-${key}`
+      if (ctx.store.collections.toasts.get(id) !== undefined) {
+        ctx.store.dispatch({ type: "toast.dismissed", actor: "system", id })
+      }
+      ctx.toastRuns.delete(key)
+      return outcome
+    }
     // Resolve whatever is on screen for this key — including a toast an
     // earlier (slower) run put up, or a failed one this run just retried.
     if (!shown && ctx.store.collections.toasts.get(`toast-${key}`) === undefined) {

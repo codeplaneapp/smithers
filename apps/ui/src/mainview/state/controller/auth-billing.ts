@@ -17,6 +17,7 @@ import {
 import { signInReturnTo } from "../../RepoLink"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
+import { TOAST_SUPERSEDED } from "./failures"
 
 export interface AuthBillingController {
   readonly handleAuthReturn: (search: string) => boolean
@@ -537,8 +538,13 @@ export const createAuthBillingController = (
     store.dispatch({ type: "identity.access.requested", actor: "user" })
   }
 
-  /** Billing seam: dollars only; chat is complimentary, so a definitive $0 never pauses it. */
-  const refreshBalanceImpl = async (): Promise<true | string> => {
+  /**
+   * Billing seam: dollars only; chat is complimentary, so a definitive $0
+   * never pauses it. A reply that arrives after the account moved is
+   * TOAST_SUPERSEDED, not success: it describes an account the app no longer
+   * has open, so nothing is written and the toast leaves without a result.
+   */
+  const refreshBalanceImpl = async (): Promise<true | typeof TOAST_SUPERSEDED | string> => {
     const identity = store.collections.identitySessions.get("identity")
     const epoch = ctx.accountEpoch
     const identityState = identity?.state
@@ -551,11 +557,11 @@ export const createAuthBillingController = (
     try {
       response = await http(`${baseUrl}${BILLING_BALANCE_PATH}`)
     } catch {
-      if (!current()) return true
+      if (!current()) return TOAST_SUPERSEDED
       store.dispatch({ type: "billing.unavailable", actor: "system" })
       return "Your balance couldn't be refreshed — the billing service didn't answer."
     }
-    if (!current()) return true
+    if (!current()) return TOAST_SUPERSEDED
     if (!response.ok) {
       await response.body?.cancel()
       store.dispatch({ type: "billing.unavailable", actor: "system" })
@@ -568,7 +574,7 @@ export const createAuthBillingController = (
         balance?: { totalUsd?: unknown; lifetimeChargedUsd?: unknown; chargeCount?: unknown }
       }
       | undefined
-    if (!current()) return true
+    if (!current()) return TOAST_SUPERSEDED
     const state = body?.state
     if (
       body === undefined ||

@@ -108,3 +108,48 @@ describe("the toast run counter's terminal cleanup", () => {
     expect(ctx.toastRuns.has("flow.race")).toBe(false)
   })
 })
+
+/*
+ * Ownership of a toast slot is an allocation question, not a counting one:
+ * the number a run holds must never be handed back out while that run is
+ * still in flight. Deriving it from the map made the newest run's terminal
+ * delete recycle it — three overlapping runs was enough to hand run 1's
+ * number to run 3.
+ */
+describe("toast slot ownership across three overlapping runs", () => {
+  test("a stale run that settles last cannot resolve the newest run's toast", async () => {
+    const { ctx, store } = await fakeContext({ toastAutoDismissMs: 10_000 })
+    const failures = createFailureController(ctx)
+    const gate = () => {
+      let release!: () => void
+      const promise = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { promise, release }
+    }
+    const first = gate()
+    const second = gate()
+    const third = gate()
+    // A is still running when B settles; C starts afterwards and owns the slot.
+    const a = failures.withToast("flow.overlap", "Working…", "Done", () => first.promise.then(() => "old A failed"))
+    const b = failures.withToast("flow.overlap", "Working…", "Done", () => second.promise.then(() => true))
+    await settled()
+    second.release()
+    await b
+    const c = failures.withToast("flow.overlap", "Working…", "Done", () => third.promise.then(() => true))
+    await settled()
+    expect(store.collections.toasts.get("toast-flow.overlap")?.status).toBe("running")
+
+    first.release()
+    await a
+    // A is two runs stale: C's running notice names work still in flight.
+    expect(store.collections.toasts.get("toast-flow.overlap")?.status).toBe("running")
+    expect(ctx.toastRuns.has("flow.overlap")).toBe(true)
+
+    third.release()
+    await c
+    const done = store.collections.toasts.get("toast-flow.overlap")
+    expect(done?.status).toBe("ok")
+    expect(done?.title).toBe("Done")
+  })
+})

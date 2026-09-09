@@ -5,6 +5,7 @@ import type { AgentPort } from "../../runtime/AgentPort"
 import { createAppStore } from "../AppStore"
 import { createAuthBillingController } from "./auth-billing"
 import { createControllerContext } from "./context"
+import { createFailureController } from "./failures"
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -330,5 +331,50 @@ describe("native sign-in handoff ownership", () => {
     h.reopened.resolve(true)
     await tick()
     expect(h.transitions()).toEqual(before)
+  })
+})
+
+/*
+ * A refresh whose account moved out from under it writes nothing: the reply
+ * describes an account the app no longer has open. Reporting "Balance is up
+ * to date" for a balance nobody wrote is the silent-lie shape — the toast
+ * must leave without claiming a result.
+ */
+describe("a balance refresh the account outlives", () => {
+  test("an epoch change mid-request leaves no 'up to date' toast and no balance", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    let release: (response: Response) => void = () => {}
+    const ctx = createControllerContext(store, repositories, agent, {
+      fetchImpl: () =>
+        new Promise<Response>((resolve) => {
+          release = resolve
+        }),
+      toastDebounceMs: 0,
+      toastAutoDismissMs: 10_000
+    })
+    ctx.withToast = createFailureController(ctx).withToast
+    const controller = createAuthBillingController(ctx, () => 0)
+
+    const pending = controller.refreshBalance()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(store.collections.toasts.get("toast-billing.balance.refresh")?.status).toBe("running")
+
+    // A focus re-read adopted a different session while the request was out.
+    ctx.accountEpoch += 1
+    release(
+      new Response(
+        JSON.stringify({
+          state: "ok",
+          allowedToStartWork: true,
+          balance: { totalUsd: "500", lifetimeChargedUsd: "0", chargeCount: 0 }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    )
+    await pending
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(store.collections.billingAccounts.get("billing")?.state).not.toBe("ok")
+    expect(store.collections.toasts.get("toast-billing.balance.refresh")).toBeUndefined()
   })
 })
