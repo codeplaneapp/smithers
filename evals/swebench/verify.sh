@@ -153,6 +153,9 @@ node "$S/fixtures/check-fullbench.mjs"
 node "$S/fixtures/check-fullbench-budget.mjs"
 node "$S/fixtures/check-fullbench-status.mjs"
 
+echo "== the driver's own wait for a worker that never finishes"
+node "$S/fixtures/check-fullbench-drain.mjs"
+
 echo "== the analysis bundle, and what it withholds"
 node "$S/fixtures/check-trace-bundle.mjs"
 

@@ -422,6 +422,19 @@ reap_oldest() {
       fi
       log "${NAMES[$i]} left no completion marker — reaping it"
       wait "${PIDS[$i]}" 2>/dev/null
+      # A lost marker is not a lost instance. A wrapper killed after its last
+      # ledger row was written, or one whose marker write failed on a full disk,
+      # finished the work; recording that instance as failed would send one the
+      # evaluator has already graded back through the whole pipeline on the next
+      # resume. Everything else did lose the instance, and a reap that left no
+      # row would leave it looking in-flight for ever.
+      LAST_STATE="$(node "$S/lib/fullbench-state.mjs" "$MANIFEST" "${NAMES[$i]}")"
+      case "$?" in
+        0) log "  the ledger already records it as $LAST_STATE — only the marker was lost" ;;
+        1) append "$MANIFEST" "$(row --kind instance --id "${NAMES[$i]}" --state failed \
+             --at "$(now_ms)" --reason "the worker died without writing a completion marker")" ;;
+        *) log "  the ledger could not be read, so this worker's fate is not recorded" ;;
+      esac
       rm -f "$FB/workers/${NAMES[$i]}.done" "$FB/workers/${NAMES[$i]}.pid"
       PIDS[$i]=""
       RUNNING=$((RUNNING - 1))
@@ -431,6 +444,28 @@ reap_oldest() {
   return 1
 }
 
+# One poll of every tracked worker: reaps the ones that wrote a `.done` marker,
+# and once `POLLS` has reached `POLL_LIMIT` falls back to `reap_oldest`, which
+# reaps a worker that is already dead and reports one that is merely slow.
+# Returns 0 as soon as a worker has been accounted for.
+#
+# Both waits poll through this, because both fail the same way. The final drain
+# used to reap markers alone, so a wrapper that was killed — or one whose marker
+# write failed — left `RUNNING` above zero for ever: the driver never
+# checkpointed, never reported and never exited, which is exactly the crash the
+# markers exist to survive.
+#
+# The caller owns `POLLS` and the sleep between polls, because what it does
+# while it waits differs: the scheduler stops waiting when a stop is requested,
+# the drain never does.
+poll_workers() {
+  if reap_finished; then POLLS=0; return 0; fi
+  POLLS=$((POLLS + 1))
+  if [ "$POLLS" -lt "$POLL_LIMIT" ]; then return 1; fi
+  POLLS=0
+  reap_oldest
+}
+
 # Waits for a slot, and returns only when there is one. Returning without one —
 # which is what "give up after an hour" used to do — schedules a third instance
 # beside two that are still running, and three testbeds is the disk this whole
@@ -438,13 +473,8 @@ reap_oldest() {
 wait_for_slot() {
   POLLS=0
   while [ "$RUNNING" -ge "$JOBS" ]; do
-    if reap_finished; then return 0; fi
+    if poll_workers; then return 0; fi
     if [ "$STOPPING" = "1" ]; then return 0; fi
-    POLLS=$((POLLS + 1))
-    if [ "$POLLS" -ge "$POLL_LIMIT" ]; then
-      if reap_oldest; then return 0; fi
-      POLLS=0
-    fi
     sleep "$POLL_SECONDS"
   done
   return 0
@@ -541,8 +571,9 @@ for ID in $QUEUE; do
 done
 
 log "draining $RUNNING in-flight instances"
+POLLS=0
 while [ "$RUNNING" -gt 0 ]; do
-  if ! reap_finished; then sleep "$POLL_SECONDS"; fi
+  if ! poll_workers; then sleep "$POLL_SECONDS"; fi
 done
 
 log "final checkpoint"

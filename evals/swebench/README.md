@@ -1332,6 +1332,19 @@ mistaken for a whole one. A `pulled` row *replaces* an instance's earlier column
 rather than merging into them, so a patch size or a verdict from the attempt that
 died cannot survive into the attempt that replaced it.
 
+**A worker that dies without its completion marker is reaped, not waited on.**
+The driver tracks each worker by a `.done` file the wrapper writes, and both of
+its waits — for a free slot, and for the last instances to drain at the end —
+poll for those markers through the same function. After
+`SWB_FULLBENCH_POLL_LIMIT` polls without one they ask whether the oldest worker
+is still alive: a live one is reported, with the shared locks reconciled beside
+it, and a dead one is reaped. Reaping records `failed` with reason `the worker
+died without writing a completion marker`, unless the ledger already has that
+instance at `graded` or `cleaned` — a marker lost after the work finished is a
+lost marker, not a lost instance, and a `failed` row over it would re-run
+something the evaluator already graded. Without this the final drain waited on a
+killed wrapper for ever and the run never reached its last checkpoint.
+
 The worker copies patch, journal (including hidden files and subdirectories),
 timings and run log into a temporary sibling directory. It checks each copy
 and compares its contents against the source before one rename publishes
