@@ -87,18 +87,34 @@ pnpm exec smithers-build build '//:ci'
 pnpm exec smithers-build lint '//:ci'
 ```
 
-Today the repository declares no `RemoteCache.make(...)` at all: it uses the
-`SMITHERS_CACHE_URL` override with the default `SMITHERS_CACHE_TOKEN`, which
-resolves to the shared-credential posture. Declaring the split in the root
-`PACKAGE.ts` is what makes the client send two different credentials:
+The root workspace currently declares only a local cache. With the
+`SMITHERS_CACHE_URL` override and no declared remote, the CLI uses the shared
+`SMITHERS_CACHE_TOKEN` default. Keep the `GithubCiGen` secret wiring in the root
+`PACKAGE.ts`, but configure client credentials in `.smithers/WORKSPACE.ts`
+(or `WORKSPACE.ts`). The CLI reads `Workspace.cache.remote`; a standalone
+`RemoteCache` export in `PACKAGE.ts` does not configure it.
+
+Keep the existing workspace settings and replace its `cache` option as shown:
 
 ```ts
-export const remoteCache = Smithers.RemoteCache.make({
-  endpoint: "https://build.smithers.sh",
-  read: Smithers.Secret("SMITHERS_CACHE_READ_TOKEN"),
-  write: Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")
+import { Smithers as S } from "@smthrs/targets"
+
+export const Workspace = S.Workspace("smithers", {
+  // Keep the other existing workspace options.
+  cache: S.Cache({
+    directory: ".flows",
+    remote: S.RemoteCache.make({
+      endpoint: "https://build.smithers.sh",
+      read: S.Secret("SMITHERS_CACHE_READ_TOKEN"),
+      write: S.Secret("SMITHERS_CACHE_WRITE_TOKEN")
+    })
+  })
 })
 ```
+
+See the [remote-cache guide](https://smithers.sh/docs/guides/remote-cache/)
+for declaration and publication/reuse verification. `SMITHERS_CACHE_URL`
+overrides the endpoint without changing the declared credential names.
 
 ## Operational step, and deployment ordering
 
@@ -119,8 +135,11 @@ this order:
 2. **Add the repository secrets.** Add `SMITHERS_CACHE_READ_TOKEN` holding the
    newly minted read token and `SMITHERS_CACHE_WRITE_TOKEN` holding the current
    value to the GitHub repository.
-3. **Land the root `PACKAGE.ts` adoption** above, so pull-request jobs stop
-   receiving the write credential.
+3. **Land both declarations above.** Update the root `PACKAGE.ts`'s
+   `GithubCiGen` secret wiring and regenerate CI, so pull-request jobs stop
+   receiving the write credential. In the same adoption, set the existing
+   Workspace's `cache.remote` in `.smithers/WORKSPACE.ts` (or `WORKSPACE.ts`)
+   so the CLI reads the split credentials.
 4. **Rotate.** Only now generate a new write credential, redeploy the Worker
    with the new `SMITHERS_CACHE_WRITE_TOKEN` and the unchanged read token, and
    update the repository secret. Rotating before step 3 breaks every job that

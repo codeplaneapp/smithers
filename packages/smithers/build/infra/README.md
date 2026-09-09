@@ -211,10 +211,18 @@ return `503`; they cannot accumulate more backend work.
 
 Malformed input returns `400`, unsupported content types return `415`, and
 oversized input returns `413`. Unsupported methods return `405`. An internal
-storage refusal returns `503`, which clients treat as retryable rather than as
-a cache miss. A stored R2 object whose provider checksum is absent or does not
-match its content address is reported absent rather than refused, because only
-a publisher can repair it and a `503` would leave the digest wedged.
+storage refusal returns `503`. The target-cache CLI treats `503` as a remote
+failure: it marks the remote degraded and falls back to local caching and
+execution for the rest of the process, without retrying the remote. Repair the
+connection or storage issue and retry in a fresh invocation. The engine's
+artifact and step-cache clients have separate error handling; any retries
+configured in their HTTP transport or callers do not change the target-cache
+CLI policy.
+
+A stored R2 object whose provider checksum is absent or does not match its
+content address is reported absent rather than refused. This lets the CAS
+client identify the digest as missing so a publisher can republish and repair
+it; a `503` fails the CAS existence probe instead of identifying missing content.
 
 ## Retention and capacity
 
