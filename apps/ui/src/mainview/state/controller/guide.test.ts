@@ -42,15 +42,15 @@ test("example flow waits five seconds then completes without overwriting navigat
   const running = controller.guideAct("wait-flow")
   await new Promise(resolve => setTimeout(resolve, 50))
   expect(store.session().guide?.demoRun?.status).toBe("running")
+  const toastId = `toast-guide-flow-${store.session().guide?.demoRun?.id}`
+  expect(store.collections.toasts.get(toastId)?.title).toBe("Waiting 5 seconds…")
+  expect(store.collections.toasts.get(toastId)?.status).toBe("running")
   await controller.guideAct("next")
   await running
   expect(Date.now() - start).toBeGreaterThanOrEqual(5000)
   expect(store.session().guide?.demoRun?.status).toBe("succeeded")
+  expect(store.collections.toasts.get(toastId)?.title).toBe("Done")
+  expect(store.collections.toasts.get(toastId)?.status).toBe("ok")
   expect(store.session().guide?.step).toBe(6)
   await store.dispose?.()
 }, 10000)
-  const toastId = `toast-guide-flow-${store.session().guide?.demoRun?.id}`
-  expect(store.collections.toasts.get(toastId)?.title).toBe("Waiting 5 seconds…")
-  expect(store.collections.toasts.get(toastId)?.status).toBe("running")
-  expect(store.collections.toasts.get(toastId)?.title).toBe("Done")
-  expect(store.collections.toasts.get(toastId)?.status).toBe("ok")
