@@ -17,6 +17,8 @@ Root development dependencies make this package available to repository declarat
 
 `BuildAndCheckTypeScriptPackage` accepts `testTimeoutMs` for a package whose complete test process needs a different outer deadline. The default remains 20 minutes. This option preserves the selected suite, its per-case deadlines, and its aggregate coverage thresholds.
 
+`BuildAndCheckTypeScriptPackage` accepts `testData: readonly string[]` for package-relative fixture globs, for example `testData: ["test/fixtures/*.mjs", "test/fixtures/*.cjs"]`. These files join the test target inputs so fixture edits invalidate cached test results. The default is empty.
+
 `pnpm --filter @smthrs/repo-targets test` enforces 100% V8 coverage across `src/**`. Both required CI package selections reach its declared Vitest target, `//packages/repo-targets:test`. The suite checks the actual CLI discovery result and the target's runner configuration, so a declared test script alone cannot satisfy that contract.
 
 ## Bun tests in this repository

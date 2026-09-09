@@ -38,6 +38,8 @@ export interface Options {
   readonly cwd?: string | undefined
   readonly sources?: Input.Glob | undefined
   readonly tests?: Input.Glob | undefined
+  /** Package-relative globs for data read by tests, included in the test cache inputs. */
+  readonly testData?: readonly string[] | undefined
   readonly tsconfig?: Input.File | undefined
   readonly testTsconfig?: Input.File | undefined
   readonly vitestConfig?: Input.File | null | undefined
@@ -162,7 +164,7 @@ export const BuildAndCheckTypeScriptPackage = (options: Options): PackageTargets
     ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
     ...(options.testTimeoutMs === undefined ? {} : { timeoutMs: options.testTimeoutMs }),
     tests: [tests],
-    sources: [sources],
+    sources: [sources, ...(options.testData ?? []).map((pattern) => Input.glob(pattern))],
     deps: [lib, ...deps],
     config: vitestConfig,
     environment: "node",

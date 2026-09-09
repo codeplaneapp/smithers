@@ -3,7 +3,10 @@ import * as Input from "@smthrs/targets/Input"
 import * as NodeTest from "@smthrs/targets/NodeTest"
 import * as Target from "@smthrs/targets/Target"
 import type * as Vitest from "@smthrs/targets/Vitest"
+import { globSync } from "node:fs"
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
+import { Package as PluginPackage } from "../../smithers/agent/plugin/PACKAGE.ts"
 import { BuildAndCheckTypeScriptPackage } from "../src/BuildAndCheckTypeScriptPackage.ts"
 import { plannedArgv, plannedCalls } from "./plan.ts"
 import { packageManager } from "./toolchain.ts"
@@ -187,5 +190,41 @@ describe("package formatting", () => {
     // check resolves workspace dependencies through built declarations, so
     // it must schedule after the package's own lib target.
     expect(Target.metadata(targets.check).dependencies).toContain(targets.lib)
+  })
+})
+
+describe("BuildAndCheckTypeScriptPackage test data", () => {
+  it("adds optional data globs to test inputs without changing the runner or other targets", () => {
+    const options = {
+      packageManager,
+      cwd: "packages/example",
+      testData: ["test/fixtures/*.mjs", "test/fixtures/*.cjs"] as const
+    }
+    const standard = BuildAndCheckTypeScriptPackage({ packageManager, cwd: options.cwd })
+    const withData = BuildAndCheckTypeScriptPackage(options)
+    expect(Target.metadata(withData.test).inputs).toEqual([
+      ...Target.metadata(standard.test).inputs.slice(0, 2),
+      Input.glob("test/fixtures/*.mjs"),
+      Input.glob("test/fixtures/*.cjs"),
+      ...Target.metadata(standard.test).inputs.slice(2)
+    ])
+    expect(plannedArgv(withData.test)).toEqual(plannedArgv(standard.test))
+    for (const name of ["lib", "check", "lint", "fmt", "docs", "circular", "docsFiles"] as const) {
+      expect(Target.metadata(withData[name]).inputs).toEqual(Target.metadata(standard[name]).inputs)
+    }
+    const empty = BuildAndCheckTypeScriptPackage({ ...options, testData: [] })
+    expect(Target.metadata(empty.test).inputs).toEqual(Target.metadata(standard.test).inputs)
+  })
+
+  it("declares both artifact fixtures executed by the plugin suite", () => {
+    const metadata = Target.metadata(PluginPackage.test)
+    const cwd = resolve(import.meta.dirname, "../../..", attrsOf<Vitest.Attrs>(PluginPackage.test).cwd)
+    const paths = metadata.inputs.flatMap((input) => {
+      if (input._tag === "Glob") return globSync(input.pattern, { cwd, exclude: [...input.exclude] })
+      if (input._tag === "File") return [input.path]
+      return []
+    }).map((path) => path.replaceAll("\\", "/"))
+    expect(paths).toContain("test/fixtures/artifact-esm.mjs")
+    expect(paths).toContain("test/fixtures/artifact-cjs.cjs")
   })
 })
