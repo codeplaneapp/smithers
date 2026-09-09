@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { fallbackReport, validateReport } from "./github-triage.mjs";
+
+const documentedReports = (kind) => {
+  const source = readFileSync(new URL(`../flows/${kind}-triage/flow.mdx`, import.meta.url), "utf8");
+  const examples = [...source.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
+  assert.ok(examples.length > 0, `flows/${kind}-triage/flow.mdx documents no report example`);
+  return examples;
+};
 
 describe("GitHub triage report contract", () => {
   it("accepts a reproduced issue and rejects contradictory status", () => {
@@ -40,5 +48,13 @@ describe("GitHub triage report contract", () => {
     const base = fallbackReport("issue", "invalid");
     assert.equal(validateReport({ ...base, labels: ["security:trusted"] }, "issue"), null);
     assert.equal(validateReport({ ...base, comment: "x".repeat(60_001) }, "issue"), null);
+  });
+
+  it("accepts every report example the triage flows document", () => {
+    for (const kind of ["issue", "pr"]) {
+      for (const example of documentedReports(kind)) {
+        assert.ok(validateReport(example, kind), `flows/${kind}-triage/flow.mdx documents a report the publisher rejects`);
+      }
+    }
   });
 });

@@ -37,7 +37,7 @@ Write `.triage/report.json` as JSON with exactly this shape:
   "kind": "issue",
   "summary": "one sentence",
   "comment": "a concise Markdown response to the opener",
-  "labels": ["kind:bug", "area:engine", "status:needs-author"],
+  "labels": ["kind:bug", "area:engine", "status:reproduced"],
   "reproduction": {
     "status": "reproduced",
     "details": "command, minimal case, expected result, and observed result"
@@ -47,5 +47,8 @@ Write `.triage/report.json` as JSON with exactly this shape:
 
 `reproduction.status` is one of `reproduced`, `needs-author`, or
 `not-applicable`. A bug may use `needs-author` only when the comment contains a
-specific request for missing input. Use only allowed labels from the context.
+specific request for missing input. Carry the matching `status:reproduced` or
+`status:needs-author` label: a report whose labels contradict its reproduction
+status is discarded and replaced by a generic request for more evidence. Use
+only allowed labels from the context.
 Do not close the issue, assign a person, promise a fix, or write any other file.
