@@ -125,7 +125,16 @@ the tree are the three pre-existing TargetGraph integration tests plus two
 
 Fixed in the working tree after the review: (1) the terminal attach: plue confirmed a Bearer PAT alone is accepted (the `?ticket=` exists for browsers), but the upgrade REQUIRES an Origin header — the tunnel now sends `https://jjhub.tech` (`SMITHERS_CLOUD_WS_ORIGIN` overrides) and caps frames at plue's 64 KiB; (2) "Make template" emitted a multi-word snapshot name the parser refused — `workspace.template` accepts `--name <rest of line>` and the button uses it; (3) the settle watch polled a wedged workspace forever — it stops after 120 polls (ten minutes at 5 s) and the card keeps the last fact; (5) the tunnel's path guard admitted `.`/`..` segments — segments are checked and the joined target must stay under the upstream's `/api/repos/`; (8) renderer→upstream frames were unbounded — a 1 MiB upstream buffer closes the renderer's socket; (9) a destroyed session's tab reconnected at 1 Hz forever — the client reconnects only on 1006 and plue's 1001, retries 1011 once, and treats 1008 (`access revoked`) and 1000 as final with the reason shown; (11) the bare workspace-id badge at the card's foot was unbriefed chrome — removed.
 
-Open from the same review: (4) a scope replace drops workspaces whose wire rows fail to parse (and their tree rows); (6) an in-flight poll can reschedule after dispose; (7) the seam test harness never asserts request bodies, so `source_bookmark`, `snapshot_id`, fork `name` are unverified; (10) fork/open acts refuse a malformed answer without refreshing the list, unlike suspend/resume.
+Open from the same review: (4) a scope replace drops workspaces whose wire rows fail to parse (and their tree rows); (7) the seam test harness never asserts request bodies, so `source_bookmark`, `snapshot_id`, fork `name` are unverified; (10) fork/open acts refuse a malformed answer without refreshing the list, unlike suspend/resume.
+
+Workspace lifecycle follow-up (2026-09-09): review item (6) is fixed.
+Disposal invalidates both actor bindings, aborts workspace reads, and settles
+pending retry sleeps as cancelled. Deleted workspaces invalidate watchers,
+desktop retries, and terminal opens, including session settling and attachment.
+Every watcher continuation checks its lifetime and authorization before
+updating state or scheduling another poll. Terminal opens check authorization,
+workspace existence, and supersession after each await before attaching.
+Deferred-response and cancellation tests live in `WorkspaceSeam.test.ts`.
 
 ## Critique fixes (2026-09-02)
 

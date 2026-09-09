@@ -160,6 +160,7 @@ const harness = async (
   const store = await createAppStore({ kind: "localStorage", storage })
   /** `METHOD path` per request, the query string dropped. */
   const requests: Array<string> = []
+  const signals: Array<AbortSignal | null | undefined> = []
   /** The same, with the query string. */
   const urls: Array<string> = []
   /** Each request's decoded JSON body, keyed `METHOD path` — what the create actually asked plue for. */
@@ -174,6 +175,7 @@ const harness = async (
       const path = url.pathname.slice(1)
       const key = `${method} ${path}`
       requests.push(key)
+      signals.push(init?.signal)
       urls.push(`${key}${url.search}`)
       if (typeof init?.body === "string") bodies.push({ key, body: JSON.parse(init.body) })
       const route = routes[key] ?? routes[path]
@@ -213,7 +215,7 @@ const harness = async (
       }
     ]
   })
-  return { ctx, store, seam: createWorkspaceSeam(ctx, { pollMs: 1 }), requests, urls, dispatched, storage, bodies }
+  return { ctx, store, seam: createWorkspaceSeam(ctx, { pollMs: 1 }), requests, urls, dispatched, storage, bodies, signals }
 }
 
 const seedWorkspace = async (store: AppStore, workspace: CloudWorkspaceInput = wsRow): Promise<void> => {
@@ -2179,4 +2181,153 @@ describe("workspace seam create refusals", () => {
     expect(await seam.openWorkspace("main", "will/smithers", "desktop")).toBe(message)
     expect(payloadOf(store)?.error).toBeUndefined()
   })
+})
+
+describe("workspace seam lifecycle cancellation", () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((done) => { resolve = done })
+    return { promise, resolve }
+  }
+
+  for (const outcome of ["response", "error", "body", "list"] as const) {
+    test(`dispose fences a watch awaiting its ${outcome}`, async () => {
+      const entered = deferred<void>()
+      const release = deferred<void>()
+      const { ctx, seam, requests, dispatched, signals } = await harness({
+        "POST api/repos/will/smithers/workspaces": json(201, { ...WS_RUNNING, status: "pending" }),
+        "api/repos/will/smithers/bookmarks": json(200, []),
+        "api/repos/will/smithers/workspace-snapshots": json(200, []),
+        "api/repos/will/smithers/workspace/sessions": json(200, []),
+        "api/repos/will/smithers/workspaces/ws-1": async () => {
+          if (outcome === "list") return json(404, {})
+          if (outcome === "body") {
+            const response = json(200, {})
+            response.json = async () => {
+              entered.resolve()
+              await release.promise
+              return { ...WS_RUNNING, status: "pending" }
+            }
+            return response
+          }
+          entered.resolve()
+          await release.promise
+          if (outcome === "error") throw new Error("late transport failure")
+          return json(200, { ...WS_RUNNING, status: "pending" })
+        },
+        "api/repos/will/smithers/workspaces": async () => {
+          entered.resolve()
+          await release.promise
+          return json(200, [])
+        }
+      })
+      try {
+        await seam.openWorkspace()
+        await entered.promise
+        // Disposal through a lazily acquired actor binding owns the same lifetime.
+        const actors = createActorBindings(() => {})
+        const user = actors.pair(ctx, (context) => createWorkspaceSeam(context))
+        actors.select(user).dispose()
+        expect(signals.some((signal) => signal?.aborted)).toBe(true)
+        const dispatchCount = dispatched.length
+        const requestCount = requests.length
+        release.resolve()
+        await wait(25)
+        expect(dispatched.length).toBe(dispatchCount)
+        expect(requests.length).toBe(requestCount)
+      } finally {
+        release.resolve()
+        seam.dispose()
+      }
+    })
+  }
+
+  for (const operation of ["terminal retry", "desktop retry", "terminal settle"] as const) {
+    for (const cancellation of ["dispose", "delete"] as const) {
+      test(`${cancellation} settles a pending ${operation} sleep`, async () => {
+        const { ctx, store, seam: unused, dispatched } = await harness({
+          "POST api/repos/will/smithers/workspace/sessions": () => operation === "terminal settle"
+            ? json(201, { id: "sess-old", status: "pending", workspace_id: "ws-1" })
+            : json(503, { code: "guest_not_ready" }, { "retry-after": "60" }),
+          "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": () =>
+            json(503, { code: "desktop_not_ready" }, { "retry-after": "60" }),
+          "DELETE api/repos/will/smithers/workspaces/ws-1": json(204, null),
+          "api/repos/will/smithers/workspaces": json(200, [])
+        })
+        const seam = createWorkspaceSeam(ctx, { pollMs: 60_000 })
+        await seedWorkspace(store)
+        const pending = operation === "desktop retry" ? seam.openDesktop("ws-1") : seam.openTerminal("ws-1")
+        try {
+          await wait(10)
+          if (cancellation === "dispose") seam.dispose()
+          else await seam.deleteWorkspace("ws-1", "review")
+          const count = dispatched.length
+          expect(await Promise.race([pending.then(() => "settled"), wait(100).then(() => "pending")])).toBe("settled")
+          expect(dispatched.length).toBe(count)
+        } finally {
+          seam.dispose()
+          unused.dispose()
+        }
+      })
+    }
+  }
+
+  for (const boundary of ["settling GET", "attached GET", "session list"] as const) {
+    for (const cancellation of ["delete", "second open", "sign-out", "sign-in again", "dispose"] as const) {
+      test(`${cancellation} fences a terminal awaiting its ${boundary}`, async () => {
+        const entered = deferred<void>()
+        const release = deferred<Response>()
+        let posts = boundary === "attached GET" ? 1 : 0
+        let gets = 0
+        let lists = 0
+        const { store, seam, dispatched } = await harness({
+          "POST api/repos/will/smithers/workspace/sessions": () => json(201, {
+            id: ++posts === 1 ? "sess-old" : "sess-new", status: posts === 1 && boundary === "settling GET" ? "pending" : "running", workspace_id: "ws-1"
+          }),
+          "api/repos/will/smithers/workspace/sessions/sess-old": () => {
+            if (++gets > 1) return json(200, { id: "sess-old", status: "stopped", workspace_id: "ws-1" })
+            entered.resolve()
+            return release.promise
+          },
+          "api/repos/will/smithers/workspace/sessions": () => {
+            if (++lists > 1 || boundary !== "session list") return json(200, [])
+            entered.resolve()
+            return release.promise
+          },
+          "DELETE api/repos/will/smithers/workspaces/ws-1": json(204, null),
+          "api/repos/will/smithers/workspaces": json(200, [])
+        })
+        await seedWorkspace(store)
+        if (boundary === "attached GET") await seedCard(store, "sess-old")
+        const pending = seam.openTerminal("ws-1")
+        try {
+          await entered.promise
+          if (cancellation === "delete") await seam.deleteWorkspace("ws-1", "review")
+          if (cancellation === "second open") await seam.openTerminal("ws-1")
+          if (cancellation === "sign-out" || cancellation === "sign-in again") await store.dispatch({
+            type: "cloud.session.loaded", actor: "system", state: "signed-out", username: null, expiresAt: null, scopes: null
+          })
+          if (cancellation === "sign-in again") await store.dispatch({
+            type: "cloud.session.loaded", actor: "system", state: "signed-in", username: "will", expiresAt: null, scopes: null
+          })
+          if (cancellation === "dispose") seam.dispose()
+          const count = dispatched.length
+          release.resolve(json(200, { id: "sess-old", status: "running", workspace_id: "ws-1" }))
+          await pending
+          expect(dispatched.length).toBe(count)
+          expect(store.collections.tabs.get("sess-old")).toBeUndefined()
+          if (cancellation === "second open") {
+            expect(store.collections.tabs.get("sess-new")).toBeDefined()
+            expect(payloadOf(store)?.terminalSessionId).toBe("sess-new")
+          } else if (cancellation === "delete" || boundary !== "attached GET") {
+            expect(cardOf(store)).toBeUndefined()
+          }
+          if (cancellation === "delete") expect(workspacesOf(store)).toEqual([])
+        } finally {
+          release.resolve(json(200, { id: "sess-old", status: "running", workspace_id: "ws-1" }))
+          seam.dispose()
+        }
+      })
+    }
+  }
 })

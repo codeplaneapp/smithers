@@ -591,23 +591,46 @@ const splitRepo = (repoId: string): { readonly owner: string; readonly name: str
 
 export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = {}): WorkspaceSeam => {
   const pollMs = deps.pollMs ?? 5_000
-  const { url: cloud, get: getJson, send: sendJson } = createCloudClient(ctx)
   const repoPath = (repoId: string, rest: string): string => {
     const { owner, name } = splitRepo(repoId)
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${rest}`
   }
 
-  const { timers, watching, watchPolls, desktopMintEpochs, terminalOpenEpochs } = actorSharedState(ctx, "workspace", () => ({
+  const { timers, watching, watchPolls, desktopMintEpochs, terminalOpenEpochs, lifecycle, workspaceEpochs, sleepers } = actorSharedState(ctx, "workspace", () => ({
     timers: new Set<ReturnType<typeof setTimeout>>(),
-    watching: new Set<string>(),
+    watching: new Map<string, () => boolean>(),
     watchPolls: new Map<string, number>(),
     desktopMintEpochs: new Map<string, number>(),
-    terminalOpenEpochs: new Map<string, number>()
+    terminalOpenEpochs: new Map<string, number>(),
+    lifecycle: { disposed: false, reads: new AbortController() },
+    workspaceEpochs: new Map<string, number>(),
+    sleepers: new Map<ReturnType<typeof setTimeout>, { readonly workspaceId: string; readonly finish: (elapsed: boolean) => void }>()
   }))
+  const { url: cloud, get: getJson, send: sendJson } = createCloudClient({
+    baseUrl: ctx.baseUrl,
+    http: (input, init) => ctx.http(input, (init?.method ?? "GET") === "GET"
+      ? { ...init, signal: lifecycle.reads.signal }
+      : init)
+  })
+
+  /** The lifetime and authorization captured before an await must still own its answer. */
+  const currentOperation = (workspaceId?: string): (() => boolean) => {
+    const session = ctx.store.collections.cloudSessions.get("cloud")
+    const epoch = workspaceId === undefined ? undefined : workspaceEpochs.get(workspaceId)
+    return () => !lifecycle.disposed
+      && session?.state === "signed-in"
+      && ctx.store.collections.cloudSessions.get("cloud")?.revision === session.revision
+      && (workspaceId === undefined || (
+        ctx.store.collections.cloudWorkspaces.has(workspaceId)
+        && workspaceEpochs.get(workspaceId) === epoch
+      ))
+  }
+
   /** 5s cadence × 120 = ten minutes, the provisioning ceiling the workspaces spec names. */
   const MAX_WATCH_POLLS = 120
 
   const after = (ms: number, work: () => void): void => {
+    if (lifecycle.disposed) return
     const timer = setTimeout(() => {
       timers.delete(timer)
       work()
@@ -615,9 +638,31 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     timers.add(timer)
   }
 
-  const sleep = (ms: number): Promise<void> => new Promise((resolve) => after(ms, resolve))
+  /** Clearing a retry timer must also release the command awaiting it. */
+  const sleep = (ms: number, workspaceId: string): Promise<boolean> => new Promise((resolve) => {
+    if (lifecycle.disposed) { resolve(false); return }
+    const finish = (elapsed: boolean): void => {
+      clearTimeout(timer)
+      timers.delete(timer)
+      sleepers.delete(timer)
+      resolve(elapsed)
+    }
+    const timer = setTimeout(() => finish(true), ms)
+    timers.add(timer)
+    sleepers.set(timer, { workspaceId, finish })
+  })
+
+  const cancelSleeps = (workspaceId?: string): void => {
+    for (const sleeper of sleepers.values()) {
+      if (workspaceId === undefined || sleeper.workspaceId === workspaceId) sleeper.finish(false)
+    }
+  }
 
   const dispose = (): void => {
+    if (lifecycle.disposed) return
+    lifecycle.disposed = true
+    lifecycle.reads.abort()
+    cancelSleeps()
     for (const timer of timers) clearTimeout(timer)
     timers.clear()
     watching.clear()
@@ -633,6 +678,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
    * and the scope set — the legacy (degraded) token reads but never acts.
    */
   const gate = (): string | void => {
+    if (lifecycle.disposed) return "The workspace controller is disposed."
     const session = ctx.store.collections.cloudSessions.get("cloud")
     if (session?.state !== "signed-in") return SIGN_OUT_REFUSAL
     if (session.scopes === "degraded") return DEGRADED_WORKSPACE_REFUSAL
@@ -850,7 +896,10 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
    * is an error, never an empty scope replace that would drop every loaded
    * workspace and its tree row.
    */
-  const loadList = async (repo?: string): Promise<ReadonlyArray<CloudWorkspaceInput> | string> => {
+  const loadList = async (
+    repo?: string,
+    current = currentOperation()
+  ): Promise<ReadonlyArray<CloudWorkspaceInput> | string> => {
     const path = repo === undefined ? "/user/workspaces" : repoPath(repo, "/workspaces")
     const raw: Array<unknown> = []
     let next: string | null = `${path}?limit=${LIST_PAGE_LIMIT}`
@@ -858,7 +907,9 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     for (let page = 0; next !== null && page < MAX_LIST_PAGES; page += 1) {
       if (seen.has(next)) break
       seen.add(next)
+      if (!current()) return SIGN_OUT_REFUSAL
       const answer = await getListPage(next, path)
+      if (!current()) return SIGN_OUT_REFUSAL
       if ("error" in answer) return answer.error
       const rows = arrayOf(answer.body, "workspaces")
       raw.push(...rows)
@@ -927,53 +978,53 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
    * gone). A failed poll is not a fact — the watch simply tries again; a 404
    * IS a fact, and the honest answer is to re-read the repository's list.
    */
-  const poll = async (workspaceId: string): Promise<void> => {
-    const row = ctx.store.collections.cloudWorkspaces.get(workspaceId)
-    // Gone from the collection, or signed out: nothing to settle, nobody to read for.
-    if (row === undefined || ctx.store.collections.cloudSessions.get("cloud")?.state !== "signed-in") {
+  const poll = async (workspaceId: string, current: () => boolean): Promise<void> => {
+    const stop = (): void => {
+      if (watching.get(workspaceId) !== current) return
       watching.delete(workspaceId)
       watchPolls.delete(workspaceId)
-      return
     }
+    const active = (): boolean => {
+      if (current() && watching.get(workspaceId) === current) return true
+      stop()
+      return false
+    }
+    const row = ctx.store.collections.cloudWorkspaces.get(workspaceId)
+    // Gone from the collection, signed out, or superseded: nothing remains to settle.
+    if (row === undefined || !active()) { stop(); return }
     // A workspace wedged in pending/starting is not polled for the life of the app: the watch gives up after MAX_WATCH_POLLS and the card keeps the last fact.
     const polled = (watchPolls.get(workspaceId) ?? 0) + 1
     watchPolls.set(workspaceId, polled)
-    if (polled > MAX_WATCH_POLLS) {
-      watching.delete(workspaceId)
-      watchPolls.delete(workspaceId)
-      return
-    }
+    if (polled > MAX_WATCH_POLLS) { stop(); return }
     let response: Response
     try {
-      response = await ctx.http(cloud(repoPath(row.repoId, `/workspaces/${encodeURIComponent(workspaceId)}`)))
+      response = await ctx.http(cloud(repoPath(row.repoId, `/workspaces/${encodeURIComponent(workspaceId)}`)), { signal: lifecycle.reads.signal })
     } catch {
-      after(pollMs, () => void poll(workspaceId))
+      if (active()) after(pollMs, () => void poll(workspaceId, current))
       return
     }
+    if (!active()) return
     if (response.status === 404) {
-      watching.delete(workspaceId)
-      watchPolls.delete(workspaceId)
-      await loadList(row.repoId)
+      await loadList(row.repoId, active)
+      stop()
       return
     }
     if (response.ok) {
       const parsed = parseWorkspaceWire(await response.json().catch(() => null), row.repoId)
+      if (!active()) return
       if (parsed !== null) {
         ctx.dispatch({ type: "workspace.updated", actor: "system", workspace: parsed })
-        if (!UNSETTLED.has(parsed.status)) {
-          watching.delete(workspaceId)
-          watchPolls.delete(workspaceId)
-          return
-        }
+        if (!UNSETTLED.has(parsed.status)) { stop(); return }
       }
     }
-    after(pollMs, () => void poll(workspaceId))
+    if (active()) after(pollMs, () => void poll(workspaceId, current))
   }
 
   const watch = (workspaceId: string): void => {
-    if (watching.has(workspaceId)) return
-    watching.add(workspaceId)
-    void poll(workspaceId)
+    if (lifecycle.disposed || watching.has(workspaceId)) return
+    const current = currentOperation(workspaceId)
+    watching.set(workspaceId, current)
+    void poll(workspaceId, current)
   }
 
   /* ---- the acts ---- */
@@ -1315,6 +1366,12 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
      * re-reads the repository's truth.
      */
     dropDesktopStream(workspace.id)
+    /* Invalidate reads and both session phases before removing the workspace. */
+    workspaceEpochs.set(workspace.id, (workspaceEpochs.get(workspace.id) ?? 0) + 1)
+    terminalOpenEpochs.set(workspace.id, (terminalOpenEpochs.get(workspace.id) ?? 0) + 1)
+    watching.delete(workspace.id)
+    watchPolls.delete(workspace.id)
+    cancelSleeps(workspace.id)
     /* A retry loop for a computer that no longer exists has nothing to mint. */
     desktopMintEpochs.set(workspace.id, (desktopMintEpochs.get(workspace.id) ?? 0) + 1)
     ctx.dispatch({ type: "workspace.deleted", actor: ctx.actor(), workspaceId: workspace.id })
@@ -1552,6 +1609,8 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const { workspace } = resolved
     const epoch = (desktopMintEpochs.get(workspace.id) ?? 0) + 1
     desktopMintEpochs.set(workspace.id, epoch)
+    const authorized = currentOperation(workspace.id)
+    const current = (): boolean => authorized() && gate() === undefined && desktopMintEpochs.get(workspace.id) === epoch
     let attempt = 0
     for (;;) {
       let response: Response
@@ -1560,14 +1619,16 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
           method: "POST"
         })
       } catch (error) {
+        if (!current()) return
         return `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`
       }
-      if (desktopMintEpochs.get(workspace.id) !== epoch) return
+      if (!current()) return
       if (!response.ok) {
         const { code, error: message, retryAfterSeconds: after } = await failed(
           response,
           `The desktop session on ${workspace.id} was refused (${response.status}).`
         )
+        if (!current()) return
         dropDesktopStream(workspace.id)
         renderWorkspace(workspace, {
           facet: "desktop",
@@ -1580,16 +1641,16 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
         })
         attempt += 1
         if (code !== DESKTOP_NOT_READY || attempt >= desktopSessionRetry.maxAttempts) return message
-        await sleep(after === null ? desktopSessionRetry.defaultDelayMs : after * 1_000)
-        if (desktopMintEpochs.get(workspace.id) !== epoch) return
+        if (!await sleep(after === null ? desktopSessionRetry.defaultDelayMs : after * 1_000, workspace.id)) return
+        if (!current()) return
         continue
       }
       const minted = parseDesktopMint(await response.json().catch(() => null), workspace.id)
+      if (!current()) return
       if (minted === null) {
         dropDesktopStream(workspace.id)
         return `Smithers Cloud's answer for the desktop session on ${workspace.id} was malformed.`
       }
-      if (desktopMintEpochs.get(workspace.id) !== epoch) return
       holdDesktopStream(minted)
       renderWorkspace(workspace, { facet: "desktop" })
       /* The line names the workspace and when the session lapses — never the URL that carries the password. */
@@ -1705,6 +1766,10 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
         }.`
       )
     }
+    const epoch = (terminalOpenEpochs.get(workspace.id) ?? 0) + 1
+    terminalOpenEpochs.set(workspace.id, epoch)
+    const authorized = currentOperation(workspace.id)
+    const current = (): boolean => authorized() && gate() === undefined && terminalOpenEpochs.get(workspace.id) === epoch
     const card = ctx.store.collections.cards.get(cardIdOf(workspace.id))
     const attached = card?.kind === "workspace" ? card.payload.terminalSessionId : undefined
     const openTab = (sessionId: string): void => {
@@ -1729,6 +1794,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     }
     if (attached !== undefined && attached !== "") {
       const session = await getJson(repoPath(workspace.repoId, `/workspace/sessions/${encodeURIComponent(attached)}`))
+      if (!current()) return
       const parsed = "error" in session ? null : parseSession(session.body)
       if (parsed !== null && parsed.status === SESSION_LIVE) {
         openTab(attached)
@@ -1745,8 +1811,6 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
      * words on the terminal facet the whole time. A later open on the same
      * workspace supersedes it. Every other refusal is answered once.
      */
-    const epoch = (terminalOpenEpochs.get(workspace.id) ?? 0) + 1
-    terminalOpenEpochs.set(workspace.id, epoch)
     let created: { readonly body: unknown }
     for (let attempt = 1;; attempt += 1) {
       const answer = await sendJson("POST", repoPath(workspace.repoId, "/workspace/sessions"), {
@@ -1754,7 +1818,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS
       })
-      if (terminalOpenEpochs.get(workspace.id) !== epoch) return
+      if (!current()) return
       if (!("error" in answer)) {
         created = answer
         break
@@ -1776,8 +1840,8 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       if (answer.code !== GUEST_NOT_READY || attempt >= terminalSessionRetry.maxAttempts) {
         return proxyGone ? `${EGRESS_PROXY_UNAVAILABLE} — ${answer.error}` : answer.error
       }
-      await sleep(answer.retryAfterSeconds === null ? terminalSessionRetry.defaultDelayMs : answer.retryAfterSeconds * 1_000)
-      if (terminalOpenEpochs.get(workspace.id) !== epoch) return
+      if (!await sleep(answer.retryAfterSeconds === null ? terminalSessionRetry.defaultDelayMs : answer.retryAfterSeconds * 1_000, workspace.id)) return
+      if (!current()) return
     }
     const session = parseSession(created.body)
     if (session === null) return `Smithers Cloud's answer for the new session on ${workspace.id} was malformed.`
@@ -1788,8 +1852,9 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     let live = session
     for (let attempt = 0; live.status !== SESSION_LIVE && attempt < SESSION_SETTLE_ATTEMPTS; attempt += 1) {
       if (live.status === "failed" || live.status === "stopped") break
-      await sleep(pollMs)
+      if (!await sleep(pollMs, workspace.id) || !current()) return
       const answer = await getJson(repoPath(workspace.repoId, `/workspace/sessions/${encodeURIComponent(session.id)}`))
+      if (!current()) return
       const parsed = "error" in answer ? null : parseSession(answer.body)
       if (parsed === null) break
       live = parsed
@@ -1797,8 +1862,9 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     if (live.status !== SESSION_LIVE) {
       return failOnCard(workspace, `Session ${live.id} of "${workspace.name}" settled as ${live.status}, not running.`)
     }
-    openTab(live.id)
     const sessions = await loadSessions(workspace.repoId, workspace.id)
+    if (!current()) return
+    openTab(live.id)
     renderWorkspace(workspace, {
       facet: "terminal",
       terminalSessionId: live.id,
