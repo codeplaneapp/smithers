@@ -161,9 +161,14 @@ export const reuseOperations = (options: { root: string; output: string }) => {
     publish: ({ pages }: { pages: Record<string, typeof BoundPage.Type> }) => {
       const ordered = Object.keys(pages).sort((a, b) => Number(a.slice(5)) - Number(b.slice(5))).map((key) => pages[key]!)
       return guarded(Effect.gen(function*() {
+        // The policy is identical for every page reviewed through one seat.
+        // Capture it once per reviewer inside this action; the writer below
+        // still independently recaptures every declared source before output.
+        const policies = new Map<string, string>()
         for (const page of ordered) {
-          const current = yield* policy(page.reviewer ?? "")
-          if (current.policyDigest !== page.provenance.policyDigest) return yield* Effect.fail(fail("Reviewer policy changed during review"))
+          const reviewer = page.reviewer ?? ""
+          if (!policies.has(reviewer)) policies.set(reviewer, (yield* policy(reviewer)).policyDigest)
+          if (policies.get(reviewer) !== page.provenance.policyDigest) return yield* Effect.fail(fail("Reviewer policy changed during review"))
         }
         return yield* ops.write(ordered, "verified", Object.fromEntries(ordered.map((page) => [page.evidence.spec.id, page.provenance])))
       }))

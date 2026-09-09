@@ -26,7 +26,7 @@ export const pages: readonly PageSpec[] = [
     "factory/wiki/pages/build-graph.md", "packages/smithers/flows/docs/concepts/runtime-portability.md", "flows/wiki/PACKAGE.ts"
   ]),
   page({ id: "runtime", title: "Runtime portability and ownership", purpose: "Run the same durable program on Bun or Node through injected platform services.", kind: "current", document: "packages/smithers/flows/docs/concepts/runtime-portability.md", related: ["flows", "storage", "wiki-generation"] }, [
-    runtime, bun, node, ["packages/smithers/flows/src/internal/NativeRuntime.ts", [63, 101], [333, 447]],
+    runtime, bun, node, ["packages/smithers/flows/src/internal/NativeRuntime.ts", [63, 101], [316, 447]],
     "packages/smithers/flows/test/NativeRuntimeParity.test.ts", "packages/smithers/flows/test/fixtures/native-runtime.ts",
     ["packages/smithers/flows/test/NodeRuntime.test.ts", [783, 790], [871, 889], [1026, 1038], [1167, 1180]],
     "packages/smithers/flows/database/src/node/NodeDatabase.ts", "packages/smithers/flows/database/src/bun/BunDatabase.ts",
