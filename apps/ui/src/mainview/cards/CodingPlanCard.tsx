@@ -1,6 +1,6 @@
 import { runSourceCommand } from "../flows/RunCommand"
 import type { Card } from "../state/AppState"
-import { codingPlanOf } from "./CodingPlan"
+import { codingEvidenceOf } from "./CodingPlan"
 
 /** Predicted ownership is visible before execution. Recorded receipts arrive through the run journal. */
 export const CodingPlanBody = ({ card, onRunCommand: sendRunCommand }: {
@@ -8,12 +8,31 @@ export const CodingPlanBody = ({ card, onRunCommand: sendRunCommand }: {
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
   const onRunCommand = runSourceCommand(card.id, sendRunCommand)
-  const plan = codingPlanOf(card)
+  const { plan, outcome, blockedSpanId } = codingEvidenceOf(card)
   if (plan === undefined) return null
   const selected = plan.changes.find((change) => change.id === card.payload.codingChangeId)
   const detailsId = `${card.id}-coding-details`
   return (
     <section className="coding-plan" aria-label="Coding plan">
+      {outcome === undefined ? null : (
+        <div aria-label="Coding outcome">
+          <p>
+            {outcome.status === "validated" ? "Validated" : outcome.status === "changes-requested" ? "Changes requested" : "Blocked"}
+            {` after ${outcome.rounds} ${outcome.rounds === 1 ? "round" : "rounds"}.`}
+          </p>
+          {outcome.blocked === null ? null : <p>{outcome.blocked.message}</p>}
+          {blockedSpanId === undefined ? null : (
+            <button
+              type="button"
+              className="run-trace-filter"
+              data-flow="runs.trace.select"
+              onClick={() => onRunCommand("runs.trace.select", `${card.payload.runId} ${blockedSpanId}`)}
+            >
+              Inspect failed execution
+            </button>
+          )}
+        </div>
+      )}
       <h4>Predicted Changes</h4>
       <ol className="coding-plan-changes" aria-label="Predicted Changes">
         {plan.changes.map((change, index) => (

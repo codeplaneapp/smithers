@@ -6,6 +6,7 @@ import type { Card } from "../state/AppState"
 import { PROTOTYPE_BANNER, RunTraceBody } from "./RunTraceCard"
 import { WorkflowRunCardBody } from "./WorkflowCards"
 import { CODING_PLAN } from "./fixtures/CodingPlan"
+import { blockedCodingJournal, preparedCodingJournal } from "./fixtures/CodingJournal"
 
 /*
  * The run trace (factory spec 06, mocks #s5 and #s6): one card shows every
@@ -329,6 +330,33 @@ describe("the run card as a trace", () => {
 
 
 describe("predicted coding Changes in the same run card", () => {
+  test("a prepared native child exposes the plan while its implementation runs, through the same selection command", () => {
+    const shown = renderTrace({ workflow: "coding", input: { prompt: CODING_PLAN.prompt }, events: preparedCodingJournal(), traceView: undefined })
+    expect(shown.host.querySelector("[aria-label='Predicted Changes']")?.textContent).toContain("Store repository memory")
+    const button = shown.host.querySelector<HTMLButtonElement>("[data-flow='runs.coding.select']")!
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    click(button)
+    expect(shown.dispatched).toEqual([{ name: "runs.coding.select", args: "sourceCard=flow-run-run-1 run-1 memory" }])
+    expect(shown.host.querySelector("[aria-label='Coding outcome']")).toBeNull()
+    expect(renderTrace({ workflow: "coding", input: { prompt: "Plan this" }, events: preparedCodingJournal(), cursorSeq: 3 }).host.querySelector("[aria-label='Coding plan']")).toBeNull()
+  })
+
+  test("a completed engine run reports blocked correction and opens its real failed execution in the existing trace", () => {
+    const shown = renderTrace({ workflow: "coding", phase: "completed", input: { prompt: CODING_PLAN.prompt }, events: blockedCodingJournal(), traceView: undefined })
+    const outcome = shown.host.querySelector("[aria-label='Coding outcome']")!
+    expect(outcome.textContent).toContain("Blocked after 1 round.")
+    expect(outcome.textContent).toContain("The required fast check failed.")
+    expect(outcome.textContent).not.toContain("Validated")
+    const inspect = outcome.querySelector<HTMLButtonElement>("[data-flow='runs.trace.select']")!
+    inspect.focus()
+    expect(document.activeElement).toBe(inspect)
+    click(inspect)
+    expect(shown.dispatched).toEqual([{ name: "runs.trace.select", args: "sourceCard=flow-run-run-1 run-1 engine:failed-round:0" }])
+    const historical = renderTrace({ workflow: "coding", phase: "completed", input: { prompt: CODING_PLAN.prompt }, events: blockedCodingJournal(), cursorSeq: 7 })
+    expect(historical.host.querySelector("[aria-label='Coding outcome']")).toBeNull()
+  })
+
   test("the typed plan appears before any journal, with durable progressive detail and no invented outcomes", () => {
     const initial = renderTrace({ workflow: "coding", input: { plan: CODING_PLAN }, traceView: undefined })
     const outline = initial.host.querySelector("[aria-label='Predicted Changes']")

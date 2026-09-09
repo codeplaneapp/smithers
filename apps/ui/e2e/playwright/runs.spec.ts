@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import type { Locator, Page } from "@playwright/test"
 import { CODING_PLAN } from "../../src/mainview/cards/fixtures/CodingPlan"
+import { blockedCodingJournal } from "../../src/mainview/cards/fixtures/CodingJournal"
 import { installCloudFixture } from "./cloudFixture.ts"
 
 /*
@@ -50,7 +51,7 @@ const serve = async (page: Page, journal: ReadonlyArray<Record<string, unknown>>
   let planned: { flowId: string; input: unknown } | undefined
   /** The engine's own accounting: a steer the gateway took is pending until the next turn. */
   let steeringPending = 0
-  await installCloudFixture(page, { capabilities: ["agent", "identity", "cloud", "local.repositories"] })
+  await installCloudFixture(page, { capabilities: ["agent", "identity", "cloud", "cloud.pat", "local.repositories"] })
   await page.route("**/api/workflow/provision", (route) =>
     route.fulfill(json({ status: "ready", repo: REPO, gatewayId: "gw-1" })))
   await page.route("**/api/workflow/rpc", async (route) => {
@@ -101,8 +102,15 @@ const serve = async (page: Page, journal: ReadonlyArray<Record<string, unknown>>
             return rows("approvals", [])
           case "transcript":
             return rows("transcript", [])
-          case "run-events":
-            return rows("run-events", journal)
+          case "run-events": {
+            const after = call.payload.after as { value: number; offset: number } | undefined
+            let offset = 0
+            return rows("run-events", journal.filter((event, index) => {
+              offset = index > 0 && journal[index - 1]?.sequence === event.sequence ? offset + 1 : 0
+              return after === undefined || Number(event.sequence) > after.value ||
+                (event.sequence === after.value && offset > after.offset)
+            }))
+          }
           default:
             return rows(String(selector._tag), [])
         }
@@ -121,6 +129,17 @@ const send = async (page: Page, text: string): Promise<void> => {
   await page.getByTestId("composer-send").click()
 }
 
+/** Exercise workspace flows after the introduction, using its existing command. */
+const finishGuide = async (page: Page): Promise<void> => {
+  await expect(page.locator(".guide-shell")).toBeVisible()
+  await page.keyboard.press("Control+k")
+  await expect(page.getByTestId("composer-input")).toBeFocused()
+  await page.keyboard.insertText("/onboarding.act finish")
+  await page.keyboard.press("Enter")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "14")
+  await expect(page.getByTestId("composer-input")).toBeHidden()
+}
+
 test.beforeEach(async ({ page }) => {
   // A persisted store from an earlier test must not carry state across tests.
   await page.addInitScript(() => {
@@ -135,6 +154,7 @@ test.beforeEach(async ({ page }) => {
 test("T1: launch a fixture flow, steer it, stop it, and see it in the run inbox", async ({ page }) => {
   const { rpc } = await serve(page)
   await page.goto("/")
+  await finishGuide(page)
 
   // Launch: /flow.run provisions the workspace, plans, and runs — the card tracks the run.
   await send(page, `/flow.run review-pr ${REPO}`)
@@ -183,6 +203,7 @@ test("T1: turn explanations lead to durable historical inspection in the same em
   ]
   await serve(page, journal)
   await page.goto("/")
+  await finishGuide(page)
   await send(page, `/runs.open run-e2e ${REPO}`)
   const card = page.getByTestId(`card-flow-run-${RUN_ID}`)
   await expect(card.getByRole("list", { name: "Turn explanations" })).toContainText("I’ll read the existing implementation")
@@ -198,7 +219,7 @@ test("T1: turn explanations lead to durable historical inspection in the same em
   await expect(pane).toHaveAttribute("data-span", "call-1")
   await expect(pane).toContainText("src/index.ts")
   // Rendering is optimistic; wait for the existing command-settlement trace before reloading OPFS.
-  await expect(page.getByText(/You ran \/runs\.trace\.select run-e2e call-1 .*→ executed/)).toBeVisible()
+  await expect(page.getByText(/You ran \/runs\.trace\.select sourceCard=flow-run-run-e2e run-e2e call-1 .*→ executed/)).toBeVisible()
   await expect(card).toContainText("At #4")
   journal.push(record(5, "control.agent.cell-call-settled", { flowName: "files.read", outcome: "success", value: "later recorded content" }))
 
@@ -240,10 +261,40 @@ const tabTo = async (page: Page, target: Locator): Promise<void> => {
   throw new Error("The coding control was not reachable with Tab")
 }
 
+test("T1: a prompt-only run reveals its recorded plan and blocked execution through keyboard controls", async ({ page }) => {
+  test.setTimeout(120_000)
+  // The same synthetic production-writer records as the projection test,
+  // addressed to this gateway fixture's actual run ID.
+  const events = JSON.parse(JSON.stringify(blockedCodingJournal()).replaceAll("run-1", RUN_ID))
+  await serve(page, events)
+  await page.goto("/")
+  await finishGuide(page)
+  await expect(page.locator(".guide-shell")).toBeVisible()
+  await page.keyboard.press("Control+k")
+  await expect(page.getByTestId("composer-input")).toBeFocused()
+  await page.keyboard.insertText(`/flow.run coding ${REPO} ${JSON.stringify({ prompt: CODING_PLAN.prompt })}`)
+  await page.keyboard.press("Enter")
+  const card = page.getByTestId(`card-flow-run-${RUN_ID}`)
+  await expect(card.getByRole("list", { name: "Predicted Changes", exact: true })).toContainText("Store repository memory")
+  await expect(card).toContainText("Blocked after 1 round.")
+  await expect(card).not.toContainText("Validated after")
+  const first = card.getByRole("button", { name: /Store repository memory/ })
+  await tabTo(page, first)
+  await page.keyboard.press("Enter")
+  await expect(first).toHaveAttribute("aria-expanded", "true")
+  const inspect = card.getByRole("button", { name: "Inspect failed execution" })
+  await tabTo(page, inspect)
+  expect(await inspect.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none")
+  await page.keyboard.press("Enter")
+  await expect(card.locator("[data-span='engine:failed-round:0']")).toContainText("The required fast check failed.")
+  await page.screenshot({ path: "/tmp/smithers-coding-evidence-ui.png", fullPage: true })
+})
+
 test("T1: coding plan launch, inspection and restoration work with only the keyboard in the Command-K shell", async ({ page }) => {
   test.setTimeout(120_000)
   const { rpc } = await serve(page)
   await page.goto("/")
+  await finishGuide(page)
   await expect(page.locator(".guide-shell")).toBeVisible()
   await expect(page.getByTestId("composer-input")).toBeHidden()
   await page.keyboard.press("Control+k")
@@ -266,7 +317,7 @@ test("T1: coding plan launch, inspection and restoration work with only the keyb
   await expect(card).toContainText("src/memory.test.ts")
   await expect(card).toContainText("fast · required")
   await expect(card).not.toContainText("passed")
-  await expect(page.getByText(/You ran \/runs\.coding\.select run-e2e memory .*→ executed/)).toBeVisible()
+  await expect(page.getByText(/You ran \/runs\.coding\.select sourceCard=flow-run-run-e2e run-e2e memory .*→ executed/)).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog", { name: "Talk to Smithers" })).toBeHidden()
   await page.reload()

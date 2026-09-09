@@ -306,7 +306,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * onRunCommand with data-flow set.
        */
       "../cards/ChangeCards.tsx": 21,
-      "../cards/CodingPlanCard.tsx": 1, // runs.coding.select
+      "../cards/CodingPlanCard.tsx": 2, // runs.coding.select, runs.trace.select
       /*
        * Connection, world and browser card interactions, plus the embedded
        * wiki collaboration cards (ad438463a6): page Previous/Next and the

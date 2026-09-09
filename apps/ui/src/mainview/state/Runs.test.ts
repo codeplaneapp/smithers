@@ -12,6 +12,7 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { CODING_PLAN } from "../cards/fixtures/CodingPlan"
+import { preparedCodingJournal } from "../cards/fixtures/CodingJournal"
 import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
 import { runCardInScope, approvalCardIdFor } from "./RunReference"
@@ -751,6 +752,23 @@ describe("the approvals inbox — list, open, and the row decision", () => {
 
 
 describe("typed coding launch and plan inspection", () => {
+  test("the existing actor-tagged selection command reads prepared native plan evidence and respects the cursor", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-1", flowId: "coding", status: "running" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("runs.open", `run-1 ${REPO}`)
+    const original = store.collections.cards.get("flow-run-run-1") as Extract<Card, { kind: "run-trace" }>
+    await store.dispatch({ type: "card.upsert", actor: "system", card: { ...original,
+      payload: { ...original.payload, input: { prompt: CODING_PLAN.prompt }, events: preparedCodingJournal(), lastSeq: 5 } } })
+    expect((await controller.commands.runForAgent("runs.coding.select", "sourceCard=flow-run-run-1 run-1 memory")).status).toBe("executed")
+    const selected = store.collections.cards.get(original.id) as typeof original
+    expect(selected.payload.codingChangeId).toBe("memory")
+    expect([...store.collections.transitions.values()].filter(row => row.type === "card.upsert").at(-1)?.actor).toBe("smithers")
+    await store.dispatch({ type: "card.upsert", actor: "user", card: { ...selected, payload: { ...selected.payload, cursorSeq: 3, liveTail: false } } })
+    expect(said(await controller.commands.run("runs.coding.select", "sourceCard=flow-run-run-1 run-1 memory"))).toContain("no recorded planned Change")
+  })
+
   test("flow.run preserves structured input, selection is actor-tagged and persisted, and reopening retains the plan", async () => {
     const storage = memoryStorage()
     const store = await createAppStore({ kind: "localStorage", storage })

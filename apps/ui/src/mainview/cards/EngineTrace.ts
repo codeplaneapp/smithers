@@ -26,8 +26,9 @@ const decodeEnvelope = Schema.decodeUnknownOption(Envelope)
 const decodeAttempt = Schema.decodeUnknownOption(EngineEvent.AttemptPayload, { onExcessProperty: "error" })
 const decodeState = Schema.decodeUnknownOption(EngineEvent.StatePayload, { onExcessProperty: "error" })
 const decodeMarker = Schema.decodeUnknownOption(EngineEvent.CurrentAttempt)
+const stateDecisions = ["created", "transitioned", "handed-off", "lineage-exhausted", "round-invalid", "quarantined", "interrupt-released"] as const
 const decodeDecision = Schema.decodeUnknownOption(Schema.Struct({
-  decision: Schema.Literals(["created", "transitioned", "handed-off", "lineage-exhausted", "round-invalid", "quarantined", "interrupt-released"]),
+  decision: Schema.Literals(stateDecisions),
   status: Schema.optionalKey(Schema.Literals(["pending", "running", "suspended", "completed", "failed", "cancelled"])),
   state: RunState
 }))
@@ -52,6 +53,25 @@ interface Execution {
   readonly envelope: Envelope
   readonly span: TraceBuilder
   parentId?: string
+  parentExecutionId?: string
+  parentKnown?: boolean
+  flowName?: string
+  coherent: boolean
+  result?: { readonly value: unknown; readonly sequence: number }
+}
+
+/** A render-only view of the same decoded execution facts; never persisted. */
+export interface EngineExecutionEvidence {
+  readonly executionId: string
+  readonly generation: number
+  readonly spanId: string
+  readonly parentExecutionId?: string
+  readonly parentKnown: boolean
+  readonly flowName?: string
+  readonly input?: unknown
+  readonly coherent: boolean
+  readonly status: string
+  readonly result?: { readonly value: unknown; readonly sequence: number }
 }
 const decodeProjection = Schema.decodeUnknownOption(Schema.Struct({
   version: Schema.Literal(1), executionId: JournalEvent.RunId, generation: JournalEvent.NonNegativeQuantity
@@ -85,11 +105,11 @@ export const engineProjectionPending = (records: ReadonlyArray<JournalRecord> = 
  * Only recorded parent IDs can nest executions. Ambiguous parent generations
  * remain beside the root instead of guessing which historical parent owned them.
  */
-export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): Array<TraceBuilder> => {
+const foldEngineJournal = (records: ReadonlyArray<JournalRecord>) => {
   const executions = new Map<string, Execution>()
   const attempts = new Map<string, TraceBuilder>()
   const notices: Array<TraceBuilder> = []
-  const seen = new Set<string>()
+  const seen = new Map<string, string>()
   for (const row of records) {
     if (row.kind === "control.engine.projection-gap") {
       const notice = span(`engine-gap:${row.sequence ?? notices.length}`, "event", "Engine evidence gap", row.occurredAt ?? 0, {
@@ -114,15 +134,34 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
     const envelope = decoded.value
     const key = identity(envelope.executionId, envelope.generation)
     const eventKey = identity(key, envelope.sequence)
-    if (seen.has(eventKey)) continue
-    seen.add(eventKey)
+    const previous = seen.get(eventKey)
+    if (previous !== undefined) {
+      if (previous !== JSON.stringify(envelope)) {
+        const conflict = executions.get(key)
+        if (conflict !== undefined) conflict.coherent = false
+      }
+      continue
+    }
+    seen.set(eventKey, JSON.stringify(envelope))
     let execution = executions.get(key)
     if (execution === undefined) {
       execution = {
         envelope,
+        coherent: true,
         span: span(`engine:${key}`, "execution", envelope.executionId, envelope.emittedAtMs, detail(row, envelope))
       }
       executions.set(key, execution)
+    }
+    const parent = (parentId: string | undefined) => {
+      if (execution.parentKnown && execution.parentExecutionId !== parentId) execution.coherent = false
+      execution.parentKnown = true
+      execution.parentExecutionId = parentId
+      execution.parentId = parentId
+    }
+    const result = (value: unknown) => {
+      if (Number.isSafeInteger(row.sequence) && row.sequence! >= 0) {
+        execution.result = { value, sequence: row.sequence! }
+      }
     }
     const generic = () => {
       const event = span(`engine-event:${eventKey}`, "event", envelope.eventType, envelope.emittedAtMs, detail(row, envelope))
@@ -153,8 +192,10 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
     }
     if (envelope.eventType === EngineEvent.attemptEventType) {
       const recorded = decodeAttempt(envelope.payload)
-      if (Option.isNone(recorded) || recorded.value.executionId !== envelope.executionId) { generic(); continue }
+      if (Option.isNone(recorded) || recorded.value.executionId !== envelope.executionId) { execution.coherent = false; generic(); continue }
       const { lifecycle, lineage, stepKeyDigest, attempt: number } = recorded.value
+      // Lineage may describe a trampoline predecessor, not a spawned parent.
+      // Product ancestry comes only from RunState.parentExecutionId below.
       execution.parentId = lineage.parentRunId ?? undefined
       const current = attempt(stepKeyDigest, number)
       current.startedAt = lifecycle.startedAtMs
@@ -171,10 +212,11 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
     }
     if (envelope.eventType === EngineEvent.stateEventType) {
       const recorded = decodeState(envelope.payload)
-      if (Option.isNone(recorded) || recorded.value.executionId !== envelope.executionId) { generic(); continue }
+      if (Option.isNone(recorded) || recorded.value.executionId !== envelope.executionId) { execution.coherent = false; generic(); continue }
       execution.parentId = recorded.value.lineage.parentRunId ?? undefined
       if (recorded.value.event._tag !== "Execution") { generic(); continue }
       const { lifecycle } = recorded.value.event
+      execution.result = undefined
       execution.span.detail = { ...detail(row, envelope), sequence: execution.span.detail.sequence, input: execution.span.detail.input }
       if (lifecycle.state === "completed") {
         execution.span.status = lifecycle.result._tag === "Success" ? "completed" : "failed"
@@ -183,12 +225,14 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
           ...execution.span.detail,
           ...(lifecycle.result._tag === "Success" ? { output: json(lifecycle.result.value) } : { message: json(lifecycle.result.detail) })
         }
+        if (lifecycle.result._tag === "Success") result(lifecycle.result.value)
       } else execution.span.status = lifecycle.state === "suspended" ? "waiting" : "running"
       continue
     }
     if (envelope.eventType === "flows.engine.interrupted") {
       const cancelled = decodeCancellation(envelope.payload)
       if (Option.isNone(cancelled)) { generic(); continue }
+      execution.result = undefined
       execution.span.status = "cancelled"
       execution.span.endedAt = cancelled.value.interruptedAtMs
       execution.span.detail = { ...detail(row, envelope), sequence: execution.span.detail.sequence, input: execution.span.detail.input }
@@ -196,10 +240,24 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
     }
     if (envelope.eventType === "flows.engine.run-decision") {
       const decision = decodeDecision(envelope.payload)
-      if (Option.isNone(decision)) { generic(); continue }
+      if (Option.isNone(decision)) {
+        const payload = envelope.payload
+        // Claim, owner-fence, wake and child-policy decisions deliberately do
+        // not carry RunState. Keep them visible without losing valid state
+        // evidence; malformed state-bearing decisions still refuse claims.
+        if (typeof payload === "object" && payload !== null &&
+          ("state" in payload || ("decision" in payload && stateDecisions.some((name) => name === payload.decision)))) {
+          execution.coherent = false
+        }
+        generic()
+        continue
+      }
       const { state, status } = decision.value
+      if (execution.flowName !== undefined && execution.flowName !== state.flowName) execution.coherent = false
+      execution.flowName = state.flowName
       execution.span.label = state.flowName
-      execution.parentId = state.parentExecutionId
+      parent(state.parentExecutionId)
+      execution.result = undefined
       execution.span.detail = { ...detail(row, envelope), sequence: execution.span.detail.sequence, input: state.payload }
       if (decision.value.decision === "created") execution.span.status = "pending"
       // RunDriver commits this decision with suspended even when its payload
@@ -208,15 +266,16 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
       else if (status === "running" || status === "pending" || status === "suspended") {
         execution.span.status = status === "suspended" ? "waiting" : status
       } else if (status !== undefined) {
-        const result = decodeResult(state.result)
-        if (Option.isSome(result) && result.value._tag === "Handoff" && status === "completed" && decision.value.decision === "handed-off") {
+        const decodedResult = decodeResult(state.result)
+        if (Option.isSome(decodedResult) && decodedResult.value._tag === "Handoff" && status === "completed" && decision.value.decision === "handed-off") {
           // A round handed off; its raw result describes the successor, not an output.
           execution.span.status = "completed"
           execution.span.endedAt = envelope.emittedAtMs
           continue
         }
-        if (Option.isNone(result) || result.value._tag !== "Complete" ||
-          (status === "completed") !== (result.value.exit._tag === "Success")) {
+        if (Option.isNone(decodedResult) || decodedResult.value._tag !== "Complete" ||
+          (status === "completed") !== (decodedResult.value.exit._tag === "Success")) {
+          execution.coherent = false
           execution.span.status = "unknown"
           generic()
           continue
@@ -225,8 +284,9 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
         execution.span.endedAt = envelope.emittedAtMs
         execution.span.detail = {
           ...execution.span.detail,
-          ...(result.value.exit._tag === "Success" ? { output: json(result.value.exit.value) } : { message: json(result.value.exit.cause) })
+          ...(decodedResult.value.exit._tag === "Success" ? { output: json(decodedResult.value.exit.value) } : { message: json(decodedResult.value.exit.cause) })
         }
+        if (decodedResult.value.exit._tag === "Success") result(decodedResult.value.exit.value)
       }
       continue
     }
@@ -254,5 +314,23 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
     if (parent === undefined) roots.push(current.span)
     else parent.span.children.push(current.span)
   }
-  return [...roots, ...notices]
+  const evidence: Array<EngineExecutionEvidence> = [...executions.values()].map((current) => ({
+    executionId: current.envelope.executionId,
+    generation: current.envelope.generation,
+    spanId: current.span.id,
+    parentExecutionId: current.parentExecutionId,
+    parentKnown: current.parentKnown === true,
+    flowName: current.flowName,
+    input: current.span.detail.input,
+    coherent: current.coherent,
+    status: current.span.status,
+    result: current.result
+  }))
+  return { trace: [...roots, ...notices], evidence }
 }
+
+export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): Array<TraceBuilder> => foldEngineJournal(records).trace
+
+/** Product claims use these typed facts, never text rendered into trace details. */
+export const engineExecutionEvidence = (records: ReadonlyArray<JournalRecord>): ReadonlyArray<EngineExecutionEvidence> =>
+  foldEngineJournal(records).evidence
