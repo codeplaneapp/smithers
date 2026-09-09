@@ -1,15 +1,14 @@
 /**
  * The host seam that watches one model-backed step while it runs.
  *
- * {@link module:Agent} answers with a `Stream<AgentEvent>` and
- * {@link module:AgentAction} consumes the whole stream itself, because it owes
- * its caller one decoded value and the answer is only known at the last
- * `complete` transition. That is the right result and it left the events with
- * nowhere to go. A host rendering the run sees no token deltas, no produced
- * cell, and no calls until the step is over, so hosts re-implemented the loop
- * behind their own `Action` to reach the stream. This service removes that
- * reason to re-implement it. The step still buffers every event for the
- * decode; the sink is handed each one on the way past.
+ * {@link module:Agent} exposes a `Stream<AgentEvent>`; {@link module:AgentAction}
+ * consumes it to produce one decoded value. The sink receives each emitted
+ * agent event while the overall step runs.
+ *
+ * With {@link module:FlowEngineLike}, model deltas arrive at the sealed model-call boundary,
+ * after the provider stream settles. That adapter records the complete provider
+ * stream before emitting its events. The sink does not report live provider
+ * progress. A replay emits the recorded events again without calling the provider.
  *
  * The service is optional. `AgentAction` resolves it with
  * `Effect.serviceOption`, so a composition that provides none behaves exactly

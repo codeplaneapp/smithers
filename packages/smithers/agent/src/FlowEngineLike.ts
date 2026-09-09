@@ -638,7 +638,7 @@ const seal = Effect.fn("FlowEngineLike.seal")(function*(
 ) {
   const prepared = yield* route.prepare(step.request)
   const declaration = step.keyMaterial.body
-  const material: KeyMaterial.KeyMaterial = {
+  const material = {
     ...step.keyMaterial,
     body: {
       _tag: "PreparedModelCall",
@@ -654,13 +654,42 @@ const seal = Effect.fn("FlowEngineLike.seal")(function*(
         method: prepared.method,
         url: prepared.url,
         publicHeaders: prepared.publicHeaders,
-        body: Array.from(prepared.body)
+        body: ""
       }
     }
+  } satisfies KeyMaterial.KeyMaterial
+  // Keep historical keys byte-for-byte: Uint8Array.join emits exactly the
+  // decimal JSON elements of Array.from(body), without allocating or walking
+  // a million generic canonical-JSON nodes. Let StepKey canonicalize all other
+  // material, then splice these known-canonical byte elements at its hash seam.
+  const wire = `[${prepared.body.join(",")}]`
+  const crypto = yield* keyed(Crypto.Crypto)
+  for (let ordinal = 0;; ordinal++) {
+    material.body.request.body = `flows/agent/wire-body/${ordinal}`
+    const marker = JSON.stringify(material.body.request.body)
+    let collision = false
+    const key = yield* StepKey.fromKeyMaterial(material, {}).pipe(
+      Effect.provideService(Crypto.Crypto, {
+        ...crypto,
+        digest: (algorithm, data) => {
+          const canonical = new TextDecoder().decode(data)
+          const offset = canonical.indexOf(marker)
+          // Caller material can contain the same literal. Retry with another
+          // marker rather than replacing any caller-owned value. No marker is
+          // ever part of the returned key's bytes.
+          collision = offset < 0 || canonical.indexOf(marker, offset + marker.length) !== -1
+          return crypto.digest(
+            algorithm,
+            collision ? data : new TextEncoder().encode(
+              canonical.slice(0, offset) + wire + canonical.slice(offset + marker.length)
+            )
+          )
+        }
+      }),
+      Effect.mapError((cause) => engineFailed("The prepared model request could not be sealed", cause))
+    )
+    if (!collision) return key
   }
-  return yield* keyed(StepKey.fromKeyMaterial(material, {})).pipe(
-    Effect.mapError((cause) => engineFailed("The prepared model request could not be sealed", cause))
-  )
 })
 
 /**

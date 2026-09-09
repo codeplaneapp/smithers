@@ -31,9 +31,11 @@ import {
   Exit,
   Fiber,
   Layer,
+  Logger,
   Option,
   PlatformError,
   Redacted,
+  References,
   Result,
   Schedule,
   Schema,
@@ -42,7 +44,7 @@ import {
 } from "effect"
 import * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as Budget from "../src/Budget.ts"
 import * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as InternalFlowEngineLike from "../src/internal/FlowEngineLike.ts"
@@ -670,26 +672,111 @@ describe("FlowEngineLike.make", () => {
   })
 
   it("reports a store that failed as nothing pinned, and says why in the log", async () => {
-    const outcome = await drive(Effect.gen(function*() {
-      const engine = yield* FlowEngineLike.make({
-        model: countingModel([]),
-        route: staticRoute()
-      }).pipe(
-        Effect.provideService(
-          Checkpoints.Checkpoints,
-          Checkpoints.make({
-            capture: () => Effect.fail(new StdError.StdError({ code: "command_failed", message: "git could not run" })),
-            materialize: () => Effect.fail(new StdError.StdError({ code: "not_found", message: "no such ref" }))
-          })
+    const logs: Array<{ message: unknown; annotations: Readonly<Record<string, unknown>>; cause: string }> = []
+    const capture = Logger.make((entry) => {
+      logs.push({
+        message: entry.message,
+        annotations: entry.fiber.getRef(References.CurrentLogAnnotations),
+        cause: String(entry.cause)
+      })
+    })
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const engine = yield* FlowEngineLike.make({
+          model: countingModel([]),
+          route: staticRoute()
+        }).pipe(
+          Effect.provideService(
+            Checkpoints.Checkpoints,
+            Checkpoints.make({
+              capture: () =>
+                Effect.fail(new StdError.StdError({ code: "command_failed", message: "git could not run" })),
+              materialize: () => Effect.fail(new StdError.StdError({ code: "not_found", message: "no such ref" }))
+            })
+          )
         )
-      )
-      return yield* engine.capture({ id: "cp-0-0", identity: { session: "s", frame: 0, boundary: "cell" } })
-    }))
+        return yield* engine.capture({ id: "cp-0-0", identity: { session: "s", frame: 0, boundary: "cell" } })
+      }).pipe(Effect.provide(Logger.layer([capture], { mergeWithExisting: false })))
+    )
 
     // The cell is told nothing was pinned, which is what happened and what it
     // can act on. The reason is not thrown away — it is logged, so a run whose
     // checkpoints never work says why rather than only stopping.
     expect(completed(outcome)).toEqual(Option.none())
+    expect(logs).toHaveLength(1)
+    expect(String(logs[0]!.message)).toContain("A checkpoint could not be pinned")
+    expect(logs[0]!.annotations).toMatchObject({ checkpoint: "cp-0-0" })
+    expect(logs[0]!.cause).toContain("StdError")
+    expect(logs[0]!.cause).toContain("git could not run")
+  })
+
+  it("seals a 1 MiB wire body without numeric-array key material, even before budget refusal", async () => {
+    const derive = vi.spyOn(StepKey, "fromKeyMaterial")
+    const calls: Array<string> = []
+    try {
+      const outcome = await drive(Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 0 } })
+        const port = yield* FlowEngineLike.make({
+          model: countingModel(calls),
+          route: staticRoute("large-wire", "x".repeat(1024 * 1024))
+        }).pipe(Effect.provideService(Budget.Budget, budget))
+        return yield* Stream.runCollect(port.sealStep(step("small declaration")))
+      }))
+      expect(outcome._tag).toBe("failed")
+      expect(calls).toEqual([])
+      expect(derive).toHaveBeenCalled()
+      for (const [material] of derive.mock.calls) {
+        expect(JSON.stringify(material).length).toBeLessThan(4096)
+      }
+    } finally {
+      derive.mockRestore()
+    }
+  })
+
+  it.each([
+    new Uint8Array(),
+    Uint8Array.from({ length: 256 }, (_, index) => index),
+    new Uint8Array([99, 0, 127, 255, 88]).subarray(1, 4)
+  ])("preserves historical key bytes for wire body %j, including marker collisions", async (body) => {
+    const keys: Array<string> = []
+    const declared = step("historical", {
+      body: { nested: ["flows/agent/wire-body/0", "flows/agent/wire-body/1"], escaped: "\"flows/agent/wire-body/2\"" }
+    })
+    const prepared = { ...preparedFor("historical", "not the wire bytes"), body }
+    const outcome = await drive(Effect.gen(function*() {
+      // Independent legacy derivation, including its numeric array. The
+      // reservation sees the actual key passed to the durable activity.
+      const expected = yield* StepKey.fromKeyMaterial({
+        ...declared.keyMaterial,
+        body: {
+          _tag: "PreparedModelCall",
+          declaration: declared.keyMaterial.body,
+          request: {
+            routeId: prepared.routeId,
+            protocolId: prepared.protocolId,
+            method: prepared.method,
+            url: prepared.url,
+            publicHeaders: prepared.publicHeaders,
+            body: Array.from(body)
+          }
+        }
+      }, {})
+      const port = yield* FlowEngineLike.make({
+        model: countingModel([]),
+        route: { prepare: () => Effect.succeed(prepared) }
+      }).pipe(Effect.provideService(Budget.Budget, {
+        ...Budget.makeUnbounded(),
+        reserve: (key) =>
+          Effect.sync(() => {
+            keys.push(key)
+            return { _tag: "proceed" } as const
+          })
+      }))
+      yield* Stream.runDrain(port.sealStep(declared))
+      yield* Stream.runDrain(port.sealStep(declared))
+      return expected
+    }))
+    expect(keys).toEqual([completed(outcome), completed(outcome)])
   })
 
   it("derives a different sealed key when the prepared wire request changes", async () => {

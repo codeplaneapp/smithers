@@ -1017,6 +1017,11 @@ consumes the whole event stream itself to owe its caller one decoded value; a
 provided sink is handed each event on the way past, and the step's answer,
 correction budget, and failures are the same with a sink as without one.
 
+With `FlowEngineLike`, model deltas arrive at the sealed model-call boundary,
+after the provider stream settles. The adapter records the complete provider
+stream before emitting its events. The sink does not report live provider
+progress. A replay emits the recorded events again without calling the provider.
+
 ### EventSink.Service and EventSink.EventSink
 
 ```ts

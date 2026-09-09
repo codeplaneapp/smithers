@@ -101,8 +101,12 @@ and the field-by-field tables are in the
 ## Watch the step run
 
 A step answers with one decoded value, which it only knows at the end. Provide
-`EventSink` to also receive each agent event as it happens: token deltas, the
-cell that was produced, the calls it made:
+`EventSink` to receive the emitted agent events: token deltas, the produced
+cell, and its calls. With `FlowEngineLike`, model deltas arrive at the sealed
+model-call boundary, after the provider stream settles. The adapter records
+the complete provider stream before emitting those events; they do not report
+live provider progress. A replay emits the recorded events again without
+calling the provider:
 
 ```ts
 import { EventSink } from "@smthrs/agent"
