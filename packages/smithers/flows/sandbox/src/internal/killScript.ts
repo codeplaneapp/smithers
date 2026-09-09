@@ -8,17 +8,23 @@
 const pidfileWaitSeconds = 5
 
 /**
- * A `kids` function that prints every descendant of a pid by walking
- * `/proc` — the one enumeration a minimal Linux machine is guaranteed to
- * serve. The parent pid is parsed from the text after the *last* `)` in
- * `/proc/N/stat`, because the comm field before it may itself contain spaces
- * (`(tmux: server)`) and a positional `read` would misparse it and skip that
- * whole subtree. Recursion runs in a subshell so an inner call cannot clobber
- * the caller's variables.
+ * Snapshot `/proc` once and index its parent-to-children edges in awk. An
+ * explicit stack then visits only the target subtree in postorder, without
+ * rescanning the table or starting a subshell for each descendant. Collection
+ * costs O(visible processes + descendants) before the first signal.
+ *
+ * Parse the parent pid after the last `)` in `/proc/N/stat`: the comm field
+ * may itself contain spaces and closing parentheses. Linked sibling entries
+ * avoid repeatedly copying a broad parent's entire child list. The visited
+ * set also bounds traversal if pid reuse during the snapshot forms a cycle.
  */
 const procKids = `kids() { t=$1; for d in /proc/[0-9]*; do read -r s 2>/dev/null < "$d/stat" || continue; ` +
-  `r=\${s##*) }; set -- $r; [ "$2" = "$t" ] || continue; ` +
-  `c=\${d#/proc/}; ( kids "$c" ); echo "$c"; done; }`
+  `r=\${s##*) }; set -- $r; printf '%s %s\\n' "\${d#/proc/}" "$2"; ` +
+  `done | awk -v root="$t" '{ pid=$1+0; parent=$2+0; sibling[pid]=first[parent]; first[parent]=pid } ` +
+  `END { root+=0; stack[1]=root; seen[root]=1; depth=1; while (depth) { ` +
+  `pid=stack[depth]; child=first[pid]; if (child != "") { first[pid]=sibling[child]; ` +
+  `if (!seen[child]++) stack[++depth]=child; ` +
+  `} else { if (pid != root) print pid; depth-- } } }'; }`
 
 /** A `kids` function on `pgrep -P`, for hosts with no `/proc` (macOS). */
 const pgrepKids = `kids() { for c in $(pgrep -P "$1" 2>/dev/null); do ( kids "$c" ); echo "$c"; done; }`
