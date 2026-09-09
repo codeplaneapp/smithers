@@ -195,7 +195,7 @@ export const collect = (
       )
       return yield* RetentionOps.deleteRuns(sql, candidates, { dryRun, assumeLadder: false })
     })
-    const removed = yield* (dryRun ? sql.withTransaction(pass) : DurableWriter.make(sql).write(pass)).pipe(
+    const removed = yield* (dryRun ? sql.withTransaction(pass) : DurableWriter.make(sql).write(pass).pipe(
       Effect.catchIf(
         (cause): cause is DurableWriter.DatabaseError => cause instanceof DurableWriter.DatabaseError,
         (cause) =>
@@ -207,7 +207,7 @@ export const collect = (
             })
           )
       )
-    )
+    ))
     return {
       database: options.database ?? "",
       olderThanMs: options.olderThanMs,
