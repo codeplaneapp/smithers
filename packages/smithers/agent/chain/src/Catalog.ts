@@ -7,6 +7,7 @@
  *
  * @since 0.1.0
  */
+import type * as CallKey from "./CallKey.ts"
 import * as Digest from "@smthrs/core/Digest"
 import { Clock, Context, type Effect, Layer, Random, Schema } from "effect"
 
@@ -42,6 +43,10 @@ export interface CallSlot {
   readonly chain: string
   readonly link: number
   readonly ordinal: number
+  /** The durable replay identity of this invocation. */
+  readonly key?: CallKey.CallKey
+  /** Aborted on Stop for entries that settle before interruption returns. */
+  readonly signal?: AbortSignal | undefined
 }
 
 /**
@@ -55,6 +60,8 @@ export interface CallSlot {
 export interface Entry {
   readonly name: string
   readonly description: string
+  /** Signal cancellation, then await the handler and its journal receipt before returning. */
+  readonly settleOnInterrupt?: boolean | undefined
   readonly handler: (payload: unknown, slot?: CallSlot) => Effect.Effect<unknown, CallError>
   /**
    * An optional declaration digest overriding the default name+description
@@ -128,6 +135,7 @@ const snapshotEntry = (entry: Entry): Entry =>
     description: entry.description,
     digest: entry.digest,
     handler: entry.handler,
+    settleOnInterrupt: entry.settleOnInterrupt,
     name: entry.name
   })
 

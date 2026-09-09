@@ -35,25 +35,30 @@ const argsOf = (name: string, payload: unknown): Effect.Effect<string | undefine
   return Effect.succeed(args)
 }
 
-const entryFor = (commands: CommandRegistry, entry: FlowEntry): Catalog.Entry => {
+const entryFor = (commands: CommandRegistry, entry: FlowEntry, lineage?: string): Catalog.Entry => {
   const { name, description, capabilities } = entry.binding.descriptor
   return {
     name,
     description,
     capabilities,
+    settleOnInterrupt: true,
     handler: (payload, slot) => Effect.gen(function*() {
       const service = yield* Effect.serviceOption(Authorize.Authorize)
       let refusal: Authorize.AuthorizeError | undefined
       return yield* argsOf(name, payload).pipe(
         Effect.flatMap((args) =>
-          Effect.tryPromise({
-            try: () => commands.runForAgent(name, args, Option.isNone(service) ? undefined : {
-              authorize: service.value,
-              slot: slot ?? { chain: "app", link: 0, ordinal: 0 },
-              authorized: Cell.declarationDigest(entry.binding.descriptor),
-              refused: (error) => { refusal = error }
-            }),
-            catch: (cause) => new Catalog.CallError({ name, message: `flow threw: ${String(cause)}` })
+          Effect.suspend(() => {
+            let pending: ReturnType<CommandRegistry["runForAgent"]> | undefined
+            return Effect.tryPromise({
+              try: (signal) => pending = commands.runForAgent(name, args, Option.isNone(service) ? undefined : {
+                lineage,
+                authorize: service.value,
+                slot: slot ?? { chain: "app", link: 0, ordinal: 0 },
+                authorized: Cell.declarationDigest(entry.binding.descriptor),
+                refused: (error) => { refusal = error }
+              }, slot?.signal === undefined ? signal : AbortSignal.any([slot.signal, signal])),
+              catch: (cause) => new Catalog.CallError({ name, message: `flow threw: ${String(cause)}` })
+            }).pipe(Effect.onInterrupt(() => Effect.promise(async () => { await pending?.catch(() => {}) })))
           })
         ),
         Effect.flatMap((outcome) => {
@@ -81,8 +86,8 @@ const entryFor = (commands: CommandRegistry, entry: FlowEntry): Catalog.Entry =>
 }
 
 /** Every flow the agent may call: the registry narrowed to model-invocable entries. */
-export const commandEntries = (commands: CommandRegistry): ReadonlyArray<Catalog.Entry> =>
-  commands.callable().map((entry) => entryFor(commands, entry))
+export const commandEntries = (commands: CommandRegistry, lineage?: string): ReadonlyArray<Catalog.Entry> =>
+  commands.callable().map((entry) => entryFor(commands, entry, lineage))
 
 /**
  * The subset the prompt's catalog block teaches: callable flows that are not

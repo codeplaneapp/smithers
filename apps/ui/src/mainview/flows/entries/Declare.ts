@@ -4,8 +4,10 @@
  * surface a handler acts on. Flows.ts re-exports the public half.
  */
 import * as Flow from "@smthrs/core/Flow"
+import type * as Cell from "@smthrs/harness/Cell"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { Effect, Schema } from "effect"
+import { FlowCancellation } from "../FlowCancellation"
 import type { RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
 import type { AppController } from "../../state/AppController"
 import type { CommandState, FlowEntry, FlowMetadata } from "../registry"
@@ -74,21 +76,29 @@ const APP_ACT: ReadonlyArray<string> = ["app:act"]
  * default; only explicitly returned refusal strings are public.
  */
 const act = (
-  run: () => CommandResult | Promise<CommandResult>
+  run: (signal: AbortSignal) => CommandResult | Promise<CommandResult>
 ): Effect.Effect<{ readonly value?: string }, string | { readonly cause: unknown }> =>
-  Effect.flatMap(
-    Effect.tryPromise({
-      try: async () => run(),
+  Effect.suspend(() => {
+    let pending: Promise<CommandResult> | undefined
+    return Effect.tryPromise({
+      try: async (signal) => {
+        pending = Promise.resolve(run(signal))
+        return pending
+      },
       // Preserve diagnostics for host-side error taps, including thrown strings.
       catch: (cause) => ({ cause })
-    }),
-    (result) =>
-      typeof result === "string"
-        ? Effect.fail(result)
-        : Effect.succeed(
-          typeof result === "object" && result !== null ? { value: result.value } : {}
-        )
-  )
+    }).pipe(
+      // Abort is cooperative. A controller that cannot abort must finish before
+      // its binding exits, so no abandoned promise can mutate after Stop returns.
+      Effect.onInterrupt(() => Effect.promise(async () => { await pending?.catch(() => {}) })),
+      Effect.flatMap((result) =>
+        typeof result === "string"
+          ? Effect.fail(result)
+          : Effect.succeed(
+            typeof result === "object" && result !== null ? { value: result.value } : {}
+          ))
+    )
+  })
 
 /**
  * The payload schemas a flow may declare: anything that decodes from unknown
@@ -101,7 +111,8 @@ type Payload = Schema.Top & Schema.ConstraintDecoder<unknown, never>
 export interface Declaration<I extends Payload> extends FlowMetadata {
   readonly name: string
   readonly input: I
-  readonly handler: (payload: I["Type"]) => CommandResult | Promise<CommandResult>
+  /** The call identity is available for destination-side idempotency. */
+  readonly handler: (payload: I["Type"], signal: AbortSignal, call: Cell.Call) => CommandResult | Promise<CommandResult>
   /** Capability claims; the free `app:act` default when omitted. */
   readonly capabilities?: ReadonlyArray<string>
   /**
@@ -127,6 +138,7 @@ export const flow = <I extends Payload>(declaration: Declaration<I>): FlowEntry 
   const { name, input, handler, capabilities, userOnly, ...metadata } = declaration
   const described = metadata.args === undefined ? metadata.summary : `${metadata.summary} (args: ${metadata.args})`
   return {
+    cooperativeCancellation: true,
     binding: FlowBinding.make({
       flow: Flow.make({
         name,
@@ -137,7 +149,8 @@ export const flow = <I extends Payload>(declaration: Declaration<I>): FlowEntry 
       }),
       modelInvocable: userOnly !== true,
       publicError: (message) => typeof message === "string" ? message : undefined,
-      handler: (payload) => act(() => handler(payload))
+      handler: (payload, call) => Effect.flatMap(FlowCancellation, (cancellation) =>
+        act((signal) => handler(payload, cancellation ?? signal, call)))
     }),
     metadata,
     input

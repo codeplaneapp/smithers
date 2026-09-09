@@ -1,8 +1,11 @@
-import { Author, ScriptRunner } from "@smthrs/chain"
+import { Author, Event, ScriptRunner } from "@smthrs/chain"
 import type { Catalog } from "@smthrs/chain"
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, spyOn, test } from "bun:test"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Exit, Layer, Schema } from "effect"
+import { createCommandRegistry } from "../flows/Commands"
+import type { CommandActions } from "../flows/Flows"
+import { flow as declareFlow, NoPayload } from "../flows/entries/Declare"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { Card } from "@smthrs/rpc/Cards"
 import type { NativeRepositories } from "../native/NativeBridge"
@@ -140,6 +143,150 @@ const seedBackground = async (
     }).isPersisted.promise
   }
 }
+
+describe("registered flow cancellation", () => {
+  const setup = async (createWorldDocument: () => Promise<void>) => {
+    const { store, settle } = trackDispatchCommits(await createAppStore({
+      kind: "localStorage", storage: memoryStorage()
+    }))
+    const actions = new Proxy({
+      bootstrap: undefined,
+      snapshot: () => ({ admin: false, signedOut: false }),
+      withAgentActor: <T>(work: () => Promise<T>) => work(),
+      createWorldDocument
+    }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => undefined })
+    const commands = createCommandRegistry(actions as unknown as CommandActions)
+    const runtime = createChainRuntime({
+      store, commands,
+      authorLayer: Author.layerMock([flow(`await ctx.call("world.new-note", {})`, `return done({})`)]),
+      runnerLayer: ScriptRunner.layerInProcess
+    })
+    const frames: Array<AgentTurnFrame> = []
+    runtime.subscribe(frame => frames.push(frame))
+    const start = () => runtime.startTurn({ runId: "cancel-binding", messages: [{ role: "user", content: "write a note" }], instructions: "" })
+    return { runtime, commands, store, settle, frames, start }
+  }
+
+  test("Stop interrupts an in-flight registered binding and records its refusal before returning", async () => {
+    let entered = false
+    let interrupted = false
+    let mutations = 0
+    const h = await setup(async () => { mutations++ })
+    const entry = h.commands.find("world.new-note")!
+    // This fixture is an Effect-native binding, rather than a controller promise.
+    Object.defineProperty(entry, "cooperativeCancellation", { value: false })
+    const original = entry.binding.run
+    const binding = spyOn(entry.binding, "run").mockImplementation(call => Effect.gen(function*() {
+      entered = true
+      yield* Effect.never.pipe(Effect.onInterrupt(() => Effect.sync(() => { interrupted = true })))
+      return yield* original(call)
+    }))
+    try {
+      await h.start()
+      await waitUntil(() => entered)
+      await h.runtime.cancelTurn("cancel-binding")
+      expect(interrupted).toBe(true)
+      expect(mutations).toBe(0)
+      expect(h.frames.some(frame => frame.type === "done" && frame.reason === "cancelled")).toBe(true)
+      expect([...h.store.collections.chainEvents.values()].some(row =>
+        Schema.decodeUnknownSync(Event.Event)(row.event)._tag === "GateRejected")).toBe(true)
+    } finally {
+      binding.mockRestore()
+      await h.settle()
+      await h.store.dispose?.()
+    }
+  })
+
+  test("Stop reaches the controller handler's signal and waits for abort cleanup", async () => {
+    let entered = false
+    let interrupted = false
+    let cleaned = false
+    let mutations = 0
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const h = await setup(async () => {})
+    const entry = h.commands.find("world.new-note")!
+    const abortable = declareFlow({
+      name: "world.new-note", summary: "abort-aware controller fixture", input: NoPayload,
+      handler: async (_, signal) => {
+        entered = true
+        await new Promise<void>(resolve => signal.addEventListener("abort", () => {
+          interrupted = true
+          resolve()
+        }, { once: true }))
+        await gate
+        cleaned = true
+        if (!signal.aborted) mutations++
+        return "cancelled before the write"
+      }
+    })
+    const binding = spyOn(entry.binding, "run").mockImplementation(abortable.binding.run)
+    try {
+      await h.start()
+      await waitUntil(() => entered)
+      let stopped = false
+      const stopping = h.runtime.cancelTurn("cancel-binding").then(() => { stopped = true })
+      await waitUntil(() => interrupted)
+      expect(stopped).toBe(false)
+      release()
+      await stopping
+      expect(cleaned).toBe(true)
+      expect(mutations).toBe(0)
+      expect(h.frames.some(frame => frame.type === "done" && frame.reason === "cancelled")).toBe(true)
+    } finally {
+      release()
+      binding.mockRestore()
+      await h.settle()
+      await h.store.dispose?.()
+    }
+  })
+
+  test("Stop drains a non-abortable controller and persists a receipt so resume cannot repeat it", async () => {
+    let entered = false
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let mutations = 0
+    const h = await setup(async () => { entered = true; await gate; mutations++ })
+    const entry = h.commands.find("world.new-note")!
+    const calls: Array<Parameters<typeof entry.binding.run>[0]> = []
+    const original = entry.binding.run
+    const binding = spyOn(entry.binding, "run").mockImplementation(call => {
+      calls.push(call)
+      return original(call)
+    })
+    try {
+      await h.start()
+      await waitUntil(() => entered)
+      let stopped = false
+      const stopping = h.runtime.cancelTurn("cancel-binding").then(() => { stopped = true })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const returnedBeforeController = stopped
+      release()
+      await stopping
+      expect(returnedBeforeController).toBe(false)
+      expect(mutations).toBe(1)
+      const receipts = [...h.store.collections.chainEvents.values()]
+        .map(row => Schema.decodeUnknownSync(Event.Event)(row.event))
+        .filter(event => event._tag === "CallSettled" && event.name === "world.new-note")
+      expect(receipts).toHaveLength(1)
+      const receipt = receipts[0]!
+      if (receipt._tag !== "CallSettled") throw new Error("expected a settled call")
+      expect(calls[0]!.identity).toMatchObject({
+        session: "cancel-binding/", frame: receipt.key.link,
+        cell: receipt.key.scriptDigest, ordinal: receipt.key.ordinal
+      })
+      await h.start()
+      await waitUntil(() => h.frames.filter(frame => frame.type === "done").length === 2)
+      expect(mutations).toBe(1)
+      expect(calls).toHaveLength(1)
+    } finally {
+      release()
+      binding.mockRestore()
+      await h.settle()
+      await h.store.dispose?.()
+    }
+  })
+})
 
 describe("background boot reconciliation", () => {
   test("terminal backgrounds do not announce themselves on successive boots", async () => {

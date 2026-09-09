@@ -1,6 +1,6 @@
 import { Catalog, Chain, Journal, Prompt, QuickJsRunner, Steering, SubChains } from "@smthrs/chain"
 import type { Author, Event, Outcome, ScriptRunner } from "@smthrs/chain"
-import { Effect, Exit, Fiber, Layer, Option, Ref, Schema } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Option, Ref, Schema } from "effect"
 import { CardPatchSchema, CardSchema } from "@smthrs/rpc/Cards"
 import type { AgentChatMessage, AgentTurnFrame, FetchLike, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { CommandRegistry } from "../flows/Commands"
@@ -285,7 +285,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
     // No surfaces and no background entry: a background tree cannot speak
     // into a turn it does not own, and does not fork further backgrounds.
     const catalog = SubChains.layer({
-      entries: [...commandEntries(options.commands), ...worldview, ...(options.entries ?? [])],
+      entries: [...commandEntries(options.commands, lineage), ...worldview, ...(options.entries ?? [])],
       prefix: subPrefix(),
       maxLinks: options.maxLinks,
       maxCallsPerLink: options.maxCallsPerLink
@@ -481,7 +481,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
       return { status: "error", message: "That Smithers turn is already running." } as const
     }
 
-    const commandCatalog = commandEntries(options.commands)
+    const commandCatalog = commandEntries(options.commands, request.runId)
     const surfaces = surfaceEntries(emit, request.runId, options.store)
     const host = options.entries ?? []
     const treeEntries = [...commandCatalog, ...surfaces, ...worldview, ...host, backgroundEntry]
@@ -608,7 +608,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
       }
       const { cause } = exit
       // A late stop cannot cancel an already settled approval boundary.
-      if (Exit.hasInterrupts(exit)) {
+      if (Cause.hasInterruptsOnly(cause)) {
         emit({ runId: request.runId, type: "done", reason: "cancelled" })
         return
       }

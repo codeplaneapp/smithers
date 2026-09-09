@@ -10,7 +10,7 @@
  * @since 0.1.0
  */
 import * as Digest from "@smthrs/core/Digest"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Fiber, Option, Schema } from "effect"
 import * as Author from "./Author.ts"
 import * as AuthorDeclaration from "./AuthorDeclaration.ts"
 import * as Authorize from "./Authorize.ts"
@@ -486,37 +486,55 @@ export const run = (options: Options): Effect.Effect<Outcome.RunResult, RunError
                     }))
                 )
             }
-            const result = yield* entry.handler(payload, { chain: chainId, link, ordinal }).pipe(
-              Effect.catchTag("/chain/CallError", (error) =>
-                Effect.gen(function*() {
-                  // Run failures stay typed and un-settled, through every
-                  // level of recursion. Ordinary handler failures reject.
-                  if (error instanceof ChildRunError) return yield* error.error
-                  // A handler surfacing a required approval — a sub-chain
-                  // waiting on a grant — parks in place like the seam's
-                  // own ask: nothing settles, resume re-enters here.
-                  if (error.cause === "approval_required") {
-                    return yield* new ApprovalPark({ message: error.message })
-                  }
-                  return yield* reject(ordinal, Observation.make("call_failed", `"${name}" failed: ${error.message}`))
-                }))
-            )
-            const resultBoundary = ScriptRunner.jsonBoundary(result)
-            if (resultBoundary._tag === "Refused") {
-              return yield* reject(
-                ordinal,
-                Observation.make("call_failed", `"${name}" produced a result that is not JSON-serializable`)
+            const key = CallKey.make(link, scriptDigest, ordinal, Catalog.entryDigest(entry))
+            const settle = (signal?: AbortSignal) => Effect.gen(function*() {
+              const result = yield* entry.handler(payload, { chain: chainId, link, ordinal, key, signal }).pipe(
+                Effect.catchTag("/chain/CallError", (error) =>
+                  Effect.gen(function*() {
+                    // Run failures stay typed and un-settled, through every
+                    // level of recursion. Ordinary handler failures reject.
+                    if (error instanceof ChildRunError) return yield* error.error
+                    // A handler surfacing a required approval — a sub-chain
+                    // waiting on a grant — parks in place like the seam's
+                    // own ask: nothing settles, resume re-enters here.
+                    if (error.cause === "approval_required") {
+                      return yield* new ApprovalPark({ message: error.message })
+                    }
+                    return yield* reject(ordinal, Observation.make("call_failed", `"${name}" failed: ${error.message}`))
+                  }))
               )
-            }
-            yield* append({
-              _tag: "CallSettled",
-              key: CallKey.make(link, scriptDigest, ordinal, Catalog.entryDigest(entry)),
-              link,
-              name,
-              payload: jsonPayload,
-              result: resultBoundary.value as typeof Schema.Json.Type
+              const resultBoundary = ScriptRunner.jsonBoundary(result)
+              if (resultBoundary._tag === "Refused") {
+                return yield* reject(
+                  ordinal,
+                  Observation.make("call_failed", `"${name}" produced a result that is not JSON-serializable`)
+                )
+              }
+              yield* append({
+                _tag: "CallSettled",
+                key,
+                link,
+                name,
+                payload: jsonPayload,
+                result: resultBoundary.value as typeof Schema.Json.Type
+              })
+              return resultBoundary.value
             })
-            return resultBoundary.value
+            if (entry.settleOnInterrupt !== true) return yield* settle()
+            // The parent remains interruptible, while the child owns both the
+            // started action and its receipt. Stop signals the action and joins
+            // settlement; it cannot abandon an irreversible controller promise.
+            return yield* Effect.uninterruptibleMask((restore) => Effect.gen(function*() {
+              const cancellation = new AbortController()
+              const fiber = yield* Effect.forkChild(settle(cancellation.signal), { uninterruptible: true })
+              return yield* restore(Fiber.join(fiber)).pipe(Effect.onInterrupt(() =>
+                Effect.sync(() => cancellation.abort()).pipe(
+                  Effect.andThen(Fiber.join(fiber)),
+                  // A refused/interrupted binding has already journaled its
+                  // observation. Journal failures must still escape the join.
+                  Effect.catchTag("/chain/Chain/LinkAborted", () => Effect.void)
+                )))
+            }))
           })
 
         if (script !== undefined) {

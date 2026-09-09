@@ -12,6 +12,7 @@
  * exists: a parallel projection is exactly the drift the one-door law forbids.
  */
 import { Authorize } from "@smthrs/chain"
+import { FlowCancellation } from "./FlowCancellation"
 import type { AgentInvocation } from "./AgentInvocation"
 import { createChainPolicy } from "../chain/Policy"
 import { formFlows } from "./entries/form"
@@ -142,7 +143,7 @@ export interface CommandRegistry {
    * value that happens to start with a failure prefix; this path never sniffs
    * strings.
    */
-  readonly runForAgent: (name: string, args?: string, invocation?: AgentInvocation) => Promise<CommandOutcome>
+  readonly runForAgent: (name: string, args?: string, invocation?: AgentInvocation, signal?: AbortSignal) => Promise<CommandOutcome>
   /** The flows the agent may call: the registry narrowed to model-invocable entries. */
   readonly callable: () => ReadonlyArray<FlowEntry>
   /** What the prompt's catalog block teaches: callable flows that are not hidden. */
@@ -151,14 +152,11 @@ export interface CommandRegistry {
 }
 
 /**
- * The synthetic call identity the app's own dispatch uses.
- *
- * A cell frame numbers its calls so replay reaches the same boundary; the app's
- * buttons and slash menu have no frame to replay, so they present a stable
- * non-durable identity instead. The binding needs the identity only to name a
- * durable boundary a handler opens, and none of these handlers open one.
+ * Chain calls carry their lineage, script digest and ordinal into the binding
+ * so a handler opening a durable boundary can key it to the same invocation.
+ * Buttons and slash calls have no replay frame and retain the app identity.
  */
-const callFor = (entry: FlowEntry, payload: Record<string, unknown>): Cell.Call =>
+const callFor = (entry: FlowEntry, payload: Record<string, unknown>, invocation?: AgentInvocation): Cell.Call =>
   new Cell.Call({
     flowName: nameOf(entry),
     input: payload as Cell.Call["input"],
@@ -166,10 +164,10 @@ const callFor = (entry: FlowEntry, payload: Record<string, unknown>): Cell.Call 
     effects: entry.binding.descriptor.effects,
     placement: entry.binding.descriptor.placement,
     identity: new Cell.CallIdentity({
-      session: "app",
-      frame: 0,
-      cell: "app",
-      ordinal: 0,
+      session: invocation?.lineage === undefined ? "app" : `${invocation.lineage}/${invocation.slot.chain}`,
+      frame: invocation?.slot.link ?? 0,
+      cell: invocation?.slot.key?.scriptDigest ?? "app",
+      ordinal: invocation?.slot.ordinal ?? 0,
       declaration: Cell.declarationDigest(entry.binding.descriptor),
       layers: []
     })
@@ -278,11 +276,17 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
   /** Invokes one flow through its binding — the single door every trigger shares. */
   const invoke = async (
     entry: FlowEntry,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    invocation?: AgentInvocation
   ): Promise<CommandOutcome> => {
     const name = nameOf(entry)
     const settled = await Effect.runPromise(
-      Effect.result(entry.binding.run(callFor(entry, payload)))
+      Effect.result(entry.binding.run(callFor(entry, payload, invocation))).pipe(
+        Effect.provideService(FlowCancellation, invocation?.signal)
+      ),
+      // Controller promises receive the signal but retain their result when a
+      // write cannot abort. Effect-native bindings use fiber interruption.
+      { signal: entry.cooperativeCancellation === true ? undefined : invocation?.signal }
     )
     if (settled._tag === "Failure") {
       // A permission park or an assembly failure is not the human's business
@@ -362,6 +366,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
     seen: ReadonlySet<string> = new Set(),
     invocation?: AgentInvocation
   ): Promise<CommandOutcome> => {
+    invocation?.signal?.throwIfAborted()
     const startedAt = Date.now()
     const outcome = await settle(invoker, name, args, seen, startedAt, invocation)
     trace(
@@ -406,7 +411,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
        * so it neither ranks in their recent commands nor traces as their act.
        */
       const prompt = find(DOWNLOAD_PROMPT)
-      if (prompt !== undefined) await invoke(prompt, { flow: name })
+      if (prompt !== undefined) await invoke(prompt, { flow: name }, invocation)
       return { status: "unavailable", door, reason, action: DOWNLOAD_PROMPT }
     }
     let target = invoker === "agent" ? agentEntry(nameOf(entry)) ?? entry : entry
@@ -460,7 +465,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
         name: nameOf(target),
         args,
         via: invoker,
-        invocation: invocation === undefined ? undefined : { ...invocation, authorized: undefined },
+        invocation: invocation === undefined ? undefined : { ...invocation, authorized: undefined, signal: undefined },
         input: target.input,
         ...(target.metadata.form === undefined ? {} : { hints: target.metadata.form })
       })
@@ -492,7 +497,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
           slot: invocation.slot
         }
         const authorization = invocation.authorize.authorize(request)
-        const decision = await Effect.runPromise(Effect.result(authorization))
+        const decision = await Effect.runPromise(Effect.result(authorization), { signal: invocation.signal })
         if (decision._tag === "Failure") {
           invocation.refused(decision.failure)
           return { status: "failed", error: decision.failure.message }
@@ -505,7 +510,8 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
         target = formFlows(acting, continuation).find((candidate) => nameOf(candidate) === "form.submit")!
       }
     }
-    const settledOutcome = await invoke(target, parsed.payload)
+    invocation?.signal?.throwIfAborted()
+    const settledOutcome = await invoke(target, parsed.payload, invocation)
     /*
      * The agent reads a refusal as its next act: a handler that points the
      * human at a slash the model cannot run (`/cloud.sign-in`) points the
@@ -545,14 +551,17 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
     // still enter runForAgent below and must bring authority or fail closed.
     runAsAgent: (name, args) => runAs("agent", name, args),
     executeForAgent: (call) => actions.withAgentActor(() => executeAgentToolCall(registry, call)),
-    runForAgent: (name, args, invocation) =>
+    runForAgent: (name, args, invocation, signal) =>
       actions.withAgentActor(async () => {
         const clean = name.trim().replace(/^\/+/, "")
         const target = find(clean)
         if (target !== undefined && !modelInvocable(target)) {
           return { status: "failed", error: userOnlyError(clean, target.metadata.userOnlyReason) }
         }
-        return runAs("agent", clean, args, new Set(), invocation ?? unscopedInvocation)
+        return runAs("agent", clean, args, new Set(), {
+          ...(invocation ?? unscopedInvocation),
+          signal: signal ?? invocation?.signal
+        })
       }),
     callable,
     /*

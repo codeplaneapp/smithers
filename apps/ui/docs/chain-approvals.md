@@ -32,6 +32,15 @@ backend across the park's done frame so the same lineage resumes there;
 ordinary completion releases that routing record. Refused initial starts
 leave no routing record.
 
+Registered flow cancellation reaches the binding and the controller handler's
+`AbortSignal`. Stop waits for abort cleanup and for controller promises that
+cannot abort. A completed write retains its result, and the chain persists
+`CallSettled` before emitting cancellation. Resume reuses that receipt.
+An aborted binding records a rejection before cancellation returns.
+Bindings receive the lineage, script digest, link and call ordinal as their
+call identity for durable boundaries. This protects orderly cancellation;
+external writes still need destination-side idempotency for process crashes.
+
 Regression coverage: `ChainRuntime.test.ts` exercises controller approval
 after root and background reloads, terminal script parks, the late-stop
 window, and seat routing. `Policy.test.ts` exercises real catalog handlers

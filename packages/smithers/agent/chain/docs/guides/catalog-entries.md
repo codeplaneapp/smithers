@@ -40,6 +40,13 @@ An entry carries:
   call. Undeclared is conservatively the broadest claim: the chain asks under
   `["*"]`, never silently passes. An explicit empty array claims no external
   authority and skips the seam.
+- `settleOnInterrupt` (optional): signal `slot.signal` on interruption, then
+  await the handler and its journal receipt before returning cancellation.
+  The handler must forward this signal to its work and await cleanup. A
+  controller that cannot abort must return its completed result. These calls
+  also receive `slot.key`, the durable replay key; the host supplies its
+  lineage when deriving destination-side idempotency keys. Other entries
+  retain ordinary Effect interruption.
 - `digest` (optional): a declaration digest overriding the default. Richer
   catalogs (the registry, memory, sub-chains) pin their full declaration
   here.
