@@ -47,6 +47,14 @@ export interface ActionExecuteOptions {
   /** Allows a cache put race to retain the first row without failing this run. */
   readonly nondeterministic?: true | undefined
   readonly metadata: unknown
+  /**
+   * Prepares a compensable attempt that will actually execute. Only supplied
+   * when the driver implements `actionSnapshot`. After checking the journal,
+   * run this effect once and durably record its handle with the attempt BEFORE
+   * executing the action. Never evaluate it for a journal hit or a joined
+   * dispatch. The engine diffs only attempts that evaluated this effect.
+   */
+  readonly snapshot?: Effect.Effect<unknown, never, FlowRuntime.FlowInstance | Crypto.Crypto> | undefined
 }
 
 /**
@@ -210,6 +218,23 @@ export interface Encoded {
     | ((options: {
       readonly key: string
     }) => Effect.Effect<Option.Option<number>, never, FlowRuntime.FlowInstance | Crypto.Crypto>)
+    | undefined
+  /**
+   * The pre-attempt snapshot of the earliest recorded compensable attempt for
+   * this key. `Option.none()` means no handle survives. Preserve the first
+   * handle for the lifetime of the retry sequence, including unfinished
+   * attempts; an opaque handle may itself be null or undefined.
+   *
+   * Implementing this hook opts into `ActionExecuteOptions.snapshot`: the
+   * driver must evaluate and persist that effect only for actual execution,
+   * after journal lookup and before the action can mutate the world. Handles
+   * must remain usable by the host boundary across process restarts. Without
+   * this hook, snapshot/restore remains process-local and surrounds replay too.
+   */
+  readonly actionSnapshot?:
+    | ((options: {
+      readonly key: string
+    }) => Effect.Effect<Option.Option<unknown>, never, FlowRuntime.FlowInstance | Crypto.Crypto>)
     | undefined
   readonly deferredResult: (
     deferred: DurableDeferred.Any

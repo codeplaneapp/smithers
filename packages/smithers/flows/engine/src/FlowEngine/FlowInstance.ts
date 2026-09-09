@@ -53,6 +53,7 @@ export const makeInstance = (
         ordinals.set(scope, next)
         return next
       },
+      // Earliest pre-attempt handle; durable drivers recover it via actionSnapshot.
       snapshots: new Map(),
       keylessInFlight: new Set()
     }

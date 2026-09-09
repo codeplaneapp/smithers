@@ -15,6 +15,7 @@
  * to replay. The durability hooks diverge where a real driver would: attempt
  * rows persist a first-start time and the highest attempt for
  * `actionRetryOrigin`/`actionLatestAttempt`,
+ * plus pre-attempt handles for `actionSnapshot`,
  * and `interrupt` records the cancel request durably and cascades it over the
  * persisted parent edges (the `RunDriver.cancelOwned` shape) instead of
  * relying on the in-process parent link.
@@ -24,10 +25,12 @@ import { Clock, Effect, Exit, Fiber, Layer, Option } from "effect"
 import type * as Scope from "effect/Scope"
 import { FlowEngine } from "../src/index.ts"
 
-/** A durable action attempt row: first-start wall clock and highest attempt. */
+/** Durable attempt metadata, including snapshots taken before action execution. */
 export interface AttemptRow {
   firstStartMs: number
   latest: number
+  /** Pre-attempt handles, persisted before any action side effect. */
+  snapshots?: Map<number, unknown>
 }
 
 /** The state that survives an engine instance. */
@@ -223,6 +226,14 @@ export const layerDurable = (log: DurableLog): Layer.Layer<FlowRuntime.FlowRunti
           } else if (recorded !== undefined) {
             return yield* recorded
           }
+          if (options.snapshot !== undefined) {
+            const snapshot = yield* options.snapshot
+            const attemptRow = log.attempts.get(options.key)!
+            const snapshots = attemptRow.snapshots ??= new Map()
+            // An unfinished attempt may execute again. Its first handle must
+            // survive even when this execution takes a fresh snapshot for diff.
+            if (!snapshots.has(options.attempt)) snapshots.set(options.attempt, snapshot)
+          }
           const actionInstance = FlowEngine.makeInstance(instance.flow, instance.executionId)
           actionInstance.interrupted = instance.interrupted
           const waitingBefore = instance.waiting
@@ -242,6 +253,12 @@ export const layerDurable = (log: DurableLog): Layer.Layer<FlowRuntime.FlowRunti
             }))
           )
         }),
+        actionSnapshot: ({ key }) =>
+          Effect.sync(() => {
+            const snapshots = log.attempts.get(key)?.snapshots
+            if (snapshots === undefined || snapshots.size === 0) return Option.none()
+            return Option.some(snapshots.get(Math.min(...snapshots.keys())))
+          }),
         actionRetryOrigin: ({ key }) => Effect.sync(() => Option.fromNullishOr(log.attempts.get(key)?.firstStartMs)),
         actionLatestAttempt: ({ key }) => Effect.sync(() => Option.fromNullishOr(log.attempts.get(key)?.latest)),
         poll: (_flow, executionId) =>

@@ -484,16 +484,37 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
             attempt: currentAttempt,
             metadata: action.metadata
           }
-          if (currentAttempt > 1 && instance.actionState.snapshots.has(key)) {
-            yield* boundary.restore(
-              instance.actionState.snapshots.get(key),
-              boundaryOptions
-            )
-          }
-          const snapshot = yield* boundary.snapshot(boundaryOptions)
-          instance.actionState.snapshots.set(key, snapshot)
-          result = yield* options.actionExecute(input).pipe(
-            Effect.ensuring(Effect.asVoid(boundary.diff(snapshot, boundaryOptions))),
+          // A durable driver owns the journal check. Defer boundary work until
+          // it asks to execute, so replay cannot replace the pre-crash handle
+          // with a snapshot of the already-mutated world.
+          const durableSnapshot = options.actionSnapshot
+          let captured = Option.none<unknown>()
+          const prepare = Effect.gen(function*() {
+            const original = durableSnapshot !== undefined
+              ? yield* durableSnapshot({ key })
+              : currentAttempt > 1 && instance.actionState.snapshots.has(key)
+              ? Option.some(instance.actionState.snapshots.get(key))
+              : Option.none<unknown>()
+            if (Option.isSome(original)) {
+              yield* boundary.restore(original.value, boundaryOptions)
+            }
+            const snapshot = yield* boundary.snapshot(boundaryOptions)
+            // Keep the earliest handle throughout the retry sequence.
+            if (!instance.actionState.snapshots.has(key)) {
+              instance.actionState.snapshots.set(key, snapshot)
+            }
+            captured = Option.some(snapshot)
+            return snapshot
+          })
+          const dispatch = durableSnapshot === undefined
+            ? prepare.pipe(Effect.andThen(options.actionExecute(input)))
+            : options.actionExecute({ ...input, snapshot: prepare })
+          result = yield* dispatch.pipe(
+            Effect.ensuring(Effect.suspend(() =>
+              Option.isSome(captured)
+                ? Effect.asVoid(boundary.diff(captured.value, boundaryOptions))
+                : Effect.void
+            )),
             Effect.provideService(Action.CurrentAttempt, currentAttempt),
             Effect.provideService(Action.CurrentInvocationKey, key)
           )

@@ -16,6 +16,7 @@ import { Action, DurableDeferred, Flow, FlowRuntime, Interpreter, RetryPolicy } 
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
+import { FlowEngine } from "../src/index.ts"
 import { withCrypto } from "./Crypto.ts"
 import { layerDurable, makeLog } from "./DurableLogEngine.ts"
 
@@ -176,6 +177,102 @@ describe("durable driver contract across an engine restart", () => {
         ).toBe(3)
         expect(dispatched).toEqual([1, 2, 3])
       }).pipe(Effect.provide(stack))
+    })
+  })
+
+  effect("restores the pre-crash snapshot and skips boundaries on journal replay", () => {
+    const log = makeLog()
+    const events: Array<string> = []
+    const started: Array<number> = []
+    const snapshots = new Map<string, number>()
+    let world = 0
+    let serial = 0
+    const step = Action.make({
+      name: "DurableContract/compensable",
+      tier: "compensable",
+      success: Schema.Number,
+      error: Schema.String,
+      retryPolicy: RetryPolicy.make({ initialMs: 10_000, factor: 1, maxMs: 10_000, maxAttempts: 3 }),
+      execute: Effect.gen(function*() {
+        const attempt = yield* Action.CurrentAttempt
+        const key = yield* Action.CurrentInvocationKey
+        expect(log.attempts.get(key!)?.snapshots?.get(attempt)).toBe(`handle-${attempt}`)
+        started.push(world)
+        events.push(`execute:${attempt}`)
+        world++
+        return attempt < 3 ? yield* Effect.fail("retry") : world
+      })
+    })
+    const declaration = Action.make("DurableContract/compensable/action", {
+      payload: { id: Schema.String },
+      success: Schema.Number,
+      error: Schema.String
+    })
+    const flow = Flow.make("DurableContract/compensable", {
+      payload: { id: Schema.String },
+      success: Schema.Number,
+      error: Schema.String,
+      body: (payload) => declaration.call(payload)
+    })
+    const boundary = FlowEngine.SnapshotBoundary.of({
+      snapshot: ({ attempt }) =>
+        Effect.sync(() => {
+          const handle = `handle-${++serial}`
+          snapshots.set(handle, world)
+          events.push(`snapshot:${attempt}:${handle}`)
+          return handle
+        }),
+      restore: (handle, { attempt }) =>
+        Effect.sync(() => {
+          events.push(`restore:${attempt}:${String(handle)}`)
+          world = snapshots.get(handle as string)!
+        }),
+      diff: (handle, { attempt }) =>
+        Effect.sync(() => {
+          events.push(`diff:${attempt}:${String(handle)}`)
+        })
+    })
+    const stack = Layer.mergeAll(declaration.toLayer(() => step), Interpreter.layer(flow)).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(layerDurable(log)),
+      Layer.provideMerge(Layer.succeed(FlowEngine.SnapshotBoundary)(boundary))
+    )
+
+    return Effect.gen(function*() {
+      // Close each engine during backoff. Only the durable log and the host's
+      // world/snapshot storage survive; snapshot handles are never reused.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        yield* Effect.gen(function*() {
+          yield* flow.execute({ id: "x" }, { executionId: "compensable-run", discard: true })
+          for (let index = 0; index < 50 && started.length < attempt; index++) {
+            yield* Effect.yieldNow
+            if (attempt > 1) yield* TestClock.adjust("10 seconds")
+          }
+          yield* waitFor(() => events.includes(`diff:${attempt}:handle-${attempt}`))
+          expect(started).toEqual(Array(attempt).fill(0))
+          expect(world).toBe(1)
+          if (attempt === 3) {
+            const settled = yield* pollUntil(flow.poll("compensable-run"), (result) => result._tag === "Complete")
+            expect(
+              Option.isSome(settled) && settled.value._tag === "Complete" &&
+                Exit.isSuccess(settled.value.exit) && settled.value.exit.value
+            ).toBe(1)
+          }
+        }).pipe(Effect.provide(stack))
+      }
+      expect(events).toEqual([
+        "snapshot:1:handle-1",
+        "execute:1",
+        "diff:1:handle-1",
+        "restore:2:handle-1",
+        "snapshot:2:handle-2",
+        "execute:2",
+        "diff:2:handle-2",
+        "restore:3:handle-1",
+        "snapshot:3:handle-3",
+        "execute:3",
+        "diff:3:handle-3"
+      ])
     })
   })
 

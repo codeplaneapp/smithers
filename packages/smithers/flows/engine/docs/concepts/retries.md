@@ -78,9 +78,13 @@ before following a policy's retry decision.
 ## Compensable actions retry against a snapshot
 
 An action declared `tier: "compensable"` runs inside a snapshot boundary. The
-engine snapshots before each attempt, diffs after each one, and restores the
-previous snapshot before a retry, so attempt 2 starts from the world attempt 1
-started from. See
+engine snapshots before each executing attempt, diffs afterward, and restores
+the earliest snapshot before a retry. This survives a process restart only
+when the driver implements `Encoded.actionSnapshot` and persists the supplied
+`ActionExecuteOptions.snapshot` handle before executing the action. That
+contract also skips boundary work for journal replay. Without it, restoration
+is process-local; the current `layerMemory` and `@smthrs/engine-store` adapters
+use that fallback. See
 [Run a compensable action](../guides/compensable-actions.md).
 
 ## What is not a retry
