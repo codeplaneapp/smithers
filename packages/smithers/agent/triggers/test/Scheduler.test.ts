@@ -1,6 +1,6 @@
 import * as Control from "@smthrs/control/Control"
 import { Unavailable } from "@smthrs/control/ControlError"
-import type { RunStatus } from "@smthrs/control/ControlSchema"
+import type { Receipt, RunStatus } from "@smthrs/control/ControlSchema"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -435,75 +435,33 @@ describe("Scheduler", () => {
   // The scheduler never approves its own plan. It re-offers the same
   // idempotent run request and takes the run id once somebody else approves.
   it("retries a parked plan until approval accepts it, never approving it itself", async () => {
-    const calls: Array<string> = []
     let runAttempts = 0
-    const control = Layer.succeed(
-      Control.Control,
-      Control.make({
-        plan: (input) =>
-          Effect.sync(() => {
-            calls.push("plan")
-            return {
+    const fixture = controlFixture({
+      run: () =>
+        Effect.sync(() => {
+          runAttempts++
+          return runAttempts === 1
+            ? {
+              _tag: "Parked" as const,
+              receiptId: "parked",
               planId: "plan-1",
-              flowId: input.flowId,
-              digest: "digest",
-              inputSummary: "input",
-              envelope: { capabilities: [], flows: [], budget: {} },
-              deployClass: true,
-              nodes: [],
-              approval: {
-                target: {
-                  _tag: "Plan" as const,
-                  planId: "plan-1",
-                  digest: "digest",
-                  envelope: { capabilities: [], flows: [], budget: {} }
-                },
-                scope: "run" as const,
-                idempotencyKey: "approval"
-              }
+              status: "waiting-approval" as const
             }
-          }),
-        run: () =>
-          Effect.sync(() => {
-            calls.push("run")
-            runAttempts++
-            return runAttempts === 1
-              ? {
-                _tag: "Parked" as const,
-                receiptId: "parked",
-                planId: "plan-1",
-                status: "waiting-approval" as const
-              }
-              : {
-                _tag: "Accepted" as const,
-                receiptId: "started",
-                runId: "run-1"
-              }
-          }),
-        approve: () =>
-          Effect.sync(() => {
-            calls.push("approve")
-            return { _tag: "Accepted" as const, receiptId: "approved" }
-          }),
-        deny: () => Effect.die("unused"),
-        steer: () => Effect.die("unused"),
-        signal: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
-        resume: () => Effect.die("unused"),
-        list: () => Effect.die("unused"),
-        watch: () => Stream.empty
-      })
-    )
+            : { _tag: "Accepted" as const, receiptId: "started", runId: "run-1" }
+        }),
+      approve: () => Effect.die("the scheduler must never approve a plan")
+    })
+    const input = {
+      flowId: "flow",
+      input: { source: "schedule", occurrence: hour },
+      idempotencyKey: "trigger:occurrence"
+    }
     const runId = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function*() {
           const runner = yield* Scheduler.Runner
           const fiber = yield* Effect.forkScoped(
-            runner.start({
-              flowId: "flow",
-              input: {},
-              idempotencyKey: "trigger:occurrence"
-            })
+            runner.start(input)
           )
           yield* TestClock.adjust("1 second")
           return yield* Fiber.join(fiber)
@@ -511,14 +469,23 @@ describe("Scheduler", () => {
       ).pipe(
         Effect.provide(TestClock.layer()),
         Effect.provide(
-          Scheduler.layerControlRunner.pipe(Layer.provide(control))
+          Scheduler.layerControlRunner.pipe(Layer.provide(fixture.layer))
         )
       )
     )
 
     expect(runId).toBe("run-1")
-    expect(calls).toEqual(["plan", "run", "run"])
-    expect(calls).not.toContain("approve")
+    expect(fixture.calls).toEqual(["plan", "run", "run"])
+    expect(fixture.calls).not.toContain("approve")
+    expect(fixture.planRequests).toEqual([input])
+    const request = {
+      _tag: "Plan",
+      planId: "plan-1",
+      digest: "digest",
+      envelope: { capabilities: ["network"], flows: ["flow"], budget: { tokens: 123 }, host: "worker" },
+      idempotencyKey: "trigger:occurrence"
+    }
+    expect(fixture.runRequests).toEqual([request, request])
   })
 
   // The store orders due triggers by id, so an aborting trigger takes every
@@ -693,28 +660,40 @@ interface ControlFixture {
   readonly layer: Layer.Layer<Control.Control>
   readonly calls: Array<string>
   readonly listRequests: Array<unknown>
+  readonly planRequests: Array<Control.PlanInput>
+  readonly runRequests: Array<Control.RunInput>
+  readonly cancelRequests: Array<Control.RunMutationInput>
 }
 
 const controlFixture = (
   overrides: Partial<Parameters<typeof Control.make>[0]> = {}
 ): ControlFixture => {
+  const { plan, run, cancel, ...otherOverrides } = overrides
   const calls: Array<string> = []
   const listRequests: Array<unknown> = []
+  const planRequests: Array<Control.PlanInput> = []
+  const runRequests: Array<Control.RunInput> = []
+  const cancelRequests: Array<Control.RunMutationInput> = []
   return {
     calls,
     listRequests,
+    planRequests,
+    runRequests,
+    cancelRequests,
     layer: Layer.succeed(
       Control.Control,
       Control.make({
         plan: (input) =>
-          Effect.sync(() => {
+          Effect.gen(function*() {
             calls.push("plan")
+            planRequests.push(input)
+            if (plan) return yield* plan(input)
             return {
               planId: "plan-1",
               flowId: input.flowId,
               digest: "digest",
               inputSummary: "input",
-              envelope: { capabilities: [], flows: [], budget: {} },
+              envelope: { capabilities: ["network"], flows: ["flow"], budget: { tokens: 123 }, host: "worker" },
               deployClass: false,
               nodes: [],
               approval: {
@@ -722,25 +701,29 @@ const controlFixture = (
                   _tag: "Plan" as const,
                   planId: "plan-1",
                   digest: "digest",
-                  envelope: { capabilities: [], flows: [], budget: {} }
+                  envelope: { capabilities: ["network"], flows: ["flow"], budget: { tokens: 123 }, host: "worker" }
                 },
                 scope: "run" as const,
                 idempotencyKey: "approval"
               }
             }
           }),
-        run: () =>
-          Effect.sync(() => {
+        run: (input) =>
+          Effect.gen(function*() {
             calls.push("run")
+            runRequests.push(input)
+            if (run) return yield* run(input)
             return { _tag: "Accepted" as const, receiptId: "started", runId: "run-1" }
           }),
         approve: () => Effect.die("unused"),
         deny: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
         signal: () => Effect.die("unused"),
-        cancel: () =>
-          Effect.sync(() => {
+        cancel: (input) =>
+          Effect.gen(function*() {
             calls.push("cancel")
+            cancelRequests.push(input)
+            if (cancel) return yield* cancel(input)
             return { _tag: "Accepted" as const, receiptId: "cancelled" }
           }),
         resume: () => Effect.die("unused"),
@@ -751,7 +734,7 @@ const controlFixture = (
             return { _tag: "runs" as const, items: [] }
           }),
         watch: () => Stream.empty,
-        ...overrides
+        ...otherOverrides
       })
     )
   }
@@ -835,6 +818,71 @@ describe("Scheduler.layerControlRunner", () => {
     const fixture = controlFixture()
     await withRunner(Effect.flatMap(Scheduler.Runner, (runner) => runner.cancel("run-1")), fixture)
     expect(fixture.calls).toEqual(["cancel"])
+    expect(fixture.cancelRequests).toEqual([{ runId: "run-1", idempotencyKey: "trigger-cancel:run-1" }])
+  })
+
+  it("accepts cancellation acknowledgement receipts", async () => {
+    const receipts: Array<Receipt> = [
+      { _tag: "Accepted", receiptId: "cancelled" },
+      { _tag: "AlreadyApplied", receiptId: "cancelled" },
+      { _tag: "Terminal", runId: "run-1", status: "cancelled" }
+    ]
+    for (const receipt of receipts) {
+      const fixture = controlFixture({ cancel: () => Effect.succeed(receipt) })
+      expect(await withRunner(Effect.flatMap(Scheduler.Runner, (runner) => runner.cancel("run-1")), fixture))
+        .toBeUndefined()
+    }
+  })
+
+  it("rejects cancellation Conflict and Parked receipts as runner failures", async () => {
+    const receipts: Array<Receipt> = [
+      { _tag: "Conflict", message: "cancellation rejected" },
+      { _tag: "Parked", receiptId: "parked", planId: "plan-1", status: "waiting-approval" }
+    ]
+    for (const receipt of receipts) {
+      const fixture = controlFixture({ cancel: () => Effect.succeed(receipt) })
+      const failure = await withRunner(
+        Effect.flip(Effect.flatMap(Scheduler.Runner, (runner) => runner.cancel("run-1"))),
+        fixture
+      )
+      expect(failure).toMatchObject({ code: "runner" })
+      expect(failure.message).toContain(receipt._tag === "Conflict" ? receipt.message : "Parked")
+    }
+  })
+
+  it("retains the predecessor and queues the replacement when Control refuses cancellation", async () => {
+    const results: Array<TriggerStore.Result> = []
+    const runtime = runnerFixture()
+    const fixture = controlFixture({
+      cancel: () => Effect.succeed({ _tag: "Conflict", message: "cancellation rejected" })
+    })
+    const held = await Effect.runPromise(
+      provideTest(
+        Effect.scoped(Effect.gen(function*() {
+          const adapter = yield* Scheduler.Runner
+          const store = yield* TriggerStore.TriggerStore
+          yield* seed(store, trigger("supersede"), runtime)
+          yield* TestClock.setTime(hour)
+          const scheduler = yield* Scheduler.make().pipe(
+            Effect.provideService(
+              Scheduler.Runner,
+              Scheduler.makeRunner({
+                ...runtime.service,
+                cancel: adapter.cancel
+              })
+            )
+          )
+          yield* scheduler.runOnce
+          return yield* store.inspect("hourly")
+        })).pipe(Effect.provide(Scheduler.layerControlRunner.pipe(Layer.provide(fixture.layer)))),
+        results
+      )
+    )
+    expect(fixture.cancelRequests).toEqual([{ runId: "seed", idempotencyKey: "trigger-cancel:seed" }])
+    expect(runtime.starts).toEqual([])
+    expect([...runtime.active]).toEqual(["seed"])
+    expect(held).toMatchObject({ activeRunId: "seed", pendingAt: hour })
+    expect(results.some((result) => result.outcome === "superseded")).toBe(false)
   })
 
   // Control failures are the runner's, not the store's. They used to arrive as
@@ -973,6 +1021,14 @@ describe("Scheduler.layerControlRunner", () => {
       )
     )
     expect(attempts).toBe(Scheduler.parkedAttempts)
+    expect(fixture.planRequests).toEqual([{ flowId: "flow", input: {}, idempotencyKey: "key" }])
+    expect(fixture.runRequests).toEqual(Array.from({ length: Scheduler.parkedAttempts }, () => ({
+      _tag: "Plan",
+      planId: "plan-1",
+      digest: "digest",
+      envelope: { capabilities: ["network"], flows: ["flow"], budget: { tokens: 123 }, host: "worker" },
+      idempotencyKey: "key"
+    })))
     expect(failure).toMatchObject({ code: "runner" })
     expect(failure.message).toContain("still parked awaiting approval")
     expect(fixture.calls).not.toContain("approve")

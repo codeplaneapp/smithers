@@ -614,7 +614,14 @@ const layerControlRunner: Layer.Layer<Runner, never, Control.Control>
 The production launcher, backed by the Control plan, run, list, and cancel API.
 A parked plan waits for approval and retries the same idempotent run request a
 bounded number of times. This adapter never approves a plan and never
-reconstructs an execution envelope.
+reconstructs an execution envelope. The start input is forwarded to `Control.plan`;
+every `Control.run` attempt uses the returned plan ID, digest, and envelope with
+the original start idempotency key.
+
+Cancellation sends ``{ runId, idempotencyKey: `trigger-cancel:${runId}` }`` to
+`Control.cancel`. Only `Accepted`, `AlreadyApplied`, and `Terminal` receipts
+acknowledge cancellation. `Conflict` and `Parked` fail with `TriggerError` code
+`runner`, so supersession retains the predecessor and queues the replacement.
 
 Liveness is read as the complement of the settled statuses `cancelled`,
 `completed`, and `failed`, so a status Control adds later is treated as live

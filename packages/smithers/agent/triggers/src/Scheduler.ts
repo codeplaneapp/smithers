@@ -227,7 +227,20 @@ export const layerControlRunner: Layer.Layer<Runner, never, Control.Control> = L
           control.cancel({
             runId,
             idempotencyKey: `trigger-cancel:${runId}`
-          }).pipe(Effect.asVoid),
+          }).pipe(
+            Effect.flatMap((receipt): Effect.Effect<void, TriggerError> => {
+              switch (receipt._tag) {
+                case "Accepted":
+                case "AlreadyApplied":
+                case "Terminal":
+                  return Effect.void
+                case "Conflict":
+                  return Effect.fail(runnerError(`Control refused scheduled cancellation: ${receipt.message}`))
+                case "Parked":
+                  return Effect.fail(runnerError(`Control returned a Parked receipt for cancellation of run ${runId}`))
+              }
+            })
+          ),
           `Control could not cancel run ${runId}`
         )
     })
