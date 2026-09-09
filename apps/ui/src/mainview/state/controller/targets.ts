@@ -133,7 +133,7 @@ export const createTargetsController = (
     })
     let response: Response
     try {
-      response = await ctx.http(`${baseUrl}/api/targets/query`, {
+      response = await ctx.boundedFetch(`${baseUrl}/api/targets/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ repoId: repo.id })

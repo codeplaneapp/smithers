@@ -110,3 +110,119 @@ describe("a seam that never answers becomes an honest answer", () => {
     expect((failure as Error).message).toBe("seam timeout")
   })
 })
+
+// Flush a partial body so fetch resolves its headers, then never send EOF.
+for (const status of [200, 503]) {
+  test(`the seam deadline covers a stalled HTTP ${status} body`, async () => {
+    let headersReceived = false
+    let signal: AbortSignal | null | undefined
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode('{"message":')) }
+      }), { status, headers: { "content-type": "application/json" } })
+    })
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const ctx = createControllerContext(store, unavailableRepositories, unavailableAgent, {
+      seamTimeoutMs: 500,
+      fetchImpl: async (input, init) => {
+        signal = init?.signal
+        const response = await Bun.fetch(input, init)
+        headersReceived = true
+        return response
+      }
+    })
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    try {
+      const started = Date.now()
+      const result = await Promise.race([
+        ctx.boundedFetch(`${server.url}api/test`).then(async (response) => {
+          return status === 200 ? response.json() : ctx.errorMessageOf(response, "failed")
+        }).catch((error: unknown) => error),
+        new Promise((resolve) => { watchdog = setTimeout(() => resolve("still pending"), 2_000) })
+      ])
+      expect(headersReceived).toBe(true)
+      expect(result).toBeInstanceOf(Error)
+      expect((result as Error).message).toBe("seam timeout")
+      expect(Date.now() - started).toBeLessThan(2_000)
+      expect(signal?.aborted).toBe(true)
+    } finally {
+      clearTimeout(watchdog)
+      await server.stop(true)
+      await ctx.dispose()
+    }
+  })
+}
+
+test("a stalled body reader is cancelled even when the transport ignores abort", async () => {
+  let cancelled = false
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const ctx = createControllerContext(store, unavailableRepositories, unavailableAgent, {
+    seamTimeoutMs: 20,
+    fetchImpl: async () => new Response(new ReadableStream({
+      cancel() { cancelled = true; return new Promise<void>(() => {}) }
+    }))
+  })
+  let watchdog: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await Promise.race([
+      ctx.boundedFetch("https://app.test/api/test").then((response) => response.text()).catch((error: unknown) => error),
+      new Promise((resolve) => { watchdog = setTimeout(() => resolve("still pending"), 500) })
+    ])
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("seam timeout")
+    expect(cancelled).toBe(true)
+  } finally {
+    clearTimeout(watchdog)
+    await ctx.dispose()
+  }
+})
+
+for (const status of [200, 503]) {
+  test(`the seam rejects and cancels an oversized HTTP ${status} body`, async () => {
+    let cancelled = false
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const ctx = createControllerContext(store, unavailableRepositories, unavailableAgent, {
+      fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(8 * 1024 * 1024))
+          controller.enqueue(new Uint8Array(1))
+        },
+        cancel() { cancelled = true }
+      }), { status })
+    })
+    try {
+      await expect(ctx.boundedFetch("https://app.test/api/test")).rejects.toThrow("seam response exceeds 8 MiB")
+      expect(cancelled).toBe(true)
+    } finally {
+      await ctx.dispose()
+    }
+  })
+}
+
+test("buffered responses retain JSON, error text, headers, and empty-body semantics", async () => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const replies = [
+    Response.json({ message: "ready ✓" }, { status: 201, statusText: "Created", headers: { "x-test": "yes" } }),
+    new Response("offline", { status: 503 }),
+    new Response(null, { status: 204 })
+  ]
+  const ctx = createControllerContext(store, unavailableRepositories, unavailableAgent, {
+    fetchImpl: async () => replies.shift()!
+  })
+  try {
+    const response = await ctx.boundedFetch("https://app.test/api/test")
+    expect(response.status).toBe(201)
+    expect(response.statusText).toBe("Created")
+    expect(response.headers.get("x-test")).toBe("yes")
+    expect(await response.json()).toEqual({ message: "ready ✓" })
+    expect(await ctx.errorMessageOf(await ctx.boundedFetch("https://app.test/api/test"), "failed")).toBe("failed (offline)")
+    const empty = await ctx.boundedFetch("https://app.test/api/test")
+    expect(empty.status).toBe(204)
+    expect(empty.body).toBeNull()
+    expect(await empty.text()).toBe("")
+  } finally {
+    await ctx.dispose()
+  }
+})

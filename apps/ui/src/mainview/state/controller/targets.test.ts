@@ -4,7 +4,7 @@ import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { Card } from "../AppState"
 import type { TargetRunClient } from "../TargetRunClient"
-import type { ControllerContext } from "./context"
+import { createControllerContext, type ControllerContext } from "./context"
 import { createTargetsController, targetsCardId } from "./targets"
 
 const memoryStorage = (): StorageApi => {
@@ -480,8 +480,8 @@ test("target.list names the missing repository, the missing workspace, or loads 
     store,
     baseUrl: "",
     commandActor: "user",
-    boundedFetch: async () => new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { "content-type": "application/json" } }),
-    http: async (_url: string, init?: RequestInit) => {
+    boundedFetch: async (url: string, init?: RequestInit) => {
+      if (!url.endsWith("/api/targets/query")) return Response.json({ runs: [] })
       queries.push(JSON.parse(String(init?.body ?? "{}")))
       return new Response(JSON.stringify({ targets: [], warnings: [], durationMs: 1 }), { status: 200, headers: { "content-type": "application/json" } })
     },
@@ -501,3 +501,47 @@ test("target.list names the missing repository, the missing workspace, or loads 
   expect(card?.kind).toBe("targets")
   expect(card?.kind === "targets" ? card.payload.status : undefined).toBe("done")
 })
+
+for (const phase of ["headers", "body"] as const) {
+  test(`target.list settles its pending card when the query stalls at ${phase}`, async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    store.dispatch({ type: "repos.loaded", actor: "system", repos: [openedRepo("built", true)] })
+    let cancelled = false
+    const ctx = createControllerContext(store, {
+      available: false,
+      pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "unavailable" })
+    }, {
+      available: false,
+      startTurn: async () => ({ status: "error", message: "unavailable" }),
+      cancelTurn: async () => {},
+      subscribe: () => () => {}
+    }, {
+      seamTimeoutMs: 20,
+      fetchImpl: async () => phase === "headers" ? new Promise<Response>(() => {}) : new Response(new ReadableStream({
+        start(controller) { controller.enqueue(new TextEncoder().encode('{"targets":')) },
+        cancel() { cancelled = true }
+      }))
+    })
+    const controller = createTargetsController(ctx, {
+      nextOrdinal: () => 1,
+      loadRepos: async () => {},
+      runs: { attach: () => () => {}, dispose: () => {} }
+    })
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    try {
+      const result = await Promise.race([
+        controller.listTargets(),
+        new Promise((resolve) => { watchdog = setTimeout(() => resolve("still pending"), 500) })
+      ])
+      expect(result).toBeUndefined()
+      expect(store.collections.cards.get(targetsCardId("built"))).toMatchObject({
+        status: "error",
+        payload: { status: "failed", warnings: ["seam timeout"] }
+      })
+      if (phase === "body") expect(cancelled).toBe(true)
+    } finally {
+      clearTimeout(watchdog)
+      await ctx.dispose()
+    }
+  })
+}

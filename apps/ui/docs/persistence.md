@@ -63,6 +63,17 @@ requests, and prevents late responses or browser opens from changing the store.
 A repeated sign-in click while its start request is pending reports preparation;
 it reopens the browser only after the handoff URL exists.
 
+## Controller request bounds
+
+`controller/context.ts` bounds non-streaming requests, including target listing,
+with one 30-second deadline (`seamTimeoutMs`) covering headers and body EOF.
+It buffers at most 8 MiB of response bytes before returning a Response for
+JSON or text decoding. Timeout rejects with `seam timeout`, aborts the fetch,
+and cancels the reader without awaiting transport cleanup. Oversized bodies
+reject with `seam response exceeds 8 MiB` and cancel the reader. Failed target
+queries settle the pending card with the error. Turn and model relay streams
+use their own streaming paths.
+
 ## Collection contract
 
 `PERSISTED_COLLECTION_SPECS` in `state/AppStore.ts` is the authority for every

@@ -247,6 +247,7 @@ export const createControllerContext = (
     }
   }
   const seamTimeoutMs = services.seamTimeoutMs ?? 30_000
+  const maxResponseBytes = 8 * 1024 * 1024
   /*
    * A request that never answers has to become an answer.
    *
@@ -258,14 +259,16 @@ export const createControllerContext = (
    * carry no deadline, because a long stream is not a hang.
    */
   /**
-   * One request, with a deadline on it.
+   * One request, with a deadline covering headers and the complete body.
    *
    * The deadline is Effect's timeout (Ruling B, docs/persistence.md): when
    * it wins, the request fiber is interrupted and tryPromise aborts the
-   * fetch's signal — cancellation is interruption, not a manual
-   * AbortController, and a settled request clears its own clock, so nothing
-   * dangles per request. The public shape is unchanged: a promise of the
-   * response, rejecting with plain Errors, and the deadline still rejects
+   * fetch's signal and cancels the body reader. Cleanup never waits for the
+   * transport to acknowledge cancellation. A settled request clears its clock.
+   * The response body is buffered with a byte cap before returning, so callers'
+   * json/text reads cannot wait on the network outside this deadline. The
+   * public shape stays a promise of a Response rejecting with plain Errors,
+   * and the deadline still rejects
    * with `seam timeout`. `Effect.timeout` alone would reject with a
    * `TimeoutError` whose `message` is undefined, so the fallback is explicit.
    */
@@ -273,10 +276,45 @@ export const createControllerContext = (
     Effect.runPromise(
       Effect.tryPromise({
         // Retain caller cancellation through response-body consumption too.
-        try: (signal) => ctx.http(url, {
-          ...init,
-          signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal
-        }),
+        try: async (signal) => {
+          const seamSignal = init?.signal ? AbortSignal.any([signal, init.signal]) : signal
+          const response = await ctx.http(url, { ...init, signal: seamSignal })
+          if (seamSignal.aborted) {
+            void response.body?.cancel().catch(() => {})
+            throw new Error("seam timeout")
+          }
+          if (response.body === null) return response
+          const reader = response.body.getReader()
+          const cancel = (): void => { void reader.cancel().catch(() => {}) }
+          seamSignal.addEventListener("abort", cancel, { once: true })
+          const chunks: Uint8Array[] = []
+          let bytes = 0
+          try {
+            while (true) {
+              const chunk = await reader.read()
+              if (seamSignal.aborted) throw new Error("seam timeout")
+              if (chunk.done) break
+              bytes += chunk.value.byteLength
+              if (bytes > maxResponseBytes) throw new Error("seam response exceeds 8 MiB")
+              chunks.push(chunk.value)
+            }
+            const body = new Uint8Array(bytes)
+            let offset = 0
+            for (const chunk of chunks) {
+              body.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            return new Response(body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers
+            })
+          } finally {
+            seamSignal.removeEventListener("abort", cancel)
+            cancel()
+            reader.releaseLock()
+          }
+        },
         catch: (error) => (error instanceof Error ? error : new Error(String(error)))
       }).pipe(
         Effect.timeoutOrElse({
