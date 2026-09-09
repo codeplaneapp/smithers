@@ -5,6 +5,58 @@ import { memoryKv } from "./helpers/memoryKv.ts";
 
 const ADMIN = "test-admin-secret";
 
+const MAX_PAYLOAD_BYTES = 256 * 1024;
+const encoder = new TextEncoder();
+
+/**
+ * A valid bug report whose JSON encoding is exactly `bytes` long. The detail
+ * string is ASCII padding followed by `tail` verbatim, so a caller can park a
+ * multibyte character at a known offset from the end of the body.
+ */
+function bodyOfExactBytes(bytes: number, tail = ""): string {
+  const envelopeBytes = encoder.encode(JSON.stringify({ summary: "cap", detail: "" })).byteLength;
+  const padding = bytes - envelopeBytes - encoder.encode(tail).byteLength;
+  const body = JSON.stringify({ summary: "cap", detail: `${"x".repeat(padding)}${tail}` });
+  const built = encoder.encode(body).byteLength;
+  if (built !== bytes) throw new Error(`built a ${built}-byte body, wanted ${bytes}`);
+  return body;
+}
+
+/**
+ * POST `body` with an explicit content-length, so the declared-length gate is
+ * the one under test: the Request constructor sets no such header on its own.
+ */
+function postDeclared(body: string, ip: string): Request {
+  return new Request("https://bug.smithers.sh/api/bugs", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "cf-connecting-ip": ip,
+      "content-length": String(encoder.encode(body).byteLength),
+    },
+    body,
+  });
+}
+
+/** Deliver `bytes` as two chunks split at `splitAt`, with no content-length. */
+function postStreamed(bytes: Uint8Array, splitAt: number, ip: string): Request {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, splitAt));
+      controller.enqueue(bytes.subarray(splitAt));
+      controller.close();
+    },
+  });
+  const request = new Request("https://bug.smithers.sh/api/bugs", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+    body: stream,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+  if (request.headers.get("content-length") !== null) throw new Error("streamed request declared a length");
+  return request;
+}
+
 function makeEnv(now?: () => number): BugWorkerEnv & { BUGS: ReturnType<typeof memoryKv> } {
   return {
     BUGS: memoryKv(now),
@@ -137,6 +189,68 @@ describe("bug worker", () => {
 
     const res = await worker.fetch(request, makeEnv());
     expect(res.status).toBe(413);
+  });
+
+  test("a body of exactly the cap is accepted and stored whole", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const body = bodyOfExactBytes(MAX_PAYLOAD_BYTES);
+    const request = postDeclared(body, "203.0.113.11");
+    // The declared-length gate must admit a length equal to the cap, not just below it.
+    expect(request.headers.get("content-length")).toBe(String(MAX_PAYLOAD_BYTES));
+
+    const res = await worker.fetch(request, env);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const record = JSON.parse((await env.BUGS.get(`bug:${id}`))!) as { report: unknown };
+    expect(record.report).toEqual(JSON.parse(body));
+  });
+
+  test("a body one byte under the cap is accepted", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(postDeclared(bodyOfExactBytes(MAX_PAYLOAD_BYTES - 1), "203.0.113.12"), makeEnv());
+    expect(res.status).toBe(201);
+  });
+
+  test("a body one byte over the cap is rejected 413 by the declared length", async () => {
+    const worker = createBugWorker();
+    const request = postDeclared(bodyOfExactBytes(MAX_PAYLOAD_BYTES + 1), "203.0.113.13");
+    expect(request.headers.get("content-length")).toBe(String(MAX_PAYLOAD_BYTES + 1));
+    const res = await worker.fetch(request, makeEnv());
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "payload too large", maxBytes: MAX_PAYLOAD_BYTES });
+  });
+
+  test("a streamed body of exactly the cap is accepted; one more byte is rejected 413", async () => {
+    const worker = createBugWorker();
+    const atCap = encoder.encode(bodyOfExactBytes(MAX_PAYLOAD_BYTES));
+    const accepted = await worker.fetch(postStreamed(atCap, MAX_PAYLOAD_BYTES - 1, "203.0.113.14"), makeEnv());
+    expect(accepted.status).toBe(201);
+
+    // The first chunk lands the running count exactly on the cap; only the
+    // final byte crosses it, so this fails if the counter used >= instead of >.
+    const overCap = encoder.encode(bodyOfExactBytes(MAX_PAYLOAD_BYTES + 1));
+    const rejected = await worker.fetch(postStreamed(overCap, MAX_PAYLOAD_BYTES, "203.0.113.15"), makeEnv());
+    expect(rejected.status).toBe(413);
+    expect(await rejected.json()).toEqual({ error: "payload too large", maxBytes: MAX_PAYLOAD_BYTES });
+  });
+
+  test("a multibyte character split across chunks survives a body at the cap", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const multibyte = "\u65e5"; // 3 UTF-8 bytes
+    const body = bodyOfExactBytes(MAX_PAYLOAD_BYTES, multibyte);
+    const bytes = encoder.encode(body);
+    // The body ends with the character, then the closing quote and brace. Cut
+    // one byte into the sequence so neither chunk holds a whole character.
+    const splitAt = bytes.byteLength - 2 - 3 + 1;
+
+    const res = await worker.fetch(postStreamed(bytes, splitAt, "203.0.113.16"), env);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const record = JSON.parse((await env.BUGS.get(`bug:${id}`))!) as { report: { detail: string } };
+    expect(record.report.detail.endsWith(multibyte)).toBe(true);
+    expect(record.report.detail).not.toContain("\ufffd");
   });
 
   test('post with an empty (null) body reads as "" and is rejected 400 as non-JSON', async () => {

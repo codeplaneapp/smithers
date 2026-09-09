@@ -122,6 +122,26 @@ describe("the smithers bug payload contract", () => {
     expect(response.status).toBe(201);
   });
 
+  test("accepts a 500-character headline and rejects 501", async () => {
+    const atCap = "x".repeat(500);
+    const overCap = "x".repeat(501);
+    for (const field of ["summary", "title"] as const) {
+      expect(bugReportSchema.safeParse({ [field]: atCap }).success).toBe(true);
+      expect(bugReportSchema.safeParse({ [field]: overCap }).success).toBe(false);
+    }
+
+    const env = makeEnv();
+    const accepted = await createBugWorker().fetch(post({ ...payload, summary: atCap }), env);
+    expect(accepted.status).toBe(201);
+    const { id } = (await accepted.json()) as { id: string };
+    const stored = JSON.parse((await env.BUGS.get(`bug:${id}`))!) as { report: { summary: string } };
+    expect(stored.report.summary).toBe(atCap);
+
+    const rejected = await createBugWorker().fetch(post({ ...payload, summary: overCap }), env);
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()) as { error: string }).toMatchObject({ error: "invalid bug report" });
+  });
+
   test("requires a non-empty headline", () => {
     expect(bugReportSchema.safeParse({ version: "1.0.0-rc.0", runs: [] }).success).toBe(false);
     expect(bugReportSchema.safeParse({ summary: "" }).success).toBe(false);
