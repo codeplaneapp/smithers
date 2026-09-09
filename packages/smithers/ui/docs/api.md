@@ -639,6 +639,14 @@ simulation. The graph math it draws is not behind this subpath:
 `computeGraphModel`, `nodeRadius`, `folderTint`, and `neighbourSet` are on the
 base barrel, so a host can compute a graph without loading the renderer.
 
+Under `prefers-reduced-motion: reduce` the graph skips the animated frames and
+settles the layout in batches with an 8 ms budget checked after each tick,
+yielding between batches and painting once the layout is settled. A single
+tick can exceed the budget. Unmounting or changing the graph cancels pending
+batches. `scheduleSettle` replaces the yield
+(`requestIdleCallback`, falling back to `setTimeout`) and `loadPhysics`
+replaces the lazy `d3-force` import; a rejecting loader renders the hub list.
+
 ## Related
 
 - [Failure codes and limits](./reference/contracts.md): the codes and bounds

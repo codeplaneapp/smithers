@@ -1,9 +1,10 @@
 /** @jsxImportSource react */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { KnowledgeGraph } from "../src/vault/KnowledgeGraph";
+import type { VaultGraphNode } from "../src/vault/graphModel";
 import type { VaultLink, VaultNoteMeta } from "../src/vault/types";
 
 const NOTES: VaultNoteMeta[] = [
@@ -110,4 +111,208 @@ describe("KnowledgeGraph (physics unavailable)", () => {
       container.remove();
     }
   });
+});
+
+/**
+ * Reduced motion plus an instrumented `d3-force`: every tick burns
+ * `tickCostMs` on an injected clock, so the settle budget forces a yield no matter
+ * how fast the machine is. Drop the cost to drain the rest of the settle.
+ */
+function reducedMotionHarness(tickCostMs: number) {
+  const originalMatchMedia = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query === "(prefers-reduced-motion: reduce)",
+    media: query,
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent() {
+      return true;
+    },
+  })) as typeof window.matchMedia;
+
+  const queue: Array<() => void> = [];
+  const state = { ticks: 0, stops: 0, costMs: tickCostMs, ms: 0 };
+  const clock = spyOn(performance, "now").mockImplementation(() => state.ms);
+  return {
+    queue,
+    state,
+    scheduleSettle(run: () => void) {
+      queue.push(run);
+      return () => {
+        const at = queue.indexOf(run);
+        if (at >= 0) queue.splice(at, 1);
+      };
+    },
+    async loadPhysics() {
+      const d3 = await import("d3-force");
+      return {
+        ...d3,
+        forceSimulation: ((nodes?: VaultGraphNode[]) => {
+          const sim = d3.forceSimulation(nodes);
+          const tick = sim.tick.bind(sim);
+          const stop = sim.stop.bind(sim);
+          sim.tick = (iterations?: number) => {
+            state.ticks += iterations ?? 1;
+            state.ms += state.costMs * (iterations ?? 1);
+            return tick(iterations);
+          };
+          sim.stop = () => {
+            state.stops += 1;
+            return stop();
+          };
+          return sim;
+        }) as typeof d3.forceSimulation,
+      };
+    },
+    restore() {
+      clock.mockRestore();
+      window.matchMedia = originalMatchMedia;
+    },
+  };
+}
+
+const nodeTransformsOf = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll(".sui-vault-graph-node"), (node) => node.getAttribute("transform"));
+
+describe("KnowledgeGraph (reduced motion)", () => {
+  test("settles in yielded batches and repaints only once, when settled", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const harness = reducedMotionHarness(3);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <KnowledgeGraph
+            notes={NOTES}
+            links={HUB_LINKS}
+            loadPhysics={harness.loadPhysics}
+            scheduleSettle={harness.scheduleSettle}
+          />,
+        );
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const seeded = nodeTransformsOf(container);
+      expect(seeded).toHaveLength(NOTES.length);
+
+      // The effect ran one budgeted batch and yielded. Settling all 180 ticks
+      // in this one continuation is what blocked the thread on real vaults.
+      expect(harness.state.ticks).toBeGreaterThan(0);
+      expect(harness.state.ticks).toBeLessThan(180);
+      expect(harness.queue).toHaveLength(1);
+      expect(harness.state.stops).toBe(1);
+      // Nothing repaints mid-settle: reduced motion sees no intermediate frames.
+      expect(nodeTransformsOf(container)).toEqual(seeded);
+
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click();
+      });
+      expect(nodeTransformsOf(container)).toEqual(seeded);
+      await act(async () => {
+        Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Reset")!.click();
+      });
+      expect(nodeTransformsOf(container)).toEqual(seeded);
+
+      harness.state.costMs = 0;
+      while (harness.queue.length > 0) {
+        await act(async () => {
+          harness.queue.shift()!();
+        });
+      }
+      expect(harness.state.ticks).toBe(180);
+      expect(harness.state.stops).toBe(1);
+      const settled = nodeTransformsOf(container);
+      expect(settled).not.toEqual(seeded);
+      expect(settled.every((transform) => /^translate\(-?[\d.]+ -?[\d.]+\)$/.test(transform ?? ""))).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      harness.restore();
+    }
+  });
+
+  test("unmounting mid-settle cancels the pending batches", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const harness = reducedMotionHarness(3);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <KnowledgeGraph
+            notes={NOTES}
+            links={HUB_LINKS}
+            loadPhysics={harness.loadPhysics}
+            scheduleSettle={harness.scheduleSettle}
+          />,
+        );
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(harness.queue).toHaveLength(1);
+      const ticksAtUnmount = harness.state.ticks;
+
+      await act(async () => root.unmount());
+
+      expect(harness.queue).toHaveLength(0);
+      expect(harness.state.ticks).toBe(ticksAtUnmount);
+    } finally {
+      container.remove();
+      harness.restore();
+    }
+  });
+
+  test("changing the graph cancels stale settlement before publishing positions", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const harness = reducedMotionHarness(2);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <KnowledgeGraph notes={NOTES} links={LINKS}
+            loadPhysics={harness.loadPhysics} scheduleSettle={harness.scheduleSettle} />,
+        );
+      });
+      expect(harness.queue).toHaveLength(1);
+      const staleBatch = harness.queue[0]!;
+      const replacement = NOTES.slice(0, 2);
+      const replacementLinks = LINKS.slice(0, 1);
+      await act(async () => {
+        root.render(
+          <KnowledgeGraph notes={replacement} links={replacementLinks}
+            loadPhysics={harness.loadPhysics} scheduleSettle={harness.scheduleSettle} />,
+        );
+      });
+      expect(harness.queue).toHaveLength(1);
+      expect(harness.queue[0]).not.toBe(staleBatch);
+      const ticksBeforeStale = harness.state.ticks;
+      const seeded = nodeTransformsOf(container);
+      await act(async () => staleBatch());
+      expect(harness.state.ticks).toBe(ticksBeforeStale);
+      expect(nodeTransformsOf(container)).toEqual(seeded);
+      expect(seeded).toHaveLength(2);
+
+      harness.state.costMs = 0;
+      while (harness.queue.length > 0) {
+        await act(async () => harness.queue.shift()!());
+      }
+      expect(nodeTransformsOf(container)).not.toEqual(seeded);
+      expect(nodeTransformsOf(container)).toHaveLength(2);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      harness.restore();
+    }
+  });
+
 });

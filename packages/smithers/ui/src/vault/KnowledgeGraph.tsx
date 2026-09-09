@@ -9,6 +9,7 @@ import { Eyebrow } from "../section-header";
 import { RowButton } from "../row-button";
 import { prefersReducedMotion } from "../styles";
 import { useVaultCss } from "./useVaultCss";
+import { settleSimulation } from "./settleSimulation";
 import {
   GRAPH_VIEWPORT_HEIGHT,
   GRAPH_VIEWPORT_WIDTH,
@@ -27,8 +28,10 @@ const HEIGHT = GRAPH_VIEWPORT_HEIGHT;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
 /**
- * Synchronous settle ticks when reduced motion is requested: the layout is
- * computed in one shot instead of animating through hundreds of frames.
+ * Settle ticks when reduced motion is requested: the layout runs to
+ * completion instead of animating through hundreds of frames. The ticks are
+ * spread over budgeted batches (see {@link settleSimulation}) so a large
+ * vault does not block the main thread while it settles.
  */
 const REDUCED_MOTION_TICKS = 180;
 /** Hub cap for the no-physics fallback list. */
@@ -50,6 +53,12 @@ export type KnowledgeGraphProps = {
    * `import("d3-force")`; a rejecting promise renders the hub-list fallback.
    */
   loadPhysics?: () => Promise<D3Force>;
+  /**
+   * Yield seam for the reduced-motion settle (tests / custom hosts). Defaults
+   * to `requestIdleCallback`, falling back to `setTimeout`. Schedule the
+   * callback in a later task and return a canceller.
+   */
+  scheduleSettle?: (run: () => void) => () => void;
 };
 
 /**
@@ -66,6 +75,7 @@ export function KnowledgeGraph({
   className,
   style,
   loadPhysics,
+  scheduleSettle,
 }: KnowledgeGraphProps) {
   useVaultCss();
   // computeGraphModel returns fresh copies: d3-force mutates nodes/links in
@@ -84,17 +94,21 @@ export function KnowledgeGraph({
     if (model.nodes.length === 0) return;
     let cancelled = false;
     let sim: Simulation<VaultGraphNode, undefined> | null = null;
+    let cancelSettle: (() => void) | null = null;
     void (async () => {
       try {
         const d3 = d3Ref.current ?? (await (loadPhysics ?? (() => import("d3-force")))());
         if (cancelled) return;
         d3Ref.current = d3;
+        const reducedMotion = prefersReducedMotion();
+        // Keep in-progress positions private, including during hover/zoom renders.
+        const simulationModel = reducedMotion ? computeGraphModel(notes, links) : model;
         sim = d3
-          .forceSimulation<VaultGraphNode>(model.nodes)
+          .forceSimulation<VaultGraphNode>(simulationModel.nodes)
           .force(
             "link",
             d3
-              .forceLink<VaultGraphNode, VaultGraphEdge>(model.links)
+              .forceLink<VaultGraphNode, VaultGraphEdge>(simulationModel.links)
               .id((d) => d.id)
               .distance(55)
               .strength(0.35),
@@ -106,16 +120,26 @@ export function KnowledgeGraph({
             d3.forceCollide<VaultGraphNode>().radius((d) => nodeRadius(d.degree) + 3),
           )
           .alphaDecay(0.045);
-        simRef.current = sim;
-        if (prefersReducedMotion()) {
-          // Settle synchronously: no animated frames, one repaint.
-          sim.tick(REDUCED_MOTION_TICKS);
-          sim.stop();
-          setPhysics("ready");
-          setTick((t) => t + 1);
+        if (reducedMotion) {
+          // Settle in budgeted batches that yield to the thread between them,
+          // and repaint once at the end: no animated frames, no long block.
+          cancelSettle = settleSimulation(sim, {
+            ticks: REDUCED_MOTION_TICKS,
+            schedule: scheduleSettle,
+            onSettled: () => {
+              if (cancelled) return;
+              simulationModel.nodes.forEach((node, index) => {
+                model.nodes[index]!.x = node.x;
+                model.nodes[index]!.y = node.y;
+              });
+              setPhysics("ready");
+              setTick((t) => t + 1);
+            },
+          });
         } else {
           // Repaint on tick rather than per-node state: one setState per
           // frame keeps hundreds of nodes smooth.
+          simRef.current = sim;
           sim.on("tick", () => setTick((t) => t + 1));
           setPhysics("ready");
         }
@@ -125,6 +149,7 @@ export function KnowledgeGraph({
     })();
     return () => {
       cancelled = true;
+      cancelSettle?.();
       sim?.stop();
       if (simRef.current === sim) simRef.current = null;
     };
