@@ -203,15 +203,19 @@ export const spendTurn = async (
   ceiling: TurnCeiling = LOGIN_CEILING
 ): Promise<TurnBudget> => {
   if (limits === undefined) return { allowed: true, remaining: ceiling.max }
-  const stub = limits.get(limits.idFromName(key))
-  const response = await stub.fetch(
-    new Request(`https://turn-limit.internal/spend?max=${ceiling.max}&windowMs=${ceiling.windowMs}`, { method: "POST" })
-  )
-  const budget = (await response.json().catch(() => undefined)) as TurnBudget | undefined
-  // An unreadable answer from our own Durable Object is an infrastructure
-  // fault, not a signal about this user: admit the turn and let it be seen in
-  // the logs rather than locking a real person out of the alpha.
-  return budget ?? { allowed: true, remaining: ceiling.max }
+  try {
+    const stub = limits.get(limits.idFromName(key))
+    const response = await stub.fetch(
+      new Request(`https://turn-limit.internal/spend?max=${ceiling.max}&windowMs=${ceiling.windowMs}`, { method: "POST" })
+    )
+    const budget = (await response.json()) as TurnBudget | undefined
+    return budget ?? { allowed: true, remaining: ceiling.max }
+  } catch (error) {
+    // A rejected fetch or unreadable answer is an infrastructure fault, not
+    // a signal about this user: admit the turn and log the cause.
+    console.error("turn-limit spend failed:", error)
+    return { allowed: true, remaining: ceiling.max }
+  }
 }
 
 /**

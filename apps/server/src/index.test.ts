@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { AppBootstrapSchema } from "@smthrs/rpc/AppBootstrap"
 import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
 import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
@@ -3338,4 +3338,83 @@ describe("sibling admin surfaces are unreachable through the transparent proxies
       }
     )
   })
+})
+
+describe("Durable Object rejections and the Worker error boundary", () => {
+  const cause = new Error("Durable Object reset because its code was updated.")
+  const rejectingNamespace = {
+    idFromName: (name: string) => name,
+    get: () => ({ fetch: async () => { throw cause } })
+  }
+
+  for (const path of ["/api/agent/turn", "/api/agent/turn/cancel"]) {
+    test(`a rejected registry fetch on ${path} answers a JSON 502`, async () => {
+      let upstreamCalls = 0
+      await withMockedFetch(() => {
+        upstreamCalls += 1
+        return new Response("unexpected upstream call", { status: 500 })
+      }, async () => {
+        const response = await worker.fetch(post(path, turnBody), {
+          ...assetsEnv(), TURN_CANCELS: rejectingNamespace
+        })
+        expect(response.status).toBe(502)
+        expect(response.headers.get("content-type")).toContain("application/json")
+        expect(await response.json()).toMatchObject({ status: "error", message: expect.any(String) })
+        expect(upstreamCalls).toBe(0)
+      })
+    })
+  }
+
+  test("a rejected admin log read returns an empty log with an unavailable note", async () => {
+    await withMockedFetch(() => new Response(JSON.stringify({
+      login: "will", allowlisted: true, admin: true
+    }), { headers: { "content-type": "application/json" } }), async () => {
+      const response = await worker.fetch(new Request("https://mvp.test/api/admin/errors", {
+        headers: { cookie: "smithers_session=abc" }
+      }), {
+        ...assetsEnv(), IDENTITY_UPSTREAM_URL: "https://identity.test", CLIENT_ERRORS: rejectingNamespace
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        status: "ok", total: 0, reports: [], note: "The client-error log is unavailable right now. Try again in a moment."
+      })
+    })
+  })
+
+  test("the error boundary awaits promises returned by route handlers", async () => {
+    const logged = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = await worker.fetch(post("/api/agent/turn", turnBody), {
+        ...assetsEnv(),
+        TURN_CANCELS: { ...rejectingNamespace, idFromName: () => { throw cause } }
+      })
+      expect(response.status).toBe(500)
+      expect(await response.json()).toEqual({
+        status: "error", message: "Smithers could not complete this request. Try again in a moment."
+      })
+      expect(logged).toHaveBeenCalledWith("worker fetch failed:", cause)
+    } finally {
+      logged.mockRestore()
+    }
+  })
+
+  for (const failure of [new Error("asset backend failed"), "non-Error rejection"]) {
+    test(`an unhandled route rejection becomes a logged JSON 500 (${String(failure)})`, async () => {
+      const logged = spyOn(console, "error").mockImplementation(() => {})
+      try {
+        const response = await worker.fetch(new Request("https://mvp.test/"), {
+          ASSETS: { fetch: async () => { throw failure } }
+        })
+        expect(response.status).toBe(500)
+        expect(response.headers.get("content-type")).toContain("application/json")
+        expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin")
+        expect(await response.json()).toEqual({
+          status: "error", message: "Smithers could not complete this request. Try again in a moment."
+        })
+        expect(logged).toHaveBeenCalledWith("worker fetch failed:", failure)
+      } finally {
+        logged.mockRestore()
+      }
+    })
+  }
 })

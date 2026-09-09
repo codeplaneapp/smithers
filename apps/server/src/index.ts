@@ -803,14 +803,20 @@ const handleTurn = async (
   if (registry !== undefined) {
     // The registry is the cross-isolate authority on duplicate turns; the
     // per-isolate map only ever sees this isolate's requests.
-    const registration = await readStubJson<{ status?: string }>(
-      await registry.fetch(
-        new Request("https://turn-cancel.internal/register", {
-          method: "POST",
-          headers: turnSession === undefined ? {} : { [TURN_OWNER_HEADER]: turnSession.login }
-        })
+    let registration: { status?: string } | undefined
+    try {
+      registration = await readStubJson<{ status?: string }>(
+        await registry.fetch(
+          new Request("https://turn-cancel.internal/register", {
+            method: "POST",
+            headers: turnSession === undefined ? {} : { [TURN_OWNER_HEADER]: turnSession.login }
+          })
+        )
       )
-    )
+    } catch (error) {
+      console.error("turn registry register failed:", error)
+      return upstreamUnreachable("The turn registry", error)
+    }
     if (registration?.status !== "started") {
       return json(409, { status: "error", message: "That Smithers turn is already running." })
     }
@@ -1033,14 +1039,20 @@ const handleCancel = async (
     // just flip the registry state. The turn's own streaming pump observes
     // "cancelled" between chunks and aborts its own upstream fetch, then
     // ends the stream with an honest terminal frame.
-    const result = await readStubJson<{ status?: string }>(
-      await registry.fetch(
-        new Request("https://turn-cancel.internal/cancel", {
-          method: "POST",
-          headers: session === undefined ? {} : { [TURN_OWNER_HEADER]: session.login }
-        })
+    let result: { status?: string } | undefined
+    try {
+      result = await readStubJson<{ status?: string }>(
+        await registry.fetch(
+          new Request("https://turn-cancel.internal/cancel", {
+            method: "POST",
+            headers: session === undefined ? {} : { [TURN_OWNER_HEADER]: session.login }
+          })
+        )
       )
-    )
+    } catch (error) {
+      console.error("turn registry cancel failed:", error)
+      return upstreamUnreachable("The turn registry", error)
+    }
     if (result?.status === "forbidden") {
       return json(403, { status: "error", message: "That turn belongs to a different account." })
     }
@@ -2056,6 +2068,7 @@ const handleAdmin = async (request: Request, env: WorkerEnv, url: URL): Promise<
       status: "ok",
       total: log.total,
       reports: log.reports,
+      ...(log.note === undefined ? {} : { note: log.note }),
       ...(env.CLIENT_ERRORS === undefined
         ? { note: "No CLIENT_ERRORS binding on this deployment: nothing is stored, so this log is always empty." }
         : {})
@@ -2753,7 +2766,7 @@ const withCanaryRobots = (url: URL, response: Response): Response => {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url)
     // This one curated, read-only catalog is public to the marketing site.
@@ -2921,5 +2934,20 @@ export default {
     // Everything else is the site build as the assets layer serves it: the
     // landing page, the docs, the hashed chunks, and its 404 page.
     return withCanaryRobots(url, await env.ASSETS.fetch(request))
+  }
+}
+
+export default {
+  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    try {
+      // Await the router: its routes may return promises without awaiting them.
+      return await worker.fetch(request, env)
+    } catch (error) {
+      console.error("worker fetch failed:", error)
+      return json(500, {
+        status: "error",
+        message: "Smithers could not complete this request. Try again in a moment."
+      })
+    }
   }
 }

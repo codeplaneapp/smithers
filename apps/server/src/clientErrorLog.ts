@@ -305,17 +305,22 @@ export const appendClientError = async (
   return response.ok ? "stored" : "failed"
 }
 
-/** The stored reports, newest first. */
+/** The stored reports, newest first. An unavailable log returns no reports and an explanatory note. */
 export const readClientErrors = async (
   logs: ClientErrorNamespace | undefined,
   limit?: number
-): Promise<{ readonly total: number; readonly reports: ReadonlyArray<ClientErrorRecord> }> => {
+): Promise<{ readonly total: number; readonly reports: ReadonlyArray<ClientErrorRecord>; readonly note?: string }> => {
   if (logs === undefined) return { total: 0, reports: [] }
-  const stub = logs.get(logs.idFromName(CLIENT_ERROR_LOG_NAME))
-  const query = limit === undefined ? "" : `?limit=${limit}`
-  const response = await stub.fetch(new Request(`https://client-errors.internal/read${query}`))
-  const body = (await response.json().catch(() => undefined)) as
-    | { readonly total: number; readonly reports: ReadonlyArray<ClientErrorRecord> }
-    | undefined
-  return body ?? { total: 0, reports: [] }
+  try {
+    const stub = logs.get(logs.idFromName(CLIENT_ERROR_LOG_NAME))
+    const query = limit === undefined ? "" : `?limit=${limit}`
+    const response = await stub.fetch(new Request(`https://client-errors.internal/read${query}`))
+    const body = (await response.json()) as
+      | { readonly total: number; readonly reports: ReadonlyArray<ClientErrorRecord> }
+      | undefined
+    return body ?? { total: 0, reports: [] }
+  } catch (error) {
+    console.error("client-error log read failed:", error)
+    return { total: 0, reports: [], note: "The client-error log is unavailable right now. Try again in a moment." }
+  }
 }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import worker from "./index"
 import type { WorkerEnv } from "./index"
 import {
@@ -127,6 +127,23 @@ describe("the per-login turn ceiling (Durable Object state)", () => {
     expect((await spendTurn(broken, "will")).allowed).toBe(true)
   })
 
+  test("a rejected Durable Object spend admits the turn and logs the cause", async () => {
+    const cause = new Error("Durable Object reset because its code was updated.")
+    const broken: TurnLimitNamespace = {
+      idFromName: (name) => name,
+      get: () => ({ fetch: async () => { throw cause } })
+    }
+    const logged = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      expect(await spendTurn(broken, "will", ANONYMOUS_CEILING)).toEqual({
+        allowed: true, remaining: ANONYMOUS_CEILING.max
+      })
+      expect(logged).toHaveBeenCalledWith("turn-limit spend failed:", cause)
+    } finally {
+      logged.mockRestore()
+    }
+  })
+
   test("each login has its own budget", async () => {
     const limits = memoryLimits()
     for (let turn = 0; turn < TURN_WINDOW_MAX; turn += 1) await spendTurn(limits, "will")
@@ -191,6 +208,21 @@ describe("the turn routes under the ceiling", () => {
     } finally {
       globalThis.fetch = original
     }
+  }
+
+  for (const path of ["/api/agent/turn", "/api/model/stream"]) {
+    test(`a rejected Durable Object spend still reaches the model on ${path}`, async () => {
+      const env = identityEnv({
+        idFromName: (name) => name,
+        get: () => ({ fetch: async () => { throw new Error("Durable Object reset") } })
+      })
+      await withStubbedSeams(async (upstreamCalls) => {
+        const response = await worker.fetch(signedIn(path, `rejected-spend-${path}`), env)
+        expect(response.status).toBe(200)
+        await response.text()
+        expect(upstreamCalls()).toBe(1)
+      })
+    })
   }
 
   test("a spent budget refuses the turn with 429 before any credential is spent", async () => {
