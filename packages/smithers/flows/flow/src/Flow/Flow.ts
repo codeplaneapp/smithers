@@ -313,12 +313,16 @@ export interface Flow<
 
   /**
    * Runs an effect and registers how to undo its successful result if the
-   * enclosing flow later exits unsuccessfully.
+   * current round later exits unsuccessfully.
    *
    * If the effect itself fails, no rollback is registered. If both the effect
-   * and the flow succeed, the rollback is discarded. Otherwise the rollback
-   * receives the effect's successful value and the flow's failure cause when
-   * the flow scope closes.
+   * and the round succeed, the rollback is discarded. Otherwise the rollback
+   * receives the effect's successful value and the round's failure cause when
+   * the round's scope closes. Suspension keeps that scope open.
+   *
+   * A handoff completes the round successfully and discards its `withRollback` registrations.
+   * A later round's failure cannot invoke those rollbacks. The engine does not
+   * provide lineage-scoped compensation.
    *
    * This applies only to effects run directly inside the flow execution. It
    * does not attach rollback behavior to nested actions.

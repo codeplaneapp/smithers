@@ -193,7 +193,8 @@ const waitForSiblings = Effect.fnUntraced(function*(
 })
 
 /**
- * Accesses the flow scope, which is only closed when the flow execution fully completes.
+ * Accesses the current round's flow scope. Suspension keeps it open;
+ * completion or handoff closes it.
  *
  * @category resource management
  * @since 0.1.0
@@ -208,7 +209,8 @@ export const scope: Effect.Effect<
 )
 
 /**
- * Provides the flow scope to the given effect, and closes the scope only when the flow execution fully completes.
+ * Provides the current round's flow scope to the given effect. Suspension keeps
+ * the scope open; completion or handoff closes it.
  *
  * @category resource management
  * @since 0.1.0
@@ -243,19 +245,23 @@ export const addFinalizer: <R>(
 
 /**
  * Runs an effect and registers how to undo its successful result if the
- * enclosing flow later exits unsuccessfully.
+ * current round later exits unsuccessfully.
  *
  * **When to use**
  *
  * Use when a top-level flow operation changes something that must be undone if
- * a later operation causes the flow to fail or be interrupted.
+ * a later operation causes the same round to fail or be interrupted.
  *
  * **Details**
  *
  * The effect runs first. If it fails, no rollback is registered. If it
- * succeeds, its value is captured in a flow-scope finalizer. The finalizer does
- * nothing when the enclosing flow succeeds; when the flow exits unsuccessfully
- * it calls `rollback(value, cause)`.
+ * succeeds, its value is captured in a round-scope finalizer. The finalizer does
+ * nothing when the round succeeds; when the round exits unsuccessfully
+ * it calls `rollback(value, cause)`. Suspension keeps that scope open.
+ *
+ * A handoff completes the round successfully and discards its `withRollback` registrations.
+ * A later round's failure cannot invoke those rollbacks. The engine does not
+ * provide lineage-scoped compensation.
  *
  * **Gotchas**
  *

@@ -11,7 +11,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime, Graph, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Effect, Layer, Option, Schema } from "effect"
+import { Effect, Exit, Layer, Option, Schema } from "effect"
+import { readFileSync } from "node:fs"
 import { withCrypto } from "./Crypto.ts"
 import { layerMemory, makeInstance } from "./MemoryFlowRuntime.ts"
 
@@ -116,6 +117,75 @@ describe("Flow.Handoff", () => {
       // produced no answer of its own.
       expect(result._tag).toBe("Handoff")
       expect(result._tag === "Handoff" && result.payload).toEqual({ n: 2 })
+    }))
+})
+
+describe("round scope contract", () => {
+  for (
+    const path of [
+      "docs/concepts/suspension-and-replay.md",
+      "docs/concepts/trampoline-rounds.md",
+      "docs/guides/cancel-and-roll-back.md",
+      "src/Flow/Flow.ts",
+      "src/Flow/Runtime.ts"
+    ]
+  ) {
+    it(`${path} documents the rollback boundary at handoff`, () => {
+      const text = readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
+        .replace(/\s*\*\s?/g, " ")
+        .replace(/\s+/g, " ")
+      expect(text).not.toContain("not when a round ends")
+      expect(text).toContain(
+        "A handoff completes the round successfully and discards its `withRollback` registrations."
+      )
+    })
+  }
+
+  it.effect("discards round 1 rollback before round 2 in the same lineage fails", () =>
+    Effect.gen(function*() {
+      const first = makeInstance(Parking, "rollback-round-1")
+      const second = { ...makeInstance(Parking, "rollback-round-2"), lineageId: first.lineageId }
+      const rollbacks: Array<string> = []
+      const finalizerExits: Array<Exit.Exit<unknown, unknown>> = []
+      const register = (value: string) =>
+        Flow.withRollback(
+          Effect.succeed(value),
+          (reserved) =>
+            Effect.sync(() => {
+              rollbacks.push(reserved)
+            })
+        )
+
+      const handoff = yield* Effect.gen(function*() {
+        yield* register("round-1")
+        yield* Flow.addFinalizer((exit) =>
+          Effect.sync(() => {
+            finalizerExits.push(exit)
+          })
+        )
+        first.handoff = new Flow.Handoff({ flow: Parking._tag, payload: { token: "next" } })
+      }).pipe(
+        Flow.provideScope,
+        Flow.intoResult,
+        Effect.provideService(FlowRuntime.FlowInstance, first)
+      )
+      expect(handoff._tag).toBe("Handoff")
+      expect(finalizerExits).toEqual([Exit.void])
+      expect(rollbacks).toEqual([])
+
+      // The package's port fixture does not follow handoffs. Drive the next
+      // instance explicitly, as the engine does with a fresh round scope.
+      const failure = yield* Effect.gen(function*() {
+        yield* register("round-2")
+        return yield* Effect.fail("round-2 failed")
+      }).pipe(
+        Flow.provideScope,
+        Flow.intoResult,
+        Effect.provideService(FlowRuntime.FlowInstance, second)
+      )
+      expect(failure).toEqual(new Flow.Complete({ exit: Exit.fail("round-2 failed") }))
+      expect(rollbacks).toEqual(["round-2"])
+      expect(finalizerExits).toEqual([Exit.void])
     }))
 })
 
