@@ -8,7 +8,7 @@ export function createGuideController(ctx: ControllerContext) {
     const guide: GuideState = { ...(ctx.store.session().guide ?? initialGuide()) }
     switch (action) {
       case "next":
-        if ([5, 6, 7, 8, 9, 12].includes(guide.step)) return "Complete this lesson's action first."
+        if ([5, 6, 7, 8, 9, 12, 14].includes(guide.step)) return "Complete this lesson's action first."
         guide.step = Math.min(15, guide.step + 1)
         if (guide.step === 7) guide.conversationOpen = false
         break
@@ -16,6 +16,7 @@ export function createGuideController(ctx: ControllerContext) {
         guide.step = Math.max(0, guide.step - 1)
         break
       case "restart":
+        delete guide.acceptedPracticeTitle
         Object.assign(guide, initialGuide())
         break
       case "open":
@@ -36,6 +37,7 @@ export function createGuideController(ctx: ControllerContext) {
         guide.project = value.slice(0, 500)
         break
       case "title":
+        delete guide.acceptedPracticeTitle
         guide.prototypeTitle = value.slice(0, 100)
         break
       case "sound":
@@ -79,6 +81,18 @@ export function createGuideController(ctx: ControllerContext) {
         if (guide.step !== 12 || !guide.prototypeTitle.trim()) return "Give the prototype a title first."
         guide.revised = true
         guide.step = 13
+        break
+      case "request-changes":
+        if (guide.step !== 14) return "Open the practice review first."
+        delete guide.acceptedPracticeTitle
+        guide.revised = false
+        guide.step = 12
+        break
+      case "accept-practice":
+        if (guide.step !== 14 || !guide.revised) return "Review your practice change first."
+        guide.acceptedPracticeTitle = guide.prototypeTitle
+        guide.step = 15
+        guide.conversationOpen = false
         break
       case "finish":
         guide.step = 15

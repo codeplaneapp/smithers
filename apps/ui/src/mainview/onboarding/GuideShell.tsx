@@ -506,12 +506,23 @@ export function GuideShell({ children }: { children: ReactNode }) {
                   <span>Vibed</span>
                   <span>Cleanup + deliver</span>
                 </div>
+                <div className="guide-review-diff" aria-label="Practice heading change">
+                  <span>Heading before</span>
+                  <del>A little room for big ideas</del>
+                  <span>Your proposed heading</span>
+                  <ins>{guide.prototypeTitle}</ins>
+                </div>
+                <p className="guide-review-explanation">Review the direction you chose. You can go back and refine it before accepting this practice change.</p>
+                <button className="guide-text-button" data-flow="onboarding.act" onClick={() => runCommandGuide("request-changes")}>
+                  I’d like to change something <ChevronLeft size={14} />
+                </button>
                 <small>Practice PR preview · nothing has been pushed or published.</small>
               </div>
             </div>
           )}
           {stage === 15 && (
             <div className="guide-start-actions">
+              {guide.acceptedPracticeTitle && <p className="guide-review-accepted"><Check size={14} /> Practice accepted: “{guide.acceptedPracticeTitle}”</p>}
               <button className="guide-primary" data-flow="connect" onClick={() => runCommandLive("connect")}>
                 Choose a repository
                 <ArrowRight size={16} />
@@ -556,6 +567,8 @@ export function GuideShell({ children }: { children: ReactNode }) {
               primary("Add Librarian", "librarian", <BookOpen size={16} />)
             ) : stage === 12 ? (
               primary("Keep this direction", "revise", <Check size={16} />)
+            ) : stage === 14 ? (
+              primary("Accept practice change", "accept-practice", <Check size={16} />)
             ) : stage === 15 ? null : (
               primary(
                 stage === 0

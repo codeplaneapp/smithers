@@ -661,6 +661,7 @@ export const GuideSchema = z.object({
   project: z.string().max(500),
   prototypeTitle: z.string().max(100),
   revised: z.boolean(),
+  acceptedPracticeTitle: z.string().max(100).optional(),
   sound: z.boolean()
 })
 export type GuideState = z.infer<typeof GuideSchema>

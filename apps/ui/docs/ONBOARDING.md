@@ -65,3 +65,7 @@ Keyboard-only operation is a rule for the whole product. Required interactions m
 ## Opening pace refinement
 
 The wordmark still settles in about one second. The rest is deliberately slower: sigil at 1.15s, greeting at 1.9s, dialogue at 2.65s, words from 3.05s with pauses between sentences, and the invitation at 5.4s. Subsequent lesson messages reveal word by word. Layout reserves the full message space; assistive technology receives one complete message, not a stream of word announcements. Reduced motion is immediate. Enter/Right can advance immediately for a returning or fast reader.
+
+## Practice review
+
+The PR lesson shows the original and proposed headings, offers a return to editing, and requires an explicit “Accept practice change” action. Enter/Right invoke that same action. Acceptance records the exact practice heading in the existing session row; editing or replaying clears it. The final workspace acknowledges the accepted direction. This is a local review rehearsal, not a GitHub approval or publication.

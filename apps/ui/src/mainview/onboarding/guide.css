@@ -1075,3 +1075,13 @@
 @media (prefers-reduced-motion: reduce) { .guide-word { opacity: 1; } }
 /* Tabbing to the invitation reveals it immediately, including its focus ring. */
 .guide-shell[data-step="0"] .guide-actions:has(:focus-visible) { animation: none; }
+
+.guide-review-diff { display: grid; gap: 6px; margin: 20px 0; padding: 16px; border: 1px solid var(--g-line); border-radius: 8px; overflow-wrap: anywhere; }
+.guide-review-diff span { font-size: 9px; color: var(--g-muted); }
+.guide-review-diff del,.guide-review-diff ins { font-size: 12px; }
+.guide-review-diff ins { text-decoration: none; color: var(--g-accent); }
+.guide-review-diff span:nth-of-type(2) { margin-top: 10px; }
+.guide-review-explanation { line-height: 1.8; }
+.guide-pr .guide-text-button { margin-bottom: 18px; }
+.guide-pr small { display: block; }
+.guide-review-accepted { flex-basis: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; overflow-wrap: anywhere; }
