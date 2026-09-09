@@ -1204,9 +1204,20 @@ export const make = (
       } | undefined
     ): Effect.Effect<void> =>
       store.get(runId).pipe(
-        Effect.map((row) => row.cancelRequestedAtMs !== null),
-        Effect.catch(() => Effect.succeed(false)),
-        Effect.flatMap((requested) => requested ? cancelOwned(runId, state) : releaseOwned(runId, state, round))
+        Effect.flatMap((row) => {
+          // Shutdown can arrive after the claim CAS but before activation, or
+          // after activation but before/after the execution race. Release only
+          // this incarnation's persisted fence; a settled or foreign row stays
+          // untouched, including its waiting reason.
+          if (row.claim !== null && row.claimedAtMs !== null && sameOwner(row.claim, dependencies.owner)) {
+            return abandon(runId, row.claimedAtMs)
+          }
+          if (row.status !== "running" || row.owner === null || !sameOwner(row.owner, dependencies.owner)) {
+            return Effect.void
+          }
+          return row.cancelRequestedAtMs !== null ? cancelOwned(runId, state) : releaseOwned(runId, state, round)
+        }),
+        Effect.catch((error) => error.code === "not_found_row" ? Effect.void : Effect.die(error))
       )
 
     /**
@@ -1591,354 +1602,359 @@ export const make = (
       )
 
     const drive = (executionId: string): Effect.Effect<void, never, Crypto.Crypto> =>
-      Effect.gen(function*() {
-        const initial = yield* store.get(executionId).pipe(
-          Effect.catch((error) =>
-            error.code === "not_found_row"
-              ? Effect.succeed(undefined)
-              : Effect.die(error)
+      Effect.suspend(() => {
+        let interruptState: RunState | undefined
+        let round: { readonly flow: Flow.Any; readonly instance: FlowRuntime.FlowInstance["Service"] } | undefined
+        let durableParkAccepted = false
+        return Effect.gen(function*() {
+          const initial = yield* store.get(executionId).pipe(
+            Effect.catch((error) =>
+              error.code === "not_found_row"
+                ? Effect.succeed(undefined)
+                : Effect.die(error)
+            )
           )
-        )
-        if (initial === undefined) return
+          if (initial === undefined) return
 
-        const state = yield* decodeState(initial.stateJson)
-        const registration = registrations.get(state.flowName)
-        if (registration === undefined) {
-          // Cancelling needs no handler. A parked run whose cancellation was
-          // durably requested used to be dropped here with everything else,
-          // and nothing else could ever reach it: the sweep woke the row every
-          // heartbeat and every wake bailed at this line, so a cancel written
-          // by a control-only process — the operator CLI, a second engine that
-          // registers other flows — stayed write-only forever while the run's
-          // linked children kept going. The terminal transition, the cascade
-          // over the durable edge table, and the interruption record are all
-          // written from the run ROW, so a process that could never execute
-          // this flow can still close it. Claiming first is what makes the
-          // close fenced: `cancelOwned` is owner-fenced, so exactly one of the
-          // sweeping processes wins and the rest see a lost CAS.
-          //
-          // `running` is here for the same reason `suspended` is. The row a
-          // hard-killed owner leaves behind is `running` with a frozen
-          // heartbeat and no waiting row, so the stale-running sweep is the
-          // only thing that reaches it, and it arrives through this same
-          // function: without this arm a control-only process could close a
-          // PARKED run of an unregistered flow and not a hard-killed one,
-          // though the two closes are the identical durable write. Nothing is
-          // weakened by admitting it, because the arbitration is
-          // `claimAndActivate`'s and not this guard's: a fresh lease or a live
-          // owner refuses the takeover and the run is left exactly as it was.
-          if (
-            (initial.status === "suspended" || initial.status === "running") &&
-            initial.cancelRequestedAtMs !== null
-          ) {
-            if (!(yield* claimAndActivate(initial))) return
+          const state = yield* decodeState(initial.stateJson)
+          interruptState = state
+          const registration = registrations.get(state.flowName)
+          if (registration === undefined) {
+            // Cancelling needs no handler. A parked run whose cancellation was
+            // durably requested used to be dropped here with everything else,
+            // and nothing else could ever reach it: the sweep woke the row every
+            // heartbeat and every wake bailed at this line, so a cancel written
+            // by a control-only process — the operator CLI, a second engine that
+            // registers other flows — stayed write-only forever while the run's
+            // linked children kept going. The terminal transition, the cascade
+            // over the durable edge table, and the interruption record are all
+            // written from the run ROW, so a process that could never execute
+            // this flow can still close it. Claiming first is what makes the
+            // close fenced: `cancelOwned` is owner-fenced, so exactly one of the
+            // sweeping processes wins and the rest see a lost CAS.
+            //
+            // `running` is here for the same reason `suspended` is. The row a
+            // hard-killed owner leaves behind is `running` with a frozen
+            // heartbeat and no waiting row, so the stale-running sweep is the
+            // only thing that reaches it, and it arrives through this same
+            // function: without this arm a control-only process could close a
+            // PARKED run of an unregistered flow and not a hard-killed one,
+            // though the two closes are the identical durable write. Nothing is
+            // weakened by admitting it, because the arbitration is
+            // `claimAndActivate`'s and not this guard's: a fresh lease or a live
+            // owner refuses the takeover and the run is left exactly as it was.
+            if (
+              (initial.status === "suspended" || initial.status === "running") &&
+              initial.cancelRequestedAtMs !== null
+            ) {
+              if (!(yield* claimAndActivate(initial))) return
+              return yield* cancelOwned(executionId, withoutResult(state))
+            }
+            // A wake for a flow this process has not registered — after a full
+            // restart the sweep re-drives released rows before (or without)
+            // the flow ever registering here. Dropping the wake silently made
+            // the #39 reclaim guarantee invisibly conditional on registration
+            // (issue #62): warn (once per run, the sweep retries every
+            // heartbeat) and leave the durable waiting row untouched so any
+            // process that does register the flow still reclaims the run.
+            if (!warnedUnregistered.has(executionId)) {
+              warnedUnregistered.add(executionId)
+              yield* Effect.logWarning(
+                `engine-store: run ${executionId} woke for flow ${state.flowName}, which is not registered in this process; leaving it parked for a worker that registers the flow`,
+                { runId: executionId, flowName: state.flowName }
+              )
+            }
+            return
+          }
+          if (!(yield* claimAndActivate(initial))) return
+          yield* Effect.logDebug("run activated", { flowName: state.flowName })
+
+          const activeState = withoutResult(state)
+          // The activation transition carries the cancel guard: a run whose
+          // cancellation was durably requested while it was parked must cancel
+          // here instead of re-executing flow side effects (issue #27).
+          const cleared = yield* store.transitionOwned(
+            executionId,
+            dependencies.owner,
+            "running",
+            yield* encodeState(activeState),
+            { cancelRequested: "absent" }
+          ).pipe(Effect.orDie)
+          if (cleared._tag === "GuardFailed") {
             return yield* cancelOwned(executionId, withoutResult(state))
           }
-          // A wake for a flow this process has not registered — after a full
-          // restart the sweep re-drives released rows before (or without)
-          // the flow ever registering here. Dropping the wake silently made
-          // the #39 reclaim guarantee invisibly conditional on registration
-          // (issue #62): warn (once per run, the sweep retries every
-          // heartbeat) and leave the durable waiting row untouched so any
-          // process that does register the flow still reclaims the run.
-          if (!warnedUnregistered.has(executionId)) {
-            warnedUnregistered.add(executionId)
-            yield* Effect.logWarning(
-              `engine-store: run ${executionId} woke for flow ${state.flowName}, which is not registered in this process; leaving it parked for a worker that registers the flow`,
-              { runId: executionId, flowName: state.flowName }
-            )
-          }
-          return
-        }
-        if (!(yield* claimAndActivate(initial))) return
-        yield* Effect.logDebug("run activated", { flowName: state.flowName })
+          if (cleared._tag !== "Transitioned") return
+          // A run that re-enters execution is no longer waiting: clear any
+          // parked waiting-reason payload (idempotent when none exists).
+          yield* engineState.wake(executionId)
 
-        const activeState = withoutResult(state)
-        // The activation transition carries the cancel guard: a run whose
-        // cancellation was durably requested while it was parked must cancel
-        // here instead of re-executing flow side effects (issue #27).
-        const cleared = yield* store.transitionOwned(
-          executionId,
-          dependencies.owner,
-          "running",
-          yield* encodeState(activeState),
-          { cancelRequested: "absent" }
-        ).pipe(Effect.orDie)
-        if (cleared._tag === "GuardFailed") {
-          return yield* cancelOwned(executionId, withoutResult(state))
-        }
-        if (cleared._tag !== "Transitioned") return
-        // A run that re-enters execution is no longer waiting: clear any
-        // parked waiting-reason payload (idempotent when none exists).
-        yield* engineState.wake(executionId)
-
-        const payload = yield* (Schema.decodeUnknownEffect(
-          Schema.toCodecJson(registration.flow.payloadSchema)
-        )(activeState.payload).pipe(Effect.orDie) as Effect.Effect<unknown>)
-        // A previous round of this run may have parked and retained its flow
-        // scope. That instance is now superseded — this round runs under the
-        // fresh instance below, with a scope of its own — so release the old
-        // one instead of orphaning it. `Exit.void`: a re-drive is a successful
-        // continuation, so ordinary finalizers release resources while
-        // `Flow.withRollback` compensations correctly stay out.
-        yield* releaseRetainedScope(executionId, Exit.void)
-        const instance = FlowEngine.makeInstance(
-          registration.flow,
-          executionId
-        )
-        const flowEngine = yield* dependencies.engine
-
-        /**
-         * Whether this round's suspension was durably accepted by the guarded
-         * terminal transition — the one outcome that lets the retained flow
-         * scope outlive the round.
-         */
-        let durableParkAccepted = false
-        // ONE cleanup region, registered before the race starts and spanning
-        // everything that can retain a scope or make its park durable: the
-        // suspension surfacing, the retention insertion in the race's exit,
-        // `encodeResult`, the pending-clock read, `engineState.park`, the
-        // guarded transition and the journal write it commits with, and the
-        // durable-park decision itself. Registering it here is what closes the
-        // last window: retention is inserted by an uninterruptible finalizer,
-        // and the fiber becomes interruptible again the instant that finalizer
-        // returns, so any cleanup piped onto the settlement alone would never
-        // be registered when an interrupt is already pending at that boundary —
-        // the scope would stay retained until the driver's own scope closed,
-        // which for a long-lived driver is not a release at all.
-        //
-        // `Exit.void` is the release exit, for the reason shutdown and a
-        // supersede use it (issue #26): a park that never committed leaves the
-        // run owned-but-stale or already re-owned, so it is reclaimed and
-        // replayed, and the replay re-registers its `Flow.withRollback`
-        // compensations under the reclaiming owner. Compensating here would
-        // undo work the journal still reports as done — and would then do it
-        // twice. Only a cancellation closes with an interrupt exit, and only
-        // `cancelOwned` does that.
-        yield* Effect.gen(function*() {
-          // Published inside the region for the same reason: the entry used to
-          // be written before `dependencies.engine` was awaited, one
-          // interruptible step ahead of the `ensuring` that removes it, so an
-          // interrupt landing there left this round's instance in the map for
-          // the driver's lifetime — a slow leak, and a stale instance for
-          // `interrupt` to mark interrupted.
-          liveInstances.set(executionId, instance)
-          const result = yield* Effect.scoped(
-            Effect.raceFirst(
-              Effect.raceFirst(
-                registration.execute(payload as object, executionId).pipe(
-                  Flow.intoResult,
-                  Effect.provideService(FlowRuntime.FlowInstance, instance),
-                  Effect.provideService(FlowRuntime.FlowRuntime, flowEngine)
-                ),
-                Ownership.heartbeatLoop(executionId, dependencies.owner).pipe(
-                  Effect.provideService(RunStore.RunStore, store)
-                )
-              ),
-              cancelPollLoop(executionId)
-            )
-          ).pipe(
-            Effect.onInterrupt(() =>
-              settleInterrupted(executionId, activeState, { flow: registration.flow, instance })
-            ),
-            Effect.ensuring(Effect.sync(() => liveInstances.delete(executionId))),
-            // A suspension is the ONE settlement `Flow.intoResult` leaves the
-            // flow scope open for, so from the instant it surfaces the scope
-            // needs an owner. Retention is taken HERE, inside the race's own
-            // exit processing — `Effect.onExit` finalizers run uninterruptibly —
-            // because taking it any later crosses an interruptible boundary: an
-            // interrupt landing there would end the drive with the scope never
-            // retained, unreachable, and its finalizers never run at all. The
-            // entry is inserted into a cleanup region that was registered before
-            // this race started, so it is owned from this instant on: every
-            // ending, including an interrupt observed at the boundary between
-            // this finalizer and the settlement below, releases it there.
-            Effect.onExit((exit) =>
-              Effect.suspend(() => {
-                if (!(Exit.isSuccess(exit) && exit.value._tag === "Suspended")) return Effect.void
-                retainedScopes.set(executionId, instance.scope)
-                return dependencies.unsafeOnScopeRetained?.(executionId) ?? Effect.void
-              })
-            )
+          const payload = yield* (Schema.decodeUnknownEffect(
+            Schema.toCodecJson(registration.flow.payloadSchema)
+          )(activeState.payload).pipe(Effect.orDie) as Effect.Effect<unknown>)
+          // A previous round of this run may have parked and retained its flow
+          // scope. That instance is now superseded — this round runs under the
+          // fresh instance below, with a scope of its own — so release the old
+          // one instead of orphaning it. `Exit.void`: a re-drive is a successful
+          // continuation, so ordinary finalizers release resources while
+          // `Flow.withRollback` compensations correctly stay out.
+          yield* releaseRetainedScope(executionId, Exit.void)
+          const instance = FlowEngine.makeInstance(
+            registration.flow,
+            executionId
           )
-          /**
-           * Settles this round durably.
-           *
-           * A suspension that the guarded terminal transition durably accepts
-           * sets `durableParkAccepted`, and that flag is the only thing that lets
-           * a retained flow scope outlive this round. Every other ending — an
-           * alternative settlement, a cancellation, a lost fence, a defect, an
-           * interruption — leaves it unset, so the cleanup region registered
-           * around the round releases the scope.
-           */
-          const settleRound = Effect.gen(function*() {
-            if (result._tag === "CancelRequested") {
-              yield* cancelOwned(executionId, activeState)
-              return
-            }
-
-            // Corrupt evidence on a SUCCEEDED attempt row is an operator-visible
-            // event, not a terminal run failure (issue #171): the row cannot be
-            // evicted and re-executed like a corrupt cache row (#164) without
-            // breaking exactly-once. ActionPersistence has already journalled
-            // the corruption and quarantined only its boundary evidence off the
-            // row. Park this first strict detection so it remains visible; the
-            // next explicit resume returns the durable outcome without replaying
-            // the poison or re-executing the action.
-            const quarantine = result._tag === "Complete" && Exit.isFailure(result.exit)
-              ? ActionPersistence.evidenceQuarantined(result.exit.cause)
-              : undefined
-            if (quarantine !== undefined) {
-              yield* engineState.park(
-                executionId,
-                { reason: "quarantine", token: quarantine.keyDigest },
-                dependencies.owner
+          round = { flow: registration.flow, instance }
+          const flowEngine = yield* dependencies.engine
+          // ONE cleanup region, registered before the race starts and spanning
+          // everything that can retain a scope or make its park durable: the
+          // suspension surfacing, the retention insertion in the race's exit,
+          // `encodeResult`, the pending-clock read, `engineState.park`, the
+          // guarded transition and the journal write it commits with, and the
+          // durable-park decision itself. Registering it here is what closes the
+          // last window: retention is inserted by an uninterruptible finalizer,
+          // and the fiber becomes interruptible again the instant that finalizer
+          // returns, so any cleanup piped onto the settlement alone would never
+          // be registered when an interrupt is already pending at that boundary —
+          // the scope would stay retained until the driver's own scope closed,
+          // which for a long-lived driver is not a release at all.
+          //
+          // `Exit.void` is the release exit, for the reason shutdown and a
+          // supersede use it (issue #26): a park that never committed leaves the
+          // run owned-but-stale or already re-owned, so it is reclaimed and
+          // replayed, and the replay re-registers its `Flow.withRollback`
+          // compensations under the reclaiming owner. Compensating here would
+          // undo work the journal still reports as done — and would then do it
+          // twice. Only a cancellation closes with an interrupt exit, and only
+          // `cancelOwned` does that.
+          yield* Effect.gen(function*() {
+            // Published inside the region for the same reason: the entry used to
+            // be written before `dependencies.engine` was awaited, one
+            // interruptible step ahead of the `ensuring` that removes it, so an
+            // interrupt landing there left this round's instance in the map for
+            // the driver's lifetime — a slow leak, and a stale instance for
+            // `interrupt` to mark interrupted.
+            liveInstances.set(executionId, instance)
+            const result = yield* Effect.scoped(
+              Effect.raceFirst(
+                Effect.raceFirst(
+                  registration.execute(payload as object, executionId).pipe(
+                    Flow.intoResult,
+                    Effect.provideService(FlowRuntime.FlowInstance, instance),
+                    Effect.provideService(FlowRuntime.FlowRuntime, flowEngine)
+                  ),
+                  Ownership.heartbeatLoop(executionId, dependencies.owner).pipe(
+                    Effect.provideService(RunStore.RunStore, store)
+                  )
+                ),
+                cancelPollLoop(executionId)
               )
-              const parked = yield* transitionAndRecord(
-                executionId,
-                "suspended",
-                yield* encodeState(withoutResult(activeState)),
-                {
-                  decision: "quarantined",
-                  status: "suspended",
-                  keyDigest: quarantine.keyDigest,
-                  owner: dependencies.owner
-                },
-                { cancelRequested: "absent" }
-              )
-              if (parked._tag === "GuardFailed") {
-                yield* cancelOwned(executionId, activeState)
-              }
-              return
-            }
-
-            // A round that handed off settles through the seam instead: its
-            // terminal transition and its successor's creation are one write, so
-            // it cannot share the ordinary terminal path below.
-            if (result._tag === "Handoff") {
-              yield* handOff({
-                executionId,
-                row: initial,
-                state: activeState,
-                flow: registration.flow,
-                handoff: result
-              })
-              return
-            }
-
-            const encodedResult = yield* encodeResult(registration.flow, result)
-            const nextState: RunState = { ...activeState, result: encodedResult.encoded }
-            // A settlement the flow's codec rejected is written `failed`
-            // whatever it claimed to be: the row must reach a terminal status
-            // in this process, because the alternative — the `running` row the
-            // release validation found — is re-executed by the next one.
-            const status: RunStore.RunStatus = encodedResult.note !== undefined
-              ? "failed"
-              : result._tag === "Suspended"
-              ? "suspended"
-              : Exit.isSuccess(result.exit)
-              ? "completed"
-              : "failed"
-            if (status === "suspended") {
-              // Park while this process still owns the row (`park` is
-              // owner-fenced; the suspended transition below releases
-              // ownership). The reason is derived from durable state: a pending
-              // clock row means a timer wake with a known deadline; anything
-              // else waits on an external event (deferred completion). This is
-              // what makes `waitingRuns` sweepers and the 0004 partial index
-              // match real suspensions (issue #12).
-              // A flow-declared classification (FlowRuntime.annotateWaiting) wins:
-              // it is the only way an approval or quota wait — and its wake
-              // token — reaches the parked row (issue #31). The durable-state
-              // derivation stays the fallback.
-              const declared = instance.waiting
-              const pendingClocks = yield* engineState.pendingClocks({ executionId })
-              const waiting: DurableEngineState.Waiting = declared !== undefined
-                ? declared
-                : pendingClocks.length > 0
-                ? {
-                  reason: "timer",
-                  wakeAt: Math.min(...pendingClocks.map((clock) => clock.dueAtMs))
-                }
-                : { reason: "event" }
-              yield* engineState.park(executionId, waiting, dependencies.owner)
-            }
-            // Finalize is guarded on `cancel_requested_at_ms` inside the same
-            // CAS: a cancellation request that raced past the last poll turns
-            // the terminal transition into GuardFailed, and the run cancels
-            // instead of finalizing (issue #11).
-            const transitioned = yield* transitionAndRecord(
-              executionId,
-              status,
-              yield* encodeState(nextState),
-              { decision: "transitioned", status, owner: dependencies.owner },
-              { cancelRequested: "absent" },
-              // A suspension is not an exit: the run is parked and will settle
-              // later, so its children keep going and its timers stay armed. A
-              // `completed` or `failed` run is done, so its attached children
-              // end with it and its clock rows are closed with it.
-              status === "suspended" ? undefined : Effect.gen(function*() {
-                yield* applyChildExitPolicy(executionId)
-                yield* engineState.completeRunClocks(executionId, yield* Clock.currentTimeMillis)
-              })
             ).pipe(
-              // The park becomes durable the instant this transition commits, so
-              // the flag that records it is set in the transition's own exit
-              // processing. `Effect.onExit` finalizers run uninterruptibly and
-              // before the fiber can observe an interruption again, so no
-              // interrupt can land between the durable commit and the flag and
-              // make the cleanup region discard a scope the park still needs.
+              Effect.ensuring(Effect.sync(() => liveInstances.delete(executionId))),
+              // A suspension is the ONE settlement `Flow.intoResult` leaves the
+              // flow scope open for, so from the instant it surfaces the scope
+              // needs an owner. Retention is taken HERE, inside the race's own
+              // exit processing — `Effect.onExit` finalizers run uninterruptibly —
+              // because taking it any later crosses an interruptible boundary: an
+              // interrupt landing there would end the drive with the scope never
+              // retained, unreachable, and its finalizers never run at all. The
+              // entry is inserted into a cleanup region that was registered before
+              // this race started, so it is owned from this instant on: every
+              // ending, including an interrupt observed at the boundary between
+              // this finalizer and the settlement below, releases it there.
               Effect.onExit((exit) =>
-                Effect.sync(() => {
-                  if (status === "suspended" && Exit.isSuccess(exit) && exit.value._tag === "Transitioned") {
-                    durableParkAccepted = true
-                  }
+                Effect.suspend(() => {
+                  if (!(Exit.isSuccess(exit) && exit.value._tag === "Suspended")) return Effect.void
+                  retainedScopes.set(executionId, instance.scope)
+                  return dependencies.unsafeOnScopeRetained?.(executionId) ?? Effect.void
                 })
               )
             )
-            if (transitioned._tag === "GuardFailed") {
-              // `cancelOwned` closes the retained scope itself, with the
-              // interrupt exit cancellation compensations exist for. Leaving
-              // `durableParkAccepted` unset therefore releases nothing a second
-              // time: the entry is already gone from the map.
-              yield* cancelOwned(executionId, activeState)
-              return
-            }
-            // A lost fence (`NotFound`, a mismatched CAS) settles nothing: the
-            // run is someone else's now, so a suspension holds no durable park
-            // and the cleanup region releases the scope rather than holding it
-            // until shutdown.
-            if (transitioned._tag !== "Transitioned") return
-            if (status !== "suspended") {
-              // The settle is durable; tell any in-process caller parked on this
-              // run's poll loop, so a run driven to completion by a sweep or a
-              // coordinator wake is observed now rather than on the next tick.
-              yield* wakeBus.wake(executionId)
-              if (activeState.parentExecutionId !== undefined) {
-                const activeCoordinator = yield* Deferred.await(coordinatorDeferred)
-                yield* activeCoordinator.wake(activeState.parentExecutionId)
-                yield* wakeBus.wake(activeState.parentExecutionId)
+            /**
+             * Settles this round durably.
+             *
+             * A suspension that the guarded terminal transition durably accepts
+             * sets `durableParkAccepted`, and that flag is the only thing that lets
+             * a retained flow scope outlive this round. Every other ending — an
+             * alternative settlement, a cancellation, a lost fence, a defect, an
+             * interruption — leaves it unset, so the cleanup region registered
+             * around the round releases the scope.
+             */
+            const settleRound = Effect.gen(function*() {
+              if (result._tag === "CancelRequested") {
+                yield* cancelOwned(executionId, activeState)
+                return
               }
-              return
-            }
-          })
 
-          yield* settleRound
+              // Corrupt evidence on a SUCCEEDED attempt row is an operator-visible
+              // event, not a terminal run failure (issue #171): the row cannot be
+              // evicted and re-executed like a corrupt cache row (#164) without
+              // breaking exactly-once. ActionPersistence has already journalled
+              // the corruption and quarantined only its boundary evidence off the
+              // row. Park this first strict detection so it remains visible; the
+              // next explicit resume returns the durable outcome without replaying
+              // the poison or re-executing the action.
+              const quarantine = result._tag === "Complete" && Exit.isFailure(result.exit)
+                ? ActionPersistence.evidenceQuarantined(result.exit.cause)
+                : undefined
+              if (quarantine !== undefined) {
+                yield* engineState.park(
+                  executionId,
+                  { reason: "quarantine", token: quarantine.keyDigest },
+                  dependencies.owner
+                )
+                const parked = yield* transitionAndRecord(
+                  executionId,
+                  "suspended",
+                  yield* encodeState(withoutResult(activeState)),
+                  {
+                    decision: "quarantined",
+                    status: "suspended",
+                    keyDigest: quarantine.keyDigest,
+                    owner: dependencies.owner
+                  },
+                  { cancelRequested: "absent" }
+                )
+                if (parked._tag === "GuardFailed") {
+                  yield* cancelOwned(executionId, activeState)
+                }
+                return
+              }
+
+              // A round that handed off settles through the seam instead: its
+              // terminal transition and its successor's creation are one write, so
+              // it cannot share the ordinary terminal path below.
+              if (result._tag === "Handoff") {
+                yield* handOff({
+                  executionId,
+                  row: initial,
+                  state: activeState,
+                  flow: registration.flow,
+                  handoff: result
+                })
+                return
+              }
+
+              const encodedResult = yield* encodeResult(registration.flow, result)
+              const nextState: RunState = { ...activeState, result: encodedResult.encoded }
+              // A settlement the flow's codec rejected is written `failed`
+              // whatever it claimed to be: the row must reach a terminal status
+              // in this process, because the alternative — the `running` row the
+              // release validation found — is re-executed by the next one.
+              const status: RunStore.RunStatus = encodedResult.note !== undefined
+                ? "failed"
+                : result._tag === "Suspended"
+                ? "suspended"
+                : Exit.isSuccess(result.exit)
+                ? "completed"
+                : "failed"
+              if (status === "suspended") {
+                // Park while this process still owns the row (`park` is
+                // owner-fenced; the suspended transition below releases
+                // ownership). The reason is derived from durable state: a pending
+                // clock row means a timer wake with a known deadline; anything
+                // else waits on an external event (deferred completion). This is
+                // what makes `waitingRuns` sweepers and the 0004 partial index
+                // match real suspensions (issue #12).
+                // A flow-declared classification (FlowRuntime.annotateWaiting) wins:
+                // it is the only way an approval or quota wait — and its wake
+                // token — reaches the parked row (issue #31). The durable-state
+                // derivation stays the fallback.
+                const declared = instance.waiting
+                const pendingClocks = yield* engineState.pendingClocks({ executionId })
+                const waiting: DurableEngineState.Waiting = declared !== undefined
+                  ? declared
+                  : pendingClocks.length > 0
+                  ? {
+                    reason: "timer",
+                    wakeAt: Math.min(...pendingClocks.map((clock) => clock.dueAtMs))
+                  }
+                  : { reason: "event" }
+                yield* engineState.park(executionId, waiting, dependencies.owner)
+              }
+              // Finalize is guarded on `cancel_requested_at_ms` inside the same
+              // CAS: a cancellation request that raced past the last poll turns
+              // the terminal transition into GuardFailed, and the run cancels
+              // instead of finalizing (issue #11).
+              const transitioned = yield* transitionAndRecord(
+                executionId,
+                status,
+                yield* encodeState(nextState),
+                { decision: "transitioned", status, owner: dependencies.owner },
+                { cancelRequested: "absent" },
+                // A suspension is not an exit: the run is parked and will settle
+                // later, so its children keep going and its timers stay armed. A
+                // `completed` or `failed` run is done, so its attached children
+                // end with it and its clock rows are closed with it.
+                status === "suspended" ? undefined : Effect.gen(function*() {
+                  yield* applyChildExitPolicy(executionId)
+                  yield* engineState.completeRunClocks(executionId, yield* Clock.currentTimeMillis)
+                })
+              ).pipe(
+                // The park becomes durable the instant this transition commits, so
+                // the flag that records it is set in the transition's own exit
+                // processing. `Effect.onExit` finalizers run uninterruptibly and
+                // before the fiber can observe an interruption again, so no
+                // interrupt can land between the durable commit and the flag and
+                // make the cleanup region discard a scope the park still needs.
+                Effect.onExit((exit) =>
+                  Effect.sync(() => {
+                    if (status === "suspended" && Exit.isSuccess(exit) && exit.value._tag === "Transitioned") {
+                      durableParkAccepted = true
+                    }
+                  })
+                )
+              )
+              if (transitioned._tag === "GuardFailed") {
+                // `cancelOwned` closes the retained scope itself, with the
+                // interrupt exit cancellation compensations exist for. Leaving
+                // `durableParkAccepted` unset therefore releases nothing a second
+                // time: the entry is already gone from the map.
+                yield* cancelOwned(executionId, activeState)
+                return
+              }
+              // A lost fence (`NotFound`, a mismatched CAS) settles nothing: the
+              // run is someone else's now, so a suspension holds no durable park
+              // and the cleanup region releases the scope rather than holding it
+              // until shutdown.
+              if (transitioned._tag !== "Transitioned") return
+              if (status !== "suspended") {
+                // The settle is durable; tell any in-process caller parked on this
+                // run's poll loop, so a run driven to completion by a sweep or a
+                // coordinator wake is observed now rather than on the next tick.
+                yield* wakeBus.wake(executionId)
+                if (activeState.parentExecutionId !== undefined) {
+                  const activeCoordinator = yield* Deferred.await(coordinatorDeferred)
+                  yield* activeCoordinator.wake(activeState.parentExecutionId)
+                  yield* wakeBus.wake(activeState.parentExecutionId)
+                }
+                return
+              }
+            })
+
+            yield* settleRound
+          })
         }).pipe(
+          // Install ownership cleanup before the claim itself. Limiting it to
+          // the execution race strands an activated row if shutdown lands in
+          // setup or settlement; a replacement host in the same process then
+          // correctly refuses to steal from the still-live PID forever.
+          Effect.onInterrupt(() =>
+            interruptState === undefined
+              ? Effect.void
+              : settleInterrupted(executionId, interruptState, round)
+          ),
           Effect.onExit(() =>
-            // `releaseRetainedScope` deletes before it closes, so a path that
-            // already released (`cancelOwned`, a supersede) finds no entry and
-            // nothing is finalized twice. Deleting the instance is likewise
-            // idempotent — the race's own `ensuring` normally does it first,
-            // and this covers the endings that never reached the race. Neither
-            // swallows the round's failure nor rewrites its cause.
             Effect.suspend(() => {
               liveInstances.delete(executionId)
-              return durableParkAccepted ? Effect.void : releaseRetainedScope(executionId, Exit.void)
+              // Cancellation settles first so its compensations still see the
+              // retained scope. A successful durable park alone retains it.
+              return round === undefined || durableParkAccepted
+                ? Effect.void
+                : releaseRetainedScope(executionId, Exit.void)
             })
-          )
+          ),
+          Effect.annotateLogs({ runId: executionId })
         )
-      }).pipe(Effect.annotateLogs({ runId: executionId }))
+      })
 
     const coordinator = yield* RunCoordinator.make<string, never, Crypto.Crypto>({
       drain: drive

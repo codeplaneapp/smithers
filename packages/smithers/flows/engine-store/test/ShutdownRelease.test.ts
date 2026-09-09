@@ -11,11 +11,12 @@ import { describe, expect, it } from "@effect/vitest"
 import { Flow, FlowRuntime } from "@smthrs/flow"
 import { Journal } from "@smthrs/journal"
 import { Node } from "@smthrs/plan"
-import { type Ownership, RunStore } from "@smthrs/run-store"
+import { Ownership, RunStore } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
@@ -95,6 +96,77 @@ describe("shutdown releases instead of cancelling (issue #26)", () => {
       expect(result.row.owner).toBeNull()
       expect(result.eventTypes).not.toContain("flows.engine.interrupted")
     }))
+
+  for (const boundary of ["claimed", "activated", "retained"] as const) {
+    it.effect(`shutdown releases ownership at the ${boundary} boundary and same-PID replacement resumes`, () =>
+      Effect.gen(function*() {
+        const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          const state = yield* DurableEngineState.DurableEngineState
+          const atBoundary = yield* Latch.make(false)
+          const driverScope = yield* Scope.make()
+          const executionId = `shutdown-${boundary}`
+          const firstOwner = { hostId: "same-process", pid: process.pid, nonce: "first" }
+          const barrier = Latch.open(atBoundary).pipe(Effect.andThen(Effect.never))
+          const interruptedStore = boundary === "claimed"
+            ? RunStore.makeNoop({
+              ...store,
+              claim: (...args) => store.claim(...args).pipe(Effect.andThen(barrier))
+            })
+            : store
+          const driver = yield* RunDriver.make({
+            owner: firstOwner,
+            journalSource: "shutdown-boundary-first",
+            isAlive: Ownership.sameHostPidProbe,
+            engine: boundary === "activated" ? barrier : Effect.succeed(fakeEngine),
+            // The existing observation hook runs uninterruptibly. Queue the
+            // interrupt there; it is delivered immediately after that finalizer.
+            unsafeOnScopeRetained: boundary === "retained"
+              ? () => Effect.withFiber((fiber) => Effect.sync(() => fiber.interruptUnsafe()))
+              : undefined
+          }).pipe(
+            Effect.provideService(RunStore.RunStore, interruptedStore),
+            Scope.provide(driverScope)
+          )
+          yield* driver.register(TestFlow, () =>
+            Effect.gen(function*() {
+              const instance = yield* FlowRuntime.FlowInstance
+              instance.suspended = true
+              instance.waiting = { reason: "approval", token: "approval-42" }
+              return yield* Effect.interrupt
+            }))
+          // resume joins the complete round without adding a pending wake.
+          yield* store.create(executionId, JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {} }))
+          const driving = yield* driver.resume(TestFlow, executionId).pipe(Effect.forkChild({ startImmediately: true }))
+          if (boundary === "retained") {
+            yield* Fiber.await(driving)
+          } else {
+            yield* Latch.await(atBoundary)
+          }
+          yield* Scope.close(driverScope, Exit.void)
+          const released = yield* store.get(executionId)
+          const waiting = yield* state.waiting(executionId)
+          const replacement = yield* RunDriver.make({
+            owner: { ...firstOwner, nonce: "replacement" },
+            journalSource: "shutdown-boundary-replacement",
+            isAlive: Ownership.sameHostPidProbe,
+            engine: Effect.succeed(fakeEngine)
+          })
+          yield* replacement.register(TestFlow, () => Effect.succeed("resumed"))
+          yield* replacement.resume(TestFlow, executionId)
+          return { released, waiting, completed: yield* store.get(executionId) }
+        })))
+        expect(result.released.owner).toBeNull()
+        expect(result.released.claim).toBeNull()
+        expect(result.released.status).toBe(boundary === "claimed" ? "pending" : "suspended")
+        if (boundary === "retained") {
+          expect(Option.getOrThrow(result.waiting)).toMatchObject({ reason: "approval", token: "approval-42" })
+          expect(JSON.parse(result.released.stateJson).result._tag).toBe("Suspended")
+        }
+        expect(result.completed.status).toBe("completed")
+        expect(result.completed.owner).toBeNull()
+      }))
+  }
 
   it.effect("operator interrupt still durably cancels the run", () =>
     Effect.gen(function*() {

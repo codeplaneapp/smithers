@@ -89,6 +89,13 @@ time travel never read a hole. No local transaction makes a remote effect
 atomic, so external effects still need idempotency keys, fencing, or
 compensation.
 
+Closing an engine's Effect scope releases its run ownership across the full
+claim, execution, and settlement lifetime. An interrupted partial claim is
+abandoned; an activated run returns to `suspended`, preserving any declared
+approval, timer, or event wait. This lets a replacement engine in the same
+process resume with a new owner nonce without weakening the PID liveness
+check. Only a persisted operator cancellation closes the run as `cancelled`.
+
 ## Bundles for the browser, runs on SQLite
 
 The entry point bundles for a browser. The two host reads it once made
