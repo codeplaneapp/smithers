@@ -700,7 +700,9 @@ export const Browser = (options: {
  */
 export const ArtifactSource = Schema.Struct({
   from: Schema.NonEmptyString,
-  as: Schema.optional(Schema.NonEmptyString)
+  as: Schema.optional(Schema.NonEmptyString),
+  /** Fail collection if this path is missing or this glob has no existing matches. */
+  required: Schema.optional(Schema.Boolean)
 })
 
 /**
@@ -733,22 +735,28 @@ export type ArtifactUpload = typeof ArtifactUpload.Type
 /**
  * Declares that a job collects and uploads artifacts after its targets run.
  *
- * Collection is strict: every declared source must exist and copy successfully.
- * The upload action still ignores an empty collection for jobs that declare no
- * sources, while a misspelled or failed source never masquerades as success.
+ * Sources are optional by default: missing paths and unmatched globs are skipped.
+ * Set `required: true` on a source to fail collection when it is absent. Existing
+ * sources must always copy successfully. The upload rejects an empty collection
+ * if any source is required; otherwise it ignores one, including with no sources.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const Artifacts = (options: {
   readonly artifact: string
-  readonly sources: ReadonlyArray<{ readonly from: string; readonly as?: string | undefined }>
+  readonly sources: ReadonlyArray<{
+    readonly from: string
+    readonly as?: string | undefined
+    readonly required?: boolean | undefined
+  }>
 }): ArtifactUpload =>
   ArtifactUpload.make({
     artifact: options.artifact,
     sources: options.sources.map((source) => ({
       from: validatePath(source.from, "artifact source"),
-      ...(source.as === undefined ? {} : { as: validatePath(source.as, "artifact destination") })
+      ...(source.as === undefined ? {} : { as: validatePath(source.as, "artifact destination") }),
+      ...(source.required === undefined ? {} : { required: source.required })
     }))
   })
 

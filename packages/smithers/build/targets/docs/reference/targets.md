@@ -508,3 +508,25 @@ back to the commit SHA for other events. With the default
 `cancelInProgress: true`, a new PR run cancels the previous run for that PR;
 each pushed commit retains its own run and verdict. Set
 `cancelInProgress: false` to disable cancellation.
+
+`Smithers.CiToolchain.Artifacts({ artifact, sources })` collects and uploads
+files after a generated job's targets run, including after failure. Each source
+has `from`, optional `as` (the destination within the artifact), and optional
+`required`. Sources are optional by default: missing literal paths and globs
+with no matches are skipped. Existing sources must copy successfully.
+
+Set `required: true` on a source to fail collection if its literal path is
+missing or its glob matches no existing paths. Every matching path is copied.
+If any source is required, the upload uses `if-no-files-found: error`;
+otherwise it uses `ignore`, including when `sources` is empty. An optional
+source cannot satisfy a missing required source.
+
+```ts
+Smithers.CiToolchain.Artifacts({
+  artifact: "test-evidence",
+  sources: [
+    { from: "reports/results.xml", required: true },
+    { from: "/tmp/shot-*.png" }
+  ]
+})
+```

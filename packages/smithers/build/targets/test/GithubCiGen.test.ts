@@ -7,7 +7,9 @@
  * to declare a command at all, which is the property the whole module exists
  * for.
  */
+import { spawnSync } from "node:child_process"
 import * as Fs from "node:fs/promises"
+import { tmpdir } from "node:os"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
 import * as CiToolchain from "../src/CiToolchain.ts"
@@ -928,6 +930,118 @@ describe("render", () => {
     )
     // No `for` loop anywhere whose whole list is a single quoted literal.
     expect(script.split("\n").filter((line) => /^\s*for \w+ in '[^'*]*';/.test(line))).toEqual([])
+  })
+
+  it("renders required artifact collection through the workflow declaration", () => {
+    const sources = [{ from: "reports/results.xml", required: true }, { from: "shot-*.png" }]
+    const rendered = render(attrsOf({
+      ...goldenAttrs,
+      gates: [],
+      jobs: [{
+        id: "evidence",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({
+          artifacts: CiToolchain.Artifacts({ artifact: "test-evidence", sources })
+        }),
+        steps: [{ verb: Verb.Test, pattern: "//apps/ui" }]
+      }]
+    }))
+    expect(rendered).toContain("if-no-files-found: error")
+    expect(rendered).toContain("Required artifact source is missing: reports/results.xml")
+    const steps = parseWorkflow(rendered).jobs.find((job) => job.id === "evidence")!.steps
+    expect(steps.filter((step) => step.name?.includes("test-evidence")).map((step) => step.condition))
+      .toEqual(["always()", "always()"])
+  })
+
+  it.each(["report.txt", "report-*.txt"])("fails collection for a missing required source: %s", async (from) => {
+    const directory = await Fs.mkdtemp(NodePath.join(tmpdir(), "required-artifacts-"))
+    try {
+      // An optional source can populate the upload without satisfying a required source.
+      await Fs.writeFile(NodePath.join(directory, "optional.txt"), "diagnostics")
+      const sources = [{ from: "optional.txt" }, { from, required: true }]
+      const steps = artifactSteps(CiToolchain.Artifacts({ artifact: "evidence", sources }))
+      const result = spawnSync("bash", ["-e", "-c", steps[0]!.run!], {
+        cwd: directory,
+        env: { ...process.env, RUNNER_TEMP: directory },
+        encoding: "utf8"
+      })
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(1)
+      expect(result.stdout + result.stderr).toContain(`Required artifact source is missing: ${from}`)
+      expect(steps[1]!.with!["if-no-files-found"]).toBe("error")
+    } finally {
+      await Fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it.each([undefined, false, true])("renders the upload policy for required: %s", (required) => {
+    const sources = [{ from: "report.txt", required }]
+    const upload = CiToolchain.Artifacts({ artifact: "evidence", sources })
+    expect(upload.sources[0]).toEqual(required === undefined ? { from: "report.txt" } : sources[0])
+    expect(artifactSteps(upload)[1]!.with!["if-no-files-found"]).toBe(required ? "error" : "ignore")
+  })
+
+  it.each([undefined, false, true])("copies present literal and glob sources with required: %s", async (required) => {
+    const directory = await Fs.mkdtemp(NodePath.join(tmpdir(), "present-artifacts-"))
+    try {
+      await Fs.writeFile(NodePath.join(directory, "report.txt"), "report")
+      await Fs.writeFile(NodePath.join(directory, "shot-1.txt"), "first")
+      await Fs.writeFile(NodePath.join(directory, "shot-2.txt"), "second")
+      const sources = [{ from: "report.txt", as: "renamed.txt", required }, { from: "shot-*.txt", required }]
+      const script = artifactSteps(CiToolchain.Artifacts({ artifact: "evidence", sources }))[0]!.run!
+      const result = spawnSync("bash", ["-e", "-c", script], {
+        cwd: directory,
+        env: { ...process.env, RUNNER_TEMP: directory },
+        encoding: "utf8"
+      })
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(await Fs.readFile(NodePath.join(directory, "evidence/renamed.txt"), "utf8")).toBe("report")
+      expect(await Fs.readFile(NodePath.join(directory, "evidence/shot-1.txt"), "utf8")).toBe("first")
+      expect(await Fs.readFile(NodePath.join(directory, "evidence/shot-2.txt"), "utf8")).toBe("second")
+    } finally {
+      await Fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it.each([undefined, false])("allows missing optional sources with required: %s", async (required) => {
+    const directory = await Fs.mkdtemp(NodePath.join(tmpdir(), "optional-artifacts-"))
+    try {
+      const sources = [{ from: "report.txt", required }, { from: "shot-*.txt", required }]
+      const steps = artifactSteps(CiToolchain.Artifacts({ artifact: "evidence", sources }))
+      const result = spawnSync("bash", ["-e", "-c", steps[0]!.run!], {
+        cwd: directory,
+        env: { ...process.env, RUNNER_TEMP: directory }
+      })
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(await Fs.readdir(NodePath.join(directory, "evidence"))).toEqual([])
+      expect(steps[1]!.with!["if-no-files-found"]).toBe("ignore")
+    } finally {
+      await Fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it.each([false, true])("fails when a present source cannot copy with required: %s", async (required) => {
+    const directory = await Fs.mkdtemp(NodePath.join(tmpdir(), "failed-artifacts-"))
+    try {
+      await Fs.writeFile(NodePath.join(directory, "report.txt"), "report")
+      const sources = [{ from: "report.txt", as: "missing-parent/report.txt", required }]
+      const script = artifactSteps(CiToolchain.Artifacts({ artifact: "evidence", sources }))[0]!.run!
+      const result = spawnSync("bash", ["-e", "-c", script], {
+        cwd: directory,
+        env: { ...process.env, RUNNER_TEMP: directory }
+      })
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(1)
+    } finally {
+      await Fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("allows an artifact declaration with no sources", () => {
+    expect(artifactSteps(CiToolchain.Artifacts({ artifact: "evidence", sources: [] }))[1]!.with!["if-no-files-found"])
+      .toBe("ignore")
   })
 
   it("validates artifact values again at the rendering boundary", () => {

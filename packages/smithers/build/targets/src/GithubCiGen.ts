@@ -964,7 +964,7 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
  *
  * Only these diagnostic steps use `always()`: GitHub otherwise skips them
  * after the failure they need to explain. Required gates retain their normal
- * failure semantics, and uploading an empty diagnostic collection is allowed.
+ * failure semantics. An empty upload is allowed only when no source is required.
  *
  * @category rendering
  * @since 0.1.0
@@ -980,6 +980,18 @@ export const artifactSteps = (upload: CiToolchain.ArtifactUpload): ReadonlyArray
     const destination = source.as === undefined
       ? root
       : `"$RUNNER_TEMP/${artifact}/${CiToolchain.validatePath(source.as, "artifact destination")}"`
+    if (source.required === true) {
+      // `from` has already passed path validation, so the diagnostic is safe to quote.
+      const missing = `echo 'Required artifact source is missing: ${source.from}' >&2; exit 1`
+      if (!source.from.includes("*")) {
+        return `if [ ! -e ${from} ]; then ${missing}; fi\ncp -R -- ${from} ${destination}`
+      }
+      return [
+        "artifact_source_found=false",
+        `for f in ${from}; do if [ -e "$f" ]; then artifact_source_found=true; cp -R -- "$f" ${destination}; fi; done`,
+        `if [ "$artifact_source_found" = false ]; then ${missing}; fi`
+      ].join("\n")
+    }
     // A green run often leaves nothing to collect: an unexpanded glob must not
     // fail the job (PR #1631: the e2e suites passed and the bare `cp` of
     // /tmp/smithers-*.png exited 1). Guard each source on existence; a source
@@ -1002,7 +1014,7 @@ export const artifactSteps = (upload: CiToolchain.ArtifactUpload): ReadonlyArray
       with: {
         name: artifact,
         path: `\${{ runner.temp }}/${artifact}`,
-        "if-no-files-found": "ignore"
+        "if-no-files-found": upload.sources.some((source) => source.required === true) ? "error" : "ignore"
       }
     }
   ]
