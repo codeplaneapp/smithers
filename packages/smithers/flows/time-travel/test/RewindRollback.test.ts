@@ -22,6 +22,7 @@ import * as Rewind from "../src/internal/Rewind.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import { error } from "../src/TimeTravelError.ts"
 import { TimeTravelStore } from "../src/TimeTravelStore.ts"
+import { journalOf, row } from "./MemoryHarness.ts"
 
 const owner: OwnerId = { hostId: "test-host", pid: 20, nonce: "rollback-owner" }
 const frame = { lineageId: "run/root", seq: 0 } as const
@@ -93,20 +94,7 @@ const makeRuns = (
   return Object.assign(service, { state: () => ({ ...row }) })
 }
 
-const runRow = (): RunStore.RunRow => ({
-  runId: "run",
-  status: "suspended",
-  createdAtMs: 1,
-  startedAtMs: 2,
-  finishedAtMs: null,
-  owner: null,
-  heartbeatAtMs: null,
-  claim: null,
-  claimedAtMs: null,
-  parentRunId: null,
-  cancelRequestedAtMs: null,
-  stateJson: "{\"cursor\":9}"
-})
+const runRow = (): RunStore.RunRow => row({ runId: "run", createdAtMs: 1, startedAtMs: 2, stateJson: "{\"cursor\":9}" })
 
 const stored = (
   seq: number,
@@ -153,40 +141,6 @@ const edge: LineageEdge = {
   attached: true
 }
 
-const makeJournal = (
-  store: ReturnType<typeof MemoryTimeTravelStore.make>
-): Journal.Service =>
-  Journal.makeNoop({
-    entries: ({ runId, after, limit }) =>
-      Effect.sync(() => {
-        const all = store.state().records
-          .filter((record) => record.runId === runId && record.seq > (after ?? -1))
-          .sort((left, right) => left.seq - right.seq)
-        const page = all.slice(0, limit)
-        return {
-          entries: page.map((record) => {
-            const value = record.payload as {
-              readonly eventType: string
-              readonly payload: unknown
-              readonly meta: unknown
-            }
-            return {
-              runId: record.runId as JournalEvent.RunId,
-              seq: record.seq as JournalEvent.Seq,
-              eventId: record.eventId,
-              sourceId: "rollback" as JournalEvent.SourceId,
-              sourceSeq: record.seq as JournalEvent.SourceSeq,
-              emittedAtMs: record.seq,
-              eventType: value.eventType,
-              payload: value.payload,
-              meta: value.meta
-            } as JournalEvent.Entry
-          }),
-          hasMore: all.length > page.length
-        }
-      })
-  })
-
 const makeJj = () => {
   let pointer = "current"
   const service = Jj.makeNoop({
@@ -212,7 +166,9 @@ const provide = <A, E, R>(
   program.pipe(
     Effect.provide(Layer.succeed(TimeTravelStore, options.store)),
     Effect.provide(Layer.succeed(RunStore.RunStore, options.runs)),
-    Effect.provide(Layer.succeed(Journal.Journal, options.journal ?? makeJournal(options.store))),
+    Effect.provide(
+      Layer.succeed(Journal.Journal, options.journal ?? journalOf(options.store, { sourceId: "rollback" }))
+    ),
     Effect.provide(CacheStore.layerNoop({ get: () => Effect.succeed(Option.none()) })),
     Effect.provide(Layer.succeed(Jj.Jj, options.jj)),
     Effect.provide(
@@ -280,7 +236,7 @@ describe("Rewind rollback parity row 4", () => {
             }).pipe(
               Effect.provide(Layer.succeed(TimeTravelStore, timeStore)),
               Effect.provide(Layer.succeed(RunStore.RunStore, runs)),
-              Effect.provide(Layer.succeed(Journal.Journal, makeJournal(timeStore))),
+              Effect.provide(Layer.succeed(Journal.Journal, journalOf(timeStore, { sourceId: "rollback" }))),
               Effect.provide(CacheStore.layerNoop({
                 get: () => Effect.succeed(Option.none())
               })),

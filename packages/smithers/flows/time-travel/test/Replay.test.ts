@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Replay from "../src/internal/Replay.ts"
+import { journalOf } from "./MemoryHarness.ts"
 
 const entry = (seq: number, payload: string, cacheKey?: string): Entry => ({
   runId: "run" as RunId,
@@ -34,13 +35,7 @@ describe("Replay", () => {
       const dispatcher = (): void => {
         dispatcherCalls += 1
       }
-      const journal = Journal.makeNoop({
-        entries: ({ after, limit }) =>
-          Effect.succeed({
-            entries: entries.filter((item) => item.seq > (after ?? -1)).slice(0, limit),
-            hasMore: false
-          })
-      })
+      const journal = journalOf(entries)
       const cache = CacheStore.makeNoop({
         get: (key) =>
           Effect.succeed(
@@ -135,9 +130,7 @@ describe("Replay", () => {
   it.effect("skips entries from a sibling lineage and rejects a frame that is absent", () =>
     Effect.gen(function*() {
       const sibling: Entry = { ...entry(0, "sibling"), meta: { lineageId: "run/other" } }
-      const journal = Journal.makeNoop({
-        entries: () => Effect.succeed({ entries: [sibling], hasMore: false })
-      })
+      const journal = journalOf([sibling])
 
       const failure = yield* (
         Effect.flip(
@@ -178,9 +171,7 @@ describe("Replay", () => {
 
   it.effect("fails when a sealed result cannot be read rather than replaying without it", () =>
     Effect.gen(function*() {
-      const journal = Journal.makeNoop({
-        entries: () => Effect.succeed({ entries: [entry(0, "first", "sealed-key")], hasMore: false })
-      })
+      const journal = journalOf([entry(0, "first", "sealed-key")])
 
       const failure = yield* (
         Effect.flip(
@@ -200,9 +191,7 @@ describe("Replay", () => {
 
   it.effect("passes an absent sealed cache entry to the projection as undefined", () =>
     Effect.gen(function*() {
-      const journal = Journal.makeNoop({
-        entries: () => Effect.succeed({ entries: [entry(0, "first", "missing")], hasMore: false })
-      })
+      const journal = journalOf([entry(0, "first", "missing")])
 
       const values = yield* (
         Replay.rederive(
@@ -229,9 +218,7 @@ describe("Replay", () => {
         { ...entry(2, "bad-lineage"), meta: { lineageId: 1 } },
         { ...entry(3, "bad-cache"), meta: { lineageId: "run/root", cacheKey: 1 } }
       ] as ReadonlyArray<Entry>
-      const journal = Journal.makeNoop({
-        entries: () => Effect.succeed({ entries: malformed, hasMore: false })
-      })
+      const journal = journalOf(malformed)
 
       const values = yield* (
         Replay.rederive(
@@ -311,9 +298,7 @@ describe("Replay", () => {
 
   it.effect("preserves a projection defect without misclassifying it as a persistence failure", () =>
     Effect.gen(function*() {
-      const journal = Journal.makeNoop({
-        entries: () => Effect.succeed({ entries: [entry(0, "first")], hasMore: false })
-      })
+      const journal = journalOf([entry(0, "first")])
 
       const exit = yield* (
         Effect.exit(

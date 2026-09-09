@@ -192,6 +192,40 @@ describe("TimeTravelStore conformance", () => {
       })
     }))
 
+  // `stranger` differs from `owner` in all three fields, so it cannot tell
+  // which comparisons the fence actually makes. Each of these differs in
+  // exactly one, which is what pins hostId, pid, and nonce individually.
+  for (
+    const { field, rival } of [
+      { field: "hostId", rival: { ...owner, hostId: "rival-host" } },
+      { field: "pid", rival: { ...owner, pid: owner.pid + 1 } },
+      { field: "nonce", rival: { ...owner, nonce: "rival-nonce" } }
+    ]
+  ) {
+    it.effect(`refuses a parent fence differing only in ${field}`, () =>
+      Effect.gen(function*() {
+        const refuse = (store: TimeTravelStore.Service) =>
+          Effect.gen(function*() {
+            const failure = yield* Effect.flip(store.archiveAndTruncate("run", frame, [], rival))
+            return {
+              failure: { code: failure.code, message: failure.message },
+              archived: yield* store.archivedAt("run", 2)
+            }
+          })
+        const memory = yield* refuse(memorySeed())
+        const sqlite = yield* withSql((store, sql) => seedSql(sql).pipe(Effect.andThen(refuse(store))))
+
+        expect(memory).toEqual(sqlite)
+        expect(memory).toEqual({
+          failure: {
+            code: "fence_lost",
+            message: `run run is no longer owned by ${rival.hostId}:${rival.pid}:${rival.nonce}`
+          },
+          archived: false
+        })
+      }))
+  }
+
   it.effect("retains both generations after truncating, re-appending, and truncating", () =>
     Effect.gen(function*() {
       const zero = { ...frame, seq: 0 }
@@ -367,6 +401,7 @@ describe("TimeTravelStore conformance", () => {
       expect(memoryStore.state().archived).toEqual([])
       for (
         const mismatchedOwner of [
+          { ...childOwner, hostId: "different-child-host" },
           { ...childOwner, pid: childOwner.pid + 1 },
           { ...childOwner, nonce: "different-child-nonce" }
         ]

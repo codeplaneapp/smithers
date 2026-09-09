@@ -21,6 +21,7 @@ import type { AuditDetail } from "../src/internal/Rewind.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import { error } from "../src/TimeTravelError.ts"
 import { type Audit, TimeTravelStore } from "../src/TimeTravelStore.ts"
+import { row as makeRow } from "./MemoryHarness.ts"
 
 const owner: OwnerId = { hostId: "recovery-host", pid: 40, nonce: "recovery-owner" }
 const frame = { lineageId: "run/root", seq: 0 } as const
@@ -28,20 +29,12 @@ const frame = { lineageId: "run/root", seq: 0 } as const
 const makeRuns = (
   overrides: Partial<RunStore.Service> = {}
 ): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
-  let row: RunStore.RunRow = {
-    runId: "run",
+  let row: RunStore.RunRow = makeRow({
     status: "running",
-    createdAtMs: 0,
-    startedAtMs: 0,
-    finishedAtMs: null,
     owner,
     heartbeatAtMs: 0,
-    claim: null,
-    claimedAtMs: null,
-    parentRunId: null,
-    cancelRequestedAtMs: null,
     stateJson: "{\"cursor\":7}"
-  }
+  })
   const service = RunStore.makeNoop({
     get: () => Effect.succeed({ ...row }),
     transitionOwned: (_runId, currentOwner, status, stateJson) =>
@@ -521,6 +514,38 @@ describe("Recovery", () => {
 
       expect(second).toEqual([{ _tag: "RolledBack", auditId: "audit-compensated" }])
       expect(rollbacks).toBe(1)
+    }))
+
+  // `sameOwner` compares hostId, pid, and nonce. A nonce is unique per process
+  // start, but two hosts can still present one to the same run row after a
+  // restore or a clone, so the host is part of the identity and not decoration:
+  // a row whose owner matches on pid and nonce alone is somebody else's.
+  it.effect("refuses a running row whose owner shares the nonce and pid but not the host", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make()
+      seed(store, audit("archive_committed"))
+      const impostor = { ...owner, hostId: "other-host" }
+      const runs = makeRuns({
+        get: () =>
+          Effect.succeed(
+            makeRow({ status: "running", owner: impostor, heartbeatAtMs: 0, stateJson: "{\"cursor\":7}" })
+          )
+      })
+
+      const outcomes = yield* runRecovery(
+        store,
+        runs,
+        Jj.makeNoop({ restore: () => Effect.void }),
+        Effect.runSync(EffectHandlerRegistry.make([])),
+        false
+      )
+
+      expect(outcomes).toMatchObject([{
+        _tag: "Busy",
+        auditId: "audit-archive_committed",
+        error: { code: "busy", message: "run run is still owned" }
+      }])
+      expect(store.state().audits).toMatchObject([{ status: "in_progress" }])
     }))
 
   it.effect("records an unrecoverable typed terminal failure without inventing a run status", () =>

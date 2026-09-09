@@ -32,6 +32,7 @@ import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import { layerWith, TimeTravel } from "../src/TimeTravel.ts"
 import type { Audit } from "../src/TimeTravelStore.ts"
 import { TimeTravelStore } from "../src/TimeTravelStore.ts"
+import { journalOf, row as makeRow } from "./MemoryHarness.ts"
 import { jjInstalled, parkSealedFlow, runRealEngine, withRealFixture } from "./RealTimeTravelHarness.ts"
 
 const lineageId = "run/root"
@@ -48,20 +49,7 @@ const record = (seq: number, amount: number): MemoryTimeTravelStore.JournalRecor
   }
 })
 
-const row = (runId: string): RunStore.RunRow => ({
-  runId,
-  status: "suspended",
-  createdAtMs: 0,
-  startedAtMs: 0,
-  finishedAtMs: null,
-  owner: null,
-  heartbeatAtMs: null,
-  claim: null,
-  claimedAtMs: null,
-  parentRunId: null,
-  cancelRequestedAtMs: null,
-  stateJson: "{}"
-})
+const row = (runId: string): RunStore.RunRow => makeRow({ runId })
 
 const makeRuns = (): RunStore.Service => {
   const state = new Map([["run", { ...row("run") }]])
@@ -103,38 +91,6 @@ const makeRuns = (): RunStore.Service => {
   })
 }
 
-const makeJournal = (store: ReturnType<typeof MemoryTimeTravelStore.make>): Journal.Service =>
-  Journal.makeNoop({
-    entries: ({ after, limit, runId }) =>
-      Effect.sync(() => {
-        const all = store.state().records
-          .filter((entry) => entry.runId === runId && entry.seq > (after ?? -1))
-          .sort((left, right) => left.seq - right.seq)
-        const selected = all.slice(0, limit)
-        return {
-          entries: selected.map((entry) => {
-            const stored = entry.payload as {
-              readonly eventType: string
-              readonly payload: unknown
-              readonly meta: unknown
-            }
-            return {
-              runId: entry.runId as JournalEvent.RunId,
-              seq: entry.seq as JournalEvent.Seq,
-              eventId: entry.eventId,
-              sourceId: "test" as JournalEvent.SourceId,
-              sourceSeq: entry.seq as JournalEvent.SourceSeq,
-              emittedAtMs: entry.seq,
-              eventType: stored.eventType,
-              payload: stored.payload,
-              meta: stored.meta
-            } as JournalEvent.Entry
-          }),
-          hasMore: all.length > selected.length
-        }
-      })
-  })
-
 const harness = (options: {
   readonly store: ReturnType<typeof MemoryTimeTravelStore.make>
   readonly workspaces?: Array<string>
@@ -144,7 +100,7 @@ const harness = (options: {
       Layer.mergeAll(
         Layer.succeed(TimeTravelStore)(options.store),
         Layer.succeed(RunStore.RunStore)(makeRuns()),
-        Layer.succeed(Journal.Journal)(makeJournal(options.store)),
+        Layer.succeed(Journal.Journal)(journalOf(options.store)),
         Layer.succeed(Jj.Jj)(
           Jj.makeNoop({
             snapshot: () => Effect.succeed({ changeId: "current" }),
@@ -390,7 +346,7 @@ describe("TimeTravel wiring", () => {
       let suffixReaders = 0
       const blockingJournal = Journal.makeNoop({
         entries: ({ after, limit }) => {
-          const page = makeJournal(store).entries({
+          const page = journalOf(store).entries({
             runId: "run" as JournalEvent.RunId,
             ...(after === undefined ? {} : { after }),
             limit
@@ -561,7 +517,7 @@ describe("TimeTravel wiring", () => {
                     }]),
                     Layer.succeed(TimeTravelStore)(store),
                     Layer.succeed(RunStore.RunStore)(makeRuns()),
-                    Layer.succeed(Journal.Journal)(makeJournal(store)),
+                    Layer.succeed(Journal.Journal)(journalOf(store)),
                     Layer.succeed(Jj.Jj)(Jj.makeNoop({})),
                     CacheStore.layerNoop({ get: () => Effect.succeed(Option.none()) })
                   )
@@ -588,7 +544,7 @@ describe("TimeTravel replay and history caps", () => {
     Layer.mergeAll(
       Layer.succeed(TimeTravelStore)(store),
       Layer.succeed(RunStore.RunStore)(makeRuns()),
-      Layer.succeed(Journal.Journal)(makeJournal(store)),
+      Layer.succeed(Journal.Journal)(journalOf(store)),
       Layer.succeed(Jj.Jj)(
         Jj.makeNoop({
           snapshot: () => Effect.succeed({ changeId: "current" }),
@@ -710,7 +666,7 @@ describe("TimeTravel fork lane reclamation", () => {
             Layer.mergeAll(
               Layer.succeed(TimeTravelStore)(store),
               Layer.succeed(RunStore.RunStore)(makeRuns()),
-              Layer.succeed(Journal.Journal)(makeJournal(store)),
+              Layer.succeed(Journal.Journal)(journalOf(store)),
               Layer.succeed(Jj.Jj)(Jj.makeNoop(jj)),
               CacheStore.layerNoop()
             )
@@ -815,7 +771,7 @@ describe("TimeTravel compensation descriptors", () => {
                   }]),
                   Layer.succeed(TimeTravelStore)(store),
                   Layer.succeed(RunStore.RunStore)(makeRuns()),
-                  Layer.succeed(Journal.Journal)(makeJournal(store)),
+                  Layer.succeed(Journal.Journal)(journalOf(store)),
                   Layer.succeed(Jj.Jj)(Jj.makeNoop({ snapshot: () => Effect.succeed({ changeId: "current" }) })),
                   CacheStore.layerNoop({ get: () => Effect.succeed(Option.none()) })
                 )

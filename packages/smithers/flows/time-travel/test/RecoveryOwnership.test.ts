@@ -12,6 +12,7 @@ import * as Recovery from "../src/internal/Recovery.ts"
 import type { AuditDetail } from "../src/internal/Rewind.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import { type Audit, TimeTravelStore } from "../src/TimeTravelStore.ts"
+import { row } from "./MemoryHarness.ts"
 
 /**
  * Startup recovery must arbitrate ownership before it touches a run: an
@@ -33,21 +34,8 @@ const runError = (method: string) =>
     cause: method
   })
 
-const baseRow = (overrides: Partial<RunStore.RunRow>): RunStore.RunRow => ({
-  runId: "run",
-  status: "running",
-  createdAtMs: 0,
-  startedAtMs: 0,
-  finishedAtMs: null,
-  owner: null,
-  heartbeatAtMs: 0,
-  claim: null,
-  claimedAtMs: null,
-  parentRunId: null,
-  cancelRequestedAtMs: null,
-  stateJson: "{\"cursor\":7}",
-  ...overrides
-})
+const baseRow = (overrides: Partial<RunStore.RunRow>): RunStore.RunRow =>
+  row({ status: "running", heartbeatAtMs: 0, stateJson: "{\"cursor\":7}", ...overrides })
 
 const auditRow = (detail?: unknown): Audit => ({
   id: "audit",

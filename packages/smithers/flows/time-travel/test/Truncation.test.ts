@@ -181,6 +181,37 @@ describe("truncation", () => {
       }))
   }
 
+  it.effect("rolls back a failed fork-id mint without leaking an intent or an id", () =>
+    Effect.gen(function*() {
+      const store = Memory.make({ records, edges, failAt: "nextForkId" })
+      const before = store.state()
+
+      const failure = yield* (
+        Effect.flip(store.nextForkId("parent", { lineageId: "parent/root", seq: 0 }))
+      )
+
+      expect(failure).toMatchObject({ code: "unknown", message: "injected failure at nextForkId" })
+      // Nothing was reserved, so `forkIntents` is still empty and the counter
+      // still hands out the id the failed mint would have taken.
+      expect(before.forkIntents).toEqual([])
+      expect(store.state()).toEqual(before)
+    }))
+
+  it.effect("rolls back a failed intent reclaim and leaves every intent outstanding", () =>
+    Effect.gen(function*() {
+      const store = Memory.make({ records, edges, failAt: "abandonForkIntents" })
+      const childRunId = yield* (store.nextForkId("parent", { lineageId: "parent/root", seq: 0 }))
+      const before = store.state()
+      expect(before.forkIntents).toEqual([
+        { childRunId, parentRunId: "parent", parentSeq: 0, reservedAtMs: 0 }
+      ])
+
+      const failure = yield* (Effect.flip(store.abandonForkIntents(1)))
+
+      expect(failure).toMatchObject({ code: "unknown", message: "injected failure at abandonForkIntents" })
+      expect(store.state()).toEqual(before)
+    }))
+
   it.effect("reports a missing audit without changing the stored audit history", () =>
     Effect.gen(function*() {
       const store = Memory.make()

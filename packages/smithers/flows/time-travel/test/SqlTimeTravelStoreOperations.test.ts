@@ -546,7 +546,13 @@ describe("SqlTimeTravelStore audits", () => {
           `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-type', 'source', 0, 0, '', '{}', '{}', 0)`,
           `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-payload', 'source', 0, 0, 'type', '{', '{}', 0)`,
           `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-meta', 'source', 0, 0, 'type', '{}', '{', 0)`,
-          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-archived', 'source', 0, 0, 'type', '{}', '{}', -1)`
+          `INSERT INTO flows_time_travel_archive VALUES ('run', 0, 0, 'event-archived', 'source', 0, 0, 'type', '{}', '{}', -1)`,
+          `INSERT INTO flows_time_travel_fork_intents VALUES ('', 'parent', 0, 0, NULL)`,
+          `INSERT INTO flows_time_travel_fork_intents VALUES ('intent-parent', '', 0, 0, NULL)`,
+          `INSERT INTO flows_time_travel_fork_intents VALUES ('intent-seq', 'parent', -1, 0, NULL)`,
+          `INSERT INTO flows_time_travel_fork_intents VALUES ('intent-seq-fractional', 'parent', 0.5, 0, NULL)`,
+          `INSERT INTO flows_time_travel_fork_intents VALUES ('intent-reserved', 'parent', 0, -1, NULL)`,
+          `INSERT INTO flows_time_travel_fork_intents VALUES ('intent-reclaimed', 'parent', 0, 0, -1)`
         ] as const
         return Effect.forEach(invalidStatements, (statement) => Effect.exit(sql.unsafe(statement)))
       })
