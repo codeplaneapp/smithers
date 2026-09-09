@@ -10,7 +10,7 @@
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as EngineLike from "@smthrs/harness/EngineLike"
-import { Effect, FileSystem, Layer, Option } from "effect"
+import { Effect, FileSystem, Layer, Logger, Option, PlatformError } from "effect"
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -140,7 +140,9 @@ describe("WorkspaceObservation", () => {
     expect(empty.paths).toBe(0)
     // A root that is not there at all is the same answer: the walk contributes
     // nothing and the next measurement reports whatever appears.
-    expect((await measured(join(root, "absent"))).digest).toBe(empty.digest)
+    const absent = await measured(join(root, "absent"))
+    expect(absent.digest).toBe(empty.digest)
+    expect(absent.complete).toBe(true)
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -164,7 +166,86 @@ describe("WorkspaceObservation", () => {
     const observation = await Effect.runPromise(WorkspaceObservation.observe(fs, root))
 
     expect(observation.paths).toBe(1)
+    expect(observation.complete).toBe(true)
     rmSync(root, { recursive: true, force: true })
+  })
+
+  it.each(
+    [
+      ["readDirectory", "", "PermissionDenied", "EACCES"],
+      ["readDirectory", "nested", "PermissionDenied", "EACCES"],
+      ["readDirectory", "nested", "Unknown", "EIO"],
+      ["stat", "nested/hidden.py", "PermissionDenied", "EACCES"],
+      ["stat", "nested/hidden.py", "Unknown", "EIO"]
+    ] as const
+  )("reports incomplete coverage for %s %s failing with %s (%s)", async (method, relative, tag, code) => {
+    const root = workspace()
+    try {
+      write(root, "nested/hidden.py", "unreadable")
+      write(root, "kept.py", "visible")
+      const failedPath = relative === "" ? root : join(root, relative)
+      const failure = PlatformError.systemError({
+        _tag: tag,
+        module: "FileSystem",
+        method,
+        pathOrDescriptor: failedPath,
+        description: code
+      })
+      const calls: Array<string> = []
+      const fs = await Effect.runPromise(
+        Effect.map(FileSystem.FileSystem, (found): FileSystem.FileSystem => ({
+          ...found,
+          readDirectory: (path) => {
+            calls.push(`readDirectory ${path}`)
+            return method === "readDirectory" && path === failedPath
+              ? Effect.fail(failure)
+              : found.readDirectory(path)
+          },
+          stat: (path) => {
+            calls.push(`stat ${path}`)
+            return method === "stat" && path === failedPath ? Effect.fail(failure) : found.stat(path)
+          }
+        })).pipe(Effect.provide(NodeFileSystem.layer))
+      )
+      const diagnostics: Array<unknown> = []
+      const capture = Logger.make((entry) => {
+        diagnostics.push(entry.message)
+      })
+      const observation = await Effect.runPromise(
+        WorkspaceObservation.observe(fs, root).pipe(
+          Effect.provide(Logger.layer([capture], { mergeWithExisting: false }))
+        )
+      )
+
+      expect(calls).toContain(`${method} ${failedPath}`)
+      expect(observation.paths).toBe(relative === "" ? 0 : 1)
+      expect(observation.complete).toBe(false)
+      expect(diagnostics).toEqual([
+        [`Workspace observation could not ${method} ${failedPath}`, failure]
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves out a directory that disappeared before listing it", async () => {
+    const root = workspace()
+    try {
+      write(root, "nested/vanishing.py", "gone")
+      write(root, "kept.py", "visible")
+      const fs = await Effect.runPromise(
+        Effect.map(FileSystem.FileSystem, (found): FileSystem.FileSystem => ({
+          ...found,
+          readDirectory: (path) =>
+            path === join(root, "nested") ? found.readDirectory(join(root, "gone")) : found.readDirectory(path)
+        })).pipe(Effect.provide(NodeFileSystem.layer))
+      )
+      const observation = await Effect.runPromise(WorkspaceObservation.observe(fs, root))
+      expect(observation.paths).toBe(1)
+      expect(observation.complete).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it("keeps a file whose host reports no modification time, and skips what is neither file nor directory", async () => {

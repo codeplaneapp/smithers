@@ -34,7 +34,9 @@
  *   a measurement that stopped there covers a prefix. It reports
  *   `complete: false`, and the controller then decides changed-ness from what
  *   the frame's calls declared rather than from a prefix that may never have
- *   looked at the files being edited.
+ *   looked at the files being edited. Listing and stat failures other than
+ *   `NotFound` also make the walk partial, and emit warning diagnostics with
+ *   the failed operation, path, and cause.
  * - **A symlink is not part of the tree.** Every symlink is skipped whole:
  *   never measured, never descended into. That is what keeps the walk inside
  *   the root on any filesystem, including one whose `stat` follows links.
@@ -79,6 +81,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import type * as PlatformError from "effect/PlatformError"
 
 /**
  * Directory names never descended into.
@@ -223,13 +226,19 @@ export const observe = (
     // ran out of tree and a walk that ends because it ran out of budget are
     // different answers, and only the first is the workspace's.
     let bounded = false
+    let unreadable = false
+    const failed = (method: string, path: string, cause: PlatformError.PlatformError): Effect.Effect<void> =>
+      Effect.gen(function*() {
+        // Disappearance is movement; every other failure leaves coverage unknown.
+        if (cause.reason._tag === "NotFound") return
+        unreadable = true
+        yield* Effect.logWarning(`Workspace observation could not ${method} ${path}`, cause)
+      })
     const walk = (directory: string): Effect.Effect<void> =>
       Effect.gen(function*() {
-        // A directory that cannot be listed contributes nothing. It is either
-        // gone — which the next measurement reports through everything under
-        // it disappearing — or unreadable, which no amount of failing here
-        // would fix.
-        const entries = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed(() => []))
+        const entries = yield* fs.readDirectory(directory).pipe(
+          Effect.catch((cause) => failed("readDirectory", directory, cause).pipe(Effect.as([])))
+        )
         for (const name of [...entries].sort()) {
           if (lines.length >= maxPaths) {
             bounded = true
@@ -246,7 +255,10 @@ export const observe = (
           // size and mtime of whatever it points at.
           const link = yield* fs.readLink(path).pipe(Effect.asSome, Effect.orElseSucceed(() => Option.none()))
           if (Option.isSome(link)) continue
-          const info = yield* fs.stat(path).pipe(Effect.asSome, Effect.orElseSucceed(() => Option.none()))
+          const info = yield* fs.stat(path).pipe(
+            Effect.asSome,
+            Effect.catch((cause) => failed("stat", path, cause).pipe(Effect.as(Option.none())))
+          )
           if (Option.isNone(info)) continue
           if (info.value.type === "Directory") {
             yield* walk(path)
@@ -265,7 +277,7 @@ export const observe = (
     return new EngineLike.Observation({
       digest: Digest.digest(lines.join("\n")),
       paths: lines.length,
-      complete: !bounded
+      complete: !bounded && !unreadable
     })
   })
 
