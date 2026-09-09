@@ -385,6 +385,14 @@ JSONC configuration loading and workspace resolution are separate operations.
 Keep npm's platform-specific optional dependencies enabled so TypeScript's
 matching native executable is installed.
 
+Closure files and tsconfig chains are confined to the workspace's canonical
+root. File and directory symlinks may resolve inside that root; escaping links
+refuse the closure or configuration load before their content is hashed or
+cached. Module text is limited to 8 MiB and each tsconfig to 1 MiB before
+allocation. Text must be valid UTF-8. Non-module leaves are hashed through a
+bounded buffer without a file-size limit. Digests cover the original bytes,
+including any UTF-8 byte-order mark.
+
 | Export                      | Signature                                                                          | What it is                                                                             |
 | --------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `ResolverConfig`            | `{ workspaceRoot; configDigest; baseUrl; paths; sources }`                         | The configuration one closure resolves under.                                          |

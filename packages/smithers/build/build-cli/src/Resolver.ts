@@ -36,6 +36,7 @@ import type { Action, FlowRuntime } from "@smthrs/flow"
 import * as Compose from "@smthrs/targets/Compose"
 import { failureMessage } from "@smthrs/targets/GeneratedFile"
 import * as Input from "@smthrs/targets/Input"
+import * as SafeFs from "@smthrs/targets/SafeFs"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -196,6 +197,22 @@ const workspaceRelative = (workspaceRoot: string, absolute: string, what: string
   return posix(relative)
 }
 
+/** Reads bounded text and hashes its exact bytes against the same admitted file identity. */
+const readWorkspaceText = async (
+  path: string,
+  options: { readonly root: string; readonly limit: number; readonly what: string }
+): Promise<{ readonly text: string; readonly digest: string }> => {
+  const entry = await SafeFs.resolveFile(path, options)
+  if (entry === undefined) throw new Error(`${options.what} does not exist: ${path}`)
+  const text = await SafeFs.readText(entry.path, options)
+  if (text === undefined) throw new Error(`${options.what} disappeared: ${path}`)
+  // readText decodes UTF-8 and removes its BOM. Hash the original bytes, and
+  // revalidate the original entry so changes between the two reads fail closed.
+  const digest = await SafeFs.digestEntry(entry, { ...options, maximumBytes: options.limit })
+  if (digest === undefined) throw new Error(`${options.what} disappeared: ${path}`)
+  return { text, digest }
+}
+
 const readTsconfigChain = async (
   workspaceRoot: string,
   relativePath: string,
@@ -206,12 +223,19 @@ const readTsconfigChain = async (
   if (depth > 8) throw new ResolverConfigError(`tsconfig extends chain exceeds 8 files at ${relativePath}`)
   const absolute = NodePath.join(workspaceRoot, relativePath)
   let text: string
+  let digest: string
   try {
-    text = await NodeFs.readFile(absolute, "utf8")
+    const content = await readWorkspaceText(absolute, {
+      root: await SafeFs.canonicalRoot(workspaceRoot),
+      limit: SafeFs.defaultTextBytes,
+      what: "tsconfig"
+    })
+    text = content.text
+    digest = content.digest
   } catch (cause) {
     throw new ResolverConfigError(`tsconfig could not be read: ${relativePath}: ${failureMessage(cause)}`)
   }
-  sources.push({ path: posix(NodePath.normalize(relativePath)), digest: sha256(text) })
+  sources.push({ path: posix(NodePath.normalize(relativePath)), digest })
   const errors: Array<ParseError> = []
   const parsed: unknown = parseJsonc(text, errors, { allowTrailingComma: true, allowEmptyContent: true })
   if (errors.length > 0) {
@@ -830,6 +854,7 @@ export const computeClosure = async (options: {
 }): Promise<ClosureOutcome> => {
   const { cache, config } = options
   const maximumFiles = options.maximumFiles ?? maximumClosureFiles
+  const root = await SafeFs.canonicalRoot(config.workspaceRoot)
   const reader = new TreeReader(config.workspaceRoot)
   const files = new Map<string, string>()
   const packages = new Set<string>()
@@ -849,9 +874,24 @@ export const computeClosure = async (options: {
     if (containedJoin(path) !== path || path === "") {
       throw new ClosureError(`closure entry is not a normalized workspace-relative path: ${JSON.stringify(path)}`)
     }
-    let content: Buffer
+    const extension = extensionOf(path)
+    const scannable = extension !== null && scannableExtensions.has(extension)
+    let text: string | undefined
+    let digest: string | undefined
     try {
-      content = await NodeFs.readFile(NodePath.join(config.workspaceRoot, path))
+      const absolute = NodePath.join(config.workspaceRoot, path)
+      if (scannable) {
+        const content = await readWorkspaceText(absolute, {
+          root,
+          limit: maximumModuleBytes,
+          what: "module (parse bound)"
+        })
+        text = content.text
+        digest = content.digest
+      } else {
+        digest = await SafeFs.digestFile(absolute, { root, what: "closure file" })
+      }
+      if (digest === undefined) throw new Error(`file does not exist: ${path}`)
     } catch (cause) {
       throw new ClosureError(
         entrySet.has(path)
@@ -859,17 +899,8 @@ export const computeClosure = async (options: {
           : `closure file could not be read: ${path}: ${failureMessage(cause)}`
       )
     }
-    const digest = sha256(content)
     files.set(path, digest)
-    const extension = extensionOf(path)
-    if (
-      extension === null || !scannableExtensions.has(extension === ".ts" && path.endsWith(".d.ts") ? ".ts" : extension)
-    ) {
-      continue
-    }
-    if (content.byteLength > maximumModuleBytes) {
-      throw new ClosureError(`module exceeds the ${maximumModuleBytes}-byte parse bound: ${path}`)
-    }
+    if (text === undefined) continue
     const key = rowCacheKey(digest, config.configDigest)
     let specifiers: ReadonlyArray<ExtractedImport> | undefined
     if (cache !== undefined) {
@@ -883,8 +914,6 @@ export const computeClosure = async (options: {
       }
     }
     if (specifiers === undefined) {
-      let text = content.toString("utf8")
-      if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
       specifiers = extractSpecifiers(path, text)
       parsed += 1
       if (cache !== undefined) {

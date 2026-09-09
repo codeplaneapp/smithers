@@ -1,7 +1,9 @@
+import * as SafeFs from "@smthrs/targets/SafeFs"
+import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { openCache } from "../src/Cache.ts"
 import {
   ClosureError,
@@ -13,6 +15,7 @@ import {
   packageDirectoryOf,
   ResolverConfigError,
   resolveSpecifier,
+  rowCacheKey,
   type TreeView
 } from "../src/Resolver.ts"
 
@@ -429,6 +432,84 @@ describe("edges and bounds", () => {
     expect(outcome.result.unresolved).toEqual([{ file: "entry.ts", specifier: "./broken" }])
   })
 
+  for (const linkKind of ["file", "directory"] as const) {
+    for (const extension of ["ts", "json"]) {
+      it(`refuses an escaping ${linkKind} symlink to a ${extension} closure file before caching`, async () => {
+        const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-resolver-outside-"))
+        const content = extension === "ts" ? "import \"private-external-specifier\"\n" : "{\"private\":true}"
+        const config = await loadResolverConfig({ workspaceRoot: root })
+        const cache = await openCache({ workspaceRoot: root })
+        try {
+          await Fs.writeFile(NodePath.join(outside, `private.${extension}`), content)
+          const linked = linkKind === "file" ? `link.${extension}` : `link/private.${extension}`
+          await Fs.symlink(
+            linkKind === "file" ? NodePath.join(outside, `private.${extension}`) : outside,
+            NodePath.join(root, linkKind === "file" ? linked : "link")
+          )
+          await write("entry.ts", `import "./${linked}"\n`)
+          for (const entries of [["entry.ts"], [linked]]) {
+            await expect(computeClosure({ config, entries, cache })).rejects.toThrow(/workspace/)
+          }
+          const digest = createHash("sha256").update(content).digest("hex")
+          expect(await cache.get(rowCacheKey(digest, config.configDigest))).toBeNull()
+        } finally {
+          await cache.close()
+          await Fs.rm(outside, { recursive: true, force: true })
+        }
+      })
+    }
+
+    for (const inherited of [false, true]) {
+      it(`refuses an escaping ${linkKind} symlink in ${inherited ? "extended" : "explicit"} tsconfig`, async () => {
+        const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-resolver-config-"))
+        try {
+          await Fs.writeFile(NodePath.join(outside, "private.json"), "{\"compilerOptions\":{}}")
+          const linked = linkKind === "file" ? "link.json" : "link/private.json"
+          await Fs.symlink(
+            linkKind === "file" ? NodePath.join(outside, "private.json") : outside,
+            NodePath.join(root, linkKind === "file" ? linked : "link")
+          )
+          if (inherited) await write("tsconfig.json", JSON.stringify({ extends: `./${linked}` }))
+          await expect(loadResolverConfig({ workspaceRoot: root, tsconfig: inherited ? undefined : linked }))
+            .rejects.toThrow(/workspace/)
+        } finally {
+          await Fs.rm(outside, { recursive: true, force: true })
+        }
+      })
+    }
+  }
+
+  it("follows internal directory and tsconfig links and preserves exact byte digests", async () => {
+    const module = "\ufeffimport \"./data.json\"\n"
+    const configText = "{\"compilerOptions\":{}}"
+    const data = Buffer.from([0xff, 0x00, 0x80])
+    await write("real/module.ts", module)
+    await Fs.writeFile(NodePath.join(root, "real/data.json"), data)
+    await write("real/config.json", configText)
+    await Fs.symlink("real", NodePath.join(root, "link"))
+    await Fs.symlink("real/config.json", NodePath.join(root, "tsconfig.json"))
+    const config = await loadResolverConfig({ workspaceRoot: root })
+    const outcome = await computeClosure({ config, entries: ["link/module.ts"] })
+    const digest = (content: string | Buffer) => createHash("sha256").update(content).digest("hex")
+    expect(config.sources).toEqual([{ path: "tsconfig.json", digest: digest(configText) }])
+    expect(outcome.result.files).toEqual([
+      { path: "link/data.json", digest: digest(data) },
+      { path: "link/module.ts", digest: digest(module) }
+    ])
+    expect(outcome.result.unresolved).toEqual([])
+  })
+
+  it("refuses an oversized tsconfig before parsing", async () => {
+    await write("tsconfig.json", " ".repeat(SafeFs.defaultTextBytes + 1))
+    const open = vi.spyOn(SafeFs.defaultIo, "open")
+    try {
+      await expect(loadResolverConfig({ workspaceRoot: root })).rejects.toThrow(/larger than/)
+      expect(open).not.toHaveBeenCalled()
+    } finally {
+      open.mockRestore()
+    }
+  })
+
   it("drops or refuses missing declared entry files by requireFiles", async () => {
     await write("present.ts", `export const present = 1\n`)
     const sources = [
@@ -502,7 +583,13 @@ describe("edges and bounds", () => {
     const oversized = Buffer.alloc(maximumModuleBytes + 1, 0x20)
     await Fs.writeFile(NodePath.join(root, "entry.ts"), oversized)
     const config = await loadResolverConfig({ workspaceRoot: root })
-    await expect(computeClosure({ config, entries: ["entry.ts"] })).rejects.toThrow(/parse bound/)
+    const open = vi.spyOn(SafeFs.defaultIo, "open")
+    try {
+      await expect(computeClosure({ config, entries: ["entry.ts"] })).rejects.toThrow(/parse bound/)
+      expect(open).not.toHaveBeenCalled()
+    } finally {
+      open.mockRestore()
+    }
   })
 
   it("strips query suffixes and a byte-order mark before resolving", async () => {
