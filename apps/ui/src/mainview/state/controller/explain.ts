@@ -93,6 +93,18 @@ export const createExplainController = (ctx: ControllerContext, config: ExplainC
       unsubscribe()
       patch(phase, error)
     }
+    const closing = ctx.onDispose(() => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      unsubscribe()
+      return agent.cancelTurn(runId).catch(() => {})
+    })
+    // A call made after scope closure must not acquire resources or write a card.
+    if (settled) {
+      await closing
+      return
+    }
     patch("asking")
     unsubscribe = agent.subscribe((frame: AgentTurnFrame) => {
       if (frame.runId !== runId || settled) return

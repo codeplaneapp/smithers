@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test"
-import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
+import { describe, expect, spyOn, test } from "bun:test"
+import type { AgentTurnFrame, StartAgentTurnRequest, StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
 import type { AgentPort } from "../../runtime/AgentPort"
-import type { ControllerContext } from "./context"
+import { createControllerContext, type ControllerContext } from "./context"
 import { createExplainController } from "./explain"
 
 const recordingController = () => {
@@ -20,7 +20,8 @@ const recordingController = () => {
   const controller = createExplainController({
     store: { dispatch: (action: (typeof dispatches)[number]) => { dispatches.push(action) } },
     agent,
-    unref: () => {}
+    unref: () => {},
+    onDispose: () => {}
   } as unknown as ControllerContext)
   return { controller, launches, dispatches }
 }
@@ -68,5 +69,115 @@ describe("the target explainer trust boundary", () => {
     }
     await controller.explain("   ")
     expect(launches).toHaveLength(2)
+  })
+})
+
+const streamingController = (start: AgentPort["startTurn"] = async () => ({ status: "started" })) => {
+  const launches: StartAgentTurnRequest[] = []
+  const dispatches: Parameters<ControllerContext["store"]["dispatch"]>[0][] = []
+  const listeners = new Set<(frame: AgentTurnFrame) => void>()
+  const cancelled: string[] = []
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const agent: AgentPort = {
+    available: true,
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    startTurn: (request) => {
+      launches.push(request)
+      return start(request)
+    },
+    cancelTurn: async (runId) => { cancelled.push(runId) }
+  }
+  const ctx = createControllerContext({
+    dispatch: (action: (typeof dispatches)[number]) => { dispatches.push(action) }
+  } as unknown as ControllerContext["store"], {
+    available: false,
+    pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "unused" })
+  }, agent, {})
+  const controller = createExplainController({
+    ...ctx,
+    unref: (timer) => { timers.push(timer); ctx.unref(timer) }
+  })
+  return { ctx, controller, launches, dispatches, listeners, cancelled, timers }
+}
+
+describe("explanations belong to the controller disposal scope", () => {
+  test("dispose releases every active listener and timer, cancels turns, and suppresses queued frames", async () => {
+    const { ctx, controller, launches, dispatches, listeners, cancelled, timers } = streamingController()
+    const clear = spyOn(globalThis, "clearTimeout")
+    let time = Date.now()
+    const now = spyOn(Date, "now").mockImplementation(() => time++)
+    try {
+      await controller.explain("Why did this fail?")
+      await controller.explain("What should I do next?")
+      expect(listeners.size).toBe(2)
+      expect(timers).toHaveLength(2)
+      const queued = [...listeners]
+      const before = dispatches.length
+      await ctx.dispose()
+      const listenersAfterDispose = listeners.size
+      for (const listener of queued) {
+        listener({ runId: launches[0]!.runId, type: "delta", kind: "text", text: "late answer" })
+        listener({ runId: launches[0]!.runId, type: "done", reason: "stop" })
+      }
+      expect({ listeners: listenersAfterDispose, cancelled, lateDispatches: dispatches.length - before }).toEqual({
+        listeners: 0,
+        cancelled: launches.map(({ runId }) => runId).reverse(),
+        lateDispatches: 0
+      })
+      for (const timer of timers) expect(clear).toHaveBeenCalledWith(timer)
+      await ctx.dispose()
+      expect(cancelled).toHaveLength(2)
+    } finally {
+      for (const timer of timers) clearTimeout(timer)
+      clear.mockRestore()
+      now.mockRestore()
+      await ctx.dispose()
+    }
+  })
+
+  for (const outcome of ["refused", "rejected"] as const) {
+    test(`a start request ${outcome} after disposal cannot publish a failure card`, async () => {
+      let resolve!: (result: StartAgentTurnResult) => void
+      let reject!: (error: Error) => void
+      const pending = new Promise<StartAgentTurnResult>((done, failed) => { resolve = done; reject = failed })
+      const { ctx, controller, dispatches, timers } = streamingController(() => pending)
+      const explaining = controller.explain("Why?")
+      try {
+        await ctx.dispose()
+        const before = dispatches.length
+        if (outcome === "refused") resolve({ status: "error", message: "late refusal" })
+        else reject(new Error("late rejection"))
+        await explaining
+        expect(dispatches).toHaveLength(before)
+      } finally {
+        resolve({ status: "started" })
+        await explaining
+        for (const timer of timers) clearTimeout(timer)
+        await ctx.dispose()
+      }
+    })
+  }
+
+  test("a completed explanation is not cancelled again during disposal", async () => {
+    const { ctx, controller, launches, dispatches, listeners, cancelled, timers } = streamingController()
+    try {
+      await controller.explain("Why?")
+      for (const listener of [...listeners]) {
+        listener({ runId: launches[0]!.runId, type: "delta", kind: "text", text: "Because." })
+        listener({ runId: launches[0]!.runId, type: "done", reason: "stop" })
+      }
+      const before = dispatches.length
+      await ctx.dispose()
+      expect(listeners.size).toBe(0)
+      expect(cancelled).toEqual([])
+      expect(dispatches).toHaveLength(before)
+      expect(dispatches.at(-1)).toMatchObject({ card: { payload: { phase: "answered", answer: "Because." } } })
+    } finally {
+      for (const timer of timers) clearTimeout(timer)
+      await ctx.dispose()
+    }
   })
 })

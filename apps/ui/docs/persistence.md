@@ -53,6 +53,11 @@ attempts every finalizer and reports failures together; repeated calls share
 the same completion or rejection. A resource registered after disposal must
 be released by its acquiring caller awaiting `onDispose`'s returned completion.
 
+Each active explanation belongs to that scope. Disposal clears its timeout,
+removes its agent listener, and cancels its side turn. Disposal and late stream
+or start-request callbacks do not publish explanation card patches. Completed
+explanations need no further cancellation.
+
 ## Collection contract
 
 `PERSISTED_COLLECTION_SPECS` in `state/AppStore.ts` is the authority for every
