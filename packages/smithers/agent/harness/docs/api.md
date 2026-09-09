@@ -114,12 +114,23 @@ reading is cleared with the refusal, because freeing is itself done by a cell.
 
 ## Bytes
 
-Every bound this package states in bytes is measured in UTF-8 bytes by one
-shared helper, and every elision notice states the real number.
-The print channel, the retention ceiling, the call ledger's line sizes and the
-memory probe all read the same unit, so a CJK or emoji payload is bounded by
-what it actually costs rather than by how many UTF-16 code units it happens to
-occupy.
+Text delivery and retention bounds use UTF-8 bytes measured by one shared
+helper. The print channel, retention ceiling and call ledger's line sizes use
+this unit, including CJK and emoji payloads. Elision notices state the real
+UTF-8 byte count.
+
+The supplemental memory probe is a separate estimate, not a UTF-8 byte count or
+an exact heap measurement. Strings and property names contribute their UTF-16
+code-unit lengths. Objects have a base weight of 8; non-string scalars,
+functions, accessors and cycle references have fixed weights of 8. The probe walks named globals, array indices,
+enumerable own string-keyed data properties, Map keys and values, and Set values.
+Collection entries use the same traversal budget as properties: 200,000 values
+and depth 32. An incomplete traversal causes the next frame to be refused.
+Cycles stop at ancestor references; shared objects on separate paths are counted
+again. Accessors are not invoked. Closure state, weak collection entries and
+other storage unreachable by these paths are not measured. The native allocator
+limit remains active, but this supplemental estimate is not a hard bound on all
+memory retained by the realm.
 
 ## Failure categories
 

@@ -597,6 +597,148 @@ describe("QuickJSSandbox interruption", () => {
 })
 
 describe("QuickJSSandbox memory pressure", () => {
+  it.each([
+    ["Map values", "new Map()", "held.set(index, chunk)"],
+    ["Map keys", "new Map()", "held.set(chunk, index)"],
+    ["Set values", "new Set()", "held.add(chunk)"],
+    ["nested Map values", "new Map()", "held.set(index, new Map([[index, { payload: chunk }]]))"]
+  ])("refuses strings accumulated in %s across frames", async (_, collection, retain) => {
+    const frames = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.make
+      const realm = yield* sandbox.openRealm!({
+        flows,
+        limits: { memoryBytes: 4 * 1024 * 1024, steps: Number.MAX_SAFE_INTEGER }
+      })
+      const frames: Array<Sandbox.RealmFrame> = []
+      for (
+        const [frame, source] of [
+          `var held = ${collection}
+         { let index = 0; let chunk = "a".repeat(2 * 1024 * 1024); ${retain} }`,
+          `{ let index = 1; let chunk = "b".repeat(2 * 1024 * 1024); ${retain} }`,
+          `console.log("must be refused")`,
+          `held.clear(); console.log("freed")`,
+          `console.log("recovered")`
+        ].entries()
+      ) {
+        frames.push(yield* realm.evaluate({ cell: Cell.source(source), frame, call: succeeds }))
+      }
+      return frames
+    }).pipe(Effect.scoped, Effect.runPromise)
+
+    expect(frames[0]!.outcome._tag).toBe("settled")
+    expect(frames[1]!.outcome._tag).toBe("settled")
+    // The supplemental estimate is enforced at the next frame's admission,
+    // unlike a native allocation failure, which raises inside the cell.
+    expect(frames[2]!.outcome).toMatchObject({
+      _tag: "rejected",
+      code: "limit_exceeded",
+      message: expect.stringContaining("held (")
+    })
+    expect(frames[2]!.prints).toBe("")
+    expect(frames[3]!.prints).toBe("freed")
+    expect(frames[4]!.outcome._tag).toBe("settled")
+    expect(frames[4]!.prints).toBe("recovered")
+  })
+
+  it("uses captured collection intrinsics without invoking cell accessors", async () => {
+    const frames = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.make
+      const realm = yield* sandbox.openRealm!({
+        flows,
+        limits: { memoryBytes: 4 * 1024 * 1024, steps: Number.MAX_SAFE_INTEGER }
+      })
+      const frames: Array<Sandbox.RealmFrame> = []
+      for (
+        const [frame, source] of [
+          `var touched = false
+         var held = new Map([[0, new Set(["a".repeat(2 * 1024 * 1024)])]])`,
+          `held.set(1, new Set(["b".repeat(2 * 1024 * 1024)]))
+         { let trap = function () { touched = true; throw new Error("probe ran cell code") }
+           Object.getPrototypeOf(held.entries()).next = trap
+           Object.getPrototypeOf(new Set().values()).next = trap
+           Map.prototype.entries = trap
+           Set.prototype.values = trap
+           Object.setPrototypeOf(held, null)
+           Object.defineProperty(held, "size", { enumerable: true, get: trap })
+           Object.defineProperty(held, Symbol.iterator, { get: trap })
+           globalThis.Map = null
+           globalThis.Set = null }`,
+          `console.log("must be refused")`,
+          `held = null; console.log(String(touched))`
+        ].entries()
+      ) {
+        frames.push(yield* realm.evaluate({ cell: Cell.source(source), frame, call: succeeds }))
+      }
+      return frames
+    }).pipe(Effect.scoped, Effect.runPromise)
+
+    expect(frames[0]!.outcome._tag).toBe("settled")
+    expect(frames[1]!.outcome._tag).toBe("settled")
+    expect(frames[2]!.outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(frames[2]!.prints).toBe("")
+    expect(frames[3]!.prints).toBe("false")
+  })
+
+  it.each([
+    ["Map node budget", `var held = new Map(); for (var i = 0; i < 100001; i++) held.set(i, null)`],
+    ["Set node budget", `var held = new Set(); for (var i = 0; i < 200001; i++) held.add(i)`],
+    [
+      "collection depth",
+      `var held = new Map();
+      { let cursor = held; for (let i = 0; i < 40; i++) {
+        let next = new Map(); cursor.set(i, new Set([next])); cursor = next
+      } }`
+    ]
+  ])("refuses an incomplete traversal at the %s", async (_, source) => {
+    const frames = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.make
+      const realm = yield* sandbox.openRealm!({
+        flows,
+        limits: { steps: Number.MAX_SAFE_INTEGER, timeMs: 60_000 }
+      })
+      const installed = yield* realm.evaluate({ cell: Cell.source(source), frame: 0, call: succeeds })
+      const refused = yield* realm.evaluate({ cell: Cell.source(`console.log("refused")`), frame: 1, call: succeeds })
+      return { installed, refused }
+    }).pipe(Effect.scoped, Effect.runPromise)
+
+    expect(frames.installed.outcome._tag).toBe("settled")
+    expect(frames.refused.outcome).toMatchObject({
+      _tag: "rejected",
+      code: "limit_exceeded",
+      message: expect.stringContaining("too large to measure")
+    })
+    expect(frames.refused.prints).toBe("")
+  }, 60_000)
+
+  it("cuts Map and Set cycles and still charges their own properties", async () => {
+    const frames = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.make
+      const realm = yield* sandbox.openRealm!({
+        flows,
+        limits: { memoryBytes: 4 * 1024 * 1024, steps: Number.MAX_SAFE_INTEGER }
+      })
+      const frames: Array<Sandbox.RealmFrame> = []
+      for (
+        const [frame, source] of [
+          `var held = new Map(); held.set(held, new Set([held]))`,
+          `held.payload = ["a".repeat(2 * 1024 * 1024), "b".repeat(2 * 1024 * 1024)]`,
+          `console.log("must be refused")`
+        ].entries()
+      ) {
+        frames.push(yield* realm.evaluate({ cell: Cell.source(source), frame, call: succeeds }))
+      }
+      return frames
+    }).pipe(Effect.scoped, Effect.runPromise)
+
+    expect(frames[0]!.outcome._tag).toBe("settled")
+    expect(frames[1]!.outcome._tag).toBe("settled")
+    expect(frames[2]!.outcome).toMatchObject({
+      _tag: "rejected",
+      code: "limit_exceeded",
+      message: expect.stringContaining("held (")
+    })
+  })
+
   it("rejects excessive JSON nesting without leaking partial handles", async () => {
     let value: Schema.Json = null
     for (let depth = 0; depth < 10_000; depth++) value = { child: value }

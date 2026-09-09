@@ -635,11 +635,11 @@ const weighDepth = 32
  * accounting, because there is no reading of a proxy the realm can be trusted to
  * take.
  *
- * One hole stays open and is stated rather than papered over: nothing weighs
- * what a closure retains. A function is 8 bytes to this walk whatever its scope
- * holds, which no walk over reachable properties can change. So this reading is
- * honest accounting of the realm's own named data, and the ceiling it feeds
- * bounds the realm a cell builds in the open — not one built to evade it.
+ * The estimate covers array indices, enumerable own string-keyed properties,
+ * Map keys and values, and Set values. It cannot see closure state, weak
+ * collection entries, or other storage unreachable by those paths. Functions
+ * have a fixed weight of 8 regardless of their scope. This supplements the
+ * native allocator limit; it is not a hard bound on all retained memory.
  *
  * The returned function declares nothing on the global object and adds no name
  * of its own to the set it reports, because the host holds it as a handle rather
@@ -661,7 +661,7 @@ const weighDepth = 32
  * is measured here instead. See {@link openRealm}.
  */
 const panelProbe = (baseline: string): string =>
-  `(function (ownNames, descriptorOf, keysOf, isArray, stringify, String, skip) {
+  `(function (ownNames, descriptorOf, keysOf, isArray, stringify, String, mapSize, mapEntries, mapNext, setSize, setValues, setNext, skip) {
   return function () {
     var names = ownNames(globalThis)
     var out = []
@@ -721,6 +721,31 @@ const panelProbe = (baseline: string): string =>
         }
         path.pop()
         return sum
+      }
+      // Collection entries live in internal slots, not own properties. Use
+      // captured native methods for both branding and iteration: instanceof,
+      // Symbol.iterator, and methods read from the value are cell-controlled.
+      // Catch only a failed brand check, never an incomplete entry traversal.
+      var isMap = false
+      var isSet = false
+      try {
+        mapSize(value)
+        isMap = true
+      } catch (error) {
+        try { setSize(value); isSet = true } catch (error) {}
+      }
+      if (isMap || isSet) {
+        // Iterator allocation can exhaust the heap too. Let that failure reach
+        // the outer catch so the reading is partial rather than empty.
+        var iterator = isMap ? mapEntries(value) : setValues(value)
+        while (!partial) {
+          var entry = isMap ? mapNext(iterator) : setNext(iterator)
+          if (entry.done) break
+          if (isMap) {
+            sum = sum + weigh(entry.value[0], depth + 1)
+            sum = sum + weigh(entry.value[1], depth + 1)
+          } else sum = sum + weigh(entry.value, depth + 1)
+        }
       }
       var keys = keysOf(value)
       for (var key = 0; key < keys.length && !partial; key++) {
@@ -788,6 +813,12 @@ const panelProbe = (baseline: string): string =>
   Array.isArray,
   JSON.stringify,
   String,
+  Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Map.prototype, "size").get),
+  Function.prototype.call.bind(Map.prototype.entries),
+  Function.prototype.call.bind(Object.getPrototypeOf(new Map().entries()).next),
+  Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Set.prototype, "size").get),
+  Function.prototype.call.bind(Set.prototype.values),
+  Function.prototype.call.bind(Object.getPrototypeOf(new Set().values()).next),
   JSON.parse(${baseline})
 )`
 
