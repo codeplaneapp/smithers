@@ -146,6 +146,17 @@ in `tierOrder`. A bound that is not a positive safe integer, an empty
 `tierOrder`, or a tier with no flow is refused with `DelegationError` carrying
 code `invalid_bounds` or `missing_tier`.
 
+Two optional bounds shape the attempts a tier spends. `backoff` is the
+`WithRetry.Backoff` ladder waited between one tier's attempts; the default is
+immediate retry, so without it a tier spends `maxAttempts` back to back.
+`nonRetryable` lists error `_tag` values that end a tier at their first
+occurrence, whatever `maxAttempts` allows; the ladder still admits the next
+tier. The default retries every failure. A backoff whose `initialMs` is not
+positive, whose `factor` is below 1, or whose `maxMs` is below `initialMs` is
+refused `invalid_bounds` before any callback runs. `make` declares the same
+policy it spends: the retry decorator around each slot's tier ladder is named
+`withRetry(delegationTiers(...), attempts=N, backoff=..., nonRetryable=...)`.
+
 `maxDepth` is the whole plan envelope, not the nesting bound alone: a derisked
 plan may hold at most `maxDepth` leaves, nest `maxDepth` levels, and put
 `maxDepth` members in one container. A plan of four leaves under `maxDepth: 3`
@@ -163,8 +174,9 @@ bound is refused `fanout_exceeded`. Raise `maxDepth` to widen all three at once.
 3. The derisked plan is validated against the envelope `{ fuel: maxDepth, depth:
    maxDepth, fanout: maxDepth }`.
 4. Each leaf climbs the tier ladder weakest first. A tier spends `maxAttempts`
-   retries before the next tier is admitted, and a tier whose result `review`
-   rejects escalates exactly the way a tier that failed does. The runtime
+   retries, waiting the declared `backoff` between them and stopping at the
+   first `nonRetryable` tag, before the next tier is admitted, and a tier whose
+   result `review` rejects escalates exactly the way a tier that failed does. The runtime
    consumes `Escalation.run`'s `Reached` and `Exhausted` results directly and
    branches on their `exhausted` field: only a reached attempt contributes its
    output, and exhaustion becomes `leaf_failed` before the leaf can reach

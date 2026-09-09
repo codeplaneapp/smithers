@@ -95,6 +95,17 @@ export interface Bounds {
   readonly maxDepth: number
   readonly maxDeriskRounds: number
   readonly maxAttempts: number
+  /**
+   * The wait ladder between one tier's attempts. The default is immediate
+   * retry: without a backoff a tier spends every attempt back to back.
+   */
+  readonly backoff?: WithRetry.Backoff | undefined
+  /**
+   * Error `_tag` values that end one tier's attempts at their first
+   * occurrence, whatever `maxAttempts` allows. The ladder still admits the
+   * next tier. The default retries every failure.
+   */
+  readonly nonRetryable?: ReadonlyArray<string> | undefined
 }
 
 /**
@@ -216,7 +227,21 @@ const copiedBounds = (bounds: Bounds): Bounds => ({
   tierOrder: [...bounds.tierOrder],
   maxDepth: bounds.maxDepth,
   maxDeriskRounds: bounds.maxDeriskRounds,
-  maxAttempts: bounds.maxAttempts
+  maxAttempts: bounds.maxAttempts,
+  backoff: bounds.backoff === undefined ? undefined : {
+    initialMs: bounds.backoff.initialMs,
+    factor: bounds.backoff.factor,
+    maxMs: bounds.backoff.maxMs
+  },
+  nonRetryable: bounds.nonRetryable === undefined ? undefined : [...bounds.nonRetryable]
+})
+
+// The one retry policy the declared ladder and the running tier both spend, so
+// a chain never declares a wait it does not take or a tag it does not honour.
+const retryPolicy = (bounds: Bounds): WithRetry.Options => ({
+  attempts: bounds.maxAttempts,
+  backoff: bounds.backoff,
+  nonRetryable: bounds.nonRetryable
 })
 
 const copiedBudget = (budget: Budget | undefined): Budget | undefined =>
@@ -238,6 +263,18 @@ const checkBounds = (
     return refuse(
       "invalid_bounds",
       `Delegation concurrency must be a positive safe integer, received ${bounds.concurrency}`
+    )
+  }
+  const backoff = bounds.backoff
+  if (
+    backoff !== undefined &&
+    (!Number.isFinite(backoff.initialMs) || backoff.initialMs <= 0 ||
+      !Number.isFinite(backoff.factor) || backoff.factor < 1 ||
+      !Number.isFinite(backoff.maxMs) || backoff.maxMs < backoff.initialMs)
+  ) {
+    return refuse(
+      "invalid_bounds",
+      "backoff must declare a positive initialMs, a factor of at least 1, and a maxMs of at least initialMs"
     )
   }
   if (bounds.tierOrder.length === 0) {
@@ -343,7 +380,7 @@ const ladder = (
         () => rung(options, slot, leaf, goal, 0)
       )
     }),
-    { attempts: options.maxAttempts }
+    retryPolicy(options)
   )
 
 /**
@@ -457,7 +494,9 @@ const attemptCause = (attempts: ReadonlyArray<Attempt>): ReadonlyArray<Readonly<
  * The derisk loop stops at the first approved round. Each leaf climbs the tier
  * ladder weakest first, spending `maxAttempts` retries on a tier before the
  * next one is admitted; a tier whose result the review rejects escalates the
- * same way a tier that failed does. Only a reached rung contributes its
+ * same way a tier that failed does. Those attempts are immediate unless
+ * `backoff` declares the waits between them, and a failure whose `_tag` is
+ * listed in `nonRetryable` ends that tier at once and admits the next. Only a reached rung contributes its
  * `result.output`; an exhausted ladder fails `leaf_failed` naming the leaf's
  * plan path, and no later stage runs.
  *
@@ -490,6 +529,7 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
     budget: copiedBudget(caller.budget),
     concurrency: caller.concurrency
   }
+  const retry = retryPolicy(options)
   return Effect.gen(function*() {
     const refusal = checkBounds(options, Object.keys(options.execute))
     if (refusal !== undefined) return yield* Effect.fail(refusal)
@@ -540,7 +580,7 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
                   goal,
                   ...(options.budget === undefined ? {} : { budget: options.budget })
                 }),
-                { attempts: options.maxAttempts }
+                retry
               ),
               {
                 onFailure: (error) => Effect.succeed<Attempt>({ tier, failed: true, error }),

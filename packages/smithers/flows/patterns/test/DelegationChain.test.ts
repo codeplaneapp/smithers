@@ -1,7 +1,9 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Schema from "effect/Schema"
+import * as TestClock from "effect/testing/TestClock"
 import { expect } from "vitest"
 import * as DelegationChain from "../src/DelegationChain.ts"
 import { PatternError } from "../src/PatternError.ts"
@@ -61,6 +63,18 @@ const callsTagged = (graph: Graph.Graph, capability: string): ReadonlyArray<Grap
   )
 
 const keys = (value: Record<string, unknown>): ReadonlyArray<string> => Object.keys(value).sort()
+
+class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", { tier: Schema.String }) {}
+
+// The declared retry decorator names the policy it carries, so the declaration
+// says what a run spends.
+const decorators = (graph: Graph.Graph): ReadonlyArray<string> =>
+  Graph.nodes(graph).flatMap((node) => {
+    const value = (node.keyMaterial.body as {
+      readonly value?: { readonly _tag?: string; readonly name?: string }
+    }).value
+    return value?._tag === "Decorator" && typeof value.name === "string" ? [value.name] : []
+  })
 
 describe("DelegationChain", () => {
   it.effect("reports every plan refusal before executing any leaf", () =>
@@ -440,6 +454,146 @@ describe("DelegationChain", () => {
       expect(leafReviews.map((request) => request.tier)).toEqual(["weak", "strong", "weak", "strong"])
       // Settle is declared with the keys run settles with.
       expect(keys(declaredSettle)).toEqual(settlement)
+    }))
+
+  it.effect("ends a tier at a non-retryable failure and admits the next one", () =>
+    Effect.gen(function*() {
+      const attempted: Array<string> = []
+      const failure = yield* DelegationChain.run("ship it", {
+        ...bounds,
+        nonRetryable: ["Unauthorized"],
+        refine: () => Effect.succeed("goal"),
+        plan: () => Effect.succeed({ sequence: [{ agent: { goal: "a" } }] }),
+        derisk: () => Effect.succeed({ approved: true }),
+        execute: {
+          weak: ({ tier }) => Effect.suspend(() => (attempted.push(tier), Effect.fail(new Unauthorized({ tier })))),
+          strong: ({ tier }) => Effect.suspend(() => (attempted.push(tier), Effect.fail(new Unauthorized({ tier }))))
+        },
+        review: () => Effect.succeed({ approved: true }),
+        settle: ({ leaves }) => Effect.succeed(leaves)
+      }).pipe(Effect.flip)
+
+      // One call per tier, not maxAttempts per tier: the tag can never succeed.
+      expect(attempted).toEqual(["weak", "strong"])
+      expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
+      expect((failure as DelegationChain.DelegationError).code).toBe("leaf_failed")
+      expect((failure as DelegationChain.DelegationError).path).toBe("root.sequence[0]")
+    }))
+
+  it.effect("still spends every attempt on a failure the tags do not name", () =>
+    Effect.gen(function*() {
+      const attempted: Array<string> = []
+      yield* DelegationChain.run("ship it", {
+        ...bounds,
+        nonRetryable: ["Unauthorized"],
+        refine: () => Effect.succeed("goal"),
+        plan: () => Effect.succeed({ sequence: [{ agent: { goal: "a" } }] }),
+        derisk: () => Effect.succeed({ approved: true }),
+        execute: {
+          weak: ({ tier }) => Effect.suspend(() => (attempted.push(tier), Effect.fail("throttled"))),
+          strong: ({ tier }) => Effect.suspend(() => (attempted.push(tier), Effect.fail("throttled")))
+        },
+        review: () => Effect.succeed({ approved: true }),
+        settle: ({ leaves }) => Effect.succeed(leaves)
+      }).pipe(Effect.flip)
+
+      expect(attempted).toEqual(["weak", "weak", "strong", "strong"])
+    }))
+
+  it("spaces a tier's attempts by the declared backoff", () =>
+    Effect.gen(function*() {
+      const attempted: Array<string> = []
+      const fiber = yield* DelegationChain.run("ship it", {
+        ...bounds,
+        maxAttempts: 3,
+        backoff: { initialMs: 100, factor: 2, maxMs: 150 },
+        refine: () => Effect.succeed("goal"),
+        plan: () => Effect.succeed({ agent: { goal: "a" } }),
+        derisk: () => Effect.succeed({ approved: true }),
+        execute: {
+          weak: ({ tier }) => Effect.suspend(() => (attempted.push(tier), Effect.fail("throttled"))),
+          strong: ({ tier }) => Effect.suspend(() => (attempted.push(tier), Effect.fail("throttled")))
+        },
+        review: () => Effect.succeed({ approved: true }),
+        settle: ({ leaves }) => Effect.succeed(leaves)
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+
+      expect(attempted).toEqual(["weak"])
+      yield* TestClock.adjust("99 millis")
+      expect(attempted).toEqual(["weak"])
+      yield* TestClock.adjust("1 millis")
+      expect(attempted).toEqual(["weak", "weak"])
+      // The third wait is the capped 150 ms, and the next tier's first attempt
+      // is admitted as soon as the weak tier gives up, without a wait of its own.
+      yield* TestClock.adjust("150 millis")
+      expect(attempted).toEqual(["weak", "weak", "weak", "strong"])
+      yield* TestClock.adjust("99 millis")
+      expect(attempted).toEqual(["weak", "weak", "weak", "strong"])
+      yield* TestClock.adjust("1 millis")
+      expect(attempted).toEqual(["weak", "weak", "weak", "strong", "strong"])
+      yield* TestClock.adjust("150 millis")
+      expect(attempted).toEqual(["weak", "weak", "weak", "strong", "strong", "strong"])
+
+      const exit = yield* Fiber.await(fiber)
+      expect(exit._tag).toBe("Failure")
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise))
+
+  it("declares the tier ladder with the retry policy run spends", () => {
+    const policy = {
+      maxAttempts: 3,
+      backoff: { initialMs: 100, factor: 2, maxMs: 400 },
+      nonRetryable: ["Unauthorized", "Invalid"]
+    }
+    const graph = Graph.build(DelegationChain.make({ ...makeOptions, maxDepth: 1, ...policy }), "ship it")
+
+    expect(decorators(graph)).toEqual([
+      "withRetry(delegationTiers(weak -> strong), attempts=3, backoff=100x2<=400, nonRetryable=Invalid|Unauthorized)"
+    ])
+    // A chain that declares no policy still declares the plain attempt budget.
+    expect(decorators(Graph.build(DelegationChain.make({ ...makeOptions, maxDepth: 1 }), "ship it"))).toEqual([
+      "withRetry(delegationTiers(weak -> strong), attempts=3)"
+    ])
+  })
+
+  it.effect("refuses an invalid backoff before any callback runs", () =>
+    Effect.gen(function*() {
+      const invalid = [
+        { initialMs: 0, factor: 2, maxMs: 10 },
+        { initialMs: 10, factor: 0.5, maxMs: 10 },
+        { initialMs: 10, factor: 2, maxMs: 5 },
+        { initialMs: Number.NaN, factor: 2, maxMs: 10 }
+      ]
+      for (const backoff of invalid) {
+        let callbacks = 0
+        const called = <A>(value: A) => Effect.sync(() => (callbacks += 1, value))
+        const failure = yield* Effect.flip(
+          DelegationChain.run("ship it", {
+            ...bounds,
+            backoff,
+            refine: () => called("goal"),
+            plan: () => called({ agent: { goal: "a" } }),
+            derisk: () => called({ approved: true }),
+            execute: { weak: () => called("ok"), strong: () => called("ok") },
+            review: () => called({ approved: true }),
+            settle: ({ leaves }) => called(leaves)
+          })
+        )
+
+        expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
+        expect((failure as DelegationChain.DelegationError).code).toBe("invalid_bounds")
+        expect((failure as DelegationChain.DelegationError).message).toBe(
+          "backoff must declare a positive initialMs, a factor of at least 1, and a maxMs of at least initialMs"
+        )
+        expect(callbacks).toBe(0)
+      }
+      expect(() => DelegationChain.make({ ...makeOptions, backoff: { initialMs: 10, factor: 2, maxMs: 5 } })).toThrow(
+        expect.objectContaining({
+          code: "invalid_bounds",
+          path: "root",
+          message:
+            "backoff must declare a positive initialMs, a factor of at least 1, and a maxMs of at least initialMs"
+        })
+      )
     }))
 
   it("refuses bounds and tiers it cannot honour", () => {
