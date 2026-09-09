@@ -10,6 +10,7 @@
  *
  * @since 0.1.0
  */
+import * as BoundedJson from "@smthrs/canonical/BoundedJson"
 import { Canonical } from "@smthrs/canonical/Canonical"
 import { affectedRows, DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
 import * as Clock from "effect/Clock"
@@ -22,7 +23,6 @@ import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlError from "effect/unstable/sql/SqlError"
 import * as CacheStoreMetrics from "./CacheStoreMetrics.ts"
-import * as BoundedJson from "./internal/BoundedJson.ts"
 
 /**
  * Maximum encoded bytes admitted for one `result` or `meta` JSON tree.
@@ -56,7 +56,15 @@ export const maximumJsonNodes = 100_000
  */
 export const maximumJsonMembers = 100_000
 
-const jsonLimits: BoundedJson.Limits = {
+/**
+ * Cache values always carry a finite byte budget and finite per-container
+ * member, string, and key budgets, so every limit the shared boundary leaves
+ * optional is required here. `maxTotalMembers` is omitted: the cache bounds
+ * each container, and a whole tree by `maxNodes` and `maxBytes`.
+ */
+type CacheJsonLimits = Required<Omit<BoundedJson.Limits, "maxTotalMembers">>
+
+const jsonLimits: CacheJsonLimits = {
   maxBytes: maximumJsonBytes,
   maxDepth: maximumJsonDepth,
   maxMembers: maximumJsonMembers,
