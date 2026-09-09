@@ -51,14 +51,14 @@ for (const disconnect of [false, true]) {
       const saved = JSON.parse(await readFile(join(dir, "repositories.json"), "utf8"))
       expect(saved.repositories).toEqual(disconnect ? [] : [{ path: dir, access: "read" }])
       if (!disconnect) expect((await post("/api/repo/access", { repoId: repo.id, access: "read-write" })).status).toBe(400)
-      routes.stop()
+      await routes.stop()
       const restored = registerRepoTargetRoutes({ ...host, router: new Router() }, { ...options, onRepoAccessRevoked: undefined })
       await restored.restored
       expect(restored.repos.list()).toHaveLength(disconnect ? 0 : 1)
       if (!disconnect) expect(restored.resolveRepo(restored.repos.list()[0]!.id, "read-write").status).toBe("permission-denied")
-      restored.stop()
+      await restored.stop()
     } finally {
-      routes.stop()
+      await routes.stop()
       await rm(dir, { recursive: true, force: true })
     }
   })
@@ -122,7 +122,7 @@ for (const disconnect of [false, true]) {
       expect((await post(path, body)).status).toBe(200)
       expect(JSON.parse(await readFile(join(dir, "repositories.json"), "utf8")).repositories).toEqual(disconnect ? [] : [{ path: dir, access: "read" }])
     } finally {
-      routes.stop()
+      await routes.stop()
       await rm(dir, { recursive: true, force: true })
     }
   })
@@ -148,7 +148,7 @@ test("a target waiting for its runtime cannot start after revocation", async () 
     node.resolve({ path: process.execPath, version: "v22.19.0" })
     expect((await running).status).toBe(403)
   } finally {
-    routes.stop()
+    await routes.stop()
     await rm(dir, { recursive: true, force: true })
   }
 })

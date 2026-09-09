@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
@@ -226,7 +226,7 @@ describe("createTargetRunner", () => {
       expect(runner.arm(run.runId)).toBe(false)
       expect(runner.arm("nope")).toBe(false)
     } finally {
-      runner.stop()
+      await runner.stop()
     }
   })
 
@@ -238,17 +238,17 @@ describe("createTargetRunner", () => {
     try {
       const run = runner.reserve(input)
       expect(() => runner.reserve(input)).toThrow("At most 1 target runs")
-      expect(runner.cancel(run.runId)).toBe(true)
+      expect(await runner.cancel(run.runId)).toBe(true)
       expect(runner.get(run.runId)).toBeUndefined()
       expect(runner.arm(run.runId)).toBe(false)
       expect(runner.attach(run.runId)).toBe(false)
-      expect(runner.cancel(run.runId)).toBe(false)
+      expect(await runner.cancel(run.runId)).toBe(false)
       const next = runner.reserve(input)
-      expect(runner.cancel(next.runId)).toBe(true)
+      expect(await runner.cancel(next.runId)).toBe(true)
       await Bun.sleep(50)
       expect(sink.frames).toEqual([])
     } finally {
-      runner.stop()
+      await runner.stop()
     }
   })
 
@@ -279,7 +279,7 @@ describe("createTargetRunner", () => {
     expect(own.map((entry) => entry.frame.seq)).toEqual(own.map((_, index) => index))
     expect(runner.get(run.runId)).toMatchObject({ status: "failed", exitCode: 3 })
     expect(runner.attach("nope")).toBe(false)
-    runner.stop()
+    await runner.stop()
   })
 
   test("a run in a child workspace runs at the joined cwd", async () => {
@@ -298,7 +298,7 @@ describe("createTargetRunner", () => {
       .map((entry) => (entry.frame as { data: string }).data)
       .join("")
     expect(stdout).toBe(`${join(dir, "aomi-sdk")}\n`)
-    runner.stop()
+    await runner.stop()
   })
 
   test("a run nobody attaches to starts on its own", async () => {
@@ -310,7 +310,7 @@ describe("createTargetRunner", () => {
     const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
     await sink.exited(run.runId)
     expect(runner.get(run.runId)).toMatchObject({ status: "done", exitCode: 0 })
-    runner.stop()
+    await runner.stop()
   })
 
   test("cancelling a pending run reports it without spawning", async () => {
@@ -318,14 +318,180 @@ describe("createTargetRunner", () => {
     const sink = collect()
     const runner = createTargetRunner({ publish: sink.publish, cli: join(dir, "never.js"), autoStartMs: 60_000 })
     const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
-    expect(runner.cancel(run.runId)).toBe(true)
+    expect(await runner.cancel(run.runId)).toBe(true)
     expect(sink.frames.map((entry) => entry.frame)).toEqual([
       { type: "error", message: "Cancelled before it started.", seq: 0 },
       { type: "exit", code: null, seq: 1 }
     ])
-    expect(runner.cancel(run.runId)).toBe(false)
-    expect(runner.cancel("nope")).toBe(false)
-    runner.stop()
+    expect(await runner.cancel(run.runId)).toBe(false)
+    expect(await runner.cancel("nope")).toBe(false)
+    await runner.stop()
+  })
+
+  for (const mode of ["cancel", "stop-open-pipe"] as const) {
+    test(`${mode} waits for escalation and reaping even when output pipes stay open`, async () => {
+      const dir = await scratch()
+      const cli = join(dir, "double-cli.js")
+      await writeFile(cli, "")
+      const sink = collect()
+      const exited = Promise.withResolvers<number>()
+      const signals: Array<string> = []
+      let cancelledReaders = 0
+      const pipe = () => new ReadableStream<Uint8Array>({ cancel: () => { cancelledReaders += 1; return new Promise<void>(() => {}) } })
+      const child = { pid: 2147483647, stdout: pipe(), stderr: pipe(), exited: exited.promise,
+        kill: (signal: string) => { signals.push(signal) } }
+      const spawn = spyOn(Bun, "spawn").mockImplementation(() => child as unknown as ReturnType<typeof Bun.spawn>)
+      const kill = spyOn(process, "kill").mockImplementation((pid, signal) => {
+        expect(pid).toBe(-child.pid)
+        if (signal === 0 && signals.includes("SIGKILL")) throw Object.assign(new Error("gone"), { code: "ESRCH" })
+        if (signal !== 0) signals.push(String(signal))
+        if (mode === "stop-open-pipe" && signal === "SIGTERM") exited.resolve(143)
+        return true
+      })
+      const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 60_000, killGraceMs: 25 })
+      const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
+      try {
+        runner.attach(run.runId)
+        let resolved = false
+        const closing = Promise.resolve(mode === "cancel" ? runner.cancel(run.runId) : runner.stop()).then(() => { resolved = true })
+        const concurrent = mode === "cancel" ? runner.cancel(run.runId) : runner.stop()
+        await Bun.sleep(10)
+        expect(resolved).toBe(false)
+        expect(signals).toEqual(["SIGTERM"])
+        for (let i = 0; i < 100 && !signals.includes("SIGKILL"); i++) await Bun.sleep(10)
+        expect(signals).toEqual(["SIGTERM", "SIGKILL"])
+        if (mode === "cancel") {
+          expect(resolved).toBe(false)
+          expect(run.status).toBe("running")
+          exited.resolve(137)
+        }
+        await closing
+        await concurrent
+        expect(run.status).toBe("failed")
+        expect(cancelledReaders).toBe(2)
+        expect(sink.frames.at(-1)?.frame.type).toBe("exit")
+        expect(spawn.mock.calls[0]?.[1]).toMatchObject({ detached: true })
+      } finally {
+        exited.resolve(137)
+        void child.stdout.cancel().catch(() => {})
+        void child.stderr.cancel().catch(() => {})
+        await runner.stop()
+        spawn.mockRestore()
+        kill.mockRestore()
+      }
+    })
+  }
+
+  /*
+   * A loader that swallows SIGTERM and a grandchild that inherits the stdout
+   * pipe: the default signal alone leaves both alive and the pumps waiting
+   * on a pipe nobody closes. The stubborn child prints "<pid> <grandchild pid>".
+   */
+  const STUBBORN_CLI = `
+    process.on("SIGTERM", () => {})
+    const { spawn } = require("node:child_process")
+    const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); process.send('ready'); process.disconnect(); setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "inherit", "ipc"] })
+    child.on("message", () => process.stdout.write(process.pid + " " + child.pid + "\\n"))
+    setInterval(() => {}, 1000)
+  `
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const stubbornPids = async (sink: ReturnType<typeof collect>, runId: string): Promise<[number, number]> => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const line = sink.frames.filter((entry) => entry.runId === runId && entry.frame.type === "stdout").map((entry) => (entry.frame as { data: string }).data).join("")
+      const match = /^(\d+) (\d+)\n/.exec(line)
+      if (match !== null) return [Number(match[1]), Number(match[2])]
+      await Bun.sleep(25)
+    }
+    throw new Error("the stubborn child never announced its pids")
+  }
+
+  test("cancelling a running child that ignores SIGTERM escalates, reaps the whole tree, and resolves once the run is settled", async () => {
+    const dir = await scratch()
+    const cli = join(dir, "stubborn-cli.js")
+    await writeFile(cli, STUBBORN_CLI)
+    const sink = collect()
+    const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 10, killGraceMs: 200 })
+    const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
+    try {
+      const [pid, grandchild] = await stubbornPids(sink, run.runId)
+      expect(alive(pid)).toBe(true)
+      expect(alive(grandchild)).toBe(true)
+      const startedAt = Date.now()
+      expect(await runner.cancel(run.runId)).toBe(true)
+      expect(Date.now() - startedAt).toBeLessThan(5_000)
+      expect(run.status).toBe("failed")
+      expect(sink.frames.some((entry) => entry.runId === run.runId && entry.frame.type === "exit")).toBe(true)
+      expect(alive(pid)).toBe(false)
+      expect(alive(grandchild)).toBe(false)
+      expect(await runner.cancel(run.runId)).toBe(false)
+    } finally {
+      await runner.stop()
+    }
+  })
+
+  test("cancellation kills a silent descendant even when its parent exits during the grace", async () => {
+    const dir = await scratch()
+    const cli = join(dir, "silent-descendant.js")
+    await writeFile(cli, STUBBORN_CLI
+      .replace('process.on("SIGTERM", () => {})', 'process.on("SIGTERM", () => process.exit(0))')
+      .replace('["ignore", "inherit", "inherit", "ipc"]', '["ignore", "ignore", "ignore", "ipc"]'))
+    const sink = collect()
+    const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 60_000, killGraceMs: 200 })
+    const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
+    let grandchild: number | undefined
+    try {
+      runner.attach(run.runId)
+      const pids = await stubbornPids(sink, run.runId)
+      grandchild = pids[1]
+      expect(await runner.cancel(run.runId)).toBe(true)
+      expect(run.status).not.toBe("running")
+      expect(alive(pids[0])).toBe(false)
+      // The host reaps its direct child; the OS reaps the orphan after SIGKILL.
+      for (let i = 0; i < 100 && alive(grandchild); i++) await Bun.sleep(10)
+      expect(alive(grandchild)).toBe(false)
+    } finally {
+      if (grandchild !== undefined && alive(grandchild)) process.kill(grandchild, "SIGKILL")
+      await runner.stop()
+    }
+  })
+
+  test("stop closes admission, reaps stubborn trees within the deadline, and fails runs that never started", async () => {
+    const dir = await scratch()
+    const cli = join(dir, "stubborn-cli.js")
+    await writeFile(cli, STUBBORN_CLI)
+    const sink = collect()
+    const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 10, killGraceMs: 200 })
+    const input = { repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar }
+    const run = runner.start(input)
+    const [pid, grandchild] = await stubbornPids(sink, run.runId)
+    const unarmed = runner.reserve(input)
+    const pending = runner.reserve(input)
+    runner.arm(pending.runId)
+    const startedAt = Date.now()
+    const stopped = runner.stop()
+    expect(() => runner.reserve(input)).toThrow("stopped")
+    expect(runner.attach(pending.runId)).toBe(false)
+    expect(runner.arm(unarmed.runId)).toBe(false)
+    expect(runner.get(unarmed.runId)).toBeUndefined()
+    expect(runner.stop()).toBe(stopped)
+    await stopped
+    expect(Date.now() - startedAt).toBeLessThan(5_000)
+    expect(run.status).toBe("failed")
+    expect(alive(pid)).toBe(false)
+    expect(alive(grandchild)).toBe(false)
+    expect(pending.status).toBe("failed")
+    expect(sink.frames.filter((entry) => entry.runId === pending.runId).map((entry) => entry.frame)).toEqual([
+      { type: "error", message: "Cancelled: the app is shutting down.", seq: 0 },
+      { type: "exit", code: null, seq: 1 }
+    ])
+    await runner.stop()
   })
 })
 

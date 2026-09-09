@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ReposResponseSchema, TargetRunMessageSchema, TargetsQueryResponseSchema } from "@smthrs/rpc/LocalApp"
@@ -428,10 +428,97 @@ for (const kind of ["pattern", "targetId"] as const) {
       expect(routes.runner.get(run.runId)).toBeUndefined()
       expect(await routes.history.replay(run.runId)).toBeUndefined()
     } finally {
-      routes.stop()
+      await routes.stop()
       initialize.mockRestore()
       spawn.mockRestore()
       await rm(dir, { recursive: true, force: true })
     }
   })
 }
+
+for (const boundary of ["cancel", "stop"] as const) {
+  test(`${boundary} waits for child reaping before flushing history and resolving`, async () => {
+    const router = new Router()
+    const routes = registerRepoTargetRoutes({ router, publish: () => {}, onMessage: () => () => {} }, {
+      node: Promise.resolve(null), authority: createRepositoryAuthority()
+    })
+    await routes.restored
+    const run = routes.runner.reserve({ repoId: "r", repo: repoDir, workspace: ".", label: "//:x", node: { path: process.execPath, version: "v22.19.0" } })
+    const reaped = Promise.withResolvers<void>()
+    const flushed = Promise.withResolvers<void>()
+    const cancel = spyOn(routes.runner, "cancel").mockImplementation(async () => { await reaped.promise; return true })
+    const stop = spyOn(routes.runner, "stop").mockImplementation(() => reaped.promise)
+    const flush = spyOn(routes.history, "flush").mockImplementation(() => flushed.promise)
+    try {
+      const route = router.match("POST", "/api/targets/cancel")!
+      const request = new Request("http://localhost/api/targets/cancel", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: run.runId })
+      })
+      let resolved = false
+      const closing = Promise.resolve(boundary === "stop" ? routes.stop() : route.handler({ request, url: new URL(request.url), params: route.params })).then(() => { resolved = true })
+      await Bun.sleep(10)
+      expect(resolved).toBe(false)
+      expect(flush).not.toHaveBeenCalled()
+      reaped.resolve()
+      await Bun.sleep(10)
+      expect(flush).toHaveBeenCalledTimes(1)
+      expect(resolved).toBe(false)
+      flushed.resolve()
+      await closing
+      expect(resolved).toBe(true)
+    } finally {
+      reaped.resolve()
+      flushed.resolve()
+      cancel.mockRestore()
+      stop.mockRestore()
+      flush.mockRestore()
+      await routes.runner.stop()
+      await routes.stop()
+    }
+  })
+}
+
+test("server stop reaps a running target and persists its exit before resolving", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "smithers-target-shutdown-")))
+  const loader = join(dir, "stubborn.js")
+  const pidFile = join(dir, "pid")
+  await writeFile(join(dir, "index.html"), "fixture")
+  await writeFile(join(dir, "WORKSPACE.ts"), "export default {}")
+  await writeFile(loader, `
+    process.on("SIGTERM", () => {})
+    require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))
+    console.log("ready")
+    setInterval(() => {}, 1000)
+  `)
+  const host = await startLocalServer({
+    port: 0, distDir: dir, home: dir, stateDir: join(dir, "state"),
+    chatStub: true, allowManualRepositoryPaths: true,
+    node: { path: process.execPath, version: "v22.19.0" }, buildCli: loader, harnesses: async () => []
+  })
+  const request = async (path: string, body: unknown) => {
+    const response = await fetch(host.origin + path, { method: "POST",
+      headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: host.sessionToken }, body: JSON.stringify(body) })
+    expect(response.status).toBe(200)
+    return response.json()
+  }
+  let pid: number | undefined
+  try {
+    const { repo } = await request("/api/repo/open", { path: dir }) as { repo: { id: string } }
+    const { runId } = await request("/api/targets/run", { repoId: repo.id, verb: "ci", pattern: "//..." }) as { runId: string }
+    for (let i = 0; i < 500; i++) {
+      const value = await readFile(pidFile, "utf8").catch(() => "")
+      if (value !== "") { pid = Number(value); break }
+      await Bun.sleep(10)
+    }
+    expect(pid).toBeDefined()
+    await host.stop()
+    expect(() => process.kill(pid!, 0)).toThrow()
+    const journal = (await readFile(join(dir, ".flows", "ui", "runs", `${runId}.jsonl`), "utf8")).trim().split("\n").map((line) => JSON.parse(line))
+    expect(journal.some((line) => line.type === "event" && line.event.type === "exit")).toBe(true)
+    expect(journal.at(-1)).toMatchObject({ type: "record", record: { status: "failed" } })
+  } finally {
+    if (pid !== undefined) { try { process.kill(pid, "SIGKILL") } catch {} }
+    await host.stop()
+    await rm(dir, { recursive: true, force: true })
+  }
+}, 15_000)

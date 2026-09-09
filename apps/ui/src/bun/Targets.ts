@@ -254,6 +254,8 @@ export interface TargetRunnerOptions {
   readonly maxActiveRuns?: number
   /** Maximum retained run handles; settled handles are evicted oldest-first. */
   readonly maxRetainedRuns?: number
+  /** Grace between the termination signal and SIGKILL on the run's process group; default 2000. */
+  readonly killGraceMs?: number
 }
 
 export class TargetRunCapacityError extends Error {
@@ -279,12 +281,22 @@ export interface TargetRunner {
   readonly start: TargetRunner["reserve"]
   /** A subscriber is listening: spawn now if armed and not yet started. */
   readonly attach: (runId: string) => boolean
-  /** Releases an unarmed reservation silently; cancels an armed run with terminal frames. */
-  readonly cancel: (runId: string) => boolean
+  /**
+   * Releases an unarmed reservation silently; cancels an armed run with
+   * terminal frames. A running child gets the termination signal on its
+   * process group, SIGKILL after the grace, and the promise settles only once
+   * the run is no longer running.
+   */
+  readonly cancel: (runId: string) => Promise<boolean>
   /** Cancel pending runs and kill running children before revocation succeeds. */
   readonly revokeRepo: (repoId: string) => Promise<void>
   readonly get: (runId: string) => TargetRun | undefined
-  readonly stop: () => void
+  /**
+   * Closes admission synchronously (reserve throws, arm and attach refuse),
+   * fails runs that never started, terminates every running process tree with
+   * escalation, and settles once each run is reaped. Idempotent.
+   */
+  readonly stop: () => Promise<void>
 }
 
 export const runTopic = (runId: string): string => `target-run:${runId}`
@@ -543,6 +555,10 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     armed: boolean
     child: ReturnType<typeof Bun.spawn> | undefined
     timer: ReturnType<typeof setTimeout> | undefined
+    /** Resolves once the exit frame is emitted; undefined until the child is spawned. */
+    settled: Promise<void> | undefined
+    termination: Promise<void> | undefined
+    readonly readers: Array<ReadableStreamDefaultReader<Uint8Array>>
     readonly edges: ReadonlyArray<GraphEdge>
     readonly kinds: ReadonlyArray<string>
     readonly parser: RunStdoutParser
@@ -552,6 +568,9 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   const runs = new Map<string, Live>()
   const maxActiveRuns = options.maxActiveRuns ?? 4
   const maxRetainedRuns = options.maxRetainedRuns ?? 64
+  const killGraceMs = options.killGraceMs ?? 2000
+  let stopped = false
+  let stopPromise: Promise<void> | undefined
 
   /*
    * Every frame the backend records is stamped with a run-local monotonic
@@ -571,29 +590,106 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   const pump = async (stream: ReadableStream<Uint8Array>, live: Live, type: "stdout" | "stderr"): Promise<void> => {
     const decoder = new TextDecoder()
     const reader = stream.getReader()
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      const data = decoder.decode(value, { stream: true })
-      if (data !== "") {
-        const label = /^(\/\/\S+)/.exec(data)?.[1]
-        emit(live.run, { type, data, ...(label === undefined ? {} : { label }) })
-        for (const event of live.parser.push(type, data)) {
-          if (event.type === "summary") live.summaryEmitted = true
-          emit(live.run, event)
+    live.readers.push(reader)
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        const data = decoder.decode(value, { stream: true })
+        if (data !== "") {
+          const label = /^(\/\/\S+)/.exec(data)?.[1]
+          emit(live.run, { type, data, ...(label === undefined ? {} : { label }) })
+          for (const event of live.parser.push(type, data)) {
+            if (event.type === "summary") live.summaryEmitted = true
+            emit(live.run, event)
+          }
         }
       }
-    }
-    const rest = decoder.decode()
-    if (rest !== "") {
-      const label = /^(\/\/\S+)/.exec(rest)?.[1]
-      emit(live.run, { type, data: rest, ...(label === undefined ? {} : { label }) })
-      for (const event of live.parser.push(type, rest)) emit(live.run, event)
+      const rest = decoder.decode()
+      if (rest !== "") {
+        const label = /^(\/\/\S+)/.exec(rest)?.[1]
+        emit(live.run, { type, data: rest, ...(label === undefined ? {} : { label }) })
+        for (const event of live.parser.push(type, rest)) emit(live.run, event)
+      }
+    } finally {
+      reader.releaseLock()
     }
   }
 
+  /*
+   * The child owns a process group (detached spawn), so one signal reaches
+   * every descendant. A loader that swallows the termination signal, or a
+   * descendant that keeps the output pipes open, is escalated to SIGKILL after
+   * the grace; the readers are then cancelled so a stray pipe holder that left
+   * the group cannot keep the run "running". Resolves once the run settled.
+   */
+  const signalTree = (child: ReturnType<typeof Bun.spawn>, signal: NodeJS.Signals): void => {
+    try {
+      process.kill(-child.pid, signal)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+      try {
+        child.kill(signal)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+      }
+    }
+  }
+
+  const groupExists = (child: ReturnType<typeof Bun.spawn>): boolean => {
+    try {
+      process.kill(-child.pid, 0)
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return false
+      throw error
+    }
+  }
+
+  const terminate = (live: Live): Promise<void> => live.termination ??= (async () => {
+    const child = live.child
+    const settled = live.settled
+    if (child === undefined || settled === undefined) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), killGraceMs) })
+    try {
+      signalTree(child, "SIGTERM")
+      if (await Promise.race([settled.then(() => true), deadline])) {
+        // A parent can exit and close its streams while a silent descendant
+        // still owns the process group. Give that descendant the same grace.
+        if (!groupExists(child)) return
+        await deadline
+      }
+      log(`target-run ${live.run.runId}: killing its process group after ${killGraceMs}ms (pid ${child.pid})`)
+      signalTree(child, "SIGKILL")
+      // Do not wait on inherited pipes: a descendant may have left the group.
+      // Reader cancellation releases pending reads even if its source's
+      // cancellation promise never settles. Reaping the child is still required.
+      for (const reader of live.readers) void reader.cancel().catch(() => {})
+      await settled
+      // The host reaps its child; the OS reaps orphaned descendants. Observe
+      // that the group is gone before reporting success, with a bounded wait.
+      const reapDeadline = Date.now() + 2000
+      while (groupExists(child)) {
+        if (Date.now() >= reapDeadline) throw new Error(`Target process group ${child.pid} did not exit after SIGKILL.`)
+        await Bun.sleep(10)
+      }
+    } finally {
+      clearTimeout(timer)
+      live.termination = undefined
+    }
+  })()
+
+  const failBeforeStart = (live: Live, message: string): void => {
+    if (live.timer !== undefined) clearTimeout(live.timer)
+    live.timer = undefined
+    live.run.status = "failed"
+    emit(live.run, { type: "error", message })
+    emit(live.run, { type: "exit", code: null })
+  }
+
   const spawn = (live: Live): void => {
-    if (!live.armed || live.run.status !== "pending") return
+    if (stopped || !live.armed || live.run.status !== "pending") return
     if (live.timer !== undefined) clearTimeout(live.timer)
     live.timer = undefined
     live.run.status = "running"
@@ -616,7 +712,8 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
         ...(environment === undefined ? {} : { env: environment }),
         stdout: "pipe",
         stderr: "pipe",
-        stdin: "ignore"
+        stdin: "ignore",
+        detached: true
       })
     } catch (error) {
       live.run.status = "failed"
@@ -626,11 +723,10 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     }
     live.child = child
     log(`target-run ${live.run.runId}: ${live.run.label} in ${workspaceCwd(live.run.repo, live.run.workspace)} (pid ${child.pid})`)
-    void Promise.all([
+    live.settled = Promise.allSettled([
       pump(child.stdout as ReadableStream<Uint8Array>, live, "stdout"),
       pump(child.stderr as ReadableStream<Uint8Array>, live, "stderr")
     ])
-      .catch(() => {})
       .then(() => child.exited)
       .then((code) => {
         for (const event of live.parser.finish()) {
@@ -651,12 +747,13 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   }
 
   const reserve: TargetRunner["reserve"] = ({ repoId, repo, workspace, label, node, edges = [], kinds = [], verb, pattern }) => {
-    const active = [...runs.values()].filter((live) => live.run.status === "pending" || live.run.status === "running")
+    if (stopped) throw new TargetRunCapacityError("The target runner is stopped.")
+    const active = [...runs.values()].filter((live) => live.run.status === "pending" || live.run.status === "running" || live.termination !== undefined)
     if (active.length >= maxActiveRuns) {
       throw new TargetRunCapacityError(`At most ${maxActiveRuns} target runs may execute at once.`)
     }
     while (runs.size >= maxRetainedRuns) {
-      const settled = [...runs].find(([, live]) => live.run.status !== "pending" && live.run.status !== "running")
+      const settled = [...runs].find(([, live]) => live.run.status !== "pending" && live.run.status !== "running" && live.termination === undefined)
       if (settled === undefined) {
         throw new TargetRunCapacityError(`At most ${maxRetainedRuns} target runs may be retained.`)
       }
@@ -670,14 +767,14 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       runId: crypto.randomUUID(), repoId, repo, workspace, label: title, labels, startedAt, status: "pending", exitCode: null,
       ...(isPattern ? { verb, pattern } : {})
     }
-    const live: Live = { run, armed: false, node, edges, kinds, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, summaryEmitted: false, nextSeq: 0 }
+    const live: Live = { run, armed: false, node, edges, kinds, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, settled: undefined, termination: undefined, readers: [], summaryEmitted: false, nextSeq: 0 }
     runs.set(run.runId, live)
     return run
   }
 
   const arm: TargetRunner["arm"] = (runId) => {
     const live = runs.get(runId)
-    if (live === undefined || live.armed || live.run.status !== "pending") return false
+    if (stopped || live === undefined || live.armed || live.run.status !== "pending") return false
     live.armed = true
     live.timer = setTimeout(() => spawn(live), options.autoStartMs ?? 1000)
     return true
@@ -693,11 +790,11 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     },
     attach: (runId) => {
       const live = runs.get(runId)
-      if (live === undefined || !live.armed) return false
+      if (stopped || live === undefined || !live.armed) return false
       spawn(live)
       return true
     },
-    cancel: (runId) => {
+    cancel: async (runId) => {
       const live = runs.get(runId)
       if (live === undefined) return false
       if (live.run.status === "pending") {
@@ -705,14 +802,11 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
           runs.delete(runId)
           return true
         }
-        if (live.timer !== undefined) clearTimeout(live.timer)
-        live.run.status = "failed"
-        emit(live.run, { type: "error", message: "Cancelled before it started." })
-        emit(live.run, { type: "exit", code: null })
+        failBeforeStart(live, "Cancelled before it started.")
         return true
       }
-      if (live.run.status === "running") {
-        live.child?.kill()
+      if (live.run.status === "running" || live.termination !== undefined) {
+        await terminate(live)
         return true
       }
       return false
@@ -722,23 +816,28 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       for (const live of runs.values()) {
         if (live.run.repoId !== repoId) continue
         if (live.run.status === "pending") {
-          if (live.timer !== undefined) clearTimeout(live.timer)
-          live.run.status = "failed"
-          emit(live.run, { type: "error", message: "Repository access was revoked." })
-          emit(live.run, { type: "exit", code: null })
+          failBeforeStart(live, "Repository access was revoked.")
         } else if (live.run.status === "running" && live.child !== undefined) {
-          live.child.kill("SIGKILL")
+          signalTree(live.child, "SIGKILL")
           exiting.push(live.child.exited)
         }
       }
       await Promise.all(exiting)
     },
     get: (runId) => runs.get(runId)?.run,
-    stop: () => {
+    stop: () => stopPromise ??= (async () => {
+      stopped = true
+      const reaping: Array<Promise<void>> = []
       for (const live of runs.values()) {
         if (live.timer !== undefined) clearTimeout(live.timer)
-        if (live.run.status === "running") live.child?.kill()
+        live.timer = undefined
+        if (live.run.status === "pending" && live.armed) failBeforeStart(live, "Cancelled: the app is shutting down.")
+        else if (live.run.status === "pending") runs.delete(live.run.runId)
+        else if (live.run.status === "running" || live.termination !== undefined) reaping.push(terminate(live))
       }
-    }
+      const results = await Promise.allSettled(reaping)
+      const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
+      if (errors.length > 0) throw new AggregateError(errors, "Target runner shutdown failed.")
+    })()
   }
 }

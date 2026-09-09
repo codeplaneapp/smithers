@@ -52,7 +52,11 @@ export interface RepoTargetRoutes {
     repoId: string,
     requiredAccess: RepositoryAccess
   ) => { readonly status: "ok"; readonly path: string } | { readonly status: "not-found" | "permission-denied" }
-  readonly stop: () => void
+  /**
+   * Closes run admission synchronously and settles once every running child
+   * tree is reaped and its terminal history frames are flushed.
+   */
+  readonly stop: () => Promise<void>
 }
 
 interface TargetGrant {
@@ -341,7 +345,7 @@ export const registerRepoTargetRoutes = (
       try {
         await history.start(run)
       } catch (error) {
-        runner.cancel(run.runId)
+        await runner.cancel(run.runId)
         throw error
       }
       runner.arm(run.runId)
@@ -423,7 +427,7 @@ export const registerRepoTargetRoutes = (
     try {
       await history.start(run)
     } catch (error) {
-      runner.cancel(run.runId)
+      await runner.cancel(run.runId)
       throw error
     }
     runner.arm(run.runId)
@@ -436,7 +440,9 @@ export const registerRepoTargetRoutes = (
     const runId = stringField(parsed.body, "runId")
     if (runId === undefined) return jsonError(400, "invalid_request", "Body must be { runId }.")
     if (runner.get(runId) === undefined) return jsonError(404, "run_not_found", `No target run with id ${runId}.`)
-    return json({ ok: runner.cancel(runId) })
+    const ok = await runner.cancel(runId)
+    await history.flush()
+    return json({ ok })
   })
 
   // A subscriber announces itself so the child starts once someone listens
@@ -448,16 +454,18 @@ export const registerRepoTargetRoutes = (
     }
   })
 
+  let stopPromise: Promise<void> | undefined
   return {
     restored,
     repos,
     runner,
     history,
     resolveRepo,
-    stop: () => {
+    stop: () => stopPromise ??= (async () => {
       unregister()
-      runner.stop()
+      const reaped = runner.stop()
       repoAccess.clear()
-    }
+      try { await reaped } finally { await history.flush() }
+    })()
   }
 }

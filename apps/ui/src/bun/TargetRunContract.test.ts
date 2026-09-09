@@ -52,7 +52,7 @@ const collect = async (script: string): Promise<{ frames: Array<TargetRunEvent>;
       }
     }, 10)
   })
-  runner.stop()
+  await runner.stop()
   return { frames, run }
 }
 

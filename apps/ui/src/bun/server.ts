@@ -1259,7 +1259,9 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         () => linearAuth?.stop(),
         () => ptyStopped,
         () => lsp.killAll(),
-        () => repoTargets.history.flush(),
+        // Target children are reaped before the journal flushes, so their
+        // exit frames land on disk instead of in a queue nobody awaits.
+        () => repoTargets.stop(),
         () => repositoryAuthority.clear()
       ].map(async (cleanup) => cleanup()))
       const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
@@ -1272,7 +1274,8 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     ...local,
     stop: () => stopPromise ??= (async () => {
       targetGraph.stop()
-      repoTargets.stop()
+      // Close run admission synchronously; local.stop awaits the reaping.
+      void repoTargets.stop()
       await local.stop()
     })()
   }

@@ -183,10 +183,16 @@ code point at the cut, so a result can be shorter than the requested limit;
 capture, not a reconstruction of the terminal screen.
 
 Target-run count, input bytes, retained history and WebSocket subscriptions
-also have limits. Target-run shutdown currently sends a kill signal without
-awaiting termination; its admission/lifetime and parser buffering remain
-under review. Do not treat server shutdown as a verified descendant-process
-drain or a complete bound on every subprocess output path.
+also have limits. Target cancellation and host shutdown signal each target's
+process group with SIGTERM, allow two seconds to exit, then send SIGKILL if
+the run or its group remains. They cancel output readers after escalation so
+inherited pipes cannot hold shutdown open, and await the direct child's exit.
+After SIGKILL, the host allows two seconds for the process group to disappear;
+a surviving group rejects shutdown.
+Descendants that leave the process group are outside this signal boundary.
+Shutdown closes target admission before waiting and cancels armed pending runs.
+The cancel response and route shutdown wait for terminal history appends;
+server shutdown awaits the route shutdown before the native launcher exits.
 
 Target run requests reserve an inert run and write its initial journal record
 before enabling attachment or the one-second auto-start timer. If journal
@@ -199,8 +205,8 @@ record's `journal`) with `state: "degraded"` and `error`; later frames for that
 run are not appended or acknowledged. An unsettled history record becomes
 `failed` without an exit code. The host logs the first error once per run.
 `history.flush()` waits for queued appends and rejects on any append failure;
-server shutdown awaits it alongside the independent finalizers. It does not
-wait for target processes to terminate or provide an fsync guarantee.
+server shutdown awaits it after target termination, alongside independent
+finalizers. It does not provide an fsync guarantee.
 After restart, a journal missing its terminal record reports degraded history
 with a generic interruption error. The original filesystem error is available
 only in the failing process and its log, since a failed disk cannot reliably
