@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import test from "node:test"
-import { ASSET_HEADERS, checkAssetHeaders, checkBuiltSite, releaseReferences } from "./check-built-site.mjs"
+import { ASSET_HEADERS, checkAssetHeaders, checkBuiltSite, checkLandingActions, releaseReferences } from "./check-built-site.mjs"
 
 function fixture(t, files) {
   const root = mkdtempSync(join(tmpdir(), "smithers-built-site-"))
@@ -228,4 +228,20 @@ test("the source public/_headers the build copies into dist already passes, so t
   const publicDir = resolve(import.meta.dirname, "../public")
   assert.deepEqual(checkAssetHeaders(publicDir), [])
   assert.deepEqual(Object.keys(ASSET_HEADERS), ["cross-origin-embedder-policy", "cross-origin-resource-policy"])
+})
+
+test("the landing page's primary action opens the app and the documentation keeps its own button", (t) => {
+  const actions = (primary, docs) =>
+    `<div class="actions"><a class="btn primary" href="${primary}">Start Here</a>` +
+    `<a class="btn ghost" href="${docs}"><svg viewBox="0 0 24 24"></svg><span>Docs</span></a></div>`
+  const app = "/smithersai/smithers/"
+  assert.deepEqual(
+    checkLandingActions(fixture(t, { "index.html": actions(app, "/docs/quickstart/") }), app),
+    []
+  )
+  const intoDocs = checkLandingActions(fixture(t, { "index.html": actions("/docs/quickstart/", "/docs/") }), app)
+  assert.equal(intoDocs.length, 1)
+  assert.match(intoDocs[0], /primary action must open the app at \/smithersai\/smithers\/, got \/docs\/quickstart\//)
+  const noDocs = checkLandingActions(fixture(t, { "index.html": actions(app, "https://github.com/smithersai/smithers") }), app)
+  assert.deepEqual(noDocs, ["index.html: the landing page must keep an action that opens the documentation"])
 })

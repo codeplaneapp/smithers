@@ -91,6 +91,32 @@ export function checkAssetHeaders(root) {
   return failures
 }
 
+/**
+ * The landing page's primary action opens the product; the documentation keeps
+ * a button of its own beside it. The link check above cannot see this: both
+ * targets are pages this build emits, so a CTA that points into /docs is a
+ * working link that sends every first visitor to the documentation instead of
+ * the app.
+ */
+export function checkLandingActions(root, appPath) {
+  const landing = join(root, "index.html")
+  if (!existsSync(landing)) return ["index.html: missing from the build"]
+  const actions = readFileSync(landing, "utf8").match(/<div class="actions">([\s\S]*?)<\/div>/)
+  if (actions === null) return ["index.html: the landing page has no actions"]
+  const anchors = [...actions[1].matchAll(/<a\b[^>]*>/g)].map((match) => match[0])
+  const href = (tag) => tag.match(/href="([^"]*)"/)?.[1]
+  const primary = anchors.find((tag) => /class="[^"]*\bprimary\b[^"]*"/.test(tag))
+  const failures = []
+  if (primary === undefined) failures.push("index.html: the landing page has no primary action")
+  else if (href(primary) !== appPath) {
+    failures.push(`index.html: the primary action must open the app at ${appPath}, got ${href(primary) ?? "no href"}`)
+  }
+  if (!anchors.some((tag) => href(tag)?.startsWith("/docs/"))) {
+    failures.push("index.html: the landing page must keep an action that opens the documentation")
+  }
+  return failures
+}
+
 export async function releaseReferences(repoRoot) {
   const { migrationUrl, removedVerbs, removedFlags } = await import(
     pathToFileURL(join(repoRoot, "packages/smithers/src/Unsupported.ts"))
@@ -258,6 +284,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (!existsSync(join(root, file))) result.failures.push(`${file}: missing from the build`)
   }
   result.failures.push(...checkAssetHeaders(root))
+  result.failures.push(...checkLandingActions(root, `/${AVAILABLE_REPOS[0].name}/`))
   for (const name of ["llms.txt", "llms-full.txt"]) {
     if (
       !existsSync(join(root, name)) ||
