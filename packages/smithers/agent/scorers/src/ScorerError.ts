@@ -19,6 +19,11 @@ import * as Schema from "effect/Schema"
  *   which retrying cannot fix.
  * - `store`: any other persistence failure, including transient ones.
  *
+ * `SqlScoreStore` persists this code, and the `failure_code` CHECK of each
+ * score-store migration mirrors these literals. Adding a code here requires a
+ * new migration that rebuilds that CHECK, otherwise the store accepts the code
+ * and the database refuses the row.
+ *
  * @category models
  * @since 0.1.0
  */

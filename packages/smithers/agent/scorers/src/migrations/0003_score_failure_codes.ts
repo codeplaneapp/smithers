@@ -22,7 +22,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  */
 export const migration: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
-  // ScorerErrorCode in ../ScorerError.ts is the source of truth for this SQL literal list.
+  // This literal list is frozen with the migration; `ScorerErrorCode` in
+  // ../ScorerError.ts is the live vocabulary. Adding a code there requires a
+  // new migration that rebuilds this CHECK, and `ScoreStore.test.ts` writes
+  // every code through the store so the two cannot drift unnoticed.
   yield* sql`CREATE TABLE flows_scores_rebuilt (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('score', 'inconclusive')),

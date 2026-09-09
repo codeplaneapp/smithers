@@ -12,7 +12,7 @@ import { migration as initialScores } from "../src/migrations/0001_scores.ts"
 import { migration as failureCodes } from "../src/migrations/0003_score_failure_codes.ts"
 import { migration as requiredFailureCodes } from "../src/migrations/0004_require_failure_codes.ts"
 import * as Migrations from "../src/migrations/index.ts"
-import { ScorerError } from "../src/ScorerError.ts"
+import { ScorerError, ScorerErrorCode } from "../src/ScorerError.ts"
 import * as ScoreStore from "../src/ScoreStore.ts"
 import * as SqlScoreStore from "../src/SqlScoreStore.ts"
 
@@ -449,6 +449,34 @@ describe("ScoreStore", () => {
       expect(output.map((observation) => observation.at)).toEqual([10, 20, 30])
     })
 
+    // Every scoped read below shares its target with a second scorer and its
+    // scorer with a second target, so dropping either filter from the query
+    // changes an answer here. Reads whose fixture holds one scorer prove
+    // nothing about the filter.
+    it("returns only the requested scorer and target, page by page", async () => {
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        yield* seed
+        yield* store.record(score({ targetStepKey: "b", scorerKey: "s", score: 0.4, at: 40 }))
+        return {
+          scoped: yield* store.observations("a", "s"),
+          other: yield* store.observations("a", "other"),
+          otherTarget: yield* store.observations("b", "s"),
+          absentScorer: yield* store.observations("a", "missing"),
+          firstPage: yield* store.observations("a", "s", { limit: 1 }),
+          secondPage: yield* store.observations("a", "s", { limit: 1, offset: 1 })
+        }
+      }))
+      const scores = (observations: ReadonlyArray<ScoreStore.Observation>) =>
+        observations.map((observation) => (observation.kind === "score" ? observation.score : undefined))
+      expect(scores(output.scoped)).toEqual([0.1, 0.3])
+      expect(scores(output.other)).toEqual([0.2])
+      expect(scores(output.otherTarget)).toEqual([0.4])
+      expect(output.absentScorer).toEqual([])
+      expect(scores(output.firstPage)).toEqual([0.1])
+      expect(scores(output.secondPage)).toEqual([0.3])
+    })
+
     it("limits rows and applies an exclusive upper timestamp filter", async () => {
       const output = await run(Effect.gen(function*() {
         yield* seed
@@ -522,6 +550,48 @@ describe("ScoreStore", () => {
   })
 
   describe("aggregate", () => {
+    const inconclusive = (
+      overrides: Partial<ScoreStore.InconclusiveObservation> = {}
+    ): ScoreStore.Observation => ({
+      kind: "inconclusive",
+      targetStepKey: "a",
+      scorerKey: "s",
+      reason: "unavailable",
+      code: "inconclusive",
+      at: 1,
+      ...overrides
+    })
+
+    // Both scorers of target `a` carry scores and inconclusive rows, and a
+    // second target carries the same scorer key, so every number below moves
+    // if the aggregate drops its scorer filter. Each score is an exact binary
+    // fraction so the means compare exactly.
+    it("aggregates only the requested scorer and target", async () => {
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        yield* store.record(score({ scorerKey: "s", score: 1, at: 1 }))
+        yield* store.record(score({ scorerKey: "s", score: 0.5, at: 2 }))
+        yield* store.record(inconclusive({ scorerKey: "s", at: 3 }))
+        yield* store.record(score({ scorerKey: "other", score: 0.25, at: 4 }))
+        yield* store.record(score({ scorerKey: "other", score: 0.75, at: 5 }))
+        yield* store.record(inconclusive({ scorerKey: "other", at: 6 }))
+        yield* store.record(inconclusive({ scorerKey: "other", at: 7 }))
+        yield* store.record(score({ targetStepKey: "b", scorerKey: "s", score: 0, at: 8 }))
+        return {
+          scoped: yield* store.aggregate("a", "s"),
+          other: yield* store.aggregate("a", "other"),
+          all: yield* store.aggregate("a"),
+          otherTarget: yield* store.aggregate("b", "s"),
+          absentScorer: yield* store.aggregate("a", "missing")
+        }
+      }))
+      expect(output.scoped).toEqual({ count: 2, mean: 0.75, min: 0.5, inconclusive: 1 })
+      expect(output.other).toEqual({ count: 2, mean: 0.5, min: 0.25, inconclusive: 2 })
+      expect(output.all).toEqual({ count: 4, mean: 0.625, min: 0.25, inconclusive: 3 })
+      expect(output.otherTarget).toEqual({ count: 1, mean: 0, min: 0, inconclusive: 0 })
+      expect(output.absentScorer).toBeUndefined()
+    })
+
     it("reports the inconclusive denominator beside the successful scores", async () => {
       const output = await run(Effect.gen(function*() {
         const store = yield* ScoreStore.ScoreStore
@@ -595,6 +665,13 @@ describe("ScoreStore", () => {
     it("refuses invalid scores, timestamps, and inconclusive rows at the table boundary", async () => {
       const failures = await run(Effect.gen(function*() {
         const sql = yield* SqlClient.SqlClient
+        // The control the reason fixtures below differ from in the reason
+        // alone. They used to omit `failure_code` too, which migration 0004
+        // requires independently, so deleting the reason checks left both
+        // inserts refused and both assertions passing.
+        yield* sql`INSERT INTO flows_scores (
+          kind, target_step_key, scorer_key, value, reason, failure_code, at_ms
+        ) VALUES ('inconclusive', 'a', 's', NULL, 'why', 'inconclusive', 1)`
         return {
           scoreAbove: yield* Effect.flip(sql`INSERT INTO flows_scores (
             kind, target_step_key, scorer_key, value, at_ms
@@ -612,15 +689,46 @@ describe("ScoreStore", () => {
             kind, target_step_key, scorer_key, value, at_ms
           ) VALUES ('score', 'a', 's', 0.5, -1)`),
           reasonNull: yield* Effect.flip(sql`INSERT INTO flows_scores (
-            kind, target_step_key, scorer_key, value, reason, at_ms
-          ) VALUES ('inconclusive', 'a', 's', NULL, NULL, 1)`),
+            kind, target_step_key, scorer_key, value, reason, failure_code, at_ms
+          ) VALUES ('inconclusive', 'a', 's', NULL, NULL, 'inconclusive', 1)`),
           reasonEmpty: yield* Effect.flip(sql`INSERT INTO flows_scores (
-            kind, target_step_key, scorer_key, value, reason, at_ms
-          ) VALUES ('inconclusive', 'a', 's', NULL, '', 1)`)
+            kind, target_step_key, scorer_key, value, reason, failure_code, at_ms
+          ) VALUES ('inconclusive', 'a', 's', NULL, '', 'inconclusive', 1)`)
         }
       }))
       expect(Object.values(failures)).toHaveLength(7)
       expect(Object.values(failures).every((failure) => failure !== undefined)).toBe(true)
+    })
+
+    // The `failure_code` CHECK in migrations 0003 and 0004 mirrors
+    // `ScorerErrorCode` by hand, and only a write through the store compares
+    // the two. A ninth code added to the union compiles, validates, and is
+    // stamped on the observation; the INSERT then fails the CHECK and
+    // `RunnerLive` downgrades the loss to a logged warning. Adding a code
+    // without a migration that rebuilds the CHECK reddens this test instead.
+    it("stores every code in the ScorerErrorCode vocabulary", async () => {
+      const codes = ScorerErrorCode.members.map((member) => member.literal)
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        yield* Effect.forEach(codes, (code, index) =>
+          store.recordOnce(`code-${code}`, {
+            kind: "inconclusive",
+            targetStepKey: "codes",
+            scorerKey: "s",
+            reason: `refused as ${code}`,
+            code,
+            at: index + 1
+          }))
+        return yield* store.observations("codes", "s")
+      }))
+      expect(output).toEqual(codes.map((code, index) => ({
+        kind: "inconclusive",
+        targetStepKey: "codes",
+        scorerKey: "s",
+        reason: `refused as ${code}`,
+        code,
+        at: index + 1
+      })))
     })
 
     it("repairs legacy blank keys without dropping the row", async () => {
@@ -661,10 +769,13 @@ describe("ScoreStore", () => {
         return yield* Effect.flip(store.observations("a"))
       })
 
+    // Every column but `reason` is valid, so only the read-side reason contract
+    // can reject this row. The fixture used to omit `failure_code` as well and
+    // stayed red for either reason.
     it("names the row of an inconclusive observation with no reason", async () => {
       const failure = await run(poison(
-        "kind, target_step_key, scorer_key, value, reason, at_ms",
-        `'inconclusive', 'a', 's', NULL, NULL, 1`
+        "kind, target_step_key, scorer_key, value, reason, failure_code, at_ms",
+        `'inconclusive', 'a', 's', NULL, NULL, 'inconclusive', 1`
       ))
       expect(failure.code).toBe("store")
       expect(failure.message).toMatch(/^Stored observation \d+ does not match the durable observation contract$/)
