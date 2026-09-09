@@ -125,7 +125,9 @@ const approvalRow = (runId: string, requestId: string, title: string) => ({
 const relay = (options: {
   readonly runs?: ReadonlyArray<SummarySpec>
   readonly approvals?: ReadonlyArray<ReturnType<typeof approvalRow>>
-  readonly transcriptLines?: ReadonlyArray<{ sequence: number; turn: number; at: number; kind: string; text: string }>
+  readonly transcriptLines?: ReadonlyArray<
+    { runId: string; sequence: number; turn: number; at: number; kind: string; text: string }
+  >
   readonly events?: ReadonlyArray<Record<string, unknown>>
   readonly refusals?: Readonly<Record<string, string>>
 } = {}) => {
@@ -469,9 +471,10 @@ describe("runs.rerun — the same flow, the same input, or the honest refusal", 
 })
 
 describe("the run card's facets — transcript, follow, and the verbose events tab", () => {
+  // The served transcript row names its run; the seam decodes these against the gateway's schema.
   const lines = [
-    { sequence: 1, turn: 1, at: 100, kind: "agent.turn.started", text: "turn 1 begins" },
-    { sequence: 2, turn: 1, at: 200, kind: "control.approval.requested", text: "asks: deploy?" }
+    { runId: "run-6", sequence: 1, turn: 1, at: 100, kind: "agent.turn.started", text: "turn 1 begins" },
+    { runId: "run-6", sequence: 2, turn: 1, at: 200, kind: "control.approval.requested", text: "asks: deploy?" }
   ]
 
   test("runs.logs shows the transcript; --follow toggles the live merge", async () => {

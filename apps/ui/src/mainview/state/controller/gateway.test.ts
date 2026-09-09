@@ -5,7 +5,7 @@
  * the allowlisted procedures fails here, not in a browser.
  */
 import { describe, expect, test } from "bun:test"
-import { createGatewaySeam } from "./gateway"
+import { createGatewaySeam, INVALID_PROJECTION_CODE } from "./gateway"
 
 interface RecordedCall {
   readonly repo: string
@@ -38,6 +38,12 @@ const rowsAnswer = (rows: ReadonlyArray<unknown>) => ({
   payload: { cursor: { projection: "test", runId: null, value: 0 }, rows }
 })
 
+/** The per-invocation nonce every control mutation mints: one `crypto.randomUUID()`, never the clock. */
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+const keysOf = (calls: ReadonlyArray<RecordedCall>): ReadonlyArray<string> =>
+  calls.map((call) => String((call.payload as { idempotencyKey: unknown }).idempotencyKey))
+
 describe("the run lifecycle operations", () => {
   test("cancel carries the human's reason, defaulting to the standing one", async () => {
     const { calls, seam } = relay()
@@ -59,7 +65,7 @@ describe("the run lifecycle operations", () => {
     expect(calls[0]?.procedure).toBe("Resume")
     expect(payload.runId).toBe("run-1")
     expect(payload.reason).toBe("nothing was driving it")
-    expect(String(payload.idempotencyKey)).toMatch(/^resume:run-1:\d+$/)
+    expect(String(payload.idempotencyKey)).toMatch(new RegExp(`^resume:run-1:${UUID}$`))
   })
 
   test("signal sends the named signal with its JSON payload", async () => {
@@ -69,13 +75,37 @@ describe("the run lifecycle operations", () => {
     expect(calls[0]?.procedure).toBe("Signal")
     expect(payload.runId).toBe("run-1")
     expect(payload.signal).toEqual({ name: "deploy-done", payload: { ok: true } })
-    expect(String(payload.idempotencyKey)).toMatch(/^signal:run-1:deploy-done:\d+$/)
+    expect(String(payload.idempotencyKey)).toMatch(new RegExp(`^signal:run-1:deploy-done:${UUID}$`))
   })
 
   test("a signal without a payload sends the empty object", async () => {
     const { calls, seam } = relay()
     await seam.signal("o/r", "run-1", "deploy-done", undefined)
     expect((calls[0]?.payload as { signal: unknown }).signal).toEqual({ name: "deploy-done", payload: {} })
+  })
+
+  test("every mutation mints its own key, so two acts in one millisecond stay two", async () => {
+    const realNow = Date.now
+    Date.now = () => 1_700_000_000_000
+    try {
+      const { calls, seam } = relay()
+      await seam.resume("o/r", "run-1")
+      await seam.resume("o/r", "run-1")
+      await seam.signal("o/r", "run-1", "next", {})
+      await seam.signal("o/r", "run-1", "next", {})
+      await seam.steer("o/r", "run-1", { kind: "Seat", seat: "one" })
+      await seam.steer("o/r", "run-1", { kind: "Thinking", thinking: "high" })
+      const keys = keysOf(calls)
+      expect(keys).toHaveLength(6)
+      expect(new Set(keys).size).toBe(6)
+      // The steer envelope carries its own identity, and it is per invocation too.
+      const messageIds = calls.slice(4).map((call) =>
+        String((call.payload as { message: { messageId: unknown } }).message.messageId)
+      )
+      expect(new Set(messageIds).size).toBe(2)
+    } finally {
+      Date.now = realNow
+    }
   })
 
   test("a refusal crosses as the seam's error, message first", async () => {
@@ -95,12 +125,12 @@ describe("steer", () => {
     expect(calls[0]?.procedure).toBe("Steer")
     const payload = calls[0]?.payload as Record<string, unknown>
     expect(payload.runId).toBe("run-1")
-    expect(String(payload.idempotencyKey)).toMatch(/^steer:run-1:\d+$/)
+    expect(String(payload.idempotencyKey)).toMatch(new RegExp(`^steer:run-1:${UUID}$`))
     const message = envelopeOf(calls[0]?.payload)
     expect(message.kind).toBe("Message")
     expect(message.body).toBe("use the smaller diff")
     expect(message.runId).toBe("run-1")
-    expect(String(message.messageId)).toMatch(/^steer-run-1-\d+$/)
+    expect(String(message.messageId)).toMatch(new RegExp(`^steer-run-1-${UUID}$`))
     // The placeholder principal the server overwrites with the authenticated one.
     expect(message.principal).toMatchObject({ kind: "user" })
     expect(typeof message.createdAt).toBe("number")
@@ -179,18 +209,53 @@ describe("the run projections", () => {
   })
 
   test("transcript and runEvents select their projections for the run", async () => {
+    const line = { runId: "run-1", sequence: 1, turn: 1, at: 1000, kind: "turn.opened", text: "opened" }
+    const lines = relay({ "Projection.Snapshot": rowsAnswer([line]) })
+    const transcript = await lines.seam.transcript("o/r", "run-1")
+    expect(lines.calls[0]?.payload).toEqual({ selector: { _tag: "transcript", runId: "run-1" } })
+    expect(transcript).toEqual({ status: "ok", value: [line] })
     const event = { kind: "control.run.accepted", payload: {}, sequence: 1, occurredAt: 1000 }
-    const { calls, seam } = relay({ "Projection.Snapshot": rowsAnswer([event]) })
-    const transcript = await seam.transcript("o/r", "run-1")
-    expect(calls[0]?.payload).toEqual({ selector: { _tag: "transcript", runId: "run-1" } })
-    expect(transcript.status).toBe("ok")
-    const events = await seam.runEvents("o/r", "run-1")
-    expect(calls[1]?.payload).toEqual({ selector: { _tag: "run-events", runId: "run-1" } })
+    const journal = relay({ "Projection.Snapshot": rowsAnswer([event]) })
+    const events = await journal.seam.runEvents("o/r", "run-1")
+    expect(journal.calls[0]?.payload).toEqual({ selector: { _tag: "run-events", runId: "run-1" } })
     expect(events).toEqual({ status: "ok", value: [event] })
   })
 
-  test("a missing rows envelope answers an empty listing, never a throw", async () => {
-    const { seam } = relay({ "Projection.Snapshot": { ok: true, payload: { cursor: {} } } })
+  test("a valid empty rows array is the empty listing", async () => {
+    const { seam } = relay({ "Projection.Snapshot": rowsAnswer([]) })
     expect(await seam.workspaceRuns("o/r")).toEqual({ status: "ok", value: [] })
+  })
+
+  test("a snapshot the served schema rejects is a refusal, never an empty workspace", async () => {
+    // A missing envelope, a null row, and a row whose fields the gateway never
+    // serves: each is a malformed answer, and reading it as [] would tell the
+    // human this workspace has no runs.
+    for (
+      const payload of [
+        { cursor: {} },
+        { cursor: {}, rows: "all of them" },
+        rowsAnswer([null]).payload,
+        rowsAnswer([{ runId: 42, status: "invented" }]).payload
+      ]
+    ) {
+      const { seam } = relay({ "Projection.Snapshot": { ok: true, payload } })
+      expect(await seam.workspaceRuns("o/r")).toEqual({
+        status: "error",
+        message: "The workspace answered with a projection I couldn't read.",
+        code: INVALID_PROJECTION_CODE
+      })
+    }
+  })
+
+  test("a run whose summary row is malformed refuses instead of reading as no such run", async () => {
+    const { seam } = relay({ "Projection.Snapshot": rowsAnswer([{ ...summaryRow, status: "invented" }]) })
+    const result = await seam.run("o/r", "run-1")
+    expect(result.status).toBe("error")
+    expect(result).toMatchObject({ code: INVALID_PROJECTION_CODE })
+  })
+
+  test("an approvals inbox row the schema rejects refuses instead of reading as no gates", async () => {
+    const { seam } = relay({ "Projection.Snapshot": rowsAnswer([{ ...approvalRow, payload: { scope: "run" } }]) })
+    expect((await seam.approvalsInbox("o/r")).status).toBe("error")
   })
 })

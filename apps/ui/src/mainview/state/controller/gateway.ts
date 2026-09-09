@@ -8,13 +8,15 @@
  * `Approval.Submit` — so there is one vocabulary between this file, the
  * Worker, and the engine.
  *
- * The row types are imported from `@smthrs/gateway`, type-only, so a change to
- * a served projection fails this app's typecheck instead of reaching a user as
- * an undefined field.
+ * The row schemas are imported from `@smthrs/gateway`, and every projection
+ * snapshot is decoded against them, so a change to a served projection fails
+ * this app's typecheck AND a row the gateway never served fails here instead
+ * of reaching a user as an undefined field.
  */
-import type { ControlEvent, SteerMessage } from "@smthrs/control/ControlSchema"
-import type { ApprovalRow, NodeOutputRow, RunSummaryRow, TranscriptRow } from "@smthrs/gateway/GatewayProjection"
+import { ControlEvent, type SteerMessage } from "@smthrs/control/ControlSchema"
+import { ApprovalRow, NodeOutputRow, RunSummaryRow, TranscriptRow } from "@smthrs/gateway/GatewayProjection"
 import { WORKFLOW_RPC_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import { Option, Schema } from "effect"
 
 /**
  * What one relayed call answered. A refusal carries the sentence the relay
@@ -33,6 +35,9 @@ export const FLOW_NOT_FOUND_TAG = "/control/FlowNotFound"
 /** Whether a refusal's code is the control plane's "no flow with this id is registered". */
 export const isFlowNotFound = (code: string | undefined): boolean =>
   code === FLOW_NOT_FOUND_CODE || code === FLOW_NOT_FOUND_TAG
+
+/** This seam's own refusal: a projection snapshot it could not read as the rows it asked for. */
+export const INVALID_PROJECTION_CODE = "invalid_projection"
 
 /** The rc.0 run statuses a card may render. */
 export type RunStatus = RunSummaryRow["status"]
@@ -54,6 +59,46 @@ export interface GatewayTransport {
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+const map = <A, B>(result: GatewayResult<A>, project: (value: A) => B): GatewayResult<B> =>
+  result.status === "ok" ? { status: "ok", value: project(result.value) } : result
+
+/**
+ * One projection snapshot's rows, decoded against the schema the gateway
+ * serves for that selector.
+ *
+ * A snapshot whose `rows` is missing, is not an array, or carries a row the
+ * served schema rejects is a malformed answer, not an empty workspace: it
+ * crosses as a refusal coded `invalid_projection`, so no card renders a row
+ * the wire never established. Only a valid empty array is an empty listing.
+ */
+const snapshotOf = <S extends Schema.Top>(row: S) => Schema.Struct({ rows: Schema.Array(row) })
+
+const rowsDecoder =
+  <A>(decode: (input: unknown) => Option.Option<{ readonly rows: ReadonlyArray<A> }>) =>
+  (result: GatewayResult<unknown>): GatewayResult<ReadonlyArray<A>> => {
+    if (result.status !== "ok") return result
+    const decoded = decode(result.value)
+    return Option.isSome(decoded)
+      ? { status: "ok", value: decoded.value.rows }
+      : {
+        status: "error",
+        message: "The workspace answered with a projection I couldn't read.",
+        code: INVALID_PROJECTION_CODE
+      }
+  }
+
+/** The first decoded row of a snapshot, absent when the projection served none. */
+const firstRowDecoder =
+  <A>(rows: (result: GatewayResult<unknown>) => GatewayResult<ReadonlyArray<A>>) =>
+  (result: GatewayResult<unknown>): GatewayResult<A | undefined> => map(rows(result), (all) => all[0])
+
+const decodeRunSummaryRows = rowsDecoder(Schema.decodeUnknownOption(snapshotOf(RunSummaryRow)))
+const decodeRunSummaryRow = firstRowDecoder(decodeRunSummaryRows)
+const decodeApprovalRows = rowsDecoder(Schema.decodeUnknownOption(snapshotOf(ApprovalRow)))
+const decodeNodeOutputRow = firstRowDecoder(rowsDecoder(Schema.decodeUnknownOption(snapshotOf(NodeOutputRow))))
+const decodeTranscriptRows = rowsDecoder(Schema.decodeUnknownOption(snapshotOf(TranscriptRow)))
+const decodeControlEventRows = rowsDecoder(Schema.decodeUnknownOption(snapshotOf(ControlEvent)))
 
 /**
  * The typed error's code in a relayed failure's `detail` (the gateway's
@@ -122,14 +167,6 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     return { status: "error", message: "The workspace answered in a shape I didn't understand." }
   }
 
-  const rowsOf = (value: unknown): ReadonlyArray<unknown> => {
-    const rows = asRecord(value).rows
-    return Array.isArray(rows) ? rows : []
-  }
-
-  const map = <A>(result: GatewayResult<unknown>, project: (value: unknown) => A): GatewayResult<A> =>
-    result.status === "ok" ? { status: "ok", value: project(result.value) } : result
-
   /** One projection snapshot, by selector. */
   const projection = (repo: string, selector: unknown): Promise<GatewayResult<unknown>> =>
     call(repo, "Projection.Snapshot", { selector })
@@ -195,14 +232,11 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
 
     /** One run's summary, including its diagnosis. */
     run: async (repo: string, runId: string): Promise<GatewayResult<RunSummaryRow | undefined>> =>
-      map(
-        await projection(repo, { _tag: "run-summary", runId }),
-        (value) => rowsOf(value)[0] as RunSummaryRow | undefined
-      ),
+      decodeRunSummaryRow(await projection(repo, { _tag: "run-summary", runId })),
 
     /** Every gate this run has asked for, decided ones included. */
     approvals: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
-      map(await projection(repo, { _tag: "approvals", runId }), (value) => rowsOf(value) as ReadonlyArray<ApprovalRow>),
+      decodeApprovalRows(await projection(repo, { _tag: "approvals", runId })),
 
     /**
      * Decide one gate.
@@ -224,17 +258,11 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
       runId: string,
       nodeId: string
     ): Promise<GatewayResult<NodeOutputRow | undefined>> =>
-      map(
-        await projection(repo, { _tag: "node-output", runId, nodeId }),
-        (value) => rowsOf(value)[0] as NodeOutputRow | undefined
-      ),
+      decodeNodeOutputRow(await projection(repo, { _tag: "node-output", runId, nodeId })),
 
     /** What happened to a run, in words: the run summary's diagnosis. */
     explain: async (repo: string, runId: string): Promise<GatewayResult<string | undefined>> =>
-      map(await projection(repo, { _tag: "run-summary", runId }), (value) => {
-        const row = rowsOf(value)[0] as RunSummaryRow | undefined
-        return row?.verdict
-      }),
+      map(decodeRunSummaryRow(await projection(repo, { _tag: "run-summary", runId })), (row) => row?.verdict),
 
     /** Stop a run. Durable: the next read of it says cancelled. */
     cancel: (repo: string, runId: string, reason?: string): Promise<GatewayResult<unknown>> =>
@@ -247,17 +275,19 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     /*
      * Lane runs — the run lifecycle beyond launch and cancel.
      *
-     * Every mutation mints one idempotency key per invocation: the relay may
-     * replay a lost answer with the same frame, and the engine deduplicates
-     * on the key, so a repeat lands one effect and two deliberate clicks land
-     * two (a second resume of a live run is the gateway's own ClaimLost).
+     * Every mutation mints one idempotency key per invocation from a fresh
+     * `crypto.randomUUID()`, never the clock: the relay may replay a lost
+     * answer with the same frame, and the engine deduplicates on the key, so a
+     * repeat lands one effect and two deliberate clicks land two even inside
+     * one millisecond (a second resume of a live run is the gateway's own
+     * ClaimLost).
      */
 
     /** Restart a parked run (or tell the run's owner to). */
     resume: (repo: string, runId: string, reason?: string): Promise<GatewayResult<unknown>> =>
       call(repo, "Resume", {
         runId,
-        idempotencyKey: `resume:${runId}:${Date.now()}`,
+        idempotencyKey: `resume:${runId}:${crypto.randomUUID()}`,
         ...(reason === undefined ? {} : { reason })
       }),
 
@@ -266,7 +296,7 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
       call(repo, "Signal", {
         runId,
         signal: { name, payload: payload ?? {} },
-        idempotencyKey: `signal:${runId}:${name}:${Date.now()}`
+        idempotencyKey: `signal:${runId}:${name}:${crypto.randomUUID()}`
       }),
 
     /**
@@ -285,8 +315,9 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
         | { readonly kind: "Tools"; readonly toolNames: ReadonlyArray<string> }
     ): Promise<GatewayResult<unknown>> => {
       const now = Date.now()
+      const nonce = crypto.randomUUID()
       const envelope = {
-        messageId: `steer-${runId}-${now}`,
+        messageId: `steer-${runId}-${nonce}`,
         runId,
         principal: { id: "app-operator", kind: "user", stampedAt: now },
         createdAt: now
@@ -300,36 +331,24 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
           ? { ...envelope, kind: "Thinking", thinking: item.thinking }
           : { ...envelope, kind: "Tools", toolNames: [...item.toolNames] }
       ) as SteerMessage
-      return call(repo, "Steer", { runId, message, idempotencyKey: `steer:${runId}:${now}` })
+      return call(repo, "Steer", { runId, message, idempotencyKey: `steer:${runId}:${nonce}` })
     },
 
     /** Every run on the workspace, one summary row each (the run inbox's read). */
     workspaceRuns: async (repo: string): Promise<GatewayResult<ReadonlyArray<RunSummaryRow>>> =>
-      map(
-        await projection(repo, { _tag: "workspace-runs" }),
-        (value) => rowsOf(value) as ReadonlyArray<RunSummaryRow>
-      ),
+      decodeRunSummaryRows(await projection(repo, { _tag: "workspace-runs" })),
 
     /** The approvals inbox: every pending gate across the workspace's runs. */
     approvalsInbox: async (repo: string): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
-      map(
-        await projection(repo, { _tag: "approvals" }),
-        (value) => rowsOf(value) as ReadonlyArray<ApprovalRow>
-      ),
+      decodeApprovalRows(await projection(repo, { _tag: "approvals" })),
 
     /** One run's turn-by-turn transcript. */
     transcript: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<TranscriptRow>>> =>
-      map(
-        await projection(repo, { _tag: "transcript", runId }),
-        (value) => rowsOf(value) as ReadonlyArray<TranscriptRow>
-      ),
+      decodeTranscriptRows(await projection(repo, { _tag: "transcript", runId })),
 
     /** One run's raw control events, in journal order. */
     runEvents: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<ControlEvent>>> =>
-      map(
-        await projection(repo, { _tag: "run-events", runId }),
-        (value) => rowsOf(value) as ReadonlyArray<ControlEvent>
-      )
+      decodeControlEventRows(await projection(repo, { _tag: "run-events", runId }))
   }
 }
 
