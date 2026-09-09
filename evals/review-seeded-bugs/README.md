@@ -35,6 +35,11 @@ that reads the same per-file prompt a model reads and never sees `label.json`.
 de-duplication, or the scorer's matching. It does not mean a model regressed,
 because no model ran.
 
+A record keeps the fixture's status and counts plus one anchor per planted bug,
+holding the line the review anchored to and the severity it assigned. A finding
+that slides inside the three-line match tolerance, or that keeps its line and
+drops from critical to info, leaves the counts alone and still fails the gate.
+
 Re-record deliberately, and only when you can name what changed:
 
 ```bash

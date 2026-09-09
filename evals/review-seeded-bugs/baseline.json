@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "reviewer": "deterministic",
   "records": [
     {
@@ -7,112 +7,224 @@
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": []
     },
     {
       "fixture": "clean-jsdoc",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": []
     },
     {
       "fixture": "clean-refactor",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": []
     },
     {
       "fixture": "clean-rename",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": []
     },
     {
       "fixture": "cross-file-signature-mismatch",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 1
+      "falseNegatives": 1,
+      "anchors": [
+        {
+          "path": "src/session.ts",
+          "line": 4,
+          "anchoredLine": null,
+          "severity": null,
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "deleted-null-check",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 1
+      "falseNegatives": 1,
+      "anchors": [
+        {
+          "path": "src/profile.ts",
+          "line": 4,
+          "anchoredLine": null,
+          "severity": null,
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "deleted-null-check-config",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 1
+      "falseNegatives": 1,
+      "anchors": [
+        {
+          "path": "src/config.ts",
+          "line": 4,
+          "anchoredLine": null,
+          "severity": null,
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "missing-await",
       "status": "success",
       "matches": 1,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": [
+        {
+          "path": "src/order.ts",
+          "line": 8,
+          "anchoredLine": 8,
+          "severity": "major",
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "missing-await-flush",
       "status": "success",
       "matches": 1,
       "falsePositives": 1,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": [
+        {
+          "path": "src/logger.ts",
+          "line": 7,
+          "anchoredLine": 7,
+          "severity": "major",
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "off-by-one-boundary",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 1
+      "falseNegatives": 1,
+      "anchors": [
+        {
+          "path": "src/window.ts",
+          "line": 7,
+          "anchoredLine": null,
+          "severity": null,
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "off-by-one-slice",
       "status": "success",
       "matches": 1,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": [
+        {
+          "path": "src/paginator.ts",
+          "line": 4,
+          "anchoredLine": 4,
+          "severity": "major",
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "resource-leak",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 1
+      "falseNegatives": 1,
+      "anchors": [
+        {
+          "path": "src/readConfig.ts",
+          "line": 5,
+          "anchoredLine": null,
+          "severity": null,
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "resource-leak-timer",
       "status": "success",
       "matches": 0,
       "falsePositives": 0,
-      "falseNegatives": 1
+      "falseNegatives": 1,
+      "anchors": [
+        {
+          "path": "src/poller.ts",
+          "line": 3,
+          "anchoredLine": null,
+          "severity": null,
+          "expectedSeverity": "major"
+        }
+      ]
     },
     {
       "fixture": "sql-injection",
       "status": "success",
       "matches": 1,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": [
+        {
+          "path": "src/users.ts",
+          "line": 7,
+          "anchoredLine": 7,
+          "severity": "critical",
+          "expectedSeverity": "critical"
+        }
+      ]
     },
     {
       "fixture": "sql-injection-like",
       "status": "success",
       "matches": 1,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": [
+        {
+          "path": "src/search.ts",
+          "line": 7,
+          "anchoredLine": 7,
+          "severity": "critical",
+          "expectedSeverity": "critical"
+        }
+      ]
     },
     {
       "fixture": "tautological-test",
       "status": "success",
       "matches": 1,
       "falsePositives": 0,
-      "falseNegatives": 0
+      "falseNegatives": 0,
+      "anchors": [
+        {
+          "path": "src/orderAssertions.ts",
+          "line": 4,
+          "anchoredLine": 4,
+          "severity": "minor",
+          "expectedSeverity": "minor"
+        }
+      ]
     }
   ]
 }

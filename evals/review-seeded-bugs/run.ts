@@ -10,7 +10,8 @@
  * The default run is offline and deterministic: every fixture is materialized
  * as a real git repository, the real review flow runs over its real diff, and
  * the reviewing seat is `deterministicReviewer.ts` rather than a model. The
- * committed `baseline.json` is that run's per-fixture score, so a red gate
+ * committed `baseline.json` is that run's per-fixture score, including where
+ * each planted bug was anchored and how it was graded, so a red gate
  * means the PIPELINE moved — diff ingestion, fan-out, scoping, anchoring,
  * de-duplication, or the scorer — not that a model had a bad day.
  *
@@ -36,6 +37,7 @@ import { Review } from "../../apps/review/src/workflow/reviewFlow.ts";
 import { layerMemory } from "../../apps/review/src/workflow/reviewLayer.ts";
 import { reviewSeatResolver } from "../../apps/review/src/workflow/reviewSeatResolver.ts";
 import { resolveReviewSeats } from "../../apps/review/src/workflow/reviewSeats.ts";
+import { type Baseline, baselineFrom, drift, type FixtureOutcome } from "./baseline.ts";
 import { answerReview } from "./deterministicReviewer.ts";
 import { loadCorpus, type PlantedBugLabel } from "./labels.ts";
 import { scriptedSeats } from "./scriptedSeats.ts";
@@ -44,25 +46,8 @@ import { scoreCorpus, type CorpusScore, type ReviewFinding } from "./score.ts";
 const corpusDir = join(import.meta.dirname, "corpus");
 const baselinePath = join(import.meta.dirname, "baseline.json");
 
-interface FixtureRun {
-  fixture: string;
-  status: string;
+interface FixtureRun extends FixtureOutcome {
   findings: ReviewFinding[];
-}
-
-/** One fixture's recorded outcome: what a re-run has to reproduce. */
-interface BaselineRecord {
-  fixture: string;
-  status: string;
-  matches: number;
-  falsePositives: number;
-  falseNegatives: number;
-}
-
-interface Baseline {
-  version: 1;
-  reviewer: "deterministic";
-  records: BaselineRecord[];
 }
 
 function run(command: string, args: string[], cwd: string): void {
@@ -189,54 +174,6 @@ function renderScorecard(labels: readonly PlantedBugLabel[], score: CorpusScore,
   return lines.join("\n");
 }
 
-function baselineFrom(runs: readonly FixtureRun[], score: CorpusScore): Baseline {
-  const byFixture = new Map(score.fixtures.map((fixture) => [fixture.fixture, fixture]));
-  return {
-    version: 1,
-    reviewer: "deterministic",
-    records: runs
-      .map((fixtureRun) => {
-        const scored = byFixture.get(fixtureRun.fixture);
-        return {
-          fixture: fixtureRun.fixture,
-          status: fixtureRun.status,
-          matches: scored?.matches ?? 0,
-          falsePositives: scored?.falsePositives ?? 0,
-          falseNegatives: scored?.falseNegatives ?? 0,
-        };
-      })
-      .sort((left, right) => left.fixture.localeCompare(right.fixture)),
-  };
-}
-
-/** Every way this run disagrees with the baseline, in report order. */
-function drift(baseline: Baseline, current: Baseline): string[] {
-  const expected = new Map(baseline.records.map((record) => [record.fixture, record]));
-  const out: string[] = [];
-  for (const record of current.records) {
-    const was = expected.get(record.fixture);
-    if (was === undefined) {
-      out.push(`${record.fixture}: not in the baseline`);
-      continue;
-    }
-    expected.delete(record.fixture);
-    if (record.status !== was.status) out.push(`${record.fixture}: status ${was.status} -> ${record.status}`);
-    // Fewer matches or more false positives is a regression. The reverse is an
-    // improvement, and an improvement still has to be recorded on purpose.
-    if (record.matches !== was.matches) {
-      out.push(`${record.fixture}: matched bugs ${was.matches} -> ${record.matches}`);
-    }
-    if (record.falsePositives !== was.falsePositives) {
-      out.push(`${record.fixture}: false positives ${was.falsePositives} -> ${record.falsePositives}`);
-    }
-    if (record.falseNegatives !== was.falseNegatives) {
-      out.push(`${record.fixture}: missed bugs ${was.falseNegatives} -> ${record.falseNegatives}`);
-    }
-  }
-  for (const fixture of expected.keys()) out.push(`${fixture}: in the baseline but not in this run`);
-  return out;
-}
-
 /**
  * Runs the suite. Returns the process exit code.
  *
@@ -272,7 +209,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     return 0;
   }
 
-  const current = baselineFrom(runs, score);
+  const current = baselineFrom(labels, runs, score);
   if (update) {
     writeFileSync(baselinePath, `${JSON.stringify(current, null, 2)}\n`);
     process.stdout.write(`${scorecard}\nrecorded ${current.records.length} baseline record(s)\n`);

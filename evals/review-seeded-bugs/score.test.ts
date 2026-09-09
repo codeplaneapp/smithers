@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type Baseline, baselineFrom, drift } from "./baseline.ts";
 import { BUG_CLASSES, loadCorpus, type PlantedBugLabel, type SeededBugLabel } from "./labels.ts";
 import { scoreCorpus, type ReviewFinding } from "./score.ts";
 
@@ -150,5 +151,82 @@ describe("review seeded-bug scoring", () => {
     expect(score.precision).toBe(1);
     expect(score.severityCalibration.exactSeverityMatchRate).toBe((bugLabels.length - 1) / bugLabels.length);
     expect(score.severityCalibration.meanAbsoluteOrdinalError).toBe(2 / bugLabels.length);
+  });
+});
+
+function successfulRuns(labels: readonly PlantedBugLabel[]): { fixture: string; status: string }[] {
+  return labels.map((label) => ({ fixture: label.fixture, status: "success" }));
+}
+
+function committedBaseline(): Baseline {
+  return JSON.parse(readFileSync(join(import.meta.dirname, "baseline.json"), "utf8")) as Baseline;
+}
+
+describe("review seeded-bug baseline gate", () => {
+  test("fails when anchors shift and severities downgrade without moving TP/FP/FN", () => {
+    const labels = loadCorpus();
+    const runs = successfulRuns(labels);
+    const recorded = scoreCorpus(labels, perfectFindings(labels));
+    const baseline = baselineFrom(labels, runs, recorded);
+
+    // Every finding moves three lines, the outer edge of the match tolerance,
+    // and drops to the lowest severity. The counts the gate used to compare
+    // cannot see either move.
+    const degradedFindings = Object.fromEntries(
+      seededLabels(labels).map((label) => [
+        label.fixture,
+        [findingFor(label, { startLine: label.line + 3, endLine: label.line + 3, severity: "info" })],
+      ]),
+    );
+    const degraded = scoreCorpus(labels, degradedFindings);
+    expect(degraded.counts.truePositives).toBe(recorded.counts.truePositives);
+    expect(degraded.counts.falsePositives).toBe(recorded.counts.falsePositives);
+    expect(degraded.counts.falseNegatives).toBe(recorded.counts.falseNegatives);
+    expect(degraded.anchorAccuracy.meanAbsoluteLineOffset).toBe(3);
+    expect(degraded.severityCalibration.exactSeverityMatchRate).toBe(0);
+
+    const disagreements = drift(baseline, baselineFrom(labels, runs, degraded));
+    expect(disagreements.length).toBeGreaterThan(0);
+    expect(disagreements.some((line) => line.includes("anchored"))).toBe(true);
+    expect(disagreements.some((line) => line.includes("severity"))).toBe(true);
+  });
+
+  test("passes when the run reproduces the recorded anchors and severities", () => {
+    const labels = loadCorpus();
+    const runs = successfulRuns(labels);
+    const score = scoreCorpus(labels, perfectFindings(labels));
+    expect(drift(baselineFrom(labels, runs, score), baselineFrom(labels, runs, score))).toEqual([]);
+  });
+
+  test("records an anchor and a severity for every planted bug", () => {
+    const labels = loadCorpus();
+    const baseline = committedBaseline();
+
+    for (const label of seededLabels(labels)) {
+      const record = baseline.records.find((candidate) => candidate.fixture === label.fixture);
+      expect(record).toBeDefined();
+      const anchor = record!.anchors.find(
+        (candidate) => candidate.path === label.file && candidate.line === label.line,
+      );
+      expect(anchor).toBeDefined();
+      expect(anchor!.expectedSeverity).toBe(label.severity);
+      expect(record!.anchors.filter((candidate) => candidate.anchoredLine !== null).length).toBe(record!.matches);
+    }
+  });
+});
+
+describe("review seeded-bug scorecard", () => {
+  test("names every fixture the committed baseline misses", () => {
+    const missed = committedBaseline()
+      .records.filter((record) => record.falseNegatives > 0)
+      .map((record) => record.fixture)
+      .sort((left, right) => left.localeCompare(right));
+    expect(missed.length).toBeGreaterThan(0);
+
+    const scorecard = readFileSync(join(import.meta.dirname, "SCORECARD.md"), "utf8");
+    const section = scorecard.split("### Missed fixtures")[1];
+    expect(section).toBeDefined();
+    const listed = [...section!.split(/\n#{2,3} /)[0].matchAll(/^- `([^`]+)`$/gm)].map((match) => match[1]);
+    expect(listed).toEqual(missed);
   });
 });

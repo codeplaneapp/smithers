@@ -7,10 +7,16 @@ Two numbers live here, and they measure different things.
 `baseline.json` records this run per fixture, and `node
 evals/review-seeded-bugs/run.ts` fails when a fixture disagrees with it. The
 reviewing seat is `deterministicReviewer.ts`, so the score is reproducible and
-free, and what it grades is the pipeline — diff ingestion, per-file fan-out,
+free, and what it grades is the pipeline: diff ingestion, per-file fan-out,
 scoping, anchoring, de-duplication, and the scorer's matching.
 
-Recorded 2026-08-29 against the rc.0 review flow:
+Each record holds the fixture's status, its matched, false-positive and missed
+counts, and one anchor per planted bug naming the line the review anchored to
+and the severity it assigned. Counts alone cannot see a finding that slides
+inside the three-line match tolerance or one that keeps its line and drops from
+critical to info, so the anchors are part of the gate.
+
+Recorded 2026-09-08 against the rc.0 review flow:
 
 | Metric | Value |
 | --- | ---: |
@@ -26,12 +32,28 @@ Recorded 2026-08-29 against the rc.0 review flow:
 | Mean severity ordinal error | 0 |
 | False positives on clean controls | 0 |
 
-The offline reviewer catches the four bug classes it has signals for and misses
-the three it does not (`resource-leak`, `cross-file-signature-mismatch`, and
-one of the two `deleted-null-check` shapes). That is the point: recall measures
-the reviewer, and the reviewer is deliberately weak. Precision, anchor accuracy,
-severity calibration, and the clean-control count measure the pipeline, and
-those are the numbers a code change moves.
+The offline reviewer has signals for four of the seven bug classes
+(`missing-await`, `off-by-one-boundary`, `sql-injection`, `tautological-test`)
+and none for the other three, and inside the classes it does cover it only
+fires on the shapes its signals match. Six of the twelve planted bugs go
+unfound.
+
+### Missed fixtures
+
+`baseline.json` records a missed planted bug for each of these, and
+`score.test.ts` fails when this list and the baseline disagree.
+
+- `cross-file-signature-mismatch`
+- `deleted-null-check`
+- `deleted-null-check-config`
+- `off-by-one-boundary`
+- `resource-leak`
+- `resource-leak-timer`
+
+That is the point: recall measures the reviewer, and the reviewer is
+deliberately weak. Precision, anchor accuracy, severity calibration, and the
+clean-control count measure the pipeline, and those are the numbers a code
+change moves.
 
 ## The reference: a live model's score
 
