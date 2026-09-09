@@ -19,17 +19,20 @@ const failure = <A, E>(result: Result.Result<A, E>): E => {
 describe("TestRuntime", () => {
   it("evaluates constants, static sequencing, maps, and prototype-shaped joins", () => {
     const joined = Node.all({
-      __proto__: Node.succeed(1),
+      ["__proto__"]: Node.succeed(1),
       constructor: Node.succeed(2),
       value: Node.succeed(3)
     })
-    const program = Node.andThen(
-      Node.map(joined, (values) => Object.values(values).reduce((sum, value) => sum + value, 0)),
-      Node.succeed("done")
-    )
+    const mapped = Node.map(joined, (values) => Object.values(values).reduce((sum, value) => sum + value, 0))
+    const program = Node.andThen(mapped, Node.succeed("done"))
 
+    expect(success(TestRuntime.evaluate(mapped))).toBe(6)
+    expect(success(TestRuntime.evaluate(Node.andThen(mapped, (value) => Node.succeed(value * 2))))).toBe(12)
     expect(success(TestRuntime.evaluate(program))).toBe("done")
-    expect(success(TestRuntime.evaluate(joined))).toEqual({ constructor: 2, value: 3 })
+    const values = success(TestRuntime.evaluate(joined))
+    expect(values).toEqual({ ["__proto__"]: 1, constructor: 2, value: 3 })
+    expect(Object.hasOwn(values, "__proto__")).toBe(true)
+    expect(values["__proto__"]).toBe(1)
   })
 
   it("evaluates dynamic nodes and flow calls through one explicit resolver", () => {
@@ -62,7 +65,11 @@ describe("TestRuntime", () => {
       name: "inner",
       input: Schema.String,
       output: Schema.String,
-      body: (input) => Node.succeed(`${input}:inlined`)
+      body: (input) =>
+        Node.andThen(
+          Node.map(Node.succeed(input), (value) => `${value}:mapped`),
+          (value) => Node.succeed(`${value}:inlined`)
+        )
     })
     const leaf = Flow.make({ name: "leaf", input: Schema.String, output: Schema.String })
     const composed = Node.all({
@@ -89,7 +96,7 @@ describe("TestRuntime", () => {
             request._tag === "FlowCall" ? Result.succeed(`${request.input}:resolved`) : Result.fail("unexpected")
         )
       )
-    ).toEqual({ inner: "a:inlined", leaf: "b:resolved", opaque: "c:resolved" })
+    ).toEqual({ inner: "a:mapped:inlined", leaf: "b:resolved", opaque: "c:resolved" })
   })
 
   it("refuses malformed and throwing inlined flow bodies", () => {
@@ -159,6 +166,89 @@ describe("TestRuntime", () => {
     expect(andThenFailure).toMatchObject({ code: "callback_threw", cause: callbackDefect })
     expect(catchFailure).toMatchObject({ code: "callback_threw", cause: callbackDefect })
   })
+
+  it.each(["callback_threw", "unresolved_node", "missing_operation", "resolver_threw"] as const)(
+    "keeps %s out of recovery arms",
+    (code) => {
+      const cause = new Error("broken declaration")
+      const mapped = Node.map(Node.succeed(1), () => {
+        throw cause
+      })
+      const lostMap = internal.makeNode({ ...Node.map(Node.succeed(1), (value) => value).ast })
+      const cases: ReadonlyArray<{
+        node: Node.Node<unknown, unknown>
+        resolver?: TestRuntime.Resolver
+        code: TestRuntime.EvaluationErrorCode
+        cause?: unknown
+      }> = [
+        { node: mapped, code: "callback_threw", cause },
+        { node: Node.dynamic({}), code: "unresolved_node" },
+        { node: lostMap, code: "missing_operation" },
+        {
+          node: Node.dynamic({}),
+          resolver: () => {
+            throw cause
+          },
+          code: "resolver_threw",
+          cause
+        }
+      ]
+      const testCase = cases.find((testCase) => testCase.code === code)!
+      for (const evaluate of [TestRuntime.evaluate, TestRuntime.evaluateInline]) {
+        let calls = 0
+        const caught = Node.catch(
+          Node.catch(testCase.node, {
+            error: Schema.Unknown,
+            onFailure: () => {
+              calls++
+              return Node.succeed("looks good")
+            }
+          }),
+          {
+            onFailure: () => {
+              calls++
+              return Node.succeed("fallback")
+            }
+          }
+        )
+        const error = failure(evaluate(caught, testCase.resolver))
+        expect(error).toBeInstanceOf(TestRuntime.EvaluationError)
+        expect(error).toMatchObject({ code: testCase.code, cause: testCase.cause })
+        expect(calls).toBe(0)
+      }
+    }
+  )
+
+  it("recovers typed node and resolver failures even when their value is an EvaluationError", () => {
+    const error = new TestRuntime.EvaluationError("callback_threw", "typed failure")
+    const recover = (node: Node.Node<unknown, unknown>) =>
+      Node.catch(node, {
+        onFailure: (value) => Node.succeed(value)
+      })
+
+    expect(success(TestRuntime.evaluate(recover(Node.fail(error))))).toBe(error)
+    expect(success(TestRuntime.evaluate(recover(Node.dynamic({})), () => Result.fail(error)))).toBe(error)
+  })
+
+  it.each([TestRuntime.evaluate, TestRuntime.evaluateInline])(
+    "skips downstream callbacks after failure (%#)",
+    (evaluate) => {
+      const calls: Array<string> = []
+      const program = Node.andThen(
+        Node.map(Node.fail("failed"), () => {
+          calls.push("map")
+          return 1
+        }),
+        (value) => {
+          calls.push("andThen")
+          return Node.succeed(value + 1)
+        }
+      )
+
+      expect(failure(evaluate(program))).toBe("failed")
+      expect(calls).toEqual([])
+    }
+  )
 
   it("refuses unresolved leaves and ASTs that lost their in-memory side tables", () => {
     expect(failure(TestRuntime.evaluate(Node.dynamic({})))).toMatchObject({ code: "unresolved_node" })
@@ -230,7 +320,9 @@ describe("TestRuntime", () => {
     expect(failure(TestRuntime.evaluate(invalidSchema))).toMatchObject({ code: "invalid_schema" })
 
     let nested: Node.Node<number> = Node.succeed(1)
-    for (let index = 0; index < 1_025; index++) nested = Node.map(nested, (value) => value)
+    for (let index = 0; index < 1_024; index++) nested = Node.map(nested, (value) => value)
+    expect(success(TestRuntime.evaluate(nested))).toBe(1)
+    nested = Node.map(nested, (value) => value)
     expect(failure(TestRuntime.evaluate(nested))).toMatchObject({ code: "depth_exceeded" })
   })
 

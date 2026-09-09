@@ -99,16 +99,23 @@ export type Resolver<E = never> = (request: Request) => Result.Result<unknown, E
 
 const maximumDepth = 1_024
 
+// Keep provenance until the public boundary: typed failures may themselves
+// contain EvaluationError values, but evaluator defects bypass recovery arms.
+type EvaluationFailure =
+  | { readonly _tag: "TypedFailure"; readonly error: unknown }
+  | { readonly _tag: "Defect"; readonly error: EvaluationError }
+
 const evaluatorFailure = (
   code: EvaluationErrorCode,
   message: string,
   cause?: unknown
-): Result.Result<never, EvaluationError> => Result.fail(new EvaluationError(code, message, cause))
+): Result.Result<never, EvaluationFailure> =>
+  Result.fail({ _tag: "Defect", error: new EvaluationError(code, message, cause) })
 
 const invoke = (
   operation: (value: unknown) => unknown,
   value: unknown
-): Result.Result<unknown, EvaluationError> => {
+): Result.Result<unknown, EvaluationFailure> => {
   try {
     return Result.succeed(operation(value))
   } catch (cause) {
@@ -116,20 +123,26 @@ const invoke = (
   }
 }
 
-const resolve = <E>(resolver: Resolver<E>, request: Request): Result.Result<unknown, E | EvaluationError> => {
+const resolve = (
+  resolver: Resolver<unknown> | undefined,
+  request: Request
+): Result.Result<unknown, EvaluationFailure> => {
+  if (resolver === undefined) {
+    return evaluatorFailure("unresolved_node", `No test value was supplied for ${request._tag}`)
+  }
   try {
-    return resolver(request)
+    return Result.mapError(resolver(request), (error): EvaluationFailure => ({ _tag: "TypedFailure", error }))
   } catch (cause) {
     return evaluatorFailure("resolver_threw", `The test resolver threw while handling ${request._tag}`, cause)
   }
 }
 
-const evaluateAst = <E>(
+const evaluateAst = (
   ast: internal.NodeAst,
-  resolver: Resolver<E>,
+  resolver: Resolver<unknown> | undefined,
   depth: number,
   inlineFlows: boolean
-): Result.Result<unknown, unknown | E | EvaluationError> => {
+): Result.Result<unknown, EvaluationFailure> => {
   if (depth > maximumDepth) {
     return evaluatorFailure("depth_exceeded", `Node evaluation exceeds ${maximumDepth} nested declarations`)
   }
@@ -137,7 +150,7 @@ const evaluateAst = <E>(
     case "Succeed":
       return Result.succeed(ast.value)
     case "Fail":
-      return Result.fail(ast.error)
+      return Result.fail({ _tag: "TypedFailure", error: ast.error })
     case "All": {
       const pairs: Array<readonly [string, unknown]> = []
       for (const [name, child] of Object.entries(ast.nodes)) {
@@ -205,17 +218,18 @@ const evaluateAst = <E>(
     case "Catch": {
       const first = evaluateAst(ast.first, resolver, depth + 1, inlineFlows)
       if (Result.isSuccess(first)) return first
+      if (first.failure._tag === "Defect") return first
       if (ast.error !== undefined) {
         if (!Schema.isSchema(ast.error)) {
           return evaluatorFailure("invalid_schema", "A catch AST carries an invalid error schema")
         }
-        if (!SchemaParser.is(ast.error)(first.failure)) return first
+        if (!SchemaParser.is(ast.error)(first.failure.error)) return first
       }
       const operation = internal.operation(ast)
       if (operation === undefined) {
         return evaluatorFailure("missing_operation", "A catch AST has lost its in-memory callback")
       }
-      const handled = invoke(operation, first.failure)
+      const handled = invoke(operation, first.failure.error)
       if (Result.isFailure(handled)) return handled
       if (!Node.isNode(handled.success)) {
         return evaluatorFailure("invalid_continuation", "A catch callback did not return a Node")
@@ -224,9 +238,6 @@ const evaluateAst = <E>(
     }
   }
 }
-
-const unresolved: Resolver<EvaluationError> = (request) =>
-  evaluatorFailure("unresolved_node", `No test value was supplied for ${request._tag}`)
 
 /**
  * Evaluates a node's in-memory declaration with a deterministic leaf resolver.
@@ -242,9 +253,12 @@ const unresolved: Resolver<EvaluationError> = (request) =>
  */
 export const evaluate = <A, E, E2 = EvaluationError>(
   node: Node.Node<A, E>,
-  resolver: Resolver<E2> = unresolved as Resolver<E2>
+  resolver?: Resolver<E2>
 ): Result.Result<A, E | E2 | EvaluationError> =>
-  evaluateAst(node.ast, resolver, 0, false) as Result.Result<A, E | E2 | EvaluationError>
+  Result.mapError(evaluateAst(node.ast, resolver, 0, false), (failure) => failure.error) as Result.Result<
+    A,
+    E | E2 | EvaluationError
+  >
 
 /**
  * Evaluates a node while recursively entering every called flow that carries
@@ -260,6 +274,9 @@ export const evaluate = <A, E, E2 = EvaluationError>(
  */
 export const evaluateInline = <A, E, E2 = EvaluationError>(
   node: Node.Node<A, E>,
-  resolver: Resolver<E2> = unresolved as Resolver<E2>
+  resolver?: Resolver<E2>
 ): Result.Result<A, E | E2 | EvaluationError> =>
-  evaluateAst(node.ast, resolver, 0, true) as Result.Result<A, E | E2 | EvaluationError>
+  Result.mapError(evaluateAst(node.ast, resolver, 0, true), (failure) => failure.error) as Result.Result<
+    A,
+    E | E2 | EvaluationError
+  >
