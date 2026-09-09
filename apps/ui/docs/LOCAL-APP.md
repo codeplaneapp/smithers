@@ -82,6 +82,13 @@ the proxy is enabled.
 
 ## Repository and process authority
 
+Repo-scoped slash commands treat a trailing `owner/repo` in argument text as
+an explicit target only when it names a loaded repository or the active working
+copy's repository. Other path-shaped tokens stay in the text: `/issues.create Fix
+src/index.ts` keeps the full title and uses the active repository, or the sole
+loaded repository when none is selected. Repository-only commands such as
+`/repos.import acme/new` can name a repository that is not loaded yet.
+
 Native repository opening is a two-step grant flow: the picker authorizes a
 canonical path for 60 seconds, then `/api/repo/open` consumes the authorization
 exactly once. Both repository and connector pickers wait for adoption before

@@ -325,7 +325,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
     // untouched, but never hand environment or form values to the trace sink.
     let tracedArgs = args ?? null
     if (args !== undefined && (name === "env.set" || name === "form.set")) {
-      const parsed = payloadFor(name, args)
+      const parsed = payloadFor(name, args, undefined, actions.knownRepositories())
       tracedArgs = "[REDACTED]"
       if (!("error" in parsed)) {
         if (name === "env.set" && typeof parsed.payload.assignment === "string") {
@@ -447,7 +447,7 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
      * exactly once, here, and a text that cannot be parsed is refused before
      * the binding runs.
      */
-    const parsed = payloadFor(nameOf(target), args, target.metadata.grammar)
+    const parsed = payloadFor(nameOf(target), args, target.metadata.grammar, actions.knownRepositories())
     if ("error" in parsed) {
       /*
        * THE FORM LAW: a line without the flow's required input renders the

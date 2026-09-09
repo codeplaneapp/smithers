@@ -582,6 +582,7 @@ describe("trace argument redaction", () => {
         const received: unknown[][] = []
         const actions = {
           repositoryFlows: () => undefined,
+          knownRepositories: () => new Set(["owner/repo"]),
           snapshot: () => ({ surface: "chat", typing: false, hasConnectors: true, admin: false, signedOut: false }),
           noteCommandRun: () => {},
           traceFlow: (record) => { records.push(record) },

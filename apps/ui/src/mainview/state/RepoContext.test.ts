@@ -1,4 +1,280 @@
-import { expect, test } from "bun:test"
+/*
+ * The one target-repo rule every repo-scoped command rides (RepoContext.ts):
+ * which trailing token is a target, which repository a bare command means,
+ * and the honest refusals when the choice is the user's. Grid review
+ * ui-state-store/testing/3: a free-text argument ending in a relative path
+ * (`fix the crash in src/index.ts`) used to lose its last word to a
+ * `src/index.ts` repository.
+ */
+import type { StorageApi } from "@tanstack/db"
+import { describe, expect, test } from "bun:test"
+import { payloadFor } from "../flows/SlashPayload"
+import type { NativeRepositories } from "../native/NativeBridge"
+import type { AgentPort } from "../runtime/AgentPort"
+import { createAppController } from "./AppController"
+import type { AppServices } from "./AppController"
+import type { Repo } from "./AppState"
+import { createAppStore } from "./AppStore"
+import type { AppStore } from "./AppStore"
+import { knownRepositories, resolveOpenRepo, resolveTargetRepo, splitTrailingRepo } from "./RepoContext"
+
+const memoryStorage = (): StorageApi => {
+  const data = new Map<string, string>()
+  return {
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => void data.set(key, value),
+    removeItem: (key) => void data.delete(key)
+  }
+}
+
+const freshStore = () => createAppStore({ kind: "localStorage", storage: memoryStorage() })
+
+const dispatch = (store: AppStore, transition: Parameters<AppStore["dispatch"]>[0]): Promise<unknown> =>
+  store.dispatch(transition).isPersisted.promise
+
+const repository = (id: string) => {
+  const [org, name] = id.split("/") as [string, string]
+  return { id, org, ownerKind: "user" as const, name, head: null }
+}
+
+/** An open checkout: `remote` names its repository, null leaves it local-only (repoId = its name). */
+const checkout = (name: string, remote: string | null): Repo => ({
+  id: name,
+  path: `/work/${name}`,
+  name,
+  git: { branch: "main", remote },
+  smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] },
+  warnings: []
+})
+
+const loadRepositories = (store: AppStore, ...ids: ReadonlyArray<string>) =>
+  dispatch(store, { type: "repositories.loaded", actor: "system", repositories: ids.map(repository) })
+
+const openCheckouts = (store: AppStore, ...repos: ReadonlyArray<Repo>) =>
+  dispatch(store, { type: "repos.loaded", actor: "system", repos })
+
+describe("splitTrailingRepo", () => {
+  const known = new Set(["will/flows"])
+
+  test("an explicit trailing token that names a known repository wins", () => {
+    expect(splitTrailingRepo("12 will/flows", known)).toEqual({ rest: "12", repo: "will/flows" })
+    expect(splitTrailingRepo("fix the crash will/flows", known)).toEqual({ rest: "fix the crash", repo: "will/flows" })
+  })
+
+  test("a path-like trailing token stays in the text when it names no known repository", () => {
+    expect(splitTrailingRepo("fix the crash in src/index.ts", known)).toEqual({ rest: "fix the crash in src/index.ts" })
+    expect(splitTrailingRepo("summarize docs/README.md", known)).toEqual({ rest: "summarize docs/README.md" })
+    expect(splitTrailingRepo("open a PR for packages/rpc", known)).toEqual({ rest: "open a PR for packages/rpc" })
+  })
+
+  test("an unknown token that is the whole text stays intact", () => {
+    expect(splitTrailingRepo("src/index.ts", known)).toEqual({ rest: "src/index.ts" })
+    expect(splitTrailingRepo("  acme/brand-new  ", new Set())).toEqual({ rest: "acme/brand-new" })
+  })
+
+  test("repository-only commands can still name an unloaded repository", () => {
+    expect(payloadFor("repos.import", "acme/brand-new", undefined, known)).toEqual({
+      payload: { repo: "acme/brand-new" }
+    })
+  })
+
+  test("without the known set the token's shape alone decides", () => {
+    expect(splitTrailingRepo("summarize docs/README.md")).toEqual({ rest: "summarize", repo: "docs/README.md" })
+    expect(splitTrailingRepo("12 will/flows")).toEqual({ rest: "12", repo: "will/flows" })
+  })
+
+  test("blank text and a non-repo last word split to nothing", () => {
+    expect(splitTrailingRepo(undefined, known)).toEqual({ rest: "" })
+    expect(splitTrailingRepo("   ", known)).toEqual({ rest: "" })
+    expect(splitTrailingRepo("12 flows", known)).toEqual({ rest: "12 flows" })
+    expect(splitTrailingRepo("a/b/c", known)).toEqual({ rest: "a/b/c" })
+  })
+})
+
+describe("knownRepositories", () => {
+  test("names loaded repositories and the active working copy's parseable repository", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows", "will/smithers")
+    await openCheckouts(store, checkout("flows", "git@github.com:acme/flows.git"), checkout("scratch", null))
+    const known = knownRepositories(store)
+    expect(known.has("will/flows")).toBe(true)
+    expect(known.has("will/smithers")).toBe(true)
+    expect(known.has("acme/flows")).toBe(true)
+    expect(splitTrailingRepo("fix crash acme/flows", known)).toEqual({ rest: "fix crash", repo: "acme/flows" })
+    // A local-only checkout's repoId is its name, never an owner/repo.
+    expect(known.has("scratch")).toBe(false)
+    expect(known.has("src/index.ts")).toBe(false)
+  })
+})
+
+describe("trailing repositories from working copies", () => {
+  test("an inactive working copy does not turn trailing text into a target", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows")
+    await openCheckouts(store,
+      checkout("flows", "git@github.com:acme/flows.git"),
+      checkout("rpc", "git@github.com:packages/rpc.git")
+    )
+    expect(store.session().activeRepoKey).toBe("local:/work/flows")
+    expect(splitTrailingRepo("fix packages/rpc", knownRepositories(store))).toEqual({ rest: "fix packages/rpc" })
+    await dispatch(store, { type: "repo.selected", actor: "user", id: "local:/work/rpc" })
+    expect(splitTrailingRepo("fix packages/rpc", knownRepositories(store))).toEqual({ rest: "fix", repo: "packages/rpc" })
+  })
+})
+
+describe("resolveTargetRepo", () => {
+  test("an explicit owner/repo wins even when it is not loaded; a malformed one is refused by name", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows")
+    expect(resolveTargetRepo(store, "acme/other")).toEqual({ repo: "acme/other" })
+    expect(resolveTargetRepo(store, "src")).toEqual({ error: "\"src\" is not an owner/repo name" })
+  })
+
+  test("no repository loaded is an honest error naming the two ways out", async () => {
+    const store = await freshStore()
+    const target = resolveTargetRepo(store, undefined)
+    expect(target).toEqual({ error: "No repository is loaded yet — sign in with /cloud.sign-in, or name one as owner/repo" })
+  })
+
+  test("one loaded repository is the target; several loaded and none selected names the choice", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows")
+    expect(resolveTargetRepo(store, undefined)).toEqual({ repo: "will/flows" })
+    await loadRepositories(store, "will/flows", "will/smithers")
+    expect(resolveTargetRepo(store, undefined)).toEqual({
+      error: "Several repositories are loaded (will/flows, will/smithers) — name one as owner/repo"
+    })
+  })
+
+  test("the active working copy's repository is the target over several loaded ones", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows", "will/smithers")
+    await openCheckouts(store, checkout("flows", "https://github.com/acme/flows"))
+    expect(store.session().activeRepoKey).toBe("local:/work/flows")
+    expect(resolveTargetRepo(store, undefined)).toEqual({ repo: "acme/flows" })
+  })
+
+  test("an active working copy whose repoId is not owner/repo falls through to the loaded set", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows", "will/smithers")
+    await openCheckouts(store, checkout("scratch", null))
+    expect(store.session().activeRepoKey).toBe("local:/work/scratch")
+    expect(store.collections.workingCopies.get("local:/work/scratch")?.repoId).toBe("scratch")
+    expect(resolveTargetRepo(store, undefined)).toEqual({
+      error: "Several repositories are loaded (will/flows, will/smithers) — name one as owner/repo"
+    })
+  })
+})
+
+describe("resolveOpenRepo", () => {
+  test("nothing selected and nothing open: open a repository first", async () => {
+    const store = await freshStore()
+    expect(resolveOpenRepo(store)).toEqual({ error: "Open a repository first." })
+  })
+
+  test("a repository selected at its head has no local checkout", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows")
+    await dispatch(store, { type: "repo.selected", actor: "user", id: "will/flows" })
+    expect(resolveOpenRepo(store)).toEqual({
+      error: "will/flows is selected at its head — open a local working copy with /repo.open first."
+    })
+  })
+
+  test("a selected cloud workspace is not open on this machine", async () => {
+    const store = await freshStore()
+    await loadRepositories(store, "will/flows")
+    await dispatch(store, {
+      type: "workspaces.loaded",
+      actor: "system",
+      workspaces: [{
+        id: "ws-1", repoId: "will/flows", name: "Box", targetBookmark: null,
+        status: "running", provisioningStage: null, suspendedAt: null, createdAt: null
+      }]
+    })
+    await dispatch(store, { type: "repo.selected", actor: "user", id: "will/flows#workspace:ws-1" })
+    expect(resolveOpenRepo(store)).toEqual({
+      error: "The active working copy is not open on this machine — open it with /repo.open first."
+    })
+  })
+
+  test("the active local checkout is the open repository", async () => {
+    const store = await freshStore()
+    const flows = checkout("flows", "git@github.com:acme/flows.git")
+    await openCheckouts(store, flows)
+    const open = resolveOpenRepo(store)
+    expect("repo" in open ? open.repo.path : open.error).toBe("/work/flows")
+  })
+})
+
+/*
+ * The symptom end to end: the production slash parser and the real issues
+ * seam, will/flows the sole loaded repository, an issue title ending in a
+ * relative path. The title reaches will/flows whole; no request names a
+ * `src/index.ts` repository.
+ */
+describe("a repo-scoped command whose text ends in a path", () => {
+  const unavailableAgent: AgentPort = {
+    available: false,
+    startTurn: async () => ({ status: "error", message: "unavailable" }),
+    cancelTurn: async () => {},
+    subscribe: () => () => {}
+  }
+  const unavailableRepositories: NativeRepositories = {
+    available: false,
+    pickLocalRepository: async () => ({
+      status: "error",
+      code: "native-required",
+      message: "Local repositories can only be connected from the Smithers native app."
+    })
+  }
+  const json = (status: number, body: unknown): Response =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+
+  test.each([
+    ["Fix the crash in src/index.ts", "Fix the crash in src/index.ts", "will/flows"],
+    ["summarize docs/README.md", "summarize docs/README.md", "will/flows"],
+    ["open a PR for packages/rpc", "open a PR for packages/rpc", "will/flows"],
+    ["src/index.ts", "src/index.ts", "will/flows"],
+    ["Fix the crash will/flows", "Fix the crash", "will/flows"],
+    ["Fix the crash acme/other", "Fix the crash", "acme/other"]
+  ])("issues.create preserves the title and posts to the right repository: %s", async (args, title, target) => {
+    const calls: string[] = []
+    const bodies: unknown[] = []
+    const services: AppServices = {
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const absolute = new URL(url, "https://app.test")
+        const method = (init?.method ?? "GET").toUpperCase()
+        calls.push(`${method} ${absolute.pathname}`)
+        if (method === "POST" && absolute.pathname === `/api/repos/${target}/issues`) {
+          bodies.push(JSON.parse(String(init?.body)))
+          return json(201, { number: 9 })
+        }
+        return json(404, { status: "error", message: `no stub for ${method} ${absolute.pathname}` })
+      }
+    }
+    const store = await freshStore()
+    const controller = createAppController(store, unavailableRepositories, unavailableAgent, services)
+    await dispatch(store, {
+      type: "identity.session.loaded", actor: "system", state: "signed-in",
+      login: "will", allowlisted: true, admin: false, scopesPlain: null
+    })
+    await loadRepositories(store, "will/flows")
+    if (target !== "will/flows") {
+      await loadRepositories(store, "will/flows", target)
+      await dispatch(store, { type: "repo.selected", actor: "user", id: "will/flows" })
+    }
+    try {
+      await controller.commands.run("issues.create", args)
+      expect(bodies).toEqual([{ title }])
+      expect(calls.filter((call) => call.startsWith("POST "))).toEqual([`POST /api/repos/${target}/issues`])
+    } finally {
+      await controller.dispose()
+    }
+  })
+})
+
 import { GatewayWorkspaceIdSchema, isGatewayWorkspaceId } from "@smthrs/rpc/GatewayWorkspace"
 import { CardSchema } from "@smthrs/rpc/Cards"
 

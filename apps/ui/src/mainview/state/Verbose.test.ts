@@ -168,6 +168,7 @@ describe("sensitive flow traces", () => {
         const received: string[] = []
         const actions = {
           repositoryFlows: () => undefined,
+          knownRepositories: () => new Set(["owner/repo"]),
           snapshot: () => ({ surface: "chat", typing: false, hasConnectors: true, admin: false, signedOut: false }),
           noteCommandRun: () => {},
           traceFlow: (record) => { writes.push(store.dispatch(record).isPersisted.promise) },

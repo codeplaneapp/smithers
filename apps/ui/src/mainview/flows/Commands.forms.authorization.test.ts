@@ -16,7 +16,8 @@ const fixture = () => {
   const effects: string[] = []
   const requests: Authorize.Request[] = []
   const store = {
-    collections: { cards, repositories: new Map() },
+    session: () => ({ activeRepoKey: null }),
+    collections: { cards, repositories: new Map(), workingCopies: new Map() },
     dispatch: (event: { type: string; card?: Card; id?: string; patch?: Partial<Card> }) => {
       if (event.type === "card.upsert") cards.set(event.card!.id, event.card!)
       if (event.type === "card.updated") Object.assign(cards.get(event.id!)!, event.patch)
@@ -25,6 +26,7 @@ const fixture = () => {
   let forms: ReturnType<typeof createFormsController>
   const actions = {
     repositoryFlows: () => undefined,
+    knownRepositories: () => new Set<string>(),
     noteCommandRun: () => {},
     traceFlow: () => {},
     snapshot: () => ({ surface: "chat", typing: false, hasConnectors: true, admin: false, signedOut: false }),

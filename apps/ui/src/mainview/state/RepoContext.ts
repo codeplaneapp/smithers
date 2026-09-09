@@ -1,7 +1,7 @@
 /*
  * The one target-repo resolution rule for repo-scoped commands (issues, PRs,
  * environment, import), following the flow.create precedent (Wave 12 §2):
- * an explicit trailing `owner/repo` token wins; otherwise the active row
+ * a known trailing `owner/repo` token wins; otherwise the active row
  * (lane piper: the active working copy's repository, else the selected
  * repository's head); otherwise the answer is an honest error naming the
  * choice — the target is a genuine user decision, never a guess.
@@ -14,16 +14,44 @@ import { cardContainsRun, runScopeFromCard, sameRunScope, type RunScope } from "
 
 const REPO_TOKEN = /^[\w.-]+\/[\w.-]+$/
 
-/** Splits a trailing `owner/repo` token off a command's argument text. */
+/**
+ * The repositories a trailing token may name in argument text: every
+ * loaded repository and the active working copy's repository. What
+ * {@link splitTrailingRepo} checks an ambiguous token against.
+ */
+export type KnownRepositories = Pick<ReadonlySet<string>, "has">
+
+/** {@link KnownRepositories} read from the store. */
+export const knownRepositories = (store: AppStore): KnownRepositories => {
+  const known = new Set<string>(store.collections.repositories.keys())
+  const key = store.session().activeRepoKey ?? null
+  const selection = key === null ? null : parseRepoSelection(key)
+  const copyId = selection === null ? undefined : "repoId" in selection ? selection.copyId : selection.localCopyId
+  const copy = copyId === undefined ? undefined : store.collections.workingCopies.get(copyId)
+  if (copy !== undefined && REPO_TOKEN.test(copy.repoId)) known.add(copy.repoId)
+  return known
+}
+
+/**
+ * Splits a trailing `owner/repo` token off a command's argument text.
+ *
+ * A token is ambiguous (`src/index.ts` and `packages/rpc` are repo-shaped
+ * too). With `known` in hand it is the target only when it names a loaded
+ * repository or the active working copy's repository; otherwise the text stays whole
+ * and the ambient repository is the target. Without `known` the shape alone decides.
+ */
 export const splitTrailingRepo = (
-  args: string | undefined
+  args: string | undefined,
+  known?: KnownRepositories
 ): { readonly rest: string; readonly repo?: string } => {
   const text = (args ?? "").trim()
   if (text === "") return { rest: "" }
   const parts = text.split(/\s+/)
   const last = parts[parts.length - 1] ?? ""
   if (parts.length > 0 && REPO_TOKEN.test(last)) {
-    return { rest: parts.slice(0, -1).join(" "), repo: last }
+    const rest = parts.slice(0, -1).join(" ")
+    if (known !== undefined && !known.has(last)) return { rest: text }
+    return { rest, repo: last }
   }
   return { rest: text }
 }
