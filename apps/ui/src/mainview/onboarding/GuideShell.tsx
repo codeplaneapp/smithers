@@ -292,11 +292,6 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </button>
             </>
           )}
-          <p>
-            Capabilities appear
-            <br />
-            as you add them.
-          </p>
         </nav>
       )}
       </aside>
