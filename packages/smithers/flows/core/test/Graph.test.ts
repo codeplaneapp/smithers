@@ -606,6 +606,130 @@ describe("Graph", () => {
     })
   })
 
+  describe.each(
+    [
+      ["All", (node: Node.Any) => Node.all({ next: node }), ".all.next"],
+      ["Map", (node: Node.Any) => Node.map(node, (value) => value), ".map"],
+      ["FlowCall", (node: Node.Any) => Flow.make({ body: () => node })(undefined), ".flow"],
+      ["AndThen", (node: Node.Any) => Node.andThen(node, Node.succeed("done")), ".andThen"],
+      ["Catch", (node: Node.Any) => Node.catch(node, { onFailure: () => Node.succeed("fallback") }), ".catch"]
+    ] as const
+  )("composite %s prerequisites", (_, wrap, suffix) => {
+    it.each(["andThen", "catch"] as const)("orders writers inside a %s arm", (kind) => {
+      const writer = () => Node.withEffects(Node.dynamic({}), effect({ writes: ["out"], onConflict: "fail" }))
+      const graph = Graph.build(
+        kind === "andThen"
+          ? Node.andThen(writer(), wrap(writer()))
+          : Node.catch(writer(), { onFailure: () => wrap(writer()) })
+      )
+      const predecessor = kind === "andThen" ? "root.andThen" : "root.catch"
+      const entry = `${kind === "andThen" ? "root.then" : "root.recover"}${suffix}`
+
+      expect(Graph.conflicts(graph)).toEqual([])
+      expect(Graph.diagnostics(graph)).toEqual([])
+      expect(Graph.edges(graph)).toContainEqual({ from: predecessor, to: entry, reason: "continuation" })
+      expect(keyMaterial(graph).find((node) => node.nodeId === entry)?.material.inputs)
+        .toContainEqual({ _tag: "Pending", from: predecessor })
+    })
+
+    it("orders disjoint work without a conflict edge", () => {
+      const graph = Graph.build(Node.andThen(
+        Node.dynamic({ effects: effect({ writes: ["before"] }) }),
+        wrap(Node.dynamic({ effects: effect({ writes: ["after"] }) }))
+      ))
+      expect(Graph.edges(graph)).toContainEqual({
+        from: "root.andThen",
+        to: `root.then${suffix}`,
+        reason: "continuation"
+      })
+      expect(Graph.conflicts(graph)).toEqual([])
+      expect(Graph.keyMaterial(graph)._tag).toBe("Success")
+    })
+  })
+
+  it("keeps nested recovery prerequisites conditional", () => {
+    const graph = Graph.build(Node.andThen(
+      Node.dynamic({}),
+      Node.catch(Node.dynamic({}), {
+        onFailure: () => Node.all({ recovery: Node.dynamic({}) })
+      })
+    ))
+    const recovery = Graph.nodes(graph).find((node) => node.id === "root.then.recover.all.recovery")!
+    expect(recovery.dependencies).toEqual(["root.then.catch"])
+    expect(recovery.keyMaterial.inputs).toEqual([{ _tag: "Pending", from: "root.then.catch" }])
+    expect(Graph.nodes(graph).find((node) => node.id === "root.then.catch")?.dependencies)
+      .toEqual(["root.andThen"])
+    expect(Graph.keyMaterial(graph)._tag).toBe("Success")
+  })
+
+  it.each(["a", "b", "c"])("keeps mixed lane and serialize writers acyclic with lane writer %s", (lane) => {
+    const writer = (id: string) =>
+      Node.dynamic({
+        effects: effect({ writes: ["out"], onConflict: id === lane ? "lane" : "serialize" })
+      })
+    const graph = Graph.build(Node.all({ a: writer("a"), b: writer("b"), c: writer("c") }))
+    expect(Graph.diagnostics(graph)).toEqual([])
+    const order = keyMaterial(graph).map((entry) => entry.nodeId)
+    for (const edge of Graph.edges(graph)) {
+      expect(order.indexOf(edge.from), `${edge.from} -> ${edge.to}`).toBeLessThan(order.indexOf(edge.to))
+    }
+    const merges = Graph.nodes(graph).filter((node) => node.kind === "LaneMerge")
+    expect(merges).toHaveLength(2)
+    expect(merges[1]?.dependencies).toContain(merges[0]?.id)
+    expect(Graph.nodes(graph).find((node) => node.id === "root")?.dependencies)
+      .toEqual(expect.arrayContaining(merges.map((node) => node.id)))
+  })
+
+  it("records a fatal diagnostic when lane consumers form a cycle", () => {
+    const writer = (path: string) =>
+      Node.dynamic({
+        effects: effect({ writes: [path], onConflict: "lane" })
+      })
+    const graph = Graph.build(Node.all({
+      left: Node.andThen(writer("x"), writer("y")),
+      right: Node.andThen(writer("y"), writer("x"))
+    }))
+    expect(Graph.diagnostics(graph)).toMatchObject([{ code: "dependency_cycle" }])
+    expect(Graph.isFatalDiagnostic(Graph.diagnostics(graph)[0]!)).toBe(true)
+    expect(Graph.keyMaterial(graph)).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "dependency_cycle" }
+    })
+  })
+
+  it("keeps a lane consumer before a merge that needs its downstream writer", () => {
+    const writer = (onConflict: Effects.Declaration["onConflict"]) =>
+      Node.dynamic({ effects: effect({ writes: ["out"], onConflict }) })
+    const graph = Graph.build(Node.all({
+      left: Node.andThen(writer("lane"), Node.map(writer("serialize"), (value) => value)),
+      right: writer("serialize")
+    }))
+    expect(Graph.diagnostics(graph)).toEqual([])
+    const order = keyMaterial(graph).map((entry) => entry.nodeId)
+    for (const edge of Graph.edges(graph)) {
+      expect(order.indexOf(edge.from), `${edge.from} -> ${edge.to}`).toBeLessThan(order.indexOf(edge.to))
+    }
+  })
+
+  it("rejects a dependency cycle in externally supplied key material", () => {
+    const built = Graph.build(Node.all({ a: Node.succeed(1), b: Node.succeed(2) }))
+    const graph = {
+      ...built,
+      nodes: Graph.nodes(built).map((node) => ({
+        ...node,
+        dependencies: node.id === "root.all.a" ?
+          ["root.all.b"]
+          : node.id === "root.all.b"
+          ? ["root.all.a"]
+          : [...node.dependencies]
+      }))
+    } as Graph.Graph
+    expect(Graph.keyMaterial(graph)).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "dependency_cycle" }
+    })
+  })
+
   it("turns serialize conflicts into dependency edges and key inputs", () => {
     const writes = effect({ writes: ["out/result"], onConflict: "serialize" })
     const graph = Graph.build(Node.all({

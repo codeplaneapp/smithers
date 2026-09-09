@@ -32,7 +32,7 @@ interface FlowDetails extends Flow.Any {
  *
  * `value` is a structural dependency, `continuation` is a statically planned
  * `andThen` or `catch` arm, `conflict` is an ordering edge the write-conflict
- * pass added, and `lane-merge` joins two laned writers to their merge node.
+ * pass added, and `lane-merge` orders laned writers, their merges, and consumers.
  *
  * @category models
  * @since 0.1.0
@@ -205,6 +205,7 @@ export const GraphBuildErrorCode = Schema.Literals([
   "write_conflict",
   "capability_outside_grant",
   "duplicate_node_id",
+  "dependency_cycle",
   "plan_too_deep",
   "plan_too_large",
   "payload_too_deep",
@@ -228,7 +229,7 @@ export type GraphBuildErrorCode = typeof GraphBuildErrorCode.Type
  * `capability_outside_grant` is advisory.
  *
  * `nodeId` is populated for the three effect-envelope codes,
- * `missing_key_material`, `duplicate_node_id`, `plan_too_deep`,
+ * `missing_key_material`, `duplicate_node_id`, `dependency_cycle`, `plan_too_deep`,
  * `plan_too_large`, `payload_too_deep`, `payload_too_large`,
  * `capability_outside_grant`, and `invalid_node`. For `plan_too_large` it
  * names the node whose admission crossed the limit: the node itself, the
@@ -256,6 +257,7 @@ const fatalGraphBuildErrorCodes: ReadonlySet<GraphBuildErrorCode> = Object.freez
     "write_conflict",
     "missing_key_material",
     "duplicate_node_id",
+    "dependency_cycle",
     "plan_too_deep",
     "plan_too_large",
     "payload_too_deep",
@@ -1506,6 +1508,41 @@ const freezeGraph = (
   return Object.freeze(graph)
 }
 
+const dependencyOrder = (
+  nodes: ReadonlyArray<InternalNode>
+): Result.Result<ReadonlyArray<InternalNode>, GraphBuildError> => {
+  const ordered: Array<InternalNode> = []
+  const complete = new Set<string>()
+  const active = new Set<string>()
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const stack: Array<{ readonly node: InternalNode; next: number }> = []
+  for (const node of nodes) {
+    if (complete.has(node.id)) continue
+    active.add(node.id)
+    stack.push({ node, next: 0 })
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!
+      if (frame.next < frame.node.dependencies.length) {
+        const dependency = frame.node.dependencies[frame.next++]!
+        if (active.has(dependency)) {
+          return Result.fail(new GraphBuildError({ code: "dependency_cycle", paths: [], nodeId: dependency }))
+        }
+        const child = byId.get(dependency)
+        if (child !== undefined && !complete.has(dependency)) {
+          active.add(dependency)
+          stack.push({ node: child, next: 0 })
+        }
+      } else {
+        stack.pop()
+        active.delete(frame.node.id)
+        complete.add(frame.node.id)
+        ordered.push(frame.node)
+      }
+    }
+  }
+  return Result.succeed(ordered)
+}
+
 /**
  * Builds a graph by evaluating flow bodies against their inputs and
  * `Node.andThen` builders and `Node.catch` recovery callbacks against symbolic
@@ -1677,7 +1714,9 @@ export const build = (
             childAnnotations,
             normalizedGrant,
             narrowedEnvelope,
-            depth + 1
+            depth + 1,
+            noInput,
+            prerequisites
           )
           depend(child.id, "value")
         }
@@ -1690,7 +1729,9 @@ export const build = (
           childAnnotations,
           normalizedGrant,
           narrowedEnvelope,
-          depth + 1
+          depth + 1,
+          noInput,
+          prerequisites
         )
         depend(first.id, "value")
         break
@@ -1702,7 +1743,9 @@ export const build = (
           childAnnotations,
           normalizedGrant,
           narrowedEnvelope,
-          depth + 1
+          depth + 1,
+          noInput,
+          prerequisites
         )
         const next = ast.next ?? (() => {
           const continuation = internal.operation(ast)
@@ -1745,7 +1788,9 @@ export const build = (
           childAnnotations,
           normalizedGrant,
           narrowedEnvelope,
-          depth + 1
+          depth + 1,
+          noInput,
+          prerequisites
         )
         depend(first.id, "value")
         const handler = internal.operation(ast)
@@ -1820,7 +1865,8 @@ export const build = (
               : normalizedGrant.filter((capability) => flowCapabilities.includes(capability)),
             calleeEnvelope,
             depth + 1,
-            ast.input
+            ast.input,
+            prerequisites
           )
           depend(child.id, "value")
         }
@@ -1928,14 +1974,15 @@ export const build = (
     }
   }
   // Reachability is answered from a transitive closure over node ids, one bit
-  // per id, computed once from the structural edges. Ids are structural, so
+  // per id, initially computed from the structural edges. Ids are structural, so
   // every edge points at an ancestor or at a continuation visited later and
   // the id graph is acyclic: a node's closure is the union of its targets'
   // closures, taken in depth-first postorder. A conflict edge added below
   // joins its target's closure into its source's in place. That keeps every
-  // later query exact, because a work node visited later never reaches one
-  // visited earlier, so the only closure a new edge changes is its source's,
-  // and two nodes that share an id share that entry.
+  // later writer-pair query exact: sources are processed in preorder, so
+  // ancestors affected by a new edge have already been compared. Consumers
+  // need those earlier closures too, so they are recomputed before merging.
+  // Two nodes that share an id share that entry.
   const idIndex = new Map<string, number>()
   for (const node of observed) {
     if (!idIndex.has(node.id)) idIndex.set(node.id, idIndex.size)
@@ -1953,7 +2000,8 @@ export const build = (
   }
   const reachable = (from: number, to: number): boolean =>
     (reach[from * reachWords + (to >>> 5)]! & (1 << (to & 31))) !== 0
-  {
+  const computeClosure = (): void => {
+    reach.fill(0)
     const targets = ids.map((id) => edgesFrom(id).map((edge) => idIndex.get(edge.to)!))
     const state = new Uint8Array(ids.length)
     const stack: Array<number> = []
@@ -1984,6 +2032,8 @@ export const build = (
       }
     }
   }
+
+  computeClosure()
 
   const conflicts: Array<Conflict> = []
   const laneConflicts: Array<{
@@ -2103,16 +2153,35 @@ export const build = (
     }
   }
 
-  for (let index = 0; index < laneConflicts.length; index++) {
-    const laneConflict = laneConflicts[index]!
+  // Plan consumers before introducing merges. Conflict edges order writers;
+  // they do not mean that a writer consumes the merged output. A structural
+  // consumer that still leads to either writer must also remain before the
+  // merge. Recompute closure to include all serialization edges.
+  if (laneConflicts.length > 0) computeClosure()
+  const mergePlans = laneConflicts.map((conflict) => ({
+    ...conflict,
+    consumers: [
+      ...new Set(
+        [...edgesFrom(conflict.left.id), ...edgesFrom(conflict.right.id)]
+          .sort((first, second) => first.index - second.index)
+          .filter((edge) => observedEdges[edge.index]!.reason !== "conflict")
+          .map((edge) => edge.to)
+      )
+    ].filter((id) => {
+      const consumer = idIndex.get(id)!
+      return [conflict.left, conflict.right].every((writer) => {
+        const target = idIndex.get(writer.id)!
+        return consumer !== target && !reachable(consumer, target)
+      })
+    })
+  }))
+  // Merges that share a lane apply in conflict order, before any consumer
+  // dependencies are attached. This avoids treating an earlier merge as a
+  // consumer of a later merge that needs the same writer.
+  const lastMerge = new Map<string, string>()
+  for (let index = 0; index < mergePlans.length; index++) {
+    const laneConflict = mergePlans[index]!
     const mergeId = `lane.merge.${index}`
-    // Sorted by edge position so consumers keep the order a scan of
-    // `observedEdges` would give them, which key material observes.
-    const consumers = new Set(
-      [...edgesFrom(laneConflict.left.id), ...edgesFrom(laneConflict.right.id)]
-        .sort((first, second) => first.index - second.index)
-        .map((edge) => edge.to)
-    )
     const capabilities = [
       ...new Set([
         ...laneConflict.left.capabilities,
@@ -2175,16 +2244,24 @@ export const build = (
     nodeById.set(mergeId, mergeNode)
     recordEdge({ from: laneConflict.left.id, to: mergeId, reason: "lane-merge" })
     recordEdge({ from: laneConflict.right.id, to: mergeId, reason: "lane-merge" })
-    for (const consumerId of consumers) {
-      const consumer = nodeById.get(consumerId)
-      /* v8 ignore else -- every edge target is a node this build recorded, so the lookup only misses if a later pass invents an edge */
-      if (consumer !== undefined) addDependency(consumer, mergeId, "lane-merge")
+    for (const writer of [laneConflict.left, laneConflict.right]) {
+      const previous = lastMerge.get(writer.id)
+      if (previous !== undefined) addDependency(mergeNode, previous, "lane-merge")
+      lastMerge.set(writer.id, mergeId)
     }
     conflicts[laneConflict.conflictIndex] = {
       ...conflicts[laneConflict.conflictIndex]!,
       mergeNodeId: mergeId
     }
   }
+
+  for (let index = 0; index < mergePlans.length; index++) {
+    for (const consumerId of mergePlans[index]!.consumers) {
+      addDependency(nodeById.get(consumerId)!, `lane.merge.${index}`, "lane-merge")
+    }
+  }
+  const order = dependencyOrder(observed)
+  if (Result.isFailure(order)) observedDiagnostics.push(order.failure)
 
   return freezeGraph({ nodes: observed, edges: observedEdges, diagnostics: observedDiagnostics, conflicts })
 }
@@ -2266,28 +2343,14 @@ export const keyMaterial = (
   for (const diagnostic of graph.diagnostics) {
     if (isFatalDiagnostic(diagnostic)) return Result.fail(diagnostic)
   }
+  const order = dependencyOrder(graph.nodes)
+  if (Result.isFailure(order)) return Result.fail(order.failure)
   const ordered: Array<KeyMaterial.Entry> = []
-  const visited = new Set<string>()
-  const byId = new Map(graph.nodes.map((node) => [node.id, node]))
-  const visit = (node: InternalNode): GraphBuildError | undefined => {
-    if (visited.has(node.id)) return undefined
-    visited.add(node.id)
-    for (const dependency of node.dependencies) {
-      const child = byId.get(dependency)
-      if (child !== undefined) {
-        const failure = visit(child)
-        if (failure !== undefined) return failure
-      }
-    }
+  for (const node of order.success) {
     if (node.keyMaterial === undefined) {
-      return new GraphBuildError({ code: "missing_key_material", paths: [], nodeId: node.id })
+      return Result.fail(new GraphBuildError({ code: "missing_key_material", paths: [], nodeId: node.id }))
     }
     ordered.push({ nodeId: node.id, material: node.keyMaterial })
-    return undefined
-  }
-  for (const node of graph.nodes) {
-    const failure = visit(node)
-    if (failure !== undefined) return Result.fail(failure)
   }
   return Result.succeed(ordered)
 }
