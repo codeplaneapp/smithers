@@ -7,7 +7,7 @@
  */
 import type { Server, ServerWebSocket } from "bun"
 import { randomBytes } from "node:crypto"
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, normalize, resolve } from "node:path"
 import {
@@ -63,7 +63,7 @@ import { binDirOf, createPtyManager } from "./Pty"
 import type { PtyManager } from "./Pty"
 import { createRepositoryAuthority } from "./RepositoryAuthority"
 import type { RepositoryAuthority } from "./RepositoryAuthority"
-import { json, jsonError, readJson, Router } from "./routes"
+import { decodePath, invalidPath, json, jsonError, readJson, Router } from "./routes"
 import type { RouteHandler } from "./routes"
 import { registerAgentRoutes } from "./routes/agents"
 import { registerRepoTargetRoutes } from "./routes/repoTargets"
@@ -642,9 +642,9 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
 
   const handleChatTurn: RouteHandler = async ({ request }) => {
     if (agent === undefined) return jsonError(503, "agent_unavailable", "No agent provider is configured in local-only mode.")
-    const length = Number(request.headers.get("content-length") ?? "0")
-    if (length > MAX_BODY_BYTES) return jsonError(413, "body_too_large", "Request body is too large.")
-    const parsed = await readJson(request)
+    // Bounded by bytes received, not by a declared length: a chunked turn
+    // carries no Content-Length and would otherwise be read whole.
+    const parsed = await readJson(request, MAX_BODY_BYTES)
     if ("error" in parsed) return parsed.error
     if (!isStartTurnRequest(parsed.body)) {
       return jsonError(400, "invalid_request", "Body must be { runId, messages, instructions } with optional tools and context.")
@@ -808,9 +808,13 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
 
   const serveStatic = async (pathname: string): Promise<Response> => {
     const index = join(distDir, "index.html")
-    const relative = normalize(decodeURIComponent(pathname)).replace(/^\/+/, "")
+    const decoded = decodePath(pathname)
+    if (decoded === undefined) return invalidPath()
+    const relative = normalize(decoded).replace(/^\/+/, "")
     const candidate = resolve(distDir, relative)
-    if (relative !== "" && candidate.startsWith(distDir + "/") && existsSync(candidate)) {
+    // Only a regular file is a body: `Bun.file(<directory>)` throws EISDIR,
+    // and a dotted directory name passes the `relative.includes(".")` test.
+    if (relative !== "" && candidate.startsWith(distDir + "/") && statSync(candidate, { throwIfNoEntry: false })?.isFile() === true) {
       const file = Bun.file(candidate)
       if ((await file.exists()) && file.size > 0 || relative.includes(".")) {
         return new Response(file, {
@@ -1000,12 +1004,26 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
      */
     fetch: async (request, bunServer) => {
       const started = performance.now()
-      const response = await handle(request, bunServer)
       const { pathname } = new URL(request.url)
-      if (response !== undefined && (pathname === "/" || pathname.startsWith("/api/"))) {
-        log(`${request.method} ${trailPath(pathname)} -> ${response.status} in ${Math.round(performance.now() - started)}ms`)
+      /*
+       * The line is written in `finally`, and a throw past `handle` answers
+       * the error envelope routes.ts promises: a request that fails outside
+       * a matched handler still leaves its trail line instead of Bun's
+       * default HTML 500 and silence.
+       */
+      let answered: Response | undefined
+      try {
+        answered = await handle(request, bunServer)
+        return answered
+      } catch (error) {
+        log(`${request.method} ${trailPath(pathname)} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+        answered = jsonError(500, "internal", error instanceof Error ? error.message : "Request failed.")
+        return answered
+      } finally {
+        if (answered !== undefined && (pathname === "/" || pathname.startsWith("/api/"))) {
+          log(`${request.method} ${trailPath(pathname)} -> ${answered.status} in ${Math.round(performance.now() - started)}ms`)
+        }
       }
-      return response
     },
     websocket: {
       maxPayloadLength: MAX_ANY_WS_FRAME_BYTES,

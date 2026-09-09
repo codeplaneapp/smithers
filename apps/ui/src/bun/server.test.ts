@@ -123,6 +123,30 @@ describe("the local origin", () => {
     expect(await response.text()).not.toContain("root:")
   })
 
+  test("a malformed percent-encoding answers the envelope with a trail line, and a dotted directory falls back to the SPA", async () => {
+    const staticPath = await fetch(`${server.origin}/%E0%A4%A`)
+    expect(staticPath.status).toBe(400)
+    expect(staticPath.headers.get("content-type")).toContain("application/json")
+    expect(await staticPath.json()).toEqual({
+      error: { code: "invalid_path", message: "Request path is not valid percent-encoded UTF-8." }
+    })
+    const before = logs.length
+    const routed = await apiFetch("/api/agents/%E0%A4%A", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    })
+    expect(routed.status).toBe(400)
+    expect(((await routed.json()) as { error: { code: string } }).error.code).toBe("invalid_path")
+    // A path that never reaches a handler still leaves its line.
+    expect(logs.slice(before).some((line) => /^PUT \/api\/agents\/%E0%A4%A -> 400 in \d+ms$/.test(line))).toBe(true)
+    // `Bun.file(<directory>)` throws EISDIR, and a dotted name looks like a file.
+    await mkdir(join(dist, "docs.d"), { recursive: true })
+    const dotted = await fetch(`${server.origin}/docs.d/`)
+    expect(dotted.status).toBe(200)
+    expect(dotted.headers.get("content-type")).toContain("text/html")
+  })
+
   test("unknown /api paths answer a JSON 404, method mismatches a 405", async () => {
     const missing = await apiFetch("/api/nope")
     expect(missing.status).toBe(404)
@@ -782,6 +806,33 @@ describe("POST /api/chat/turn", () => {
     expect(response.status).toBe(400)
     const body = (await response.json()) as { error: { code: string } }
     expect(body.error.code).toBe("invalid_request")
+  })
+
+  test("caps the body by bytes received, so a chunked turn past the cap answers 413", async () => {
+    const declared = await apiFetch("/api/chat/turn", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": String(4 * 1024 * 1024) },
+      body: "x".repeat(4 * 1024 * 1024)
+    })
+    expect(declared.status).toBe(413)
+    // Chunked: no Content-Length on the wire, so only the received bytes bound it.
+    const encoder = new TextEncoder()
+    const chunk = encoder.encode("a".repeat(256 * 1024))
+    const chunked = await apiFetch("/api/chat/turn", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode("{\"runId\":\"chunked\",\"instructions\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\""))
+          for (let index = 0; index < 8; index += 1) controller.enqueue(chunk)
+          controller.enqueue(encoder.encode("\"}]}"))
+          controller.close()
+        }
+      }),
+      duplex: "half"
+    } as RequestInit)
+    expect(chunked.status).toBe(413)
+    expect(((await chunked.json()) as { error: { code: string } }).error.code).toBe("body_too_large")
   })
 
   test("cancel answers ok and closes a live stream", async () => {

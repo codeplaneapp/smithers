@@ -191,7 +191,11 @@ verbs over `//...` for the kinds the repository actually has.
 ## HTTP and WebSocket surface
 
 All mutations require `Content-Type: application/json`; failures use
-`{ error: { code, message } }` locally.
+`{ error: { code, message } }` locally. A path whose percent-encoding is not
+valid UTF-8 answers `400 invalid_path` in that envelope, static or routed, and
+leaves its trail line. An agent turn body is capped at 1 MiB by the bytes
+received, so a chunked body is refused with `413 body_too_large` like one that
+declares its length.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
