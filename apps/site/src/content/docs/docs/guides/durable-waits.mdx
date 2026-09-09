@@ -35,7 +35,17 @@ A payload names exactly one deadline: a relative `millis`, or an absolute `until
 
 `SleepRequestInvalid` is the typed refusal, with three codes: `missing_deadline` (the payload named neither field), `ambiguous_deadline` (it named both, which are the same fact stated two ways), and `invalid_deadline` (a number that is not a length of time, such as a negative `millis`).
 
-Inside an effect rather than a body, `DurableClock.sleep({ name, duration, inMemoryThreshold? })` parks the execution instead of holding a fiber, so the wait outlives the process waiting on it.
+Inside an effect rather than a body, `DurableClock.sleep({ name, duration, inMemoryThreshold? })` picks its mechanism from the duration. A duration at or below `inMemoryThreshold`, 60 seconds by default, runs as an in-memory sealed action: it holds a fiber, and a process that dies mid-sleep repeats the whole delay on resume instead of reading a recorded deadline. A longer duration schedules a durable clock and parks the execution, so that wait outlives the process waiting on it. A zero duration returns without waiting. The boundary is inclusive: a duration exactly equal to the threshold stays in memory.
+
+Set `inMemoryThreshold: 0` when every positive wait has to be a persisted deadline. That is what `Sleep.action` does under the hood, which is why a body-level sleep parks whatever its length:
+
+```ts
+import { DurableClock } from "@smthrs/flow"
+
+DurableClock.sleep({ name: "cooldown", duration: "5 seconds", inMemoryThreshold: 0 })
+```
+
+The [`DurableClock.sleep` reference](/docs/reference/api/flow/) carries the signature and the default.
 
 ## 3. Rendezvous with the outside with WaitFor and DurableDeferred
 
@@ -99,6 +109,7 @@ A queue needs an Effect `PersistedQueue` service backed by durable storage. The 
 - Kill a poll mid-wait and attach a fresh engine over the same SQLite file. The lineage finishes, and the recorded check dispatches number one per attempt across both engines. That is example 34's two-phase shape: phase one parks on the timer with the engine dropped underneath it, phase two attaches after the timer is due.
 - Feed `Sleep.action` a payload naming both `millis` and `until` and the step refuses with `SleepRequestInvalid` code `ambiguous_deadline` before any timer is armed.
 - Let a poll reach `maxAttempts` unsatisfied: with `onTimeout: "fail"` the lineage fails `PollExhausted`; with `return-last` it answers the last check output.
+- Call `DurableClock.sleep` for 5 seconds and the execution keeps running in its fiber; call the same sleep with `inMemoryThreshold: 0` and the execution suspends on a durable clock.
 - Complete a wait point from another process with `DurableDeferred.succeed` and the parked run resumes; completing it a second time changes nothing, because the first recorded exit is the one every later read replays.
 
 ## See also

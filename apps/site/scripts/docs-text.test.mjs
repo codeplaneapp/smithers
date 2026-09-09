@@ -90,3 +90,16 @@ test("exports the theme-selected animation as its single image", () => {
   )
   assert.equal(result, "![The graph.](/images/dark.gif)")
 })
+
+test("durable wait guide agrees with the DurableClock in-memory threshold", () => {
+  const guide = readFileSync(new URL("../src/content/docs/docs/guides/durable-waits.mdx", import.meta.url), "utf8")
+  const source = readFileSync(new URL("../../../packages/smithers/flows/flow/src/DurableClock.ts", import.meta.url), "utf8")
+  const declared = /defaultInMemoryThreshold = Duration\.seconds\((\d+)\)/.exec(source)
+  assert.ok(declared, "DurableClock declares its in-memory threshold default in seconds")
+  assert.match(source, /Duration\.isLessThanOrEqualTo\(duration, inMemoryThreshold\)/)
+  const documented = new RegExp(`at or below \`inMemoryThreshold\`, ${declared[1]} seconds by default`)
+  assert.match(guide, documented)
+  assert.doesNotMatch(guide, /parks the execution instead of holding a fiber, so the wait outlives the process/)
+  assert.match(guide, /inMemoryThreshold: 0/)
+  assert.match(guide, /inclusive/)
+})
