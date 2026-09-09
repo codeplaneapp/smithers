@@ -2,12 +2,18 @@
  * The durable Node host adapter for credential persistence, over the
  * production SQLite driver in `@smthrs/database`.
  */
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Cause, Effect, Exit, Option, Redacted } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Redacted } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import { describe, expect, it } from "vitest"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describe, expect, it, onTestFinished } from "vitest"
 import * as Credential from "../src/Credential.ts"
 import type * as CredentialStore from "../src/CredentialStore.ts"
+import * as ControlMigrations from "../src/Migrations.ts"
 import * as SqlCredentialStore from "../src/SqlCredentialStore.ts"
 import * as WebCryptoCipher from "../src/WebCryptoCipher.ts"
 
@@ -28,6 +34,24 @@ const withStore = <A, E>(
 const squash = <A, E>(exit: Exit.Exit<A, E>): Record<string, unknown> => {
   if (Exit.isSuccess(exit)) throw new Error("expected a typed failure")
   return Cause.squash(exit.cause) as Record<string, unknown>
+}
+
+/**
+ * A database on disk, so a session can close every layer and a later one can
+ * open the same bytes. The migration ledger is written the way a host writes
+ * it, because the driver refuses to reopen a file that has tables without one.
+ */
+const durableDatabase = (filename: string) =>
+  Layer.provideMerge(
+    ControlMigrations.layer,
+    Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))
+  )
+
+/** A fresh database path whose directory is removed when the test ends. */
+const databaseFile = (): string => {
+  const directory = mkdtempSync(join(tmpdir(), "control-credentials-"))
+  onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
+  return join(directory, "control.db")
 }
 
 const record = (overrides: Partial<CredentialStore.SealedRecord> = {}): CredentialStore.SealedRecord => ({
@@ -126,6 +150,112 @@ describe("SqlCredentialStore", () => {
     // What is on disk is ciphertext, not the rotated secret.
     expect(JSON.stringify(observed.persisted)).not.toContain("sk-live-rotated")
     expect(observed.revoked).toBe(true)
+  })
+
+  it("resolves and revokes a rotated credential after every layer is closed", async () => {
+    // The in-memory database dies with its scope, so it can only show that a
+    // secret survives one process. This walks the real promise: what is on
+    // disk after a rotation is what a later host opens and decrypts.
+    const filename = databaseFile()
+    const session = <A, E>(
+      body: (
+        host: {
+          readonly store: CredentialStore.Service
+          readonly credentials: Credential.Credential
+        }
+      ) => Effect.Effect<A, E>
+    ): Promise<A> =>
+      Effect.runPromise(
+        Effect.gen(function*() {
+          const store = yield* SqlCredentialStore.make
+          const cipher = yield* WebCryptoCipher.make({ key: hostKey })
+          return yield* body({ store, credentials: Credential.make({ store, cipher }) })
+        }).pipe(Effect.provide(durableDatabase(filename)), Effect.scoped, Effect.orDie)
+      )
+
+    const reference = await session(({ credentials }) =>
+      Effect.gen(function*() {
+        const created = yield* credentials.create({
+          id: "exa",
+          name: "Exa search",
+          secret: Redacted.make("sk-live-first")
+        })
+        yield* credentials.rotate(created, Redacted.make("sk-live-rotated"))
+        return created
+      })
+    )
+
+    const reopened = await session(({ credentials, store }) =>
+      Effect.gen(function*() {
+        const resolved = yield* credentials.resolve(reference)
+        const persisted = Option.getOrThrow(yield* store.read("exa"))
+        return {
+          secret: Redacted.value(resolved),
+          version: persisted.version,
+          names: (yield* credentials.list()).map((entry) => entry.name)
+        }
+      })
+    )
+
+    expect(reopened).toEqual({ secret: "sk-live-rotated", version: 2, names: ["Exa search"] })
+
+    await session(({ credentials }) => credentials.revoke(reference))
+    const afterRevoke = await session(({ store }) => store.read("exa"))
+    expect(Option.isNone(afterRevoke)).toBe(true)
+  })
+
+  it("refuses the loser when two independently opened stores rotate at one version", async () => {
+    // Two connections on one file, each with its own writer, as two host
+    // processes sharing a database. The SQLite driver is synchronous, so one
+    // runtime never suspends inside a write and the overlap has to be
+    // arranged: the second store starts its rotation while the first holds an
+    // uncommitted one open, which is the only state the transaction exists to
+    // survive. Both writers derived version 2 from the same version 1.
+    const filename = databaseFile()
+    const opened = Deferred.makeUnsafe<void>()
+    const holding = Deferred.makeUnsafe<void>()
+
+    const winner = Effect.gen(function*() {
+      const store = yield* SqlCredentialStore.make
+      const writer = yield* DurableWriter.DurableWriter
+      yield* Deferred.await(opened)
+      yield* store.write(record())
+      yield* writer.write(Effect.gen(function*() {
+        yield* store.write(record({ version: 2, ciphertext: "Zmlyc3Q=" }))
+        yield* Deferred.succeed(holding, undefined)
+        // Hold the row while the other connection attempts its rotation. The
+        // waiter cannot signal this fiber to finish: resuming it would commit
+        // before the second store had begun, which is the interleaving under
+        // test.
+        yield* Effect.sleep("100 millis")
+      }))
+    }).pipe(Effect.provide(durableDatabase(filename)), Effect.scoped, Effect.orDie)
+
+    const loser = Effect.gen(function*() {
+      const store = yield* SqlCredentialStore.make
+      yield* Deferred.succeed(opened, undefined)
+      yield* Deferred.await(holding)
+      return yield* Effect.exit(store.write(record({ version: 2, ciphertext: "c2Vjb25k" })))
+    }).pipe(Effect.provide(durableDatabase(filename)), Effect.scoped, Effect.orDie)
+
+    const [, refused] = await Effect.runPromise(Effect.all([winner, loser], { concurrency: "unbounded" }))
+
+    const conflict = squash(refused)
+    expect(conflict._tag).toBe("/control/CredentialConflict")
+    expect(conflict.expectedVersion).toBe(1)
+    expect(conflict.actualVersion).toBe(2)
+
+    // A third connection reads what a later host would open: the loser never
+    // overwrote the winner.
+    const persisted = await Effect.runPromise(
+      Effect.flatMap(SqlCredentialStore.make, (store) => store.read("exa")).pipe(
+        Effect.provide(durableDatabase(filename)),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+    expect(Option.getOrThrow(persisted).ciphertext).toBe("Zmlyc3Q=")
+    expect(Option.getOrThrow(persisted).version).toBe(2)
   })
 
   it("reports every operation as unavailable storage when the table is gone", async () => {
