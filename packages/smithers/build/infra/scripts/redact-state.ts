@@ -219,6 +219,51 @@ const validateJsonBudget = (root: unknown): void => {
 }
 
 /**
+ * Audits member names in text already accepted by JSON.parse. Like the
+ * protocol prescan, this keeps a separate name set for each object and
+ * decodes escaped keys before comparing them. Parsed values alone cannot
+ * expose credentials hidden in members that JSON.parse discarded.
+ */
+const assertNoDuplicateJsonMembers = (text: string): void => {
+  const scopes: Array<Set<string> | null> = []
+  let keyScope: Set<string> | null = null
+  let index = 0
+  while (index < text.length) {
+    const character = text.charAt(index)
+    if (character === "{") {
+      keyScope = new Set<string>()
+      scopes.push(keyScope)
+      index += 1
+    } else if (character === "[") {
+      scopes.push(null)
+      keyScope = null
+      index += 1
+    } else if (character === "}" || character === "]") {
+      scopes.pop()
+      keyScope = null
+      index += 1
+    } else if (character === ",") {
+      const enclosing = scopes.at(-1)
+      keyScope = enclosing instanceof Set ? enclosing : null
+      index += 1
+    } else if (character === ":") {
+      keyScope = null
+      index += 1
+    } else if (character === "\"") {
+      let end = index + 1
+      // Valid JSON guarantees a closing quote; escaped quotes are skipped.
+      while (text.charAt(end) !== "\"") end += text.charAt(end) === "\\" ? 2 : 1
+      if (keyScope !== null) {
+        const name = JSON.parse(text.slice(index, end + 1)) as string
+        if (keyScope.has(name)) throw new TypeError("Alchemy state contains a duplicate object member name")
+        keyScope.add(name)
+      }
+      index = end + 1
+    } else index += 1
+  }
+}
+
+/**
  * Runs `use` over an open handle and closes the handle afterwards.
  *
  * The operation's own failure is the one reported: a close that fails after
@@ -290,6 +335,7 @@ const readStateFile = async (file: string): Promise<{ readonly identity: FileIde
     throw new TypeError(`Alchemy state file is not valid JSON: ${file}`)
   }
   validateJsonBudget(state)
+  assertNoDuplicateJsonMembers(text)
   return { identity, state }
 }
 
@@ -351,7 +397,6 @@ const assertNoUnhandledCredentialBindings = (
 }
 
 const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): boolean => {
-  if (!isRecord(value)) return false
   let changed = false
   const handledKeyContainers = new WeakSet<object>()
   const handledNameRecords = new WeakSet<object>()
@@ -362,7 +407,7 @@ const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): bool
   // wrapper reports a successful redaction.
   const mustRedact = (candidate: unknown): boolean => typeof candidate !== "string" || !permitted.has(candidate)
 
-  const props = isRecord(value["props"]) ? value["props"] : null
+  const props = isRecord(value) && isRecord(value["props"]) ? value["props"] : null
   const env = props !== null && isRecord(props["env"]) ? props["env"] : null
   if (env !== null) {
     handledKeyContainers.add(env)
@@ -391,7 +436,7 @@ const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): bool
     }
   }
 
-  const bindings = value["bindings"]
+  const bindings = isRecord(value) ? value["bindings"] : undefined
   if (Array.isArray(bindings)) {
     for (const binding of bindings) {
       if (!isRecord(binding)) continue
@@ -525,9 +570,17 @@ const redactFile = async (
 ): Promise<boolean> => {
   const { identity, state } = await readStateFile(file)
   if (!redactWorkerState(state, permitted)) return false
-  const rendered = `${JSON.stringify(state, null, 2)}\n`
+  let rendered = `${JSON.stringify(state, null, 2)}\n`
   if (Buffer.byteLength(rendered, "utf8") > maximumRenderedStateBytes) {
     throw new RangeError(`redacted Alchemy state exceeds ${maximumRenderedStateBytes} bytes: ${file}`)
+  }
+  // Preserve the rendering budget above, but never publish bytes a later
+  // redaction cannot read. Deep indentation can dwarf the compact input.
+  if (Buffer.byteLength(rendered, "utf8") > maximumStateFileBytes) {
+    rendered = `${JSON.stringify(state)}\n`
+    if (Buffer.byteLength(rendered, "utf8") > maximumStateFileBytes) {
+      throw new RangeError(`redacted Alchemy state exceeds ${maximumStateFileBytes} bytes: ${file}`)
+    }
   }
   await writeStateFile(root, file, identity, rendered)
   return true
@@ -567,7 +620,7 @@ const discoverWorkerStates = async (
       // The name is checked before the kind: a directory or a device named
       // like Worker state is a state file the read path cannot scrub, and
       // walking past it would report success over whatever it hides.
-      if (entry.name === "CacheWorker.json") {
+      if (entry.name.startsWith("CacheWorker.json")) {
         if (!entry.isFile()) throw new TypeError(`Alchemy Worker state is not a regular file: ${candidate}`)
         const resolved = await Fs.realpath(candidate)
         if (!inside(root, resolved)) throw new TypeError(`Alchemy Worker state escapes its root: ${candidate}`)

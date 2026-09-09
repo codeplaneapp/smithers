@@ -71,6 +71,13 @@ therefore cannot survive a run that claims success. Current state contains
 only the one-way verifier. Use the scripts instead of calling `alchemy deploy`
 directly.
 
+Redaction inspects every `CacheWorker.json*` file under the stack state
+directory, including Alchemy temporary siblings left by an interrupted write.
+It refuses duplicate JSON member names, including escaped spellings, and audits
+credential bindings in every decoded root, including arrays. Published
+replacements fit the 16 MiB read limit; indentation falls back to compact JSON
+when needed, and oversized replacements are refused before publication.
+
 ## Deploy production
 
 Run both commands from `packages/smithers/build/infra`. Preview the production plan:

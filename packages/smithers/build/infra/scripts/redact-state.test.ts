@@ -148,6 +148,110 @@ describe("redactAlchemyState", () => {
     })
   })
 
+  it.each([
+    ["credential members", `{"props":{"env":{"CACHE_WRITE_TOKEN":"raw-token","CACHE_WRITE_TOKEN":"${sentinel}"}}}`],
+    ["escaped credential members", String.raw`{"props":{"env":{"CACHE_WRITE_TOKEN":"raw-token","CACHE_WRITE_\u0054OKEN":"${sentinel}"}}}`],
+    ["ancestor members", '{"props":{"env":{"CACHE_WRITE_TOKEN":"raw-token"}},"props":{}}'],
+    ["escaped ancestor members", String.raw`{"props":{"env":{"CACHE_WRITE_TOKEN":"raw-token"}},"\u0070rops":{}}`],
+    ["members in an array", '[{"extra":"raw-token","extra":null}]']
+  ])("refuses duplicate %s before declaring the original bytes clean", async (_case, input) => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      await Fs.writeFile(file, input)
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /duplicate object member name/
+      )
+      expect(await Fs.readFile(file, "utf8")).toBe(input)
+    })
+  })
+
+  it("keeps equal member names in separate objects and escaped string contents", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      const input = JSON.stringify({
+        first: { same: 'braces {}, commas, colon: and a quote " and slash \\' },
+        second: [{ same: null }, { same: true }],
+        empty: {},
+        tail: false
+      }, null, 2)
+      await Fs.writeFile(file, input)
+
+      expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(0)
+      expect(await Fs.readFile(file, "utf8")).toBe(input)
+    })
+  })
+
+  it.each(["null", "true", "5", '"text"', '[{"CACHE_TOKEN":"' + sentinel + '"}]'])(
+    "leaves a provably clean root %s unchanged",
+    async (input) => {
+      await withFixture(async (root) => {
+        const file = NodePath.join(root, "CacheWorker.json")
+        await Fs.writeFile(file, input)
+
+        expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(0)
+        expect(await Fs.readFile(file, "utf8")).toBe(input)
+      })
+    }
+  )
+
+  it("refuses a credential-bearing array root", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      const input = `[${workerState("CACHE_WRITE_TOKEN", "raw-token")}]`
+      await Fs.writeFile(file, input)
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /unrecognized shape for credential binding CACHE_WRITE_TOKEN/
+      )
+      expect(await Fs.readFile(file, "utf8")).toBe(input)
+    })
+  })
+
+  it.each(["CacheWorker.json.123.abc.tmp", "CacheWorker.json.backup"])(
+    "scrubs a leftover %s beside the current state",
+    async (name) => {
+      await withFixture(async (root) => {
+        await Fs.writeFile(NodePath.join(root, "CacheWorker.json"), workerState("CACHE_TOKEN", sentinel))
+        const file = NodePath.join(root, name)
+        await Fs.writeFile(file, workerState("CACHE_TOKEN", "raw-token"))
+
+        expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(1)
+        expect(await Fs.readFile(file, "utf8")).not.toContain("raw-token")
+        expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(0)
+      })
+    }
+  )
+
+  it("refuses an unreadable Alchemy temporary sibling", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(NodePath.join(root, "CacheWorker.json"), "{}")
+      await Fs.writeFile(NodePath.join(root, "CacheWorker.json.123.abc.tmp"), "{")
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(/not valid JSON/)
+    })
+  })
+
+  it("can redact a deeply nested replacement again", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      // robustness-2.ts: indentation expands this 180 KB input past 16 MiB.
+      const filler = `${"[".repeat(100)}${"0,".repeat(89_999)}0${"]".repeat(100)}`
+      const input = `{"props":{"env":{"CACHE_TOKEN":{"__redacted__":"old"}}},"filler":${filler}}`
+      expect(Buffer.byteLength(input)).toBeLessThan(maximumStateFileBytes)
+      await Fs.writeFile(file, input)
+
+      expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(1)
+      expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(0)
+      const output = await Fs.readFile(file, "utf8")
+      expect(Buffer.byteLength(output)).toBeLessThanOrEqual(maximumStateFileBytes)
+      expect(JSON.parse(output)).toEqual({
+        ...JSON.parse(input),
+        props: { env: { CACHE_TOKEN: { __redacted__: sentinel } } }
+      })
+    })
+  })
+
   it("scrubs every credential environment variable when no token is supplied", async () => {
     await withFixture(async (root) => {
       const configured = "the-read-bearer"
@@ -508,6 +612,21 @@ describe("redactAlchemyState", () => {
       await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
         /redacted Alchemy state exceeds 33554432 bytes/
       )
+    })
+  })
+
+  it("refuses a replacement that exceeds the read limit even when compact", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      const prefix = '{"props":{"env":{"CACHE_TOKEN":"raw"}},"filler":"'
+      const suffix = '"}'
+      const input = prefix + "x".repeat(maximumStateFileBytes - prefix.length - suffix.length) + suffix
+      await Fs.writeFile(file, input)
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /redacted Alchemy state exceeds 16777216 bytes/
+      )
+      expect(await Fs.readFile(file, "utf8")).toBe(input)
     })
   })
 
