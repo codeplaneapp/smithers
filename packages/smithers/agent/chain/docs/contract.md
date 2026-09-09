@@ -43,6 +43,19 @@ same entry declaration it was produced under; a redeclared entry re-keys its
 calls and the resumed chain refuses loudly with `replay_divergence` rather
 than serving a stale result.
 
+## Catalog descriptions
+
+`Prompt.assemble` places a fixed instruction before the catalog declaring
+entry descriptions untrusted repository data. Each description is a
+JSON-quoted string labelled `untrusted repository description`. Embedded
+instructions cannot override the user's goal or authorize actions. The
+harness-owned `author` description remains trusted.
+
+Descriptions are collapsed to one line, stripped of backticks, and bounded
+to 200 characters before JSON encoding. Quotes, backslashes, and control
+characters are escaped after truncation, preserving the data delimiter.
+Runtime catalog and capability checks still govern every call.
+
 ## The gates
 
 | Gate             | Where                 | What it rejects                                                                         |

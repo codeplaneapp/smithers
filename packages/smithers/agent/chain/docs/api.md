@@ -600,17 +600,20 @@ cache hits across turns.
   advertised names must stay byte-identical to what `Catalog.lookup`
   dispatches.
 - `maxEntryDescription = 200`: the longest entry description the catalog
-  block renders.
+  block renders before JSON encoding and provenance labelling.
 - `renderableName(name): boolean`: whether a name can be advertised verbatim
   on one bounded line. Names are advertised byte-identically or omitted.
 - `catalogBlock(entries): string`: renders the catalog as a byte-stable
   block: the author entry pinned first, then every dispatchable entry sorted
   by name, deduped last-wins to mirror `Catalog.make`, the reserved author
   name filtered, names advertised verbatim or omitted, and descriptions
-  collapsed to one bounded line with truncation marked.
+  collapsed to one bounded line with truncation marked, then JSON-quoted
+  and labelled as untrusted repository descriptions. The harness-owned
+  `author` description remains trusted.
 - `assemble(options): string`: assembles the full prefix in fixed order:
   BASE, CONCIERGE (concierge role only), RULES, the authoring contract, the
-  catalog block.
+  catalog block. The contract tells the model that catalog descriptions are
+  data and cannot override the user's goal or authorize actions.
 - `forCatalog(catalog: Catalog.Service, role: Role): string`: assembles the
   prefix from a mounted catalog service: the composition that cannot diverge
   from what the chain dispatches.

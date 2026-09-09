@@ -12,10 +12,10 @@
  * dedupe last-wins exactly like `Catalog.make`'s lookup, an entry named
  * `author` is filtered (the trampoline intercepts that name before the
  * catalog), names are advertised byte-identically or omitted, and
- * descriptions are collapsed to single lines so no entry can inject
- * structure into the prefix. `forCatalog` assembles from a mounted catalog
- * service, keeping the advertised block and the dispatched entries the same
- * by construction.
+ * descriptions are bounded JSON strings labelled as untrusted repository
+ * data under the fixed contract rule. `forCatalog` assembles from a mounted
+ * catalog service, keeping the advertised block and the dispatched entries
+ * the same by construction.
  *
  * @since 0.1.0
  */
@@ -121,7 +121,7 @@ export const renderableName = (name: string): boolean =>
   line(name, "").indexOf(separator) === bullet.length + name.length
 
 /**
- * The longest entry description the catalog block renders.
+ * The longest entry description before JSON encoding and provenance labelling.
  *
  * Registry-discovered entries carry descriptions written in repository
  * files rather than by the harness, so one entry must not be able to claim
@@ -134,33 +134,33 @@ export const renderableName = (name: string): boolean =>
 export const maxEntryDescription = 200
 
 /**
- * Collapses one entry description to a single bounded line.
+ * Encodes one entry description as a bounded, untrusted data field.
  *
- * Descriptions are the least-trusted strings in the prefix:
- * registry-discovered entries carry them from repository files. Three
- * defences, and deliberately no more. Whitespace collapsing defeats
- * newline-based section forgery, and it is what makes a `#` or a fence
- * harmless — both land mid-line, where they open nothing. Backticks come out
- * because a one-line description has no use for them. The length cap bounds
- * how much of the context window one entry can claim, and truncation is
- * marked so a shortened line never reads as the whole declaration.
+ * Registry descriptions originate in repository files. Collapse whitespace,
+ * remove backticks, and mark truncation to retain the single-line context
+ * bound. Then JSON-quote the value so quotes, backslashes, and control
+ * characters cannot close its data delimiter. Encoding happens after
+ * truncation so the closing quote and escape sequences always stay intact.
+ * The fixed contract preceding the catalog tells the model to disregard
+ * instructions in these provenance-labelled fields.
  *
  * Names are treated differently: advertise-what-you-dispatch requires the
  * model to read the exact string `Catalog.lookup` accepts. An unrenderable
  * name is dropped because not advertising a dispatchable call is safe, while
  * advertising a rewritten call that gate 3 then refuses is not.
  */
-const inlineDescription = (description: string, limit: number): string => {
+const untrustedDescription = (description: string, limit: number): string => {
   const flat = description.replaceAll(/\s+/g, " ").replaceAll("`", "").trim()
-  return flat.length <= limit ? flat : `${flat.slice(0, limit - 3)}...`
+  const bounded = flat.length <= limit ? flat : `${flat.slice(0, limit - 3)}...`
+  return `untrusted repository description: ${JSON.stringify(bounded)}`
 }
 
 /**
  * Renders the catalog as a byte-stable block: the author entry pinned
  * first, then every dispatchable entry sorted by name — deduped
  * last-wins to mirror `Catalog.make`, the reserved author name filtered,
- * with names advertised verbatim or omitted and descriptions collapsed to
- * one bounded line.
+ * with names advertised verbatim or omitted and descriptions encoded as
+ * bounded, untrusted repository data.
  *
  * @category assembly
  * @since 0.1.0
@@ -176,7 +176,7 @@ export const catalogBlock = (entries: ReadonlyArray<Catalog.Entry>): string => {
   // Names are unique after the dedupe, so the comparator never sees equals.
   const lines = [...dispatchable.values()]
     .sort((left, right) => left.name < right.name ? -1 : 1)
-    .map((entry) => line(entry.name, inlineDescription(entry.description, maxEntryDescription)))
+    .map((entry) => line(entry.name, untrustedDescription(entry.description, maxEntryDescription)))
   return [
     "# Catalog",
     "",

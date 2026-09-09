@@ -44,6 +44,10 @@ export interface Config {
  * same function derives test fixtures, so a mapping drift breaks the
  * replay match loudly instead of silently changing the step key.
  *
+ * The prefix is host-supplied. `Prompt.assemble` places a fixed rule before
+ * the catalog and encodes repository descriptions as labelled, untrusted
+ * data; this mapping preserves that boundary in the system part.
+ *
  * Degenerate inputs collapse to wire-valid shapes: an empty prefix emits
  * no system part at all, and an empty context (reachable from any script
  * via a garbage author payload) becomes one placeholder line — providers
