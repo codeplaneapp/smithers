@@ -157,3 +157,26 @@ const resource = Resource.layer({
 into OpenTelemetry attributes, for code that needs the attribute record rather
 than a layer. It reads no environment variables: every attribute is one you
 passed.
+
+## Default OTLP export limits
+
+`Otlp.layer` and `Otlp.layerFetch` share a limit of four active HTTP requests
+across logs, traces, and metrics within each layer acquisition. Each request has
+a ten-second timeout that interrupts the transport and aborts a stalled fetch.
+`shutdownTimeout` separately bounds the final scope flush.
+
+Logs and traces flush at 1,000 records or the export interval. The transport has
+no waiting queue: a batch arriving while all four slots are occupied is dropped.
+Serialized JSON payloads larger than 1 MiB are also dropped, limiting active
+request payloads to 4 MiB. This limit applies after serialization; it does not
+bound individual application records, temporary serialization allocations, or
+the application's metric registry.
+
+The Effect counter `flows/observability/otlp/dropped` increments once per batch
+discarded for saturation, payload size, or timeout. Discards are terminal and
+are not retried. Read the counter locally
+with `Metric.value(Metric.counter("flows/observability/otlp/dropped"))` during an
+outage. Its exported value becomes available when the collector recovers.
+Ordinary HTTP and network failures retain Effect's retry policy. These limits
+apply to the default `Otlp` layers; SDK processors supplied to the other builders
+retain their own export policies.

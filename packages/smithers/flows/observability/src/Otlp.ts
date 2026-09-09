@@ -20,9 +20,14 @@
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Metric from "effect/Metric"
+import * as Option from "effect/Option"
+import * as Semaphore from "effect/Semaphore"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import type * as Headers from "effect/unstable/http/Headers"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
+import type * as HttpBody from "effect/unstable/http/HttpBody"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as Otlp from "effect/unstable/observability/Otlp"
 import * as Endpoint from "./Endpoint.ts"
 import * as Resource from "./Resource.ts"
@@ -51,6 +56,40 @@ export const defaultServiceName = "flows"
  * @since 0.1.0
  */
 export const defaultServiceVersion = "1.0.0-rc.0"
+
+// The upstream logger and tracer each buffer at most one 1,000-record batch.
+// Do not queue at the transport: upstream forks every full batch independently.
+const maxBatchSize = 1000
+const maxInFlight = 4
+const maxRequestBytes = 1024 * 1024
+const requestTimeout = "10 seconds"
+
+const boundedClient = Layer.effect(
+  HttpClient.HttpClient,
+  Effect.gen(function*() {
+    const client = yield* HttpClient.HttpClient
+    const permits = Semaphore.makeUnsafe(maxInFlight)
+    // Metric handles cache their first registry, so allocate one per layer.
+    const droppedExports = Metric.counter("flows/observability/otlp/dropped")
+    return HttpClient.transform(client, (requestEffect, request) =>
+      Effect.suspend(() => {
+        // A local discard is terminal, so the upstream retry loop must not
+        // retain or retry its payload. Count batches, not records, without
+        // logging into this exporter.
+        const discard = Metric.update(droppedExports, 1).pipe(
+          Effect.as(HttpClientResponse.fromWeb(request, new Response(null, { status: 204 })))
+        )
+        // layerJson always supplies a Uint8Array body with a byte length.
+        const body = request.body as HttpBody.Uint8Array
+        if (body.contentLength > maxRequestBytes) return discard
+        return requestEffect.pipe(
+          Effect.timeoutOrElse({ duration: requestTimeout, orElse: () => discard }),
+          permits.withPermitsIfAvailable(1),
+          Effect.flatMap(Option.match({ onNone: () => discard, onSome: Effect.succeed }))
+        )
+      }))
+  })
+)
 
 /**
  * Configuration for the default OTLP wiring.
@@ -84,7 +123,9 @@ export interface Options {
 
 /**
  * Creates the OTLP logs, metrics, and traces layer with flows resource
- * defaults, JSON-serialized.
+ * defaults, JSON-serialized. Exports share a four-request limit with no waiting
+ * queue. Requests larger than 1 MiB or stalled for ten seconds are discarded;
+ * `flows/observability/otlp/dropped` counts discarded batches.
  *
  * **Details**
  *
@@ -126,11 +167,12 @@ export const layer = (
               ...(resource.attributes === undefined ? {} : { attributes: resource.attributes })
             },
             headers: options.headers,
+            maxBatchSize,
             loggerExportInterval: options.exportInterval,
             metricsExportInterval: options.exportInterval,
             tracerExportInterval: options.exportInterval,
             shutdownTimeout: options.shutdownTimeout
-          })
+          }).pipe(Layer.provide(boundedClient))
         )
       }
     )

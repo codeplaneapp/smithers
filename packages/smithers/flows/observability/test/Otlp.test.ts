@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Metric from "effect/Metric"
 import { TestClock } from "effect/testing"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
@@ -235,6 +236,93 @@ describe("Otlp", () => {
         expect(request.url).toMatch(/^http:\/\/collector\.invalid:4318\/nested\/v1\/(logs|metrics|traces)$/)
       }
       expect(collector.requests.some((request) => request.url.endsWith("/v1/logs"))).toBe(true)
+    }))
+
+  it.effect("bounds stalled exports, counts lost batches, and aborts requests before scope close", () =>
+    Effect.gen(function*() {
+      let started = 0
+      let active = 0
+      let peak = 0
+      let aborted = 0
+      let healthy = false
+      const pending = new Set<() => void>()
+      const activeCounts: Array<number> = []
+      const stalledFetch: typeof globalThis.fetch = (input, init) => {
+        if (healthy || String(input).endsWith("/v1/metrics")) return Promise.resolve(new Response("{}"))
+        started++
+        active++
+        peak = Math.max(peak, active)
+        return new Promise((_resolve, reject) => {
+          const abort = () => {
+            pending.delete(abort)
+            active--
+            aborted++
+            reject(new DOMException("aborted", "AbortError"))
+          }
+          pending.add(abort)
+          if (init?.signal?.aborted) abort()
+          else init?.signal?.addEventListener("abort", abort, { once: true })
+        })
+      }
+      const dropped = Metric.counter("flows/observability/otlp/dropped")
+      const snapshots = yield* runExportingTimed(
+        Effect.gen(function*() {
+          for (let batch = 0; batch < 20; batch++) {
+            for (let record = 0; record < 1000; record++) {
+              if (batch < 10) yield* Effect.logInfo("synthetic record")
+              else yield* Effect.void.pipe(Effect.withSpan("synthetic span"))
+            }
+            yield* TestClock.adjust("1 millis")
+            activeCounts.push(active)
+          }
+          const saturated = { started, peak, dropped: (yield* Metric.value(dropped)).count }
+          yield* TestClock.adjust("10 seconds")
+          const timedOut = { active, aborted, dropped: (yield* Metric.value(dropped)).count }
+          // A timed-out request releases its slot while the layer stays alive.
+          for (let record = 0; record < 1000; record++) yield* Effect.logInfo("after timeout")
+          yield* TestClock.adjust("1 millis")
+          const restarted = started
+          yield* TestClock.adjust("10 seconds")
+          const reused = { active, aborted }
+          // Clean up even with the regression present, so failures report the
+          // observed counts instead of hanging in TestClock-backed finalizers.
+          healthy = true
+          for (const abort of pending) abort()
+          yield* TestClock.adjust("5 seconds")
+          return { saturated, timedOut, restarted, reused }
+        }),
+        Otlp.layerFetch({
+          baseUrl: "http://collector.invalid:4318",
+          exportInterval: "1 hour",
+          shutdownTimeout: "10 millis"
+        }),
+        stalledFetch
+      ).pipe(Effect.provide(Logger.layer([])))
+      for (const count of activeCounts) expect(count).toBeLessThanOrEqual(4)
+      expect(snapshots.saturated).toEqual({ started: 4, peak: 4, dropped: 16 })
+      expect(snapshots.timedOut).toEqual({ active: 0, aborted: 4, dropped: 20 })
+      expect(snapshots.restarted).toBe(5)
+      expect(snapshots.reused).toEqual({ active: 0, aborted: 5 })
+      expect(active).toBe(0)
+    }))
+
+  it.effect("discards oversized serialized batches with a loss diagnostic", () =>
+    Effect.gen(function*() {
+      const collector = recordingFetch()
+      const dropped = Metric.counter("flows/observability/otlp/dropped")
+      yield* runExportingTimed(
+        Effect.gen(function*() {
+          yield* Effect.logInfo("x".repeat(1024 * 1024))
+          yield* TestClock.adjust("2 seconds")
+          expect(collector.requests.filter((request) => request.url.endsWith("/v1/logs"))).toHaveLength(0)
+          expect((yield* Metric.value(dropped)).count).toBe(1)
+          yield* Effect.logInfo("small batch")
+          yield* TestClock.adjust("1 second")
+          expect(collector.requests.filter((request) => request.url.endsWith("/v1/logs"))).toHaveLength(1)
+        }),
+        Otlp.layerFetch({ baseUrl: "http://collector.invalid:4318", exportInterval: "1 second" }),
+        collector.fetch
+      ).pipe(Effect.provide(Logger.layer([])))
     }))
 
   it.effect("layerNoop provides nothing and exports nothing", () =>
