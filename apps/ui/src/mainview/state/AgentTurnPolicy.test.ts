@@ -1,86 +1,23 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentChatMessage } from "@smthrs/rpc/NativeAgent"
+import type { AgentChatMessage, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import {
   boundToolResult,
   boundTurnRequest,
-  contextMessages,
-  estimateTextTokens,
+  droppedHistoryNotice,
   MAX_TURN_REQUEST_BYTES,
-  selectCompactionSlice,
   turnRequestBytes,
   utf8Bytes
 } from "./AgentTurnPolicy"
-import type { Message } from "./AppState"
 
 /** `AgentChatMessage` is a union: a chat turn, or a tool call/result item. */
 const textOf = (message: AgentChatMessage | undefined): string =>
   message !== undefined && "content" in message ? message.content : ""
-
-const message = (ordinal: number, role: Message["role"], text: string, act?: string): Message => ({
-  id: `m-${ordinal}`,
-  role,
-  text,
-  status: "complete",
-  createdAt: ordinal,
-  ordinal,
-  ...(act === undefined ? {} : { act })
-})
 
 describe("agent turn production policy", () => {
   test("measures the exact UTF-8 request body rather than JS code units", () => {
     const request = { runId: "r", messages: [{ role: "user" as const, content: "🙂" }], instructions: "" }
     expect(turnRequestBytes(request)).toBe(utf8Bytes(JSON.stringify(request)))
     expect(utf8Bytes("🙂")).toBe(4)
-    expect(estimateTextTokens("12345")).toBe(2)
-  })
-
-  test("injects a hidden Pi-compatible compaction summary and retains only newer messages", () => {
-    const messages = [
-      message(0, "user", "old question"),
-      message(1, "smithers", "old answer"),
-      message(2, "user", "new question")
-    ]
-    expect(
-      contextMessages(messages, { summary: "User chose blue.", throughOrdinal: 1, sourceMessageCount: 2, createdAt: 1 })
-    ).toEqual([
-      {
-        role: "user",
-        content:
-          "The conversation history before this point was compacted into the following summary:\n\n<summary>\nUser chose blue.\n</summary>"
-      },
-      { role: "user", content: "new question" }
-    ])
-  })
-
-  test("excludes tool-act rows from both ordinary and compacted context", () => {
-    const messages = [
-      message(0, "user", "question"),
-      message(1, "smithers", "Smithers ran /x", "tool"),
-      message(2, "smithers", "answer")
-    ]
-    expect(contextMessages(messages)).toEqual([
-      { role: "user", content: "question" },
-      { role: "assistant", content: "answer" }
-    ])
-  })
-
-  test("cuts only before a complete user turn", () => {
-    const messages = [
-      message(0, "user", "u0"),
-      message(1, "smithers", "a0"),
-      message(2, "user", "u1"),
-      message(3, "smithers", "a1"),
-      message(4, "user", "u2")
-    ]
-    const slice = selectCompactionSlice(messages, 1)
-    expect(slice?.compact.map((entry) => entry.text)).toEqual(["u0", "a0", "u1", "a1"])
-    expect(slice?.keep.map((entry) => entry.text)).toEqual(["u2"])
-    expect(slice?.throughOrdinal).toBe(3)
-  })
-
-  test("does not claim it can compact when no complete old turn exists", () => {
-    expect(selectCompactionSlice([message(0, "user", "only")], 1)).toBeUndefined()
-    expect(selectCompactionSlice([message(0, "user", "u"), message(1, "smithers", "a")], 1)).toBeUndefined()
   })
 
   test("tool outputs pass through losslessly under both limits", () => {
@@ -125,7 +62,7 @@ describe("agent turn production policy", () => {
  * from outside the app.
  */
 describe("one turn request is bounded to the boundary's body limit", () => {
-  const turn = (messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>) => ({
+  const turn = (messages: ReadonlyArray<AgentChatMessage>): StartAgentTurnRequest => ({
     runId: "turn-1",
     messages,
     instructions: "be snappy"
@@ -169,21 +106,21 @@ describe("one turn request is bounded to the boundary's body limit", () => {
 
   test("a tool leg's call and output are never split by the bound", () => {
     const long = "z".repeat(20_000)
-    // Three context messages, then a two-message tool leg plus the prompt.
+    // Keep the actual wire call/result pair intact.
     const bounded = boundTurnRequest(
       turn([
         { role: "user", content: long },
         { role: "assistant", content: long },
         { role: "user", content: long },
-        { role: "assistant", content: "call: issues.list" },
-        { role: "user", content: "result: two issues" }
+        { type: "function_call", call_id: "call-1", name: "issues.list", arguments: "{}" },
+        { type: "function_call_output", call_id: "call-1", output: "two issues" }
       ]),
       2
     )
     expect(turnRequestBytes(bounded.request)).toBeLessThanOrEqual(MAX_TURN_REQUEST_BYTES)
-    expect(bounded.request.messages.slice(-2).map(textOf)).toEqual([
-      "call: issues.list",
-      "result: two issues"
+    expect(bounded.request.messages.slice(-2)).toEqual([
+      { type: "function_call", call_id: "call-1", name: "issues.list", arguments: "{}" },
+      { type: "function_call_output", call_id: "call-1", output: "two issues" }
     ])
   })
 
@@ -193,5 +130,109 @@ describe("one turn request is bounded to the boundary's body limit", () => {
     const bounded = boundTurnRequest(turn([{ role: "user", content: "q".repeat(80_000) }]))
     expect(bounded.dropped).toBe(0)
     expect(bounded.request.messages).toHaveLength(1)
+  })
+
+  /*
+   * The reference the linear bound must match byte for byte: drop one oldest
+   * message at a time and re-measure the whole request. It is quadratic, which
+   * is why it lives here and not in the module.
+   */
+  const referenceBound = (
+    request: ReturnType<typeof turn>,
+    keepTail: number,
+    maxBytes: number
+  ): { dropped: number; bytes: number } => {
+    if (turnRequestBytes(request) <= maxBytes) return { dropped: 0, bytes: turnRequestBytes(request) }
+    const messages = [...request.messages]
+    const floor = Math.min(Math.max(keepTail, 1), messages.length)
+    let dropped = 0
+    let bytes = turnRequestBytes(request)
+    while (messages.length > floor) {
+      messages.shift()
+      dropped += 1
+      bytes = turnRequestBytes({
+        ...request,
+        messages: [{ role: "user", content: droppedHistoryNotice(dropped) }, ...messages]
+      })
+      if (bytes <= maxBytes) return { dropped, bytes }
+    }
+    return { dropped, bytes }
+  }
+
+  test("the bound drops exactly as many messages as re-measuring the whole request would, across a size sweep", () => {
+    // Mixed sizes and multi-byte text, so a per-message measure that forgot
+    // the JSON framing, the commas or the notice's own width would show.
+    const contents = ["🙂", "", "x".repeat(3), "é".repeat(700), "y".repeat(2_000), "\"quoted\"\n", "z".repeat(9_000)]
+    const messages = Array.from({ length: 60 }, (_, index) => ({
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content: `${index} ${contents[index % contents.length] ?? ""}`
+    }))
+    for (const maxBytes of [200, 1_000, 4_096, 10_000, 30_000, 60 * 1024, 200_000]) {
+      for (const keepTail of [1, 2, 5]) {
+        const request = turn(messages)
+        const expected = referenceBound(request, keepTail, maxBytes)
+        const bounded = boundTurnRequest(request, keepTail, maxBytes)
+        expect({ maxBytes, keepTail, dropped: bounded.dropped, bytes: turnRequestBytes(bounded.request) }).toEqual({
+          maxBytes,
+          keepTail,
+          dropped: expected.dropped,
+          bytes: expected.bytes
+        })
+        if (bounded.dropped > 0) {
+          expect(textOf(bounded.request.messages[0])).toBe(droppedHistoryNotice(bounded.dropped))
+          expect(bounded.request.messages.slice(1)).toEqual(messages.slice(bounded.dropped))
+        }
+      }
+    }
+  })
+
+  test("serialization work stays linear across growing histories", () => {
+    // Count serialized characters instead of elapsed time so machine load
+    // cannot hide repeated serialization of the remaining history.
+    for (const length of [250, 500, 1_000]) {
+      const request = turn(
+        Array.from({ length }, (_, index) => ({
+          role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+          content: `${index} ${"x".repeat(2_000)}`
+        }))
+      )
+      const original = JSON.stringify
+      let serialized = 0
+      JSON.stringify = ((value: unknown, ...rest: Array<never>) => {
+        const text = (original as (v: unknown, ...r: Array<never>) => string)(value, ...rest)
+        serialized += text.length
+        return text
+      }) as typeof JSON.stringify
+      try {
+        const bounded = boundTurnRequest(request)
+        expect(bounded.dropped).toBe(length - 30)
+        expect(turnRequestBytes(bounded.request)).toBeLessThanOrEqual(MAX_TURN_REQUEST_BYTES)
+      } finally {
+        JSON.stringify = original
+      }
+      expect(serialized).toBeLessThanOrEqual(4 * turnRequestBytes(request))
+    }
+  })
+
+  test("exact-fit boundaries include the envelope, tool items and notice digit changes", () => {
+    const request: StartAgentTurnRequest = {
+      ...turn([
+        ...Array.from({ length: 105 }, () => ({ role: "user" as const, content: "é\n\"".repeat(100) })),
+        { type: "function_call", call_id: "c", name: "read", arguments: '{"path":"🙂"}' },
+        { type: "function_call_output", call_id: "c", output: "🙂\nresult" }
+      ]),
+      tools: [{ type: "function", name: "read", description: "Read a file", parameters: { type: "object" } }],
+      tier: "cheap",
+      purpose: "conversation"
+    }
+    for (const dropped of [1, 9, 10, 99, 100]) {
+      const expected = {
+        ...request,
+        messages: [{ role: "user" as const, content: droppedHistoryNotice(dropped) }, ...request.messages.slice(dropped)]
+      }
+      const maxBytes = turnRequestBytes(expected)
+      expect(boundTurnRequest(request, 2, maxBytes)).toEqual({ request: expected, dropped })
+      expect(boundTurnRequest(request, 2, maxBytes - 1).dropped).toBe(dropped + 1)
+    }
   })
 })

@@ -1,10 +1,14 @@
-import type { AgentChatMessage, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import type { Message } from "./AppState"
+/*
+ * Size limits for outgoing turns and function_call_output items are applied in
+ * controller/turns.ts. Full tool results remain in the store.
+ * Transcript preparation remains in that controller. The unused summary and
+ * compaction-slice API was removed; requests drop older messages with a notice
+ * instead of using a stored compaction summary.
+ */
+import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 
 /** The deployed Worker rejects request bodies above 64 KiB. Leave framing headroom. */
 export const MAX_TURN_REQUEST_BYTES = 60 * 1024
-/** Keep roughly Pi's recent-context policy, adjusted for this boundary's smaller envelope. */
-export const KEEP_RECENT_CONTEXT_TOKENS = 8_000
 /** A single tool result must not consume most of the next request. */
 export const MAX_TOOL_RESULT_BYTES = 16 * 1024
 export const MAX_TOOL_RESULT_LINES = 1_000
@@ -13,77 +17,7 @@ const encoder = new TextEncoder()
 
 export const utf8Bytes = (text: string): number => encoder.encode(text).byteLength
 
-/** Pi's intentionally cheap, conservative-enough approximation for text-only messages. */
-export const estimateTextTokens = (text: string): number => Math.ceil(text.length / 4)
-
 export const turnRequestBytes = (request: StartAgentTurnRequest): number => utf8Bytes(JSON.stringify(request))
-
-export interface ContextCompaction {
-  readonly summary: string
-  readonly throughOrdinal: number
-  readonly sourceMessageCount: number
-  readonly createdAt: number
-}
-
-const COMPACTION_PREFIX =
-  "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
-const COMPACTION_SUFFIX = "\n</summary>"
-
-export const contextMessages = (
-  messages: ReadonlyArray<Message>,
-  compaction?: ContextCompaction | null
-): ReadonlyArray<AgentChatMessage> => {
-  const visible = messages
-    .filter(
-      (message) =>
-        message.act === undefined &&
-        message.text.trim() !== "" &&
-        (compaction === undefined || compaction === null || message.ordinal > compaction.throughOrdinal)
-    )
-    .map((message) => ({
-      role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-      content: message.text
-    }))
-  if (compaction === undefined || compaction === null) return visible
-  return [
-    { role: "user", content: `${COMPACTION_PREFIX}${compaction.summary}${COMPACTION_SUFFIX}` },
-    ...visible
-  ]
-}
-
-export interface CompactionSlice {
-  /** Complete older messages to summarize. */
-  readonly compact: ReadonlyArray<Message>
-  /** Complete recent messages retained verbatim. */
-  readonly keep: ReadonlyArray<Message>
-  readonly throughOrdinal: number
-}
-
-/**
- * Choose a Pi-style cut point by walking backward over complete messages, then
- * move the cut to a user-message boundary so an assistant answer is never kept
- * without the prompt that caused it.
- */
-export const selectCompactionSlice = (
-  messages: ReadonlyArray<Message>,
-  keepRecentTokens = KEEP_RECENT_CONTEXT_TOKENS
-): CompactionSlice | undefined => {
-  const eligible = messages.filter((message) => message.act === undefined && message.text.trim() !== "")
-  if (eligible.length < 3) return undefined
-  let tokens = 0
-  let keepIndex = eligible.length - 1
-  for (let index = eligible.length - 1; index >= 0; index -= 1) {
-    tokens += estimateTextTokens(eligible[index]?.text ?? "")
-    keepIndex = index
-    if (tokens >= keepRecentTokens) break
-  }
-  while (keepIndex > 0 && eligible[keepIndex]?.role !== "user") keepIndex -= 1
-  if (keepIndex <= 0) return undefined
-  const compact = eligible.slice(0, keepIndex)
-  const keep = eligible.slice(keepIndex)
-  const throughOrdinal = compact.at(-1)?.ordinal
-  return throughOrdinal === undefined ? undefined : { compact, keep, throughOrdinal }
-}
 
 const byteSafePrefix = (text: string, maxBytes: number): string => {
   if (maxBytes <= 0) return ""
@@ -164,21 +98,38 @@ export const boundTurnRequest = (
   keepTail = 1,
   maxBytes = MAX_TURN_REQUEST_BYTES
 ): BoundedTurnRequest => {
-  if (turnRequestBytes(request) <= maxBytes) return { request, dropped: 0 }
-  const messages = [...request.messages]
+  const messages = request.messages
   const floor = Math.min(Math.max(keepTail, 1), messages.length)
+  if (messages.length <= floor) return { request, dropped: 0 }
+  const candidateOf = (dropped: number): StartAgentTurnRequest => ({
+    ...request,
+    messages: [{ role: "user", content: droppedHistoryNotice(dropped) }, ...messages.slice(dropped)]
+  })
+  /*
+   * Measure each message once. A candidate's body is the request with an
+   * empty message list, plus every kept item, plus one comma per boundary:
+   * the notice, then the surviving suffix. Suffix sums make each candidate a
+   * constant-time question, so a long history costs one pass, not one full
+   * re-serialization per dropped message.
+   */
+  const envelopeBytes = turnRequestBytes({ ...request, messages: [] })
+  const suffixBytes = new Array<number>(messages.length + 1).fill(0)
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    suffixBytes[index] = (suffixBytes[index + 1] ?? 0) + utf8Bytes(JSON.stringify(messages[index]))
+  }
+  const requestBytes = envelopeBytes + (suffixBytes[0] ?? 0) + messages.length - 1
+  if (requestBytes <= maxBytes) return { request, dropped: 0 }
+  const candidateBytes = (dropped: number): number => {
+    const kept = messages.length - dropped
+    const notice = utf8Bytes(JSON.stringify({ role: "user", content: droppedHistoryNotice(dropped) }))
+    return envelopeBytes + notice + (suffixBytes[dropped] ?? 0) + kept
+  }
   let dropped = 0
-  let candidate = request
-  while (messages.length > floor) {
-    messages.shift()
+  while (messages.length - dropped > floor) {
     dropped += 1
-    candidate = {
-      ...request,
-      messages: [{ role: "user", content: droppedHistoryNotice(dropped) }, ...messages]
-    }
-    if (turnRequestBytes(candidate) <= maxBytes) return { request: candidate, dropped }
+    if (candidateBytes(dropped) <= maxBytes) return { request: candidateOf(dropped), dropped }
   }
   // Even the tail alone is over the limit: the seam refuses it honestly, and
   // dropping the user's own words to hide that would be the worse answer.
-  return { request: candidate, dropped }
+  return { request: dropped === 0 ? request : candidateOf(dropped), dropped }
 }

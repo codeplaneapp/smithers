@@ -5,7 +5,7 @@ import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import { agentVisibleCatalog } from "../../flows/agentTools"
 import type { CommandOutcome } from "../../flows/Commands"
 import { parseSubmit } from "../../flows/registry"
-import { boundTurnRequest } from "../AgentTurnPolicy"
+import { boundToolResult, boundTurnRequest } from "../AgentTurnPolicy"
 import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
 import { isRuntimeOwnedCard } from "../isRuntimeOwnedCard"
@@ -600,9 +600,14 @@ export const createTurnController = (
       turnId: turn.id,
       text: toolActLine(call, result)
     })
+    /*
+     * The record above keeps the whole result; the model gets it bounded, so
+     * one wide tool output cannot fill the next request by itself and force
+     * the turn bound to drop the conversation around it.
+     */
     turn.toolItems.push(
       { type: "function_call", call_id: call.callId, name: call.name, arguments: call.args },
-      { type: "function_call_output", call_id: call.callId, output: result }
+      { type: "function_call_output", call_id: call.callId, output: boundToolResult(result).modelOutput }
     )
     launchLeg(turn.id, [...contextMessages(), ...turn.toolItems], turn.toolItems.length + 1)
   }
