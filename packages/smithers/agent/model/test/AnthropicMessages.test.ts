@@ -557,6 +557,21 @@ describe("AnthropicMessages streaming", () => {
   })
 })
 
+describe("AnthropicMessages terminal event", () => {
+  it("declares message_stop as the terminal event", () => {
+    const decode = Schema.decodeUnknownSync(AnthropicMessages.protocol.stream.event)
+    const terminal = AnthropicMessages.protocol.stream.terminal
+    expect(terminal).toBeDefined()
+    expect(terminal?.(decode("{\"type\":\"message_stop\"}"))).toBe(true)
+    expect(
+      terminal?.(
+        decode("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}")
+      )
+    ).toBe(false)
+    expect(terminal?.(decode("{\"type\":\"ping\"}"))).toBe(false)
+  })
+})
+
 describe("AnthropicMessages body lowering", () => {
   it("omits declared tools when the request forbids tool use", () => {
     const withTools = (toolChoice?: "none"): ModelRequest =>

@@ -857,7 +857,10 @@ export const protocol: Protocol<Body, string, AnthropicEvent, State> = makeProto
     event: jsonEvent(AnthropicEvent),
     initial,
     step,
-    onHalt: finalize
+    onHalt: finalize,
+    // `message_stop` is the last frame on the wire, so the route stops pulling
+    // there instead of waiting for a body a proxy may never close.
+    terminal: (event) => event.type === "message_stop"
   },
   classifyError
 })

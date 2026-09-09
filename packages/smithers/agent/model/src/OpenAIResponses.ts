@@ -492,6 +492,44 @@ const encryptedReasoning = (
   }
 }
 
+/**
+ * A `response.completed` that arrives while a function call is still open
+ * used to settle `tool-calls` on the strength of the call having started, and
+ * the halt hook then emitted whatever arguments had arrived into a message
+ * that was never aborted. The final Response object is authoritative for
+ * every output item, so each open call closes from it through the same strict
+ * validator a done event uses; a call the final output does not finish is a
+ * provider fault, not a successful tool turn.
+ */
+const closeOpenCalls = (
+  state: State,
+  response: Readonly<Record<string, unknown>> | undefined
+): { readonly state: State; readonly events: ReadonlyArray<ModelEvent.ModelEvent> } | ModelError => {
+  if (state.tools.open.length === 0) return { state, events: [] }
+  const output = Array.isArray(response?.output) ? response.output.map(record) : []
+  let current = state
+  const events: Array<ModelEvent.ModelEvent> = []
+  for (const open of state.tools.open) {
+    const item = output.find((entry) =>
+      entry?.type === "function_call" &&
+      (string(entry.call_id) === open.callId || current.toolNames[string(entry.id) ?? ""] === open.callId)
+    )
+    if (item === undefined && open.fragments.length === 0) continue
+    const result = completeTool(current, open.callId, string(item?.arguments))
+    if (result instanceof ModelError) return result
+    current = result.state
+    events.push(...result.events)
+  }
+  const unfinished = current.tools.open.length
+  if (unfinished > 0) {
+    return new ModelError({
+      code: "invalid_provider_output",
+      message: `OpenAI Responses completed with ${unfinished} unfinished function call${unfinished === 1 ? "" : "s"}`
+    })
+  }
+  return { state: current, events }
+}
+
 const stepEvent = (
   state: State,
   value: OpenAIEvent,
@@ -627,23 +665,29 @@ const stepEvent = (
     if (callId === undefined) return { state: current, events: [] }
     return completeTool(current, callId, string(value.arguments) ?? string(item?.arguments))
   }
-  if (type === "response.completed") {
+  if (type === "response.completed" || type === "response.incomplete") {
+    // Both terminal events carry the full Response object, so a token-limited
+    // or filtered turn bills its tokens and names its id exactly like a
+    // completed one.
     const response = record(value.response)
     const events: Array<ModelEvent.ModelEvent> = []
     const eventUsage = usage(response?.usage)
     if (eventUsage !== undefined) events.push(ModelEvent.ModelEvent.Usage(eventUsage))
-    const completed = {
+    const identified = {
       ...current,
       responseId: string(response?.id) ?? current.responseId
     }
-    const terminal = settle(completed, Object.keys(completed.toolNames).length === 0 ? "stop" : "tool-calls")
-    return { state: terminal.state, events: [...events, ...terminal.events] }
-  }
-  if (type === "response.incomplete") {
-    // The event says WHY it is incomplete. `content_filter` is a refusal, not a
-    // token budget, and `StopReason` already distinguishes the two.
-    const reason = record(record(value.response)?.["incomplete_details"])?.["reason"]
-    return settle(current, reason === "content_filter" ? "content-filter" : "length")
+    if (type === "response.incomplete") {
+      // The event says WHY it is incomplete. `content_filter` is a refusal, not a
+      // token budget, and `StopReason` already distinguishes the two.
+      const reason = record(response?.["incomplete_details"])?.["reason"]
+      const terminal = settle(identified, reason === "content_filter" ? "content-filter" : "length")
+      return { state: terminal.state, events: [...events, ...terminal.events] }
+    }
+    const closed = closeOpenCalls(identified, response)
+    if (closed instanceof ModelError) return closed
+    const terminal = settle(closed.state, Object.keys(closed.state.toolNames).length === 0 ? "stop" : "tool-calls")
+    return { state: terminal.state, events: [...events, ...closed.events, ...terminal.events] }
   }
   if (type === "response.failed" || type === "error") {
     const error = providerError(value)
@@ -655,6 +699,11 @@ const stepEvent = (
   }
   return { state: current, events: [] }
 }
+
+// Nothing follows the terminal Response event on the wire, so the route stops
+// pulling there instead of waiting for a body a proxy may never close.
+const terminalEvent = (event: OpenAIEvent): boolean =>
+  event.type === "response.completed" || event.type === "response.incomplete"
 
 const stepWith = (continuation: Continuation) =>
   Effect.fn("OpenAIResponses.step")((
@@ -730,7 +779,8 @@ export const protocol: Protocol.Protocol<
       settled: false
     }),
     step,
-    onHalt: finalize
+    onHalt: finalize,
+    terminal: terminalEvent
   },
   classifyError
 })
@@ -772,7 +822,8 @@ export const chatgptProtocol: Protocol.Protocol<
       settled: false
     }),
     step: stepWith("encrypted"),
-    onHalt: finalize
+    onHalt: finalize,
+    terminal: terminalEvent
   },
   classifyError
 })

@@ -468,6 +468,58 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
   })
 })
 
+describe("OpenAIChatCompletions.protocol.stream terminal reason", () => {
+  const call =
+    "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_1\",\"index\":0,\"type\":\"function\",\"function\":{\"name\":\"answer\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}"
+  const finish = (reason: string) => `{"choices":[{"index":0,"delta":{},"finish_reason":"${reason}"}]}`
+  const reasonOf = (data: ReadonlyArray<string>) =>
+    replayData(data).find((event): event is Events.Settle => event.type === "settle")?.stopReason
+
+  // Gemini finishes a successful tool turn with `stop`, so a completed call
+  // normalizes that to `tool-calls`; a truncation or a refusal that happens to
+  // follow a completed call is still a truncation or a refusal.
+  it.each([
+    ["stop", "tool-calls", "stop"],
+    ["tool_calls", "tool-calls", "tool-calls"],
+    ["length", "length", "length"],
+    ["content_filter", "content-filter", "content-filter"],
+    ["mystery", "unknown", "unknown"]
+  ])("settles finish_reason %s as %s with a tool call and %s without", (finishReason, withCall, withoutCall) => {
+    expect(reasonOf([call, finish(finishReason)])).toBe(withCall)
+    expect(reasonOf([finish(finishReason)])).toBe(withoutCall)
+  })
+
+  it("keeps a completed tool call in a length-stopped message", () => {
+    const message = Events.ModelEvent.settledMessage(replayData([call, finish("length")])).message
+    expect(message.stopReason).toBe("length")
+    expect(message.content).toEqual([{ type: "tool-call", id: "call_1", name: "answer", arguments: "{}" }])
+  })
+
+  it("declares the trailing choice-less usage chunk as the terminal event", () => {
+    // `[DONE]` never reaches a protocol (SSE framing discards it), and the
+    // finish_reason chunk precedes the usage chunk this route always requests,
+    // so the choice-less usage chunk is the last frame the protocol can see.
+    const decode = Schema.decodeUnknownSync(OpenAIChatCompletions.protocol.stream.event)
+    const terminal = OpenAIChatCompletions.protocol.stream.terminal
+    expect(terminal).toBeDefined()
+    expect(
+      terminal?.(decode("{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}"))
+    ).toBe(true)
+    expect(terminal?.(decode("{\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}"))).toBe(
+      true
+    )
+    expect(terminal?.(decode(finish("stop")))).toBe(false)
+    expect(terminal?.(decode("{\"choices\":[],\"usage\":null}"))).toBe(false)
+    expect(
+      terminal?.(
+        decode(
+          "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}"
+        )
+      )
+    ).toBe(false)
+  })
+})
+
 describe("OpenAIChatCompletions.protocol.classifyError", () => {
   it("classifies a real Gemini 429 rate-limit body, even array-wrapped", () => {
     const error = OpenAIChatCompletions.protocol.classifyError(

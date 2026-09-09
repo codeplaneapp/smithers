@@ -435,9 +435,13 @@ const stepEvent = (
         ModelEvent.ModelEvent.ToolCallEnd({ type: "tool-call-end", id: callId, arguments: ended.completed.arguments })
       )
     }
+    // Gemini finishes a successful tool turn with `stop`, so a completed call
+    // normalizes that to `tool-calls`. A truncation or a refusal that follows a
+    // completed call is still a truncation or a refusal.
+    const stopReason = stopReasonOf(choice.finish_reason)
     const terminal = settle(
       current,
-      Object.keys(current.callIdByIndex).length > 0 ? "tool-calls" : stopReasonOf(choice.finish_reason),
+      stopReason === "stop" && Object.keys(current.callIdByIndex).length > 0 ? "tool-calls" : stopReason,
       usageEvent(event.usage ?? current.usage)
     )
     return { state: terminal.state, events: [...events, ...terminal.events] }
@@ -454,6 +458,14 @@ const step = Effect.fn("OpenAIChatCompletions.step")((
     return result instanceof ModelError ? Effect.fail(result) : Effect.succeed([result.state, result.events] as const)
   })
 )
+
+// `[DONE]` never reaches a protocol (SSE framing discards it), and the
+// finish_reason chunk precedes the choice-less usage chunk that
+// `stream_options.include_usage` makes api.openai.com and Ollama send last, so
+// that chunk is the final frame the route can stop pulling at. A provider that
+// folds usage into the finish_reason chunk still ends at HTTP EOF.
+const terminalEvent = (event: ChatCompletionChunk): boolean =>
+  (event.choices === undefined || event.choices.length === 0) && event.usage !== undefined && event.usage !== null
 
 const finalize = (state: State): ReadonlyArray<ModelEvent.ModelEvent> =>
   ToolStream.flushAborted(state.tools).completed.map((call) =>
@@ -524,7 +536,8 @@ export const protocolWith = (
       event: Protocol.jsonEvent(ChatCompletionChunk),
       initial: () => ({ tools: ToolStream.initial(), callIdByIndex: {}, textOpen: false, settled: false }),
       step,
-      onHalt: finalize
+      onHalt: finalize,
+      terminal: terminalEvent
     },
     classifyError
   })

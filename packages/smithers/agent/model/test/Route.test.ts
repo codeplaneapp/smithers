@@ -980,6 +980,76 @@ describe("Route.stream", () => {
   })
 })
 
+describe("Route.stream terminal events", () => {
+  // A proxy that sends its terminal frame and then leaves the body open is a
+  // transport edge, but every built-in protocol used to pull until HTTP EOF
+  // after it, so the run never completed without an outside interrupt.
+  const neverClosing = (frames: ReadonlyArray<string>, onCancel: () => void): Response =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(frames.map((frame) => `data: ${frame}\n\n`).join("")))
+        },
+        cancel() {
+          onCancel()
+        }
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    )
+
+  const key = Redacted.make("secret")
+  it.each([
+    [
+      "anthropic",
+      () => Result.getOrThrow(Route.anthropic({ apiKey: key })),
+      [
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}",
+        "{\"type\":\"message_stop\"}"
+      ],
+      { type: "settle", stopReason: "stop", responseId: "msg_1" }
+    ],
+    [
+      "openai-responses",
+      () => Result.getOrThrow(Route.openai({ apiKey: key })),
+      ["{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}"],
+      { type: "settle", stopReason: "stop", responseId: "resp_1" }
+    ],
+    [
+      "openai-chat-completions",
+      () =>
+        Result.getOrThrow(Route.openaiChatCompatible({ id: "compat", baseUrl: "https://compat.test", apiKey: key })),
+      [
+        "{\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}",
+        "{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}",
+        "[DONE]"
+      ],
+      { type: "usage", inputTokens: 3, outputTokens: 1, totalTokens: 4 }
+    ]
+  ])("completes a %s stream at its terminal frame without waiting for EOF", async (_, route, frames, last) => {
+    let cancelled = false
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Route.toModel(route() as Route.Config<unknown, string, unknown, unknown>).pipe(
+          Effect.flatMap((model) => model.stream(request).pipe(Stream.runCollect)),
+          Effect.provideService(
+            RequestExecutor.RequestExecutor,
+            executorOf(() =>
+              neverClosing(frames, () => {
+                cancelled = true
+              })
+            )
+          )
+        )
+      ).pipe(Effect.timeout("2 seconds"))
+    ).then((chunk) => Array.from(chunk))
+
+    expect(events.at(-1)).toEqual(last)
+    expect(events.filter((event) => event.type === "settle")).toHaveLength(1)
+    expect(cancelled).toBe(true)
+  })
+})
+
 describe("Route.stream credential safety", () => {
   // A successful call is enough to leak a key: the HTTP client writes every
   // request header onto its client span, and its default redaction policy

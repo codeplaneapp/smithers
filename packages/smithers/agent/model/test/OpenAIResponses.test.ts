@@ -310,7 +310,7 @@ describe("OpenAIResponses", () => {
     ])).toEqual([
       { type: "text-start", id: "msg" },
       { type: "text-delta", id: "msg", text: "trunc" },
-      { type: "settle", stopReason: "length", responseId: undefined }
+      { type: "settle", stopReason: "length", responseId: "resp_cut" }
     ])
   })
 
@@ -341,6 +341,91 @@ describe("OpenAIResponses", () => {
     )
     expect(stopReasonFor("{\"id\":\"r\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}")).toBe("length")
     expect(stopReasonFor("{\"id\":\"r\"}")).toBe("length")
+  })
+
+  it("carries usage and the response id on response.incomplete exactly like response.completed", () => {
+    // A max_output_tokens or content_filter stop still bills every token, and
+    // the terminal event is the only place a stream may name them.
+    expect(replayData([
+      "{\"type\":\"response.output_text.delta\",\"item_id\":\"msg\",\"delta\":\"trunc\"}",
+      "{\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_cut\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":100,\"output_tokens\":25,\"total_tokens\":125,\"input_tokens_details\":{\"cached_tokens\":40},\"output_tokens_details\":{\"reasoning_tokens\":5}}}}"
+    ])).toEqual([
+      { type: "text-start", id: "msg" },
+      { type: "text-delta", id: "msg", text: "trunc" },
+      {
+        type: "usage",
+        inputTokens: 100,
+        outputTokens: 25,
+        cachedInputTokens: 40,
+        reasoningTokens: 5,
+        totalTokens: 125
+      },
+      { type: "settle", stopReason: "length", responseId: "resp_cut" }
+    ])
+    expect(
+      Events.ModelEvent.settledMessage(replayData([
+        "{\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_cut\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":100,\"output_tokens\":25,\"total_tokens\":125}}}"
+      ])).usage
+    ).toEqual({ inputTokens: 100, outputTokens: 25, totalTokens: 125 })
+  })
+
+  it("closes a function call left open at response.completed from the fragments it already validated", () => {
+    // A stream that omits both `function_call_arguments.done` and
+    // `output_item.done` must not settle a successful tool turn on faith: the
+    // call closes through the same strict validator as a done event.
+    expect(replayData([
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"write\"}}",
+      "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"path\\\":\\\"a\\\"}\"}",
+      "{\"type\":\"response.completed\",\"response\":{\"id\":\"r\"}}"
+    ], true)).toEqual([
+      { type: "tool-call-start", id: "call_1", name: "write" },
+      { type: "tool-call-delta", id: "call_1", arguments: "{\"path\":\"a\"}" },
+      { type: "tool-call-end", id: "call_1", arguments: "{\"path\":\"a\"}" },
+      { type: "settle", stopReason: "tool-calls", responseId: "r" }
+    ])
+  })
+
+  it("closes a function call left open at response.completed from the final response output", () => {
+    expect(replayData([
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"write\"}}",
+      "{\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"output\":[{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"write\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}]}}"
+    ], true)).toEqual([
+      { type: "tool-call-start", id: "call_1", name: "write" },
+      { type: "tool-call-end", id: "call_1", arguments: "{\"path\":\"b\"}" },
+      { type: "settle", stopReason: "tool-calls", responseId: "r" }
+    ])
+  })
+
+  it("fails response.completed while a function call's arguments are still partial", () => {
+    // Before this check the route settled `tool-calls` and the halt hook then
+    // emitted `{"path":` verbatim into a message that was never aborted.
+    const partial = [
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"write\"}}",
+      "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"path\\\":\"}"
+    ]
+    expect(replayDataError([...partial, "{\"type\":\"response.completed\",\"response\":{\"id\":\"r\"}}"]))
+      .toMatchObject({
+        code: "invalid_provider_output"
+      })
+    expect(replayDataError([
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"write\"}}",
+      "{\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"output\":[]}}"
+    ])).toMatchObject({
+      code: "invalid_provider_output",
+      message: "OpenAI Responses completed with 1 unfinished function call"
+    })
+  })
+
+  it("declares response.completed and response.incomplete as the terminal events", () => {
+    const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event)
+    for (const protocol of [OpenAIResponses.protocol, OpenAIResponses.chatgptProtocol]) {
+      const terminal = protocol.stream.terminal
+      expect(terminal).toBeDefined()
+      expect(terminal?.(decode("{\"type\":\"response.completed\",\"response\":{}}"))).toBe(true)
+      expect(terminal?.(decode("{\"type\":\"response.incomplete\",\"response\":{}}"))).toBe(true)
+      expect(terminal?.(decode("{\"type\":\"response.output_text.delta\",\"delta\":\"x\"}"))).toBe(false)
+      expect(terminal?.(decode("{\"type\":\"response.created\",\"response\":{\"id\":\"r\"}}"))).toBe(false)
+    }
   })
 
   it("omits declared tools when the request forbids tool use", () => {

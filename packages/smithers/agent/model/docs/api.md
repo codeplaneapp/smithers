@@ -379,7 +379,8 @@ as `invalid_request`. A non-empty request whose first lowered message is an
 assistant message also fails preparation as `invalid_request`, with path
 `messages[0].role`, before any network call. Stop reasons map `end_turn`, `stop_sequence`, and
 `pause_turn` to `"stop"`; `max_tokens` to `"length"`; `tool_use` to
-`"tool-calls"`; `refusal` to `"content-filter"`. Classification recognizes
+`"tool-calls"`; `refusal` to `"content-filter"`. `message_stop` is the
+`terminal` predicate, so the route stops pulling there. Classification recognizes
 Anthropic's HTTP 400 "credit balance is too low" wording as
 `quota_exceeded`, and `overloaded` and 529 as `rate_limited` so the agent can park durably.
 
@@ -402,7 +403,12 @@ assistant turn is omitted. Stored reasoning item ids replay as
 reasoning items on the ChatGPT protocol, where item references would fail.
 `response.completed` settles `"stop"` or `"tool-calls"`; `response.incomplete`
 settles `"content-filter"` when its reason is `content_filter` and `"length"`
-otherwise.
+otherwise. Both terminal events carry the response id and its usage counters,
+and both are the protocol's `terminal` predicate, so the route stops pulling
+there. A function call still open at `response.completed` closes from the
+final response `output` through the same strict argument validator a done
+event uses; a call the final output does not finish fails the stream as
+`invalid_provider_output` instead of settling a tool turn.
 
 ## `OpenAIChatCompletions`
 
@@ -424,7 +430,12 @@ tools, failing preparation with `invalid_request`, because providers reject
 `tools` together with `response_format`. The one exception is
 `toolChoice: "none"`: that lowering omits `tools`, so the two fields never
 meet on the wire. Finish reasons map `stop`, `length`, `tool_calls`, and
-`content_filter` onto the matching stop reasons. A purely numeric provider
+`content_filter` onto the matching stop reasons; only `stop` normalizes to
+`"tool-calls"` when a call completed, since Gemini finishes a successful tool
+turn that way, while `length` and `content_filter` after a completed call stay
+what they are. The choice-less usage chunk that `include_usage` makes the
+provider send after the finish chunk is the `terminal` predicate; `[DONE]`
+never reaches the protocol. A purely numeric provider
 code in the HTTP range stands in for a missing status, which is how a gateway
 that reports `{"error":{"code":429}}` inside an HTTP 200 stream still
 classifies as `rate_limited`.
