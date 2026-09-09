@@ -8,10 +8,11 @@
  * fresh session to land on.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Option, PlatformError, Ref, Schedule } from "effect"
+import { Deferred, Effect, Fiber, Logger, Option, PlatformError, Ref, Schedule, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { elapsed } from "../src/internal/deadline.ts"
 import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as SandboxHealth from "../src/SandboxHealth/index.ts"
@@ -401,6 +402,160 @@ describe("SandboxSupervision", () => {
 
       expect(reason(failed)).toBe("NotFound")
       expect(provider.state.cancellations).toBe(1)
+    }))
+
+  it.effect("opens and probes a fresh session while the previous reporter never returns", () =>
+    Effect.gen(function*() {
+      const reporting = yield* Deferred.make<void>()
+      const probes = yield* Ref.make(0)
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        ping: Effect.andThen(Ref.update(probes, (n) => n + 1), Effect.fail(gone())),
+        scripts: { greet: { stdout: "hello" } }
+      })
+      yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        yield* spawner.string(ChildProcess.make("greet"))
+        yield* TestClock.adjust(interval)
+        yield* Deferred.await(reporting)
+        const output = yield* Effect.raceFirst(
+          spawner.string(ChildProcess.make("greet")),
+          Effect.as(elapsed("1 second"), "blocked")
+        )
+        expect(output).toBe("hello")
+        expect(provider.state.openedSessions).toHaveLength(2)
+        yield* TestClock.adjust(interval)
+        expect(yield* Ref.get(probes)).toBe(2)
+        expect(provider.state.cancellations).toBe(2)
+      }).pipe(Effect.provide(SandboxSupervision.layer(provider, {
+        interval,
+        reporter: { unhealthy: () => Effect.andThen(Deferred.succeed(reporting, undefined), Effect.never) }
+      })))
+    }))
+
+  it.effect.each(["string", "stdout", "stderr", "all"] as const)(
+    "retires pending %s after the process exit has completed",
+    (output) =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const base = RemoteChildProcessSpawner.TestRemote.make({ ping: Effect.fail(gone()) })
+        const pending = Stream.fromEffect(Effect.andThen(Deferred.succeed(entered, undefined), Effect.never))
+        const provider: RemoteChildProcessSpawner.Provider = {
+          ...base,
+          spawn: () => Effect.succeed({ stdout: pending, stderr: pending, exitCode: Effect.succeed(0) })
+        }
+        yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const command = ChildProcess.make("exited-with-open-pipes")
+          const consume = Effect.gen(function*() {
+            if (output === "string") return yield* spawner.string(command)
+            const handle = yield* spawner.spawn(command)
+            expect(yield* handle.exitCode).toBe(0)
+            expect(yield* handle.isRunning).toBe(false)
+            return yield* Stream.runCollect(Stream.onStart(handle[output], Deferred.succeed(entered, undefined)))
+          })
+          const running = yield* Effect.forkChild(Effect.result(consume), { startImmediately: true })
+          yield* Deferred.await(entered)
+          yield* TestClock.adjust(interval)
+          const result = yield* Effect.raceFirst(Fiber.join(running), Effect.as(elapsed("1 second"), undefined))
+          expect(base.state.cancellations).toBe(1)
+          expect(result?._tag).toBe("Failure")
+          if (result?._tag === "Failure") expect(reason(result.failure)).toBe("NotFound")
+        }).pipe(Effect.provide(SandboxSupervision.layer(provider, { interval })))
+      })
+  )
+
+  it.effect("leaves completed output alone while retiring another consumer of the same handle", () =>
+    Effect.gen(function*() {
+      const base = RemoteChildProcessSpawner.TestRemote.make({ ping: Effect.fail(gone()) })
+      const provider: RemoteChildProcessSpawner.Provider = {
+        ...base,
+        spawn: () =>
+          Effect.succeed({
+            stdout: Stream.make(new TextEncoder().encode("done")),
+            stderr: Stream.never,
+            exitCode: Effect.never
+          })
+      }
+      yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        const handle = yield* spawner.spawn(ChildProcess.make("partial-output"))
+        expect(yield* Stream.mkString(Stream.decodeText(handle.stdout))).toBe("done")
+        const waiting = yield* Effect.forkChild(Effect.flip(Stream.runDrain(handle.stderr)), {
+          startImmediately: true
+        })
+        yield* TestClock.adjust(interval)
+        expect(reason(yield* Fiber.join(waiting))).toBe("NotFound")
+      }).pipe(Effect.provide(SandboxSupervision.layer(provider, { interval })))
+    }))
+
+  it.effect("reports release defects and keeps probing later sessions", () =>
+    Effect.gen(function*() {
+      const record = yield* recorder()
+      const probes = yield* Ref.make(0)
+      const base = RemoteChildProcessSpawner.TestRemote.make({
+        ping: Effect.andThen(Ref.update(probes, (n) => n + 1), Effect.fail(gone())),
+        scripts: { greet: { stdout: "hello" } }
+      })
+      const provider: RemoteChildProcessSpawner.Provider = {
+        ...base,
+        open: (session) =>
+          Effect.andThen(
+            base.open(session),
+            Effect.addFinalizer(() => Effect.die("release exploded"))
+          )
+      }
+      const logs: Array<{ level: string; message: unknown; cause: unknown }> = []
+      const logger = Logger.make((entry) => {
+        logs.push({ level: entry.logLevel, message: entry.message, cause: entry.cause })
+      })
+      yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        yield* spawner.string(ChildProcess.make("greet"))
+        yield* TestClock.adjust(interval)
+        expect(yield* Ref.get(record.events)).toHaveLength(1)
+        yield* spawner.string(ChildProcess.make("greet"))
+        yield* TestClock.adjust(interval)
+        expect(yield* Ref.get(probes)).toBe(2)
+        expect(yield* Ref.get(record.events)).toHaveLength(2)
+        expect(base.state.cancellations).toBe(2)
+        expect(logs.filter((entry) => entry.level === "Warn")).toHaveLength(2)
+        expect(JSON.stringify(logs)).toContain("test-session")
+        expect(JSON.stringify(logs)).toContain("release exploded")
+      }).pipe(
+        Effect.provide(SandboxSupervision.layer(provider, { interval, reporter: record.reporter })),
+        Effect.provide(Logger.layer([logger]))
+      )
+    }))
+
+  it.effect("interrupts a hung reporter at reportWithin while supervision remains open", () =>
+    Effect.gen(function*() {
+      const reporting = yield* Deferred.make<void>()
+      const interrupted = yield* Deferred.make<void>()
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        ping: Effect.fail(gone()),
+        scripts: { greet: { stdout: "hello" } }
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const spawner = yield* SandboxSupervision.make(provider, {
+          interval,
+          reporter: {
+            unhealthy: () =>
+              Effect.andThen(Deferred.succeed(reporting, undefined), Effect.never).pipe(
+                Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+              )
+          }
+        }, "20 millis")
+        yield* spawner.string(ChildProcess.make("greet"))
+        yield* TestClock.adjust(interval)
+        yield* Deferred.await(reporting)
+        const bounded = yield* Effect.raceFirst(
+          Effect.as(Deferred.await(interrupted), true),
+          Effect.as(elapsed("1 second"), false)
+        )
+        expect(bounded).toBe(true)
+        expect(yield* spawner.string(ChildProcess.make("greet"))).toBe("hello")
+        expect(provider.state.openedSessions).toHaveLength(2)
+      }))
     }))
 
   it.effect("reports through the logger when no reporter is injected", () =>

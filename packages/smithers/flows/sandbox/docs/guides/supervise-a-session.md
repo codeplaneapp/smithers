@@ -107,12 +107,14 @@ failed because its sandbox died reads very differently from a run that failed
 on its own, and only this event tells them apart. The default reporter logs a
 warning.
 
-Retirement is ordered around what is mandatory. Failing the in-flight commands
-and closing the provider scope run first and uninterruptibly; only then is the
-verdict reported. A reporter is caller supplied and observational, so it may
-fail, be interrupted, or never return, and none of that may strand a waiter,
-leak the machine, or hold the permit every later command needs. A reporter that
-outlives 30 seconds is abandoned and its failure is logged.
+Retirement fails pending operations and output consumers, including output
+still pending after process exit, then closes the provider scope. These steps
+run uninterruptibly under the spawn permit. The permit is released before the
+reporter is forked in the supervisor's scope, so reporting delays neither new
+commands nor the heartbeat. Reporter failures are logged at Warn. An
+interruptible reporter still pending after 30 seconds is interrupted on the
+platform timer. A provider release failure is logged at Warn with the session
+key; the retirement is still reported and later sessions are still probed.
 
 ## Do not supervise a placed body
 

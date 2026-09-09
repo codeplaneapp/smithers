@@ -32,9 +32,6 @@ import { SandboxUnhealthy } from "./SandboxUnhealthy.ts"
 
 const MODULE = "ChildProcess"
 
-/** How long a caller-supplied reporter may take before retirement moves on without it. */
-const reportWithin = Duration.seconds(30)
-
 /**
  * The failure a retired session hands to everything still running in it.
  *
@@ -65,47 +62,28 @@ interface Session {
  * and the exit code never arrives, so the action waits forever instead of
  * failing.
  *
- * A retirement reaches the handle through a second `Deferred`, and the fiber
- * that forwards it asks the process whether it is still running first. That
- * question is the whole trick. A process that already exited is not running in
- * the retired session any more, so nothing is waiting on its guard, and a
- * failure nobody receives is reported as a defect. The question has to be
- * answered on the spot, which is why it is `isRunning` and not the exit code:
- * the fiber that observes an exit code may not have been scheduled yet when a
- * retirement arrives, and a liveness answer that lags is no answer at all.
- *
- * Scope closure cannot do this job. The scope a spawn is given belongs to
- * whoever runs the output stream, and `ChildProcessSpawner.string` runs the
- * stream in the ambient scope, so a guard that waited for scope closure would
- * keep listening for as long as its caller lives.
+ * Each operation and each output pull races retirement only for the duration
+ * of that wait. Process exit does not imply that stdout or stderr has ended:
+ * a descendant can keep either pipe open. Racing individual pulls also leaves
+ * no background stream listener to fail after its consumer has finished.
  */
 const guarded = (
   handle: ChildProcessHandle,
   failed: Deferred.Deferred<never, PlatformError.PlatformError>
-): Effect.Effect<ChildProcessHandle, never, Scope.Scope> =>
-  Effect.gen(function*() {
-    const forwarded = yield* Deferred.make<never, PlatformError.PlatformError>()
-    yield* Effect.forkScoped(
-      Effect.catch(Deferred.await(failed), (error) =>
-        Effect.flatMap(
-          /* v8 ignore next -- the remote handle answers liveness from a local flag with `Effect.sync`, so the fallback only discharges the error channel `ChildProcessHandle` declares */
-          Effect.orElseSucceed(handle.isRunning, () => true),
-          (running) => running ? Effect.asVoid(Deferred.fail(forwarded, error)) : Effect.void
-        ))
-    )
-    const dies = Deferred.await(forwarded)
-    const guard = <A>(effect: Effect.Effect<A, PlatformError.PlatformError>) => Effect.raceFirst(effect, dies)
-    const guardStream = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) =>
-      Stream.interruptWhen(stream, dies)
-    return makeHandle({
-      ...handle,
-      exitCode: guard(handle.exitCode),
-      isRunning: guard(handle.isRunning),
-      stdout: guardStream(handle.stdout),
-      stderr: guardStream(handle.stderr),
-      all: guardStream(handle.all)
-    })
-  })
+): Effect.Effect<ChildProcessHandle> => {
+  const dies = Deferred.await(failed)
+  const guard = <A>(effect: Effect.Effect<A, PlatformError.PlatformError>) => Effect.raceFirst(effect, dies)
+  const guardStream = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) =>
+    Stream.transformPull(stream, (pull) => Effect.succeed(Effect.raceFirst(pull, dies)))
+  return Effect.succeed(makeHandle({
+    ...handle,
+    exitCode: guard(handle.exitCode),
+    isRunning: guard(handle.isRunning),
+    stdout: guardStream(handle.stdout),
+    stderr: guardStream(handle.stderr),
+    all: guardStream(handle.all)
+  }))
+}
 
 /**
  * Builds a spawner that keeps exactly one live provider session.
@@ -122,7 +100,9 @@ const guarded = (
  */
 export const make = (
   provider: Provider,
-  options: Options
+  options: Options,
+  /** @internal Shortens the platform-timer bound in regression tests. */
+  reportWithin: Duration.Input = Duration.seconds(30)
 ): Effect.Effect<ChildProcessSpawner["Service"], never, Scope.Scope> =>
   Effect.gen(function*() {
     const parent = yield* Scope.Scope
@@ -131,10 +111,9 @@ export const make = (
     const probe: Effect.Effect<HealthState> = options.probe ??
       fromProvider(provider, options.deadline === undefined ? undefined : { deadline: options.deadline }).check
     const held = yield* Ref.make<Session | undefined>(undefined)
-    // Bounded on the platform timer, and its outcome discarded whatever it is:
-    // a reporter is an observer, and an observer must not be able to hold the
-    // one permit every future spawn waits on. The bound is deliberately not an
-    // option — a caller who wants a different one wraps their own reporter.
+    // Reporting runs outside the spawn permit and heartbeat. Bound each
+    // observer on the platform timer so a hung reporter does not accumulate
+    // for the lifetime of the supervisor, even under a frozen ambient clock.
     const report = (event: SandboxUnhealthy) =>
       Effect.catchCause(
         Effect.raceFirst(reporter.unhealthy(event), elapsed(reportWithin)),
@@ -156,14 +135,17 @@ export const make = (
     // or never return; sequencing it first put both mandatory operations
     // behind it, and behind the permit every future spawn needs.
     const retire = (session: Session, event: SandboxUnhealthy) =>
-      turn.withPermit(Effect.gen(function*() {
-        yield* Effect.uninterruptible(Effect.gen(function*() {
+      Effect.gen(function*() {
+        yield* turn.withPermit(Effect.uninterruptible(Effect.gen(function*() {
           yield* Ref.set(held, undefined)
           yield* Deferred.fail(session.failed, retired(event.session, event.reason))
-          yield* Scope.close(session.scope, Exit.void)
-        }))
-        yield* report(event)
-      }))
+          const released = yield* Effect.exit(Scope.close(session.scope, Exit.void))
+          if (Exit.isFailure(released)) {
+            yield* Effect.logWarning(`sandbox session \`${event.session}\` failed to release`, released.cause)
+          }
+        })))
+        yield* Effect.forkScoped(report(event))
+      })
 
     const heartbeat = Effect.gen(function*() {
       let unhealthy = 0
@@ -234,8 +216,6 @@ export const make = (
         // guard's job.
         const open = yield* Effect.mapError(session, platformFailure("open", CommandLine.render(command)))
         const handle = yield* Effect.raceFirst(open.spawner.spawn(command), Deferred.await(open.failed))
-        // The wrapped spawner observes a fast process exit in a scoped fiber.
-        // Let that observation run before the retirement guard reads liveness.
         yield* Effect.yieldNow
         return yield* guarded(handle, open.failed)
       })
