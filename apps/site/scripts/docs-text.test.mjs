@@ -98,6 +98,12 @@ test("exports navigation and diagram text", () => {
   assert.ok(!result.includes("<"))
 })
 
+test("preserves blank lines in fenced template literals while collapsing prose blank lines", () => {
+  const fence = '```js\nconst content = `first\n\n\nsecond`\n```'
+  const source = `Before\n\n\nparagraph.\n\n\n${fence}\n\n\nAfter\n\n\nparagraph.`
+  assert.equal(docsText(source), `Before\n\nparagraph.\n\n${fence}\n\nAfter\n\nparagraph.`)
+})
+
 test("exports app screenshots with their captions for text readers", () => {
   const result = docsText('<AppScreenshot src="/images/app/home.png" alt="The repository home." caption="Choose a featured flow." />')
   assert.equal(result, '![The repository home.](/images/app/home.png)\n\nChoose a featured flow.')

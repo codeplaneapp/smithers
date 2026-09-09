@@ -28,5 +28,6 @@ export function docsText(source, { raw = {}, versions = {} } = {}) {
         return String(versions[key])
       })
       .replace(/^[ \t]+$/gm, "")
-  }).join("").replace(/\n{3,}/g, "\n\n").trim()
+      .replace(/\n{3,}/g, "\n\n")
+  }).join("").trim()
 }
