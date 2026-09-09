@@ -61,12 +61,13 @@ const manifest = JSON.parse(await capture(["--llms-full", "--format", "json"]))
 if (!Array.isArray(manifest.commands) || manifest.commands.length === 0) {
   throw new Error("The public CLI did not return a canonical command manifest")
 }
-const canonicalNames = new Set(manifest.commands.map((command) => command.name.split(" ")[0]))
 const unsupported = await import(join(root, "packages/smithers/src/Unsupported.ts"))
 
 // One entry per anchor. Verbs anchor on their own name; flags carry an
-// explicit anchor; reserved flow ids link to #flows.
-const verbs = unsupported.removedVerbs.filter((verb) => !canonicalNames.has(verb.name)).map((verb) => ({
+// explicit anchor; reserved flow ids link to #flows. `removedVerbs` names only
+// spellings the CLI no longer answers, pinned against this manifest by
+// packages/smithers/test/Verb.test.ts, so nothing is filtered out here.
+const verbs = unsupported.removedVerbs.map((verb) => ({
   kind: "verb",
   anchor: verb.name,
   name: verb.name,

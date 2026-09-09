@@ -120,6 +120,13 @@ smthrs replay was removed in 1.0.0-rc.0: time travel is a library API
 See https://smithers.sh/migration/1.0#replay
 ```
 
+The table holds only names the CLI no longer answers. A 0.x spelling the
+canonical tree reissued with a new meaning is not a removal: `graph`, `eval`,
+`review`, `test`, `runs`, and `show` all run today. Listing them would force
+the router, the help assertion, and the site generator to keep the same
+exclusion list by hand, so a host can map `removedVerbs` straight to names
+without filtering it.
+
 Three refusals behave slightly differently, and each is deliberate:
 
 - `gateway` survives as the `serve` alias, so only `gateway status` and

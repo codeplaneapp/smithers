@@ -7,6 +7,7 @@
  * suite is where it has to be made deliberately.
  */
 import { describe, expect, it } from "vitest"
+import { makeCli } from "../src/Cli.ts"
 import { cli } from "../src/Command.ts"
 import * as Unsupported from "../src/Unsupported.ts"
 import * as Verb from "../src/Verb.ts"
@@ -100,7 +101,6 @@ describe("the removed surface", () => {
       "revert",
       "retry-task",
       "tree",
-      "graph",
       "timeline",
       "diff",
       "worktrees",
@@ -113,7 +113,6 @@ describe("the removed surface", () => {
       "supervise",
       "supervisor",
       "top",
-      "eval",
       "optimize",
       "scores",
       "chat",
@@ -144,18 +143,14 @@ describe("the removed surface", () => {
       "ask-human",
       "node",
       "tail",
-      "review",
       "release",
-      "test",
       "list-runs",
-      "runs",
       "list",
       "workflows",
       "stop",
       "kill",
       "start",
       "exec",
-      "show",
       "log",
       "help"
     ])
@@ -224,5 +219,27 @@ describe("the removed surface", () => {
 
     expect(removed.has("ls")).toBe(false)
     expect(removed.has("status")).toBe(false)
+  })
+
+  it("names no verb the canonical tree ships, so no consumer needs an exclusion list", async () => {
+    // `graph`, `eval`, `review`, `test`, `runs`, and `show` were once listed
+    // here and are canonical commands again. While they were both, the router,
+    // this suite, the help assertion, and the site generator each carried the
+    // same six names by hand. The manifest is the authority: a spelling the
+    // CLI answers is not a removal.
+    const environment = { ...process.env, NO_COLOR: "1" } as Record<string, string>
+    let manifest = ""
+    await makeCli({ environment }).serve(["--llms-full", "--format", "json"], {
+      env: environment,
+      stdout: (text) => {
+        manifest += text
+      },
+      exit: () => {}
+    })
+    const commands = JSON.parse(manifest).commands as ReadonlyArray<{ readonly name: string }>
+    const canonical = new Set(commands.map((command) => command.name.split(" ")[0]))
+
+    expect(canonical.size).toBeGreaterThan(0)
+    expect(Unsupported.removedVerbs.map((verb) => verb.name).filter((name) => canonical.has(name))).toEqual([])
   })
 })

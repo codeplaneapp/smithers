@@ -98,8 +98,8 @@ export async function releaseReferences(repoRoot) {
   const { legacyArguments } = await import(
     pathToFileURL(join(repoRoot, "packages/smithers/src/cli/Compatibility.ts"))
   )
-  // gen-cli-data reads the actual command tree: canonical verbs override old
-  // entries in Unsupported, and other CLI modules emit literal anchors too.
+  // gen-cli-data emits one anchor per removal plus the literal anchors other
+  // CLI modules write by hand, so the generated table is wider than this file.
   const removed = JSON.parse(readFileSync(join(repoRoot, "apps/site/src/data/removed-commands.json"), "utf8"))
   if (
     removed.migrationUrl !== migrationUrl || !Array.isArray(removed.anchors) || removed.anchors.length === 0 ||

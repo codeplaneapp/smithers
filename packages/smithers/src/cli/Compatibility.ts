@@ -4,9 +4,8 @@
  */
 import { removedVerbs } from "../Unsupported.ts"
 
-const restored = new Set(["graph", "eval", "review", "test", "runs", "show"])
 const legacy = new Set([
-  ...removedVerbs.filter((verb) => !restored.has(verb.name)).map((verb) => verb.name),
+  ...removedVerbs.map((verb) => verb.name),
   "up",
   "plan",
   "approve",

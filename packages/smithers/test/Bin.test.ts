@@ -324,11 +324,7 @@ describe("the help surface", processBudget, () => {
   it("advertises no removed verb", () => {
     // Matched on the help layout's own leading indentation so a word that
     // merely appears inside a description is not read as a listed command.
-    for (
-      const verb of Unsupported.removedVerbs.filter((verb) =>
-        !["graph", "eval", "review", "test", "runs", "show"].includes(verb.name)
-      )
-    ) {
+    for (const verb of Unsupported.removedVerbs) {
       expect(help.stdout).not.toMatch(new RegExp(`^\\s+${verb.name}\\s{2,}`, "m"))
     }
   })

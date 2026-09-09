@@ -68,6 +68,12 @@ const removedGroup = (
 /**
  * Every verb removed in 1.0.0-rc.0.
  *
+ * Only names the CLI no longer answers belong here. A 0.x spelling the
+ * canonical tree reissued with a new meaning is not a removal: `smthrs graph`,
+ * `eval`, `review`, `test`, `runs`, and `show` all run today, so saying they
+ * were removed would make every consumer of this table maintain the same
+ * exclusion list by hand. `test/Verb.test.ts` pins the two sets apart.
+ *
  * @category constants
  * @since 1.0.0
  */
@@ -83,7 +89,6 @@ export const removedVerbs: ReadonlyArray<RemovedVerb> = [
     "revert",
     "retry-task",
     "tree",
-    "graph",
     "timeline",
     "diff"
   ]),
@@ -95,7 +100,7 @@ export const removedVerbs: ReadonlyArray<RemovedVerb> = [
   removedGroup("Old gateway and UI hosting", uiHosting, "gateway", ["status", "stop"]),
   ...removed("Old gateway and UI hosting", uiHosting, ["ui", "gui", "monitor"]),
   ...removed("Supervision", recovery, ["supervise", "supervisor", "top"]),
-  ...removed("Evaluation and optimization", evaluation, ["eval", "optimize", "scores"]),
+  ...removed("Evaluation and optimization", evaluation, ["optimize", "scores"]),
   ...removed("Chat and narration", jsx, ["chat", "chat-create", "what", "ask"]),
   removedGroup("Accounts and providers", plugins, "agents", [
     "add",
@@ -148,12 +153,11 @@ export const removedVerbs: ReadonlyArray<RemovedVerb> = [
   removedGroup("Human requests", approvals, "human", ["list", "resolve"]),
   ...removed("Human requests", approvals, ["ask-human"]),
   ...removed("Node detail", nodeDetail, ["node", "tail"]),
-  ...removed("Review and release", reserved, ["review", "release", "test"]),
-  ...removed("Old aliases and did-you-mean keys", "use `ps`", ["list-runs", "runs"]),
+  ...removed("Release", reserved, ["release"]),
+  ...removed("Old aliases and did-you-mean keys", "use `ps`", ["list-runs"]),
   ...removed("Old aliases and did-you-mean keys", "use `ls`", ["list", "workflows"]),
   ...removed("Old aliases and did-you-mean keys", "use `cancel`", ["stop", "kill"]),
   ...removed("Old aliases and did-you-mean keys", "use `up`", ["start", "exec"]),
-  ...removed("Old aliases and did-you-mean keys", "use `status`", ["show"]),
   ...removed("Old aliases and did-you-mean keys", "use `logs`", ["log"]),
   ...removed("Old aliases and did-you-mean keys", "use `--help`", ["help"])
 ]
