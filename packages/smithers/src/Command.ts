@@ -736,19 +736,23 @@ const up = Command.make("up", upFlags, (config) =>
         : ["--mcp-config", resolve(process.cwd(), globals.mcpConfig.value)]),
       ...(Option.isNone(globals.root) ? [] : ["--root", projectRoot])
     ]
-    const launched = yield* Effect.promise(() =>
-      Detached.launch({
+    const launched = yield* Effect.callback<Detached.Launched | Detached.Rejected>((resume, signal) => {
+      const pending = Detached.launch({
         root: projectRoot,
         payload: JSON.stringify({ ...card.approval, scope: "run" }),
         passthrough,
+        signal,
         ...(timeoutMs === undefined ? {} : { timeoutMs })
       })
-    )
+      pending.then((result) => resume(Effect.succeed(result)), (error) => resume(Effect.die(error)))
+      // Interruption aborts the signal first. Wait for termination and reaping
+      // before the CLI scope can close and the process can exit.
+      return Effect.promise(() => pending.then(() => undefined, () => undefined))
+    })
     if (!Detached.isLaunched(launched)) {
-      yield* Effect.sync(() => Detached.discard(launched))
       return yield* Effect.fail(
         new CliError.UnsupportedError({
-          message: launched.tail === "" ? launched.reason : `${launched.reason}\n${launched.tail}`
+          message: `${launched.reason}\nLog: ${launched.logFile}${launched.tail === "" ? "" : `\n${launched.tail}`}`
         })
       )
     }

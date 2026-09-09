@@ -188,9 +188,16 @@ composition does not have.
 silent past `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` (30000 by default) and
 then past four times that window.
 
-**Fix.** Read `.flows/logs/pending-<nonce>.log`, which is where the child's
-output lands until the run id is known. Raise the timeout for a slow first
-start, when the engine database still has to be created and migrated.
+**Fix.** Read the file named by `Log:` in the failure report. The CLI retains
+`.flows/logs/pending-<nonce>.log` after a failed launch and includes the last
+32 KiB in the report. Remove the file manually when it is no longer needed.
+Raise the timeout for a slow first start, when the engine database still has
+to be created and migrated.
+
+Interrupting the admission wait waits for child cleanup before the CLI exits.
+On POSIX, cleanup targets its process group; on Windows, it targets the child
+handle. The pending log is retained. After admission succeeds, the child owns
+the run and outlives the launcher.
 
 ## The output is not what you expected
 

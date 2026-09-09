@@ -254,13 +254,15 @@ export interface Options {
   readonly payload: string
   /** Extra arguments handed to the child, such as `--remote`. */
   readonly passthrough?: ReadonlyArray<string> | undefined
+  /** Cancellation owns the child until the admission result is handed back. */
+  readonly signal?: AbortSignal | undefined
   readonly timeoutMs?: number | undefined
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   /** The Node executable and CLI entry the child re-executes. */
   readonly execPath?: string | undefined
   readonly entry?: string | undefined
   readonly intervalMs?: number | undefined
-  /** Grace given to each cleanup signal after the admission deadline. */
+  /** Grace given to each cleanup signal before admission ownership transfers. */
   readonly terminationGraceMs?: number | undefined
   /** Where a slow-boot notice goes; stderr in production. */
   readonly onSlowBoot?: ((message: string) => void) | undefined
@@ -276,6 +278,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * @since 1.0.0
  */
 export const launch = async (options: Options): Promise<Launched | Rejected> => {
+  options.signal?.throwIfAborted()
   const timeoutMs = Math.max(1, options.timeoutMs ?? defaultTimeoutMs)
   const maxWaitMs = timeoutMs * liveChildGraceMultiple
   const intervalMs = Math.max(1, options.intervalMs ?? pollIntervalMs)
@@ -304,12 +307,29 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
   } finally {
     closeSync(descriptor)
   }
-  child.unref()
+  // Keep the child referenced until admission or cleanup completes. An
+  // interrupted CLI must remain alive long enough to escalate and reap it.
+  let handedOff = false
+  let termination: Promise<boolean> | undefined
+  const cleanup = () => termination ??= terminate(child, options.terminationGraceMs)
+  let wake = () => {}
+  const onAbort = () => wake()
+  let spawnError: Error | undefined
+  const onError = (error: Error) => {
+    spawnError = error
+    wake()
+  }
+  child.on("error", onError)
+  options.signal?.addEventListener("abort", onAbort, { once: true })
 
   const startedAt = Date.now()
   let notified = false
   try {
     for (;;) {
+      if (options.signal?.aborted) {
+        return { reason: "Detached launch interrupted before admission.", tail: logTail(pending), logFile: pending }
+      }
+      if (spawnError !== undefined) throw spawnError
       const tail = logTail(pending)
       const runId = admittedRunId(tail, nonce)
       // The readiness proof wins over a later child exit: once the run row is
@@ -325,6 +345,8 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
         // deleted to get there.
         if (existsSync(file)) renameSync(file, join(directory, `${runId}.superseded-${nonce}.log`))
         renameSync(pending, file)
+        handedOff = true
+        child.unref()
         return { runId, logFile: file, pid: child.pid }
       }
       if (child.exitCode !== null || child.signalCode !== null) {
@@ -337,7 +359,7 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
       }
       const elapsedMs = Date.now() - startedAt
       if (elapsedMs >= maxWaitMs) {
-        const terminated = await terminate(child, options.terminationGraceMs)
+        const terminated = await cleanup()
         return {
           reason: `Detached engine did not reach admission within ${maxWaitMs}ms. The engine process (pid ${
             child.pid ?? "unknown"
@@ -360,10 +382,27 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
           }s; waiting up to ${Math.round(maxWaitMs / 1000)}s.`
         )
       }
-      await sleep(Math.min(intervalMs, maxWaitMs - elapsedMs))
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.min(intervalMs, maxWaitMs - elapsedMs))
+        wake = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+        // onSlowBoot can synchronously abort the launch before this wait.
+        if (options.signal?.aborted) wake()
+      })
+    }
+  } catch (error) {
+    return {
+      reason: `Detached launch failed before admission: ${String(error)}`,
+      tail: logTail(pending),
+      logFile: pending
     }
   } finally {
-    child.removeAllListeners()
+    options.signal?.removeEventListener("abort", onAbort)
+    wake()
+    if (!handedOff) await cleanup()
+    child.removeListener("error", onError)
   }
 }
 

@@ -9,6 +9,7 @@
  * past the grace window is terminated rather than left running.
  */
 import { spawn } from "node:child_process"
+import { getEventListeners } from "node:events"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -41,7 +42,9 @@ const processGone = (pid: number): boolean => {
     process.kill(pid, 0)
     return false
   } catch (error) {
-    if ((error as { readonly code?: string } | null)?.code === "ESRCH") return true
+    const code = (error as { readonly code?: string } | null)?.code
+    if (code === "ESRCH") return true
+    if (code === "EPERM") return false
     throw error
   }
 }
@@ -198,6 +201,109 @@ describe("launching", () => {
     expect(descendantGone).toBe(true)
     expect(groupGone).toBe(true)
   }, 30_000)
+
+  it.skipIf(process.platform === "win32")("aborts admission and reaps the child process group", async () => {
+    const root = project()
+    const ready = join(root, "ready")
+    const entry = child(
+      `import { spawn } from "node:child_process"
+       import { writeFileSync, renameSync } from "node:fs"
+       process.on("SIGTERM", () => {})
+       const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" })
+       writeFileSync(${JSON.stringify(ready + ".tmp")}, JSON.stringify([process.pid, descendant.pid]))
+       renameSync(${JSON.stringify(ready + ".tmp")}, ${JSON.stringify(ready)})
+       setInterval(() => {}, 1000)`
+    )
+    const controller = new AbortController()
+    const options = {
+      root,
+      payload: "{}",
+      entry,
+      signal: controller.signal,
+      timeoutMs: 10_000,
+      intervalMs: 5_000,
+      terminationGraceMs: 100
+    }
+    const pending = Detached.launch(options)
+    let pids: Array<number> = []
+    try {
+      expect(await until(() => existsSync(ready), 10_000)).toBe(true)
+      pids = JSON.parse(readFileSync(ready, "utf8"))
+      controller.abort()
+      // Cancellation must wake the admission poll, even with a long interval.
+      expect(await until(() => processGone(-pids[0]!), 2_000)).toBe(true)
+      const result = await pending
+      expect(Detached.isLaunched(result)).toBe(false)
+      expect((result as Detached.Rejected).reason).toContain("interrupted")
+      expect(existsSync(result.logFile)).toBe(true)
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
+      expect(pids.every(processGone)).toBe(true)
+    } finally {
+      controller.abort()
+      if (pids[0] !== undefined && !processGone(-pids[0])) process.kill(-pids[0], "SIGKILL")
+      await pending
+    }
+  })
+
+  it("releases cancellation ownership after admission", async () => {
+    const root = project()
+    const controller = new AbortController()
+    const entry = child(
+      `process.stderr.write("SMITHERS_DETACHED_ADMISSION=run:" + process.env.SMITHERS_INTERNAL_DETACHED_ADMISSION + " runId=run-owned\\n")
+       setInterval(() => {}, 1000)`
+    )
+    const options = { root, payload: "{}", entry, signal: controller.signal, intervalMs: 10 }
+    const result = await Detached.launch(options)
+    expect(Detached.isLaunched(result)).toBe(true)
+    const pid = (result as Detached.Launched).pid!
+    try {
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
+      controller.abort()
+      expect(processGone(pid)).toBe(false)
+    } finally {
+      if (!processGone(pid)) process.kill(pid, "SIGKILL")
+      expect(await until(() => processGone(pid), 2_000)).toBe(true)
+    }
+  })
+
+  it("does not spawn when the signal is already aborted", async () => {
+    const root = project()
+    const controller = new AbortController()
+    controller.abort()
+    const options = { root, payload: "{}", entry: child(""), signal: controller.signal }
+    await expect(Detached.launch(options)).rejects.toMatchObject({ name: "AbortError" })
+    expect(existsSync(Project.logDirectory(root))).toBe(false)
+  })
+
+  it("cleans up when admission polling throws", async () => {
+    const root = project()
+    const ready = join(root, "ready")
+    const entry = child(
+      `import { writeFileSync } from "node:fs"
+       writeFileSync(${JSON.stringify(ready)}, String(process.pid))
+       setInterval(() => {}, 1000)`
+    )
+    let pid: number | undefined
+    try {
+      const result = await Detached.launch({
+        root,
+        payload: "{}",
+        entry,
+        timeoutMs: 5_000,
+        intervalMs: 10,
+        onSlowBoot: () => {
+          throw new Error("notice failed")
+        }
+      })
+      pid = Number(readFileSync(ready, "utf8"))
+      expect(Detached.isLaunched(result)).toBe(false)
+      expect((result as Detached.Rejected).reason).toContain("notice failed")
+      expect(processGone(pid)).toBe(true)
+    } finally {
+      if (pid === undefined && existsSync(ready)) pid = Number(readFileSync(ready, "utf8"))
+      if (pid !== undefined && !processGone(pid)) process.kill(pid, "SIGKILL")
+    }
+  })
 
   it("passes the operator's extra arguments through to the child", async () => {
     const root = project()
