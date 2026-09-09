@@ -1,19 +1,9 @@
 /**
- * Crash-shaped append recovery against a real file-backed SQLite database.
+ * Injected-defect rollback and corruption recovery on file-backed SQLite.
  *
- * `JournalCompaction.test.ts` injects a crash into an in-memory database during
- * compaction; `JournalDurable.test.ts` restarts cleanly. Neither covers the
- * append path losing its process between the INSERT and the COMMIT, which is
- * the case a durable journal exists for: the row must be absent, the producer
- * identity must be free, and the next allocation must continue from the durable
- * floor rather than from the sequence the dead writer had already claimed.
- *
- * The crash is injected at the SQL layer, over a real file. That is the same
- * idiom `JournalCompaction.test.ts` uses, lifted onto a real database because
- * an in-memory one cannot outlive the connection that would have crashed.
- * Child processes are not available to this package's tooling, so "reopen in a
- * fresh process" is a fresh `NodeDatabase` connection to the same file, which
- * is what actually re-reads the durable floor.
+ * Effect.die still unwinds the transaction and connection scopes. These tests
+ * prove orderly rollback and reopen; `JournalProcessDeath.test.ts` covers
+ * abrupt termination before COMMIT and after acknowledgment with SIGKILL.
  *
  * Prior art: Temporal, whose readers of damaged history fail with a typed
  * `DataLoss` rather than replaying a prefix
@@ -91,8 +81,8 @@ class CrashInjected extends Error {
 }
 
 /**
- * Kills the writer immediately after the durable INSERT has executed and before
- * its transaction can commit — the exact window a `kill -9` opens.
+ * Defects immediately after the durable INSERT, causing the transaction to
+ * roll back through its normal scope finalizers.
  */
 const crashAfterInsert = (
   shouldCrash: () => boolean
@@ -112,7 +102,7 @@ const crashAfterInsert = (
             }
             return statement.pipe(
               Effect.tap(() =>
-                shouldCrash() ? Effect.die(new CrashInjected("writer killed before commit")) : Effect.void
+                shouldCrash() ? Effect.die(new CrashInjected("writer defect before commit")) : Effect.void
               )
             )
           }
@@ -166,7 +156,7 @@ const corrupt = (filename: string, statement: string) =>
 
 describe("SqlJournal append recovery on a real file", () => {
   it.effect(
-    "leaves no phantom entry, identity, or sequence when the writer dies before commit",
+    "leaves no phantom entry, identity, or sequence after an injected defect rolls back",
     () =>
       withTempFile((filename) =>
         Effect.gen(function*() {
@@ -187,9 +177,7 @@ describe("SqlJournal append recovery on a real file", () => {
             )
           )
 
-          // The append died rather than failing: a killed process has no typed
-          // error to report, and the journal must not convert one into a
-          // receipt.
+          // A defect must remain a defect, never a successful receipt.
           expect(Exit.isFailure(exit) ? exit.cause.reasons.map((reason) => reason._tag) : "Success").toEqual(["Die"])
 
           // A cold connection re-reads the file. The doomed INSERT rolled back
