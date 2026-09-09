@@ -23,7 +23,7 @@ export const Provenance = Schema.Struct({
 })
 export type Provenance = typeof Provenance.Type
 const Candidate = Schema.Struct({
-  inputDigest: Schema.String, contentDigest: Schema.String, review: Review, reviewer: Schema.String,
+  inputDigest: Schema.String, contentDigest: Schema.String, sectionsDigest: Schema.String, review: Review, reviewer: Schema.String,
   attempt: AttemptStore.AttemptId, originRunId: Schema.String
 })
 export const Pool = Schema.Struct({
@@ -97,8 +97,9 @@ export const reuseOperations = (options: { root: string; output: string }) => {
             ids.set(`${stepKeyDigest}:${attempt}`, { runId, stepKeyDigest, attempt })
           }
         } else if (entry.eventType === "flows.engine.attempt-finished") {
-          // Old runs have incomplete lifecycle markers. Resolve the committed
-          // result from their matching native attempt row rather than invent it.
+          // The current engine emits these legacy lifecycle markers. Resolve
+          // their committed result from the matching native attempt row; the
+          // typed branch above also accepts the complete v2 event contract.
           const parsed = Schema.decodeUnknownOption(Schema.Struct({ ...AttemptStore.AttemptId.fields, state: Schema.String }))(entry.payload)
           if (Option.isSome(parsed) && parsed.value.state === "succeeded" && parsed.value.runId === priorRunId) {
             const { runId, stepKeyDigest, attempt } = parsed.value
@@ -135,6 +136,7 @@ export const reuseOperations = (options: { root: string; output: string }) => {
       const id = old.value.evidence.spec.id
       if (candidates[id]) return empty // Ambiguous successful receipts are never guessed between.
       candidates[id] = { inputDigest: old.value.evidence.inputDigest, contentDigest: old.value.evidence.contentDigest,
+        sectionsDigest: yield* digest(canonical(old.value.evidence.sections)),
         review: old.value.review, reviewer,
         attempt: { runId: priorRunId, stepKeyDigest: row.value.stepKeyDigest, attempt: row.value.attempt },
         originRunId: Option.isSome(inherited) ? inherited.value.provenance.originRunId : priorRunId }
@@ -149,6 +151,7 @@ export const reuseOperations = (options: { root: string; output: string }) => {
     const candidate = pool.candidates[evidence.spec.id]
     if (!candidate) return fresh("no compatible recorded review")
     if (candidate.inputDigest !== evidence.inputDigest || candidate.contentDigest !== evidence.contentDigest || candidate.reviewer !== reviewer) return fresh("page source, prose or reviewer changed")
+    if (candidate.sectionsDigest !== (yield* digest(canonical(evidence.sections)))) return fresh("review section boundaries changed")
     const assessment = yield* Effect.result(ops.assess({ evidence, review: candidate.review, reviewer }))
     if (assessment._tag === "Failure") return fresh("recorded citations fail current validation")
     return { review: candidate.review, reason: "exact recorded review reused",

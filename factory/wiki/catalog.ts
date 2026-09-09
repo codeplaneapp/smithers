@@ -32,7 +32,7 @@ export const pages: readonly PageSpec[] = [
     "packages/smithers/flows/database/src/node/NodeDatabase.ts", "packages/smithers/flows/database/src/bun/BunDatabase.ts",
     ["packages/smithers/flows/database/src/internal/SqliteOpen.ts", [65, 123], [132, 208], [291, 343]],
     ["packages/smithers/flows/database/src/DurableWriter.ts", [64, 106], [208, 310]],
-    ["packages/smithers/flows/platform-node/src/AtomicFileSystem.ts", [1426, 1469], [1815, 1844], [2009, 2054]],
+    ["packages/smithers/flows/platform-node/src/AtomicFileSystem.ts", [1426, 1469], [1815, 1844], [2009, 2082]],
     "packages/smithers/flows/platform-node/test/AtomicFileSystemRuntimeParity.test.ts", "packages/smithers/flows/platform-node/test/fixtures/atomic-helper-identity.ts"
   ]),
   page({ id: "storage", title: "Journal and durable stores", purpose: "Use existing persisted execution facts instead of another coding ledger.", kind: "current", document: "factory/wiki/pages/storage.md", related: ["runtime", "flows", "wiki-generation"] }, [
@@ -50,8 +50,9 @@ export const pages: readonly PageSpec[] = [
     "flows/wiki/workflow.ts", "flows/wiki/runtime.ts", "flows/wiki/evidence.ts", operations, "apps/ui/docs/workbench-lanes/runs.md"
   ]),
   page({ id: "product-ui", title: "Embedded UI and recursive inspection", purpose: "Follow the existing frame, card and dispatcher boundaries.", kind: "current", document: "factory/wiki/pages/product-ui.md", related: ["agent", "storage", "coding-direction", "cloud-wiki"] }, [
-    ui, "apps/ui/docs/ONBOARDING.md", ["apps/ui/src/mainview/cards/RunTrace.ts", [20, 108], [175, 221], [510, 576]],
-    ["apps/ui/src/mainview/cards/RunTraceCard.tsx", [66, 240]], "apps/ui/src/mainview/runtime/FrameHistory.ts",
+    ui, "apps/ui/docs/ONBOARDING.md", ["apps/ui/src/mainview/cards/RunTrace.ts", [20, 108], [154, 221], [279, 305], [510, 576]],
+    ["apps/ui/src/mainview/cards/RunTraceCard.tsx", [66, 416]], "apps/ui/src/mainview/runtime/FrameHistory.ts",
+    ["apps/ui/src/mainview/state/controller/runs.ts", [393, 424], [448, 462]], ["apps/ui/src/mainview/flows/entries/runs.ts", [184, 220]],
     "apps/ui/docs/workbench-lanes/runs.md", ["flows/wiki/operations.ts", [94, 145]]
   ]),
   page({ id: "wiki-generation", title: "How this wiki stays accountable", purpose: "Separate source freshness, semantic review and human intent.", kind: "current", document: "factory/wiki/pages/wiki-generation.md", related: ["build-graph", "runtime", "coding-direction"] }, [

@@ -6,7 +6,7 @@ The coding progression graph is a repository recipe made from ordinary `Flow.mak
 
 `Plan` contains a prompt, memory revision, base revision, and ordered Changes. Each Change groups planned atoms and declares implementation and check flows with pinned executable digests. An existing atom uses its native JJ change ID; a planned new atom uses `changeId: null` until implementation supplies a revision. The product Change ID groups work; it is not a replacement identity for every atom.
 
-`Revision` records change, commit, tree, operation, and parent commit IDs. Plan validation rejects duplicate grouping IDs, duplicate check IDs, and repeated non-null atom IDs. Every Change must declare a required fast check and a required slow check.
+`Revision` records change, commit, tree, operation, and parent commit IDs. Plan validation rejects duplicate grouping IDs, duplicate check IDs within each Change, and repeated non-null atom IDs. Every Change must declare a required fast check and a required slow check.
 
 ## Advance after fast acceptance
 

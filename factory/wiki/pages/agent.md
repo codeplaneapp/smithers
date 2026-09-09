@@ -16,4 +16,4 @@ The model decides semantic support. Citation validation only establishes that th
 
 ## Preserve the evidence needed for inspection
 
-Model calls and capability calls belong to durable execution. The product can show a cheap explanation first, then reveal lower-level evidence. An explanation of intent and a recorded action outcome are different facts, and should stay linked rather than be merged into an invented success story.
+Model calls and capability calls belong to durable execution. The product contract calls for a cheap explanation first, followed by lower-level evidence. An explanation of intent and a recorded action outcome are different facts, and should stay linked rather than be merged into an invented success story.

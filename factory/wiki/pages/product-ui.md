@@ -18,4 +18,4 @@ The trace card now starts with a cheap Turns view: bounded excerpts of recorded 
 
 ## Keep wiki truth visible
 
-The UI rules describe the wiki as Markdown-native linked documents in its own TanStack DB collection, with provenance, confidence, actor and revision. Inferred world state must not look like ground truth. Generated wiki pages therefore expose freshness and semantic verification separately, while human-authored intent remains an independently editable lane.
+The UI rules describe the wiki as Markdown-native linked documents in its own TanStack DB collection, with provenance, confidence, actor and revision. Inferred world state must not look like ground truth. Generated wiki pages therefore expose freshness and semantic verification separately. The generator leaves canonical human-authored pages outside its output directory and does not overwrite them; explicitly catalogued intent can appear as a generated snapshot copy.

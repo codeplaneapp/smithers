@@ -57,17 +57,17 @@ Reopening it in the first runtime must not repeat that action. Both directions
 are exercised. This is native Bun execution, not running Node through a Bun
 package-manager shim.
 
-The existing Node tests continue to verify registration ordering, ownership,
-process containment and signal cleanup. Bun-specific host and database contract
+The Node suite contains named regression cases for registration ordering,
+ownership, process containment and signal cleanup. These sources describe test
+coverage; they do not certify that a particular test run passed. Bun-specific host and database contract
 coverage must be expanded alongside behavior changes. A Node sidecar is not a
 compatibility solution: when a supported runtime cannot run a flow, repair its
 injected platform implementation and add a regression scenario here.
 
 The shared confined filesystem also has a native Node/Bun regression for
-concurrent macOS developer-tool launches. Apple's `/usr/bin/python3` entry point
-can share a tool-shim inode with Git. Bun's file `realpath` returned the other
-hard-link name during concurrent operations, causing Git to receive Python
-arguments. The shared host resolves the interpreter's parent directory and
+concurrent macOS developer-tool launches. This covers helper identity when
+developer-tool entry points share a hard-linked inode: choosing a different
+hard-link name can dispatch the wrong tool. The shared host resolves the interpreter's parent directory and
 follows actual leaf symlinks while preserving a hard-linked executable's entry
 name. Explicit configuration still uses `AtomicFileSystem.layerWith`; domain
 flows do not choose interpreters. The same executable, workspace confinement,

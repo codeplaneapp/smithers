@@ -6,7 +6,7 @@ This page records intended product behavior from the user's release brief. It is
 
 Coding begins by gathering relevant memory through workflows, then clarifying or pushing back where the evidence warrants it. Memory includes a clean linear mythical history and a separate wiki. A logical product Change groups small atomic changes; planned file reads and writes help schedule parallel work.
 
-Native JJ change identities should survive history rewriting. JJ commit identities name particular revisions. The product should place a thin opinionated grouping over existing JJ capabilities instead of inventing another identity for every atomic change. Owning code and generated explanations are linked by build dependencies; human intent and future direction remain distinct from current behavior.
+Native JJ change identities should survive history rewriting. Validation receipts must separately pin the exact JJ commit revision they evaluated. The product should place a thin opinionated grouping over existing JJ capabilities instead of inventing another identity for every atomic change. Owning code and generated explanations are linked by build dependencies; human intent and future direction remain distinct from current behavior.
 
 ## Three builds and optimistic progress
 

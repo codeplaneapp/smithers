@@ -121,7 +121,7 @@ export const operations = (options: { readonly root: string; readonly output: st
     const files: Record<string, string> = { "snapshot.json": JSON.stringify(snapshot, null, 2) + "\n" }
     for (const page of pages) for (const source of page.evidence.sources) files[`sources/${source.path}`] = source.text
     for (const page of rendered) files[`pages/${page.id}.md`] = page.body
-    files["README.md"] = `# Smithers engineering wiki\n\nSnapshot: \`${sourceRevision}\`. Semantic verification: **${verification}**.\n\nThe source snapshot is immutable content evidence, not a claim about the current main branch or production. Human-authored intent lives outside this generated directory and is never an input.\n\n` + rendered.map((page) => `- [${page.title}](pages/${page.id}.md) — ${page.purpose}`).join("\n") + "\n"
+    files["README.md"] = `# Smithers engineering wiki\n\nSnapshot: \`${sourceRevision}\`. Semantic verification: **${verification}**.\n\nThe source snapshot is immutable content evidence, not a claim about the current main branch or production. Canonical human-authored pages are not overwritten; explicitly catalogued intent may appear as generated copies and archived source evidence.\n\n` + rendered.map((page) => `- [${page.title}](pages/${page.id}.md) — ${page.purpose}`).join("\n") + "\n"
     const requestedRoot = path.resolve(options.output)
     yield* fs.makeDirectory(requestedRoot, { recursive: true })
     const root = yield* fs.realPath(requestedRoot)
