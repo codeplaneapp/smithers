@@ -995,6 +995,28 @@ describe("PackageManager manifests", () => {
     expect(manifest.platform).toEqual(platformInput)
   })
 
+  it("versions the canonical tuple when pnpm configuration is present", () => {
+    const pnpmfileDigest = "c".repeat(64)
+    const workspaceDigest = "d".repeat(64)
+    expect(JSON.parse(PackageManager.storeManifestText({ ...validInput, pnpmfileDigest, workspaceDigest })))
+      .toEqual([
+        "smithers-build/store-manifest/v2",
+        "pnpm",
+        "11.21.0",
+        ["linux", "x64", null],
+        validInput.lockfileDigest,
+        validInput.npmrcDigest,
+        pnpmfileDigest,
+        workspaceDigest
+      ])
+    expect(PackageManager.storeManifestText({ ...validInput, pnpmfileDigest: null, workspaceDigest: null }))
+      .toBe(PackageManager.storeManifestText(validInput))
+    for (const key of ["pnpmfileDigest", "workspaceDigest"] as const) {
+      expect(() => PackageManager.storeManifestText({ ...validInput, [key]: "invalid" }))
+        .toThrow(/lowercase SHA-256 digest or null/)
+    }
+  })
+
   it("gives every field a distinct digest", async () => {
     const digestOf = (input: Parameters<typeof PackageManager.storeManifest>[0]) =>
       Effect.runPromise(
@@ -1010,7 +1032,9 @@ describe("PackageManager manifests", () => {
       { ...validInput, platform: null },
       { ...validInput, platform: { ...platformInput, arch: "arm64" } },
       { ...validInput, lockfileDigest: "c".repeat(64) },
-      { ...validInput, npmrcDigest: null }
+      { ...validInput, npmrcDigest: null },
+      { ...validInput, pnpmfileDigest: "c".repeat(64) },
+      { ...validInput, workspaceDigest: "c".repeat(64) }
     ]
     const digests = await Promise.all(variants.map(digestOf))
     expect(new Set([base, ...digests]).size).toBe(digests.length + 1)

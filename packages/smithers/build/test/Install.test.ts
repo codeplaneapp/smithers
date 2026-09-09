@@ -3,7 +3,9 @@ import { Flow, Graph } from "@smthrs/flow"
 import * as FileSet from "@smthrs/plan/FileSet"
 import * as Plan from "@smthrs/plan/Plan"
 import * as Context from "effect/Context"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -42,7 +44,9 @@ const installContent = async (root: string): Promise<Install.Content> => ({
       PackageManager.lockfileDigest(root, "pnpm-lock.yaml").pipe(Effect.provide(NodeServices.layer))
     )
   },
-  npmrc: null
+  npmrc: null,
+  pnpmfile: null,
+  workspace: null
 })
 
 interface ManagerOptions {
@@ -97,6 +101,123 @@ const packageJsonDigest = (root: string) =>
   Effect.runPromise(PackageManager.packageJsonDigest(root).pipe(Effect.provide(NodeServices.layer)))
 
 describe("Install", () => {
+  for (const path of ["pnpm-lock.yaml", ".npmrc", ".pnpmfile.cjs", "pnpm-workspace.yaml"]) {
+    for (const phase of ["fetch", "link"] as const) {
+      for (const timing of ["before", "during"] as const) {
+        it(`refuses ${path} drift ${timing} ${phase}`, async () => {
+          await withFixture(async (root) => {
+            const evidence = await packageJsonDigest(root)
+            const initial = managerService({ root, evidence })
+            const provide = <A, E>(
+              effect: Effect.Effect<
+                A,
+                E,
+                | PackageManager.PackageManager
+                | Runtime.Runtime
+                | FileSystem.FileSystem
+                | Crypto.Crypto
+              >,
+              service = initial
+            ) =>
+              effect.pipe(
+                Effect.provide(NodeServices.layer),
+                Effect.provideService(PackageManager.PackageManager, service),
+                Effect.provideService(Runtime.Runtime, runtimeService())
+              )
+            const content = await Effect.runPromise(provide(Install.executeMeasure()))
+            const store = await Effect.runPromise(provide(Install.executeFetch({ content })))
+            const mutate = () =>
+              Fs.writeFile(
+                NodePath.join(root, path),
+                path === ".npmrc" ? "registry=https://changed.example/\n" : "changed\n"
+              )
+            let calls = 0
+            const operation = Effect.promise(async () => {
+              calls++
+              if (timing === "during") await mutate()
+            })
+            const service = { ...initial, [phase]: operation }
+            if (timing === "before") await mutate()
+            const error = await Effect.runPromise(provide(
+              (phase === "fetch"
+                ? Install.executeFetch({ content }).pipe(Effect.asVoid)
+                : Install.executeLink({ content, store }).pipe(Effect.asVoid)).pipe(Effect.flip),
+              service
+            ))
+            expect(error).toMatchObject({ _tag: "smithers-build/PackageManagerError", code: "input_drift" })
+            expect(error.message).toContain(path)
+            expect(calls).toBe(timing === "before" ? 0 : 1)
+          })
+        })
+      }
+    }
+  }
+
+  it("withholds the link manifest when package.json changes during linking", async () => {
+    await withFixture(async (root) => {
+      const content = await installContent(root)
+      const service = managerService({ root, evidence: await packageJsonDigest(root) })
+      const store = await Effect.runPromise(
+        Install.executeFetch({ content }).pipe(
+          Effect.provide(NodeServices.layer),
+          Effect.provideService(PackageManager.PackageManager, service),
+          Effect.provideService(Runtime.Runtime, runtimeService())
+        )
+      )
+      const error = await Effect.runPromise(
+        Install.executeLink({ content, store }).pipe(
+          Effect.flip,
+          Effect.provide(NodeServices.layer),
+          Effect.provideService(PackageManager.PackageManager, {
+            ...service,
+            link: Effect.promise(() => Fs.writeFile(NodePath.join(root, "package.json"), "{\"name\":\"changed\"}"))
+          }),
+          Effect.provideService(Runtime.Runtime, runtimeService())
+        )
+      )
+      expect(error.code).toBe("input_drift")
+      expect(error.message).toContain("package.json")
+    })
+  })
+
+  it("measures pnpm hook and workspace files and binds each to the store identity", async () => {
+    await withFixture(async (root) => {
+      const service = managerService({ root, evidence: await packageJsonDigest(root) })
+      const measure = () =>
+        Effect.runPromise(
+          Install.executeMeasure().pipe(
+            Effect.provide(NodeServices.layer),
+            Effect.provideService(PackageManager.PackageManager, service)
+          )
+        )
+      const fetch = (content: Install.Content) =>
+        Effect.runPromise(
+          Install.executeFetch({ content }).pipe(
+            Effect.provide(NodeServices.layer),
+            Effect.provideService(PackageManager.PackageManager, service),
+            Effect.provideService(Runtime.Runtime, runtimeService())
+          )
+        )
+      const empty = await measure()
+      const baseline = await fetch(empty)
+      for (const [field, path] of [["pnpmfile", ".pnpmfile.cjs"], ["workspace", "pnpm-workspace.yaml"]] as const) {
+        await Fs.writeFile(NodePath.join(root, path), "first\n")
+        const first = await measure()
+        expect(first[field]).toEqual({
+          path,
+          digest: await Effect.runPromise(
+            PackageManager.lockfileDigest(root, path).pipe(Effect.provide(NodeServices.layer))
+          )
+        })
+        const firstStore = await fetch(first)
+        expect(firstStore.digest).not.toBe(baseline.digest)
+        await Fs.writeFile(NodePath.join(root, path), "second\n")
+        expect((await fetch(await measure())).digest).not.toBe(firstStore.digest)
+        await Fs.unlink(NodePath.join(root, path))
+      }
+    })
+  })
+
   it("plans the non-restorable link honestly instead of declaring it cacheable or compensable", async () => {
     expect(Install.Link.tier).toBe("irreversible")
     for (const manager of ["pnpm", "bun"] as const) {
@@ -140,7 +261,7 @@ describe("Install", () => {
       )
       let fetches = 0
       let links = 0
-      const evidence = await packageJsonDigest(root)
+      const evidence = "a".repeat(64) as PackageManager.Digest
       const service = managerService({
         root,
         evidence,
@@ -168,8 +289,17 @@ describe("Install", () => {
           Effect.provideService(PackageManager.PackageManager, service),
           Effect.provideService(Runtime.Runtime, runtimeService())
         )
-      await Effect.runPromise(link())
-      await Effect.runPromise(link())
+      const manifest = await Effect.runPromise(
+        PackageManager.linkedTreeManifest({
+          storeDigest: store.digest,
+          packageJsonDigest: await packageJsonDigest(root),
+          managerEvidence: evidence
+        }).pipe(Effect.provide(NodeServices.layer))
+      )
+      expect(evidence).not.toBe(await packageJsonDigest(root))
+      const expected = { store: store.digest, manifest, linked: true }
+      expect(await Effect.runPromise(link())).toEqual(expected)
+      expect(await Effect.runPromise(link())).toEqual(expected)
       expect(fetches).toBe(0)
       expect(links).toBe(2)
     })
@@ -280,7 +410,7 @@ describe("Install", () => {
     })
   })
 
-  it("measures content only: two digests, no manager version and no platform", async () => {
+  it("measures content only, no manager version and no platform", async () => {
     await withFixture(async (root) => {
       const evidence = await packageJsonDigest(root)
       const service = managerService({ root, evidence })
@@ -290,7 +420,7 @@ describe("Install", () => {
           Effect.provideService(PackageManager.PackageManager, service)
         )
       )
-      expect(Object.keys(measured).sort()).toEqual(["lockfile", "npmrc"])
+      expect(Object.keys(measured).sort()).toEqual(["lockfile", "npmrc", "pnpmfile", "workspace"])
       expect(measured.lockfile.path).toBe("pnpm-lock.yaml")
       expect(measured.lockfile.digest).toMatch(/^[0-9a-f]{64}$/)
       expect(measured.npmrc).toBe(null)
@@ -393,19 +523,37 @@ describe("Install", () => {
       )
       expect(content.npmrc).not.toBe(null)
 
+      const events: Array<string> = []
       const fetched = (platformSensitive: boolean) =>
         Effect.runPromise(
           Install.executeFetch({ content }).pipe(
             Effect.provide(NodeServices.layer),
             Effect.provideService(
               PackageManager.PackageManager,
-              managerService({ root, evidence, platformSensitive })
+              managerService({
+                root,
+                evidence,
+                platformSensitive,
+                requirement: ">=11.0.0",
+                version: "11.21.3",
+                onVersionRead: () => {
+                  events.push("version")
+                },
+                onFetch: () => {
+                  events.push("fetch")
+                }
+              })
             ),
             Effect.provideService(Runtime.Runtime, runtimeService())
           )
         )
       const independent = await fetched(false)
+      expect(events).toEqual(["version", "fetch"])
+      expect(independent.managerVersion).toBe("11.21.3")
+      events.length = 0
       const sensitive = await fetched(true)
+      expect(events).toEqual(["version", "fetch"])
+      expect(sensitive.managerVersion).toBe("11.21.3")
       expect(independent.platform).toBe(null)
       expect(sensitive.platform).toEqual(platform)
       expect(independent.digest).not.toBe(sensitive.digest)
@@ -445,12 +593,30 @@ describe("Install", () => {
       const actions = graph.nodes.filter((node) => node.kind === "ActionCall")
       expect(actions).toHaveLength(3)
       const [measure, fetch, link] = actions
-      expect(measure!.draft.effects.reads).toEqual([".npmrc", "bun.lock", "pnpm-lock.yaml"])
-      expect(fetch!.draft.effects.reads).toEqual([lockfile, ".npmrc"])
+      expect(measure!.draft.effects.reads).toEqual([
+        ".npmrc",
+        "bun.lock",
+        "pnpm-lock.yaml",
+        ".pnpmfile.cjs",
+        "pnpm-workspace.yaml"
+      ])
+      expect(fetch!.draft.effects.reads).toEqual(
+        manager === "pnpm"
+          ? [lockfile, ".npmrc", ".pnpmfile.cjs", "pnpm-workspace.yaml"]
+          : [lockfile, ".npmrc"]
+      )
       expect(fetch!.draft.effects.writes).toEqual([
         { _tag: "TreeArtifact", path: `.flows/store/${manager}` }
       ])
-      expect(link!.draft.effects.reads).toEqual(["package.json"])
+      expect(link!.draft.effects.reads).toEqual([
+        ".npmrc",
+        "bun.lock",
+        "pnpm-lock.yaml",
+        ".pnpmfile.cjs",
+        "pnpm-workspace.yaml",
+        "package.json",
+        { _tag: "Glob", include: ["**/package.json"], exclude: ["**/node_modules/**", ".flows/**"] }
+      ])
       for (const action of actions) expect(action.draft.effects.boundaryMode).toBe("expected")
     }
   })

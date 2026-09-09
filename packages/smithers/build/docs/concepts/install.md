@@ -68,12 +68,14 @@ declaration, and measure feeds it as an ordinary settled upstream reference.
 ## Measure
 
 `Measure` digests the manager lockfile and the project `.npmrc` when present.
-That is all it does.
+For pnpm it also digests `.pnpmfile.cjs` and `pnpm-workspace.yaml` when present.
 
 ```ts
 Content = {
   lockfile: { path, digest }
   npmrc: { path, digest } | null
+  pnpmfile: { path, digest } | null
+  workspace: { path, digest } | null
 }
 ```
 
@@ -98,15 +100,17 @@ measure key, which the `expected` boundary made inert and a `hard` boundary
 would make a hit on another manager's measurement.
 
 `.npmrc` is limited to 256 KiB, `package.json` to 4 MiB, and lockfiles to
-64 MiB. Reads use stable regular-file descriptors, exact UTF-8, and
-canonical-path checks inside the project root.
+64 MiB. The pnpm hook and workspace files use the same 64 MiB bound. Reads use
+stable regular-file descriptors, exact UTF-8, and canonical-path checks inside
+the project root.
 
 ## Fetch identity
 
 The fetch payload includes:
 
 1. the lockfile path and SHA-256 digest;
-2. the project `.npmrc` digest or `null`.
+2. the project `.npmrc` digest or `null`;
+3. the pnpm hook and workspace manifest paths and digests, or `null`.
 
 The scheduler also folds declaration identity, layers, capabilities, effects,
 and settled dependencies into its step key. The manager name and version reach
@@ -120,6 +124,14 @@ name implies, and then holds the host to both declared versions. A mismatch
 fails with `environment_mismatch` before anything is written. This replaces the
 old cross-round recheck, which could only compare one measurement of a host
 against an earlier measurement of the same host.
+
+Fetch and link re-read every measured input before invoking the manager and
+again after execution, before returning a manifest. Changed paths, digests,
+file presence, or newly unreadable inputs fail with `input_drift`. Preflight
+failure prevents the manager operation; postflight failure withholds the
+manifest but cannot undo store or tree writes already made. Store identity
+includes the reverified hook and workspace digests. Link also checks that the
+root `package.json` digest stayed unchanged through execution.
 
 The manager the workspace declared is not compared against the manager the
 composition provided. A sealed action receives the layer and never the
@@ -136,17 +148,20 @@ Fetch returns a `StoreManifest`:
 }
 ```
 
-Its digest is SHA-256 over a versioned canonical tuple of the measured
-environment. It describes what populated the store; it is not the store bytes.
+Its digest is SHA-256 over a versioned canonical tuple of the verified manager,
+platform, and input digests. It describes what populated the store; it is not
+the store bytes.
+The tuple uses v2 when either pnpm configuration file is present. With both
+absent it preserves the v1 digest.
 
 ## Why fetch is not cache-admissible
 
 Fetch declares `.flows/store/<manager>` as a `TreeArtifact`, but its boundary
 mode is `expected`, not `hard`. The current manager process runs against an
-absolute workspace root and opens the lockfile and `.npmrc` itself. The parent
-can compare those files before and after execution but cannot freeze their
-paths across the child's opens. The unsandboxed observer also cannot attest
-that no undeclared path was read or written.
+absolute workspace root and opens its inputs itself. The parent compares
+measured files before and after execution but cannot freeze their paths across
+the child's opens or detect a change reverted between checks. The unsandboxed
+observer also cannot attest that no undeclared path was read or written.
 
 Consequently no fetch result or store tree is replayed from a cross-run engine
 cache today. A sandbox lane that supplies hermetic-read and whole-tree evidence
@@ -234,6 +249,13 @@ declaring another is not allowed.
 
 Every supported command passes `--ignore-scripts`. Arbitrary package lifecycle
 code needs a separate non-sealed execution model and is not part of this flow.
+
+`--ignore-scripts` does not disable `.pnpmfile.cjs`. Project pnpm hooks remain
+supported: Measure hashes that file and `pnpm-workspace.yaml`, and FetchPnpm
+and Link declare both reads. Link also declares workspace member
+`package.json` reads. Hook imports and other dynamic reads are not a hermetic
+input closure; the expected boundary keeps these actions out of the shared
+cache.
 
 ## Next
 

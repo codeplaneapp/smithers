@@ -31,8 +31,8 @@
  *
  * ## What measure is, and what it is not
  *
- * Measure reports **content**: the lockfile digest and the credential-free
- * `.npmrc` digest. That is all. It used to report an `Environment` struct that
+ * Measure reports **content**: the lockfile, credential-free `.npmrc`,
+ * and pnpm hook and workspace digests. It used to report an `Environment` struct that
  * also carried the manager name, the manager version, and the host platform,
  * and the flow ran in two trampoline rounds so a later round could select a
  * manager-specific fetch from a measured manager name.
@@ -53,7 +53,7 @@
  * what the workspace declared rather than against an earlier measurement of the
  * same host.
  *
- * Measure still exists, and still runs in its own step, because the two digests
+ * Measure still exists, and still runs in its own step, because the input digests
  * are step-key material: an install whose lockfile changed must not be answered
  * by the previous install's recorded result.
  *
@@ -65,7 +65,7 @@ import * as Node from "@smthrs/plan/Node"
 import type * as Planned from "@smthrs/plan/Planned"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import type * as FileSystem from "effect/FileSystem"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as PackageManager from "./PackageManager.ts"
@@ -74,8 +74,8 @@ import * as Runtime from "./Runtime.ts"
 /**
  * Schema for the content an install is keyed on.
  *
- * Both fields are digests. Nothing here names a host, a manager, or a path into
- * a store, because this value exists to make one install distinguishable from
+ * The fields contain file paths and digests. Nothing here names a host, a
+ * manager, or a path into a store, because this value exists to make one install distinguishable from
  * another install of different dependencies.
  *
  * @category models
@@ -86,7 +86,11 @@ export const Content = Schema.Struct({
   /** The lockfile path and its measured digest. */
   lockfile: FileInput,
   /** The credential-free `.npmrc` and its digest, or `null` when absent. */
-  npmrc: Schema.NullOr(FileInput)
+  npmrc: Schema.NullOr(FileInput),
+  /** The project pnpm hook, or `null` when absent or not using pnpm. */
+  pnpmfile: Schema.NullOr(FileInput),
+  /** The pnpm workspace manifest, or `null` when absent or not using pnpm. */
+  workspace: Schema.NullOr(FileInput)
 })
 
 /**
@@ -140,21 +144,23 @@ export type LinkManifest = typeof LinkManifest.Type
  * The lockfiles and configuration the measure action may read.
  *
  * One entry per manager {@link PackageManager.Name} admits, plus the project
- * `.npmrc`. `package-lock.json` and `yarn.lock` were declared here too, for
+ * `.npmrc` and pnpm hook and workspace files. `package-lock.json` and `yarn.lock` were declared here too, for
  * managers no declaration can select and no implementation can drive, which
  * inflated a sealed action's read set with paths no code path opens.
  */
 const measureInputPatterns: ReadonlyArray<string> = [
   ".npmrc",
   "bun.lock",
-  "pnpm-lock.yaml"
+  "pnpm-lock.yaml",
+  ".pnpmfile.cjs",
+  "pnpm-workspace.yaml"
 ]
 
 /**
  * Measures the content every later step keys on.
  *
  * Declared with an `expected` boundary so that no cross-run cache ever answers
- * it. Re-measuring costs two file digests, and a restored measurement would
+ * it. Re-measuring costs a few file digests, and a restored measurement would
  * describe another machine's checkout.
  *
  * `manager` is in the payload as key material and for nothing else: the
@@ -186,12 +192,12 @@ export const Measure = Action.make("smithers-build/install/measure", {
 /**
  * Populates the package-manager store, and writes no `node_modules`.
  *
- * Its key material is the measured content: the lockfile digest and the
- * credential-free `.npmrc` digest, reaching the key as a settled upstream
+ * Its key material is the measured lockfile and configuration digests,
+ * reaching the key as a settled upstream
  * reference. Its value is a store-manifest digest, never the store's bytes and
  * never a `node_modules` archive. The store files are declared outputs, but
  * the shipped implementation pins its child process to an absolute project
- * root. It cannot freeze the lockfile and `.npmrc` between verification and
+ * root. It cannot freeze the inputs between verification and
  * the child's own opens, so this action uses an `expected` boundary and is
  * not admitted to a cross-run cache.
  *
@@ -216,7 +222,9 @@ const makeFetch = <Tag extends string>(
     tier: "sealed"
   })
     .annotate(Flow.EffectsDeclaration, {
-      reads: [lockfile, ".npmrc"],
+      reads: manager === "pnpm"
+        ? [lockfile, ".npmrc", ".pnpmfile.cjs", "pnpm-workspace.yaml"]
+        : [lockfile, ".npmrc"],
       writes: [{ _tag: "TreeArtifact", path: `${PackageManager.storeRoot}/${manager}` }],
       boundaryMode: "expected"
     })
@@ -265,7 +273,11 @@ export const Link = Action.make("smithers-build/install/link", {
   tier: "irreversible"
 })
   .annotate(Flow.EffectsDeclaration, {
-    reads: ["package.json"],
+    reads: [...measureInputPatterns, "package.json", {
+      _tag: "Glob",
+      include: ["**/package.json"],
+      exclude: ["**/node_modules/**", ".flows/**"]
+    }],
     writes: [{ _tag: "Glob", include: ["**/node_modules", "**/node_modules/**"] }],
     boundaryMode: "expected"
   })
@@ -454,10 +466,49 @@ const verifyStoreManager = (
     : Effect.fail(environmentMismatch("the fetched store does not match this host"))
 }
 
+const inputDrift = (path: string): PackageManager.PackageManagerError =>
+  new PackageManager.PackageManagerError({
+    code: "input_drift",
+    message: `install input ${path} changed since measurement or could not be reverified`
+  })
+
+const optionalInput = (root: string, path: string) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const present = yield* fs.exists(`${root}/${path}`).pipe(
+      Effect.mapError(() =>
+        new PackageManager.PackageManagerError({
+          code: "manifest_unreadable",
+          message: `cannot inspect ${path}`
+        })
+      )
+    )
+    return present ? { path, digest: yield* PackageManager.lockfileDigest(root, path) } : null
+  })
+
+/** Re-read fixed manager paths, never paths supplied by a recorded payload. */
+const verifyContent = (manager: PackageManager.Service, content: Content) =>
+  Effect.gen(function*() {
+    const current = yield* executeMeasure().pipe(
+      Effect.provideService(PackageManager.PackageManager, manager),
+      Effect.mapError((error) => inputDrift(error.message))
+    )
+    for (const field of ["lockfile", "npmrc", "pnpmfile", "workspace"] as const) {
+      const expected = content[field]
+      const actual = current[field]
+      if (expected === null && actual === null) continue
+      if (expected?.path !== actual?.path || expected?.digest !== actual?.digest || expected === undefined) {
+        const path = actual?.path ?? expected?.path ?? field
+        return yield* Effect.fail(inputDrift(path))
+      }
+    }
+    return current
+  })
+
 /**
  * The implementation of {@link Measure}.
  *
- * It reads two files and digests them. It measures no manager version and no
+ * It reads the manager inputs and digests them. It measures no manager version and no
  * platform, because neither is content and both now have a service that
  * answers for them.
  *
@@ -482,7 +533,9 @@ export const executeMeasure = (): Effect.Effect<
     const npmrc = yield* PackageManager.npmrcDigest(manager.projectRoot)
     return {
       lockfile: { path: manager.lockfileName, digest: lockfile },
-      npmrc: npmrc === null ? null : { path: ".npmrc", digest: npmrc }
+      npmrc: npmrc === null ? null : { path: ".npmrc", digest: npmrc },
+      pnpmfile: manager.name === "pnpm" ? yield* optionalInput(manager.projectRoot, ".pnpmfile.cjs") : null,
+      workspace: manager.name === "pnpm" ? yield* optionalInput(manager.projectRoot, "pnpm-workspace.yaml") : null
     }
   })
 
@@ -511,13 +564,17 @@ export const executeFetch = ({ content }: { readonly content: Content }) =>
     const manager = yield* PackageManager.PackageManager
     const runtime = yield* Runtime.Runtime
     const managerVersion = yield* verifyEnvironment(manager, runtime)
+    yield* verifyContent(manager, content)
     yield* manager.fetch
+    const verified = yield* verifyContent(manager, content)
     return yield* PackageManager.storeManifest({
       manager: manager.name,
       managerVersion,
       platform: manager.platformSensitive ? runtime.platform : null,
-      lockfileDigest: content.lockfile.digest,
-      npmrcDigest: content.npmrc === null ? null : content.npmrc.digest
+      lockfileDigest: verified.lockfile.digest,
+      npmrcDigest: verified.npmrc === null ? null : verified.npmrc.digest,
+      pnpmfileDigest: verified.pnpmfile?.digest ?? null,
+      workspaceDigest: verified.workspace?.digest ?? null
     })
   })
 
@@ -566,7 +623,9 @@ const verifyStoreContent = (
       managerVersion,
       platform,
       lockfileDigest: content.lockfile.digest,
-      npmrcDigest: content.npmrc === null ? null : content.npmrc.digest
+      npmrcDigest: content.npmrc === null ? null : content.npmrc.digest,
+      pnpmfileDigest: content.pnpmfile?.digest ?? null,
+      workspaceDigest: content.workspace?.digest ?? null
     }),
     (expected) =>
       expected.digest === store.digest ? Effect.void : Effect.fail(
@@ -600,10 +659,16 @@ export const executeLink = ({ content, store }: {
     const managerVersion = yield* verifyEnvironment(manager, runtime)
     const platform = manager.platformSensitive ? runtime.platform : null
     yield* verifyStoreManager(manager, managerVersion, platform, store)
-    yield* verifyStoreContent(manager, managerVersion, platform, content, store)
+    const verified = yield* verifyContent(manager, content)
+    yield* verifyStoreContent(manager, managerVersion, platform, verified, store)
     const packageJsonDigest = yield* PackageManager.packageJsonDigest(manager.projectRoot)
     yield* manager.link
     const managerEvidence = yield* manager.linkManifest
+    yield* verifyContent(manager, content)
+    const currentPackageJsonDigest = yield* PackageManager.packageJsonDigest(manager.projectRoot).pipe(
+      Effect.mapError(() => inputDrift("package.json"))
+    )
+    if (currentPackageJsonDigest !== packageJsonDigest) return yield* Effect.fail(inputDrift("package.json"))
     const manifest = yield* PackageManager.linkedTreeManifest({
       storeDigest: store.digest,
       packageJsonDigest,

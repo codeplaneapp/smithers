@@ -130,6 +130,7 @@ export type Digest = typeof Sha256.Digest.Type
 export const ErrorCode = Schema.Literals([
   "command_failed",
   "environment_mismatch",
+  "input_drift",
   "lockfile_unreadable",
   "manifest_unreadable",
   "unsafe_configuration",
@@ -1111,6 +1112,8 @@ interface NormalizedStoreManifestInput {
   readonly platform: Platform | null
   readonly lockfileDigest: string
   readonly npmrcDigest: string | null
+  readonly pnpmfileDigest: string | null
+  readonly workspaceDigest: string | null
 }
 
 const digestPattern = /^[0-9a-f]{64}$/
@@ -1142,11 +1145,21 @@ const normalizeStoreManifestInput = (value: {
   readonly platform: Platform | null
   readonly lockfileDigest: string
   readonly npmrcDigest: string | null
+  readonly pnpmfileDigest?: string | null
+  readonly workspaceDigest?: string | null
 }): NormalizedStoreManifestInput => {
   const record = Validate.plainRecord(value, "store manifest input")
   Validate.exactKeys(
     record,
-    new Set(["manager", "managerVersion", "platform", "lockfileDigest", "npmrcDigest"]),
+    new Set([
+      "manager",
+      "managerVersion",
+      "platform",
+      "lockfileDigest",
+      "npmrcDigest",
+      "pnpmfileDigest",
+      "workspaceDigest"
+    ]),
     "store manifest input"
   )
   const manager = Validate.ownData(record, "manager", "store manifest input")
@@ -1171,26 +1184,41 @@ const normalizeStoreManifestInput = (value: {
   if (npmrcDigest !== null && (typeof npmrcDigest !== "string" || !digestPattern.test(npmrcDigest))) {
     throw new TypeError("store manifest npmrcDigest must be a lowercase SHA-256 digest or null")
   }
+  const optionalDigest = (key: "pnpmfileDigest" | "workspaceDigest"): string | null => {
+    if (!Object.hasOwn(record, key)) return null
+    const digest = Validate.ownData(record, key, "store manifest input")
+    if (digest !== null && (typeof digest !== "string" || !digestPattern.test(digest))) {
+      throw new TypeError(`store manifest ${key} must be a lowercase SHA-256 digest or null`)
+    }
+    return digest
+  }
   const platformValue = Validate.ownData(record, "platform", "store manifest input")
   return Object.freeze({
     manager,
     managerVersion,
     platform: platformValue === null ? null : normalizedPlatform(platformValue, "store manifest platform"),
     lockfileDigest,
-    npmrcDigest
+    npmrcDigest,
+    pnpmfileDigest: optionalDigest("pnpmfileDigest"),
+    workspaceDigest: optionalDigest("workspaceDigest")
   })
 }
 
 const renderStoreManifestText = (input: NormalizedStoreManifestInput): string =>
   JSON.stringify([
-    "smithers-build/store-manifest/v1",
+    input.pnpmfileDigest === null && input.workspaceDigest === null
+      ? "smithers-build/store-manifest/v1"
+      : "smithers-build/store-manifest/v2",
     input.manager,
     input.managerVersion,
     input.platform === null
       ? null
       : [input.platform.os, input.platform.arch, input.platform.libc],
     input.lockfileDigest,
-    input.npmrcDigest
+    input.npmrcDigest,
+    ...(input.pnpmfileDigest === null && input.workspaceDigest === null
+      ? []
+      : [input.pnpmfileDigest, input.workspaceDigest])
   ])
 
 /**
@@ -1211,6 +1239,8 @@ export const storeManifestText = (input: {
   readonly platform: Platform | null
   readonly lockfileDigest: string
   readonly npmrcDigest: string | null
+  readonly pnpmfileDigest?: string | null
+  readonly workspaceDigest?: string | null
 }): string => renderStoreManifestText(normalizeStoreManifestInput(input))
 
 /**
@@ -1226,6 +1256,8 @@ export const storeManifest = (input: {
   readonly platform: Platform | null
   readonly lockfileDigest: string
   readonly npmrcDigest: string | null
+  readonly pnpmfileDigest?: string | null
+  readonly workspaceDigest?: string | null
 }): Effect.Effect<StoreManifest, never, Crypto.Crypto> =>
   Effect.sync(() => normalizeStoreManifestInput(input)).pipe(
     Effect.flatMap((normalized) =>
