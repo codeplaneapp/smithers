@@ -309,8 +309,10 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         WHERE p.plan_id = ${planId} ORDER BY n.ordinal
       `.pipe(Effect.mapError(mapPersistenceError))
         if (rows.length === 0) return Option.none()
+        // The `flows_plans` CHECK constraints only require nonempty digest
+        // strings, while this row requires `StoredKey` syntax, so a legal
+        // INSERT from outside this module reaches here.
         const row = yield* decodePlanRow(rows[0]).pipe(
-          /* v8 ignore next -- every `flows_plans` column carries a CHECK constraint, so a row that fails this decode cannot be written; the branch is the belt to the schema's braces */
           Effect.mapError((cause) => error("decode_failed", "could not decode flows_plans row", cause))
         )
         // One statement observes the envelope and nodes at the same generation,

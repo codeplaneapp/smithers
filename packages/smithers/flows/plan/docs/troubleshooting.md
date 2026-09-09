@@ -290,10 +290,11 @@ never be removed.
 **What happened.** A stored row did not decode: either a `flows_plans` row or a
 node's JSON.
 
-**What to change.** Every `flows_plans` column carries a CHECK constraint, so
-this should not be reachable from rows this package wrote. Suspect a schema
-version older or newer than the running code, or a database written by something
-else.
+**What to change.** The `flows_plans` CHECK constraints require nonempty digest
+strings, not the stored-key syntax the row decoder requires, so a row written
+outside this package can satisfy every constraint and still fail to decode.
+Rows this package wrote always decode. Suspect a schema version older or newer
+than the running code, or a database written by something else.
 
 ### persistence_failed and unknown
 

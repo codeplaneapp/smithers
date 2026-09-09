@@ -345,25 +345,57 @@ describe("PlanStore", () => {
       expect(raised(failure)).toBe("flows_plans is append-only")
     }))
 
-  it.effect("refuses rewriting a recorded plan's flow or creation time", () =>
+  it.effect("refuses rewriting a recorded plan's flow, creation time, or base digest as it moves forward", () =>
     Effect.gen(function*() {
       const plan = yield* withCrypto(samplePlan())
-      const [flow, createdAt] = yield* withStore((store) =>
+      const other = yield* withCrypto(compile([draft("other")], "other-plan"))
+      const grown = yield* withCrypto(Plan.append(plan, [draft("late")]))
+      const { after, baseDigest, before, createdAt, flow, forward } = yield* withStore((store) =>
         Effect.gen(function*() {
           const sql = yield* SqlClient.SqlClient
           yield* store.record(plan, 1)
-          const flow = yield* Effect.flip(
-            sql`UPDATE flows_plans SET flow = 'other/Flow' WHERE plan_id = ${plan.planId}`
-          )
-          const createdAt = yield* Effect.flip(
-            sql`UPDATE flows_plans SET created_at_ms = 2 WHERE plan_id = ${plan.planId}`
-          )
-          return [flow, createdAt] as const
+          const before = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plans WHERE plan_id = ${plan.planId}
+          `
+          // Each mutation ALSO advances the generation, so the forward-only
+          // predicate cannot be what rejects it and only the field's own guard
+          // can. Without the advance all three statements are refused by
+          // `NEW.generation <= OLD.generation` alone and still pass with the
+          // flow, creation-time, and base-digest guards deleted.
+          const flow = yield* Effect.flip(sql`
+            UPDATE flows_plans SET flow = 'other/Flow', generation = generation + 1
+            WHERE plan_id = ${plan.planId}
+          `)
+          const createdAt = yield* Effect.flip(sql`
+            UPDATE flows_plans SET created_at_ms = 2, generation = generation + 1
+            WHERE plan_id = ${plan.planId}
+          `)
+          const baseDigest = yield* Effect.flip(sql`
+            UPDATE flows_plans SET base_digest = ${other.digest}, generation = generation + 1
+            WHERE plan_id = ${plan.planId}
+          `)
+          const after = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plans WHERE plan_id = ${plan.planId}
+          `
+          // The control: the one UPDATE the schema exists to admit. A guard
+          // wide enough to catch the three above must still let this through.
+          yield* sql`
+            UPDATE flows_plans SET digest = ${grown.digest}, generation = generation + 1
+            WHERE plan_id = ${plan.planId}
+          `
+          const forward = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plans WHERE plan_id = ${plan.planId}
+          `
+          return { after, baseDigest, before, createdAt, flow, forward }
         })
       )
 
       expect(raised(flow)).toBe("a plan only grows")
       expect(raised(createdAt)).toBe("a plan only grows")
+      expect(raised(baseDigest)).toBe("a plan only grows")
+      // Not just the raise: no refused statement left a field behind.
+      expect(after).toEqual(before)
+      expect(forward).toEqual([{ ...before[0], digest: grown.digest, generation: 1 }])
     }))
 
   it.effect("refuses rewriting a plan id during a forward update and preserves the row", () =>
@@ -426,6 +458,25 @@ describe("PlanStore", () => {
         })
       )
       expect(failure).toMatchObject({ code: "decode_failed", message: expect.stringContaining("flows_plan_nodes") })
+    }))
+
+  it.effect("reports an undecodable plan row rather than returning a broken plan", () =>
+    Effect.gen(function*() {
+      const failure = yield* withStore((store) =>
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          // Every `flows_plans` CHECK holds — the digests are nonempty strings
+          // — so SQLite admits this row. They are still not `StoredKey`s,
+          // which is the syntax the envelope decoder requires, so the schema's
+          // constraints do not make this branch unreachable.
+          yield* sql`
+            INSERT INTO flows_plans (plan_id, flow, base_digest, digest, generation, created_at_ms)
+            VALUES ('malformed', 'example/Build', 'x', 'x', 0, 1)
+          `
+          return yield* Effect.flip(store.get("malformed"))
+        })
+      )
+      expect(failure).toMatchObject({ code: "decode_failed", message: "could not decode flows_plans row" })
     }))
 
   it.effect("refuses a node the encoder cannot serialize", () =>
