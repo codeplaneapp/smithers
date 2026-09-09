@@ -37,22 +37,25 @@ function foldCommentsIntoBody(payload: PullRequestReviewPayload): string {
  * is the expected trigger; folding on every error keeps transient anchor
  * validation drift (PR head moved between fetch and post) from dropping the
  * review.
+ *
+ * Returns the created review's id when GitHub reports one, so the caller can
+ * retire its predecessors without retiring the replacement as well.
  */
 export async function postPullRequestReview(
   repoDir: string,
   pr: PullRequestTarget,
   payload: PullRequestReviewPayload,
   runGh: typeof defaultRunGh = defaultRunGh,
-): Promise<{ url: string; inline: number }> {
+): Promise<{ url: string; inline: number; id?: number }> {
   const endpoint = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews`;
   const post = async (body: PullRequestReviewPayload) => {
     const raw = await runGh(repoDir, ["api", "--method", "POST", endpoint, "--input", "-"], JSON.stringify(body));
-    return JSON.parse(raw) as { html_url?: string };
+    return JSON.parse(raw) as { html_url?: string; id?: number };
   };
 
   try {
     const result = await post(payload);
-    return { url: result.html_url ?? pr.url, inline: payload.comments.length };
+    return { url: result.html_url ?? pr.url, inline: payload.comments.length, id: result.id };
   } catch (error) {
     if (payload.comments.length === 0) throw error;
     // Surface why the inline batch failed before falling back, or the reason
@@ -66,6 +69,6 @@ export async function postPullRequestReview(
       body: foldCommentsIntoBody(payload),
     };
     const result = await post(fallback);
-    return { url: result.html_url ?? pr.url, inline: 0 };
+    return { url: result.html_url ?? pr.url, inline: 0, id: result.id };
   }
 }

@@ -60,7 +60,7 @@ describe("supersedePriorReviews", () => {
       "{}",
     );
 
-    await expect(supersedePriorReviews("/repo", pr, runGhMock)).resolves.toBe(2);
+    await expect(supersedePriorReviews("/repo", pr, 999, runGhMock)).resolves.toBe(2);
 
     expect(ghCalls).toHaveLength(4);
     expect(ghCalls[0].args).toEqual(["api", "user", "--jq", ".login"]);
@@ -83,7 +83,7 @@ describe("supersedePriorReviews", () => {
 
   test("a failing review-list call is non-fatal and returns 0", async () => {
     ghResponses.push("smithers-bot\n", new Error("gh api failed: HTTP 502"));
-    await expect(supersedePriorReviews("/repo", pr, runGhMock)).resolves.toBe(0);
+    await expect(supersedePriorReviews("/repo", pr, 999, runGhMock)).resolves.toBe(0);
     expect(ghCalls).toHaveLength(2);
   });
 
@@ -97,13 +97,32 @@ describe("supersedePriorReviews", () => {
       new Error("gh api failed: HTTP 422"),
       "{}",
     );
-    await expect(supersedePriorReviews("/repo", pr, runGhMock)).resolves.toBe(1);
+    await expect(supersedePriorReviews("/repo", pr, 999, runGhMock)).resolves.toBe(1);
     expect(ghCalls).toHaveLength(4);
   });
 
   test("an empty gh login short-circuits to 0 without listing reviews", async () => {
     ghResponses.push("\n");
-    await expect(supersedePriorReviews("/repo", pr, runGhMock)).resolves.toBe(0);
+    await expect(supersedePriorReviews("/repo", pr, 999, runGhMock)).resolves.toBe(0);
     expect(ghCalls).toHaveLength(1);
+  });
+
+  test("never marks the newly posted review superseded, even though the list contains it", async () => {
+    ghResponses.push(
+      "smithers-bot\n",
+      [
+        JSON.stringify({ id: 11, body: `${MARKER}\nOlder`, login: "smithers-bot" }),
+        // Read after the POST, so the list carries the replacement itself.
+        JSON.stringify({ id: 12, body: `${MARKER}\nJust posted`, login: "smithers-bot" }),
+      ].join("\n"),
+      "{}",
+    );
+
+    await expect(supersedePriorReviews("/repo", pr, 12, runGhMock)).resolves.toBe(1);
+
+    const updateCalls = ghCalls.slice(2);
+    expect(updateCalls.map((call) => call.args)).toEqual([
+      ["api", "--method", "PUT", "repos/smithersai/smithers/pulls/306/reviews/11", "--input", "-"],
+    ]);
   });
 });

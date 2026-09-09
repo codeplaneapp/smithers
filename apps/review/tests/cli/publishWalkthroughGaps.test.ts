@@ -89,3 +89,80 @@ describe("publishWalkthrough config + upload", () => {
     await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("response had no url");
   });
 });
+
+describe("publishWalkthrough deadline", () => {
+  // Publishing is best-effort and `runReview` awaits it before posting the PR
+  // review, so an endpoint that accepts the upload and then never answers must
+  // not hold a finished review. Each case would hang without a deadline; the
+  // per-test timeout is what turns that hang into a failure.
+  test("a request that never settles rejects at the deadline instead of holding the run", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+
+    await expect(publishWalkthrough(htmlPath, { homeDir, timeoutMs: 25 })).rejects.toThrow(
+      "publish failed: no response within 25ms",
+    );
+  }, 5000);
+
+  test("a response whose body never settles rejects at the deadline", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    // Headers arrive, then the server holds the body open forever.
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 201,
+      json: () => new Promise(() => {}),
+    })) as unknown as typeof fetch;
+
+    await expect(publishWalkthrough(htmlPath, { homeDir, timeoutMs: 25 })).rejects.toThrow(
+      "publish failed: no response within 25ms",
+    );
+  }, 5000);
+
+  test("an error body that never settles still reports the HTTP status", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 503,
+      text: () => new Promise(() => {}),
+    })) as unknown as typeof fetch;
+
+    await expect(publishWalkthrough(htmlPath, { homeDir, timeoutMs: 25 })).rejects.toThrow(
+      "publish failed: HTTP 503",
+    );
+  }, 5000);
+
+  test("the upload carries an abort signal that fires at the deadline", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    let signal: AbortSignal | undefined;
+    globalThis.fetch = ((_url: string, init: RequestInit) => {
+      signal = init.signal ?? undefined;
+      return new Promise<Response>(() => {});
+    }) as unknown as typeof fetch;
+
+    await expect(publishWalkthrough(htmlPath, { homeDir, timeoutMs: 25 })).rejects.toThrow("no response within");
+    // The socket is torn down, not just abandoned by the caller.
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(true);
+  }, 5000);
+
+  test("a prompt upload leaves no timer behind and returns the share URL", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ url: "https://share.test/w/ok" }), { status: 201 })) as unknown as typeof fetch;
+
+    await expect(publishWalkthrough(htmlPath, { homeDir, timeoutMs: 25 })).resolves.toBe("https://share.test/w/ok");
+    // The deadline has passed; a timer left armed would reject with nothing
+    // awaiting it and crash the run as an unhandled rejection.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }, 5000);
+});

@@ -23,12 +23,16 @@ nine seconds of module loading, and `--help` must not pay it;
   which tied the command to one runtime.
 - `publishWalkthrough.ts` — uploads the walkthrough HTML to the share service;
   config from `SMITHERS_REVIEW_PUBLISH_URL`/`_TOKEN` env vars or
-  `~/.smithers-review.json`.
+  `~/.smithers-review.json`. One 60s deadline covers the request and the
+  response-body read, so a share service that stalls mid-body cannot hold the
+  PR post behind it.
 
 Behaviors worth knowing:
 
 - `--pr` derives `--from`/`--to` from the PR base and uses the PR title/body
   as review background.
 - Publishing and the summary file are best-effort: their failures never fail
-  the review.
+  the review, and a stalled publish times out rather than blocking the PR post.
 - A failed review never posts a "0 findings" PR review.
+- The PR review is posted before earlier smithers reviews are marked
+  superseded, so a failed post leaves the previous reviews intact.

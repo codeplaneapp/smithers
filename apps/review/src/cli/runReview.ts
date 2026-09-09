@@ -14,10 +14,9 @@ import { dirname, join, resolve } from "node:path";
 import { Effect, Layer } from "effect";
 import { buildPullRequestReview } from "../github/buildPullRequestReview.ts";
 import { listPullRequestFiles } from "../github/listPullRequestFiles.ts";
-import { postPullRequestReview } from "../github/postPullRequestReview.ts";
+import { postReviewSupersedingPrior } from "../github/postReviewSupersedingPrior.ts";
 import { resolvePullRequest, type PullRequestTarget } from "../github/resolvePullRequest.ts";
 import { ghBin } from "../github/runGh.ts";
-import { supersedePriorReviews } from "../github/supersedePriorReviews.ts";
 import { fenceFor } from "../text/fenceFor.ts";
 import { Review } from "../workflow/reviewFlow.ts";
 import { layerNode } from "../workflow/reviewLayer.ts";
@@ -259,15 +258,16 @@ export async function runReview(args: ReviewArgs): Promise<void> {
         reviewStatus,
         warnings,
       });
-      const superseded = await supersedePriorReviews(repoDir, pr);
-      if (superseded > 0) {
-        console.error(
-          `[smithers-review] marked ${superseded} earlier smithers review${superseded === 1 ? "" : "s"} superseded`,
-        );
-      }
-      const posted = await postPullRequestReview(repoDir, pr, payload);
+      // Post first, then retire the predecessors: superseding ahead of the
+      // post can leave the PR with only "superseded" notes and no replacement.
+      const posted = await postReviewSupersedingPrior(repoDir, pr, payload);
       inlinePosted = posted.inline;
       console.log(`PR review posted (${posted.inline} inline comment${posted.inline === 1 ? "" : "s"}): ${posted.url}`);
+      if (posted.superseded > 0) {
+        console.error(
+          `[smithers-review] marked ${posted.superseded} earlier smithers review${posted.superseded === 1 ? "" : "s"} superseded`,
+        );
+      }
     } catch (error) {
       prFailed = true;
       console.error(`smithers-review: PR review failed: ${(error as Error).message}`);
