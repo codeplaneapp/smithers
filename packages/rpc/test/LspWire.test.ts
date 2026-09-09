@@ -96,6 +96,56 @@ describe("the LSP wire conversion", () => {
     expect(relativeToRoot("untitled:Untitled-1", root)).toBeNull()
   })
 
+  test("file links and escaped host paths are redacted without changing public URLs", () => {
+    const root = "/home/developer/workspace"
+    expect(redactHostPaths(`[a](file://${root}/src/a%20b.ts#L12)`, root)).toBe("[a](src/a b.ts)")
+    expect(redactHostPaths("See file:///Users/%61lice/private/src/a.ts", root)).toBe("See …/a.ts")
+    expect(redactHostPaths("See FILE:///nix/store/abc/lib.d.ts", root)).toBe("See …/lib.d.ts")
+    expect(redactHostPaths("See /Users/%61lice/private/a.ts", root)).toBe("See …/a.ts")
+    expect(redactHostPaths("See file:///Users/alice/%ZZ", root)).toBe("See …")
+    expect(redactHostPaths("See https://example.com/a/b#L12", root)).toBe("See https://example.com/a/b#L12")
+  })
+
+  test.each(["/Users/alice", "/Users/alice/", "/home/alice/", "file:///Users/%61lice", "file:///home/alice/"])(
+    "bare home directory %s is fully elided",
+    (path) => expect(redactHostPaths(`home is ${path}`, "/home/developer/workspace")).toBe("home is …")
+  )
+
+  test.each([
+    "../../../etc/passwd",
+    "src/%2e%2e/%2e%2e/%2e%2e/.ssh/id_ed25519",
+    "..",
+    "src/../a.ts",
+    "src/%2e%2e/a.ts",
+    "./a.ts",
+    "%2e/a.ts",
+    "src//a.ts",
+    "src/a.ts/",
+    "src%2fa.ts",
+    "src%5ca.ts",
+    "src\\a.ts",
+    "src/%00a.ts",
+    "src/%ZZ.ts"
+  ])("unsafe file path %s is refused before URL normalization", (path) => {
+    const root = "file:///home/developer/workspace"
+    expect(relativeToRoot(`${root}/${path}`, root)).toBeNull()
+  })
+
+  test("file URI containment uses decoded paths and matching file authorities, excluding query and fragment", () => {
+    const root = "file:///home/developer/workspace"
+    expect(relativeToRoot(`${root}/src/a.ts?version=1#L12`, root)).toBe("src/a.ts")
+    expect(relativeToRoot(`${root}/src/a.ts`, "file:///home/developer/work%73pace")).toBe("src/a.ts")
+    expect(relativeToRoot("file://other/home/developer/workspace/a.ts", root)).toBeNull()
+    expect(relativeToRoot("file://server/root/a.ts", "file://server/root")).toBe("a.ts")
+    expect(relativeToRoot(`${root}/src/a.ts`, `${root}/src/..`)).toBeNull()
+    expect(relativeToRoot(root, root)).toBeNull()
+    expect(relativeToRoot("file:///src/a.ts", "file:///")).toBe("src/a.ts")
+  })
+
+  test("a non-file root never produces a repository path", () => {
+    expect(relativeToRoot("https://example.com/root/src/a.ts", "https://example.com/root")).toBeNull()
+  })
+
   test("both adapters announce the same client capabilities: markdown hovers, no related information, full-text sync", () => {
     expect(LSP_CLIENT_CAPABILITIES.textDocument.hover.contentFormat).toEqual(["markdown", "plaintext"])
     expect(LSP_CLIENT_CAPABILITIES.textDocument.publishDiagnostics.relatedInformation).toBe(false)

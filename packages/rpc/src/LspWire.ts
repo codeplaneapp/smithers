@@ -118,31 +118,43 @@ const markedString = (value: LspMarkedString): string =>
   typeof value === "string" ? value : `\`\`\`${value.language}\n${value.value}\n\`\`\``
 
 /**
- * An absolute path in free text: a leading slash not glued to a word (so a
+ * A file URI or absolute path in free text: a leading slash not glued to a word (so a
  * URL's `//host/…` and a relative `src/…` are left alone), then at least two
  * segments. Quotes, brackets, whitespace and `:` end it, so `'/x/y'` and
  * `/x/y.ts:12:3` keep their punctuation.
  */
-const PATH_TOKEN = /(?<![A-Za-z0-9_.~/-])\/(?:[^\s"'`<>()[\]{}|:;,/]+\/)+[^\s"'`<>()[\]{}|:;,/]*/g
-
-const lastSegment = (path: string): string => path.split("/").filter((segment) => segment !== "").at(-1) ?? ""
+const PATH_TOKEN =
+  /file:\/\/[^\s"'`<>()[\]{}|;,]+|(?<![A-Za-z0-9_.~/-])\/(?:[^\s"'`<>()[\]{}|:;,/]+\/)+[^\s"'`<>()[\]{}|:;,/]*/gi
 
 /**
- * The server's free text with the machine's filesystem taken out: a path
- * under the root becomes root-relative (the root itself `.`), any other
- * absolute path keeps only its last segment behind `…/`. The renderer, the
- * model and the `/ws` bus all read the result; nothing downstream sees
- * `/Users/<name>/…` or `/nix/store/…`.
+ * Redact slash-delimited absolute paths with at least two segments and
+ * `file://` URIs, including markdown links and percent-escaped paths.
+ * A local path under the root becomes root-relative (the root itself `.`).
+ * Other paths keep their last segment behind `…/`, or become `…` with fewer
+ * than three segments, so bare home directories do not reveal account names.
+ * File URI authorities, queries and fragments are omitted; malformed escapes
+ * become `…`. HTTP(S) links and relative paths are left alone. This token-based
+ * redactor does not cover Windows paths or unescaped whitespace in paths.
  * @since 1.0.0
  * @category conversions
  */
 export const redactHostPaths = (text: string, root: string): string =>
   text.replace(PATH_TOKEN, (token) => {
-    const trailing = token.length > 1 && token.endsWith("/") ? "/" : ""
-    const path = trailing === "" ? token : token.slice(0, -1)
-    if (path === root) return "."
-    if (path.startsWith(`${root}/`)) return `${path.slice(root.length + 1)}${trailing}`
-    return `…/${lastSegment(path)}${trailing}`
+    try {
+      const uri = /^file:/i.test(token) ? new URL(token) : null
+      const decoded = decodeURIComponent(uri === null ? token : uri.pathname)
+      const trailing = decoded.length > 1 && decoded.endsWith("/") ? "/" : ""
+      const path = trailing === "" ? decoded : decoded.slice(0, -1)
+      const localRoot = root.replace(/\/+$/, "")
+      if (uri === null || uri.host === "") {
+        if (path === localRoot) return "."
+        if (path.startsWith(`${localRoot}/`)) return `${path.slice(localRoot.length + 1)}${trailing}`
+      }
+      const segments = path.split("/").filter((segment) => segment !== "")
+      return segments.length < 3 ? "…" : `…/${segments.at(-1)}${trailing}`
+    } catch {
+      return "…"
+    }
   })
 
 /** The hover's text as one markdown string, through `redact`, cut at the cap and saying so.
@@ -182,19 +194,38 @@ export const toDiagnostic = (
  * A `file:` URI under `rootUri` as a root-relative path, or null when it
  * points elsewhere (a linked package, a lib.d.ts): a target the renderer
  * cannot open as a file card of this repository is counted, never invented
- * away. Percent-escapes are decoded; a URI that is not a file URI is null.
+ * away. Both URIs must use `file://` with matching authorities. Percent-escapes
+ * are decoded; queries and fragments are omitted. Dot segments, empty segments,
+ * encoded separators, backslashes and NULs are refused in either path before
+ * URL normalization. The root may have one trailing slash.
  * @since 1.0.0
  * @category conversions
  */
 export const relativeToRoot = (uri: string, rootUri: string): string | null => {
-  const root = rootUri.endsWith("/") ? rootUri.slice(0, -1) : rootUri
-  if (!uri.startsWith(`${root}/`)) return null
   try {
-    const relative = decodeURIComponent(uri.slice(root.length + 1))
-    return relative === "" ? null : relative
+    const target = new URL(uri)
+    const root = new URL(rootUri)
+    if (target.protocol !== "file:" || root.protocol !== "file:" || target.host !== root.host) return null
+    const targetSegments = filePathSegments(uri, false)
+    const rootSegments = filePathSegments(rootUri, true)
+    if (targetSegments === null || rootSegments === null || targetSegments.length <= rootSegments.length) return null
+    if (!rootSegments.every((segment, index) => segment === targetSegments[index])) return null
+    return targetSegments.slice(rootSegments.length).join("/")
   } catch {
     return null
   }
+}
+
+// Read the original path: URL removes literal and percent-encoded dot segments.
+const filePathSegments = (uri: string, isRoot: boolean): Array<string> | null => {
+  const path = /^file:\/\/[^/?#\\]*(\/[^?#]*)/i.exec(uri)?.[1]
+  if (path === undefined || /[\u0000-\u001f\u007f\\]/.test(path)) return null
+  const segments = path.slice(1).split("/")
+  if (isRoot && segments.at(-1) === "") segments.pop()
+  const decoded = segments.map((segment) => decodeURIComponent(segment))
+  return decoded.some((segment) => segment === "" || segment === "." || segment === ".." || /[/\\\u0000]/.test(segment))
+    ? null
+    : decoded
 }
 
 /** The one `initialize` capability set both adapters announce: markdown hovers, no related information, full-text sync.
