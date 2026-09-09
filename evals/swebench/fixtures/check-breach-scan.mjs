@@ -29,6 +29,7 @@
  * Spends nothing, needs no docker, needs no dataset.
  */
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -91,11 +92,82 @@ try {
     logs: join(sealedDirectory, "logs"),
     require: "none"
   })
+  assert.equal(sealed.rows[0].traceStatus, "traced")
+  assert.equal(sealed.rows[0].traceDiagnostics.length, 1)
   assert.equal(sealed.claim, "none")
   assert.deepEqual(sealed.failures, [], "a sealed lane passes")
   assert.equal(sealed.totals.attempts, 0)
   assert.equal(sealed.totals.breaches, 0)
   assert.ok(render(sealed, { label: "x", ledger: sealedLedger }).includes("**Verdict: sealed.**"))
+
+  // Losing agent evidence must fail even when the driver log survives.
+  for (const scenario of ["deleted", "empty", "no-events", "wrong-run", "missing-root"]) {
+    const directory = join(temporary, `lost-journal-${scenario}`)
+    const logs = join(directory, "logs")
+    const journals = join(directory, "journals")
+    const database = join(journals, "a__a-1", "engine.db")
+    mkdirSync(logs, { recursive: true })
+    writeFileSync(join(logs, "a__a-1.run.log"), "[a__a-1-r98] agent start\n")
+    journal(join(journals, "a__a-1"), scenario === "no-events" ? [] : ["agent call"])
+    if (scenario === "deleted") rmSync(database)
+    if (scenario === "empty") writeFileSync(database, "")
+    if (scenario === "wrong-run") {
+      rmSync(join(journals, "a__a-1"), { recursive: true })
+      journal(join(journals, "b__b-2"), ["unrelated agent call"])
+    }
+    if (scenario === "missing-root") rmSync(journals, { recursive: true })
+    const lost = scan({ journals, ledger: sealedLedger, logs, require: "none" })
+    assert.equal(lost.rows[0].traced, false, `${scenario}: a driver log is not agent evidence`)
+    assert.equal(lost.rows[0].traceStatus, "missing-agent-evidence", scenario)
+    assert.equal(lost.missingAgentEvidence.length, 1, scenario)
+    assert.equal(lost.untraced.length, 1, scenario)
+    assert.ok(lost.failures.some((failure) => failure.includes("missing agent evidence")), scenario)
+    const report = render(lost, { label: scenario, ledger: sealedLedger })
+    assert.ok(report.includes("Missing agent evidence"), scenario)
+    assert.ok(report.includes("**Verdict: FAILED.**"), scenario)
+    assert.ok(!report.includes("**Verdict: sealed.**"), scenario)
+    assert.ok(!report.includes("No run issued an egress command."), scenario)
+    const cli = spawnSync(process.execPath, [
+      join(root, "breach-scan.mjs"), "--ledger", sealedLedger,
+      "--logs", logs, "--journals", journals, "--require", "none", "--json"
+    ], { encoding: "utf8", timeout: 30_000 })
+    assert.equal(cli.status, 1, `${scenario}: ${cli.stderr}`)
+    assert.equal(JSON.parse(cli.stdout).rows[0].traced, false, scenario)
+  }
+
+  // A flows journal is sufficient without a driver, including suffixed runs.
+  const suffixedJournals = join(temporary, "suffixed-journals")
+  journal(join(suffixedJournals, "a__a-1-r98"), ["agent call"])
+  const journalWithoutDriver = scan({ journals: suffixedJournals, ledger: sealedLedger, require: "none" })
+  assert.equal(journalWithoutDriver.rows[0].traceStatus, "traced")
+  assert.deepEqual(journalWithoutDriver.failures, [])
+
+  // Driver diagnostics are excluded from the agent's calls.
+  const diagnosticLogs = join(temporary, "diagnostic-logs")
+  mkdirSync(diagnosticLogs)
+  writeFileSync(join(diagnosticLogs, "a__a-1.run.log"), "docker exec swb curl https://example.com/\n")
+  const diagnostics = scan({
+    journals: suffixedJournals, ledger: sealedLedger, logs: diagnosticLogs, require: "none"
+  })
+  assert.equal(diagnostics.totals.attempts, 0, "driver diagnostics are not agent calls")
+  assert.deepEqual(diagnostics.failures, [])
+
+  // Codex needs a non-empty transcript, not just its final message.
+  const codexLogs = join(temporary, "codex-evidence")
+  mkdirSync(codexLogs)
+  writeFileSync(join(codexLogs, "a__a-1.last.txt"), "done\n")
+  for (const contents of [undefined, "", "  \n"]) {
+    if (contents !== undefined) writeFileSync(join(codexLogs, "a__a-1.run.log"), contents)
+    const missing = scan({ ledger: sealedLedger, logs: codexLogs, require: "none" })
+    assert.equal(missing.rows[0].traceStatus, "missing-agent-evidence")
+    assert.equal(missing.rows[0].traced, false)
+    assert.equal(missing.failures.length, 1)
+    assert.ok(!render(missing, { label: "codex", ledger: sealedLedger }).includes("**Verdict: sealed.**"))
+  }
+  writeFileSync(join(codexLogs, "a__a-1.codex.log"), "agent call\n")
+  const codexTranscript = scan({ ledger: sealedLedger, logs: codexLogs, require: "none" })
+  assert.equal(codexTranscript.rows[0].traceStatus, "traced")
+  assert.deepEqual(codexTranscript.failures, [])
 
   // -------------------------------------------------------------------------
   // The flows arm's trace is the journal. A fetch recorded only there is found.
@@ -105,7 +177,11 @@ try {
   journal(join(journalOnly, "journals", "a__a-1"), [
     JSON.stringify({ flow: "bash", input: { command: "docker exec swb curl -sL https://example.com/fix.patch" } })
   ])
-  writeFileSync(join(journalOnly, "logs", "a__a-1.run.log"), "[a__a-1-r98] agent start\n")
+  writeFileSync(
+    join(journalOnly, "logs", "a__a-1.run.log"),
+    "docker exec swb curl https://example.com/driver-probe\n"
+      + "curl: (6) Could not resolve host: example.com\n"
+  )
   const journalLedger = jsonl(join(journalOnly, "manifest.jsonl"), [
     { kind: "instance", id: "a__a-1", state: "ran", at: 1, testbedNetwork: "none", testbedNetworkObserved: "none" }
   ])
@@ -115,6 +191,7 @@ try {
     logs: join(journalOnly, "logs"),
     require: "none"
   })
+  assert.equal(fetched.totals.attempts, 1, "driver refusals cannot clear the agent fetch")
   assert.equal(fetched.totals.breaches, 1, "a fetch recorded only in the journal is still a breach")
   assert.equal(fetched.breached[0].id, "a__a-1")
   assert.ok(fetched.failures.some((failure) => failure.includes("fetched from inside the testbed")))
@@ -299,6 +376,8 @@ try {
   ])
   const untraced = scan({ ledger: untracedLedger, logs: join(untracedDirectory, "logs"), require: "none" })
   assert.equal(untraced.untraced.length, 1)
+  assert.equal(untraced.rows[0].traceStatus, "no-evidence")
+  assert.deepEqual(untraced.missingAgentEvidence, [])
   assert.ok(untraced.failures.some((failure) => failure.includes("left no trace")))
 
   // -------------------------------------------------------------------------

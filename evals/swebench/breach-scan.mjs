@@ -53,7 +53,8 @@
  * writes one transcript, `logs/<id>.run.log`. A flows run writes a driver log of
  * the same name plus a journal, `journals/<id>/engine.db`, whose
  * `flows_journal_events.payload_json` holds every call the agent made and every
- * result it got back. Both are read as text and handed to the same patterns.
+ * result it got back. Only agent evidence is handed to the same patterns; a
+ * flows driver log is diagnostic and cannot substitute for its journal.
  *
  * It reads a ledger, some logs and some journals. No evaluator report, no
  * clock, no network. Running it twice over the same files produces the same
@@ -61,7 +62,7 @@
  *
  * @since 0.1.0
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import {
@@ -131,31 +132,49 @@ export const journalText = (database) => {
 }
 
 /**
- * Everything written about one instance, as one string.
+ * Agent evidence for one instance, with driver artifacts kept as diagnostics.
  *
- * A missing source is not a failure — a codex lane has no journals and a flows
- * lane's run log is its driver's — but an instance with *no* source at all is,
- * and it is reported as `no trace` rather than silently scanned as the empty
- * string, which would clear it.
+ * Supplying journals selects the flows contract: a non-empty instance journal
+ * is required. Otherwise the codex transcript is required. A driver log or
+ * final message alone leaves missing-agent-evidence; no artifacts at all leave
+ * no-evidence. Neither state may be scanned as a clean, empty trace.
  *
  * @category conversions
  * @since 0.1.0
  */
 export const traceOf = (id, { logs, journals }) => {
   const parts = []
+  const diagnostics = []
+  let evidenceExists = false
   if (logs !== undefined) {
     for (const suffix of ["run.log", "last.txt", "codex.log"]) {
       const path = join(logs, `${id}.${suffix}`)
-      if (existsSync(path)) parts.push(readFileSync(path, "utf8"))
+      if (!existsSync(path)) continue
+      evidenceExists = true
+      if (journals === undefined && suffix !== "last.txt") {
+        const text = readFileSync(path, "utf8")
+        if (text.trim() !== "") parts.push(text)
+      } else {
+        diagnostics.push(path)
+      }
     }
   }
   if (journals !== undefined) {
-    for (const name of [id, ...readdirSync(journals).filter((entry) => entry.startsWith(`${id}-`))]) {
+    const entries = existsSync(journals) ? readdirSync(journals) : []
+    for (const name of [id, ...entries.filter((entry) => entry.startsWith(`${id}-`))]) {
       const database = join(journals, name, "engine.db")
-      if (existsSync(database)) parts.push(journalText(database))
+      if (!existsSync(database)) continue
+      evidenceExists = true
+      if (statSync(database).size === 0) continue
+      const text = journalText(database)
+      if (text.trim() !== "") parts.push(text)
     }
   }
-  return parts.length === 0 ? undefined : parts.join("\n")
+  return {
+    status: parts.length > 0 ? "traced" : evidenceExists ? "missing-agent-evidence" : "no-evidence",
+    text: parts.length === 0 ? undefined : parts.join("\n"),
+    diagnostics
+  }
 }
 
 /**
@@ -166,11 +185,19 @@ export const traceOf = (id, { logs, journals }) => {
  */
 export const traceFailures = ({ searched, untraced }) => {
   const failures = []
+  const missingAgentEvidence = untraced.filter((row) => row.traceStatus === "missing-agent-evidence")
   if (searched.length > 0) {
     failures.push({ kind: "web search", detail: `${searched.length} run(s) used a web-search tool` })
   }
-  if (untraced.length > 0) {
-    failures.push({ kind: "missing trace", detail: `${untraced.length} run(s) left no trace to scan` })
+  if (missingAgentEvidence.length > 0) {
+    failures.push({
+      kind: "missing agent evidence",
+      detail: `${missingAgentEvidence.length} run(s) have missing agent evidence despite surviving artifacts`
+    })
+  }
+  const noEvidence = untraced.filter((row) => row.traceStatus !== "missing-agent-evidence")
+  if (noEvidence.length > 0) {
+    failures.push({ kind: "missing trace", detail: `${noEvidence.length} run(s) left no trace to scan` })
   }
   return failures
 }
@@ -183,7 +210,8 @@ export const traceFailures = ({ searched, untraced }) => {
  */
 export const scan = ({ journals, ledger, logs, require: required }) => {
   const rows = foldLedger(readFileSync(ledger, "utf8")).map((instance) => {
-    const text = traceOf(instance.id, { journals, logs })
+    const trace = traceOf(instance.id, { journals, logs })
+    const text = trace.text
     const found = text === undefined
       ? { attempts: 0, breaches: [], commands: [], refusals: 0, webSearches: [] }
       : egress(text)
@@ -204,7 +232,9 @@ export const scan = ({ journals, ledger, logs, require: required }) => {
       inContainerRefused: inContainer.length - counted.length,
       unnetworked,
       refusals: found.refusals,
-      traced: text !== undefined,
+      traced: trace.status === "traced",
+      traceStatus: trace.status,
+      traceDiagnostics: trace.diagnostics,
       webSearches: found.webSearches
     }
   })
@@ -222,6 +252,7 @@ export const scan = ({ journals, ledger, logs, require: required }) => {
   const breached = rows.filter((row) => row.breaches.length > 0)
   const searched = rows.filter((row) => row.webSearches.length > 0)
   const untraced = rows.filter((row) => !row.traced)
+  const missingAgentEvidence = rows.filter((row) => row.traceStatus === "missing-agent-evidence")
   const failures = []
   const asserted = required === "none" || claim === "none"
   if (required !== undefined && claim !== required) {
@@ -240,6 +271,7 @@ export const scan = ({ journals, ledger, logs, require: required }) => {
     claim,
     failures,
     notSealed,
+    missingAgentEvidence,
     observed: Object.fromEntries(observed),
     rows,
     searched,
@@ -284,7 +316,12 @@ export const render = (result, { label, ledger }) => {
 
   const attempted = result.rows.filter((row) => row.attempts > 0)
   if (attempted.length === 0) {
-    lines.push("No run issued an egress command.", "")
+    lines.push(
+      result.untraced.length > 0
+        ? "No egress command was found in the available agent evidence; some instances could not be scanned."
+        : "No run issued an egress command.",
+      ""
+    )
   } else {
     lines.push("## Where the seal was pushed on", "")
     lines.push("| instance | attempts | refusals | breaches | first command |", "| --- | ---: | ---: | ---: | --- |")
@@ -321,9 +358,15 @@ export const render = (result, { label, ledger }) => {
     for (const row of result.searched) lines.push(`- ${row.id} — ${row.webSearches.length}`)
     lines.push("")
   }
-  if (result.untraced.length > 0) {
+  if (result.missingAgentEvidence.length > 0) {
+    lines.push("## Missing agent evidence", "")
+    for (const row of result.missingAgentEvidence) lines.push(`- ${row.id}`)
+    lines.push("")
+  }
+  const noEvidence = result.untraced.filter((row) => row.traceStatus === "no-evidence")
+  if (noEvidence.length > 0) {
     lines.push("## No trace to scan", "")
-    for (const row of result.untraced) lines.push(`- ${row.id}`)
+    for (const row of noEvidence) lines.push(`- ${row.id}`)
     lines.push("")
   }
 

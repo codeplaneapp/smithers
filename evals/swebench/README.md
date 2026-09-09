@@ -393,8 +393,11 @@ trace lives**: a codex run writes one transcript at `logs/<id>.run.log`, and a
 flows run writes a driver log of that name plus a journal at
 `journals/<id>/engine.db`, whose `flows_journal_events.payload_json` holds every
 call the agent made and every result it got back. A scan that read only the
-driver's log would clear every flows lane by looking in the wrong file, so both
-are read and concatenated.
+driver's log would clear every flows lane by looking in the wrong file.
+Supplying `--journals` requires a non-empty instance journal; driver logs remain
+diagnostics. Without `--journals`, a non-empty codex transcript is required.
+Surviving diagnostics cannot satisfy either contract. See
+[seal evidence](docs/seal-evidence.md) for trace states and failure reporting.
 
 Four rules, and each is a way a scan could clear a lane it should fail:
 
