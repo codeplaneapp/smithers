@@ -96,6 +96,9 @@ action, and the retry acquires the key again.
 Most vendor execution APIs take a command line and nothing else, so a session
 with no input channel satisfies its "spawn delivers stdin" obligation by
 writing the bytes into the workspace and redirecting the command from the file.
+The command runs verbatim inside a subshell with its own exit status. Newlines
+separate it from the subshell delimiters, preserving trailing shell comments
+and heredoc terminators on the final line.
 
 Two properties of that staging are guarantees, and one commonly assumed
 property is not:

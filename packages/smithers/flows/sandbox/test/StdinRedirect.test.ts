@@ -13,6 +13,10 @@ import { describe, expect, it } from "@effect/vitest"
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import { stdinRedirect } from "../src/internal/stdinRedirect.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 
@@ -45,6 +49,34 @@ const recorded = (options: { readonly failWrite?: boolean } = {}) => {
 }
 
 describe("stdinRedirect", () => {
+  for (const { command, name, stdout } of [
+    { name: "a trailing comment", command: "cat # trailing comment", stdout: "staged input\n" },
+    { name: "a final heredoc terminator", command: "cat <<EOF\nhello\nEOF", stdout: "hello\n" }
+  ]) {
+    it.effect.skipIf(!existsSync("/bin/sh"))(`executes a command ending with ${name}`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const workdir = yield* Effect.acquireRelease(
+          Effect.sync(() => mkdtempSync(join(tmpdir(), "smthrs-stdin redirect-"))),
+          (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true }))
+        )
+        const line = yield* stdinRedirect({
+          workdir,
+          writeFile: (path, content) =>
+            Effect.sync(() => {
+              mkdirSync(dirname(path), { recursive: true })
+              writeFileSync(path, content)
+            }),
+          remove: (path) => Effect.sync(() => rmSync(path))
+        })(command, new TextEncoder().encode("staged input\n"))
+        const result = spawnSync("/bin/sh", ["-c", line], { encoding: "utf8", timeout: 5000 })
+
+        expect(result.error).toBeUndefined()
+        expect(result.status, result.stderr).toBe(0)
+        expect(result.stderr).toBe("")
+        expect(result.stdout).toBe(stdout)
+      })))
+  }
+
   it.effect("leaves a command with no input alone", () =>
     Effect.gen(function*() {
       const { removals, target, writes } = recorded()
@@ -68,7 +100,7 @@ describe("stdinRedirect", () => {
       const staged = writes[0]!
 
       expect(staged).toMatch(/^\/workspace\/\.smthrs-stdin\/[0-9a-f]{32}$/)
-      expect(line).toBe(`( cat > out ) < ${CommandLine.quote(staged)}`)
+      expect(line).toBe(`(\ncat > out\n) < ${CommandLine.quote(staged)}`)
       expect(removals).toEqual([staged])
     }))
 

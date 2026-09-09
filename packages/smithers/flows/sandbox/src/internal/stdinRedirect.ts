@@ -77,10 +77,10 @@ const staged = (): string => {
  * hands this module, so the file is created under the machine's umask like
  * every other file the session writes.
  *
- * The rewritten line is `( command ) < file`, which keeps the command's own
- * exit status and its own quoting: the command text is placed inside a
- * subshell verbatim, so a caller's pipeline or compound command means what it
- * meant.
+ * The command text is placed verbatim on separate lines inside a subshell,
+ * redirected from the staged file. This keeps its exit status and quoting,
+ * and lets trailing comments and heredoc terminators end before the closing
+ * parenthesis.
  *
  * @category constructors
  * @since 0.1.0
@@ -99,7 +99,7 @@ export const stdinRedirect = (target: StdinTarget): (
       // bytes on the machine.
       yield* Effect.addFinalizer(() => Effect.ignore(target.remove(file), { log: "Warn" }))
       yield* target.writeFile(file, stdin)
-      return `( ${command} ) < ${CommandLine.quote(file)}`
+      return `(\n${command}\n) < ${CommandLine.quote(file)}`
     })
   }
 }
