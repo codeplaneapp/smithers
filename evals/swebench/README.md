@@ -933,6 +933,11 @@ round — `select-candidate.mjs`, `fixtures/rehydrate-journals.mjs` — keeps it
 stricter `r<digits>` rule, so a tagged lane's artifacts are never mistaken for an
 attempt in a best-of-n draw.
 
+The helper validates each whole instance and index argument and rejects CR or LF
+before emitting output. Instance ids match `<repo>__<issue>` with ASCII letters,
+digits, `.`, `_` and `-`, starting each part with a letter or digit. Every output
+assignment uses Bash shell escaping (`printf %q`) for the runners' `eval`.
+
 The journal archive carries the **patch's** suffix rather than the run index, so
 the journal and the patch a selection is made from always come from one run. Key
 the archive by the index instead and a hand run, whose patch is `<id>.patch`,

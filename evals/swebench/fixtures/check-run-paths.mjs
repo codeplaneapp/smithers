@@ -16,25 +16,35 @@
  */
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 const root = resolve(import.meta.dirname, "..")
 
-const paths = (harness, instance, index) => {
+const names = [
+  "RUN_INDEX", "RUN_ID", "SUFFIX", "WORK_ROOT", "WORK", "VCS_ROOT", "VCS",
+  "PATCH_ROOT", "PATCH", "TIMINGS_ROOT", "TIMINGS", "LOG_ROOT", "LOG_PREFIX",
+  "CONTAINER", "JOURNAL_ROOT", "JOURNAL"
+]
+
+const paths = (harness, instance, index, base = root, cwd = root) => {
   const result = spawnSync(
-    join(root, "lib/run-paths.sh"),
+    join(base, "lib/run-paths.sh"),
     index === undefined ? [harness, instance] : [harness, instance, index],
     { encoding: "utf8" }
   )
   assert.equal(result.status, 0, result.stderr)
-  const derived = {}
-  for (const line of result.stdout.split("\n")) {
-    if (line === "") continue
-    const at = line.indexOf("=")
-    derived[line.slice(0, at)] = line.slice(at + 1).replace(/^"|"$/gu, "")
-  }
-  return derived
+  // Decode with Bash, as the runners do: %q output is shell syntax, and values
+  // may contain quotes, backslashes or newlines in the checkout's path.
+  const decoded = spawnSync("bash", [
+    "-c", 'eval "$1"; shift; for name in "$@"; do printf "%s\\0" "${!name}"; done',
+    "run-paths-fixture", result.stdout, ...names
+  ], { encoding: "utf8", cwd })
+  assert.equal(decoded.status, 0, decoded.stderr)
+  const values = decoded.stdout.split("\0")
+  assert.equal(values.pop(), "")
+  assert.equal(values.length, names.length)
+  return Object.fromEntries(names.map((name, index) => [name, values[index]]))
 }
 
 const refuses = (args) => {
@@ -138,6 +148,56 @@ assert.match(refuses(["flows", instance, "3"]), /run index must match/u)
 assert.match(refuses(["flows", instance, "r3/../.."]), /run index must match/u)
 assert.match(refuses(["flows", instance, "r90C"]), /run index must match/u)
 assert.match(refuses(["flows", instance, "rc"]), /run index must match/u)
+
+// A matching line must never validate the rest of an argument. Evaluate even
+// rejected output to prove neither input can smuggle a command into assignments.
+const scratch = mkdtempSync(join(root, ".run-paths-"))
+try {
+  const probes = []
+  for (const harness of ["flows", "codex"]) {
+    for (const field of ["instance", "index"]) {
+      for (const separator of ["\n", "\r", "\r\n"]) {
+        const args = [harness, instance, "r1"]
+        args[field === "instance" ? 1 : 2] += `${separator}$(touch marker)`
+        const result = spawnSync(join(root, "lib/run-paths.sh"), args, { encoding: "utf8" })
+        const evaluated = spawnSync("bash", ["-c", 'eval "$1"', "run-paths-fixture", result.stdout], {
+          encoding: "utf8", cwd: scratch
+        })
+        const executed = existsSync(join(scratch, "marker"))
+        rmSync(join(scratch, "marker"), { force: true })
+        probes.push({ harness, field, separator, status: result.status, output: result.stdout.length, executed })
+        assert.equal(evaluated.error, undefined)
+      }
+    }
+  }
+  assert.deepEqual(probes, probes.map((probe) => ({ ...probe, status: 2, output: 0, executed: false })))
+
+  for (const value of ["", "_a__b", "a___", "a__-b", "a__b/c", "a__bé", "a__b\n", "a__b\r"]) {
+    refuses(["flows", value])
+  }
+  for (const value of ["r", "r1a2", "r1_", "r1é", "r1\n", "r1\r"]) {
+    refuses(["codex", instance, value])
+  }
+  assert.equal(paths("flows", "A0._-__B1._-", "r12abc").RUN_ID, "A0._-__B1._--r12abc")
+
+  // The checkout path is not an identifier. Preserve its bytes without running
+  // either kind of command substitution or expanding shell metacharacters.
+  const unusualRoot = join(scratch, "space ' quote\" $(touch marker) `touch marker` \\ $HOME\n\r")
+  mkdirSync(join(unusualRoot, "lib"), { recursive: true })
+  copyFileSync(join(root, "lib/run-paths.sh"), join(unusualRoot, "lib/run-paths.sh"))
+  for (const harness of ["flows", "codex"]) {
+    for (const index of [undefined, "r90c"]) {
+      const expected = paths(harness, instance, index)
+      const actual = paths(harness, instance, index, unusualRoot, scratch)
+      assert.equal(existsSync(join(scratch, "marker")), false, "evaluating paths must not execute commands")
+      for (const name of names) {
+        assert.equal(actual[name], expected[name].replace(root, unusualRoot), name)
+      }
+    }
+  }
+} finally {
+  rmSync(scratch, { recursive: true, force: true })
+}
 
 // ---------------------------------------------------------------------------
 // The run scripts derive their names from it rather than spelling them again

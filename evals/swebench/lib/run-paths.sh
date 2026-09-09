@@ -3,7 +3,7 @@
 #
 #   run-paths.sh <flows|codex> <instance_id> [run-index]
 #
-# Prints `KEY=value` lines for `eval`, so the two run scripts and the matrix
+# Prints Bash-escaped `KEY=value` lines for `eval`, so the two run scripts and the matrix
 # driver cannot disagree about where a run's artifacts live. It is the one place
 # that knows the naming rule:
 #
@@ -31,6 +31,7 @@
 # this script's output is `eval`ed, so a value that is not `<repo>__<issue>` or
 # `r<digits>` stops before any of that.
 set -euo pipefail
+export LC_ALL=C
 
 HARNESS="${1:-}"
 INSTANCE="${2:-}"
@@ -42,11 +43,18 @@ case "$HARNESS" in
   *) echo "run-paths.sh: harness must be flows or codex, got '${HARNESS}'" >&2; exit 2 ;;
 esac
 
+# Validate complete arguments, never individual lines accepted by grep.
+for VALUE in "$INSTANCE" "$INDEX"; do
+  case "$VALUE" in
+    *$'\r'*|*$'\n'*) echo "run-paths.sh: instance id and run index must not contain CR or LF" >&2; exit 2 ;;
+  esac
+done
+
 case "$INSTANCE" in
   *__*) ;;
   *) echo "run-paths.sh: instance id must match <repo>__<issue>" >&2; exit 2 ;;
 esac
-if ! printf '%s' "$INSTANCE" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*__[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+if ! [[ "$INSTANCE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*__[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   echo "run-paths.sh: instance id must use only ASCII letters, digits, '.', '_' and '-'" >&2; exit 2
 fi
 
@@ -62,7 +70,7 @@ if [ -z "$INDEX" ]; then
   RUN_INDEX="r1"
   SUFFIX=""
 else
-  if ! printf '%s' "$INDEX" | grep -Eq '^r[0-9]+[a-z]*$'; then
+  if ! [[ "$INDEX" =~ ^r[0-9]+[a-z]*$ ]]; then
     echo "run-paths.sh: run index must match r<digits>[<lowercase tag>], got '${INDEX}'" >&2; exit 2
   fi
   RUN_INDEX="$INDEX"
@@ -103,19 +111,19 @@ else
   CONTAINER="codexbench-${SLUG}${SUFFIX}"
 fi
 
-printf 'RUN_INDEX=%s\n' "$RUN_INDEX"
-printf 'RUN_ID=%s\n' "${INSTANCE}-${RUN_INDEX}"
-printf 'SUFFIX=%s\n' "\"$SUFFIX\""
-printf 'WORK_ROOT=%s\n' "\"$WORK_ROOT\""
-printf 'WORK=%s\n' "\"$WORK_ROOT/${INSTANCE}${SUFFIX}\""
-printf 'VCS_ROOT=%s\n' "\"$VCS_ROOT\""
-printf 'VCS=%s\n' "\"$VCS_ROOT/${INSTANCE}${SUFFIX}.git\""
-printf 'PATCH_ROOT=%s\n' "\"$PATCH_ROOT\""
-printf 'PATCH=%s\n' "\"$PATCH_ROOT/${INSTANCE}${SUFFIX}.patch\""
-printf 'TIMINGS_ROOT=%s\n' "\"$TIMINGS_ROOT\""
-printf 'TIMINGS=%s\n' "\"$TIMINGS_ROOT/${INSTANCE}${SUFFIX}.json\""
-printf 'LOG_ROOT=%s\n' "\"$LOG_ROOT\""
-printf 'LOG_PREFIX=%s\n' "\"$LOG_ROOT/${INSTANCE}${SUFFIX}\""
-printf 'CONTAINER=%s\n' "$CONTAINER"
-printf 'JOURNAL_ROOT=%s\n' "\"$S/journals\""
-printf 'JOURNAL=%s\n' "\"$S/journals/${INSTANCE}${SUFFIX}\""
+printf 'RUN_INDEX=%q\n' "$RUN_INDEX"
+printf 'RUN_ID=%q\n' "${INSTANCE}-${RUN_INDEX}"
+printf 'SUFFIX=%q\n' "$SUFFIX"
+printf 'WORK_ROOT=%q\n' "$WORK_ROOT"
+printf 'WORK=%q\n' "$WORK_ROOT/${INSTANCE}${SUFFIX}"
+printf 'VCS_ROOT=%q\n' "$VCS_ROOT"
+printf 'VCS=%q\n' "$VCS_ROOT/${INSTANCE}${SUFFIX}.git"
+printf 'PATCH_ROOT=%q\n' "$PATCH_ROOT"
+printf 'PATCH=%q\n' "$PATCH_ROOT/${INSTANCE}${SUFFIX}.patch"
+printf 'TIMINGS_ROOT=%q\n' "$TIMINGS_ROOT"
+printf 'TIMINGS=%q\n' "$TIMINGS_ROOT/${INSTANCE}${SUFFIX}.json"
+printf 'LOG_ROOT=%q\n' "$LOG_ROOT"
+printf 'LOG_PREFIX=%q\n' "$LOG_ROOT/${INSTANCE}${SUFFIX}"
+printf 'CONTAINER=%q\n' "$CONTAINER"
+printf 'JOURNAL_ROOT=%q\n' "$S/journals"
+printf 'JOURNAL=%q\n' "$S/journals/${INSTANCE}${SUFFIX}"
