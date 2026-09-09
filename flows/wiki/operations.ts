@@ -5,7 +5,7 @@ import { Evidence, type ReviewedPage, type PageSpec, type Receipt, WikiError } f
 import { reviewEvidence, visibleLine } from "./evidence.ts"
 
 const maxFileBytes = 512_000
-const maxPageBytes = 220_000
+const maxPageBytes = 300_000
 const fail = (code: WikiError["code"], message: string) => new WikiError({ code, message })
 export const digest = (text: string) => Effect.gen(function*() {
   const crypto = yield* Crypto.Crypto

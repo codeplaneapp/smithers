@@ -2,7 +2,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { parseArgs } from "node:util"
-import { resolve } from "node:path"
+import { isAbsolute, relative, resolve, sep } from "node:path"
 import { pages, sourceFiles } from "../../factory/wiki/catalog.ts"
 import { operations } from "./operations.ts"
 import type { Input } from "./schema.ts"
@@ -19,12 +19,16 @@ if (values.help) {
   if (values.check) {
     console.log(JSON.stringify(await Effect.runPromise(operations({ root, output }).check(pages, values.verified).pipe(Effect.provide(NodeServices.layer))), null, 2))
   } else {
+  const destination = relative(root, output)
+  if (!destination || destination === ".." || destination.startsWith(`..${sep}`) || isAbsolute(destination)) {
+    throw new Error("Generation output must be a dedicated directory inside --root. Publish the resulting immutable snapshot separately; --check can inspect an exported snapshot.")
+  }
   const [{ Action, Interpreter }, { Capability }, { Wiki }, { actionLayers, agentLayers }] = await Promise.all([
     import("@smthrs/flow"), import("@smthrs/flows"), import("./workflow.ts"), import("./runtime.ts")
   ])
   const runtime = typeof (globalThis as { Bun?: unknown }).Bun === "undefined" ? await import("@smthrs/flows/NodeRuntime") : await import("@smthrs/flows/BunRuntime")
   const input: Input = { pages, mode: values.verified ? "verified" : "preview", reviewer: values.model }
-  // A preflight source capture prints the exact input identity before admission;
+  // A preflight source capture validates the declared evidence before admission;
   // actions independently recapture and the write gate rechecks it after review.
   await Effect.runPromise(Effect.forEach(pages, (page) => operations({ root, output }).collect(page)).pipe(Effect.provide(NodeServices.layer)))
   const layers = Layer.mergeAll(actionLayers({ root, output }), Interpreter.layer(Wiki),

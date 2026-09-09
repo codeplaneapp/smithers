@@ -19,7 +19,7 @@ export const ReviewPage = AgentAction.make("wiki/review-page", {
     "When spec.kind is intent, the owning page IS the authoritative policy declaration. Self-citations are appropriate for its desired future behavior; evaluate whether it is clearly labeled intent, internally coherent and consistent with supplied constraints. Do not require implementation evidence for an explicitly future requirement. Likewise, clearly stated contributor requirements on current pages describe policy, not proof that every implementation complies.",
     "Explain specific uncertainty or corrections. Do not infer that a test passed merely because a test file exists. Do not claim that npm publication, a deployment, synchronization, or a release occurred from source alone."
   ],
-  prompt: ({ evidence }) => `Semantically review every section of this page. Sources with complete:false are curated excerpts; original 1-based line numbers are preserved. A quote must reproduce source text without adding the line label.\n${JSON.stringify(reviewEvidence(evidence))}`
+  prompt: ({ evidence }) => `Semantically review every section of this page. Sources with complete:false are curated excerpts; original 1-based line numbers are preserved. A quote must reproduce source text without adding its line label.\n${JSON.stringify(reviewEvidence(evidence))}`
 })
 export const Assess = Action.make("wiki/assess-review", {
   payload: { evidence: Evidence, review: Schema.NullOr(Review), reviewer: Schema.NullOr(Schema.String) },

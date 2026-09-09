@@ -1,6 +1,6 @@
 # The engineering wiki recipe
 
-The catalog is the only repository-specific input inventory. Each page has a small purpose, linked neighbors, an owning Markdown document and exact code inputs. Explicit inclusive line ranges can select bounded reviewer excerpts; complete files are still hashed and archived, so a change outside an excerpt invalidates the page. Reviews are capped at 90 KB of serialized evidence per page and the flow accepts at most 30 pages. Prefer a focused page to concatenating package manuals. Read [how generation works](pages/wiki-generation.md) and [runtime portability](../../packages/smithers/flows/docs/concepts/runtime-portability.md).
+The catalog is the only repository-specific input inventory. Each page has a small purpose, linked neighbors, an owning Markdown document and exact code inputs. Explicit inclusive line ranges can select bounded reviewer excerpts; complete files are still hashed and archived, so a change outside an excerpt invalidates the page. Reviews are capped at 90 KB of serialized prompt evidence per page; full-file capture is capped separately at 300 KB per page, and the flow accepts at most 30 pages. Prefer a focused page to concatenating package manuals. Read [how generation works](pages/wiki-generation.md) and [runtime portability](../../packages/smithers/flows/docs/concepts/runtime-portability.md).
 
 Generate an explicitly unreviewed preview through a real durable flow:
 
@@ -8,6 +8,8 @@ Generate an explicitly unreviewed preview through a real durable flow:
 node --experimental-strip-types flows/wiki/main.ts
 node --experimental-strip-types flows/wiki/main.ts --check
 ```
+
+Generation output must be a dedicated directory inside the source workspace. To publish into a separate wiki repository, copy the immutable snapshot and its pointer as a separate publication step, preserving human-owned files. `--check --output /path/to/export` can verify that copy against this source checkout without opening a runtime or writing outside its boundary.
 
 Run the semantic reviewer and require every section to be supported:
 

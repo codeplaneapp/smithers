@@ -59,7 +59,7 @@ test("curated review excerpts retain full-file invalidation and enforce shown ci
   const spec = { ...f.spec, excerpts: { "src/answer.ts": [{ start: 2, end: 2 }] } }
   const evidence = await run(f.ops.collect(spec))
   const view = reviewEvidence(evidence).sources.find((source) => source.path === "src/answer.ts")!
-  assert.deepEqual(view.lines, [{ line: 2, text: "  export const answer = 42" }])
+  assert.equal(view.lines, "2 |   export const answer = 42")
   assert.equal(view.complete, false)
   assert.equal("text" in view, false, "full source must not leak into the reviewer view")
   const page = { evidence, reviewer: "scripted-test", review: { sections: supported(evidence).sections.map((section) => ({ ...section, citations: [{ path: "src/answer.ts", line: 2, quote: "export const answer = 42" }] })) } }

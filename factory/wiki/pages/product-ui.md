@@ -1,12 +1,14 @@
 # Embedded UI and recursive inspection
 
-The UI's permanent engineering rules require outputs to render as cards inside the transcript, with the composer visible. Maximizing is an explicit user presentation change of the same component and state. It is not a separate capability implementation.
+The UI shares registered flows, persisted state, cards and frames across presentation modes. The September 8 onboarding brief supersedes the older always-visible-chat rule: the conversation is a translucent top panel, hidden until Command-K / Control-K opens it. The owning onboarding document distinguishes local rehearsal from live backend work. Maximizing a card remains a presentation change of the same component and state.
 
 ## One flow, three doors
 
 A button, slash command and agent invocation share the same registered action. Required missing arguments render a schema-derived form. Human-only gestures have enumerated exceptions rather than silently hiding consequential capabilities from the agent.
 
 State that a card projects belongs in TanStack DB and changes through the shared actor-tagged transition dispatcher. The UI rules prohibit React effects for application state synchronization. These are contributor requirements; use the owning tests and source to judge compliance of a particular component.
+
+Every required action must have a keyboard path with visible focus and predictable focus movement. The shell controls when conversation is visible; an older embedded-card test is not evidence that the composer must remain visible throughout onboarding.
 
 ## Inspect real execution structure
 
