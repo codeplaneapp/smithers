@@ -38,6 +38,57 @@ const throwingFs = (cause: unknown): BrowserFileSystem.ZenFsPromisesLike => {
 
 const codeError = (code: string): Error => Object.assign(new Error(`${code}: boom`), { code })
 
+/** The root of every {@link nestedChain}. */
+const chainRoot = "/root"
+
+/** The stats a {@link nestedChain} reports for each of its levels. */
+const chainDirectory: BrowserFileSystem.ZenFsStatsLike = {
+  size: 0,
+  mode: 0o755,
+  mtimeMs: 0,
+  isFile: () => false,
+  isDirectory: () => true,
+  isSymbolicLink: () => false
+}
+
+/**
+ * A backend holding one chain of `levels` nested directories under
+ * {@link chainRoot}, every level named `d` and nothing linked. How deep a walk
+ * over it gets is therefore the ceiling itself rather than a cycle.
+ */
+const nestedChain = (
+  levels: number,
+  helpers: {
+    readonly lstat?: BrowserFileSystem.ZenFsPromisesLike["lstat"]
+    readonly realpath?: BrowserFileSystem.ZenFsPromisesLike["realpath"]
+  } = {}
+): BrowserFileSystem.ZenFsPromisesLike => {
+  const levelOf = (at: string): number | undefined => {
+    if (at === chainRoot) return 0
+    if (!at.startsWith(`${chainRoot}/`)) return undefined
+    const segments = at.slice(chainRoot.length + 1).split("/")
+    return segments.every((segment) => segment === "d") ? segments.length : undefined
+  }
+  return {
+    ...throwingFs(codeError("ENOENT")),
+    readdir: async (at: string) => {
+      const level = levelOf(at)
+      if (level === undefined || level > levels) throw codeError("ENOENT")
+      return level < levels ? ["d"] : []
+    },
+    stat: async () => chainDirectory,
+    ...helpers
+  }
+}
+
+/** The pathname of the `level`th directory of a {@link nestedChain}. */
+const chainPath = (level: number): string =>
+  level === 0 ? chainRoot : `${chainRoot}/${Array.from({ length: level }, () => "d").join("/")}`
+
+/** Every entry a fully walked {@link nestedChain} of `levels` reports, in order. */
+const chainEntries = (levels: number): Array<string> =>
+  Array.from({ length: levels }, (_, index) => Array.from({ length: index + 1 }, () => "d").join("/"))
+
 describe("BrowserFileSystem error mapping", () => {
   /**
    * Every tag here is one `effect/PlatformError` already declares. Collapsing
@@ -262,6 +313,44 @@ describe("BrowserFileSystem error mapping", () => {
     }))
 
   /**
+   * The ceiling is a documented number, so it is pinned as one. A chain of 128
+   * nested directories is reported whole, and the 129th level is the one the
+   * walk refuses and names. A limit of any other size, or a `>=` where the
+   * check reads `>`, changes one of those answers.
+   */
+  it.effect("walks 128 nested levels over a helperless backend and refuses the 129th by name", () =>
+    Effect.gen(function*() {
+      const walk = (levels: number) =>
+        BrowserFileSystem.make(nestedChain(levels)).readDirectory(chainRoot, { recursive: true })
+
+      expect(yield* (walk(127))).toEqual(chainEntries(127))
+      expect(yield* (walk(128))).toEqual(chainEntries(128))
+
+      const refused = yield* (Effect.flip(walk(129)))
+
+      expect(refused.reason).toMatchObject({
+        _tag: "BadResource",
+        method: "readDirectory",
+        pathOrDescriptor: chainPath(129)
+      })
+    }))
+
+  /**
+   * The ceiling exists only for a backend that can neither avoid following a
+   * directory symlink nor recognize one it has already visited. Either helper
+   * on its own lifts it, so a legitimately deep tree is walked whole instead
+   * of being rejected for its depth.
+   */
+  it.effect("lifts the ceiling for a backend with lstat alone and for one with realpath alone", () =>
+    Effect.gen(function*() {
+      const withLstat = BrowserFileSystem.make(nestedChain(200, { lstat: async () => chainDirectory }))
+      const withRealpath = BrowserFileSystem.make(nestedChain(200, { realpath: async (at: string) => at }))
+
+      expect(yield* (withLstat.readDirectory(chainRoot, { recursive: true }))).toEqual(chainEntries(200))
+      expect(yield* (withRealpath.readDirectory(chainRoot, { recursive: true }))).toEqual(chainEntries(200))
+    }))
+
+  /**
    * `@zenfs/core` exposes its promises API as an object whose members read
    * `this`. Calling an optional member through a captured reference would drop
    * the receiver, so the optional members go through the backend object too.
@@ -294,6 +383,30 @@ describe("BrowserFileSystem error mapping", () => {
       expect(yield* (fileSystem.realPath("/root"))).toBe("/canonical")
       // The one child canonicalizes onto the root, so the walk stops there.
       expect(yield* (fileSystem.readDirectory("/canonical", { recursive: true }))).toEqual(["child"])
+    }))
+
+  /**
+   * A caller who names no mode leaves the permissions to the backend and the
+   * process umask. Sending a mode anyway would decide them here, which a real
+   * backend cannot be made to expose under every umask, so the call itself is
+   * recorded.
+   */
+  it.effect("reaches mkdir with no mode at all when the caller names none", () =>
+    Effect.gen(function*() {
+      const options: Array<Parameters<BrowserFileSystem.ZenFsPromisesLike["mkdir"]>[1]> = []
+      const fileSystem = BrowserFileSystem.make({
+        ...throwingFs(codeError("ENOENT")),
+        mkdir: async (_path, given) => {
+          options.push(given)
+        }
+      })
+
+      yield* fileSystem.makeDirectory("/plain")
+      yield* fileSystem.makeDirectory("/asked", { mode: 0o700, recursive: true })
+
+      expect(options[0]).toEqual({ recursive: false })
+      expect(options[0] !== undefined && "mode" in options[0]).toBe(false)
+      expect(options[1]).toEqual({ recursive: true, mode: 0o700 })
     }))
 
   it.effect("dies rather than fails when closing a streamed handle throws", () =>
@@ -832,17 +945,23 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
 
   /**
    * `writeFile` forwards `mode`; creating a directory 0755 when the caller
-   * asked for 0700 is the same silent permission widening.
+   * asked for 0700 is the same silent permission widening. Omitting `mode`
+   * has to leave the permissions where the backend and the process umask put
+   * them, so the default is compared against a directory the same backend made
+   * under the same umask rather than against fixed bits a umask of 077 would
+   * clear.
    */
-  it.effect("creates a directory with the requested mode", () =>
+  it.effect("creates a directory with the requested mode and leaves the backend's default alone", () =>
     Effect.gen(function*() {
       yield* fileSystem.makeDirectory(path("moded"), { mode: 0o700 })
       yield* fileSystem.makeDirectory(path("default"))
+      yield* Effect.promise(() => NodeFsPromises.mkdir(path("control")))
       const moded = yield* fileSystem.stat(path("moded"))
       const byDefault = yield* fileSystem.stat(path("default"))
+      const control = yield* fileSystem.stat(path("control"))
 
       expect(moded.mode & 0o777).toBe(0o700)
-      expect(byDefault.mode & 0o077).not.toBe(0)
+      expect(byDefault.mode & 0o777).toBe(control.mode & 0o777)
     }))
 
   it.effect("round-trips text outside the basic plane and honours a byte-per-character encoding", () =>
@@ -859,19 +978,28 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
       expect(asLatin1).not.toBe(astral)
     }))
 
+  /**
+   * The tree removed here is this test's own. Removing a fixture the rest of
+   * the file reads would make those tests pass only while they run before this
+   * one, so `sub` is checked afterwards and has to still be there.
+   */
   it.effect("removes recursively, tolerates a forced removal of a missing path, and fails otherwise", () =>
     Effect.gen(function*() {
       const outcome = yield* (
         Effect.gen(function*() {
-          yield* fileSystem.remove(path("sub"), { recursive: true })
+          yield* fileSystem.makeDirectory(path("doomed", "inner"), { recursive: true })
+          yield* fileSystem.writeFileString(path("doomed", "inner", "leaf.txt"), "leaf")
+          yield* fileSystem.remove(path("doomed"), { recursive: true })
           yield* fileSystem.remove(path("never"), { force: true })
           const failure = yield* Effect.flip(fileSystem.remove(path("never")))
-          const exists = yield* fileSystem.exists(path("sub"))
-          return { failure, exists }
+          const exists = yield* fileSystem.exists(path("doomed"))
+          const shared = yield* fileSystem.exists(path("sub", "b.txt"))
+          return { failure, exists, shared }
         })
       )
 
       expect(outcome.exists).toBe(false)
+      expect(outcome.shared).toBe(true)
       expect(outcome.failure).toMatchObject({ reason: { _tag: "NotFound", method: "remove" } })
     }))
 
