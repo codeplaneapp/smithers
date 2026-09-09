@@ -362,6 +362,118 @@ describe("execution identity", () => {
     }).pipe(Effect.provide(layer))
   })
 
+  for (const channel of ["success", "error"] as const) {
+    for (const operation of ["execute", "poll"] as const) {
+      effect(
+        `refuses same-tag ${channel} schema evolution through ${operation}`,
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const engine = yield* FlowRuntime.FlowRuntime
+            const original = Flow.make(`Memory/schema-evolution/${channel}/${operation}`, {
+              payload: {},
+              success: Schema.String,
+              error: Schema.String,
+              body: () => Node.succeed("old-string")
+            })
+            const changed = Flow.make(original._tag, {
+              payload: {},
+              success: channel === "success" ? Schema.Number : Schema.String,
+              error: channel === "error" ? Schema.Number : Schema.String,
+              body: () => Node.succeed(42)
+            })
+            yield* engine.register(original, () =>
+              channel === "success"
+                ? Effect.succeed("old-string")
+                : Effect.fail("old-error"))
+            yield* original.execute({}, { executionId: "schema-evolution" }).pipe(Effect.exit)
+            yield* engine.register(changed, () => Effect.succeed(42))
+            const exit: Exit.Exit<unknown, unknown> = yield* (operation === "execute"
+              ? changed.execute({}, { executionId: "schema-evolution" }).pipe(Effect.exit)
+              : changed.poll("schema-evolution").pipe(Effect.exit))
+            expect(Exit.isFailure(exit)).toBe(true)
+            const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+            expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+            expect(defect).toMatchObject({ field: "flow", executionId: "schema-evolution" })
+          })).pipe(Effect.provide(FlowEngine.layerMemory))
+      )
+    }
+  }
+
+  effect(
+    "replays compatible same-tag declarations through their decoded result schemas",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        const original = Flow.make("Memory/compatible-schema", {
+          payload: {},
+          success: Schema.Number,
+          error: Schema.Number,
+          body: () => Node.succeed(42)
+        })
+        const compatible = Flow.make(original._tag, {
+          payload: {},
+          success: Schema.NumberFromString,
+          error: Schema.NumberFromString,
+          body: () => Node.succeed(99)
+        })
+        yield* engine.register(original, (_payload, id) =>
+          id === "compatible-success"
+            ? Effect.succeed(42)
+            : Effect.fail(7))
+        expect(yield* original.execute({}, { executionId: "compatible-success" })).toBe(42)
+        expect(yield* original.execute({}, { executionId: "compatible-error" }).pipe(Effect.flip)).toBe(7)
+        yield* engine.register(compatible, () => Effect.succeed(99))
+        expect(yield* compatible.execute({}, { executionId: "compatible-success" })).toBe(42)
+        expect(yield* compatible.execute({}, { executionId: "compatible-error" }).pipe(Effect.flip)).toBe(7)
+        for (const id of ["compatible-success", "compatible-error"]) {
+          const polled = yield* compatible.poll(id)
+          expect(Option.isSome(polled) && polled.value._tag === "Complete").toBe(true)
+          if (Option.isSome(polled) && polled.value._tag === "Complete") {
+            if (id === "compatible-success") {
+              expect(polled.value.exit).toEqual(Exit.succeed(42))
+            } else {
+              expect(Exit.isFailure(polled.value.exit)).toBe(true)
+              if (Exit.isFailure(polled.value.exit)) {
+                expect(polled.value.exit.cause.reasons).toHaveLength(1)
+                expect(polled.value.exit.cause.reasons[0]).toMatchObject({ _tag: "Fail", error: 7 })
+              }
+            }
+          }
+        }
+      })).pipe(Effect.provide(FlowEngine.layerMemory))
+  )
+
+  for (const kind of ["Date", "Class"] as const) {
+    effect(`joins equal codec-encoded ${kind} payloads`, () => {
+      class Value extends Schema.Class<Value>("Memory/CodecValue")({ value: Schema.String }) {}
+      const flow = Flow.make(`Memory/codec-payload/${kind}`, {
+        payload: { value: kind === "Date" ? Schema.Date : Value },
+        success: Schema.Void,
+        body: () => Node.succeed(undefined)
+      })
+      const value = (different = false) =>
+        kind === "Date"
+          ? new Date(different ? "2026-01-02T00:00:00.000Z" : "2026-01-01T00:00:00.000Z")
+          : new Value({ value: different ? "different" : "same" })
+      return Effect.scoped(Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        let calls = 0
+        yield* engine.register(flow, () =>
+          Effect.sync(() => {
+            calls++
+          }))
+        yield* flow.execute({ value: value() }, { executionId: "codec-equal" })
+        yield* flow.execute({ value: value() }, { executionId: "codec-equal" })
+        const exit = yield* flow.execute({ value: value(true) }, { executionId: "codec-equal" }).pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+        expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+        expect(defect).toMatchObject({ field: "payload" })
+        expect(calls).toBe(1)
+      })).pipe(Effect.provide(FlowEngine.layerMemory))
+    })
+  }
+
   effect("compares payload shape conservatively across key, array, depth, and opaque boundaries", () =>
     Effect.scoped(
       Effect.gen(function*() {
@@ -426,10 +538,19 @@ describe("execution identity", () => {
           success: Schema.Void,
           body: () => Node.succeed(undefined)
         })
+        yield* conflict(ArrayOrObject, { value: ["x"] }, { value: ["x", "y"] }, "payload-array-length")
         yield* conflict(ArrayOrObject, { value: ["x"] }, { value: { "0": "x" } }, "payload-array-object")
         yield* conflict(ArrayOrObject, { value: { "0": "x" } }, { value: "x" }, "payload-right-primitive")
         yield* conflict(ArrayOrObject, { value: { "0": "x" } }, { value: null }, "payload-right-null")
         yield* conflict(ArrayOrObject, { value: null }, { value: { "0": "x" } }, "payload-left-null")
+
+        const Numeric = Flow.make("Memory/payload-zero", {
+          payload: { value: Schema.Number },
+          success: Schema.Void,
+          body: () => Node.succeed(undefined)
+        })
+        yield* join(Numeric, { value: 0 }, { value: -0 }, "payload-signed-zero")
+        yield* conflict(Numeric, { value: 0 }, { value: 1 }, "payload-unequal-number")
 
         let deepSchema: Schema.Top = Schema.String
         let firstDeep: unknown = "leaf"
@@ -453,6 +574,8 @@ describe("execution identity", () => {
           body: () => Node.succeed(undefined)
         })
         class OpaqueValue {}
+        const opaqueReference = new OpaqueValue()
+        yield* join(Hostile, { value: opaqueReference }, { value: opaqueReference }, "payload-same-opaque-reference")
         yield* conflict(
           Hostile,
           { value: new OpaqueValue() },

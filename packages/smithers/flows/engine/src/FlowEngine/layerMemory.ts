@@ -13,6 +13,7 @@ import * as Fiber from "effect/Fiber"
 import * as FiberMap from "effect/FiberMap"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import { ExecutionIdentityConflict, FlowNotRegistered } from "./Errors.ts"
 import { makeInstance } from "./FlowInstance.ts"
@@ -170,17 +171,11 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       value: unknown
     ): Effect.Effect<unknown> => Effect.orDie(flow.payloadSchema.makeEffect(value as never))
 
-    /**
-     * Structural identity of two rebuilt payload snapshots.
-     *
-     * `snapshot` rebuilds each struct, array, and record the payload schema
-     * declares and hands back declared-opaque values by reference, so
-     * recursing into plain objects and arrays and comparing every leaf with
-     * `Object.is` is exactly the identity the schema describes. It is bounded
-     * so a self-referential declared value cannot make the comparison diverge.
-     */
-    const samePayload = (left: unknown, right: unknown, depth: number): boolean => {
-      if (Object.is(left, right)) return true
+    // JSON identity, with a conservative fallback for memory-only payloads.
+    // Plain objects and arrays are structural even when declared opaque;
+    // other references only match themselves. Bound cycles and deep inputs.
+    const sameShape = (left: unknown, right: unknown, depth: number): boolean => {
+      if (Object.is(left, right) || (left === 0 && right === 0)) return true
       if (depth === 0) return false
       if (typeof left !== "object" || left === null) return false
       if (typeof right !== "object" || right === null) return false
@@ -188,6 +183,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         const leftArray = Array.isArray(left)
         const rightArray = Array.isArray(right)
         if (leftArray !== rightArray) return false
+        if (leftArray && (left as Array<unknown>).length !== (right as Array<unknown>).length) return false
         if (!leftArray) {
           const leftPrototype = Object.getPrototypeOf(left)
           const rightPrototype = Object.getPrototypeOf(right)
@@ -200,7 +196,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         for (const key of leftKeys) {
           if (!Object.hasOwn(right, key)) return false
           if (
-            !samePayload(
+            !sameShape(
               (left as Record<string, unknown>)[key],
               (right as Record<string, unknown>)[key],
               depth - 1
@@ -212,6 +208,46 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         return false
       }
     }
+
+    const samePayload = (flow: Flow.Any, left: unknown, right: unknown): Effect.Effect<boolean> =>
+      Effect.gen(function*() {
+        // A declared live reference need not have a JSON codec. Codec
+        // construction itself can throw, so include it in the fallback.
+        const encoded = yield* Effect.exit(Effect.suspend(() => {
+          const encode = Schema.encodeEffect(Schema.toCodecJson(flow.payloadSchema))
+          return Effect.zip(encode(left as never), encode(right as never)) as Effect.Effect<
+            [Schema.Json, Schema.Json],
+            Schema.SchemaError
+          >
+        }))
+        return Exit.isSuccess(encoded)
+          ? sameShape(encoded.value[0], encoded.value[1], 64)
+          : sameShape(left, right, 64)
+      })
+
+    const settlement = (
+      flow: Flow.Any,
+      executionId: string,
+      result: Flow.Result<unknown, unknown>
+    ): Effect.Effect<Flow.Result<unknown, unknown>> =>
+      // Memory stores decoded values. Validate the Type side so transforms
+      // such as NumberFromString do not decode an already-decoded number.
+      Flow.Result({
+        success: Schema.toType(flow.successSchema),
+        error: Schema.toType(flow.errorSchema)
+      }).makeEffect(result).pipe(
+        Effect.catch(() =>
+          Effect.die(
+            new ExecutionIdentityConflict({
+              executionId,
+              field: "flow",
+              expected: "schemas compatible with the recorded settlement",
+              actual: flow._tag,
+              message: `execution ${executionId} has a settlement incompatible with the schemas of flow ${flow._tag}`
+            })
+          )
+        )
+      )
 
     // Untraced because resume recursively drives suspended executions.
     const resume = Effect.fnUntraced(function*(executionId: string): Effect.fn.Return<void> {
@@ -327,7 +363,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         }
         if (state !== undefined) {
           const requestedPayload = yield* snapshot(flow, options.payload)
-          if (!samePayload(state.payload, requestedPayload, 64)) {
+          if (!(yield* samePayload(flow, state.payload, requestedPayload))) {
             return yield* Effect.die(
               new ExecutionIdentityConflict({
                 executionId: options.executionId,
@@ -381,7 +417,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           yield* resume(options.executionId)
         }
         if (options.discard) return
-        return (yield* Fiber.join(state.fiber!)) as any
+        return (yield* settlement(flow, options.executionId, yield* Fiber.join(state.fiber!))) as any
       }),
       // Untraced because interruption is coordinated from recursive execution.
       interrupt: Effect.fnUntraced(function*(_flow, executionId) {
@@ -502,7 +538,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
             return Effect.succeedNone
           }
           return exit._tag === "Success"
-            ? Effect.succeedSome(exit.value)
+            ? Effect.map(settlement(flow, executionId, exit.value), Option.some)
             : Effect.die(exit.cause)
         }),
       // Untraced because deferred polling is a flow scheduler hot path.
