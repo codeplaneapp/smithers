@@ -38,7 +38,8 @@ sample has a finite `value` in `[0, 1]` and an optional `reason`. A
 - `mean(threshold)` compares the arithmetic mean of all score observations.
 - `min(threshold)` compares the lowest score observation.
 - `perCase(thresholds)` compares each named case's lowest observation. Cases
-  absent from the threshold record are not gated individually.
+  absent from the threshold record are not gated individually. Each breach
+  names the case that missed its threshold.
 
 Thresholds are finite numbers in `[0, 1]`. Equality passes: at a threshold of
 `0.5`, `0.49` fails, while `0.5` and `0.51` pass. There is no sample-count
@@ -67,7 +68,11 @@ measurement remains a finding when another observation is unavailable. Faults
 travel beside passed or failed measurements in `inconclusive`.
 
 `combine(verdicts, environmentFaults = [])` gives findings precedence over
-undecidability. It deduplicates reasons while preserving first-seen order.
+undecidability. Precedence reads the verdict tags, not the length of their
+reason lists, so a `Failed` or `Inconclusive` value with an empty `reasons`
+array keeps its tag and its CI exit code. `combine` states a stand-in reason
+when such a value leaves it with none. It deduplicates reasons while
+preserving first-seen order.
 For failures, unresolved reasons order external faults, faults beside decided
 gates, then undecidable gates. With no findings, undecidable gate reasons
 precede the other faults. An empty verdict array with faults is inconclusive;
@@ -85,7 +90,11 @@ enough evidence to call it.
 
 Reason lists are joined with `;`. Threshold breach reasons retain the gate
 code, threshold, and actual score, rounded to six significant digits for
-display, for example `mean_below_threshold: threshold 0.5, actual 0.49`.
+display, for example `mean_below_threshold: threshold 0.5, actual 0.49`. A
+per-case reason names its case as well,
+`case_below_threshold: case 'translation', threshold 0.8, actual 0.2`, so two
+cases that miss the same threshold with the same score stay distinct after
+`combine` deduplicates equal reasons.
 
 ## Errors and compatibility
 

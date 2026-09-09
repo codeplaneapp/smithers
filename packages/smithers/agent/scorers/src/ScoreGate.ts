@@ -147,13 +147,30 @@ const unique = (reasons: ReadonlyArray<string>): ReadonlyArray<string> => [...ne
 const faults = (samples: ReadonlyArray<ScoreSample>): ReadonlyArray<string> =>
   samples.flatMap((sample) => sample.kind === "inconclusive" ? [sample.reason] : [])
 
+/** Trims binary noise: a mean of `0.8500000000000001` reads as `0.85`. */
+const rounded = (value: number): number => Number(value.toPrecision(6))
+
 /**
  * Renders one breach with the stable code the error channel uses for misuse,
  * so a reason line names the gate, its threshold, and what the run scored.
- * Binary noise is trimmed: a mean of `0.8500000000000001` reads as `0.85`.
  */
 const breach = (code: ScoreGateCode, threshold: number, actual: number): string =>
-  `${code}: threshold ${Number(threshold.toPrecision(6))}, actual ${Number(actual.toPrecision(6))}`
+  `${code}: threshold ${rounded(threshold)}, actual ${rounded(actual)}`
+
+/**
+ * Renders a per-case breach, naming the case that missed its threshold. The
+ * name belongs in the reason because `combine` deduplicates equal reason
+ * strings: two cases that miss the same threshold with the same score would
+ * otherwise collapse into one finding that names neither of them.
+ */
+const caseBreach = (caseName: string, threshold: number, actual: number): string =>
+  `case_below_threshold: case '${caseName}', threshold ${rounded(threshold)}, actual ${rounded(actual)}`
+
+/** Stands in for a verdict that states bad news without stating a reason. */
+const unstatedFailure = "A gate failed without a stated reason"
+
+/** The undecidable counterpart of {@link unstatedFailure}. */
+const unstatedUndecidable = "A gate was undecidable without a stated reason"
 
 const passed = (samples: ReadonlyArray<ScoreSample>): Extract<Verdict, { readonly _tag: "Passed" }> => ({
   _tag: "Passed",
@@ -202,8 +219,20 @@ export const combine = (
     ...environmentFaults,
     ...verdicts.flatMap((verdict) => verdict._tag === "Inconclusive" ? [] : verdict.inconclusive)
   ])
-  if (reasons.length > 0) return { _tag: "Failed", reasons, inconclusive: unique([...observed, ...undecided]) }
-  if (undecided.length > 0) return { _tag: "Inconclusive", reasons: unique([...undecided, ...observed]) }
+  // Precedence reads the tags, not the reason lists. `Verdict` permits an
+  // empty `reasons` array, and deriving severity from a list length turns a
+  // stated failure that carries no reason into a clean pass and a CI exit 0.
+  if (verdicts.some((verdict) => verdict._tag === "Failed")) {
+    return {
+      _tag: "Failed",
+      reasons: reasons.length === 0 ? [unstatedFailure] : reasons,
+      inconclusive: unique([...observed, ...undecided])
+    }
+  }
+  if (verdicts.some((verdict) => verdict._tag === "Inconclusive")) {
+    const stated = unique([...undecided, ...observed])
+    return { _tag: "Inconclusive", reasons: stated.length === 0 ? [unstatedUndecidable] : stated }
+  }
   if (verdicts.length === 0 && observed.length > 0) return { _tag: "Inconclusive", reasons: observed }
   return { _tag: "Passed", inconclusive: observed }
 }
@@ -301,16 +330,26 @@ export const expectScores = (samples: ReadonlyArray<ScoreSample>): ScoreExpectat
         yield* validate
         const named = Object.entries(thresholds)
         if (named.length === 0) return passed(samples)
+        // Grouped in one pass rather than rescanned per case: a suite with
+        // thousands of named cases otherwise pays cases x samples comparisons
+        // inside a grading call the other gates keep linear.
+        const byCase = new Map<string, Array<number>>()
+        for (const sample of samples) {
+          if (sample.kind !== "score") continue
+          const values = byCase.get(sample.case)
+          if (values === undefined) byCase.set(sample.case, [sample.value])
+          else values.push(sample.value)
+        }
         const breaches: Array<string> = []
         const unmeasured: Array<string> = []
         for (const [caseName, threshold] of named) {
-          const values = scoreValues(samples.filter((sample) => sample.case === caseName))
-          if (values.length === 0) {
+          const values = byCase.get(caseName)
+          if (values === undefined) {
             unmeasured.push(`No score samples for case ${caseName}`)
             continue
           }
           const actual = minimum(values)
-          if (actual < threshold) breaches.push(breach("case_below_threshold", threshold, actual))
+          if (actual < threshold) breaches.push(caseBreach(caseName, threshold, actual))
         }
         // Every named case went unmeasured, so this gate decided nothing. One
         // unmeasured case among measured ones is reported alongside the

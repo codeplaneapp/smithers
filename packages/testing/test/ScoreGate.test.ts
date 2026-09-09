@@ -45,7 +45,7 @@ describe("ScoreGate", () => {
   it("reports a per-case threshold miss", async () => {
     await expectMiss(
       ScoreGate.expectScores(samples).perCase({ second: 0.85 }),
-      "case_below_threshold: threshold 0.85, actual 0.8"
+      "case_below_threshold: case 'second', threshold 0.85, actual 0.8"
     )
   })
 
@@ -117,7 +117,7 @@ describe("ScoreGate", () => {
     await expect(Effect.runPromise(ScoreGate.expectScores(withFault).perCase({ second: 0.85 }))).resolves
       .toMatchObject({
         _tag: "Failed",
-        reasons: ["case_below_threshold: threshold 0.85, actual 0.8"]
+        reasons: ["case_below_threshold: case 'second', threshold 0.85, actual 0.8"]
       })
   })
 
@@ -216,7 +216,7 @@ describe("ScoreGate.suite", () => {
       _tag: "Failed",
       reasons: [
         "mean_below_threshold: threshold 0.8, actual 0.6",
-        "case_below_threshold: threshold 0.7, actual 0.6"
+        "case_below_threshold: case 'first', threshold 0.7, actual 0.6"
       ]
     })
     expect(report.cases).toHaveLength(2)
@@ -310,7 +310,7 @@ describe("ScoreGate.suite", () => {
     expect(report.samples.map((sample) => sample.case)).toEqual(["first", "second"])
     expect(report.verdict).toMatchObject({
       _tag: "Failed",
-      reasons: ["case_below_threshold: threshold 0.8, actual 0.1"]
+      reasons: ["case_below_threshold: case 'first', threshold 0.8, actual 0.1"]
     })
   })
 

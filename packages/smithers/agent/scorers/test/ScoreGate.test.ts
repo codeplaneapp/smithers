@@ -35,10 +35,13 @@ describe("runtime score gates", () => {
         [gates.perCase({ first: 0.5 }), "case_below_threshold"]
       ] as const
     ) {
+      const reason = code === "case_below_threshold"
+        ? `${code}: case 'first', threshold 0.5, actual 0.49`
+        : `${code}: threshold 0.5, actual 0.49`
       expect(await Effect.runPromise(effect)).toEqual(
         tag === "Passed"
           ? { _tag: "Passed", inconclusive: [] }
-          : { _tag: "Failed", reasons: [`${code}: threshold 0.5, actual 0.49`], inconclusive: [] }
+          : { _tag: "Failed", reasons: [reason], inconclusive: [] }
       )
     }
   })
@@ -57,7 +60,7 @@ describe("runtime score gates", () => {
     })
     expect(await Effect.runPromise(gates.perCase({ first: 0.5, second: 1 }))).toEqual({
       _tag: "Failed",
-      reasons: ["case_below_threshold: threshold 0.5, actual 0.25"],
+      reasons: ["case_below_threshold: case 'first', threshold 0.5, actual 0.25"],
       inconclusive: []
     })
   })
@@ -96,7 +99,7 @@ describe("runtime score gates", () => {
     })
     expect(await Effect.runPromise(gates.perCase({ first: 0.6, missing: 1 }))).toEqual({
       _tag: "Failed",
-      reasons: ["case_below_threshold: threshold 0.6, actual 0.5"],
+      reasons: ["case_below_threshold: case 'first', threshold 0.6, actual 0.5"],
       inconclusive: ["judge unavailable", "No score samples for case missing"]
     })
     expect(await Effect.runPromise(ScoreGate.expectScores([fault]).mean(0))).toEqual({
@@ -172,6 +175,57 @@ describe("runtime score gates", () => {
     ])
   })
 
+  it("names the case in every per-case breach so equal misses stay distinct", async () => {
+    const verdict = await Effect.runPromise(
+      ScoreGate.expectScores([sample(0.2, "translation"), sample(0.2, "summarization")])
+        .perCase({ translation: 0.8, summarization: 0.8 })
+    )
+    expect(verdict).toEqual({
+      _tag: "Failed",
+      reasons: [
+        "case_below_threshold: case 'translation', threshold 0.8, actual 0.2",
+        "case_below_threshold: case 'summarization', threshold 0.8, actual 0.2"
+      ],
+      inconclusive: []
+    })
+    const summary = ScoreGate.grade(ScoreGate.combine([verdict])).summary
+    expect(summary).toContain("case 'translation'")
+    expect(summary).toContain("case 'summarization'")
+  })
+
+  it("grades grouped cases exactly as a per-case rescan of every sample does", async () => {
+    const names = Array.from({ length: 40 }, (_, index) => `case-${index}`)
+    const samples = [
+      ...names.flatMap((caseName, index) => [sample((index % 10) / 10, caseName), sample(1, caseName)]),
+      fault
+    ]
+    const thresholds = Object.fromEntries([
+      ...names.map((caseName, index) => [caseName, index % 2 === 0 ? 0.5 : 0] as const),
+      ["absent", 1] as const,
+      ["missing", 1] as const
+    ])
+    const rescan = (caseName: string): ReadonlyArray<number> =>
+      samples.flatMap((candidate) => candidate.case === caseName && candidate.kind === "score" ? [candidate.value] : [])
+    const reasons = Object.entries(thresholds).flatMap(([caseName, threshold]) => {
+      const values = rescan(caseName)
+      if (values.length === 0) return []
+      const actual = Math.min(...values)
+      return actual < threshold
+        ? [`case_below_threshold: case '${caseName}', threshold ${threshold}, actual ${actual}`]
+        : []
+    })
+    expect(reasons.length).toBeGreaterThan(1)
+    expect(await Effect.runPromise(ScoreGate.expectScores(samples).perCase(thresholds))).toEqual({
+      _tag: "Failed",
+      reasons,
+      inconclusive: [
+        "judge unavailable",
+        "No score samples for case absent",
+        "No score samples for case missing"
+      ]
+    })
+  })
+
   it("takes minima beyond JavaScript's argument-count limit", async () => {
     const samples = Array.from({ length: 200_000 }, (_, index) => sample(index === 199_999 ? 0.25 : 0.75))
     const gates = ScoreGate.expectScores(samples)
@@ -182,7 +236,7 @@ describe("runtime score gates", () => {
     })
     expect(await Effect.runPromise(gates.perCase({ first: 0.5 }))).toEqual({
       _tag: "Failed",
-      reasons: ["case_below_threshold: threshold 0.5, actual 0.25"],
+      reasons: ["case_below_threshold: case 'first', threshold 0.5, actual 0.25"],
       inconclusive: []
     })
   })
@@ -212,6 +266,36 @@ describe("verdict composition and CI grades", () => {
     expect(ScoreGate.combine([{ _tag: "Passed", inconclusive: ["offline"] }])).toEqual({
       _tag: "Passed",
       inconclusive: ["offline"]
+    })
+  })
+
+  it("takes precedence from the verdict tag, not the length of its reason list", () => {
+    const emptyFailure = ScoreGate.combine([{ _tag: "Failed", reasons: [], inconclusive: [] }])
+    expect(emptyFailure).toEqual({
+      _tag: "Failed",
+      reasons: ["A gate failed without a stated reason"],
+      inconclusive: []
+    })
+    expect(ScoreGate.grade(emptyFailure).exitCode).toBe(1)
+    const emptyUndecidable = ScoreGate.combine([{ _tag: "Inconclusive", reasons: [] }])
+    expect(emptyUndecidable).toEqual({
+      _tag: "Inconclusive",
+      reasons: ["A gate was undecidable without a stated reason"]
+    })
+    expect(ScoreGate.grade(emptyUndecidable).exitCode).toBe(5)
+    // A stated failure outranks a stated undecidable gate even with no reason
+    // of its own, and observed faults still stand in for absent reasons.
+    expect(ScoreGate.combine([
+      { _tag: "Failed", reasons: [], inconclusive: [] },
+      { _tag: "Inconclusive", reasons: ["missing"] }
+    ])).toEqual({
+      _tag: "Failed",
+      reasons: ["A gate failed without a stated reason"],
+      inconclusive: ["missing"]
+    })
+    expect(ScoreGate.combine([{ _tag: "Inconclusive", reasons: [] }], ["offline"])).toEqual({
+      _tag: "Inconclusive",
+      reasons: ["offline"]
     })
   })
 
