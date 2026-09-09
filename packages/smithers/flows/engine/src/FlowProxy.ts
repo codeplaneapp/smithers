@@ -123,18 +123,36 @@ const executePayload = <Payload extends Flow.AnyStructSchema>(
  * **Example** (Deriving RPC endpoints from flows)
  *
  * ```ts
- * import { Layer, Schema } from "effect"
+ * import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+ * import { Effect, Layer, Schema } from "effect"
  * import { RpcServer } from "effect/unstable/rpc"
- * import { FlowProxy, FlowProxyServer } from "@smthrs/engine"
- * import { Flow } from "@smthrs/flow"
+ * import { FlowEngine, FlowProxy, FlowProxyServer } from "@smthrs/engine"
+ * import { Action, Flow, Interpreter } from "@smthrs/flow"
+ *
+ * const RenderEmail = Action.make("RenderEmail", {
+ *   payload: { to: Schema.String },
+ *   success: Schema.String
+ * })
  *
  * const EmailFlow = Flow.make("EmailFlow", {
  *   payload: {
  *     id: Schema.String,
  *     to: Schema.String
  *   },
- *   idempotencyKey: ({ id }) => id
+ *   success: Schema.String,
+ *   idempotencyKey: ({ id }) => id,
+ *   body: (payload) => RenderEmail.call(payload)
  * })
+ *
+ * // This example renders a message without delivering it.
+ * const EmailLayer = Layer.mergeAll(
+ *   RenderEmail.toLayer(({ to }) => Effect.succeed(`Hello, ${to}.`)),
+ *   Interpreter.layer(EmailFlow)
+ * ).pipe(
+ *   Layer.provideMerge(Action.layerImplementations),
+ *   Layer.provideMerge(FlowEngine.layerMemory),
+ *   Layer.provideMerge(NodeCrypto.layer)
+ * )
  *
  * const myFlows = [EmailFlow] as const
  *
@@ -145,7 +163,9 @@ const executePayload = <Payload extends Flow.AnyStructSchema>(
  * // Use FlowProxyServer.layerRpcHandlers to create a layer that implements
  * // the rpc handlers
  * const ApiLayer = RpcServer.layer(MyRpcs, { disableFatalDefects: true }).pipe(
- *   Layer.provide(FlowProxyServer.layerRpcHandlers(myFlows))
+ *   Layer.provide(FlowProxyServer.layerRpcHandlers(myFlows).pipe(
+ *     Layer.provide(EmailLayer)
+ *   ))
  * )
  * ```
  *
@@ -210,18 +230,36 @@ export type ConvertRpcs<Flows extends Flow.Any, Prefix extends string> = Flows e
  * **Example** (Deriving HTTP API endpoints from flows)
  *
  * ```ts
- * import { Layer, Schema } from "effect"
+ * import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+ * import { Effect, Layer, Schema } from "effect"
  * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
- * import { FlowProxy, FlowProxyServer } from "@smthrs/engine"
- * import { Flow } from "@smthrs/flow"
+ * import { FlowEngine, FlowProxy, FlowProxyServer } from "@smthrs/engine"
+ * import { Action, Flow, Interpreter } from "@smthrs/flow"
+ *
+ * const RenderEmail = Action.make("RenderEmail", {
+ *   payload: { to: Schema.String },
+ *   success: Schema.String
+ * })
  *
  * const EmailFlow = Flow.make("EmailFlow", {
  *   payload: {
  *     id: Schema.String,
  *     to: Schema.String
  *   },
- *   idempotencyKey: ({ id }) => id
+ *   success: Schema.String,
+ *   idempotencyKey: ({ id }) => id,
+ *   body: (payload) => RenderEmail.call(payload)
  * })
+ *
+ * // This example renders a message without delivering it.
+ * const EmailLayer = Layer.mergeAll(
+ *   RenderEmail.toLayer(({ to }) => Effect.succeed(`Hello, ${to}.`)),
+ *   Interpreter.layer(EmailFlow)
+ * ).pipe(
+ *   Layer.provideMerge(Action.layerImplementations),
+ *   Layer.provideMerge(FlowEngine.layerMemory),
+ *   Layer.provideMerge(NodeCrypto.layer)
+ * )
  *
  * const myFlows = [EmailFlow] as const
  *
@@ -235,7 +273,9 @@ export type ConvertRpcs<Flows extends Flow.Any, Prefix extends string> = Flows e
  * // flows HttpApiGroup
  * const ApiLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(
- *     FlowProxyServer.layerHttpApi(MyApi, "flows", myFlows)
+ *     FlowProxyServer.layerHttpApi(MyApi, "flows", myFlows).pipe(
+ *       Layer.provide(EmailLayer)
+ *     )
  *   )
  * )
  * ```

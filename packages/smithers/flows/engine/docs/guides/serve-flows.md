@@ -67,6 +67,11 @@ Execute, discard, and resume payloads require an `executionId` with 1 to 4,096
 UTF-16 code units and no unpaired surrogates. RPC and HTTP schemas reject
 invalid ids before invoking the engine.
 
+Direct library calls to `Flow.execute` may omit the id. A declared
+`idempotencyKey` then selects it; otherwise the default source mints a fresh
+UUID for each invocation. Proxy clients must supply an id and retain it to
+retry or resume the same execution.
+
 ## Serve over HTTP
 
 The HTTP form adds a group to an `HttpApi` and binds it the same way:

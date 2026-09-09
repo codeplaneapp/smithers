@@ -64,8 +64,9 @@ const GreetingLayer = Layer.mergeAll(
 )
 
 /**
- * Runs the flow under a caller-selected execution ID. The flow declares no
- * `idempotencyKey`, so an explicit id is required.
+ * Runs the flow under a caller-selected execution ID. Without this option or
+ * an `idempotencyKey`, the default source mints a fresh UUID for each call.
+ * Retain the id to reattach to the same execution.
  */
 export const main: Effect.Effect<string> = Greeting.execute(
   { name: "Ada" },

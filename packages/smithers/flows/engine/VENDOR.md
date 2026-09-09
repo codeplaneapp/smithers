@@ -53,26 +53,27 @@ flow tag and derived key, and always computes that ID inside `execute`.
 Consequently equal payload keys join the same execution. Upstream proxy execute
 and discard requests contain the flow payload directly.
 
-Smithers makes `Flow.make({ idempotencyKey })` optional and adds
-`executionId?: string` to `Flow.execute`. An explicit value always wins. If
-it is absent, an opt-in idempotency key is decoded through the injected
-`@smthrs/crypto` `Sha256` transformation. If neither exists, the ambient
-`Flow.CurrentExecutionIds` source names the invocation before `FlowEngine` is
-read; the structured `ExecutionIdRequired` defect is what a source raises when
-it cannot. The `Flow.executionId` helper resolves identity the same three
-ways. RPC and HTTP execute/discard schemas carry `{ payload, executionId? }`,
-and both server adapters forward the optional ID.
+Smithers makes the `idempotencyKey` option of `Flow.make` optional and adds
+`executionId?: string` to library calls through `Flow.execute`. An explicit
+value always wins. If it is absent, an opt-in idempotency key is decoded
+through the injected `@smthrs/crypto` `Sha256` transformation. If neither exists,
+the ambient `Flow.CurrentExecutionIds` source names the invocation before
+`FlowEngine` is read. Its default, `Flow.fresh`, mints a fresh UUID using host
+cryptography, so equal unkeyed payloads start independent executions. The
+`Flow.executionId` helper resolves identity the same three ways.
 
-The point of the divergence is that identity is _chosen_, not imposed by the
-library: upstream's unconditional payload-key derivation gives a caller no way
-to keep two runs apart, and the `executionId` option is that way. Which runs
-are "the same" beyond that is a host question, not a flow-definition question —
-a coding agent running one request per user is the case where equal payloads
-must NOT permanently join — so `Flow.layerExecutionIds` is where a host answers
-it once for every flow it drives. The default source dies with
-`ExecutionIdRequired`; a host opts into equal-payload joins with
-`Flow.layerExecutionIds(Flow.derived)`, or installs a source that scopes the
-minted ID to the request, session, or workspace that relates invocations.
+RPC and HTTP execute/discard schemas instead require `{ payload, executionId }`.
+Resume requires `{ executionId }`. Both server adapters validate the mandatory
+client wire id and pass it through the optional server-owned `executionId`
+scope. A scope may select library identity resolution by returning `undefined`
+for execute/discard. Resume has no payload and requires a scoped string;
+returning `undefined` there raises `Flow.ExecutionIdRequired`.
+
+A caller that needs reattachment after a crash must retain the execution id
+or declare an idempotency key. Another unkeyed library invocation starts new
+work under the fresh default. A host can opt into equal-payload joins with
+`Flow.layerExecutionIds(Flow.derived)`, or install a source that scopes the
+minted id to its request, session, or workspace.
 
 Upstream references:
 
