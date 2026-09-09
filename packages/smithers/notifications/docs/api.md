@@ -45,6 +45,18 @@ interface Service {
 `NotificationQueue` is the service tag, a `Context.Service` under the key
 `/notifications/NotificationQueue`.
 
+New admissions persist a SHA-256 fingerprint of the validated notification's
+canonical JSON before journal redaction. Identical retries return the committed
+receipt even when redaction changed the stored payload. Different content still
+fails with `notification_id_reused`, including changes to redacted fields.
+Legacy admissions without a fingerprint compare against their persisted content;
+original values removed by redaction cannot be recovered.
+
+The journal-backed layers deeply freeze decoded notifications, including nested
+payload objects and arrays, before `pending` or `drain` exposes them. Outputs
+carry the persisted, possibly redacted content. Consumer mutation cannot change
+later reads or drain receipts.
+
 ### AdmissionReceipt
 
 ```ts
@@ -212,7 +224,7 @@ The journal event types this package owns. Import from
 | `AdmittedEventType` | `"flows/notifications/Admitted"`. Frozen: the value is already durable in every journal this package has written to. |
 | `PromotedEventType` | `"flows/notifications/Promoted"`. Frozen for the same reason.                                                        |
 | `AdmissionDecision` | `"admitted" \| "coalesced" \| "rejected-full"`. The one declaration of the admission vocabulary.                     |
-| `Admitted`          | `{ notification: Notification; decision: AdmissionDecision }`.                                                       |
+| `Admitted`          | `{ notification: Notification; decision: AdmissionDecision; fingerprint?: string }`.                                                       |
 | `Promoted`          | `{ boundary: string; targetLineageId: string; ids: ReadonlyArray<string> }`.                                         |
 | `Event`             | `Admitted \| Promoted`.                                                                                              |
 

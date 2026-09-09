@@ -301,13 +301,23 @@ const canonical = (value: unknown): string => {
   }}`
 }
 
-const sameNotification = (
-  left: NotificationModel.Notification,
-  right: NotificationModel.Notification
-): boolean => canonical(left) === canonical(right)
+/** Fingerprint the validated input before the journal redacts its payload. */
+const fingerprint = (notification: NotificationModel.Notification): Effect.Effect<string> =>
+  Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical(notification))))
+    .pipe(
+      Effect.map((digest) => Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""))
+    )
+
+/** Freeze the decoded JSON graph before any queue output can expose it. */
+const freeze = (value: unknown): void => {
+  if (typeof value !== "object" || value === null) return
+  for (const nested of Object.values(value)) freeze(nested)
+  Object.freeze(value)
+}
 
 /** One committed admission, as the journal recorded it. */
 interface Committed {
+  readonly fingerprint: string | undefined
   readonly notification: NotificationModel.Notification
   readonly decision: NotificationState.AdmissionDecision
   readonly seq: number
@@ -420,8 +430,10 @@ export const layerWith = (
             if (Option.isNone(decoded)) continue
             const event = decoded.value
             if (NotificationEvent.isAdmitted(event)) {
+              freeze(event.notification)
               admissions.set(event.notification.id, {
                 notification: event.notification,
+                fingerprint: event.fingerprint,
                 decision: event.decision,
                 seq: entry.seq
               })
@@ -461,13 +473,19 @@ export const layerWith = (
        */
       const admitInTransaction = (
         runId: JournalEvent.RunId,
-        admitted: NotificationModel.Notification
+        admitted: NotificationModel.Notification,
+        admittedFingerprint: string
       ): Effect.Effect<AdmissionReceipt, Journal.JournalError | NotificationError> =>
         Effect.gen(function*() {
           const loaded = yield* load(runId)
           const prior = loaded.admissions.get(admitted.id)
           if (prior !== undefined) {
-            if (!sameNotification(prior.notification, admitted)) {
+            // Legacy rows have no fingerprint; only their persisted content is
+            // available for comparison. New rows retain the original identity.
+            const same = prior.fingerprint === undefined
+              ? canonical(prior.notification) === canonical(admitted)
+              : prior.fingerprint === admittedFingerprint
+            if (!same) {
               return yield* new NotificationError({
                 code: "notification_id_reused",
                 notificationId: admitted.id,
@@ -512,7 +530,7 @@ export const layerWith = (
               // fill level it happened to load at.
               dedupe: "identity",
               eventType: NotificationEvent.AdmittedEventType,
-              payload: { notification: admitted, decision: admission.decision }
+              payload: { notification: admitted, decision: admission.decision, fingerprint: admittedFingerprint }
             })
           )
           const committed = (yield* load(runId)).admissions.get(admitted.id)
@@ -538,8 +556,9 @@ export const layerWith = (
         admit: Effect.fn("NotificationQueue.admit")((rawRunId, notification) =>
           Effect.gen(function*() {
             const admitted = yield* validated(notification)
+            const admittedFingerprint = yield* fingerprint(admitted)
             return yield* operations.withPermits(1)(
-              journal.transact(admitInTransaction(JournalEvent.RunId.make(rawRunId), admitted))
+              journal.transact(admitInTransaction(JournalEvent.RunId.make(rawRunId), admitted, admittedFingerprint))
             )
           })
         ),

@@ -106,6 +106,94 @@ describe("NotificationQueue", () => {
     expect(error.message).not.toContain("second")
   })
 
+  it.each([
+    { token: "synthetic-test-value" },
+    { body: "Bearer synthetic-test-value" }
+  ])("deduplicates original content after default journal redaction: %j", async (payload) => {
+    const notification = { ...item("redacted", "steer"), payload } satisfies Notification
+    await run(Effect.gen(function*() {
+      const queue = yield* NotificationQueue.NotificationQueue
+      const journal = yield* Journal.Journal
+      const first = yield* queue.admit("run", notification)
+      const pending = yield* queue.pending("run")
+      expect(pending[0]?.payload).not.toEqual(payload)
+      const retry = yield* queue.admit("run", notification)
+      expect(retry).toEqual({ ...first, duplicate: true })
+      const replay = yield* NotificationQueue.NotificationQueue.pipe(
+        Effect.provide(NotificationQueue.layerWith())
+      )
+      expect(yield* replay.admit("run", notification)).toEqual(retry)
+      const changed = { ...notification, payload: { ...payload, extra: true } }
+      expect((yield* replay.admit("run", changed).pipe(Effect.flip)).code).toBe("notification_id_reused")
+      // Even two inputs that redact to the same payload must remain distinct.
+      const changedSecret = {
+        ...notification,
+        payload: "token" in payload
+          ? { token: "different-synthetic-value" }
+          : { body: "Bearer different-synthetic-value" }
+      }
+      expect((yield* queue.admit("run", changedSecret).pipe(Effect.flip)).code).toBe("notification_id_reused")
+      const rows = yield* journal.entries({ runId: JournalEvent.RunId.make("run"), limit: 512 })
+      expect(rows.entries).toHaveLength(1)
+      expect(JSON.stringify(rows.entries[0]?.payload)).not.toContain("synthetic-test-value")
+    }))
+  })
+
+  it.each(["pending", "drain"] as const)("protects cached notifications exposed by %s", async (output) => {
+    const notification = {
+      ...item("immutable", "steer"),
+      payload: { nested: { body: "original" }, tools: ["read"] }
+    } satisfies Notification
+    const boundary = { runId: "run", targetLineageId: "run/root", boundary: "turn", wouldIdle: false }
+    await run(Effect.gen(function*() {
+      const queue = yield* NotificationQueue.NotificationQueue
+      const journal = yield* Journal.Journal
+      yield* queue.admit("run", notification)
+      const returned = output === "pending"
+        ? yield* queue.pending("run")
+        : (yield* queue.drain(boundary)).notifications
+      // Schema.Json is deeply readonly. Reflect simulates an untyped consumer.
+      const exposed = returned[0]!
+      const payload = exposed.payload as typeof notification.payload
+      Reflect.set(payload.nested, "body", "edited by reader")
+      Reflect.set(payload.tools, "0", "write")
+      Reflect.set(exposed.provenance, "sourceActor", "edited by reader")
+      Reflect.set(exposed, "targetLineageId", "elsewhere")
+      const live = yield* queue.drain(boundary)
+      const repeated = yield* queue.drain(boundary)
+      const replay = yield* NotificationQueue.NotificationQueue.pipe(
+        Effect.provide(NotificationQueue.layerWith())
+      )
+      const fresh = yield* replay.drain(boundary)
+      const rows = yield* journal.entries({ runId: JournalEvent.RunId.make("run"), limit: 512 })
+      expect(rows.entries[0]?.payload).toMatchObject({ notification })
+      expect(live.notifications).toEqual([notification])
+      expect(repeated.notifications).toEqual(fresh.notifications)
+      expect(fresh.notifications).toEqual([notification])
+      expect((yield* queue.admit("run", notification)).duplicate).toBe(true)
+    }))
+  })
+
+  it("compares legacy admissions without fingerprints against persisted content", async () => {
+    await run(Effect.gen(function*() {
+      const journal = yield* Journal.Journal
+      const queue = yield* NotificationQueue.NotificationQueue
+      const notification = item("legacy", "steer")
+      yield* journal.emitDurableUnfenced(
+        new JournalEvent.Input({
+          runId: JournalEvent.RunId.make("run"),
+          sourceId: JournalEvent.SourceId.make("legacy-writer"),
+          sourceSeq: JournalEvent.SourceSeq.make(0),
+          eventType: "flows/notifications/Admitted",
+          payload: { notification, decision: "admitted" }
+        })
+      )
+      expect((yield* queue.admit("run", notification)).duplicate).toBe(true)
+      expect((yield* queue.admit("run", { ...notification, payload: null }).pipe(Effect.flip)).code)
+        .toBe("notification_id_reused")
+    }))
+  })
+
   it("serializes concurrent admissions at the durable capacity", async () => {
     const result = await run(Effect.gen(function*() {
       const queue = yield* NotificationQueue.NotificationQueue

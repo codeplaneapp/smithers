@@ -105,7 +105,8 @@ describe("the durable notification vocabulary", () => {
             },
             payload: { kind: "Message", body: "look at the failing test" }
           },
-          decision: "admitted"
+          decision: "admitted",
+          fingerprint: "85fca33dbf4723a84614e47fad256f7c50a53064f77cc8ced348792d822ccec3"
         }
       },
       {
@@ -124,7 +125,8 @@ describe("the durable notification vocabulary", () => {
             },
             payload: { kind: "Message", body: "when you get a moment" }
           },
-          decision: "admitted"
+          decision: "admitted",
+          fingerprint: "3c21cc48d8c8fca0b97fd2ece6fd494873d22d8d30ee459f7f906c0b2a2980e9"
         }
       },
       {
@@ -144,7 +146,8 @@ describe("the durable notification vocabulary", () => {
             },
             payload: { condition: "waiting-approval" }
           },
-          decision: "admitted"
+          decision: "admitted",
+          fingerprint: "978270e4ca46788eef4fd37b2cda8278a784a4721715906767097b55e59c9e78"
         }
       },
       {

@@ -69,7 +69,9 @@ export type AdmissionDecision = typeof AdmissionDecision.Type
  */
 export const Admitted = Schema.Struct({
   notification: Notification.Notification,
-  decision: AdmissionDecision
+  decision: AdmissionDecision,
+  /** SHA-256 of canonical validated input, absent in legacy admission rows. */
+  fingerprint: Schema.optional(Schema.String)
 })
 
 /**

@@ -44,7 +44,8 @@ const common = {
  *
  * `id` is the caller's idempotency key: admitting it twice with the same
  * content is one notification, and admitting it with different content is a
- * producer bug the queue refuses.
+ * producer bug the queue refuses. New admissions fingerprint the validated
+ * content before journal redaction, so redaction does not change retry identity.
  *
  * @category models
  * @since 0.1.0
@@ -91,7 +92,9 @@ export const SystemEvent = Schema.TaggedStruct("system-event", {
  *
  * `NotificationQueue.admit` decodes its argument against this union before it
  * journals anything, so a value that does not match it is refused rather than
- * acknowledged and then skipped by every replay.
+ * acknowledged and then skipped by every replay. Journal-backed queues deeply
+ * freeze decoded notifications, including payloads, before returning them from
+ * `pending` or `drain`.
  *
  * @category models
  * @since 0.1.0
