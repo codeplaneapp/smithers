@@ -39,8 +39,28 @@ import { minimalProfiles, adapterProfiles, runConsumerMatrix } from "./fixtures/
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const keepTmp = args.includes("--keep-tmp");
-const maxPackagesFlag = args.indexOf("--max-packages");
-const maxPackages = maxPackagesFlag === -1 ? 925 : Number(args[maxPackagesFlag + 1]);
+const usage = "usage: node scripts/check-npm-dedupe.mjs [--max-packages <n>] [--keep-tmp]";
+
+/**
+ * Reads the optional `--max-packages` budget.
+ *
+ * A bare `--max-packages`, or one followed by another flag, used to parse as
+ * `NaN`. The budget's only use is `total > maxPackages`, which is false for
+ * `NaN`, so the aggregate package-count assertion silently stopped asserting
+ * while the log line still printed `(budget NaN)`. A budget that cannot fail is
+ * worse than no budget, so an unusable value is a usage error.
+ */
+export const maxPackagesFrom = (args, fallback = 925) => {
+  const flag = args.indexOf("--max-packages");
+  if (flag === -1) return fallback;
+  const value = Number(args[flag + 1]);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(
+      `--max-packages requires a positive integer, received ${JSON.stringify(args[flag + 1] ?? null)}`,
+    );
+  }
+  return value;
+};
 const npmInstallArgs = [
   "install",
   "--package-lock-only",
@@ -212,7 +232,7 @@ export async function resolveConsumerProfiles() {
   }
 }
 
-async function main() {
+async function main(maxPackages) {
   const { optionalPeers: OPTIONAL_ABSENT, lockPackages, tmp } = resolveConsumerTree({ keepTmp });
 
   const failures = [];
@@ -252,5 +272,12 @@ async function main() {
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await main();
+  let maxPackages;
+  try {
+    maxPackages = maxPackagesFrom(args);
+  } catch (error) {
+    console.error(`${error.message}\n${usage}`);
+    process.exit(2);
+  }
+  await main(maxPackages);
 }

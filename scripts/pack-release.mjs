@@ -20,15 +20,17 @@ import { assertPackedExportTargets } from "./packed-export-targets.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
-const packageGroups = new Set(["engine", "agent", "tooling"])
-
 /**
- * The groups the 1.0 release train packs.
+ * Every group a workspace manifest may declare, and the groups the 1.0 release
+ * train packs. They are one set on purpose.
  *
  * 0.x shipped the engine group alone and left the agent layer for a second
- * train. Smithers 1.0 gives every public first-party package one synchronized
- * version, so all public groups release together. Private deployment tooling
- * remains excluded by the manifest's `private` flag.
+ * train, so a manifest could name a known group that no train packed. Smithers
+ * 1.0 gives every public first-party package one synchronized version, so all
+ * known groups release together and the only thing that holds a package back
+ * is the manifest's `private` flag. Splitting this into a "known" set and a
+ * smaller "released" set again would reintroduce a group that validates but
+ * never publishes.
  */
 export const releaseGroups = new Set(["engine", "agent", "tooling"])
 
@@ -110,10 +112,10 @@ export const readWorkspaceManifests = (root = repoRoot) => {
   const manifests = new Map()
   for (const entry of libraryPackages(root)) {
     const group = entry.manifest.smthrs?.group
-    if (!packageGroups.has(group)) {
-      throw new Error(`${entry.manifestPath}: smthrs.group must be one of ${[...packageGroups].join(", ")}`)
+    if (!releaseGroups.has(group)) {
+      throw new Error(`${entry.manifestPath}: smthrs.group must be one of ${[...releaseGroups].join(", ")}`)
     }
-    if (entry.manifest.private || !releaseGroups.has(group)) continue
+    if (entry.manifest.private) continue
     manifests.set(entry.dir, entry.manifest)
   }
   const declared = [...manifests.values()].map((manifest) => manifest.name).sort()
@@ -199,8 +201,15 @@ export const dependencyOrder = (dependencies) => {
 
 /**
  * Dependency order used for release packing and publication.
+ *
+ * This is a function, not a module-level constant, because it reads and
+ * validates a workspace tree. As a constant it ran at import, so every
+ * importer that only wanted a pure helper — `dependencyOrder`,
+ * `workspaceDependencies`, or `readWorkspaceManifests(someOtherRoot)` — read
+ * this repository's manifests and inherited the roster check's throw before it
+ * could call anything.
  */
-export const workspaces = dependencyOrder(workspaceDependencies(readWorkspaceManifests()))
+export const workspaces = (root = repoRoot) => dependencyOrder(workspaceDependencies(readWorkspaceManifests(root)))
 
 const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
 
@@ -536,12 +545,12 @@ export const main = async (args) => {
     return
   }
   if (destination === "--list") {
-    console.log(workspaces.join("\n"))
+    console.log(workspaces().join("\n"))
     return
   }
   if (destination === "--names") {
     const manifests = readWorkspaceManifests()
-    console.log(workspaces.map((directory) => manifests.get(directory).name).join("\n"))
+    console.log(dependencyOrder(workspaceDependencies(manifests)).map((directory) => manifests.get(directory).name).join("\n"))
     return
   }
   if (destination === undefined) {
@@ -562,7 +571,7 @@ export const main = async (args) => {
   const stagingRoot = await mkdtemp(join(tmpdir(), "smthrs-release-pack-"))
   try {
     const packed = []
-    for (const directory of workspaces) {
+    for (const directory of workspaces()) {
       packed.push(await packWorkspace(directory, outputDirectory, stagingRoot))
     }
     await writeFile(

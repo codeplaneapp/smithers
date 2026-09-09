@@ -13,12 +13,41 @@
 // Run it with `node --test scripts/check-npm-dedupe.test.mjs`.
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { SINGLETONS, copiesOf, optionalPeersOf, resolveConsumerTree, resolveConsumerProfiles } from "./check-npm-dedupe.mjs";
+import { SINGLETONS, copiesOf, maxPackagesFrom, optionalPeersOf, resolveConsumerTree, resolveConsumerProfiles } from "./check-npm-dedupe.mjs";
 import { assertConsumerTree } from "./fixtures/dependency-consumers.mjs";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+it("refuses a --max-packages value that cannot fail", () => {
+  // The budget's only use is `total > maxPackages`, and that comparison is
+  // false for NaN. A bare flag, or one followed by another flag, therefore used
+  // to disable the package-count assertion while the log still printed the
+  // budget it was no longer applying.
+  assert.equal(maxPackagesFrom([]), 925);
+  assert.equal(maxPackagesFrom(["--keep-tmp"]), 925);
+  assert.equal(maxPackagesFrom(["--max-packages", "1200"]), 1200);
+  for (const args of [["--max-packages"], ["--max-packages", "--keep-tmp"], ["--max-packages", ""], ["--max-packages", "0"], ["--max-packages", "-1"], ["--max-packages", "9.5"], ["--max-packages", "1e400"]]) {
+    assert.throws(() => maxPackagesFrom(args), /--max-packages requires a positive integer/, args.join(" "));
+  }
+});
+
+it("exits 2 with usage on a bare --max-packages instead of installing under no budget", () => {
+  const result = spawnSync(process.execPath, ["scripts/check-npm-dedupe.mjs", "--max-packages"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /--max-packages requires a positive integer/);
+  assert.match(result.stderr, /usage: node scripts\/check-npm-dedupe\.mjs/);
+  assert.doesNotMatch(result.stdout, /resolved package count/);
+});
 
 it("requires exactly one physical Effect copy at the zero, one, and two-copy boundaries", async () => {
   for (const count of [0, 1, 2]) {

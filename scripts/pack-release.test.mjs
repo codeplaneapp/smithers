@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 import test from "node:test"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { assertExportTargets, assertPackedExportTargets } from "./packed-export-targets.mjs"
 import { assertEffectPins, effectDeclarations, effectLockVersions, installedEffectResolutions } from "./check-single-effect-version.mjs"
 import {
@@ -23,6 +23,9 @@ import {
 } from "./pack-release.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+// `workspaces` reads and validates a workspace tree, so this suite reads the
+// real one once and every case below asserts over that single order.
+const packedWorkspaces = workspaces()
 const releaseVersion = JSON.parse(readFileSync(join(repoRoot, "packages/smithers/package.json"), "utf8")).version
 const workflow = (name) => readFileSync(join(repoRoot, ".github", "workflows", name), "utf8")
 
@@ -154,7 +157,7 @@ test("workspaces covers every non-private engine and agent package under package
     .map(([name]) => name)
 
   assert.deepEqual([...releaseGroups].sort(), ["agent", "engine", "tooling"])
-  assert.deepEqual([...workspaces].sort(), published.sort())
+  assert.deepEqual([...packedWorkspaces].sort(), published.sort())
   // The build runtime is public because the CLI requires it. Infrastructure
   // deployment and repository-local policy remain private and cannot enter
   // the tarball set by accident.
@@ -170,12 +173,44 @@ test("workspaces covers every non-private engine and agent package under package
   )
 })
 
+test("importing the release scripts reads no workspace tree", async () => {
+  // Every exported helper takes a `root` or a `manifests` argument, so an
+  // importer that only wants `dependencyOrder` never asked this module to look
+  // at a workspace at all. While the packed order was a module-level constant,
+  // importing build-release.mjs — or restore-release.mjs, or
+  // check-single-effect-version.mjs — read the colocated tree and threw the
+  // roster error before the importer could call anything.
+  const fixture = await mkdtemp(join(tmpdir(), "smithers-pack-release-import-"))
+  try {
+    await mkdir(join(fixture, "scripts"), { recursive: true })
+    for (const file of ["workspace-packages.mjs", "pack-release.mjs", "publish-release.mjs", "packed-export-targets.mjs", "build-release.mjs"]) {
+      await cp(join(repoRoot, "scripts", file), join(fixture, "scripts", file))
+    }
+    // A workspace whose only member is a valid engine package: a roster the
+    // release check rejects, so an eager read cannot pass unnoticed.
+    await writeFile(join(fixture, "pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n")
+    await mkdir(join(fixture, "packages/kernel"), { recursive: true })
+    await writeFile(
+      join(fixture, "packages/kernel/package.json"),
+      JSON.stringify({ name: "@smthrs/kernel", version: "1.0.0", smthrs: { group: "engine" } })
+    )
+
+    const module = await import(pathToFileURL(join(fixture, "scripts/build-release.mjs")).href)
+    assert.equal(typeof module.buildRelease, "function")
+
+    // The check did not move, it only stopped running at import.
+    assert.throws(() => workspaces(fixture), /does not match publishedPackages/)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test("the packed set is exactly the 49 names the RC contract publishes", () => {
   // `publishedPackages` is the release decision; group membership is
   // only how it is enforced. Restating the roster here means a package that
   // joins or leaves the release has to change both files in one diff.
   const manifests = readWorkspaceManifests()
-  const packed = workspaces.map((directory) => manifests.get(directory).name)
+  const packed = packedWorkspaces.map((directory) => manifests.get(directory).name)
 
   assert.equal(publishedPackages.length, 49)
   assert.deepEqual([...packed].sort(), [...publishedPackages].sort())
@@ -187,7 +222,7 @@ test("every packed manifest carries the candidate version and the safe default d
   // install that tracks the tag, so the tag is pinned per manifest as well as
   // on the publish command (the release runbook in Smithers-Ops).
   const manifests = readWorkspaceManifests()
-  for (const directory of workspaces) {
+  for (const directory of packedWorkspaces) {
     const manifest = manifests.get(directory)
     assert.equal(manifest.version, releaseVersion, `${manifest.name} version`)
     assert.equal(manifest.publishConfig.tag, "next", `${manifest.name} publishConfig.tag`)
@@ -207,13 +242,13 @@ test("pack-release lists workspace directories and package names in publication 
   })
   const manifests = readWorkspaceManifests()
 
-  assert.deepEqual(list.trim().split("\n"), workspaces)
-  assert.deepEqual(names.trim().split("\n"), workspaces.map((directory) => manifests.get(directory).name))
+  assert.deepEqual(list.trim().split("\n"), packedWorkspaces)
+  assert.deepEqual(names.trim().split("\n"), packedWorkspaces.map((directory) => manifests.get(directory).name))
 })
 
 test("pack-release order is a topological order of the workspace dependency graph", () => {
   const dependencies = workspaceDependencies(readWorkspaceManifests())
-  const position = new Map(workspaces.map((name, index) => [name, index]))
+  const position = new Map(packedWorkspaces.map((name, index) => [name, index]))
   const unordered = []
   for (const [workspace, edges] of dependencies) {
     for (const edge of edges) {
@@ -366,7 +401,7 @@ test("every published manifest packs the module-type marker its build writes", (
   // it. `dist/**/*` packs it and `dist/**/*.js` does not, so the claim is
   // checked against the path, not against one spelling of the glob.
   const manifests = readWorkspaceManifests()
-  const missing = workspaces.filter((directory) =>
+  const missing = packedWorkspaces.filter((directory) =>
     !(manifests.get(directory).files ?? []).some((pattern) => packsPath(pattern, "dist/cjs/package.json"))
   )
 
@@ -401,7 +436,7 @@ test("@smthrs/memory packs the SQL reference copies its shipped source cites", (
 
 test("every published library exposes the one Effect runtime as a peer", () => {
   const manifests = readWorkspaceManifests()
-  const published = workspaces.map((directory) => manifests.get(directory))
+  const published = packedWorkspaces.map((directory) => manifests.get(directory))
   const pins = new Set(published.flatMap((manifest) =>
     [manifest.dependencies?.effect, manifest.peerDependencies?.effect].filter((range) => typeof range === "string")
   ))
@@ -517,7 +552,7 @@ test("every published package packs the markdown inside the source tree it ships
   // tarball. `packages/smithers/flows/keys/src/README.md` is the file that named the gap.
   const manifests = readWorkspaceManifests()
   const unpacked = []
-  for (const directory of workspaces) {
+  for (const directory of packedWorkspaces) {
     const source = join(repoRoot, directory, "src")
     if (!existsSync(source)) continue
     const files = manifests.get(directory).files ?? []

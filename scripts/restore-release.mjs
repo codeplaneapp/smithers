@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { preflight, registryIntegrity } from "./publish-release.mjs"
-import { readWorkspaceManifests, workspaces } from "./pack-release.mjs"
+import { dependencyOrder, publishedPackages, readWorkspaceManifests, workspaceDependencies } from "./pack-release.mjs"
 
 export const restoreSelection = (runId = "", artifactId = "") => {
   if (runId === "" && artifactId === "") return undefined
@@ -62,7 +62,15 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
             shutil.copyfileobj(source, target)
 `
 
-export const extractArchive = (archive, destination, maximumPackages = workspaces.length) => {
+/**
+ * Expands a release archive under a member-count budget.
+ *
+ * Callers inside this module pass the roster they are about to verify, so the
+ * budget is the caller's expectation. The default is the declared release
+ * roster's length — a constant — rather than the packed workspace order, which
+ * would read and validate the whole workspace tree just to size a zip.
+ */
+export const extractArchive = (archive, destination, maximumPackages = publishedPackages.length) => {
   execFileSync("python3", ["-c", extractProgram, archive, destination, String(maximumPackages)], { stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 })
 }
 
@@ -150,7 +158,7 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(realpathS
       sourceSha: git("rev-parse", "HEAD"),
       tagSha: git("rev-parse", "--verify", `refs/tags/${process.env.RELEASE_TAG}^{commit}`),
       releaseTag: process.env.RELEASE_TAG,
-      expectedPackages: workspaces.map((directory) => ({ name: manifests.get(directory).name, version: manifests.get(directory).version })),
+      expectedPackages: dependencyOrder(workspaceDependencies(manifests)).map((directory) => ({ name: manifests.get(directory).name, version: manifests.get(directory).version })),
       lockfileSha256: createHash("sha256").update(await readFile("pnpm-lock.yaml")).digest("hex"),
       readRegistry: registryIntegrity,
       readMetadata: async (endpoint) => JSON.parse(execFileSync("gh", ["api", endpoint, ...githubHeaders], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 })),
