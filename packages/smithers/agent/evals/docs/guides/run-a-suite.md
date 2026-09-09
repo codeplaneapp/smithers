@@ -126,8 +126,9 @@ A run verifies all three and fails with `scorer_protocol` when one is broken.
 Before calling an order-only runner, it also refuses two jobs that share a
 step key and scorer with `ambiguous_score_job`: give each case its own step
 key, or implement `runBatchCorrelated`. The runner service in
-`@smthrs/scorers` implements the order-only contract, so its service value can
-be used directly. For that service, see the [scorers API](/api/scorers).
+`@smthrs/scorers` implements `runBatchCorrelated`, so its service value can be
+used directly and `ambiguous_score_job` never applies to it. For that service,
+see the [scorers API](/api/scorers).
 
 A returned score that is not finite and inside [0, 1] becomes an inconclusive
 observation naming the scorer and the offending value, and the run's own

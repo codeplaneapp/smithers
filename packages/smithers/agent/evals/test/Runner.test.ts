@@ -1,5 +1,6 @@
 import * as Flow from "@smthrs/core/Flow"
 import * as Binding from "@smthrs/scorers/Binding"
+import * as ScorerRunner from "@smthrs/scorers/Runner"
 import type * as Sampling from "@smthrs/scorers/Sampling"
 import * as Scorer from "@smthrs/scorers/Scorer"
 import { ScorerError } from "@smthrs/scorers/ScorerError"
@@ -520,6 +521,33 @@ describe("Runner", () => {
     expect(result.cases[0]?.error?.path).toBe("cases['one']")
   })
 
+  // `Effect.match` only sees typed failures. A defect from a valid executor,
+  // such as a parser throwing inside `Effect.sync`, must stay with its case
+  // rather than aborting the run and the sibling cases behind it.
+  it("keeps an executor defect on its case and still scores the next case", async () => {
+    const suite = await suiteOf("defect", [binding], [{ name: "bad", input: 1 }, { name: "good", input: 2 }])
+    const attempted: Array<string> = []
+    const executor = executorFor((suiteCase) =>
+      Effect.sync(() => {
+        attempted.push(suiteCase.name)
+        if (suiteCase.name === "bad") throw new TypeError("parser exploded")
+        return { output: suiteCase.input, stepKey: suiteCase.name, latencyMs: 0, target }
+      })
+    )
+    const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(executor)))
+    expect(attempted).toEqual(["bad", "good"])
+    expect(result.cases.map((entry) => entry.case)).toEqual(["bad", "good"])
+    expect(result.cases[0]?.execution).toBeUndefined()
+    expect(result.cases[0]?.error?.code).toBe("executor")
+    expect(result.cases[0]?.error?.message).toBe("Target failed for case 'bad': TypeError: parser exploded")
+    expect(result.cases[0]?.error?.path).toBe("cases['bad']")
+    expect(result.cases[0]?.error?.cause).toBeInstanceOf(TypeError)
+    expect(result.cases[0]?.observations).toEqual([])
+    expect(result.cases[1]?.execution?.output).toBe(2)
+    expect(result.cases[1]?.observations.map((observation) => observation.kind)).toEqual(["score"])
+    expect(result.observations).toHaveLength(1)
+  })
+
   it("locates a typed target failure that named no path at the case", async () => {
     const suite = await suiteOf("pathless-failure", [])
     const executor = executorFor(() => Effect.fail(new EvalError({ code: "executor", message: "the host is gone" })))
@@ -734,6 +762,56 @@ describe("Runner", () => {
     expect(Object.hasOwn(seen!, "context")).toBe(false)
   })
 
+  // A presence check on `undefined` followed by `??` silently swaps a declared
+  // `null` for the binding's value; every falsy value must survive as written.
+  it("preserves a declared null, false, zero or empty-string expected value over binding ground truth", async () => {
+    for (const expected of [null, false, 0, ""]) {
+      let seen: Scorer.Input | undefined
+      const inspecting = Scorer.make({
+        id: "packages/smithers/agent/evals/test/Runner/falsy-ground-truth",
+        version: "1",
+        name: "falsy-ground-truth",
+        score: (input) =>
+          Effect.sync(() => {
+            seen = input
+            return { score: Object.is(input.groundTruth, input.output) ? 1 : 0 }
+          })
+      })
+      const suite = await suiteOf(
+        "falsy-ground-truth",
+        [Binding.make({ scorer: inspecting, appliesTo: target, groundTruth: "binding" })],
+        [{ name: "one", input: expected, expected }]
+      )
+      const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(succeeding)))
+      expect(Object.hasOwn(seen!, "groundTruth")).toBe(true)
+      expect(Object.is(seen!.groundTruth, expected)).toBe(true)
+      expect(result.observations[0]).toMatchObject({ kind: "score", score: 1 })
+    }
+  })
+
+  it("offers a declared null expected value when the binding declares no ground truth", async () => {
+    let seen: Scorer.Input | undefined
+    const inspecting = Scorer.make({
+      id: "packages/smithers/agent/evals/test/Runner/null-ground-truth",
+      version: "1",
+      name: "null-ground-truth",
+      score: (input) =>
+        Effect.sync(() => {
+          seen = input
+          return { score: input.groundTruth === null ? 1 : 0 }
+        })
+    })
+    const suite = await suiteOf(
+      "null-ground-truth",
+      [Binding.make({ scorer: inspecting, appliesTo: target })],
+      [{ name: "one", input: 1, expected: null }]
+    )
+    const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(succeeding)))
+    expect(Object.hasOwn(seen!, "groundTruth")).toBe(true)
+    expect(seen!.groundTruth).toBeNull()
+    expect(result.observations[0]).toMatchObject({ kind: "score", score: 1 })
+  })
+
   it("omits ground truth when neither the case nor the binding declares it", async () => {
     let seen: Scorer.Input | undefined
     const inspecting = Scorer.make({
@@ -749,6 +827,13 @@ describe("Runner", () => {
     const suite = await suiteOf("bare", [Binding.make({ scorer: inspecting, appliesTo: target })])
     await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(succeeding)))
     expect(Object.hasOwn(seen!, "groundTruth")).toBe(false)
+  })
+
+  // The docs promise that the scorers package's own runner service is a
+  // correlated batch runner, so `ambiguous_score_job` never applies to it.
+  it("accepts the scorers runner service as a correlated batch runner", () => {
+    const adapter: Runner.ScoreBatchRunner = ScorerRunner.makeNoop()
+    expect(typeof adapter.runBatchCorrelated).toBe("function")
   })
 
   it("requires deterministic run identity and a canonical UTC timestamp", async () => {

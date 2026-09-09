@@ -30,9 +30,10 @@ export type Binding = ScorerBinding.Binding
  * One immutable fixed-suite case.
  *
  * `input` is handed to the executor and `expected` is offered to a bound scorer
- * as ground truth when the binding declares none of its own. Both are snapshots
- * taken by {@link make}: mutating the object a caller passed in never changes
- * the suite.
+ * as ground truth. A declared `expected`, including `null`, wins over the
+ * binding's `groundTruth`; only an absent one defers to the binding. Both are
+ * snapshots taken by {@link make}: mutating the object a caller passed in never
+ * changes the suite.
  *
  * @category models
  * @since 0.1.0

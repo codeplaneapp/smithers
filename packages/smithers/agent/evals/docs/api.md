@@ -193,8 +193,9 @@ eight codes in the failure table.
 Fixed suite declarations and their JSON Lines fixture format.
 
 - `Case`: `{ name, input, expected? }`. `input` is handed to the executor and
-  `expected` is offered to a bound scorer as ground truth when the binding
-  declares none of its own. Both are snapshots taken by `make`.
+  `expected` is offered to a bound scorer as ground truth. A declared
+  `expected`, including `null`, wins over the binding's `groundTruth`; only an
+  absent one defers to the binding. Both are snapshots taken by `make`.
 - `Binding`: a scorer binding accepted from [@smthrs/scorers](/api/scorers).
   The binding's `appliesTo` flow is matched against an execution's `target` by
   reference identity.

@@ -23,8 +23,9 @@ const cases = [
 ```
 
 When a case declares `expected` and the binding also declares `groundTruth`,
-the case's value wins. When neither declares one, the scorer is called without
-ground truth.
+the case's value wins. A declared `null`, `false`, `0` or `""` is a value and
+wins too; only an absent `expected` defers to the binding. When neither
+declares one, the scorer is called without ground truth.
 
 Case names must be non-empty, unique within the suite, and free of control
 characters. A control character in a name corrupts Markdown reports and CI log

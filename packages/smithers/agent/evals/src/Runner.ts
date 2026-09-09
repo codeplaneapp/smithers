@@ -89,8 +89,9 @@ export type ScoreJob = ScorerRunner.Job
  * attributed to a case.
  *
  * A run fails with `scorer_protocol` when either protocol is broken.
- * `@smthrs/scorers`' `Runner.Service` implements the order-only contract, so its
- * service value can be used directly.
+ * `@smthrs/scorers`' `Runner.Service` implements `runBatchCorrelated`, so its
+ * service value can be used directly and `ambiguous_score_job` never applies
+ * to it.
  *
  * @category services
  * @since 0.1.0
@@ -220,29 +221,42 @@ const inconclusive = (request: ScoreRequest, reason: string, at: string): Observ
 // a failure with no path leaves a caller nothing to branch on but prose.
 const casePath = (name: string): string => `cases['${name}']`
 
+// The executor boundary handles every non-interruption cause, not only typed
+// failures: an executor that wraps a parser in `Effect.sync` dies with a
+// defect, and one case's defect must not abort its siblings or the report.
+const caseError = (suiteCase: Case, cause: Cause.Cause<unknown>): EvalError => {
+  const reason = Cause.squash(cause)
+  return reason instanceof EvalError
+    ? new EvalError({
+      code: reason.code,
+      message: `Target failed for case '${suiteCase.name}': ${reason.message}`,
+      path: reason.path ?? casePath(suiteCase.name),
+      cause: reason
+    })
+    : new EvalError({
+      code: "executor",
+      message: `Target failed for case '${suiteCase.name}': ${String(reason)}`,
+      path: casePath(suiteCase.name),
+      cause: reason
+    })
+}
+
 const runCase = (executor: CaseExecutorService, suiteCase: Case): Effect.Effect<CaseResult> =>
   Effect.suspend(() => executor.run(structuredClone(suiteCase))).pipe(
-    Effect.match({
-      onFailure: (cause: unknown) => ({
-        case: suiteCase.name,
-        error: cause instanceof EvalError
-          ? new EvalError({
-            code: cause.code,
-            message: `Target failed for case '${suiteCase.name}': ${cause.message}`,
-            path: cause.path ?? casePath(suiteCase.name),
-            cause
-          })
-          : new EvalError({
-            code: "executor",
-            message: `Target failed for case '${suiteCase.name}': ${String(cause)}`,
-            path: casePath(suiteCase.name),
-            cause
-          }),
-        observations: []
-      }),
-      onSuccess: (execution) => ({ case: suiteCase.name, execution, observations: [] })
-    })
+    Effect.map((execution): CaseResult => ({ case: suiteCase.name, execution, observations: [] })),
+    Effect.catchCause((cause) =>
+      Cause.hasInterrupts(cause)
+        ? Effect.interrupt
+        : Effect.succeed<CaseResult>({ case: suiteCase.name, error: caseError(suiteCase, cause), observations: [] })
+    )
   )
+
+// A declared case value is ground truth even when it is `null`, `false`, `0`
+// or the empty string; only an absent `expected` defers to the binding.
+const groundTruthFor = (suiteCase: Case, binding: Binding): { readonly groundTruth?: unknown } => {
+  const groundTruth = suiteCase.expected !== undefined ? suiteCase.expected : binding.groundTruth
+  return groundTruth === undefined ? {} : { groundTruth: structuredClone(groundTruth) }
+}
 
 const requestFor = (suiteCase: Case, execution: Execution, binding: Binding): ScoreRequest => ({
   case: suiteCase.name,
@@ -259,9 +273,7 @@ const requestFor = (suiteCase: Case, execution: Execution, binding: Binding): Sc
   input: {
     input: structuredClone(suiteCase.input),
     output: execution.output,
-    ...(suiteCase.expected === undefined && binding.groundTruth === undefined
-      ? {}
-      : { groundTruth: structuredClone(suiteCase.expected ?? binding.groundTruth) }),
+    ...(groundTruthFor(suiteCase, binding)),
     ...(binding.context === undefined ? {} : { context: structuredClone(binding.context) }),
     latencyMs: execution.latencyMs
   }
