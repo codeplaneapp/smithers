@@ -8,10 +8,21 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import { buildSync } from "esbuild"
 import { spawnSync } from "node:child_process"
-import { createHash } from "node:crypto"
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
+import { createHash, randomUUID } from "node:crypto"
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Layer from "effect/Layer"
 
@@ -74,6 +85,101 @@ export const hashTree = (root: string): ReadonlyMap<string, string> => {
   return hashes
 }
 
+/** The sha256 of a set of files, over their paths and their contents together. */
+const keyOf = (paths: ReadonlyArray<string>): string => {
+  const hash = createHash("sha256")
+  for (const path of [...paths].sort()) {
+    hash.update(path)
+    hash.update("\u0000")
+    try {
+      hash.update(readFileSync(path))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+      // A deleted input is a change like any other, not an input that is still
+      // whatever it last was.
+      hash.update("absent")
+    }
+    hash.update("\u0000")
+  }
+  return hash.digest("hex").slice(0, 16)
+}
+
+const inputRecord = (directory: string): string => join(directory, "inputs.json")
+
+/**
+ * The files the bundle in `directory` was last built from, as its build
+ * recorded them, or nothing if no build has written there yet.
+ */
+export const bundleInputs = (directory: string): ReadonlyArray<string> => {
+  try {
+    return JSON.parse(readFileSync(inputRecord(directory), "utf8")) as ReadonlyArray<string>
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    return []
+  }
+}
+
+/**
+ * Bundles `entryPoint` into `directory` and returns the bundle's path.
+ *
+ * The name carries the sha256 of every file the bundle was built from: the
+ * entry, every module esbuild reached through it, and anything named in
+ * `keyedOn`. Judging freshness by the entry package's own sources would reuse
+ * a bundle built before a change to anything else it inlines, and the CLI
+ * bundle inlines far more than it owns: `src/flow/bin.ts` reaches 512 files,
+ * of which 40 are this package's. A registry, kernel or harness edit would
+ * otherwise leave the spawned-process tests running the previous
+ * implementation while the tests beside them import the current tree.
+ *
+ * Keying the name rather than a fixed file also gives every distinct set of
+ * inputs its own path, so vitest workers building concurrently cannot
+ * overwrite each other's bundle, and the build lands by `rename`, which is
+ * atomic, so no worker ever spawns a half-written file.
+ */
+export const bundleOnce = (options: {
+  readonly entryPoint: string
+  readonly directory: string
+  readonly external?: ReadonlyArray<string>
+  readonly keyedOn?: ReadonlyArray<string>
+}): string => {
+  const recorded = bundleInputs(options.directory)
+  if (recorded.length > 0) {
+    const cached = join(options.directory, `bundle-${keyOf(recorded)}.mjs`)
+    if (existsSync(cached)) return cached
+  }
+  mkdirSync(options.directory, { recursive: true })
+  const scratch = join(options.directory, `.building-${randomUUID()}.mjs`)
+  // esbuild reports its inputs relative to this directory, so name it rather
+  // than reading `process.cwd()` twice and hoping it did not move.
+  const workingDirectory = process.cwd()
+  const built = buildSync({
+    entryPoints: [options.entryPoint],
+    absWorkingDir: workingDirectory,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    outfile: scratch,
+    metafile: true,
+    external: [...options.external ?? []],
+    // A bundled CommonJS dependency still calls `require`, and an ES module has
+    // none until one is made.
+    banner: { js: "import { createRequire as ___cr } from 'node:module'; const require = ___cr(import.meta.url);" }
+  })
+  const inputs = [
+    ...Object.keys(built.metafile.inputs).map((input) => resolve(workingDirectory, input)),
+    ...options.keyedOn ?? []
+  ]
+  const bundle = join(options.directory, `bundle-${keyOf(inputs)}.mjs`)
+  renameSync(scratch, bundle)
+  const record = join(options.directory, `.inputs-${randomUUID()}.json`)
+  writeFileSync(record, JSON.stringify(inputs))
+  renameSync(record, inputRecord(options.directory))
+  return bundle
+}
+
+let bin: string | undefined
+
 /**
  * Builds the `smithers-migrate` bin as one file a process can run, and returns
  * its path.
@@ -88,31 +194,20 @@ export const hashTree = (root: string): ReadonlyMap<string, string> => {
  * It is written under `node_modules` so that `effect` and `@effect/platform-node`,
  * which stay external because they ship their own builds, resolve from the
  * package the way they do for a published install.
+ *
+ * The manifest is keyed on beside the sources because it is what sends those
+ * imports at a source file rather than a published build; every other
+ * resolution shows up in {@link bundleOnce}'s inputs as the file it resolved
+ * to. One run measures one tree, so the answer is computed once per process.
  */
 export const buildBin = (): string => {
-  const source = fileURLToPath(new URL("../../src/", import.meta.url))
-  const target = join(fileURLToPath(new URL("../../node_modules/.migrate-bin/", import.meta.url)), "bin.mjs")
-  // Rebuilt whenever a source is newer than the bundle, so an edit is never
-  // measured against the build before it.
-  const newest = (directory: string): number =>
-    readdirSync(directory, { withFileTypes: true }).reduce((latest, entry) => {
-      const path = join(directory, entry.name)
-      return Math.max(latest, entry.isDirectory() ? newest(path) : statSync(path).mtimeMs)
-    }, 0)
-  if (existsSync(target) && statSync(target).mtimeMs > newest(source)) return target
-  buildSync({
-    entryPoints: [join(source, "flow", "bin.ts")],
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    target: "node22",
-    outfile: target,
+  bin ??= bundleOnce({
+    entryPoint: fileURLToPath(new URL("../../src/flow/bin.ts", import.meta.url)),
+    directory: fileURLToPath(new URL("../../node_modules/.migrate-bin/", import.meta.url)),
     external: ["effect", "@effect/*", "typescript"],
-    // A bundled CommonJS dependency still calls `require`, and an ES module has
-    // none until one is made.
-    banner: { js: "import { createRequire as ___cr } from 'node:module'; const require = ___cr(import.meta.url);" }
+    keyedOn: [fileURLToPath(new URL("../../package.json", import.meta.url))]
   })
-  return target
+  return bin
 }
 
 /**
