@@ -2,7 +2,7 @@ import { CapabilityPattern, format, parse } from "@smthrs/capability/Capability"
 import { evaluate, Rule } from "@smthrs/capability/Permission"
 import { Effect, Layer, Option } from "effect"
 import { describe, expect, it } from "vitest"
-import type * as Event from "../src/Event.ts"
+import * as Event from "../src/Event.ts"
 // The barrel is the advertised surface: the seam's own suite reaches the
 // author claim the way a host must, not through the `./*` deep subpath.
 import { Author, AuthorDeclaration, Authorize, Catalog } from "../src/index.ts"
@@ -234,7 +234,7 @@ describe("Authorize", () => {
     expect(rejection.observation.kind).toBe("denied")
   })
 
-  it("does not gate replayed settled calls: a revoked grant still resumes them", async () => {
+  it("returns a finished chain's terminal without consulting the seam at all", async () => {
     const entry = readEntry("file body")
     const first = await runChain({
       author: Author.layerMock([readScript]),
@@ -242,6 +242,10 @@ describe("Authorize", () => {
       entries: [entry]
     })
     expect(first.outcome._tag).toBe("Done")
+    // The seed is a COMPLETE journal, so `Event.terminal` short-circuits the
+    // run before any link executes. The settled-call replay path is a
+    // different promise, pinned by the mid-link test below.
+    expect(Event.terminal(first.events)).toEqual(first.outcome)
     const replayEntry = readEntry("file body")
     const replay = await runChain({
       author: Author.layerMock([]),
@@ -251,6 +255,68 @@ describe("Authorize", () => {
     })
     expect(replay.outcome).toEqual(first.outcome)
     expect(replayEntry.count()).toBe(0)
+  })
+
+  it("does not gate replayed settled calls: a revoked grant still resumes them mid-link", async () => {
+    // The script relays its settled result into a seamless call, so the
+    // journaled value is visible in the resumed journal, then makes a second
+    // protected call the revoked grant must still refuse.
+    const relayScript = flow(
+      `const content = await ctx.call("repo/read", { path: "src/a.ts" })`,
+      `await ctx.call("relay", { content })`,
+      `await ctx.call("repo/read", { path: "src/b.ts" })`,
+      `return done(content)`
+    )
+    // An explicit empty claim set claims no external authority and skips the
+    // seam, so the relay stays callable after the fs:read grant is revoked.
+    const relayEntry = () => {
+      const counting = countingEntry("relay", null)
+      return { ...counting.entry, capabilities: [], count: counting.count }
+    }
+    const granted = readEntry("journaled body")
+    const relay = relayEntry()
+    const first = await runChain({
+      author: Author.layerMock([relayScript]),
+      authorize: authorizeWith(allowAuthor, allowRead),
+      entries: [granted, relay]
+    })
+    expect(first.outcome).toEqual({ _tag: "Done", value: "journaled body" })
+
+    // Cut the journal after the protected call settles but BEFORE its link
+    // ends: the resume re-enters link 1 and reaches the replay branch instead
+    // of returning a journaled terminal.
+    const settledIndex = first.events.findIndex(
+      (event) => event._tag === "CallSettled" && event.name === "repo/read"
+    )
+    expect(settledIndex).toBeGreaterThan(-1)
+    const unfinished = first.events.slice(0, settledIndex + 1)
+    expect(Event.terminal(unfinished)).toBeUndefined()
+    expect(unfinished.some((event) => event._tag === "LinkEnded" && event.link === 1)).toBe(false)
+
+    const revoked = readEntry("live body")
+    const resumedRelay = relayEntry()
+    const resumed = await runChain({
+      author: Author.layerMock([flow(`return done("worked around")`)]),
+      authorize: authorizeWith(allowAuthor, new Rule({ effect: "deny", pattern: pattern("fs:read", "**") })),
+      entries: [revoked, resumedRelay],
+      initial: unfinished
+    })
+    // The settled call replayed: the JOURNALED result, not the live one,
+    // reached the relay that ran live under the revoked grant.
+    expect(resumedRelay.count()).toBe(1)
+    const relayed = resumed.events.find(
+      (event) => event._tag === "CallSettled" && event.name === "relay"
+    ) as Event.CallSettled
+    expect(relayed.payload).toEqual({ content: "journaled body" })
+    // ...and it replayed without running the entry the grant now refuses.
+    expect(revoked.count()).toBe(0)
+    // The same link's NEXT live call is still decided by the current rules.
+    const rejection = resumed.events.find(
+      (event) => event._tag === "GateRejected"
+    ) as Event.GateRejected
+    expect(rejection.observation.kind).toBe("denied")
+    expect(rejection.ordinal).toBe(2)
+    expect(resumed.outcome).toEqual({ _tag: "Done", value: "worked around" })
   })
 
   it("leaves chains without the seam untouched", async () => {
