@@ -29,15 +29,34 @@ isSmithersError(forged) // false
 ```
 
 Use it when the error was raised by code that resolves the same copy of
-`@smthrs/errors` you did, which is the normal case inside one application or
-one build.
+`@smthrs/errors` through the same module format you did, which is the normal
+case inside one build.
 
 ## Use hasSmithersErrorShape across a boundary
 
 `instanceof` compares prototypes, so it answers `false` for an error built by a
 second copy of the package: a duplicated dependency, a bundled build beside a
-source build, a plugin loaded from its own `node_modules`. The error is right;
-the identity check is asking the wrong question.
+source build, or a plugin loaded from its own `node_modules`. Mixed
+ESM/CommonJS loading is also a module-copy boundary: the published entry
+points expose the same API with distinct constructors, even with one installed
+package version.
+
+In a Node.js ESM consumer of the published package:
+
+```ts
+import { hasSmithersErrorShape, isSmithersError } from "@smthrs/errors"
+import { createRequire } from "node:module"
+
+const require = createRequire(import.meta.url)
+const cjs = require("@smthrs/errors")
+const error = new cjs.SmithersError("INVALID_INPUT", "x")
+
+isSmithersError(error) // false, the CommonJS constructor is distinct
+hasSmithersErrorShape(error) // true
+```
+
+The same applies when a CommonJS consumer checks an error from the ESM entry
+point. Deduplicating installed versions does not remove this boundary.
 
 `hasSmithersErrorShape` asks the structural question instead. The value must:
 

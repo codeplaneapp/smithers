@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process"
+import { existsSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { inspect } from "node:util"
 import { describe, expect, expectTypeOf, it } from "vitest"
 import {
@@ -442,5 +445,39 @@ describe("error codes", () => {
       )
     expect(smithersErrorDefinitions.TELEGRAM_INIT_DATA_INVALID.details)
       .toBe("`{ authDate }` on the expiry failures, otherwise none")
+  })
+})
+
+describe("published module formats", () => {
+  it("documents distinct ESM and CommonJS constructor identities", () => {
+    const installation = readFileSync(new URL("../docs/installation.md", import.meta.url), "utf8")
+    expect(installation).not.toContain("both resolve to the same class")
+    expect(installation).toContain("distinct constructor identities")
+  })
+
+  // Run `pnpm build` first to exercise the published artifacts. Source-only
+  // checkouts can still run the rest of the suite without generated files.
+  it.skipIf(
+    !existsSync(new URL("../dist/esm/index.js", import.meta.url))
+      || !existsSync(new URL("../dist/cjs/index.js", import.meta.url))
+  )("recognizes mixed-loader errors structurally across the module-copy boundary", () => {
+    // Native Node loaders avoid Vitest transforming or deduplicating the modules.
+    execFileSync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      `
+        import assert from "node:assert/strict"
+        import { createRequire } from "node:module"
+        import * as esm from "./dist/esm/index.js"
+        const cjs = createRequire(import.meta.url)("./dist/cjs/index.js")
+        assert.notEqual(esm.SmithersError, cjs.SmithersError)
+        for (const [producer, consumer] of [[cjs, esm], [esm, cjs]]) {
+          const error = new producer.SmithersError("INVALID_INPUT", "bad input")
+          assert.equal(producer.isSmithersError(error), true)
+          assert.equal(consumer.isSmithersError(error), false)
+          assert.equal(consumer.hasSmithersErrorShape(error), true)
+        }
+      `
+    ], { cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 20_000 })
   })
 })
