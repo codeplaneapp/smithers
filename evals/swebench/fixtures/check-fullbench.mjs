@@ -607,11 +607,12 @@ if [ "$ARCHIVE_MODE" = publish-fail ]; then exit 1; fi
   // The rig-fault rate excludes only the instance the evaluator could not grade.
   assert.ok(Math.abs(summary.rateExcludingRigFaults.point - 8 / 24) < 1e-12)
 
-  // Cost: 25 priced instances at $1.30 plus one in-flight `ran` row with no
-  // cost record. The mean must divide by what was priced, not by what exists.
-  assert.ok(Math.abs(summary.spentUsd - 32.5) < 1e-9, `spent ${summary.spentUsd}`)
-  assert.ok(Math.abs(summary.meanUsd - 1.3) < 1e-9, `mean ${summary.meanUsd}`)
-  assert.ok(Math.abs(summary.projectedUsd - 39) < 1e-9, `projected ${summary.projectedUsd}`)
+  // Cost: 25 priced instances at $1.30 plus one `ran` row with no cost
+  // record. Missing accounting makes the total and its projections unknown.
+  assert.equal(summary.spentUsd, null)
+  assert.equal(summary.unknownAttempts, 1)
+  assert.equal(summary.meanUsd, undefined)
+  assert.equal(summary.projectedUsd, undefined)
   assert.equal(summary.tokens.inputTokens, 25 * 200_000)
   assert.equal(summary.tokens.outputTokens, 25 * 8_000)
   assert.equal(summary.waits, 2)
@@ -653,7 +654,8 @@ if [ "$ARCHIVE_MODE" = publish-fail ]; then exit 1; fi
   assert.match(report, /\| resolved \| 8 \| 32\.0% \|/)
   assert.match(report, /\| eval error \| 1 \| 4\.0% \|/)
   assert.match(report, /\| django\/django \| 9 \|/)
-  assert.match(report, /\| projected for all 30 \| \$39\.00 \|/)
+  assert.match(report, /\| projected for all 30 \| — \|/)
+  assert.match(report, /\| attempts with unknown cost \| 1 \|/)
   assert.match(report, /## Against the pinned five/)
   assert.match(report, /head-moved/, "a driver note reaches the report")
   assert.ok(!report.includes("PAUSED"), "nothing claims a pause that did not happen")
@@ -674,7 +676,7 @@ if [ "$ARCHIVE_MODE" = publish-fail ]; then exit 1; fi
   assert.match(paused, /> \*\*PAUSED\*\* — cumulative API cost \$612\.40 reached the \$600 budget/)
 
   const checkpoint = renderCheckpoint(summary)
-  assert.match(checkpoint, /\| 25\/30 \| 8 \| 32\.0% \(17\.2%–51\.6%\) \| \$1\.30 \| \$32\.50 \| \$39\.00 \|/)
+  assert.match(checkpoint, /\| 25\/30 \| 8 \| 32\.0% \(17\.2%–51\.6%\) \| — \| — \| — \|/)
   assert.match(checkpoint, /9001 MiB \|$/m)
 
   // The generator run twice over one ledger writes the same report: it holds no
@@ -696,7 +698,7 @@ if [ "$ARCHIVE_MODE" = publish-fail ]; then exit 1; fi
 
   const spend = run(["--spend-cents", "--manifest", manifestPath])
   assert.equal(spend.status, 0, spend.stderr)
-  assert.equal(spend.stdout.trim(), "3250", "the budget gate reads whole cents")
+  assert.equal(spend.stdout.trim(), "unknown", "missing cost must pause the budget gate")
 
   const args = [
     "--checkpoint",

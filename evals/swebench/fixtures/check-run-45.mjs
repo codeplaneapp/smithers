@@ -217,6 +217,32 @@ try {
   // -----------------------------------------------------------------------
   // The budget gate pauses instead of spending past it.
   // -----------------------------------------------------------------------
+  const retried = join(temporary, "fb-retry-budget")
+  mkdirSync(retried)
+  jsonl(join(retried, "manifest.jsonl"), [
+    instance(ordered[0], "ran", { cost: { usd: 40 } }),
+    instance(ordered[0], "pulled"),
+    instance(ordered[0], "ran", { cost: { usd: 25 } })
+  ])
+  writeFileSync(trace, "")
+  const retryBudget = drive(retried, [], { SWB_RERUN_JOBS: "1", SWB_RERUN_BUDGET_USD: "60" })
+  assert.equal(retryBudget.status, 0, retryBudget.stderr)
+  assert.equal(readFileSync(trace, "utf8"), "", "the $60 gate must count both the $40 and $25 attempts")
+  assert.ok(read(join(retried, "manifest.jsonl")).notes.some((note) => note.note === "paused"))
+
+  for (const seat of ["openai:gpt-5.6-sol", "openai:unpriced-fixture"]) {
+    const unknown = join(temporary, `fb-unknown-${seat.split(":")[1]}`)
+    mkdirSync(unknown)
+    // The priced seat exercises missing accounting; the unpriced seat must be
+    // refused on an empty ledger, before the first worker starts.
+    if (seat === "openai:gpt-5.6-sol") jsonl(join(unknown, "manifest.jsonl"), [instance(ordered[0], "ran", { cost: {} })])
+    writeFileSync(trace, "")
+    const refused = drive(unknown, [], { SWB_SEAT: seat, SWB_RERUN_JOBS: "1" })
+    assert.equal(refused.status, 0, refused.stderr)
+    assert.equal(readFileSync(trace, "utf8"), "", "unknown cost or price must prevent scheduling")
+    assert.match(refused.stdout, /PAUSED: the ledger's cumulative cost could not be read/)
+  }
+
   const broke = join(temporary, "fb-budget")
   const budget = drive(broke, [], { SWB_RERUN_JOBS: "1", SWB_RERUN_BUDGET_USD: "0.06", SWB_STUB_USD: "0.05" })
   assert.equal(budget.status, 0, budget.stderr)

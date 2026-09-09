@@ -283,12 +283,7 @@ log "run-45: $1 of $3 already re-run, $2 to go, $JOBS in flight, ${INSTANCE_BUDG
 # letting it spend blind.
 # ---------------------------------------------------------------------------
 spend_cents() {
-  node --input-type=module -e '
-    import { read } from "'"$S"'/lib/fullbench-manifest.mjs"
-    let usd = 0
-    for (const [, state] of read(process.argv[1]).states) usd += state.cost?.usd ?? 0
-    process.stdout.write(String(Math.round(usd * 100)))
-  ' "$MANIFEST" 2>/dev/null
+  node "$S/fullbench-report.mjs" --spend-cents --manifest "$MANIFEST" 2>/dev/null
 }
 BUDGET_CENTS="$(node -e 'process.stdout.write(String(Math.round(Number(process.argv[1]) * 100)))' "$BUDGET_USD")"
 case "$BUDGET_CENTS" in

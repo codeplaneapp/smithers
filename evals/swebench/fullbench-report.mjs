@@ -48,8 +48,46 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { dirname, join } from "node:path"
 import { denominatorLabel, denominators, renderExclusions } from "./lib/excluded.mjs"
 import { read, readRows } from "./lib/fullbench-manifest.mjs"
+import { usd } from "./prices.ts"
 
 const rigRoot = import.meta.dirname
+
+// A grade can carry the cost when the ran row did not. It describes the same
+// attempt, while pulled and subsequent ran rows start new attempts.
+const costAttempts = (rows) => {
+  const attempts = []
+  const current = new Map()
+  for (const row of rows) {
+    if (row.kind !== "instance") continue
+    if (row.state === "pulled") current.delete(row.id)
+    if (row.state !== "ran" && row.state !== "graded") continue
+    if (row.state === "ran" || !current.has(row.id)) {
+      const attempt = { ...row }
+      attempts.push(attempt)
+      current.set(row.id, attempt)
+    } else if (row.cost !== undefined) {
+      current.get(row.id).cost = row.cost
+    }
+  }
+  return attempts
+}
+
+/**
+ * All attempts' spend, retaining unknown costs instead of treating them as zero.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const spendByInstance = (ledger) => {
+  let dollars = 0
+  let unknownAttempts = 0
+  for (const { cost } of costAttempts(ledger.rows)) {
+    if (cost?.unknown === true || !Number.isFinite(cost?.usd) || cost.usd < 0) unknownAttempts += 1
+    else dollars += cost.usd
+  }
+  // Round only after summing: many sub-cent attempts are still real spend.
+  return { cents: Math.round(dollars * 100), unknownAttempts }
+}
 
 /**
  * The 95% Wilson score interval for `successes` out of `total`.
@@ -144,10 +182,10 @@ export const summarise = (options) => {
   // its model calls and re-ran would otherwise have its first attempt's tokens
   // vanish from the total the budget gate reads, and a benchmark that crashes
   // often could spend past its cap without ever tripping it.
-  const attempts = manifest.rows.filter((row) => row.kind === "instance" && row.cost !== undefined)
-  const spentUsd = attempts.reduce((sum, row) => sum + (row.cost?.usd ?? 0), 0)
-  const priced = attempts.filter((row) => typeof row.cost?.usd === "number")
-  const meanUsd = priced.length === 0 ? undefined : spentUsd / priced.length
+  const attempts = costAttempts(manifest.rows)
+  const spend = spendByInstance(manifest)
+  const spentUsd = spend.unknownAttempts === 0 ? spend.cents / 100 : null
+  const meanUsd = attempts.length === 0 || spentUsd === null ? undefined : spentUsd / attempts.length
   const tokens = attempts.reduce((sum, row) => ({
     inputTokens: sum.inputTokens + (row.cost?.usage?.inputTokens ?? 0),
     cachedInputTokens: sum.cachedInputTokens + (row.cost?.usage?.cachedInputTokens ?? 0),
@@ -233,6 +271,7 @@ export const summarise = (options) => {
       ? undefined
       : wilson(resolved.length, graded.length - evalErrors.length),
     spentUsd,
+    unknownAttempts: spend.unknownAttempts,
     meanUsd,
     projectedUsd: meanUsd === undefined ? undefined : meanUsd * total,
     attempts: attempts.length,
@@ -354,6 +393,7 @@ export const renderReport = (summary) => {
   lines.push("## Cost and wall clock", "")
   lines.push("| | |", "| --- | ---: |")
   lines.push(`| spent so far | ${money(summary.spentUsd)} |`)
+  if (summary.unknownAttempts > 0) lines.push(`| attempts with unknown cost | ${summary.unknownAttempts} |`)
   lines.push(`| paid attempts | ${summary.attempts}${summary.retried > 0 ? ` (${summary.retried} re-run after a crash, and still on the bill)` : ""} |`)
   lines.push(`| mean per attempt | ${money(summary.meanUsd)} |`)
   lines.push(`| projected for all ${summary.total} | ${money(summary.projectedUsd)} |`)
@@ -503,16 +543,19 @@ const main = () => {
   const manifest = optionValue(argv, "--manifest", join(rigRoot, "fullbench", "manifest.jsonl"))
 
   if (argv.includes("--spend-cents")) {
-    // Every attempt's cost, including the attempts a crash replaced. This is
-    // the number the driver's budget gate compares, so it has to be the number
-    // the invoice will say.
-    let cents = 0
-    for (const row of read(manifest).rows) {
-      if (row.kind === "instance" && typeof row.cost?.usd === "number") {
-        cents += Math.round(row.cost.usd * 100)
-      }
+    const ledger = read(manifest)
+    // Drivers append the current session header before their first budget
+    // check. Refuse an unpriced seat here, before any worker can spend money.
+    const header = ledger.headers.at(-1)
+    if (header?.budgetUsd !== undefined && header?.seat !== undefined
+      && usd(header.seat, { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }).usd === undefined) {
+      console.error(`unpriced seat: ${header.seat}; the dollar budget cannot be enforced`)
+      process.stdout.write("unknown-seat\n")
+      return
     }
-    process.stdout.write(`${cents}\n`)
+    const spend = spendByInstance(ledger)
+    const unknown = spend.unknownAttempts > 0 || ledger.malformed.length > 0 || ledger.torn > 0
+    process.stdout.write(`${unknown ? "unknown" : spend.cents}\n`)
     return
   }
 

@@ -14,7 +14,7 @@
  *   - https://openrouter.ai/openai/gpt-5.6-sol (quotes the same base rates
  *     under a promotional 50% discount, cache read at half of $0.50)
  *
- * A seat the table does not name is reported at zero cost with an explicit
+ * A seat the table does not name has undefined cost with an explicit
  * `unpriced` note, never silently at another model's rate.
  *
  * @since 0.1.0
