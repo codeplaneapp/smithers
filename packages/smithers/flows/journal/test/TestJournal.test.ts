@@ -98,6 +98,29 @@ describe("TestJournal", () => {
       })
     }))
 
+  it.effect("forwards the entry byte bound", () =>
+    Effect.gen(function*() {
+      // The bundle used to hand-copy the production option list, and the copy
+      // had already lost `maxEntryBytes`: the option named no field on the
+      // bundle's interface and was dropped on the way to `SqlJournal.layer`,
+      // so no suite could reach the production byte bound through the bundle.
+      const failure = yield* Effect.gen(function*() {
+        const journal = yield* Journal
+        return yield* Effect.flip(journal.emitDurableUnfenced({
+          runId: "bounded-run" as RunId,
+          sourceId: "bounded-source" as SourceId,
+          eventType: "bounded",
+          payload: { blob: "x".repeat(64) }
+        }))
+      }).pipe(
+        Effect.provide(TestJournal.layer({ maxEntryBytes: 32 })),
+        Effect.scoped
+      )
+
+      expect(failure.code).toBe("invalid_event")
+      expect(failure.message).toContain("maxEntryBytes")
+    }))
+
   it.effect("forwards the redactor, the index bound, and the compaction policy", () =>
     Effect.gen(function*() {
       // Each of these three options is observable only through the bundle:

@@ -2142,6 +2142,14 @@ describe("SqlJournal maxEntryBytes", () => {
   const envelopeBytes = 15
   const cap = envelopeBytes + 64
 
+  /**
+   * An entry carrying `meta`. The shared `input` helper leaves `meta` at its
+   * default `null`, which weighs a constant four bytes and so cannot tell a
+   * counted meta from an ignored one.
+   */
+  const withMeta = (source: string, eventType: string, payload: unknown, meta: unknown): Input =>
+    new Input({ runId: run, sourceId: sourceId(source), eventType, payload, meta }, { disableChecks: true })
+
   const withCap = <A, E>(body: Effect.Effect<A, E, Journal | Scope.Scope>) =>
     body.pipe(
       Effect.provide(journalLayer({ capacity: 16, overflow: "reject", maxEntryBytes: cap })),
@@ -2189,6 +2197,84 @@ describe("SqlJournal maxEntryBytes", () => {
         // have consumed.
         const next = yield* journal.emitDurableUnfenced(input(run, sourceId("durable"), "after", { blob: "y" }))
         expect(next).toMatchObject({ _tag: "Accepted", seq: 2 })
+      })
+    ))
+
+  effect("measures UTF-8 bytes rather than JavaScript string length", () =>
+    withCap(
+      Effect.gen(function*() {
+        const journal = yield* Journal
+        // Each string weighs the 64 bytes the cap leaves for payload content
+        // and each is shorter than that as a JavaScript string: "\u00e9" is one
+        // char and two bytes, "\u{1D11E}" is two chars and four. JSON.stringify
+        // emits both verbatim, so the persisted bytes are the UTF-8 bytes.
+        for (
+          const [name, atBound] of [["two-byte", "\u00e9".repeat(32)], ["astral", "\u{1D11E}".repeat(16)]] as const
+        ) {
+          expect((yield* journal.emitDurableUnfenced(input(run, sourceId(name), "fits", { blob: atBound })))._tag)
+            .toBe("Accepted")
+
+          const failure = yield* Effect.flip(
+            journal.emitDurableUnfenced(input(run, sourceId(name), "over", { blob: `${atBound}x` }))
+          )
+          expect(failure.code).toBe("invalid_event")
+          expect(failure.message).toContain(`event is ${cap + 1} bytes`)
+        }
+      })
+    ))
+
+  effect("counts the encoded meta and leaves a refused entry unallocated", () =>
+    withCap(
+      Effect.gen(function*() {
+        const journal = yield* Journal
+        // `{"blob":"x"}` is 12 bytes and the meta envelope `{"tag":""}` is 10,
+        // so 57 bytes of meta content reach the cap exactly: 28 two-byte
+        // characters and one ASCII byte.
+        const payload = { blob: "x" }
+        const atBound = `${"\u00e9".repeat(28)}z`
+
+        expect((yield* journal.emitDurableUnfenced(withMeta("meta", "fits", payload, { tag: atBound })))._tag)
+          .toBe("Accepted")
+
+        // One byte of meta over the bound, then meta alone far over it while
+        // the payload stays well under: a meta counted as a constant admits
+        // both.
+        for (
+          const [meta, bytes] of [
+            [{ tag: `${atBound}x` }, cap + 1],
+            [{ tag: "x".repeat(100) }, 122]
+          ] as const
+        ) {
+          const failure = yield* Effect.flip(journal.emitDurableUnfenced(withMeta("meta", "over", payload, meta)))
+          expect(failure.code).toBe("invalid_event")
+          expect(failure.message).toContain(`event is ${bytes} bytes`)
+        }
+
+        // The refusals ran before allocation, so neither the run sequence nor
+        // the producer sequence moved and nothing extra was persisted.
+        const next = yield* journal.emitDurableUnfenced(withMeta("meta", "after", payload, { tag: "z" }))
+        expect(next).toMatchObject({ _tag: "Accepted", seq: 1, sourceSeq: 1 })
+        const page = yield* journal.entries({ runId: run, limit: 10 })
+        expect(page.entries.map((entry) => [entry.seq, entry.eventType])).toEqual([[0, "fits"], [1, "after"]])
+      })
+    ))
+
+  effect("sizes the entry after redaction", () =>
+    withCap(
+      Effect.gen(function*() {
+        const journal = yield* Journal
+        // Raw, this entry is thousands of bytes over the cap. The default
+        // redactor replaces both credential values first, and the bound is
+        // measured on the bytes that actually persist.
+        const receipt = yield* journal.emitDurableUnfenced(
+          withMeta("redacted", "secret", { apiKey: "s".repeat(4096) }, { sessionKey: "s".repeat(4096) })
+        )
+        expect(receipt._tag).toBe("Accepted")
+
+        const page = yield* journal.entries({ runId: run, limit: 10 })
+        expect(page.entries.map((entry) => [entry.payload, entry.meta])).toEqual([
+          [{ apiKey: "[REDACTED]" }, { sessionKey: "[REDACTED]" }]
+        ])
       })
     ))
 })

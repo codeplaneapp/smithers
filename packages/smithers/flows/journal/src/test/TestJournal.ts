@@ -11,33 +11,29 @@
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Layer from "effect/Layer"
 import * as Migrations from "../Migrations.ts"
-import type * as Redaction from "../Redaction.ts"
 import * as SqlJournal from "../SqlJournal.ts"
 
 /**
  * Options for the deterministic journal bundle.
  *
- * Every field forwards to {@link SqlJournal.layer} unchanged, so a suite can
- * exercise index-bound eviction, a custom or noop redactor, and the compaction
- * policy through the bundle instead of hand-assembling the layer stack the
- * bundle exists to hide.
+ * The production options with `capacity` and `overflow` made optional. Every
+ * field forwards to {@link SqlJournal.layer} unchanged, so a suite can exercise
+ * index-bound eviction, the entry byte bound, a custom or noop redactor, and
+ * the compaction policy through the bundle instead of hand-assembling the layer
+ * stack the bundle exists to hide.
+ *
+ * The type is derived rather than mirrored because a mirror silently falls
+ * behind: the hand-copied list had already lost `maxEntryBytes`, so the one
+ * production bound a hostile-payload suite needs was unreachable here.
  *
  * @category models
  * @since 0.1.0
  */
-export interface TestJournalOptions {
+export interface TestJournalOptions extends Omit<SqlJournal.SqlJournalOptions, "capacity" | "overflow"> {
   /** Admission-queue bound and `changes` buffer size. Defaults to 1024. */
-  readonly capacity?: number
+  readonly capacity?: number | undefined
   /** Policy applied when the admission queue is full. Defaults to `reject`. */
-  readonly overflow?: "reject" | "drop-newest" | "drop-oldest"
-  /** Entries the queued writer commits per transaction. */
-  readonly batchSize?: number
-  /** Upper bound on the in-process producer-idempotency index. */
-  readonly sourceEventCache?: number
-  /** Scrub applied to every `payload` and `meta` before persistence. */
-  readonly redact?: Redaction.Redactor
-  /** Automatic checkpoint-and-compact policy. Off unless supplied. */
-  readonly compaction?: SqlJournal.CompactionPolicy
+  readonly overflow?: SqlJournal.SqlJournalOptions["overflow"] | undefined
 }
 
 /**
@@ -49,10 +45,7 @@ export interface TestJournalOptions {
  */
 export const layer = (options?: TestJournalOptions) =>
   SqlJournal.layer({
+    ...options,
     capacity: options?.capacity ?? 1024,
-    overflow: options?.overflow ?? "reject",
-    batchSize: options?.batchSize,
-    sourceEventCache: options?.sourceEventCache,
-    redact: options?.redact,
-    compaction: options?.compaction
+    overflow: options?.overflow ?? "reject"
   }).pipe(Layer.provide(Layer.provideMerge(Migrations.layer, TestDatabase.layer)))

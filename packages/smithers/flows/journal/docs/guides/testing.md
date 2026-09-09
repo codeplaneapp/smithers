@@ -24,10 +24,11 @@ import * as TestJournal from "@smthrs/journal/test/TestJournal"
 const layer = TestJournal.layer()
 ```
 
-Every option forwards to `SqlJournal.layer` unchanged, so a suite can exercise
-index-bound eviction, a custom or noop redactor, and the compaction policy
-through the bundle instead of hand-assembling the layer stack the bundle exists
-to hide:
+`TestJournalOptions` is `SqlJournalOptions` with `capacity` and `overflow` made
+optional, so every option forwards to `SqlJournal.layer` unchanged and a suite
+can exercise index-bound eviction, the `maxEntryBytes` entry bound, a custom or
+noop redactor, and the compaction policy through the bundle instead of
+hand-assembling the layer stack the bundle exists to hide:
 
 ```ts
 const strict = TestJournal.layer({

@@ -349,16 +349,18 @@ for schemas no published release ever used.
 `@smthrs/journal/test/TestJournal` provides the production SQL journal over a
 migrated in-memory database:
 
-| Export               | Signature                                                                       |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `layer`              | `(options?: TestJournalOptions) => Layer<Journal, ...>`                         |
-| `TestJournalOptions` | `{ capacity?, overflow?, batchSize?, sourceEventCache?, redact?, compaction? }` |
+| Export               | Signature                                                   |
+| -------------------- | ----------------------------------------------------------- |
+| `layer`              | `(options?: TestJournalOptions) => Layer<Journal, ...>`     |
+| `TestJournalOptions` | `SqlJournalOptions` with `capacity` and `overflow` optional |
 
-Every field forwards to `SqlJournal.layer` unchanged. The defaults are
-`capacity: 1024` and `overflow: "reject"`. This bundle creates the journal's
-tables only, so a suite exercising a fenced call supplies `flows_runs` itself
-or takes `@smthrs/engine-store/test/TestStores`, which provides the journal,
-run, attempt, and cache services over one database.
+`TestJournalOptions` is the production option type, so every field forwards to
+`SqlJournal.layer` unchanged and a new production option is reachable here the
+day it is added. The defaults are `capacity: 1024` and `overflow: "reject"`.
+This bundle creates the journal's tables only, so a suite exercising a fenced
+call supplies `flows_runs` itself or takes
+`@smthrs/engine-store/test/TestStores`, which provides the journal, run,
+attempt, and cache services over one database.
 
 `@smthrs/journal/test/Notifying` wraps a record-of-Effect-methods service so a
 hook fires around every operation:
