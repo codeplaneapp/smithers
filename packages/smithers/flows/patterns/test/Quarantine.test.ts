@@ -235,6 +235,19 @@ describe("Quarantine", () => {
     })
   })
 
+  // Pins the other half of what the `settle` JSDoc claims: a success is nested,
+  // so a value carrying the complete `Succeeded` wire shape settles unchanged
+  // instead of being read as protocol metadata. The sibling case above covers
+  // the `Quarantined` wire shape.
+  it.effect("nests a full success-marker-shaped value without unwrapping it twice", () =>
+    Effect.gen(function*() {
+      const value = { _tag: "Succeeded", member: "impostor", value: 1 } as const
+      const outcomes = yield* Quarantine.run({ a: Effect.succeed(value) }, { policy: "quarantine" })
+      const settled = yield* Quarantine.settle(outcomes)
+
+      expect(settled).toEqual({ a: value })
+    }))
+
   it.effect("refuses malformed settlement envelopes", () =>
     Effect.gen(function*() {
       const failure = yield* Quarantine.settle({

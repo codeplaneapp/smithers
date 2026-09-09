@@ -266,9 +266,12 @@ export function run<A, E, R>(
  * Use it when the caller wants halt-after-join: every member got its chance to
  * run, and one failure still fails the step.
  *
- * The marker is a structural tag on the wire. A successful member value with
- * exactly that shape is indistinguishable, so callers whose values can carry a
- * `_tag` should wrap them before settling the record.
+ * Every entry has to be a complete {@link Succeeded} or {@link Quarantined}
+ * envelope. A successful value is nested under `value`, so it can carry any
+ * shape, including either complete wire shape, and settles unchanged. Callers
+ * do not wrap their values. An entry that is neither envelope, such as a raw
+ * success value, fails `PatternError` with code `invalid_decorator` naming the
+ * offending members, and a quarantined entry fails with code `quarantined`.
  *
  * @category combinators
  * @since 0.1.0
