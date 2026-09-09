@@ -672,7 +672,7 @@ describe("the sympy__sympy-13878 proof loop, replayed with checkpoints", () => {
     expect(of(events, "checkpoint-minted")).toEqual([])
   })
 
-  it("holds the failing baseline against later frames, so a fix two frames on is recognised", async () => {
+  it("holds the failing baseline until a stable passing frame recognises the fix", async () => {
     const { events } = await drive({
       cells: [
         // Frame 0: edit, baseline at ctx.base, re-check — and the check still
@@ -682,6 +682,9 @@ describe("the sympy__sympy-13878 proof loop, replayed with checkpoints", () => {
         `await ctx.call("edit", { path: "sympy/stats/crv_types.py", text: "second attempt" })
          const after = await ctx.call("bash", { mode: "unhermetic", command: "bin/test sympy/stats/tests/test_continuous_rv.py" })
          console.log("rechecked")`,
+        // Frame 2: the live check can now be attributed to the changed tree.
+        `await ctx.call("bash", { mode: "unhermetic", command: "bin/test sympy/stats/tests/test_continuous_rv.py" })
+         console.log("checked without editing")`,
         `ctx.done("done")`
       ],
       calls: [
@@ -689,12 +692,14 @@ describe("the sympy__sympy-13878 proof loop, replayed with checkpoints", () => {
         { _tag: "Success", value: { exitCode: 1, stdout: "1 failed" } },
         { _tag: "Success", value: { exitCode: 1, stdout: "1 failed" } },
         { _tag: "Success", value: null, tree: "crv_types.py=second" },
+        { _tag: "Success", value: { exitCode: 0, stdout: "1 passed" } },
         { _tag: "Success", value: { exitCode: 0, stdout: "1 passed" } }
       ]
     })
 
     const observed = of(events, "sufficiency-observed")
     expect(observed).toHaveLength(1)
+    expect(observed[0]?.nextFrame).toBe(3)
     expect(observed[0]?.flow).toBe("bash")
     expect(observed[0]?.failed).toContain("bin/test sympy/stats/tests/test_continuous_rv.py")
     // Epoch 0: the baseline was taken over a tree pinned before this run had

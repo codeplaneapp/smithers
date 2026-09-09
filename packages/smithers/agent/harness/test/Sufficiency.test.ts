@@ -124,6 +124,72 @@ describe("Sufficiency.find", () => {
     })).toBeUndefined()
   })
 
+  it("does not pair test failures with broader lint readings of the same path", () => {
+    const failed = NarrowedCheck.check({
+      flow: "test",
+      signature: "test:narrow",
+      input: { path: "a/b.ts", filter: "case" },
+      digest: "before",
+      failing: true,
+      stable: true
+    })!
+    const passed = NarrowedCheck.check({
+      flow: "lint",
+      signature: "lint:broad",
+      input: { path: "a/b.ts" },
+      digest: "after",
+      passing: true,
+      stable: true
+    })!
+    const ledger = Sufficiency.remember([], { frame: [failed], epoch: 0 })
+
+    expect(NarrowedCheck.narrows(failed.terms, passed.terms)).toBe(true)
+    expect(Sufficiency.find({ ledger, frame: [passed], epoch: 1 })).toBeUndefined()
+    expect(
+      Sufficiency.find({
+        ledger,
+        frame: [new NarrowedCheck.Check({ ...passed, flow: "test", signature: "test:broad" })],
+        epoch: 1
+      })?.failed
+    ).toBe(ledger[0])
+  })
+
+  it("rejects a pass taken before an edit in the same frame", () => {
+    // CellTurn stamps live readings from a mutating frame with stable: false
+    // and passes the frame's closing epoch, even if the check preceded the edit.
+    expect(Sufficiency.find({
+      ledger: failedAt("check a/b.py", 0),
+      frame: [ran("check a/b.py", { passing: true, stable: false })],
+      epoch: 1
+    })).toBeUndefined()
+  })
+
+  it("accepts a stable passing reading attributed to a checkpoint after an edit", () => {
+    // Checkpoint attribution is represented by stable: true; a checkpoint
+    // reading has no live workspace digest.
+    const passed = new NarrowedCheck.Check({
+      ...ran("check a/b.py", { passing: true, stable: true }),
+      digest: ""
+    })
+
+    expect(
+      Sufficiency.find({
+        ledger: failedAt("check a/b.py", 0),
+        frame: [passed],
+        epoch: 1
+      })?.passed
+    ).toBe(passed)
+  })
+
+  it("ignores an unstable broader pass when choosing the strongest evidence", () => {
+    const ledger = failedAt("check a/b.py -k one", 0)
+    const stable = ran("check a/b.py -k one", { passing: true })
+    const unstable = ran("check a/b.py", { passing: true, stable: false })
+
+    expect(Sufficiency.find({ ledger, frame: [unstable, stable], epoch: 1 })?.passed).toBe(stable)
+    expect(Sufficiency.find({ ledger, frame: [stable, unstable], epoch: 1 })?.passed).toBe(stable)
+  })
+
   it("says nothing when the check that answers reported no exit status at all", () => {
     // Silence is not a pass. Without this a file read would be half of a
     // completion signal, which is the shape of every hollow completion the
@@ -269,7 +335,8 @@ describe("Sufficiency over the recorded waves", () => {
   }
 
   const fires = [
-    ["wave 9", waveNine.journals, "pytest-dev__pytest-6197", 11],
+    // Frame 11 also edits; frame 13 is the first stable passing reading.
+    ["wave 9", waveNine.journals, "pytest-dev__pytest-6197", 13],
     ["wave 10", waveTen.journals, "astropy__astropy-8707", 8]
   ] as const
 

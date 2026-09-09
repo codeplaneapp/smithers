@@ -166,6 +166,12 @@ ends on `TurnClosed` with its outcome, beside `Resolved`, `Suspended`, or
 `Aborted`. `AgentEvent.eventType` maps every tag to its journal event type.
 The full list is in the [`AgentEvent` reference](../api.md#agentevent).
 
+`SufficiencyObserved` pairs a remembered failure with a later passing check of
+the same flow, with identical or broader inputs, after a workspace mutation.
+Passing readings must be stable. A live check in a frame that also edits is
+ambiguous even when the cell checks after editing; run the passing check in a
+later frame to establish the ordering.
+
 ## Next steps
 
 - For the engine port's full contract, see

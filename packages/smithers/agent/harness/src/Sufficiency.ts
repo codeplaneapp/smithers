@@ -183,11 +183,13 @@ export interface Sufficient {
  *    only ever suppresses the observation and can never manufacture one, and it
  *    changes neither of the two frames that fire across the ten journals two
  *    graded waves recorded;
- * 1. some check of this frame reported a *passing* exit status — silence is not
- *    a pass, so a read or a search can never be one half of this;
- * 2. some remembered failure is the same call, or one that check is broader
- *    than, as `NarrowedCheck` `narrows` reads "broader": every term of the
- *    passing check is carried by the failing one, which added conditions to it.
+ * 1. some stable check of this frame reported a *passing* exit status — silence
+ *    is not a pass, and an unstable reading may precede this frame's edits.
+ *    Checkpoint-attributed readings are already stamped stable by `CellTurn`;
+ * 2. some remembered failure names the same flow and is the same call, or one
+ *    that check is broader than, as `NarrowedCheck` `narrows` reads "broader":
+ *    every term of the passing check is carried by the failing one, which added
+ *    conditions to it.
  *    A broader reading passing is stronger evidence than the narrow one
  *    passing, never weaker, so it is admitted;
  * 3. the run changed the workspace between the two — the failure's epoch is
@@ -213,11 +215,12 @@ export const find = (options: {
   if (options.frame.some((check) => check.failing)) return undefined
   let found: Sufficient | undefined = undefined
   for (const passed of options.frame) {
-    if (!passed.passing) continue
+    if (!passed.passing || !passed.stable) continue
     if (found !== undefined && found.passed.terms.length <= passed.terms.length) continue
     let answered: Failure | undefined = undefined
     for (const failed of options.ledger) {
       if (failed.epoch >= options.epoch) continue
+      if (failed.flow !== passed.flow) continue
       if (failed.signature !== passed.signature && !NarrowedCheck.narrows(failed.terms, passed.terms)) continue
       answered = failed
     }
