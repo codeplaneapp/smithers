@@ -167,10 +167,12 @@ directory.
 ## What just happened
 
 Every operation was addressed by content, so nothing above needed a file name,
-a bucket, or an identifier of its own. The second put was free because the
-address already existed and verified. The corrupted read failed loudly instead
-of returning bytes that were not the recorded artifact, and the repair was the
-same call that published it the first time.
+a bucket, or an identifier of its own. The second put stored no second copy
+because the address already existed and verified, but it was not free: it
+hashed its input, rehashed the stored blob, took the digest's lock, freshened
+the blob, and synced it. The corrupted read failed loudly instead of returning
+bytes that were not the recorded artifact, and the repair was the same call
+that published it the first time.
 
 ## Next steps
 

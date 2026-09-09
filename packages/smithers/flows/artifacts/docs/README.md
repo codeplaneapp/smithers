@@ -17,10 +17,12 @@ behind it were not truncated by a crashed writer or replaced by a broken
 cache.
 
 Addressing bytes by their digest answers both at once. Two callers that produce
-identical bytes produce one address, so the second write costs nothing and no
-copy is stored twice. An address is a claim the store can recheck on every
-read, so a mismatch surfaces as a typed failure instead of a wrong result
-flowing into whatever consumes it.
+identical bytes produce one address, so no copy is stored twice and the second
+write never rewrites the payload. That second write is not free: it hashes its
+input, rehashes the stored blob, takes and releases a lock file, freshens the
+blob's modification time, and syncs the blob and its directories. An address is
+a claim the store can recheck on every read, so a mismatch surfaces as a typed
+failure instead of a wrong result flowing into whatever consumes it.
 
 Reach for this package when you cache or ship large byte payloads and you care
 that a read either returns the exact bytes that were published or fails. It has
@@ -85,11 +87,12 @@ the bytes a build step produced
 
 One blob landed on disk, at
 `.flows/objects/6b/6bb29e0869012afcfc246886c647422236e0b7d3419d3dc4ded8da758a4dfeb3`.
-The second `put` measured the bytes, found the address already published,
-verified the blob already there, and returned the same address without writing
-anything. The `get` measured what it read before returning it, so a blob that
-had been truncated or overwritten would have failed with
-`ArtifactCorruption` rather than handing back the wrong bytes.
+The second `put` measured the bytes, took the digest's lock, verified the blob
+already there, freshened its modification time, and synced it, then returned
+the same address without rewriting the payload. The `get` measured what it read
+before returning it, so a blob that had been truncated or overwritten would
+have failed with `ArtifactCorruption` rather than handing back the wrong
+bytes.
 
 ## Filesystem security and existing stores
 

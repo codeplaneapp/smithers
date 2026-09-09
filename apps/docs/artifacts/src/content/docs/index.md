@@ -18,10 +18,12 @@ behind it were not truncated by a crashed writer or replaced by a broken
 cache.
 
 Addressing bytes by their digest answers both at once. Two callers that produce
-identical bytes produce one address, so the second write costs nothing and no
-copy is stored twice. An address is a claim the store can recheck on every
-read, so a mismatch surfaces as a typed failure instead of a wrong result
-flowing into whatever consumes it.
+identical bytes produce one address, so no copy is stored twice and the second
+write never rewrites the payload. That second write is not free: it hashes its
+input, rehashes the stored blob, takes and releases a lock file, freshens the
+blob's modification time, and syncs the blob and its directories. An address is
+a claim the store can recheck on every read, so a mismatch surfaces as a typed
+failure instead of a wrong result flowing into whatever consumes it.
 
 Reach for this package when you cache or ship large byte payloads and you care
 that a read either returns the exact bytes that were published or fails. It has
@@ -30,6 +32,13 @@ database, and opens no file and no socket by itself: the filesystem and the
 network arrive as Effect's `FileSystem` and `HttpClient` services, which is what
 lets the same store code run in Node.js, in Bun, in a browser tab, and inside a
 sandbox.
+
+The two-minute coordination acquisition deadline includes the in-process
+semaphore wait and filesystem lock acquisition. It does not time out the
+protected operation. Semaphores are scoped by filesystem service, objects
+directory, and digest. An interrupted backup acquisition removes the marker
+it created, including interruption during marker creation or gate release.
+Host completion and release finalizers can extend cancellation latency.
 
 ## Install
 
@@ -79,11 +88,46 @@ the bytes a build step produced
 
 One blob landed on disk, at
 `.flows/objects/6b/6bb29e0869012afcfc246886c647422236e0b7d3419d3dc4ded8da758a4dfeb3`.
-The second `put` measured the bytes, found the address already published,
-verified the blob already there, and returned the same address without writing
-anything. The `get` measured what it read before returning it, so a blob that
-had been truncated or overwritten would have failed with
-`ArtifactCorruption` rather than handing back the wrong bytes.
+The second `put` measured the bytes, took the digest's lock, verified the blob
+already there, freshened its modification time, and synced it, then returned
+the same address without rewriting the payload. The `get` measured what it read
+before returning it, so a blob that had been truncated or overwritten would
+have failed with `ArtifactCorruption` rather than handing back the wrong
+bytes.
+
+## Filesystem security and existing stores
+
+New payloads are created exclusively (`wx`) with mode `0600`. New objects,
+fanout, and lock directories use `0700`. The host umask may restrict these
+modes further. Set `fileMode` and `directoryMode` explicitly to share payloads
+and object directories; lock directories remain private. Creation modes do
+not change existing entries or ACLs.
+
+Scratch creation retries collisions with a fresh random token, keeping the
+opened handle through writing and syncing. Both durability modes require
+exclusive writable handles and symlink inspection. `best-effort` tolerates
+sync refusals only. Hosts without those capabilities fail as `unavailable`;
+use the memory or remote tier until the host supplies them.
+
+Publication and sweep removal reject detected symlinks at the objects root,
+fanout, and blob paths, and recheck directory identities before mutation.
+Scratch cleanup and inventory inspect one directory level at a time and skip
+symlinked entries. The portable Effect filesystem API provides no `lstat`,
+no-follow open, or descriptor-relative rename/unlink. Inspection uses
+`readLink` plus `stat`; a replacement after the final check can still redirect
+a pathname operation. These checks are defense in depth, not containment
+against a process able to replace directory entries concurrently. Keep the
+store and its ancestors writable only by trusted principals, or supply a
+filesystem confined by the host. Closing this race requires a host capability
+that enforces containment during each mutation.
+
+Before reusing an existing store, stop writers and sweepers and audit the
+objects root, its ancestors, fanouts, blobs, lock entries, ownership, modes,
+and ACLs without following symlinks. Remove unexpected links and migrate
+verified blobs into a newly created private store, or apply owner-only modes
+to verified regular files and directories. Do not run a recursive permission
+change across unaudited links. Existing readable blobs remain readable after
+an upgrade, including deduplicated blobs.
 
 ## The stores you can compose
 

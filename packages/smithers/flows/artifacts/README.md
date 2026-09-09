@@ -62,8 +62,9 @@ the bytes a build step produced
 ```
 
 One blob landed on disk, under the first two characters of its own address. The
-second `put` measured the bytes, found the address already published, verified
-the blob already there, and returned the same address without writing anything.
+second `put` measured the bytes, took the digest's lock, verified the blob
+already there, freshened its modification time, and synced it, then returned the
+same address without rewriting the payload.
 
 ## The stores you can compose
 
