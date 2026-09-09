@@ -4,9 +4,11 @@ import { renderAgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeRepositories } from "../native/NativeBridge"
+import { GUIDE_LAST_STEP, GUIDE_LESSONS } from "../onboarding/lessons"
 import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
+import { initialGuide } from "./AppState"
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -334,5 +336,39 @@ describe("per-turn runtime context", () => {
     await settled()
     expect(requests[0]?.context?.tabs).toEqual([{ id: "main", kind: "main", title: "Smithers", status: "open", active: true }])
     expect(requests[0]?.context?.capabilities.some((line) => line.includes("tab.read"))).toBe(false)
+  })
+
+  /*
+   * A message sent mid-tutorial is answered against the lesson transcript the
+   * user has actually seen: the turn context carries the onboarding block
+   * (lesson position + transcript) while the guide runs, and drops it once
+   * the workspace step is reached.
+   */
+  test("the onboarding transcript rides the turn while the tutorial runs, and leaves when it is done", async () => {
+    const store = await webStore()
+    const requests: StartAgentTurnRequest[] = []
+    const controller = createAppController(store, unavailableRepositories, recordingAgent(requests))
+
+    // No guide at all (a session that never entered the tutorial): no block.
+    controller.send("hi")
+    await settled()
+    expect(requests[0]?.context?.onboarding).toBeUndefined()
+
+    await store.dispatch({ type: "guide.changed", actor: "user", guide: { ...initialGuide(), step: 6 } }).isPersisted.promise
+    controller.send("what is this?")
+    await settled()
+    const onboarding = requests[1]?.context?.onboarding
+    expect(onboarding?.step).toBe(6)
+    expect(onboarding?.stepCount).toBe(GUIDE_LESSONS.length)
+    expect(onboarding?.transcript).toEqual(GUIDE_LESSONS.slice(0, 7))
+    expect(onboarding?.transcript[6]).toBe("You can talk directly to me. Try it now.")
+    const rendered = renderAgentRuntimeContext(requests[1]?.context as AgentRuntimeContext)
+    expect(rendered).toContain(`the user is on lesson 7 of ${GUIDE_LESSONS.length}`)
+    expect(rendered).toContain("onboarding.act finish")
+
+    await store.dispatch({ type: "guide.changed", actor: "user", guide: { ...initialGuide(), step: GUIDE_LAST_STEP } }).isPersisted.promise
+    controller.send("done with that")
+    await settled()
+    expect(requests[2]?.context?.onboarding).toBeUndefined()
   })
 })

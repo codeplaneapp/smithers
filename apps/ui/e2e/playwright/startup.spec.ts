@@ -19,6 +19,15 @@ test("a late boot recovers after the startup watchdog without losing React's mou
     await expect(page.locator(".session-shell > .guide-wordmark")).toHaveCount(1)
     const entrance = await page.locator(".session-shell > .guide-wordmark").elementHandle()
     await expect(page.locator("body")).not.toContainText("Smithers is starting your session.")
+    /*
+     * Settle the entrance before measuring its corner: the wordmark's anchor
+     * shifts ~5px when IBM Plex Mono swaps in over the fallback mono, and the
+     * arrive animation is compositor time, never the fake clock. The pin's
+     * subject is the app arrival moving the mark, not the font loading.
+     */
+    await page.evaluate(() =>
+      Promise.all([document.fonts.ready, ...document.getAnimations().map((animation) => animation.finished)])
+    )
     await page.clock.fastForward(2_000)
     const corner = await entrance!.boundingBox()
     expect(corner!.x).toBeGreaterThan(900)

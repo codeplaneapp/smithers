@@ -9,6 +9,7 @@ import {
   GitPullRequest,
   HardDrive,
   Laptop,
+  Library,
   MessageSquare,
   Paperclip,
   Plug,
@@ -31,14 +32,15 @@ import { workingCopyLabel } from "./state/WorkspaceViews"
 /** Stable Playwright handle; spread past ChatComposer's excess-property check. */
 const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "composer-input" }
 
-type Surface = "chat" | "world" | "connectors" | "flows"
+type Surface = "chat" | "world" | "connectors" | "flows" | "plugins"
 
 /* The surface pill's label: what the composer is currently pointed at. */
 const SURFACE_LABELS: Readonly<Record<Surface, string>> = {
   chat: "Chat",
   world: WIKI_DISPLAY_NAME,
   connectors: "Connect",
-  flows: "Flows"
+  flows: "Flows",
+  plugins: "Plugins"
 }
 
 /** Shorten the local host's conventional home-directory roots for display. */
@@ -108,6 +110,13 @@ function ComposerMenu({
       label: SURFACE_LABELS.flows,
       icon: <Workflow size={14} aria-hidden="true" />,
       active: surface === "flows"
+    },
+    /* The Library: where the abilities on this workspace come from. */
+    {
+      flow: "plugins",
+      label: SURFACE_LABELS.plugins,
+      icon: <Library size={14} aria-hidden="true" />,
+      active: surface === "plugins"
     }
   ] as const
 

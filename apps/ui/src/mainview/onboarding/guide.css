@@ -213,7 +213,6 @@
   margin-bottom: 13px;
 }
 .guide-speaker > span,
-.guide-plugin-dot,
 .guide-status-dot {
   width: 5px;
   height: 5px;
@@ -364,37 +363,40 @@
   line-height: 1.6;
   color: var(--g-muted);
 }
-.guide-plugin-card {
-  display: flex;
-  gap: 19px;
-  align-items: center;
-  margin: 18px 0 12px;
-  padding: 25px;
-  background: var(--g-panel);
-  border: 1px solid var(--g-line);
-  border-radius: 12px;
+.guide-steps {
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
   text-align: left;
 }
-.guide-plugin-icon {
-  background: var(--g-bg);
+.guide-steps li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--g-panel);
   border: 1px solid var(--g-line);
-  padding: 15px;
-  border-radius: 12px;
-  color: var(--g-accent);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--g-ink);
 }
-.guide-plugin-card h2 {
-  font-size: 16px;
-  font-weight: 500;
-  margin-bottom: 7px;
-}
-.guide-plugin-card p {
-  font-size: 11px;
-  color: var(--g-muted);
-  margin-bottom: 7px;
-}
-.guide-plugin-card small {
+.guide-step-number {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 10px;
   color: var(--g-accent);
+  border: 1px solid var(--g-line);
+  border-radius: 50%;
+}
+.guide-steps .guide-button-key {
+  font-size: 9px;
 }
 .guide-tag {
   font-family: "IBM Plex Mono", monospace;
@@ -440,9 +442,6 @@
   letter-spacing: 0.14em;
   color: var(--g-muted);
   padding: 0 9px 12px;
-}
-.guide-plugin-dot {
-  margin-left: auto;
 }
 .guide-background-flows {
   margin-top: 20px;
@@ -729,7 +728,7 @@
   flex: 1;
   min-width: 0;
 }
-.guide-shell[data-step="15"] .guide-app {
+.guide-shell[data-step="14"] .guide-app {
   visibility: visible;
   opacity: 1;
   transition-delay: 0s;
@@ -739,13 +738,13 @@
  * (transcript, header, atmosphere, plugin shelf, progress) retires, and only
  * the outro card and the footer float above the full-screen UI.
  */
-.guide-shell[data-step="15"] .guide-atmosphere,
-.guide-shell[data-step="15"] .guide-header,
-.guide-shell[data-step="15"] .guide-transcript,
-.guide-shell[data-step="15"] .guide-progress {
+.guide-shell[data-step="14"] .guide-atmosphere,
+.guide-shell[data-step="14"] .guide-header,
+.guide-shell[data-step="14"] .guide-transcript,
+.guide-shell[data-step="14"] .guide-progress {
   display: none;
 }
-.guide-shell[data-step="15"] .guide-start-actions {
+.guide-shell[data-step="14"] .guide-start-actions {
   background: var(--g-panel);
   backdrop-filter: blur(18px);
   border: 1px solid var(--g-line);
@@ -753,13 +752,13 @@
   padding: 24px 28px;
   box-shadow: 0 18px 60px #102a3322;
 }
-.guide-shell[data-step="15"] .guide-main {
+.guide-shell[data-step="14"] .guide-main {
   pointer-events: none;
 }
-.guide-shell[data-step="15"] .guide-lesson > * {
+.guide-shell[data-step="14"] .guide-lesson > * {
   pointer-events: auto;
 }
-.guide-shell[data-step="15"] .guide-footer {
+.guide-shell[data-step="14"] .guide-footer {
   background: var(--g-panel);
   backdrop-filter: blur(18px);
   border-top: 1px solid var(--g-line);
@@ -907,9 +906,6 @@
   .guide-sidebar nav button {
     font-size: 10px;
   }
-  .guide-sidebar .guide-plugin-dot {
-    display: none;
-  }
   .guide-main {
     padding-top: 20px;
   }
@@ -948,13 +944,6 @@
   }
   .guide-progress {
     bottom: 8px;
-  }
-  .guide-plugin-card {
-    padding: 19px;
-    gap: 13px;
-  }
-  .guide-plugin-card > .guide-tag {
-    display: none;
   }
   .guide-board {
     padding: 23px 18px;
@@ -1019,7 +1008,11 @@
     transform: none;
   }
 }
-/* Keep long lessons scrollable and their footer out of the reading column. */
+/*
+ * The shell is a fixed-height column: the lesson area scrolls, and the
+ * composer dock and the footer are pinned rows below it, in that order —
+ * so the summoned composer always opens above the footer chrome.
+ */
 .guide-shell {
   height: 100dvh;
   display: flex;
@@ -1048,7 +1041,6 @@
 .guide-footer {
   position: relative;
   flex-shrink: 0;
-  margin-top: auto;
 }
 
 
@@ -1096,6 +1088,8 @@
   /* A passive log, not a control: focusable for arrow-key scrolling, never ringed. */
   outline: none;
 }
+/* Outranks the app-wide :focus-visible ring (base.css) for the transcript. */
+.guide-shell .guide-transcript:focus-visible { outline: none; }
 /*
  * A new message OPENS its place: the wrapper's grid track grows 0fr → 1fr, so
  * the messages above shift up while the actions below move down as one stable
@@ -1110,7 +1104,7 @@
 @keyframes guide-message-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 /* The lesson's interactive example arrives with the message, in place. */
 .guide-lesson > .guide-form,
-.guide-lesson > .guide-plugin-card,
+.guide-lesson > .guide-library,
 .guide-lesson > .guide-practice-note,
 .guide-lesson > .guide-background-flows,
 .guide-lesson > .guide-prototype,
@@ -1145,3 +1139,69 @@
 }
 .guide-sidebar .composer-menu-item { flex-wrap: nowrap; font-size: 12px; }
 .guide-sidebar .composer-connect-trigger:focus-visible { outline: 2px solid var(--g-accent); outline-offset: 2px; }
+
+/*
+ * The Library, inside the lesson. It is the real gallery (plugins/), so only
+ * its palette changes here: the app's tokens would drop a white card onto the
+ * guide's paper.
+ */
+.guide-library {
+  margin: 18px 0 12px;
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--g-line);
+  border-radius: 12px;
+  background: var(--g-panel);
+}
+.guide-library .plugin-gallery {
+  padding: 16px;
+  gap: 14px;
+}
+.guide-library .plugin-start {
+  background: color-mix(in srgb, var(--g-gold) 12%, transparent);
+  border-color: color-mix(in srgb, var(--g-gold) 40%, transparent);
+}
+.guide-library .plugin-start h2,
+.guide-library .plugin-start li strong,
+.guide-library .plugin-body h3 {
+  color: var(--g-ink);
+}
+.guide-library .plugin-start li,
+.guide-library .plugin-summary {
+  color: var(--g-muted);
+}
+.guide-library .plugin-start > p,
+.guide-library .plugin-description,
+.guide-library .plugin-publisher,
+.guide-library .plugin-tags li,
+.guide-library .plugin-version,
+.guide-library .plugin-requires,
+.guide-library .plugin-steps {
+  color: var(--g-muted);
+  opacity: 0.85;
+}
+.guide-library .plugin-card {
+  background: var(--g-bg);
+  border-color: var(--g-line);
+}
+.guide-library .plugin-card[data-asked="true"] {
+  border-color: var(--g-accent);
+}
+.guide-library .plugin-icon {
+  background: color-mix(in srgb, var(--g-accent) 12%, transparent);
+  color: var(--g-accent);
+}
+.guide-library .plugin-installed {
+  color: var(--g-accent);
+}
+/* What the installed plugins added, in the workspace sidebar. */
+.guide-plugin-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.guide-plugin-rail .plugin-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

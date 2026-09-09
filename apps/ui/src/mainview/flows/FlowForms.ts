@@ -11,7 +11,6 @@
  * (state/controller/forms.ts) resolves option providers against the seams
  * and holds the draft in the card's payload.
  */
-import { splitRunSource } from "./RunCommand"
 import type { Schema, SchemaAST } from "effect"
 
 export type FieldKind = "text" | "number" | "boolean" | "select"
@@ -36,7 +35,9 @@ export const OPTION_PROVIDERS = [
   /** Cloud workspaces the session has loaded. */
   "workspaces",
   /** The agents (built-in and custom) with their availability here. */
-  "agents"
+  "agents",
+  /** The plugin catalog, with the ones already on this workspace's shelf marked. */
+  "plugins"
 ] as const
 export type OptionProvider = (typeof OPTION_PROVIDERS)[number]
 
@@ -188,12 +189,11 @@ export const partialPayload = (
   args: string | undefined
 ): Readonly<Record<string, unknown>> => {
   if (hints?.partial !== undefined) return hints.partial(args ?? "")
-  const source = fields.some((field) => field.name === "sourceCard") ? splitRunSource(args) : { args, sourceCard: undefined }
-  const tokens = tokensOf(source.args)
+  const tokens = tokensOf(args)
   const flag = tokens.findIndex((token) => token.startsWith("--"))
   const positional = flag === -1 ? tokens : tokens.slice(0, flag)
-  const payload: Record<string, unknown> = source.sourceCard === undefined ? {} : { sourceCard: source.sourceCard }
-  const slots = fields.filter((field) => field.kind !== "boolean" && field.name !== "sourceCard")
+  const payload: Record<string, unknown> = {}
+  const slots = fields.filter((field) => field.kind !== "boolean")
   let lastText: string | undefined
   let index = 0
   for (const field of slots) {
@@ -266,14 +266,14 @@ export const assembleArgs = (
   payload: Readonly<Record<string, unknown>>
 ): string => {
   if (hints?.args !== undefined) return hints.args(payload).trim()
-  return [...fields.filter((field) => field.name === "sourceCard"), ...fields.filter((field) => field.name !== "sourceCard")]
+  return fields
     .flatMap((field) => {
       const value = payload[field.name]
       if (value === undefined || value === null) return []
       if (field.kind === "boolean") return value === true || value === "true" ? [`--${field.name}`] : []
       if (Array.isArray(value)) return value.map(String).filter((item) => item.trim() !== "")
       const text = String(value).trim()
-      return text === "" ? [] : [field.name === "sourceCard" ? `sourceCard=${text}` : text]
+      return text === "" ? [] : [text]
     })
     .join(" ")
 }

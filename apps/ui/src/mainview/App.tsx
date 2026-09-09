@@ -37,6 +37,7 @@ import { TriggerListCardBody } from "./cards/TriggersCard"
 import { WorkflowListCardBody } from "./cards/WorkflowCards"
 import { Composer } from "./Composer"
 import { ConnectorsSurface } from "./ConnectorsSurface"
+import { PluginsSurface } from "./plugins/PluginsSurface"
 import { useController } from "./ControllerContext"
 import { DevtoolsPanel } from "./DevtoolsPanel"
 import { stampFlows } from "./FlowStamp"
@@ -362,6 +363,12 @@ function App() {
    */
   const authAction = authMessage?.action
 
+  /*
+   * The suggestion row is DERIVED (§2a/§2f — never stored, never
+   * fabricated): the genuinely-next state-derived step when one exists
+   * (signed-out → Sign in; no repo open → Select a repo). An empty pill row
+   * is a correct state; a fabricated one is a violation.
+   */
   /*
    * Selecting a repository is the one next step, and locally it is the native
    * folder picker (repo.open) — the IDE's open-folder — never a sign-in.
@@ -1020,6 +1027,8 @@ function App() {
               </div>
             </section>
           ) :
+          session.surface === "plugins" ?
+          <PluginsSurface /> :
           null}
 
         {/* Admin-only: the panel is absent — not hidden — for everyone else. */}

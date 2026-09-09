@@ -99,6 +99,9 @@ const PRESENTATION_ONLY = [
   "onFrameForward", // delegated: App.tsx binds it to frame.forward
   "onForkFrame", // delegated: App.tsx binds it to frame.fork
   "onOpenInTab(", // delegated: App.tsx and tabs/CardTabBody.tsx bind it to runCommandArgs("tab.card", ...)
+  "onInstall(", // delegated: PluginsSurface.tsx and the guide's Library bind it to runCommandArgs("plugins.install", ...)
+  "onRemove(", // delegated: PluginsSurface.tsx binds it to runCommandArgs("plugins.remove", ...)
+  "onOpen(", // delegated: the plugin rail's binding sites bind it to runCommand(<the entry's own flow>)
   "onConnectGitHub(", // delegated: App.tsx binds it to auth.sign-in
   "onConnectLocal(", // delegated: App.tsx binds it to runCommandArgs("connector.add", ...)
   "onRunWorkflow(", // delegated: App.tsx binds it to runCommandArgs("flow.run", ...)
@@ -158,7 +161,7 @@ describe("launch-law parity: every affordance is a command", () => {
         .filter(([, count]) => count > 0)
     )
     expect(counts).toEqual({
-      "../onboarding/GuideShell.tsx": 17, // Delegates to the shared onboarding and existing app flows; the Command-K overlay is the summoned composer with no chrome of its own.
+      "../onboarding/GuideShell.tsx": 15, // Delegates to the shared onboarding and existing app flows; the Command-K overlay is the summoned composer with no chrome of its own. The sidebar lists Wiki and Mythical history only — no Library entry.
       /*
        * The chrome Sign in button (LOCAL-APP.md: sign-in is an option in the
        * chrome, never a gate on the chat) is one of ChromeBar's nine below.
@@ -173,6 +176,15 @@ describe("launch-law parity: every affordance is a command", () => {
       // +1 (Librarian L5): the Wiki pane's Graph button, the button door of wiki.graph.
       "../App.tsx": 17,
       "../StorageRecoveryButton.tsx": 1,
+      /*
+       * The Library (the `plugins` surface and the guided introduction share
+       * it): Install and Remove on a row, and the rail button each installed
+       * plugin contributed. Every one is a delegated prop its binding site
+       * runs through the registry.
+       */
+      "../plugins/PluginGallery.tsx": 2,
+      "../plugins/PluginRail.tsx": 1,
+      "../plugins/PluginsSurface.tsx": 1,
       /* 11 = 10 + the origin chip's "rev N exists · view" (lane change step 4; renders only when both seqs are known). */
       "../Composer.tsx": 9,
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
@@ -197,7 +209,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * watching, Resume, Stop, Run again, the steer row's send, the
        * repository chooser's row and the workflow list's Run.
        */
-      "../cards/WorkflowCards.tsx": 11,
+      "../cards/WorkflowCards.tsx": 12,
       "../DevtoolsPanel.tsx": 1,
       "../SearchPalette.tsx": 5,
       "../SurfaceChrome.tsx": 3,
@@ -252,7 +264,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * breadcrumbs, tree rows, timeline bars and the recorded child link.
        * Every button enters onRunCommand and persists in the same card.
        */
-      "../cards/RunTraceCard.tsx": 8,
+      "../cards/RunTraceCard.tsx": 9,
       /*
        * Lane runs: the run inbox's Open per row, its All/status filter chips,
        * and the Stop-all footer (all through onRunCommand), plus the
@@ -294,6 +306,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * onRunCommand with data-flow set.
        */
       "../cards/ChangeCards.tsx": 21,
+      "../cards/CodingPlanCard.tsx": 1, // runs.coding.select
       /*
        * Connection, world and browser card interactions, plus the embedded
        * wiki collaboration cards (ad438463a6): page Previous/Next and the

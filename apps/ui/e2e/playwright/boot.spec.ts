@@ -3,7 +3,8 @@ import { localApiGet } from "./localApi"
 
 /*
  * M0 boot (LOCAL-APP.md, "Test tiers"): the local origin answers, the SPA
- * renders its chat surface, and advertises only the services in bootstrap.
+ * mounts (the guide shell owns first paint), and advertises only the
+ * services in bootstrap.
  */
 
 test("GET /api/health answers ok with node and sandbox", async ({ request }) => {
@@ -27,14 +28,21 @@ test("GET /api/health answers ok with node and sandbox", async ({ request }) => 
 test("the offline local app boots without advertising unavailable cloud identity", async ({ page }) => {
   await page.goto("/")
   await expect(page).toHaveTitle(/Smithers/)
-  await expect(page.getByTestId("transcript")).toBeVisible()
-  await expect(page.getByTestId("composer-input")).toBeVisible()
+  /*
+   * The guide shell is the mounted app: it owns first paint (the entrance),
+   * with the transcript mounted beneath it and the composer hidden until
+   * summoned (the 2026-09-08 brief: Command-K summons ONLY the composer).
+   */
+  await expect(page.locator(".guide-shell")).toBeVisible()
+  await expect(page.getByTestId("composer-input")).toBeHidden()
   await expect(page.getByTestId("chrome-sign-in")).toHaveCount(0)
-  // The opening read ("Smithers initialized successfully") sits above it; the identity state is its own message.
+  // The opening read sits above it; the identity state is its own message (mounted, beneath the guide).
   await expect(
     page.locator('.smithers-chat-message[data-role="assistant"]').filter({ hasText: "Smithers identity" })
   ).toContainText("doesn't provide Smithers identity")
-  // Anonymous is the open state: the composer invites, nothing gates.
+  // Anonymous is the open state: Command-K summons the composer, nothing gates.
+  await page.keyboard.press("Control+k")
+  await expect(page.getByTestId("composer-input")).toBeVisible()
   await expect(page.getByTestId("composer-input")).toBeEnabled()
 })
 

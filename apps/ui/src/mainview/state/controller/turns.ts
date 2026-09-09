@@ -10,6 +10,7 @@ import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
 import { isRuntimeOwnedCard } from "../isRuntimeOwnedCard"
 import { roleMenuEntries } from "../../AgentRoleMenu"
+import { GUIDE_LAST_STEP, GUIDE_LESSONS } from "../../onboarding/lessons"
 import { currentAgentRoles } from "./agents"
 import type { ImpossibleAskClass, InstructionRole, InstructionStage } from "../Instructions"
 import { CHAT_INSTRUCTIONS_CAP_BYTES, INSTRUCTIONS_HEADROOM_BYTES, bytesOf, smithersInstructions } from "../Instructions"
@@ -199,6 +200,21 @@ export const createTurnController = (
       surface: current.surface,
       theme: current.theme,
       selectedWorldDocument: selected?.path ?? null,
+      /*
+       * The guided introduction while it runs: the model sees the same
+       * lesson transcript the user has, with the rule that chatter defers
+       * to the lesson and real work skips it (onboarding.act finish).
+       * Absent once the workspace step is reached — the tutorial is done.
+       */
+      ...(current.guide === undefined || current.guide.step >= GUIDE_LAST_STEP
+        ? {}
+        : {
+          onboarding: {
+            step: current.guide.step,
+            stepCount: GUIDE_LESSONS.length,
+            transcript: GUIDE_LESSONS.slice(0, current.guide.step + 1)
+          }
+        }),
       connectors: snapshot.connectors.map((connector) => ({
         kind: connector.kind,
         name: connector.name,

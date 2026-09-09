@@ -101,7 +101,7 @@ export const startStartupWatchdog = (options: StartupWatchdogOptions): StartupWa
   }
 }
 
-/** Allow cold bundles, saved-state loading, and the identity seam's 30s deadline to settle. */
+/** Allow cold bundles and saved-state loading to settle. Boot never waits on a remote read. */
 export const DEFAULT_BOOT_TIMEOUT_MS = 60_000
 
 let browserInstance: StartupWatchdog | undefined

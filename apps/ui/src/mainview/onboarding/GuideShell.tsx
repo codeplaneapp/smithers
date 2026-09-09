@@ -1,8 +1,14 @@
 import { Spinner } from "@smthrs/ui"
 import { SidebarRepositoryPicker } from "../Composer"
+import { GUIDE_LESSONS } from "./lessons"
+import { GuideSteps } from "./GuideSteps"
 import { guideForwardAction } from "./navigation"
+import { LESSON_PLUGIN } from "./pluginLesson"
+import { loadedApp } from "../plugins/appSurface"
+import { PluginGallery } from "../plugins/PluginGallery"
+import { PluginRail } from "../plugins/PluginRail"
 import { useLiveQuery } from "@tanstack/react-db"
-import { createContext, Fragment, useRef, useState, type ReactNode } from "react"
+import { createContext, Fragment, useRef, useState, type ReactNode, type CSSProperties } from "react"
 import {
   BookOpen,
   Check,
@@ -10,7 +16,6 @@ import {
   Command,
   GitPullRequest,
   History,
-  Library,
   Volume2,
   VolumeX,
   X,
@@ -28,24 +33,7 @@ import "./guide.css"
  */
 export const GuideComposerHost = createContext<HTMLDivElement | null | undefined>(undefined)
 
-const lessons = [
-  "Hello. I’m Smithers. Let me show how Smithers works",
-  "I am more than a chat app. I control this entire UI. And I will help you get work done. For example, let’s change the theme.",
-  "And back to light mode.",
-  "I can send you notifications from time to time, like this. You don’t need to watch every flow to know what’s happening.",
-  "I can talk to you with UI widgets, too. Here’s a small form so I can get to know you. Everything here is optional.",
-  "But the coolest thing I can do is run flows. Flows are instructions that can be executed to get work done. Everything in this app is modeled as a flow.",
-  "From time to time, I’ll create new flows that I think will be useful for you.",
-  "Your work gets the whole window. I’ll stay out of the way until you call me. Press ⌘K (or Ctrl K) to bring me back.",
-  "Plugins give this workspace its abilities. Start with the Library: a place to discover the flows and specialists you want to work with.",
-  "The Librarian learns a codebase and makes it easier for both of us to understand. Add it, and I’ll walk you through its first two background flows.",
-  "On your codebase, the Librarian will ask to build a wiki and a mythical history in the background. You can inspect either run while you work. Let’s rehearse that in a small practice project.",
-  "Before committing to an implementation, we try the idea. Here’s our little idea board. This prototype is disposable; what we learn is what we keep.",
-  "Change the heading below. You’ll see the prototype update immediately. When it feels right, we’ll carry your feedback into the real plan.",
-  "We keep your feedback, discard the prototype code, and plan the implementation with hindsight. A logical Change groups the atomic changes. Mythical history puts stable foundations first.",
-  "Implementation, review, and checks come first. When you say it feels right, cleanup turns the accepted work into append-only main history. Delivery can then open a real PR.",
-  "You’ve met flows, plugins, and the path from a quick idea to a reviewed change. I’ll sometimes suggest new flows that could help. You decide what to add.",
-] as const
+const lessons = GUIDE_LESSONS
 
 /** An original, short opt-in interval; no autoplay or copyrighted game audio. */
 function chime() {
@@ -105,12 +93,19 @@ export function GuideShell({ children }: { children: ReactNode }) {
   if (stage > enteredStep.current) enteredStep.current = stage
   const opener = useRef<HTMLButtonElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
+  /*
+   * The lessons install REAL plugins: the shelf below is the session's own,
+   * and the sidebar shows what the plugin loader made of it — the same
+   * computation the Library pane runs.
+   */
+  const installedPlugins = sessions[0]?.plugins ?? []
+  const pluginRail = loadedApp(installedPlugins, (name) => controller.commands.find(name) !== undefined).surface.rail
   // Transient save acknowledgement only; field values and progression live in the store.
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   const saveSequence = useRef(0)
   const runCommandGuide = (action: string, value?: string) => {
     const args = `${action}${value === undefined ? "" : ` ${JSON.stringify(value)}`}`
-    if (action === "next" && stage === 4) {
+    if (action === "next" && stage === 3) {
       const sequence = ++saveSequence.current
       setSaveStatus("saving")
       void controller.commands.run("onboarding.act", args).then(
@@ -212,16 +207,19 @@ export function GuideShell({ children }: { children: ReactNode }) {
             return
           }
           if (event.key === "Enter" && target?.closest("button, a")) return
-          if (stage === 5 && event.key.toLowerCase() === "r") {
+          if (stage === 4 && event.key.toLowerCase() === "r") {
             event.preventDefault()
             if (!event.repeat) runCommandGuide("wait-flow")
-          } else if (stage === 3 && event.key.toLowerCase() === "n") {
+          } else if (stage === 2 && event.key.toLowerCase() === "n") {
             event.preventDefault()
             if (!event.repeat) runCommandGuide("notify")
           } else if (event.key === "ArrowRight" || event.key === "Enter") {
             event.preventDefault()
             if (event.repeat) return
-            if (stage === 7 || stage === 15) runCommandOpen()
+            if (stage === 6 || stage === 14) runCommandOpen()
+            /* The plugin lessons finish with the real flows, not a tutorial action. */
+            else if (stage === 7) controller.runCommand("plugins")
+            else if (stage === 8) controller.runCommandArgs("plugins.install", LESSON_PLUGIN)
             else runCommandGuide(guideForwardAction(stage))
           } else if (event.key === "ArrowLeft" && stage > 0) {
             event.preventDefault()
@@ -249,33 +247,18 @@ export function GuideShell({ children }: { children: ReactNode }) {
       </div>
       <header className="guide-header">
         <span className="guide-location">
-          {stage < 8 ? "" : stage < 15 ? "Your first adventure" : "Your workspace"}
+          {stage < 7 ? "" : stage < 14 ? "Your first adventure" : "Your workspace"}
         </span>
 
       </header>
       <aside className="guide-sidebar" aria-label="Workspace sidebar">
         <SidebarRepositoryPicker />
       {guide.library && (
-        <nav aria-label="Installed capabilities">
+        <div className="guide-plugin-rail">
           <span className="guide-section-label">YOUR PLUGINS</span>
-          <button data-flow="flows" onClick={() => runCommandLive("flows")}>
-            <Library size={17} />
-            Library {keyHint("Tab ↵")}
-            <span className="guide-plugin-dot" />
-          </button>
-          {guide.librarian && (
-            <>
-              <button data-flow="wiki" onClick={() => runCommandLive("wiki")}>
-                <BookOpen size={17} />
-                Wiki {keyHint("Tab ↵")}
-              </button>
-              <button data-flow="history.show" onClick={() => runCommandLive("history.show")}>
-                <History size={17} />
-                Mythical history {keyHint("Tab ↵")}
-              </button>
-            </>
-          )}
-        </nav>
+          {/* Not a written list: what the installed plugins actually added. */}
+          <PluginRail entries={pluginRail} onOpen={runCommandLive} />
+        </div>
       )}
       </aside>
       <main className="guide-main">
@@ -310,13 +293,13 @@ export function GuideShell({ children }: { children: ReactNode }) {
                   className="guide-dialogue smithers-control"
                   data-message-step={messageStep}
                   data-current={messageStep === stage}
-                  data-controlled={messageStep === stage && (stage < 7 || stage === 10)}
+                  data-controlled={messageStep === stage && (stage < 6 || stage === 9)}
                 >
                   <div className="guide-speaker"><span />SMITHERS</div>
                   <p>
                     {message.split(" ").map((word, index, words) => {
                       const pauses = words.slice(0, index).filter(part => /[.!?]$/.test(part)).length
-                      const profileLastWord = messageStep === 4 && index === words.length - 1
+                      const profileLastWord = messageStep === 3 && index === words.length - 1
                       return <span
                         key={index}
                         className="guide-word"
@@ -336,7 +319,14 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </div>
             ))}
           </div>
-          {stage === 4 && profileMessageFinished && (
+          {stage === 6 && (
+            <GuideSteps
+              steps={[
+                <>Press <kbd className="guide-button-key">⌘ K</kbd> (or <kbd className="guide-button-key">Ctrl K</kbd>) and type a message to me</>,
+              ]}
+            />
+          )}
+          {stage === 3 && profileMessageFinished && (
             <form
               id="guide-profile"
               className="guide-form"
@@ -379,30 +369,30 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </p>
             </form>
           )}
-          {(stage === 8 || stage === 9) && (
-            <div className="guide-plugin-card">
-              <div className="guide-plugin-icon">{stage === 8 ? <Library /> : <BookOpen />}</div>
-              <div>
-                <h2>{stage === 8 ? "Library" : "Librarian"}</h2>
-                <p>
-                  {stage === 8 ? "Discover a new way to work." : "A guide to your codebase, always learning."}
-                </p>
-                <small>
-                  {stage === 8
-                    ? "Adds the plugin shelf to your workspace"
-                    : "Introduces Wiki + Mythical history"}
-                </small>
-              </div>
-              <span className="guide-tag">FIRST PARTY</span>
+          {stage === 7 && (
+            <GuideSteps
+              steps={[
+                <>Type <kbd className="guide-button-key">/plugins</kbd> in the composer and press <kbd className="guide-button-key">↵ Enter</kbd></>,
+              ]}
+            />
+          )}
+          {stage === 8 && (
+            <div className="guide-library">
+              {/* The real Library, the same one `/plugins` opens on your workspace. */}
+              <PluginGallery
+                installed={installedPlugins}
+                asked={LESSON_PLUGIN}
+                onInstall={(id) => controller.runCommandArgs("plugins.install", id)}
+              />
             </div>
           )}
-          {stage >= 8 && stage <= 14 && (
+          {stage >= 7 && stage <= 13 && (
             <p className="guide-practice-note">
-              ONBOARDING PREVIEW · Plugin activation is local. Repository runs begin only when you launch
-              them.
+              ONBOARDING PREVIEW · Plugins install on this workspace for real. Repository runs begin only
+              when you launch them.
             </p>
           )}
-          {stage === 10 && (
+          {stage === 9 && (
             <div className="guide-background-flows">
               {[
                 [BookOpen, "Build the wiki", "Read the code → connect concepts → write a living guide"],
@@ -427,8 +417,8 @@ export function GuideShell({ children }: { children: ReactNode }) {
               <p>These are the two proposed flows. No codebase is being processed in this rehearsal.</p>
             </div>
           )}
-          {(stage === 11 || stage === 12) && (
-            <div className="guide-prototype smithers-control" data-controlled={stage === 11}>
+          {(stage === 10 || stage === 11) && (
+            <div className="guide-prototype smithers-control" data-controlled={stage === 10}>
               <div className="guide-artifact-bar">
                 <span>
                   <span className="guide-status-dot" />
@@ -457,7 +447,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
                   ))}
                 </div>
               </div>
-              {stage === 12 && (
+              {stage === 11 && (
                 <label className="guide-edit-label">
                   Edit the heading
                   <input
@@ -476,7 +466,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               )}
             </div>
           )}
-          {stage === 13 && (
+          {stage === 12 && (
             <div className="guide-history">
               <div className="guide-artifact-bar">
                 <span>MYTH / practice change</span>
@@ -501,7 +491,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </p>
             </div>
           )}
-          {stage === 14 && (
+          {stage === 13 && (
             <div className="guide-pr">
               <GitPullRequest size={22} />
               <div>
@@ -534,7 +524,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
              * never re-animate or trade places with a retiring copy.
              */
           }
-          {stage === 15 && (
+          {stage === 14 && (
             <div className="guide-start-actions">
               {guide.acceptedPracticeTitle && <p className="guide-review-accepted"><Check size={14} /> Practice accepted: “{guide.acceptedPracticeTitle}”</p>}
               <button className="guide-primary" data-flow="connect" onClick={() => runCommandLive("connect")}>
@@ -563,29 +553,27 @@ export function GuideShell({ children }: { children: ReactNode }) {
                * morphing it in place: a pointer click that advances into the
                * profile lesson must not let the browser's activation behavior
                * submit the freshly-mounted form the same gesture became (one
-               * click was advancing 2 → 3 → 4 in a single gesture).
+                * click was advancing 1 → 2 → 3 in a single gesture).
                */
             }
             <Fragment key={stage}>
-            {stage === 3 && (
+            {stage === 2 && (
               <button className="guide-text-button" aria-keyshortcuts="N" data-flow="onboarding.act" onClick={() => runCommandGuide("notify")}>
                 Send me a notification {keyHint("N")}
               </button>
             )}
-            {stage === 5 && (
+            {stage === 4 && (
               <button className="guide-secondary" data-flow="onboarding.act" aria-keyshortcuts="R" disabled={guide.demoRun?.status === "running"} onClick={() => runCommandGuide("wait-flow")}>
                 Run a flow {keyHint("R")}
               </button>
             )}
-            {stage === 4 ? (profileMessageFinished && (
+            {stage === 3 ? (profileMessageFinished && (
               <button type="submit" form="guide-profile" aria-keyshortcuts="Enter ArrowRight" className="guide-primary" data-flow="onboarding.act">
                 Continue, with or without answers {keyHint()}
               </button>
             )) : stage === 1 ? (
               primary("Change theme", "dark")
-            ) : stage === 2 ? (
-              primary("Bring back the light", "light")
-            ) : stage === 7 ? (
+            ) : stage === 6 ? (
               <button
                 ref={opener}
                 className="guide-primary"
@@ -597,32 +585,48 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 {keyHint("⌘ K")}
                 {keyHint()}
               </button>
+            ) : stage === 7 ? (
+              <button
+                className="guide-primary"
+                data-flow="plugins"
+                aria-keyshortcuts="Enter ArrowRight"
+                onClick={() => controller.runCommand("plugins")}
+              >
+                Open the Library
+                {keyHint()}
+              </button>
             ) : stage === 8 ? (
-              primary("Install Library", "library")
-            ) : stage === 9 ? (
-              primary("Add Librarian", "librarian")
-            ) : stage === 12 ? (
+              <button
+                className="guide-primary"
+                data-flow="plugins.install"
+                aria-keyshortcuts="Enter ArrowRight"
+                onClick={() => controller.runCommandArgs("plugins.install", LESSON_PLUGIN)}
+              >
+                Install the Librarian
+                {keyHint()}
+              </button>
+            ) : stage === 11 ? (
               primary("Keep this direction", "revise")
-            ) : stage === 14 ? (
+            ) : stage === 13 ? (
               primary("Accept practice change", "accept-practice")
-            ) : stage === 15 ? null : (
+            ) : stage === 14 ? null : (
               primary(
                 stage === 0
                   ? "Let’s begin"
-                  : stage === 4
+                  : stage === 3
                     ? "Continue, with or without answers"
-                    : stage === 10
+                    : stage === 9
                       ? "Let’s make something"
-                      : stage === 11
+                      : stage === 10
                         ? "Try editing it"
-                        : stage === 13
+                        : stage === 12
                           ? "See the path to a PR"
-                          : stage === 14
+                          : stage === 13
                             ? "Take me to my workspace"
                             : "Continue",
               )
             )}
-            {stage > 0 && stage < 15 && (
+            {stage > 0 && stage < 14 && (
               <button
                 className="guide-back"
                 aria-keyshortcuts="ArrowLeft"
@@ -637,35 +641,6 @@ export function GuideShell({ children }: { children: ReactNode }) {
           </div>
         </section>
       </main>
-      <footer className="guide-footer">
-        <button
-          data-flow="onboarding.act"
-          onClick={runCommandSound}
-          aria-keyshortcuts="s"
-          aria-label={guide.sound ? "Mute tutorial sounds" : "Enable tutorial sounds"}
-        >
-          {guide.sound ? <Volume2 size={15} /> : <VolumeX size={15} />}
-          <span>Sound {guide.sound ? "on" : "off"}</span>
-          {keyHint("S")}
-        </button>
-        <div className="guide-progress" aria-label={`Lesson ${stage + 1} of 16`}>
-          {Array.from({ length: 16 }, (_, i) => (
-            <span key={i} data-passed={i <= stage} />
-          ))}
-        </div>
-        {stage >= 7 && (
-          <button ref={opener} data-flow="onboarding.act" onClick={runCommandOpen}>
-            <Command size={14} />
-            <span>Talk to Smithers</span>
-            {keyHint("⌘ K")}
-          </button>
-        )}
-        {stage === 15 && (
-          <button data-flow="onboarding.act" onClick={() => runCommandGuide("restart")}>
-            Replay introduction {keyHint("Tab ↵")}
-          </button>
-        )}
-      </footer>
       </div>
         <div
           className="guide-composer-dock"
@@ -682,6 +657,40 @@ export function GuideShell({ children }: { children: ReactNode }) {
           </section>
         </div>
         </div>
+      {/*
+       * The footer is the shell's last row, BELOW the composer dock: the dock
+       * grows between the workspace and this chrome, so the summoned composer
+       * always appears above the footer.
+       */}
+      <footer className="guide-footer">
+        <button
+          data-flow="onboarding.act"
+          onClick={runCommandSound}
+          aria-keyshortcuts="s"
+          aria-label={guide.sound ? "Mute tutorial sounds" : "Enable tutorial sounds"}
+        >
+          {guide.sound ? <Volume2 size={15} /> : <VolumeX size={15} />}
+          <span>Sound {guide.sound ? "on" : "off"}</span>
+          {keyHint("S")}
+        </button>
+        <div className="guide-progress" aria-label={`Lesson ${stage + 1} of 15`}>
+          {Array.from({ length: 15 }, (_, i) => (
+            <span key={i} data-passed={i <= stage} />
+          ))}
+        </div>
+        {stage >= 6 && (
+          <button ref={opener} data-flow="onboarding.act" onClick={runCommandOpen}>
+            <Command size={14} />
+            <span>Talk to Smithers</span>
+            {keyHint("⌘ K")}
+          </button>
+        )}
+        {stage === 14 && (
+          <button data-flow="onboarding.act" onClick={() => runCommandGuide("restart")}>
+            Replay introduction {keyHint("Tab ↵")}
+          </button>
+        )}
+      </footer>
       {toasts.length > 0 && (
         <aside className="guide-toasts" aria-label="Notifications">
           {toasts.map((toast) => (

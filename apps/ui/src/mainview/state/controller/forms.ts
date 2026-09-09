@@ -9,8 +9,8 @@ import type { CommandOutcome } from "../../flows/Commands"
 import { assembleArgs, draftFrom, formFieldsFor, missingFields, partialPayload } from "../../flows/FlowForms"
 import type { FieldOption, FieldValue, FormDraft, FormField, FormHints, OptionProvider } from "../../flows/FlowForms"
 import { payloadFor } from "../../flows/SlashPayload"
+import { manifests } from "../../plugins/catalog"
 import { actorSharedState } from "../ActorBindings"
-import { knownRepositories } from "../RepoContext"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 
@@ -166,6 +166,14 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
       }
       case "workspaces":
         return [...collections.cloudWorkspaces.values()].map((workspace) => ({ value: workspace.id, label: `${workspace.name} · ${workspace.status}` }))
+      case "plugins": {
+        const installed = store.session().plugins ?? []
+        return manifests().map((manifest) =>
+          installed.includes(manifest.id)
+            ? { value: manifest.id, label: manifest.name, disabled: true, reason: "already installed" }
+            : { value: manifest.id, label: manifest.name }
+        )
+      }
       case "agents":
         return roleMenuEntries(harnesses(), orderedAgentRoles([...collections.agents.values()])).map((entry) => ({
           value: entry.role.id,
@@ -218,12 +226,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const fields = formFieldsFor(input, hints)
     if (fields.length === 0) return undefined
     /* A line the grammar parses whole prefills exactly (agent.new's edit prefill); a line it refuses prefills what it can. */
-    const parsed = payloadFor(
-      request.name,
-      request.args,
-      (entry ?? ctx.commands.find(request.name))?.metadata.grammar,
-      knownRepositories(ctx.store)
-    )
+    const parsed = payloadFor(request.name, request.args, (entry ?? ctx.commands.find(request.name))?.metadata.grammar)
     const given = "payload" in parsed ? parsed.payload : partialPayload(fields, hints, request.args)
     const draft = draftFrom(fields, given)
     const resolved = withOptions(fields, draft)
@@ -356,7 +359,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const represented = new Set(card.payload.fields.map((field) => field.name))
     const unrepresented = Object.fromEntries(Object.entries(card.payload.given).filter(([name]) => !represented.has(name)))
     const args = assembleArgs(card.payload.fields, entry.metadata.form, { ...unrepresented, ...card.payload.draft })
-    const parsed = payloadFor(flow, args, entry.metadata.grammar, knownRepositories(ctx.store))
+    const parsed = payloadFor(flow, args, entry.metadata.grammar)
     if ("error" in parsed) {
       patch(card, { ...card.payload, error: parsed.error }, "error")
       return parsed.error

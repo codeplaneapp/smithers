@@ -20,7 +20,7 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await expect(page.locator('[data-message-step="1"]')).toContainText("I am more than a chat app. I control this entire UI.")
   await page.getByRole("button", { name: "Change theme" }).click()
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark")
-  await page.getByRole("button", { name: "Bring back the light" }).click()
+  /* One lesson, both themes: the demo holds dark, then returns to light on its own. */
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light")
   await page.getByRole("button", { name: "Send me a notification" }).click()
   await expect(page.getByText("You can keep working", { exact: true })).toBeVisible()
@@ -34,7 +34,7 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await page.getByLabel("What would you love to build?").focus()
   await page.reload()
   await expect(page.getByLabel("How did you hear about Smithers?")).toHaveValue('A friend called "Sam" ')
-  await expect(page.locator(".guide-transcript article")).toHaveCount(5)
+  await expect(page.locator(".guide-transcript article")).toHaveCount(4)
   await page.getByRole("button", { name: "Continue, with or without answers" }).click()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
@@ -43,9 +43,15 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await expect(page.getByRole("dialog").locator(".guide-summoned, .smithers-chat-message, .guide-dialogue")).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toBeHidden()
-  await page.getByRole("button", { name: "Install Library" }).click()
-  await expect(page.getByRole("navigation", { name: "Installed capabilities" })).toBeVisible()
-  await page.getByRole("button", { name: "Add Librarian" }).click()
+  await page.getByRole("button", { name: "Open the Library" }).click()
+  /* The lesson is finished by the real flow: opening the Library advances the guide. */
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "8")
+  /* The rail is honest: nothing installed yet, so it shows nothing. */
+  await expect(page.getByRole("navigation", { name: "Installed capabilities" })).toBeHidden()
+  /* The lesson's Library is the real one: this is the `plugins.install` flow. */
+  await expect(page.locator(".guide-library .plugin-card").first()).toHaveAttribute("data-plugin", "librarian")
+  await page.getByRole("button", { name: "Install the Librarian" }).click()
+  await expect(page.getByRole("button", { name: "Wiki" })).toBeVisible()
   await page.getByRole("button", { name: "Let’s make something" }).click()
   await page.getByRole("button", { name: "Try editing it" }).click()
   await page.getByLabel("Prototype heading").fill("A garden of possible futures")
@@ -72,7 +78,7 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toBeHidden()
   await page.reload()
-  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "15")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "14")
   await expect(page.getByTestId("composer-input")).toBeHidden()
 })
 
@@ -96,18 +102,18 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   const shell = page.locator(".guide-shell")
   await expect(shell).toHaveAttribute("data-step", "0")
   await expect(page.locator(".guide-actions .guide-primary .guide-button-key")).toHaveText("↵ Enter")
-  for (let step = 1; step <= 4; step++) {
+  for (let step = 1; step <= 3; step++) {
     await page.keyboard.press(step % 2 ? "Enter" : "ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
     await expect(page.locator(".guide-dialogue > p")).toHaveCount(step + 1)
-    if (step === 3) {
+    if (step === 2) {
       await expect(page.getByRole("button", { name: "Send me a notification" }).locator("kbd")).toHaveText("N")
       await page.keyboard.press("n")
       await expect(page.getByText("You can keep working", { exact: true })).toBeVisible()
-      await expect(shell).toHaveAttribute("data-step", "3")
+      await expect(shell).toHaveAttribute("data-step", "2")
     }
-    if (step < 15) {
+    if (step < 14) {
       await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
       await expect(page.locator(".guide-actions .guide-back .guide-button-key")).toHaveText("←")
     }
@@ -123,33 +129,33 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   await page.keyboard.press("ArrowLeft")
   await page.keyboard.type("!")
   await expect(page.getByLabel("How did you hear about Smithers?")).toHaveValue("A friend told m!e")
-  await expect(shell).toHaveAttribute("data-step", "4")
+  await expect(shell).toHaveAttribute("data-step", "3")
   await page.keyboard.press("Enter")
-  await expect(shell).toHaveAttribute("data-step", "5")
-  for (let step = 6; step <= 7; step++) {
+  await expect(shell).toHaveAttribute("data-step", "4")
+  for (let step = 5; step <= 6; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
     await expect(page.locator(".guide-dialogue > p")).toHaveCount(step + 1)
-    if (step < 15) {
+    if (step < 14) {
       await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
       await expect(page.locator(".guide-actions .guide-back .guide-button-key")).toHaveText("←")
     }
   }
   await page.keyboard.press("ArrowLeft")
-  await expect(shell).toHaveAttribute("data-step", "6")
+  await expect(shell).toHaveAttribute("data-step", "5")
   await page.keyboard.press("ArrowRight")
-  await expect(shell).toHaveAttribute("data-step", "7")
+  await expect(shell).toHaveAttribute("data-step", "6")
   await page.keyboard.press("Control+k")
   await expect(page.getByRole("dialog")).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toBeHidden()
-  for (let step = 9; step <= 15; step++) {
+  for (let step = 8; step <= 14; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
     await expect(page.locator(".guide-dialogue > p")).toHaveCount(step + 1)
-    if (step < 15) {
+    if (step < 14) {
       await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
       await expect(page.locator(".guide-actions .guide-back .guide-button-key")).toHaveText("←")
     }
@@ -175,7 +181,7 @@ test("Command K can replay the tutorial and reset a returning user", async ({ pa
   await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "0")
   await expect(page.getByTestId("composer-input")).toBeHidden()
   // Even the special Library greeting must keep the command input reachable.
-  for (let step = 1; step <= 7; step++) {
+  for (let step = 1; step <= 6; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", String(step))
   }
@@ -203,7 +209,7 @@ test("Command K can replay the tutorial and reset a returning user", async ({ pa
 test("the flow lesson runs a five-second flow from its keyboard button", async ({ page }) => {
   await page.goto("/")
   await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "0")
-  for (let step = 1; step <= 5; step++) {
+  for (let step = 1; step <= 4; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", String(step))
   }
@@ -218,7 +224,7 @@ test("the flow lesson runs a five-second flow from its keyboard button", async (
   await expect(page.locator('.guide-toast[data-toast-status="ok"]', { hasText: 'Done' })).toBeVisible({ timeout: 8000 })
   await expect(page.locator(".guide-actions")).not.toContainText("Done")
   expect(Date.now() - started).toBeGreaterThanOrEqual(5000)
-  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "5")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "4")
 })
 
 
@@ -229,7 +235,7 @@ test("Command K shows only the input and repository selection lives in the sideb
   await page.keyboard.press("Tab")
   await expect(sidebar.getByTestId("composer-repo-trigger")).toBeFocused()
   await page.keyboard.press("Enter")
-  await expect(sidebar.getByRole("menu", { name: "Repository connections" })).toBeVisible()
+  await expect(sidebar.getByRole("menu", { name: "Repositories" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(sidebar.getByTestId("composer-repo-trigger")).toBeFocused()
   const content = page.locator(".guide-content")
@@ -247,6 +253,12 @@ test("Command K shows only the input and repository selection lives in the sideb
     return Math.abs(workspace!.y + workspace!.height - dock!.y)
   }).toBeLessThan(1)
   await expect(page.locator(".guide-composer-dock")).toHaveCSS("background-color", "rgb(247, 246, 241)")
+  /* The dock grows between the workspace and the footer, never below it. */
+  await expect.poll(async () => {
+    const dock = await page.locator(".guide-composer-dock").boundingBox()
+    const footer = await page.locator(".guide-footer").boundingBox()
+    return dock!.y + dock!.height <= footer!.y + 1
+  }).toBe(true)
   await page.keyboard.press("Escape")
   await expect.poll(() => content.evaluate(node => node.getBoundingClientRect().height)).toBe(closedHeight)
   await expect(sidebar.getByTestId("composer-repo-trigger")).toBeFocused()
@@ -291,16 +303,16 @@ test("the profile form waits for the last word, then scrolls into view", async (
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/")
   await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "0")
-  for (let step = 1; step <= 3; step++) {
+  for (let step = 1; step <= 2; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", String(step))
   }
   // Hold the words mid-animation to prove the form follows completion, not a timer.
   await page.addStyleTag({ content: '.guide-word { animation-play-state: paused !important; }' })
   await page.keyboard.press("ArrowRight")
-  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "4")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "3")
   await expect(page.locator("#guide-profile")).toHaveCount(0)
-  const lastWord = page.locator('[data-message-step="4"] .guide-word').last()
+  const lastWord = page.locator('[data-message-step="3"] .guide-word').last()
   await expect(lastWord).toHaveCSS("animation-duration", "0.16s")
   await page.addStyleTag({ content: '.guide-word { animation-play-state: running !important; }' })
   await expect(page.locator("#guide-profile")).toBeVisible()
@@ -312,7 +324,7 @@ test("reduced motion reveals the profile form without waiting for animation", as
   await page.emulateMedia({ reducedMotion: "reduce" })
   await page.goto("/")
   await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "0")
-  for (let step = 1; step <= 4; step++) {
+  for (let step = 1; step <= 3; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", String(step))
   }

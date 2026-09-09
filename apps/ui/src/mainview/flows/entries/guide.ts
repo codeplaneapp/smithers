@@ -11,7 +11,7 @@ export const guideFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     handler: () => actions.debugReset() }),
   flow({
     name: "onboarding.act",
-    summary: "Guide the onboarding lesson, open or close the conversation, or update the optional profile",
+    summary: "Guide the onboarding lesson, open or close the conversation, update the optional profile, or end the tutorial (action finish)",
     args: "<action> [value]",
     input: Schema.Struct({ action: Schema.String, value: Schema.optional(Schema.String) }),
     handler: ({ action, value }) => actions.guideAct(action, value),

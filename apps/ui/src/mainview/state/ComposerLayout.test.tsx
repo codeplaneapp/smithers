@@ -450,7 +450,7 @@ describe("the composer's + menu and surface pill", () => {
 
     await view.act(() => byTestId(view.host, "composer-surface-trigger")?.click())
     const items = [...view.host.querySelectorAll<HTMLElement>(".composer-surfaces [role=\"menuitem\"]")]
-    expect(items.map((item) => item.dataset.flow)).toEqual(["chat", "connect", "wiki", "flows"])
+    expect(items.map((item) => item.dataset.flow)).toEqual(["chat", "connect", "wiki", "flows", "plugins"])
     await view.act(() => items[2]?.click())
     expect(store.session().surface).toBe("chat")
     expect(text(byTestId(view.host, "composer-surface-trigger"))).toBe("Chat")

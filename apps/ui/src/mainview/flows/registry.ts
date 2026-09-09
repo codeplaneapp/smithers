@@ -52,6 +52,7 @@ import * as issues from "./entries/issues"
 import * as linear from "./entries/linear"
 import * as notifications from "./entries/notifications"
 import * as palette from "./entries/palette"
+import * as plugins from "./entries/plugins"
 import * as prs from "./entries/prs"
 import * as repo from "./entries/repo"
 import * as repos from "./entries/repos"
@@ -176,8 +177,6 @@ export interface CatalogItem extends FlowMetadata {
  */
 export interface FlowEntry<R = never> {
   readonly binding: FlowBinding.Binding<R>
-  /** Controller promises observe FlowCancellation and must settle before the binding returns. */
-  readonly cooperativeCancellation?: boolean
   readonly metadata: FlowMetadata
   /** The flow's input schema, kept beside the binding so the form derives from it (the descriptor does not carry it). */
   readonly input: Schema.Top
@@ -296,9 +295,11 @@ export const unmetRequirements = (
 
 /** The app state the recommendation rule reads, sampled from the store. */
 export interface CommandState {
-  readonly surface: "chat" | "world" | "connectors" | "flows"
+  readonly surface: "chat" | "world" | "connectors" | "flows" | "plugins"
   readonly typing: boolean
   readonly hasConnectors: boolean
+  /** The plugins installed on this workspace (the session's shelf); optional so state fixtures stay minimal. */
+  readonly plugins?: ReadonlyArray<string>
   /** The validated session carries admin:true; the admin plugin registers only then. */
   readonly admin: boolean
   /** No validated session: the one next step is sign-in. */
@@ -344,7 +345,8 @@ export const recommendations: ReadonlyArray<Recommendation> = [
   ...chat.recommendations,
   ...auth.recommendations,
   ...wiki.recommendations,
-  ...connector.recommendations
+  ...connector.recommendations,
+  ...plugins.recommendations
 ]
 
 /**
@@ -365,14 +367,14 @@ export const recommendedNames = (state: CommandState): ReadonlyArray<string> => 
  * ── The namespace tree ─────────────────────────────────────────────────
  *
  * A flow's namespace is its dotted head (`auth.sign-in` → `auth`). Every
- * Namespaced flows live in one; the only bare names are the four surface
- * switches (`chat`, `wiki`, `connect`, `flows`), which ARE the top level of
- * the app and read wrong under any prefix. The hidden `world` alias of `wiki`
+ * Namespaced flows live in one; the only bare names are the surface
+ * switches (`chat`, `wiki`, `connect`, `flows`, `plugins`), which ARE the top
+ * level of the app and read wrong under any prefix. The hidden `world` alias of `wiki`
  * (entries/world.ts) never lists, so it needs no place here.
  */
 
 /** The surface switches: the one legitimate top-level leaves. */
-export const SURFACE_FLOWS: ReadonlyArray<string> = ["chat", "wiki", "connect", "flows"]
+export const SURFACE_FLOWS: ReadonlyArray<string> = ["chat", "wiki", "connect", "flows", "plugins"]
 
 export interface Namespace {
   readonly id: string
@@ -409,6 +411,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   files.namespace,
   search.namespace,
   palette.namespace,
+  plugins.namespace,
   branches.namespace,
   env.namespace,
   secrets.namespace,

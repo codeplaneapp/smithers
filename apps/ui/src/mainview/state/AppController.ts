@@ -16,8 +16,7 @@ import { localSocketProtocols } from "../runtime/LocalSession"
 import type { FrameHistoryPort } from "../runtime/FrameHistory"
 import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
-import { activeCatalogRepositoryId, activeRepositoryId, knownRepositories, resolveTargetRepo } from "./RepoContext"
-import type { KnownRepositories } from "./RepoContext"
+import { activeCatalogRepositoryId, activeRepositoryId, resolveTargetRepo } from "./RepoContext"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import { createSearchSeam } from "./seams/SearchSeam"
 import type { PaletteAnswer, SearchSeam } from "./seams/SearchSeam"
@@ -37,6 +36,7 @@ import { createControllerContext } from "./controller/context"
 import type { NetEntry } from "./controller/context"
 import { createFailureController } from "./controller/failures"
 import { createFramesController } from "./controller/frames"
+import { createPluginsController } from "./controller/plugins"
 import { createPresentationController } from "./controller/presentation"
 import { createExplainController } from "./controller/explain"
 import type { ExplainConfig, ExplainController } from "./controller/explain"
@@ -133,12 +133,6 @@ export interface AppController {
    * repository or before its projection has landed.
    */
   readonly repositoryFlows: () => RepositoryFlowCatalog | undefined
-  /**
-   * The repositories a trailing `owner/repo` token beside other text may
-   * name (RepoContext.ts knownRepositories): the slash grammar's check that
-   * `fix src/index.ts` keeps its path.
-   */
-  readonly knownRepositories: () => KnownRepositories
   readonly slashItems: (needle: string) => Array<SlashItem<CatalogItem>>
   readonly slashTree: (needle: string) => Array<SlashRow<CatalogItem>>
   readonly changeDraft: (draft: string) => void
@@ -149,6 +143,11 @@ export interface AppController {
   readonly showChat: () => void
   readonly showWorld: () => void
   readonly showConnectors: () => void
+  /** The Library: the plugin shelf this workspace browses and installs from. */
+  readonly showPlugins: () => void
+  readonly installPlugin: (id: string) => string | void
+  readonly removePlugin: (id: string) => string | void
+  readonly listPlugins: () => { readonly value: string }
   readonly askReset: () => void
   readonly cancelReset: () => void
   readonly runCommand: (name: string) => boolean
@@ -808,6 +807,7 @@ export const createAppController = (
     settleTurnBilling,
     watchIdentityAcrossTabs
   } = actors.pair(ctx, (context) => createAuthBillingController(context, nextTranscriptOrdinal))
+  const { showPlugins, installPlugin, removePlugin, listPlugins } = actors.pair(ctx, createPluginsController)
   const { downloadUrl, openDownload, promptDownload, introduce } = actors.pair(ctx, (context) => createAppShellController(context))
   const { storageRecoveryState, promptStorageRecovery, exportStorageRecovery } = actors.pair(ctx, createStorageRecoveryController)
 
@@ -1266,7 +1266,6 @@ export const createAppController = (
     exportStorageRecovery,
     bootstrap: services.bootstrap,
     repositoryFlows,
-    knownRepositories: () => knownRepositories(store),
     changeDraft,
     withAgentActor: <T>(work: () => Promise<T>): Promise<T> => work(),
     reset,
@@ -1278,6 +1277,10 @@ export const createAppController = (
     showChat,
     showWorld,
     showConnectors,
+    showPlugins,
+    installPlugin,
+    removePlugin,
+    listPlugins,
     connectLocalRepository,
     makeConnectorReadOnly,
     askConnectorRemoval,
@@ -1552,6 +1555,7 @@ export const createAppController = (
       const signedIn = identity?.state === "signed-in"
       return {
         surface: store.session().surface,
+        plugins: store.session().plugins ?? [],
         typing: store.session().phase === "responding",
         // Sign-in IS the GitHub connector (§2a′): a valid session means
         // work IS connected, so "connect" stops leading the next actions.
@@ -1621,7 +1625,6 @@ export const createAppController = (
     exportStorageRecovery,
     bootstrap: services.bootstrap,
     repositoryFlows,
-    knownRepositories: () => knownRepositories(store),
     downloadUrl,
     features,
     nativeAgentAvailable: agent.available,
@@ -1640,6 +1643,10 @@ export const createAppController = (
     showChat,
     showWorld,
     showConnectors,
+    showPlugins,
+    installPlugin,
+    removePlugin,
+    listPlugins,
     runCommand,
     runCommandArgs,
     connectLocalRepository,

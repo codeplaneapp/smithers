@@ -64,7 +64,22 @@ const bootProgram = () =>
         allowlisted: false,
         admin: false
       }))
+    } else if (bootstrap.host === "local") {
+      /*
+       * The local host never gates on sign-in (LOCAL-APP.md), and this read
+       * rides the remote identity seam through the local proxy — a slow or
+       * captive network held the whole boot on the session shell for as long
+       * as the upstream took. It runs beside the other inventory loads, never
+       * on the paint path: identity "unknown" is a first-class state the app
+       * already renders, and the answer lands in the store whenever it comes.
+       */
+      yield* Effect.sync(() => void controller.loadSession())
     } else {
+      /*
+       * The cloud host gates the transcript on the signed-out answer, so the
+       * probe stays on the boot path: awaiting it keeps the gate from flashing
+       * the opening read first. Same-origin on the Worker, never a proxy hop.
+       */
       yield* promiseEffect("load identity session", () => controller.loadSession())
     }
     if (runtime.backend.repositories !== undefined) {

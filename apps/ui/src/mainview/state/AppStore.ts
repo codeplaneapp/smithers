@@ -19,7 +19,6 @@ import { readSqliteRecovery, StorageRecoveryError } from "../chain/StorageRecove
 import type { RecoveryTable, StorageRecoverySnapshot, EnumerableRecoveryStorage } from "../chain/StorageRecovery"
 import { captureBrowserStorageRecovery, recoveryStorage } from "./BrowserStorageRecovery"
 import { createCollectionPersistence, durableCollectionOptions } from "../chain/DurableCollection"
-import type { DurableRowSink } from "../chain/DurableCollection"
 import { retiredLineageKey } from "../chain/LineageRetirement"
 import type { CollectionPersistence } from "../chain/DurableCollection"
 import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY, matchesStoredStringId, openTransactionalStorage } from "../chain/TransactionalStorage"
@@ -94,6 +93,7 @@ import type {
   Frame,
   FrameSnapshot,
   GitHubAppStatusRow,
+  GuideState,
   LinearIntegrationRow,
   LocalRepositoryConnector,
   Message,
@@ -276,8 +276,6 @@ export type PersistenceBackend =
     readonly close: () => Promise<void>
     /** Read on the owning connection, serialized with writes. Older injected hosts may refuse recovery. */
     readonly readRecovery?: () => Promise<ReadonlyArray<RecoveryTable>>
-    /** Normalized row writes. Older injected hosts only accept whole collections. */
-    readonly applyRows?: DurableRowSink["applyRows"]
   }
   | {
     readonly kind: "localStorage"
@@ -556,8 +554,7 @@ export const resolvePersistence = async (host: BrowserPersistenceHost = {
       abortBatch: sqlite.abortBatch,
       flush: sqlite.flush,
       close: sqlite.close,
-      readRecovery: sqlite.readRecovery,
-      applyRows: sqlite.applyRows
+      readRecovery: sqlite.readRecovery
     },
     mode: "opfs",
     degraded: false
@@ -787,6 +784,24 @@ const seed = async (collections: StoredCollections): Promise<void> => {
       collections.sessions.update(SESSION_ID, (draft) => {
         const target = draft as unknown as Record<string, unknown>
         for (const key of missing) target[key] = seed[key]
+      })
+    }
+    /*
+     * The 16-lesson build numbered the guide with the light lesson standing
+     * alone at step 2; the 15-lesson build folds it into the theme lesson, so
+     * every later lesson moved one down. A version-1 guide names its lesson
+     * in the old order — remap it once, by version, so a returning user lands
+     * on the lesson they were on (and a finished tutorial stays finished).
+     */
+    const persistedGuide = collections.sessions.get(SESSION_ID)?.guide
+    if (persistedGuide !== undefined && persistedGuide.version === 1) {
+      const remapped: GuideState = {
+        ...persistedGuide,
+        version: 2,
+        step: persistedGuide.step <= 1 ? persistedGuide.step : persistedGuide.step - 1
+      }
+      collections.sessions.update(SESSION_ID, (draft) => {
+        draft.guide = remapped
       })
     }
   }
@@ -1042,17 +1057,10 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     persistedLocally.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
     resolvedBackend = { ...resolvedBackend, storage: transactional.storage }
   }
-  /* A normalized host takes row deltas, so an append costs its own rows rather
-   * than the whole retained collection. Whole-collection JSON stays the
-   * localStorage envelope's format, and any host without row writes. */
-  const rowSink = resolvedBackend.kind === "opfs" && resolvedBackend.applyRows !== undefined
-    ? { applyRows: resolvedBackend.applyRows }
-    : undefined
   const collectionPersistence = createCollectionPersistence({
     storage: storageOf(resolvedBackend) ?? memoryStorage(),
     batch: resolvedBackend.kind === "opfs" ? resolvedBackend : transactional,
-    ...(resolvedBackend.kind === "opfs" ? { flush: resolvedBackend.flush } : {}),
-    ...(rowSink === undefined ? {} : { rows: rowSink })
+    ...(resolvedBackend.kind === "opfs" ? { flush: resolvedBackend.flush } : {})
   })
   const collectionBackend = { ...resolvedBackend, collectionPersistence }
   const collections = Object.fromEntries(
@@ -1761,15 +1769,6 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           })
           break
 
-        case "chain.lineage.retired": {
-          const id = retiredLineageKey(transition.lineageId)
-          if (!collections.retiredChainLineages.has(id)) collections.retiredChainLineages.insert({ id })
-          collections.sessions.update(SESSION_ID, (draft) => {
-            draft.revision = revision
-          })
-          break
-        }
-
         case "chain.event.appended":
           collections.chainEvents.insert({
             id: `chain-${transition.lineageId}-${transition.seq}`,
@@ -1825,6 +1824,25 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
         case "surface.changed":
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.surface = transition.surface
+            draft.revision = revision
+          })
+          break
+
+        /*
+         * The plugin shelf: installing twice is the same shelf, so the write
+         * is idempotent, and the order is the order a person added them.
+         */
+        case "plugin.installed":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            const installed = draft.plugins ?? []
+            if (!installed.includes(transition.plugin)) draft.plugins = [...installed, transition.plugin]
+            draft.revision = revision
+          })
+          break
+
+        case "plugin.removed":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.plugins = (draft.plugins ?? []).filter((plugin) => plugin !== transition.plugin)
             draft.revision = revision
           })
           break

@@ -24,6 +24,7 @@ import { createAppStore } from "../state/AppStore"
 import type { AppStore } from "../state/AppStore"
 import { modelInvocable, nameOf } from "./registry"
 import { PALETTE_ACTIONS_REASON, PALETTE_OPEN_REASON } from "./entries/palette"
+import { PLUGINS_USER_ONLY_REASON } from "./entries/plugins"
 import { WIKI_HEADING_USER_ONLY_REASON } from "./entries/wiki"
 import { STORAGE_RECOVERY_USER_ONLY_REASON } from "./StorageRecoveryFlow"
 
@@ -67,6 +68,7 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
   "workspace.rename.edit": "opening the inline editor is the human's gesture; the agent names the workspace with workspace.rename",
   "composer.add": "opening the composer's menu is the human's gesture",
   "palette.open": PALETTE_OPEN_REASON,
+  "plugins": PLUGINS_USER_ONLY_REASON,
   "palette.actions": PALETTE_ACTIONS_REASON,
   "target.filter": "the targets table's filter is the human's control; the agent lists targets with target.list",
   "target.select": "the targets table's row drawer is the human's control; the agent shows a target with target.open",

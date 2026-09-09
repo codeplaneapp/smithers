@@ -13,23 +13,14 @@
  * parsed is refused before the handler runs, which is why no handler below the
  * boundary contains an argument check.
  */
-import { splitRunSource, takesRunSource } from "./RunCommand"
 import { parseFileArgs } from "./FileArgs"
 import { isTraceFilter, TRACE_FILTER_IDS } from "../cards/RunTrace"
 import { splitTrailingRepo } from "../state/RepoContext"
-import type { KnownRepositories } from "../state/RepoContext"
 
 /** A parsed invocation, or the honest refusal that names what is missing. */
 export type Parsed =
   | { readonly payload: Record<string, unknown> }
   | { readonly error: string }
-
-/**
- * One flow's grammar: its slash text, and the repositories a trailing
- * `owner/repo` token beside other text may name (RepoContext.ts
- * splitTrailingRepo). Absent `known`, the token's shape alone decides.
- */
-export type Grammar = (args: string | undefined, known?: KnownRepositories) => Parsed
 
 const ok = (payload: Record<string, unknown>): Parsed => ({ payload })
 const no = (error: string): Parsed => ({ error })
@@ -53,15 +44,14 @@ const optional = (field: string, args: string | undefined): Parsed => {
 
 /** A repo-scoped flow that takes nothing but its optional `owner/repo` target. */
 const repoOnly = (name: string, args: string | undefined): Parsed => {
-  // This grammar only accepts a repository, including one not yet imported.
   const { rest, repo } = splitTrailingRepo(args)
   if (rest !== "") return no(`${name} takes just an owner/repo name`)
   return ok(repo === undefined ? {} : { repo })
 }
 
 /** A positive issue or pull-request number beside its optional repo. */
-const numbered = (args: string | undefined, reason: string, known?: KnownRepositories): Parsed => {
-  const { rest, repo } = splitTrailingRepo(args, known)
+const numbered = (args: string | undefined, reason: string): Parsed => {
+  const { rest, repo } = splitTrailingRepo(args)
   const number = Number(rest)
   if (!Number.isInteger(number) || number <= 0) return no(reason)
   return ok(repo === undefined ? { number } : { number, repo })
@@ -163,7 +153,7 @@ const numberedChangeRef = (name: string, field: string, what: string, args: stri
   return ok({ changeId, [field]: id })
 }
 
-const GRAMMAR: Readonly<Record<string, Grammar>> = {
+const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = {
   "appearance.theme": (args) => ok({ palette: args ?? "" }),
   "chat.send": (args) => required("text", args, "send needs the text to submit"),
   "chat.clear": (args) => trimmed(args) === "" ? NONE : trimmed(args) === "--summarize"
@@ -190,24 +180,24 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
    * any order: `by=`/`lineage=` name theirs, a trailing owner/repo names the
    * workspace, and the remaining positionals are [status] [flow].
    */
-  "runs.list": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "runs.list": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     const payload: Record<string, string> = {}
     const positional: Array<string> = []
     for (const token of tokensOf(rest)) {
-      const keyed = /^(by|lineage|sourceCard)=(.+)$/.exec(token)
+      const keyed = /^(by|lineage)=(.+)$/.exec(token)
       if (keyed !== null) payload[keyed[1]!] = keyed[2]!
       else positional.push(token)
     }
-    if (positional.length > 2) return no("runs.list takes [status] [flow] [by=…] [lineage=…] [sourceCard=…] [owner/repo]")
+    if (positional.length > 2) return no("runs.list takes [status] [flow] [by=…] [lineage=…] [owner/repo]")
     const [status, flow] = positional
     if (status !== undefined) payload["status"] = status
     if (flow !== undefined) payload["flow"] = flow
     if (repo !== undefined) payload["repo"] = repo
     return ok(payload)
   },
-  "runs.open": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "runs.open": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     const runId = rest.trim()
     if (runId === "" || /\s/.test(runId)) return no("runs.open needs a run id: /runs.open <runId> [owner/repo]")
     return ok(repo === undefined ? { runId } : { runId, repo })
@@ -335,8 +325,8 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
     if (repo === undefined) return no("Choose a repository for its Wiki.")
     return ok({ repo, ...(page === undefined ? {} : { page: Number(page) }) })
   },
-  "wiki.cloud.open": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "wiki.cloud.open": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     return rest === "" || repo === undefined ? no("Choose a Wiki page slug and repository.") : ok({ slug: rest, repo })
   },
   "wiki.sync": (args) => required("documentId", args, "wiki.sync needs the document id"),
@@ -366,20 +356,23 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
   "world.select": (args) => required("documentId", args, "world.select needs the document id"),
   "world.delete": (args) => required("documentId", args, "world.delete needs the document id"),
   "toast.dismiss": (args) => required("toastId", args, "toast.dismiss needs the toast id"),
+  /* The Library's two acts: one plugin id, the one the shelf lists. */
+  "plugins.install": (args) => required("plugin", args, "plugins.install needs a plugin id — /plugins lists them"),
+  "plugins.remove": (args) => required("plugin", args, "plugins.remove needs a plugin id — /plugins lists what is installed"),
   /* The flow the card names as absent; blank renders the generic "That is not in the web app". */
   "app.download.prompt": (args) => optional("flow", args),
   "repos.import": (args) => repoOnly("repos.import", args),
-  "issues.list": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "issues.list": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     const filter = rest === "" ? "open" : rest
     if (filter !== "open" && filter !== "closed" && filter !== "all") {
       return no("issues.list takes open, closed, or all")
     }
     return ok(repo === undefined ? { filter } : { filter, repo })
   },
-  "issues.view": (args, known) => numbered(args, "issues.view needs an issue number", known),
-  "issues.create": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "issues.view": (args) => numbered(args, "issues.view needs an issue number"),
+  "issues.create": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     if (rest === "") return no("issues.create needs a title")
     return ok(repo === undefined ? { title: rest } : { title: rest, repo })
   },
@@ -393,15 +386,15 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
   "repo.contribute": (args) => repoOnly("repo.contribute", args),
   "repo.explore": (args) => repoOnly("repo.explore", args),
   "repo.home": (args) => repoOnly("repo.home", args),
-  "feature.prototype": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "feature.prototype": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     if (rest === "") return no("feature.prototype needs what the feature should do")
     return ok(repo === undefined ? { request: rest } : { request: rest, repo })
   },
-  "issues.close": (args, known) => numbered(args, "issues.close needs an issue number", known),
-  "issues.reopen": (args, known) => numbered(args, "issues.reopen needs an issue number", known),
-  "issues.comment": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "issues.close": (args) => numbered(args, "issues.close needs an issue number"),
+  "issues.reopen": (args) => numbered(args, "issues.reopen needs an issue number"),
+  "issues.comment": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     const [head, ...tail] = rest.split(/\s+/)
     const number = Number(head)
     const text = tail.join(" ").trim()
@@ -410,9 +403,9 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
     return ok(repo === undefined ? { number, text } : { number, text, repo })
   },
   "prs.list": (args) => repoOnly("prs.list", args),
-  "prs.view": (args, known) => numbered(args, "prs.view needs a pull request number", known),
-  "prs.create": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "prs.view": (args) => numbered(args, "prs.view needs a pull request number"),
+  "prs.create": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     // The source bookmark rides as a `from:<name>` token anywhere in the text;
     // /branches.list shows the choices.
     const tokens = rest.split(/\s+/).filter((token) => token !== "")
@@ -429,9 +422,9 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
       ...(repo === undefined ? {} : { repo })
     })
   },
-  "prs.land": (args, known) => numbered(args, "prs.land needs a pull request number", known),
-  "prs.review": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "prs.land": (args) => numbered(args, "prs.land needs a pull request number"),
+  "prs.review": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     const [head, verdict, ...tail] = rest.split(/\s+/)
     const number = Number(head)
     if (!Number.isInteger(number) || number <= 0) return no("prs.review needs a pull request number")
@@ -450,8 +443,8 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
   },
   "billing.upgrade": (args) => optional("plan", args),
   "env.view": (args) => repoOnly("env.view", args),
-  "env.set": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "env.set": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     if (rest === "") return no("env.set needs a NAME=value pair")
     return ok(repo === undefined ? { assignment: rest } : { assignment: rest, repo })
   },
@@ -504,7 +497,7 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
    * token (a slug), with the workspace id trailing it.
    */
   "workspace.list": (args) => repoOnly("workspace.list", args),
-  "workspace.open": (args, known) => {
+  "workspace.open": (args) => {
     /*
      * ADR 0002: the kind IS the choice, so it rides the line as `--kind
      * <container|vm|desktop>` wherever the caller put it — the card's three
@@ -517,7 +510,7 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
     }
     const kind = flagged?.[1]
     const line = flagged === null ? args : (args ?? "").replace(flagged[0], " ")
-    const { rest, repo } = splitTrailingRepo(line, known)
+    const { rest, repo } = splitTrailingRepo(line)
     const bookmark = rest.trim()
     if (/\s/.test(bookmark)) return no("workspace.open takes a bookmark and optionally an owner/repo")
     return ok({
@@ -789,8 +782,8 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
   "github.reconcile": (args) => repoOnly("github.reconcile", args),
   "github.mirror-sync": (args) => repoOnly("github.mirror-sync", args),
   /* plue#491: the ref name is one token (it carries slashes) with the usual optional trailing repo. */
-  "github.mirror.retry-ref": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "github.mirror.retry-ref": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     if (rest === "" || /\s/.test(rest)) return no("github.mirror.retry-ref needs one ref name")
     return ok(repo === undefined ? { ref: rest } : { ref: rest, repo })
   },
@@ -798,8 +791,8 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
   "linear.connect": (args) => repoOnly("linear.connect", args),
   "linear.connect.open": (args) => repoOnly("linear.connect.open", args),
   "linear.connect.confirm": (args) => repoOnly("linear.connect.confirm", args),
-  "linear.connect.team": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "linear.connect.team": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     if (rest === "" || /\s/.test(rest)) return no("linear.connect.team needs the team id")
     return ok(repo === undefined ? { teamId: rest } : { teamId: rest, repo })
   },
@@ -824,8 +817,8 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
   "sync.retry": (args) => required("opId", args, "sync.retry needs an op id"),
   "sync.ops.show-more": (args) => required("cardId", args, "sync.ops.show-more needs the card id"),
   "sync.ops.load-older": (args) => required("cardId", args, "sync.ops.load-older needs the card id"),
-  "issues.link-linear": (args, known) => {
-    const { rest, repo } = splitTrailingRepo(args, known)
+  "issues.link-linear": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
     const [head, identifier, ...extra] = rest.split(/\s+/)
     const number = Number(head)
     if (!Number.isInteger(number) || number <= 0) return no("issues.link-linear needs an issue number")
@@ -834,9 +827,9 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
     }
     return ok(repo === undefined ? { number, identifier } : { number, identifier, repo })
   },
-  "issues.unlink-linear": (args, known) => {
+  "issues.unlink-linear": (args) => {
     /* `<n> <identifier> [owner/repo]`: the identifier typed back confirms; without it the seam names the exact invocation. */
-    const { rest, repo } = splitTrailingRepo(args, known)
+    const { rest, repo } = splitTrailingRepo(args)
     const [head, identifier, ...extra] = rest.split(/\s+/)
     const number = Number(head)
     if (!Number.isInteger(number) || number <= 0) return no("issues.unlink-linear needs an issue number")
@@ -1080,17 +1073,10 @@ const GRAMMAR: Readonly<Record<string, Grammar>> = {
 export const payloadFor = (
   name: string,
   args: string | undefined,
-  grammar?: Grammar,
-  known?: KnownRepositories
+  grammar?: (args: string | undefined) => Parsed
 ): Parsed => {
   const parse = GRAMMAR[name] ?? grammar
-  if (parse === undefined) return NONE
-  if (takesRunSource(name)) {
-    const source = splitRunSource(args)
-    const parsed = parse(source.args, known)
-    return "payload" in parsed && source.sourceCard !== undefined ? ok({ ...parsed.payload, sourceCard: source.sourceCard }) : parsed
-  }
-  return parse(args, known)
+  return parse === undefined ? NONE : parse(args)
 }
 
 /**
@@ -1098,4 +1084,4 @@ export const payloadFor = (
  * `owner/repo` target (a repository's flow leaf, entries/flow.ts): the table
  * above cannot name it, so the flow carries this as `metadata.grammar`.
  */
-export const repoTargetGrammar = (name: string): Grammar => (args) => repoOnly(name, args)
+export const repoTargetGrammar = (name: string) => (args: string | undefined): Parsed => repoOnly(name, args)

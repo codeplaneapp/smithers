@@ -61,6 +61,7 @@ import { issuesFlows, issuesLinearFlows } from "./entries/issues"
 import { linearFlows } from "./entries/linear"
 import { notificationsFlows } from "./entries/notifications"
 import { paletteFlows } from "./entries/palette"
+import { PLUGINS_USER_ONLY_REASON, pluginsFlows, pluginsSurfaceFlows } from "./entries/plugins"
 import { prsFlows } from "./entries/prs"
 import { repoFlows, repoOpenFlows, repoStarterFlows } from "./entries/repo"
 import { reposImportFlows, reposImportRetryFlows } from "./entries/repos"
@@ -109,6 +110,7 @@ export const USER_ONLY_VISIBLE: ReadonlyArray<{ readonly name: string; readonly 
   { name: "auth.sign-in", why: "the GitHub OAuth redirect yanks the page; the human clicks (auth.prompt is the agent's door)" },
   { name: "auth.sign-out", why: "drops the human's session; the human clicks" },
   { name: "flows", why: "surface switch: the model lists flows with flow.list, which answers as an embedded card" },
+  { name: "plugins", why: PLUGINS_USER_ONLY_REASON },
   { name: "palette.open", why: "focus and an overlay are the human's gesture; the model searches with the search.* flows, which answer the same rows as data" }
 ]
 
@@ -117,6 +119,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...wikiSurfaceFlows(actions),
   ...worldSurfaceFlows(actions),
   ...flowsSurfaceFlows(actions),
+  ...pluginsSurfaceFlows(actions),
   ...appearanceFlows(actions),
   ...chatSurfacesFlows(actions),
   ...debugVerboseFlows(actions),
@@ -180,6 +183,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...smithersFlows(actions),
   ...searchFlows(actions),
   ...paletteFlows(actions),
+  ...pluginsFlows(actions),
   ...guideFlows(actions)
 ]
 

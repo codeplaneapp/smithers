@@ -577,10 +577,10 @@ export const WIKI_DISPLAY_NAME = "Wiki"
 export const WIKI_GRAPH_ALL_SCOPE = "All"
 
 /*
- * A suggestion binds a pill directly to a flow and its optional arguments.
- * The ordered set is persisted in the current RecommendationSchema row.
- * controller/recommend.ts writes the rule's suggestions, then replaces them
- * with a validated server answer when available; App.tsx projects that row.
+ * Wave 10 (§2a/§2f) — pills are flow BINDINGS, never prompt strings: a
+ * suggestion carries the flow it invokes directly, and the suggestion set
+ * is DERIVED in App.tsx from live state (the genuinely-next step) — never
+ * fabricated, never stored.
  */
 export interface Suggestion {
   readonly id: string
@@ -655,7 +655,13 @@ export const isPalette = (value: string): value is Palette => (PALETTES as Reado
 export const GuideSchema = z.object({
   responseId: z.string().uuid().optional(),
   demoRun: z.object({ id: z.string(), status: z.enum(["running", "succeeded", "interrupted"]), startedAt: z.number(), finishedAt: z.number().optional() }).optional(),
-  version: z.literal(1),
+  /*
+   * Version 1 persisted the 16-lesson introduction, where the light lesson
+   * stood alone at step 2 and the scale ran to 15. Version 2 folds it into
+   * the theme lesson, so every later lesson moved one down. Both shapes stay
+   * readable; the store's seed remaps a version-1 guide once, by version.
+   */
+  version: z.union([z.literal(1), z.literal(2)]),
   playthrough: z.number().int().nonnegative().optional(),
   step: z.number().int().min(0).max(15),
   conversationOpen: z.boolean(),
@@ -669,7 +675,7 @@ export const GuideSchema = z.object({
   sound: z.boolean()
 })
 export type GuideState = z.infer<typeof GuideSchema>
-export const initialGuide = (): GuideState => ({ version: 1, step: 0, conversationOpen: false,
+export const initialGuide = (): GuideState => ({ version: 2, step: 0, conversationOpen: false,
   library: false, librarian: false, heard: "", project: "", prototypeTitle: "A little room for big ideas", revised: false, sound: false })
 
 export const SessionSchema = z.object({
@@ -688,7 +694,14 @@ export const SessionSchema = z.object({
   palette: z.enum(PALETTES).optional(),
   composerOwner: z.enum(["user", "smithers"]),
   /* The pane the chat shell has open beside the conversation ("flows": will, ask 5, 2026-09-02). */
-  surface: z.enum(["chat", "world", "connectors", "flows"]),
+  surface: z.enum(["chat", "world", "connectors", "flows", "plugins"]),
+  /*
+   * The plugins installed on this workspace, in the order a person added
+   * them. Optional (missing = none installed) so sessions persisted before
+   * the plugin shelf existed parse unchanged, the same discipline `palette`
+   * follows above.
+   */
+  plugins: z.array(z.string()).optional(),
   selectedWorldDocumentId: z.string().nullable(),
   /** The card currently maximized (a presentation transition; null = embedded). */
   maximizedCardId: z.string().nullable(),
@@ -1267,12 +1280,6 @@ export type AppTransition =
     result: string
   }
   | {
-    /* A failed background must remain dormant even if its journal is unreadable. */
-    type: "chain.lineage.retired"
-    actor: "system"
-    lineageId: string
-  }
-  | {
     /* One chain journal event appended; seq is per lineage (DESIGN.md §14). */
     type: "chain.event.appended"
     actor: "smithers" | "system"
@@ -1299,6 +1306,17 @@ export type AppTransition =
     type: "surface.changed"
     actor: Actor
     surface: Session["surface"]
+  }
+  /* A plugin is added to (or taken off) this workspace's shelf. */
+  | {
+    type: "plugin.installed"
+    actor: Actor
+    plugin: string
+  }
+  | {
+    type: "plugin.removed"
+    actor: Actor
+    plugin: string
   }
   | {
     type: "world.document.selected"
