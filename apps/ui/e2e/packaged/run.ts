@@ -214,6 +214,9 @@ const main = async (): Promise<void> => {
         "test",
         "src/bun/PackagedE2EBridge.test.ts",
         "e2e/packaged/FixtureRun.test.ts",
+        "e2e/packaged/PackagedApp.test.ts",
+        "e2e/packaged/bridge.test.ts",
+        "e2e/packaged/run.test.ts",
         "e2e/contracts"
       ]
     )
