@@ -91,6 +91,38 @@ describe("worker entry point", () => {
     )
 
     expect(response.status).toBe(503)
+    expect(String(errors.mock.calls[0]?.[0])).toContain("cause1.code=D1_READINESS_INVALID")
+    expect(String(errors.mock.calls[0]?.[0])).toContain("operation=health")
+  })
+
+  it("identifies corrupt D1 discriminators in request logs", async () => {
+    const worker = await load()
+    const corrupt = {
+      prepare: (sql: string) => ({
+        bind: () => ({ first: async () => sql.startsWith("INSERT") ? null : { result_json: '{ "ok": true }' } })
+      })
+    } as unknown as D1Database
+    const response = await worker.fetch(new Request("https://cache.test/ac/key", {
+      method: "PUT",
+      headers: { authorization: "Bearer entry-point-write-token", "content-type": "application/json" },
+      body: '{"ok":true}'
+    }), env({ CACHE_DATABASE: corrupt }))
+    expect(response.status).toBe(503)
+    expect(String(errors.mock.calls[0]?.[0])).toContain("cause1.code=D1_RESULT_NON_CANONICAL")
+    expect(String(errors.mock.calls[0]?.[0])).toContain("operation=actionCache.put")
+  })
+
+  it("identifies repeated R2 publication loss in request logs", async () => {
+    const worker = await load()
+    const digest = createHash("sha256").update("artifact").digest("hex")
+    const response = await worker.fetch(new Request(`https://cache.test/cas/${digest}`, {
+      method: "PUT",
+      headers: { authorization: "Bearer entry-point-write-token", "content-type": "application/octet-stream" },
+      body: "artifact"
+    }), env())
+    expect(response.status).toBe(503)
+    expect(String(errors.mock.calls[0]?.[0])).toContain("cause1.code=R2_PUBLICATION_LOST")
+    expect(String(errors.mock.calls[0]?.[0])).toContain("operation=contentStore.put")
   })
 
   it("counts every request under the presented credential's digest and refuses a spent budget", async () => {

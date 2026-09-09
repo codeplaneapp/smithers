@@ -3,6 +3,7 @@
  *
  * @since 0.1.0
  */
+import { CacheFailure } from "./cache-failure.ts"
 import {
   type ActionCache,
   type ActionCachePublication,
@@ -117,7 +118,11 @@ const assertObjectShape = (digest: string, object: R2Object): void => {
     object.size < 0 ||
     object.size > maxArtifactBodyBytes
   ) {
-    throw new Error("R2 returned an object outside the content-store invariant")
+    throw new CacheFailure(
+      "R2_OBJECT_INVALID",
+      "r2.validate",
+      "R2 returned an object outside the content-store invariant"
+    )
   }
 }
 
@@ -141,7 +146,7 @@ const contentChecksumFault = (digest: string, object: R2Object): string | null =
 const assertContentObject = (digest: string, object: R2Object): void => {
   assertObjectShape(digest, object)
   const fault = contentChecksumFault(digest, object)
-  if (fault !== null) throw new Error(fault)
+  if (fault !== null) throw new CacheFailure("R2_CHECKSUM_INVALID", "r2.validate", fault)
 }
 
 /**
@@ -168,15 +173,19 @@ const validateStoredResult = (value: unknown): string => {
   if (
     typeof value !== "string" ||
     new TextEncoder().encode(value).byteLength > maxCanonicalJsonBytes
-  ) throw new Error("D1 returned an invalid action-cache discriminator")
-  let parsed: unknown
+  ) throw new CacheFailure("D1_RESULT_INVALID", "actionCache.put", "D1 returned an invalid action-cache discriminator")
+  let canonical: string
   try {
-    parsed = JSON.parse(value) as unknown
+    canonical = canonicalJson(JSON.parse(value) as unknown)
   } catch {
-    throw new Error("D1 returned an invalid action-cache discriminator")
+    throw new CacheFailure("D1_RESULT_INVALID", "actionCache.put", "D1 returned an invalid action-cache discriminator")
   }
-  if (canonicalJson(parsed) !== value) {
-    throw new Error("D1 returned a non-canonical action-cache discriminator")
+  if (canonical !== value) {
+    throw new CacheFailure(
+      "D1_RESULT_NON_CANONICAL",
+      "actionCache.put",
+      "D1 returned a non-canonical action-cache discriminator"
+    )
   }
   return value
 }
@@ -278,7 +287,7 @@ export const makeActionCache = (database: D1Database): ActionCache => ({
         return validateStoredResult(stored.result_json) === publication.resultJson ? "identical" : "conflict"
       }
     }
-    throw new Error("action-cache publication lost its row repeatedly")
+    throw new CacheFailure("D1_PUBLICATION_LOST", "actionCache.put", "action-cache publication lost its row repeatedly")
   },
   async delete(keyDigest, fence) {
     const row = fence === null
@@ -354,12 +363,22 @@ export const makeContentStore = (bucket: R2Bucket): ContentStore => ({
         // unconditional write is a deterministic repair. A concurrent repair
         // writes the same bytes and checksum and is therefore harmless.
         const repaired = await bucket.put(digest, bytes, options)
-        if (repaired === null) throw new Error("R2 did not return the repaired content object")
+        if (repaired === null) {
+          throw new CacheFailure(
+            "R2_REPAIR_MISSING",
+            "contentStore.put",
+            "R2 did not return the repaired content object"
+          )
+        }
         assertContentObject(digest, repaired)
         return "inserted"
       }
     }
-    throw new Error("R2 conditional publication lost its object repeatedly")
+    throw new CacheFailure(
+      "R2_PUBLICATION_LOST",
+      "contentStore.put",
+      "R2 conditional publication lost its object repeatedly"
+    )
   },
   async presentDigests(digests) {
     const present = new Set<string>()
@@ -446,7 +465,9 @@ const makeHealth = (database: D1Database, bucket: R2Bucket) => async (): Promise
     database.prepare("SELECT 1 AS ok").first<HealthRow>(),
     bucket.head(healthObjectKey)
   ])
-  if (row?.ok !== 1) throw new Error("D1 readiness check did not return its sentinel")
+  if (row?.ok !== 1) {
+    throw new CacheFailure("D1_READINESS_INVALID", "health", "D1 readiness check did not return its sentinel")
+  }
 }
 
 type CacheHandler = ReturnType<typeof createHandler>
@@ -492,7 +513,9 @@ const worker = {
     } catch (cause) {
       // The allowlisted diagnostic is the record; the rethrown failure is what
       // makes Cloudflare retry the invocation without repeating the cause.
-      console.error(describeFailure(cause))
+      console.error(
+        describeFailure(new CacheFailure("RETENTION_FAILED", "retention", "scheduled retention failed", { cause }))
+      )
       throw new Error("scheduled retention failed")
     }
   }

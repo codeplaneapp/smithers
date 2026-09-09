@@ -97,6 +97,13 @@ export interface RedactionTargets {
  * Without a directory the run walks {@link defaultStateDirectory}; without a
  * token every credential this service can be deployed with is read from the
  * environment. Every option is read as plain data, so an accessor never runs.
+ * The directory must be absolute. This resolver does no filesystem access;
+ * {@link redactAlchemyState} checks that the resolved root is canonical and
+ * contains no symbolic links.
+ *
+ * @returns The directory, permitted sentinel/verifier values, and optional ownership.
+ * @throws {TypeError} For invalid options, a relative directory, invalid ownership,
+ * or the redaction sentinel supplied as a bearer token.
  *
  * @category constructors
  * @since 0.1.0
@@ -643,6 +650,24 @@ const discoverWorkerStates = async (root: string): Promise<ReadonlyArray<string>
  * the environment and native binding representations are treated as secrets
  * regardless of their declared type, and an unreadable credential shape is
  * refused rather than reported clean.
+ *
+ * Options default as described by {@link resolveRedactionOptions}. The directory
+ * must be absolute and resolve to a canonical directory without symbolic links.
+ * Each file is published independently: rejection can follow earlier file
+ * replacements and does not roll them back.
+ *
+ * @returns The count of changed files, or zero when the directory is missing
+ * or all discovered Worker state is already clean.
+ * @throws {TypeError} Rejects invalid options, unsafe paths or state shapes,
+ * or ownership for a different directory.
+ * @throws {RangeError} Rejects state exceeding discovery, JSON, or byte bounds.
+ * Changed file identities, filesystem, and ownership failures also reject
+ * the promise.
+ * @example
+ * ```ts
+ * const changed = await redactAlchemyState({ directory: "/srv/smithers/.alchemy/state/build" })
+ * console.log(`Redacted ${changed} Worker state file(s).`)
+ * ```
  *
  * @category security
  * @since 0.1.0

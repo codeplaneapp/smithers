@@ -5,6 +5,7 @@
  */
 
 import { isRecord } from "@smthrs/canonical/Record"
+import { CacheFailure } from "./cache-failure.ts"
 
 const hexDigest = /^[0-9a-f]{64}$/
 const jsonContentType = /^application\/(?:[a-z0-9!#$&^_.+-]+\+)?json$/
@@ -190,8 +191,8 @@ export interface DeleteFence {
  * One validated action-cache publication.
  *
  * `body` is the exact JSON text supplied by the client. `resultJson` is a
- * canonical conflict discriminator: the entry's `result` member when it has
- * one, or the entire JSON value for the CLI's `CachedResult` shape.
+ * canonical conflict discriminator: `result` only when the document has both
+ * own `keyDigest` and `result` properties; otherwise the entire JSON document.
  *
  * The service stores the publication verbatim and does not index the
  * artifacts it declares. Nothing consumed the reference list this type once
@@ -289,6 +290,11 @@ export interface CredentialBudget {
 /**
  * Dependencies for the remote-cache protocol handler.
  *
+ * Supply an inspectable plain record of enumerable data properties. Store
+ * methods are captured at construction. Credential hashes must be distinct
+ * lowercase SHA-256 digests. Invalid configuration throws `TypeError` from
+ * {@link createHandler}; dependency failures during requests produce `503`.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -313,7 +319,9 @@ export interface ProtocolDependencies {
    * apply; the deployed Worker always configures one.
    */
   readonly credentialBudget?: CredentialBudget
+  /** Readiness probe; defaults to an async no-op. Rejection makes `/healthz` return `503`. */
   readonly health?: (signal?: AbortSignal) => Promise<void>
+  /** Integer from 1 through 16 MiB; defaults to {@link maxArtifactBodyBytes}. */
   readonly maxArtifactBytes?: number
 }
 
@@ -405,7 +413,7 @@ const boundedWait = <A>(
     const stop = (): void => {
       settled = true
       cleanup()
-      reject(new Error("cache operation cancelled or timed out"))
+      reject(new CacheFailure("OPERATION_STOPPED", "wait", "cache operation cancelled or timed out"))
       controller.abort()
     }
     const abort = (): void => stop()
@@ -442,6 +450,7 @@ const boundedWait = <A>(
  * cannot accumulate unlimited abandoned work or publication buffers.
  */
 const boundedOperation = <Args extends Array<unknown>, A>(
+  name: CacheFailure["operation"],
   operation: (...args: [...Args, AbortSignal?]) => Promise<A>,
   maximum: number,
   discard?: (value: A) => void
@@ -450,7 +459,9 @@ const boundedOperation = <Args extends Array<unknown>, A>(
   return (signal, ...args) =>
     boundedWait(
       async (cancellation) => {
-        if (active >= maximum) throw new Error("cache dependency is still occupied")
+        if (active >= maximum) {
+          throw new CacheFailure("DEPENDENCY_OCCUPIED", "wait", "cache dependency is still occupied")
+        }
         active += 1
         try {
           const value = await operation(...args, cancellation)
@@ -462,7 +473,9 @@ const boundedOperation = <Args extends Array<unknown>, A>(
       },
       signal,
       dependencyMilliseconds
-    )
+    ).catch((cause: unknown) => {
+      throw new CacheFailure("DEPENDENCY_FAILED", name, "cache dependency failed", { cause })
+    })
 }
 
 const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
@@ -780,34 +793,36 @@ export const invalidKeyDigest = (keyDigest: string): string | null => {
 
 const validateStoredActionBody = (keyDigest: string, body: unknown): string => {
   if (typeof body !== "string" || utf8Bytes(body) > maxActionCacheBodyBytes) {
-    throw new Error("action cache returned an invalid stored body")
+    throw new CacheFailure("AC_BODY_INVALID", "actionCache.get", "action cache returned an invalid stored body")
   }
   let value: unknown
   try {
     value = JSON.parse(body) as unknown
     canonicalJson(value)
   } catch {
-    throw new Error("action cache returned invalid stored JSON")
+    throw new CacheFailure("AC_JSON_INVALID", "actionCache.get", "action cache returned invalid stored JSON")
   }
   if (isRecord(value) && Object.hasOwn(value, "keyDigest") && value["keyDigest"] !== keyDigest) {
-    throw new Error("action cache returned a row for a different key")
+    throw new CacheFailure("AC_KEY_MISMATCH", "actionCache.get", "action cache returned a row for a different key")
   }
   return body
 }
 
 const validatedContentBody = (object: unknown): BodyInit => {
-  if (!isRecord(object)) throw new Error("content store returned an invalid object")
+  if (!isRecord(object)) {
+    throw new CacheFailure("CAS_OBJECT_INVALID", "contentStore.get", "content store returned an invalid object")
+  }
   const descriptor = Object.getOwnPropertyDescriptor(object, "body")
   if (
     descriptor === undefined || !("value" in descriptor) || descriptor.value === null || descriptor.value === undefined
   ) {
-    throw new Error("content store returned an invalid object body")
+    throw new CacheFailure("CAS_BODY_INVALID", "contentStore.get", "content store returned an invalid object body")
   }
   return descriptor.value as BodyInit
 }
 
-/** Extracts only artifacts the engine's declared-output boundary references. */
-const referencedDigests = (record: Record<string, unknown>): ReadonlyArray<string> => {
+/** Validates declared outputs and bounds their unique artifact digests. */
+const assertDeclaredOutputsValid = (record: Record<string, unknown>): void => {
   const outputs = (
     record["meta"] as
       | {
@@ -816,7 +831,7 @@ const referencedDigests = (record: Record<string, unknown>): ReadonlyArray<strin
       | null
       | undefined
   )?.boundary?.declaredOutputs?.outputs
-  if (outputs === undefined) return []
+  if (outputs === undefined) return
   if (!Array.isArray(outputs)) throw new Error("declared outputs must be an array")
   const references = new Set<string>()
   for (const output of outputs) {
@@ -828,7 +843,6 @@ const referencedDigests = (record: Record<string, unknown>): ReadonlyArray<strin
     references.add(output["digest"])
     if (references.size > maxReferencedDigests) throw new Error("publication references too many artifacts")
   }
-  return [...references]
 }
 
 const readPublication = async (request: Request, keyDigest: string): Promise<PublicationRead> => {
@@ -845,11 +859,11 @@ const readPublication = async (request: Request, keyDigest: string): Promise<Pub
   const enveloped = record !== null && Object.hasOwn(record, "keyDigest") && Object.hasOwn(record, "result")
   let resultJson: string
   try {
-    canonicalJson(parsed.value)
-    resultJson = canonicalJson(enveloped ? record["result"] : parsed.value)
+    const documentJson = canonicalJson(parsed.value)
+    resultJson = enveloped ? canonicalJson(record["result"]) : documentJson
     // The two deployments serve one protocol. The self-hosted tier refcounts
     // references that this tier only stores, so both tiers validate them.
-    if (enveloped) referencedDigests(record)
+    if (enveloped) assertDeclaredOutputsValid(record)
   } catch {
     return {
       ok: false,
@@ -985,7 +999,11 @@ const handleActionCache = async (
     if (result === "inserted") return json(201, { keyDigest })
     if (result === "identical") return empty(200)
     if (result === "conflict") return empty(409)
-    throw new Error("action cache returned an invalid publication outcome")
+    throw new CacheFailure(
+      "AC_PUBLICATION_INVALID",
+      "actionCache.put",
+      "action cache returned an invalid publication outcome"
+    )
   }
   if (request.method === "DELETE") {
     await discardBody(request.body)
@@ -1020,7 +1038,13 @@ const handleActionCache = async (
       fence = { runId, eventSeq: parsedEventSeq }
     }
     const deleted = await actionCache.delete(keyDigest, fence, request.signal)
-    if (typeof deleted !== "boolean") throw new Error("action cache returned an invalid deletion outcome")
+    if (typeof deleted !== "boolean") {
+      throw new CacheFailure(
+        "AC_DELETION_INVALID",
+        "actionCache.delete",
+        "action cache returned an invalid deletion outcome"
+      )
+    }
     return empty(deleted ? 200 : 404)
   }
   await discardBody(request.body)
@@ -1040,7 +1064,13 @@ const handleArtifact = async (
   if (request.method === "HEAD") {
     await discardBody(request.body)
     const present = await contentStore.has(digest, request.signal)
-    if (typeof present !== "boolean") throw new Error("content store returned an invalid presence outcome")
+    if (typeof present !== "boolean") {
+      throw new CacheFailure(
+        "CAS_PRESENCE_INVALID",
+        "contentStore.has",
+        "content store returned an invalid presence outcome"
+      )
+    }
     return empty(present ? 200 : 404)
   }
   if (request.method === "GET") {
@@ -1076,7 +1106,11 @@ const handleArtifact = async (
     const result = await contentStore.put(digest, body.bytes, request.signal)
     if (result === "inserted") return empty(201)
     if (result === "present") return empty(200)
-    throw new Error("content store returned an invalid publication outcome")
+    throw new CacheFailure(
+      "CAS_PUBLICATION_INVALID",
+      "contentStore.put",
+      "content store returned an invalid publication outcome"
+    )
   }
   await discardBody(request.body)
   return methodNotAllowed("GET, HEAD, PUT")
@@ -1150,11 +1184,21 @@ const handleFindMissing = async (
   // its promise was pending could otherwise put a digest the client never
   // asked for into `missing`.
   const present = await contentStore.presentDigests(Object.freeze([...requested]), request.signal)
-  if (!(present instanceof Set)) throw new Error("content store returned an invalid digest set")
+  if (!(present instanceof Set)) {
+    throw new CacheFailure(
+      "CAS_DIGEST_SET_INVALID",
+      "contentStore.presentDigests",
+      "content store returned an invalid digest set"
+    )
+  }
   const requestedSet = new Set(requested)
   for (const digest of present) {
     if (typeof digest !== "string" || !requestedSet.has(digest)) {
-      throw new Error("content store returned a digest outside the request")
+      throw new CacheFailure(
+        "CAS_DIGEST_UNREQUESTED",
+        "contentStore.presentDigests",
+        "content store returned a digest outside the request"
+      )
     }
   }
   return json(200, {
@@ -1164,12 +1208,10 @@ const handleFindMissing = async (
 
 const diagnosticName = /^[A-Za-z][A-Za-z0-9_$]{0,39}$/
 const diagnosticCode = /^[A-Za-z0-9_.-]{1,32}$/
+const diagnosticOperation =
+  /^(?:actionCache\.(?:get|put|delete)|contentStore\.(?:get|has|put|presentDigests)|credentialBudget\.charge|health|wait|r2\.validate|retention)$/
 
-const diagnosticTag = (
-  cause: object,
-  field: "code" | "errno" | "name" | "syscall",
-  shape: RegExp
-): string | null => {
+const diagnosticValue = (cause: object, field: string): unknown => {
   let current: object | null = cause
   let value: unknown
   for (let depth = 0; current !== null && depth < 16; depth += 1) {
@@ -1185,12 +1227,20 @@ const diagnosticTag = (
       return null
     }
   }
+  return value
+}
+
+const diagnosticTag = (cause: object, field: string, shape: RegExp): string | null => {
+  const value = diagnosticValue(cause, field)
   if (typeof value === "number") return Number.isSafeInteger(value) ? String(value) : null
   return typeof value === "string" && shape.test(value) ? value : null
 }
 
 /**
- * Renders a failure as an allowlisted diagnostic that cannot carry a secret.
+ * Renders bounded diagnostic fields without provider messages or request data.
+ *
+ * Operations are restricted to fixed internal names. At most four nested
+ * causes contribute format-allowlisted codes; accessors are never invoked.
  *
  * @category utilities
  * @since 0.1.0
@@ -1200,12 +1250,20 @@ export const describeFailure = (cause: unknown): string => {
   if (typeof cause !== "object" || cause === null) {
     return `smithers build cache: request failed (kind=${cause === null ? "null" : kind})`
   }
+  const operation = diagnosticValue(cause, "operation")
   const tags = [
     ["name", diagnosticTag(cause, "name", diagnosticName)],
     ["code", diagnosticTag(cause, "code", diagnosticCode)],
+    ["operation", typeof operation === "string" && diagnosticOperation.test(operation) ? operation : null],
     ["errno", diagnosticTag(cause, "errno", diagnosticCode)],
     ["syscall", diagnosticTag(cause, "syscall", diagnosticCode)]
   ].filter((tag): tag is [string, string] => tag[1] !== null)
+  let nested = diagnosticValue(cause, "cause")
+  for (let depth = 1; depth <= 4 && typeof nested === "object" && nested !== null; depth += 1) {
+    const code = diagnosticTag(nested, "code", diagnosticCode)
+    if (code !== null) tags.push([`cause${depth}.code`, code])
+    nested = diagnosticValue(nested, "cause")
+  }
   const attribution = tags.length === 0
     ? "unattributed"
     : tags.map((tag) => `${tag[0]}=${tag[1]}`).join(" ")
@@ -1373,6 +1431,18 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
  *
  * The returned function owns its admission counters and readiness cache, so a
  * production caller must retain it for the lifetime of one Worker isolate.
+ * `maxArtifactBytes` defaults to 16 MiB, `health` to an async no-op, and an
+ * omitted credential budget admits every request within the isolate limits.
+ *
+ * @returns An async `(request: Request) => Promise<Response>` handler. Storage
+ * failures are logged with safe diagnostics and answered with a generic `503`.
+ * @throws {TypeError} Synchronously for invalid dependency records or methods,
+ * invalid or identical credential hashes, or an artifact limit outside 1..16777216.
+ * @example
+ * ```ts
+ * const handle = createHandler({ actionCache, contentStore, readTokenHash, writeTokenHash })
+ * const response = await handle(new Request("https://cache.example/healthz"))
+ * ```
  *
  * @category constructors
  * @since 0.1.0
@@ -1380,32 +1450,46 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
 export const createHandler = (dependencies: ProtocolDependencies) => {
   const normalized = normalizeDependencies(dependencies)
   const { maxArtifactBytes, readTokenHash, writeTokenHash } = normalized
-  const actionGet = boundedOperation<[string], string | null>(normalized.actionCache.get, maxConcurrentCacheRequests)
+  const actionGet = boundedOperation<[string], string | null>(
+    "actionCache.get",
+    normalized.actionCache.get,
+    maxConcurrentCacheRequests
+  )
   const actionPut = boundedOperation<[string, ActionCachePublication], Publication>(
+    "actionCache.put",
     normalized.actionCache.put,
     maxConcurrentActionCachePublications
   )
   const actionDelete = boundedOperation<[string, DeleteFence | null], boolean>(
+    "actionCache.delete",
     normalized.actionCache.delete,
     maxConcurrentCacheRequests
   )
   const contentGet = boundedOperation<[string], ContentObject | null>(
+    "contentStore.get",
     normalized.contentStore.get,
     maxConcurrentArtifactTransfers,
     (object) => {
       if (object?.body instanceof ReadableStream) void discardBody(object.body)
     }
   )
-  const contentHas = boundedOperation<[string], boolean>(normalized.contentStore.has, maxConcurrentCacheRequests)
+  const contentHas = boundedOperation<[string], boolean>(
+    "contentStore.has",
+    normalized.contentStore.has,
+    maxConcurrentCacheRequests
+  )
   const contentPut = boundedOperation<[string, Uint8Array<ArrayBuffer>], "inserted" | "present">(
+    "contentStore.put",
     normalized.contentStore.put,
     maxConcurrentArtifactTransfers
   )
   const contentPresent = boundedOperation<[ReadonlyArray<string>], ReadonlySet<string>>(
+    "contentStore.presentDigests",
     normalized.contentStore.presentDigests,
     maxConcurrentFindMissingRequests
   )
   const budgetCharge = boundedOperation<[string, CredentialBudgetRoute], boolean>(
+    "credentialBudget.charge",
     normalized.credentialBudget.charge,
     maxConcurrentCacheRequests
   )
@@ -1420,7 +1504,7 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
       throw cause
     }
   }
-  const health = boundedOperation<[], void>(normalized.health, 1)
+  const health = boundedOperation<[], void>("health", normalized.health, 1)
   const actionCache: ActionCache = {
     get: (key, signal) => actionGet(signal, key),
     put: (key, publication, signal) => actionPut(signal, key, publication),
@@ -1451,7 +1535,7 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
   } | null = null
   let lastHealthyAt = Number.NEGATIVE_INFINITY
   const ready = async (signal: AbortSignal): Promise<void> => {
-    if (signal?.aborted === true) throw new Error("readiness request cancelled")
+    if (signal?.aborted === true) throw new CacheFailure("READINESS_CANCELLED", "health", "readiness request cancelled")
     const now = performance.now()
     if (now >= lastHealthyAt && now - lastHealthyAt < healthCacheMilliseconds) return
     if (healthInFlight === null) {

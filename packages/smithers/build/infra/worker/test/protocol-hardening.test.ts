@@ -1358,6 +1358,74 @@ describe("remote-cache hardening", () => {
     await expect(response.json()).resolves.toEqual({ error: "request URL is malformed" })
   })
 
+  it("validates declared digests without materializing an unused reference array", async () => {
+    const handler = makeHandler()
+    const digest = "d".repeat(64)
+    const publication = jsonRequest(`/ac/${keyDigest}`, {
+      keyDigest,
+      result: { ok: true },
+      meta: { boundary: { declaredOutputs: { outputs: [{ digest }] } } }
+    }, { method: "PUT" })
+    const iterate = vi.spyOn(Set.prototype, Symbol.iterator)
+    try {
+      expect((await handler(publication)).status).toBe(201)
+      expect(iterate.mock.contexts.filter((set) => set instanceof Set && set.size === 1 && set.has(digest))).toHaveLength(0)
+    } finally {
+      iterate.mockRestore()
+    }
+  })
+
+  it("canonicalizes a bare publication only once", async () => {
+    const handler = makeHandler()
+    const publication = jsonRequest(`/ac/${keyDigest}`, { output: "canonical-render-marker" }, { method: "PUT" })
+    const encode = vi.spyOn(TextEncoder.prototype, "encode")
+    try {
+      expect((await handler(publication)).status).toBe(201)
+      expect(encode.mock.calls.filter(([value]) => value === '"canonical-render-marker"')).toHaveLength(1)
+    } finally {
+      encode.mockRestore()
+    }
+  })
+
+  it("attributes provider failures to their operation without logging provider messages", async () => {
+    const secret = "provider bearer=private-token"
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const health = async () => {
+      throw new Error(secret, { cause: Object.assign(new Error(secret), { code: "ECONNRESET" }) })
+    }
+    try {
+      expect((await makeHandler({ health })(request("/healthz"))).status).toBe(503)
+      const line = String(errors.mock.calls[0]?.[0])
+      expect(line).toContain("code=DEPENDENCY_FAILED operation=health")
+      expect(line).toContain("cause2.code=ECONNRESET")
+      expect(line).not.toContain(secret)
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it("bounds cyclic cause diagnostics and rejects unsafe operation and cause fields", () => {
+    const cycle = Object.assign(new Error("private provider message"), { code: "ELOOP", operation: "health" })
+    Object.defineProperty(cycle, "cause", { value: cycle })
+    const line = describeFailure(cycle)
+    expect(line.match(/cause[1-4]\.code=ELOOP/g)).toHaveLength(4)
+    expect(line).not.toContain("cause5")
+    expect(line).not.toContain("private")
+
+    let reads = 0
+    const nested = Object.defineProperty({}, "code", { get() { reads += 1; return "private" } })
+    const failure = Object.assign(new Error("private"), { operation: "private operation", cause: nested })
+    expect(describeFailure(failure)).toBe("smithers build cache: request failed (name=Error)")
+    expect(describeFailure({ operation: 123, cause: { code: "Bearer private" } })).toBe(
+      "smithers build cache: request failed (unattributed)"
+    )
+    expect(describeFailure(Object.defineProperty({}, "cause", { get() { reads += 1; return nested } }))).toBe(
+      "smithers build cache: request failed (unattributed)"
+    )
+    expect(describeFailure({ cause: null })).toBe("smithers build cache: request failed (unattributed)")
+    expect(reads).toBe(0)
+  })
+
   it("survives diagnostics with throwing fields and primitive failures", () => {
     let reads = 0
     const hostile = Object.defineProperty({}, "name", {

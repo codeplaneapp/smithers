@@ -229,6 +229,21 @@ artifact and step-cache clients have separate error handling; any retries
 configured in their HTTP transport or callers do not change the target-cache
 CLI policy.
 
+Programmatic `createHandler` callers retain one handler for the isolate lifetime.
+`maxArtifactBytes` defaults to 16 MiB, `health` to an async no-op, and an omitted
+credential budget permits requests within the isolate concurrency limits.
+Construction throws `TypeError` synchronously for invalid dependency records or
+methods, invalid or identical SHA-256 credential hashes, or artifact limits
+outside 1..16777216. The returned function resolves an HTTP `Response`.
+
+Worker failure logs include fixed internal `code` and `operation` fields, plus
+up to four nested cause codes containing at most 32 letters, digits, underscores,
+dots, or hyphens (safe integer codes are also accepted). Provider messages,
+stacks, and request payloads are omitted. For example, a corrupt discriminator
+logs `D1_RESULT_NON_CANONICAL` under `actionCache.put`, a lost R2 publication
+logs `R2_PUBLICATION_LOST` under `contentStore.put`, and a failed readiness
+sentinel logs `D1_READINESS_INVALID` under `health`. Responses remain generic `503`.
+
 A stored R2 object whose provider checksum is absent or does not match its
 content address is reported absent rather than refused. This lets the CAS
 client identify the digest as missing so a publisher can republish and repair
@@ -272,6 +287,21 @@ starts until redaction has published its last file, through a lock file
 inside that directory holding its process id. A second deployment or a
 standalone `scripts/redact-state.ts` run against the same state is refused
 while it runs; a lock left by a process that no longer exists is reclaimed.
+
+Programmatic redaction returns the number of changed Worker state files. A
+missing state directory or already-clean state returns zero. The directory must
+be absolute and resolve to a canonical directory without symbolic links.
+Invalid options, paths, state shapes, or ownership reject with `TypeError`;
+discovery, JSON, and byte limits reject with `RangeError`. Changed file
+identities, filesystem, and ownership failures also reject. Publication is per file, so earlier
+replacements remain if a later operation fails.
+
+```ts
+import { redactAlchemyState } from "./scripts/redact-state.ts"
+
+const changed = await redactAlchemyState({ directory: "/srv/smithers/.alchemy/state/build" })
+console.log(`Redacted ${changed} Worker state file(s).`)
+```
 
 ## Self-host instead
 
