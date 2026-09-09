@@ -111,6 +111,11 @@ import * as StandardFlows from "./StandardFlows.ts"
  * @since 0.1.0
  */
 export interface Options {
+  /**
+   * Age at which an unanswered resume delegation may be adopted by another
+   * host. Defaults to `Ownership.heartbeatStaleAfter`; the cutoff is inclusive.
+   */
+  readonly abandonedParkAfter?: Duration.Duration | undefined
   /** Refuse resume delegation for a run routed to another workspace host. */
   readonly canExecute?: ((runId: string) => Effect.Effect<boolean>) | undefined
   /** Host executable-flow sources composed into every run's catalog. */
@@ -269,6 +274,9 @@ export const traceIdentity = (
 /**
  * The largest free-text or value field one trail record carries.
  *
+ * Completion outputs are bounded inside both cell settlements and applied
+ * transitions, preserving the containing outcome and transition tags.
+ *
  * The trail is a durable journal row, and a cell may read a multi-megabyte
  * file into one result. Bounding the field limits both that row's storage and
  * the canonicalization and hashing work paid for every event identity.
@@ -292,19 +300,8 @@ const tracedField = <A extends Schema.Json | string>(value: A): A | {
     : { truncated: true, bytes, digest: Digest.digest(canonical) }
 }
 
-/**
- * How long a resume delegation must stand unanswered before a composition
- * that did not park the run may take it up.
- *
- * `Ownership.heartbeatStaleAfter` is the cutoff the engine already uses to
- * declare an owner gone, and this is the same question asked about a host that
- * is not writing a heartbeat at all: a parked run has none. Every host drains
- * its delegations once a second, so one still standing thirty seconds later
- * belongs to a process that has exited — the `smithers run` that parked at the
- * approval and returned the shell prompt — and the run it parked has to stay
- * resumable by the next host that comes along.
- */
-const abandonedParkAfterMs = Duration.toMillis(Ownership.heartbeatStaleAfter)
+const tracedTransition = (transition: Cell.Transition) =>
+  transition._tag === "complete" ? { ...transition, output: tracedField(transition.output) } : transition
 
 /**
  * Why a parked run is being taken up, which decides whether the hosting guard
@@ -449,9 +446,19 @@ export const trace = (
         payload: { cell: event.cell, text: tracedField(event.text) }
       }
     case "cell-settled":
-      return { eventType: "control.agent.cell-settled", payload: { outcome: event.outcome } }
+      return {
+        eventType: "control.agent.cell-settled",
+        payload: {
+          outcome: event.outcome._tag === "settled"
+            ? { ...event.outcome, transition: tracedTransition(event.outcome.transition) }
+            : event.outcome
+        }
+      }
     case "transition-applied":
-      return { eventType: "control.agent.transition-applied", payload: { transition: event.transition } }
+      return {
+        eventType: "control.agent.transition-applied",
+        payload: { transition: tracedTransition(event.transition) }
+      }
     case "mutation-observed":
       // Written for every frame, not only for the ones that trip a control.
       // `basis` travels with it because a `declared` answer is paperwork and an
@@ -1181,6 +1188,7 @@ export const make = (
   options: Options
 ): Effect.Effect<ControlExecutor.Service, never, Services | Scope.Scope> =>
   Effect.gen(function*() {
+    const abandonedParkAfterMs = Duration.toMillis(options.abandonedParkAfter ?? Ownership.heartbeatStaleAfter)
     const runtime = yield* ControlRuntime
     const journal = yield* Journal.Journal
     const registry = yield* Registry.Registry
@@ -1906,11 +1914,9 @@ export const make = (
      *   delegation up at once, which is the ordinary same-process approval.
      * - Somebody else's `parkedBy`: not this composition's run to drive, so
      *   the delegation is left standing for the host that parked it — until
-     *   it has stood unanswered for `heartbeatStaleAfter`, the same cutoff the
-     *   engine uses to declare an owner gone. A host polls its delegations
-     *   once a second, so one still standing after thirty is one whose host is
-     *   not coming back, and refusing it forever would leave every run parked
-     *   by a process that has since exited unresumable by anything.
+     *   it has stood unanswered for `options.abandonedParkAfter`, defaulting
+     *   to the engine's `heartbeatStaleAfter`. Refusing it forever would leave
+     *   a run parked by an exited process unresumable by another host.
      *
      * A control store that cannot answer is not evidence of a foreign host, so
      * it leaves the decision where it was before this guard existed.

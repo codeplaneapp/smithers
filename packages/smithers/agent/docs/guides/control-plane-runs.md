@@ -129,7 +129,8 @@ Two properties keep the trail trustworthy:
   transaction the frame is holding.
 
 Fields larger than `maxTracedBytes` (65,536) are replaced with a truncation
-marker carrying the byte count and digest.
+marker carrying the byte count and digest. Completion outputs are bounded in
+both the cell settlement and the applied transition.
 
 ## Resume across processes
 
@@ -140,8 +141,9 @@ resume delegations, because a decision taken in another process reaches this
 executor through nothing else. A parked run has no owner, so the follower takes
 up a delegation only when this composition is the run's host: the fence the
 park was written under, which only the parking incarnation holds. A delegation
-left standing past the engine's heartbeat-stale cutoff belongs to a process
-that has exited, and any host may adopt it.
+left standing for `abandonedParkAfter` may be adopted by another host. The
+default is `Ownership.heartbeatStaleAfter` (30 seconds). The cutoff is inclusive
+and applies to the delegation's age, not the age of the parked run.
 
 The module exports the pieces this half is built from
 (`waitForRunning`, `waitForParked`, `preserveDriverInterrupt`,

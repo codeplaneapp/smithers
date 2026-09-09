@@ -37,7 +37,7 @@ import { Node } from "@smthrs/plan"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { RegistryError } from "@smthrs/registry/RegistryError"
-import { RunStore } from "@smthrs/run-store"
+import { Ownership, RunStore } from "@smthrs/run-store"
 import { Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, PubSub, Schema, Scope, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
@@ -287,6 +287,8 @@ const answeringAgent = (answers: Array<unknown>): Agent.Service =>
 type EngineService = FlowRuntime.FlowRuntime["Service"]
 
 interface ScenarioOptions {
+  readonly nowMs?: number
+  readonly abandonedParkAfter?: Duration.Duration | undefined
   readonly canExecute?: AgentSession.Options["canExecute"]
   readonly runs?: Partial<RunStore.Service> | undefined
   readonly agent?: Agent.Service | undefined
@@ -325,6 +327,7 @@ const withExecutor = <A>(
   Effect.gen(function*() {
     const executor = yield* AgentSession.make({
       canExecute: options.canExecute,
+      abandonedParkAfter: options.abandonedParkAfter,
       limits: { calls: 4 },
       maxFrames: 2,
       quotaPolicy: Safety.quotaPolicy,
@@ -375,6 +378,15 @@ const withExecutor = <A>(
       )
     ),
     Effect.scoped,
+    Effect.provideServiceEffect(
+      Clock.Clock,
+      Effect.map(Clock.Clock, (clock) =>
+        options.nowMs === undefined ? clock : {
+          ...clock,
+          currentTimeMillis: Effect.succeed(options.nowMs),
+          currentTimeMillisUnsafe: () => options.nowMs!
+        })
+    ),
     Effect.runPromise
   ) as Promise<A>
 
@@ -1171,73 +1183,35 @@ describe("the executor's resume bridge", () => {
     expect(attempted.resumed).toEqual(["run-hosted"])
   })
 
-  it("leaves a delegation for a run another host parked standing while that host could still answer", async () => {
-    const record = recorder()
-    const resumed: Array<string> = []
-    const cleared: Array<string> = []
-    const done = Deferred.makeUnsafe<void>()
-    const drove = Deferred.makeUnsafe<void>()
-    const attempted = await withExecutor(
-      record,
-      {
+  it.each([undefined, Duration.millis(100)])(
+    "adopts at the cutoff and leaves a delegation one millisecond younger standing (%s)",
+    async (abandonedParkAfter) => {
+      const record = recorder()
+      const resumed: Array<string> = []
+      const cleared: Array<string> = []
+      const done = Deferred.makeUnsafe<void>()
+      const drove = Deferred.makeUnsafe<void>()
+      const nowMs = 60_000
+      const cutoff = Duration.toMillis(abandonedParkAfter ?? Ownership.heartbeatStaleAfter)
+      const attempted = await withExecutor(record, {
+        nowMs,
+        abandonedParkAfter,
         runtime: {
-          // `run-foreign` names another host's fence on the row and comes
-          // FIRST, so the assertions below read a list it has been through.
           getRun: (runId) =>
             Effect.succeed(
-              runId === "run-foreign" ? { ...launchInput.run, parkedBy: "fence-another-host" } : launchInput.run
+              runId === "run-hosted" ? launchInput.run : { ...launchInput.run, parkedBy: "fence-another-host" }
             ),
-          pendingResumes: Effect.map(Clock.currentTimeMillis, (nowMs) => [
-            { runId: "run-foreign", sequence: 8, requestedAtMs: nowMs },
+          // The hosted sentinel comes last, so the assertion observes a full
+          // pass even when a boundary mutation refuses the abandoned park.
+          pendingResumes: Effect.succeed([
+            { runId: "run-younger", sequence: 8, requestedAtMs: nowMs - cutoff + 1 },
+            { runId: "run-boundary", sequence: 9, requestedAtMs: nowMs - cutoff },
             { runId: "run-hosted", sequence: 7, requestedAtMs: nowMs }
           ]),
           clearResume: (runId) =>
             Effect.sync(() => {
               cleared.push(runId)
-              Deferred.doneUnsafe(done, Effect.void)
-            })
-        },
-        engine: (engine) =>
-          ({
-            ...engine,
-            // Both executions are in THIS engine and both are parked: engine
-            // visibility is a shared file, which is exactly why it cannot be
-            // the hosting test.
-            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
-            resume: (_flow: unknown, executionId: string) =>
-              Effect.sync(() => {
-                resumed.push(executionId)
-                Deferred.doneUnsafe(drove, Effect.void)
-              })
-          }) as unknown as EngineService
-      },
-      () => Effect.as(Effect.all([Deferred.await(done), Deferred.await(drove)]), { resumed, cleared })
-    )
-
-    // The park this composition wrote is taken up; the one another host wrote
-    // is not driven and not cleared, however plainly this engine can see it.
-    expect(attempted.resumed).toEqual(["run-hosted"])
-    expect(attempted.cleared).toEqual(["run-hosted"])
-  })
-
-  it("adopts a park whose host has left the delegation standing past the staleness cutoff", async () => {
-    const record = recorder()
-    const resumed: Array<string> = []
-    const cleared: Array<string> = []
-    const done = Deferred.makeUnsafe<void>()
-    const drove = Deferred.makeUnsafe<void>()
-    const attempted = await withExecutor(
-      record,
-      {
-        runtime: {
-          getRun: () => Effect.succeed({ ...launchInput.run, parkedBy: "fence-a-process-that-exited" }),
-          // Recorded at the epoch: older than `Ownership.heartbeatStaleAfter`
-          // by every clock this suite can be run under.
-          pendingResumes: Effect.succeed([{ runId: "run-abandoned", sequence: 9, requestedAtMs: 0 }]),
-          clearResume: (runId) =>
-            Effect.sync(() => {
-              cleared.push(runId)
-              Deferred.doneUnsafe(done, Effect.void)
+              if (runId === "run-hosted") Deferred.doneUnsafe(done, Effect.void)
             })
         },
         engine: (engine) =>
@@ -1247,20 +1221,15 @@ describe("the executor's resume bridge", () => {
             resume: (_flow: unknown, executionId: string) =>
               Effect.sync(() => {
                 resumed.push(executionId)
-                Deferred.doneUnsafe(drove, Effect.void)
+                if (executionId === "run-hosted") Deferred.doneUnsafe(drove, Effect.void)
               })
           }) as unknown as EngineService
-      },
-      () => Effect.as(Effect.all([Deferred.await(done), Deferred.await(drove)]), { resumed, cleared })
-    )
+      }, () => Effect.as(Effect.all([Deferred.await(done), Deferred.await(drove)]), { resumed, cleared }))
 
-    // `smithers run` exits at the approval park. Nothing would ever resume the
-    // run it left behind if a park could only be taken up by the incarnation
-    // that wrote it, so a delegation no host has answered for thirty seconds
-    // is adopted by one that can drive it.
-    expect(attempted.resumed).toEqual(["run-abandoned"])
-    expect(attempted.cleared).toEqual(["run-abandoned"])
-  })
+      expect(attempted.resumed).toEqual(["run-boundary", "run-hosted"])
+      expect(attempted.cleared).toEqual(["run-boundary", "run-hosted"])
+    }
+  )
 
   it("keeps the executor alive when the control store cannot list resume delegations", async () => {
     const record = recorder()

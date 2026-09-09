@@ -413,22 +413,28 @@ describe("trace", () => {
         new AgentEvent.Resolved({ eventType: "flows.harness.resolved.v1", message: assistant }),
         { eventType: "control.agent.resolved", payload: { text: "First line.\nSecond line." } }
       ],
-      [
-        "checkpoint-minted",
-        new AgentEvent.CheckpointMinted({
-          eventType: "flows.harness.checkpoint-minted.v1",
-          id: "cp-0-0",
-          ref: "stash-cp-0-0",
-          cell: "cell-digest",
-          ordinal: 0
-        }),
-        {
-          eventType: "control.agent.checkpoint-minted",
-          // The store's own name for the tree travels with the id: a journal
-          // holding only the reading could not say which tree it was of.
-          payload: { id: "cp-0-0", ref: "stash-cp-0-0", cell: "cell-digest", ordinal: 0 }
+      ...(["cell-settled", "transition-applied"] as const).map((tag) => {
+        const transition = new Cell.Complete({ output: "x".repeat(131_072) })
+        const outcome = new Cell.Settled({ transition })
+        const value = transition.output
+        const marker = {
+          truncated: true,
+          bytes: new TextEncoder().encode(value).byteLength,
+          digest: Digest.digest(CanonicalJson.stringify(value))
         }
-      ]
+        return [
+          `${tag} with oversized completion output`,
+          tag === "cell-settled"
+            ? new AgentEvent.CellSettled({ eventType: "flows.harness.cell-settled.v1", cell: cell.digest, outcome })
+            : new AgentEvent.TransitionApplied({ eventType: "flows.harness.transition-applied.v1", transition }),
+          {
+            eventType: `control.agent.${tag}`,
+            payload: tag === "cell-settled"
+              ? { outcome: { ...outcome, transition: { ...transition, output: marker } } }
+              : { transition: { ...transition, output: marker } }
+          }
+        ] as const
+      })
     ] satisfies ReadonlyArray<readonly [string, AgentEvent.AgentEvent, unknown]>
   )(
     "projects %s with its durable payload",

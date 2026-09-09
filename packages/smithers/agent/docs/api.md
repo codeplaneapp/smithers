@@ -183,6 +183,10 @@ them separately; `AgentSession` executes markdown prompt flows.
 
 ### AgentSession.Options
 
+`abandonedParkAfter?: Duration.Duration` sets how long a foreign host's resume
+delegation must stand before adoption. The default is
+`Ownership.heartbeatStaleAfter` (30 seconds); adoption starts at the cutoff.
+
 | Field             | Type                                                                      | What it decides                                                                                                                                     |
 | ----------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `limits`          | `Sandbox.Limits`                                                          | The explicit sandbox budget every cell runs under. Required; never unlimited.                                                                       |
@@ -236,7 +240,9 @@ The journal projection of one agent event: `model-settled` becomes
 the token-by-token prefix of `model-settled` and journaling them would multiply
 a run's event count by its token count. Free-text and value fields larger than
 `maxTracedBytes` are replaced with a deterministic truncation marker carrying
-the field's byte count and digest.
+the field's byte count and digest. This includes completion `output` nested in
+`cell-settled.outcome.transition` and `transition-applied.transition`; the
+containing outcome and transition retain their tags.
 
 ### AgentSession.traceIdentity
 
