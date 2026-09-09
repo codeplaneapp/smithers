@@ -3,8 +3,8 @@ title: "API reference"
 description: "Every export of @smthrs/keys: deriveKey, DerivedKey, StoredKey, KeyV1, digest, KeyDerivationError, and KeyDerivationErrorCode, with signatures, requirements, and failures."
 ---
 
-`@smthrs/keys` exports one module. Every name below is available from the root
-entry point and from `@smthrs/keys/Key`.
+Every name below is available from the root entry point and from
+`@smthrs/keys/Key`. Each is defined in the source file that carries its name.
 
 ```ts
 import { DerivedKey, deriveKey, digest, KeyDerivationError, KeyV1, StoredKey } from "@smthrs/keys"

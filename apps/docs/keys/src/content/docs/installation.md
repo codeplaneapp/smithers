@@ -75,13 +75,13 @@ only validates keys installs nothing.
 
 ## Import forms
 
-The root entry point re-exports the whole module:
+The root entry point re-exports every module:
 
 ```ts
 import { DerivedKey, deriveKey, digest, KeyDerivationError, KeyV1, StoredKey } from "@smthrs/keys"
 ```
 
-The module is also importable from its own subpath:
+Every name is also importable from the `Key` subpath:
 
 ```ts
 import * as Key from "@smthrs/keys/Key"

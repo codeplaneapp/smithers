@@ -112,21 +112,53 @@ describe("source purity", () => {
     // nothing. Pinning the exact specifier set makes the scan observable — if
     // a rename or a new syntax makes the matcher miss an import, this fails
     // here rather than quietly relaxing the allowlist below.
+    //
+    // The pinned set is also the package's dependency graph, one concept per
+    // file: `DerivedKey` composes `deriveKey`, which needs `KeyDerivationError`
+    // and `KeyV1`; `digest` needs only `StoredKey`; `Key.ts` and `index.ts` are
+    // barrels that add no dependency of their own.
     const files = await sourceFiles(sourceRoot)
-    expect(files.map((file) => relative(sourceRoot, file)).sort()).toEqual(["Key.ts", "index.ts"])
+    expect(files.map((file) => relative(sourceRoot, file)).sort()).toEqual([
+      "DerivedKey.ts",
+      "Key.ts",
+      "KeyDerivationError.ts",
+      "KeyV1.ts",
+      "StoredKey.ts",
+      "deriveKey.ts",
+      "digest.ts",
+      "index.ts"
+    ])
 
     const sources = await Promise.all(files.map(async (file) => [file, await readFile(file, "utf8")] as const))
     const found = sources.flatMap(([file, source]) =>
       moduleSpecifiers(source).map((specifier) => `${relative(sourceRoot, file)} -> ${specifier}`)
     )
     expect(found.sort()).toEqual([
-      "Key.ts -> @smthrs/canonical",
-      "Key.ts -> @smthrs/crypto",
-      "Key.ts -> effect/Crypto",
-      "Key.ts -> effect/Effect",
-      "Key.ts -> effect/Schema",
-      "Key.ts -> effect/SchemaGetter",
-      "Key.ts -> effect/SchemaIssue",
+      "DerivedKey.ts -> ./KeyDerivationError.ts",
+      "DerivedKey.ts -> ./KeyV1.ts",
+      "DerivedKey.ts -> ./deriveKey.ts",
+      "DerivedKey.ts -> effect/Effect",
+      "DerivedKey.ts -> effect/Schema",
+      "DerivedKey.ts -> effect/SchemaGetter",
+      "DerivedKey.ts -> effect/SchemaIssue",
+      "Key.ts -> ./DerivedKey.ts",
+      "Key.ts -> ./KeyDerivationError.ts",
+      "Key.ts -> ./KeyV1.ts",
+      "Key.ts -> ./StoredKey.ts",
+      "Key.ts -> ./deriveKey.ts",
+      "Key.ts -> ./digest.ts",
+      "KeyDerivationError.ts -> effect/Schema",
+      "KeyV1.ts -> effect/Schema",
+      "StoredKey.ts -> ./KeyV1.ts",
+      "deriveKey.ts -> ./KeyDerivationError.ts",
+      "deriveKey.ts -> ./KeyV1.ts",
+      "deriveKey.ts -> @smthrs/canonical",
+      "deriveKey.ts -> @smthrs/crypto",
+      "deriveKey.ts -> effect/Crypto",
+      "deriveKey.ts -> effect/Effect",
+      "deriveKey.ts -> effect/Schema",
+      "digest.ts -> ./StoredKey.ts",
+      "digest.ts -> @smthrs/crypto",
       "index.ts -> ./Key.ts"
     ])
   })
@@ -153,5 +185,62 @@ describe("source purity", () => {
       .filter(([, source]) => usesDynamicModuleLoad(source))
       .map(([file]) => relative(sourceRoot, file))
     expect(offenders).toEqual([])
+  })
+})
+
+/** Every name a module declares and exports itself, ignoring re-exports. */
+const declaredExports = (source: string): Array<string> => {
+  const sourceFile = ts.createSourceFile("source.ts", source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
+  return sourceFile.statements.flatMap((statement) => {
+    const modifiers = ts.canHaveModifiers(statement) ? (ts.getModifiers(statement) ?? []) : []
+    if (!modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) return []
+    if (ts.isVariableStatement(statement)) {
+      return statement.declarationList.declarations.flatMap((declaration) =>
+        ts.isIdentifier(declaration.name) ? [declaration.name.text] : []
+      )
+    }
+    if (
+      (ts.isTypeAliasDeclaration(statement) || ts.isClassDeclaration(statement) ||
+        ts.isFunctionDeclaration(statement) || ts.isInterfaceDeclaration(statement)) &&
+      statement.name !== undefined
+    ) {
+      return [statement.name.text]
+    }
+    return []
+  })
+}
+
+describe("module layout", () => {
+  /** The file each public name is defined in, keyed by the name. */
+  const definitions = async (): Promise<Record<string, string>> => {
+    const files = await sourceFiles(sourceRoot)
+    const sources = await Promise.all(files.map(async (file) => [file, await readFile(file, "utf8")] as const))
+    return Object.fromEntries(
+      sources.flatMap(([file, source]) =>
+        declaredExports(source).map((name) => [name, relative(sourceRoot, file)] as const)
+      )
+    )
+  }
+
+  it("defines each public concept in the file that carries its name", async () => {
+    // The package's rule is one named public concept per matching file. A
+    // value and its same-name type count as one concept; a code literal set
+    // belongs with the error that returns it.
+    expect(await definitions()).toEqual({
+      DerivedKey: "DerivedKey.ts",
+      KeyDerivationError: "KeyDerivationError.ts",
+      KeyDerivationErrorCode: "KeyDerivationError.ts",
+      KeyV1: "KeyV1.ts",
+      StoredKey: "StoredKey.ts",
+      deriveKey: "deriveKey.ts",
+      digest: "digest.ts"
+    })
+  })
+
+  it("keeps the two barrels free of declarations of their own", async () => {
+    for (const barrel of ["Key.ts", "index.ts"]) {
+      const source = await readFile(resolve(sourceRoot, barrel), "utf8")
+      expect({ barrel, declared: declaredExports(source) }).toEqual({ barrel, declared: [] })
+    }
   })
 })
