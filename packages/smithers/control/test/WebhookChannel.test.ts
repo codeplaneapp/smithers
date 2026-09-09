@@ -3,12 +3,10 @@
  * with an arbitrary payload, so its bounds and its decoding failures are the
  * assertions worth pinning.
  *
- * `handler` used to materialize whatever arrived: `request.arrayBuffer` with no
- * size check anywhere in the package. The two tests that matter here are the
- * ones proving the declared length is refused BEFORE the body is read, and that
- * a caller who lies about the declared length gains nothing.
+ * A declared flood is refused before reading, and an undeclared or understated
+ * flood is stopped while streaming, before signature verification.
  */
-import { Cause, Effect, Exit, Layer, Redacted, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Redacted, Schema, Stream } from "effect"
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import { describe, expect, it } from "vitest"
 import * as Channels from "../src/Channels.ts"
@@ -21,24 +19,27 @@ const accepted = { _tag: "Accepted" as const, receiptId: "receipt" }
 const credential: Redacted.Redacted<CredentialRef> = Redacted.make({ id: "cred", name: "webhook" })
 
 /** A Channels service that records what reached it instead of ingesting. */
-const recordingChannels = (seen: Array<Channels.IngestRequest>) =>
+const recordingChannels = (
+  seen: Array<Channels.IngestRequest>,
+  verify: Channels.Channel["verify"] = () => Effect.void
+) =>
   Layer.succeed(
     Channels.Channels,
     Channels.Channels.of({
       register: () => Effect.void,
       lookup: () => Effect.die("unused"),
       ingest: (request) =>
-        Effect.sync(() => {
+        verify(request.raw).pipe(Effect.map(() => {
           seen.push(request)
           return accepted
-        }),
+        })),
       project: () => Effect.die("unused")
     })
   )
 
 /**
- * A minimal request. `arrayBuffer` is a thunk so a test can assert the body was
- * never pulled: an over-declared length must cost nothing to refuse.
+ * A minimal request with lazy body reads, so an over-declared length must cost
+ * nothing to refuse.
  */
 const request = (
   headers: Readonly<Record<string, string | undefined>>,
@@ -48,6 +49,9 @@ const request = (
     HttpServerRequest.HttpServerRequest,
     {
       headers,
+      get stream() {
+        return Stream.fromEffect(Effect.sync(body))
+      },
       get arrayBuffer() {
         return Effect.sync(() => {
           const bytes = body()
@@ -78,6 +82,74 @@ const runHandler = (
   )
 
 describe("WebhookChannel.handler bounds the request body", () => {
+  it.each([0, 64])("preserves streamed bytes at the %i byte limit", async (limit) => {
+    const expected = Uint8Array.from({ length: limit }, (_, index) => index)
+    const seen: Array<Channels.IngestRequest> = []
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(expected.slice(0, 17))
+        controller.enqueue(new Uint8Array(0))
+        controller.enqueue(expected.slice(17))
+        controller.close()
+      }
+    })
+    const webRequest = new Request("https://example.com/webhook", {
+      method: "POST",
+      body,
+      duplex: "half"
+    } as RequestInit)
+    const exit = await Effect.runPromiseExit(
+      WebhookChannel.handler("hook", "key", { maximumBodyBytes: limit }).pipe(
+        Effect.provide(Layer.mergeAll(
+          Layer.succeed(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(webRequest)),
+          recordingChannels(seen)
+        ))
+      )
+    )
+    expect(exit._tag).toBe("Success")
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.raw.body).toEqual(expected)
+  })
+
+  it.each([undefined, "1"])("stops an oversized stream with content-length %s before verification", async (length) => {
+    let chunksRead = 0
+    let cancelled = false
+    let verified = false
+    const seen: Array<Channels.IngestRequest> = []
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunksRead++
+        controller.enqueue(bytes(64))
+        if (chunksRead === 100) controller.close()
+      },
+      cancel() {
+        cancelled = true
+      }
+    }, { highWaterMark: 0 })
+    const webRequest = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: length === undefined ? {} : { "content-length": length },
+      body,
+      duplex: "half"
+    } as RequestInit)
+    const exit = await Effect.runPromiseExit(
+      WebhookChannel.handler("hook", "key", { maximumBodyBytes: 64 }).pipe(
+        Effect.provide(Layer.mergeAll(
+          Layer.succeed(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(webRequest)),
+          recordingChannels(seen, () =>
+            Effect.sync(() => {
+              verified = true
+            }))
+        ))
+      )
+    )
+    expect(failure(exit)).toMatchObject({ _tag: "/control/InvalidInput" })
+    expect(chunksRead).toBe(2)
+    expect(cancelled).toBe(true)
+    expect(verified).toBe(false)
+    expect(seen).toHaveLength(0)
+  })
+
   it("accepts a body at exactly the limit", async () => {
     const seen: Array<Channels.IngestRequest> = []
     const exit = await runHandler({}, () => bytes(64), seen, { maximumBodyBytes: 64 })
@@ -205,6 +277,17 @@ describe("WebhookChannel.make", () => {
     const error = failure(exit) as InvalidInput
     expect(error._tag).toBe("/control/InvalidInput")
     expect(error.issue).toContain("invalid webhook JSON")
+  })
+
+  it("keeps malformed payload secrets out of the error and its serialization", async () => {
+    const secret = "SECRET123"
+    const exit = await Effect.runPromiseExit(channel().decode(raw(secret)))
+    const error = failure(exit) as InvalidInput
+    expect(error.issue).not.toContain(secret)
+    expect(String(error)).not.toContain(secret)
+    expect(JSON.stringify(error)).not.toContain(secret)
+    expect(JSON.stringify(exit)).not.toContain(secret)
+    expect(error.issue).toBe("invalid webhook JSON")
   })
 
   it("refuses well-formed JSON that fails the declared schema", async () => {

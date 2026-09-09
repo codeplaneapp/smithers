@@ -570,8 +570,11 @@ that change the decoded command.
 | `handler`           | function  | `(channel: string, idempotencyKey: IdempotencyKey, options?: HandlerOptions) => Effect<Receipt, ...>` |
 
 The body is bounded twice: a `content-length` over the limit is refused before
-the body is read, and the measured length is checked again afterwards. Both
-refusals are `InvalidInput` naming the two byte counts and no body content.
+the body is read, and each streamed chunk is measured before it is retained.
+Reading stops at the first chunk exceeding the limit, before verification.
+Both refusals are `InvalidInput` naming the two byte counts and no body content.
+Malformed JSON returns the fixed issue `invalid webhook JSON` without parser
+messages or payload fragments.
 
 ## Credential
 

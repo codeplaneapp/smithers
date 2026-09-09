@@ -113,8 +113,9 @@ payload, so `handler` bounds the body twice:
 
 - A `content-length` over the limit is refused before the body is read at all,
   so a declared flood costs nothing.
-- The measured length is checked again afterwards, so a caller that lies low or
-  declares nothing gains nothing.
+- Each streamed chunk is measured before it is retained. Reading stops and the
+  stream is cancelled at the first chunk exceeding the limit, even if the
+  caller understates or omits the length. Verification has not run at this point.
 
 Both refusals are `InvalidInput` naming the two byte counts and no body
 content. The default is `WebhookChannel.maximumBodyBytes`, 1 MiB, and one mount
@@ -127,6 +128,9 @@ WebhookChannel.handler("github", deliveryId, { maximumBodyBytes: 256 * 1024 })
 The default is deliberately smaller than the 4 MiB mutation identity budget: a
 body that cannot become a durable mutation is refused at the door rather than
 copied, decoded, and refused later.
+
+Malformed JSON returns `InvalidInput` with the fixed issue `invalid webhook
+JSON`. Parser messages and payload fragments are excluded from the error.
 
 ## Project a run back out
 

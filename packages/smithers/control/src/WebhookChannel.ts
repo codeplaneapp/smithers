@@ -3,7 +3,7 @@
  *
  * @since 0.1.0
  */
-import { Effect, type Redacted, Schema } from "effect"
+import { Effect, type Redacted, Schema, Stream } from "effect"
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import { type Channel, Channels, type InboundResult, type RawInbound } from "./Channels.ts"
 import { InvalidInput, type Unauthorized } from "./ControlError.ts"
@@ -76,7 +76,7 @@ export interface HandlerOptions {
  * Header names arrive lower-cased from Effect's HTTP layer, but a hand-built
  * request is not obliged to, so the lookup folds case itself. An absent,
  * non-numeric, fractional, or negative declaration is not evidence of
- * anything: it falls through to the post-read measurement rather than being
+ * anything: it falls through to the streaming measurement rather than being
  * treated as zero.
  */
 const declaredLength = (headers: Readonly<Record<string, string | undefined>>): number | undefined => {
@@ -106,7 +106,7 @@ export const make = <A>(config: Config<A>): Channel<A> => {
     decode: Effect.fn("WebhookChannel.decode")((raw) =>
       Effect.try({
         try: () => JSON.parse(new TextDecoder().decode(raw.body)),
-        catch: (cause) => invalidInput(`invalid webhook JSON: ${String(cause)}`)
+        catch: () => invalidInput("invalid webhook JSON")
       }).pipe(
         Effect.flatMap((json) => decode(json)),
         Effect.mapError((cause) => cause instanceof InvalidInput ? cause : invalidInput(String(cause)))
@@ -124,8 +124,9 @@ export const make = <A>(config: Config<A>): Channel<A> => {
  *
  * The body is bounded twice. A `content-length` over the limit is refused
  * before the body is read at all, so a declared flood costs nothing; the
- * measured length is checked again afterwards, so a caller that lies low or
- * declares nothing gains nothing. Both refusals are `InvalidInput` naming the
+ * measured length is checked before retaining each streamed chunk. Reading
+ * stops at the first chunk exceeding the limit, including when the caller
+ * understates or omits the length. Both refusals are `InvalidInput` naming the
  * two byte counts and no body content.
  *
  * @category handlers
@@ -144,9 +145,21 @@ export const handler = (
     if (declared !== undefined && declared > limit) {
       return yield* invalidInput(`webhook body: declared ${declared} bytes exceeds the ${limit} byte limit`)
     }
-    const body = new Uint8Array(yield* request.arrayBuffer)
-    if (body.byteLength > limit) {
-      return yield* invalidInput(`webhook body: ${body.byteLength} bytes exceeds the ${limit} byte limit`)
+    const chunks: Array<Uint8Array> = []
+    let size = 0
+    yield* Stream.runForEach(request.stream, (chunk) =>
+      Effect.gen(function*() {
+        size += chunk.byteLength
+        if (size > limit) {
+          return yield* invalidInput(`webhook body: ${size} bytes exceeds the ${limit} byte limit`)
+        }
+        if (chunk.byteLength > 0) chunks.push(chunk.slice())
+      }))
+    const body = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) {
+      body.set(chunk, offset)
+      offset += chunk.byteLength
     }
     const channels = yield* Channels
     return yield* channels.ingest({
