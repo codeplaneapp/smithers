@@ -1586,9 +1586,13 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       changeset: ChangesetStateSchema.nullable(),
       /**
        * Why an auxiliary above is null: the failed read's reason in the
-       * platform's words. One rule (ChangeSeam `surfaceChange`): a read writes
-       * every auxiliary from its own answer, a failed read writes null and
-       * names it here, and nothing from an earlier read survives.
+       * platform's words. One rule per read (ChangeSeam): a read writes the
+       * auxiliaries it reads from their own answers, a failed one writes
+       * null and names it here, and nothing from an earlier read survives in
+       * those fields. The full read (`change.view`) covers every auxiliary;
+       * a revision picker (`change.pins`, `change.checks`) covers only the
+       * panel it moves and leaves the other auxiliaries — and their lines
+       * here — as their own last read left them.
        */
       unread: z.object({
         diff: z.string().optional(),

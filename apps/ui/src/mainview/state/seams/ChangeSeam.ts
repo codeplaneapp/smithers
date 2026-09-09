@@ -789,6 +789,19 @@ const resolvePins = (
 /** The label a pin wears in a card line: `parent`, `current`, or `rev N`. */
 const pinLabel = (token: string): string => (token === "parent" || token === "current" ? token : `rev ${token}`)
 
+/**
+ * The card's `unread` lines with ONE auxiliary's answer folded in: the
+ * reason when that read failed, no line at all when it succeeded. Every
+ * other auxiliary keeps the line its own last read left, which is what a
+ * one-panel read (a picker) means.
+ */
+const foldUnread = (prior: ChangeUnread | undefined, key: keyof ChangeUnread, read: Read<unknown>): ChangeUnread => {
+  const next: ChangeUnread = { ...prior }
+  if ("unread" in read) next[key] = read.unread
+  else delete next[key]
+  return next
+}
+
 export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): ChangeSeam => {
   const { get: getJson, send: sendJson } = createCloudClient(ctx)
   const repoPath = (repoId: string, rest: string): string => {
@@ -1076,13 +1089,14 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
       return `${changeId} has no rev ${options.checksSeq} to read checks at.`
     }
     /*
-     * ONE retention rule for every auxiliary: this read writes each of them
-     * from its own answer — the value when the route answered, null plus the
-     * reason in `unread` when it did not — and nothing from an earlier read
-     * survives it. A transient failure can therefore never leave a stale
-     * "Conflicted" line or Land scope standing, nor a blank that reads as
-     * "no checks". Only a no-read act (change.facet) keeps the prior
-     * payload, through renderChange's fallback.
+     * ONE retention rule for every auxiliary of the FULL read: it writes
+     * each of them from its own answer — the value when the route answered,
+     * null plus the reason in `unread` when it did not — and nothing from
+     * an earlier read survives it. A transient failure can therefore never
+     * leave a stale "Conflicted" line or Land scope standing, nor a blank
+     * that reads as "no checks". A no-read act (change.facet) and a
+     * one-panel picker (surfacePins, surfaceChecksAt) keep the prior
+     * payload of what they do not read, through renderChange's fallback.
      */
     const [conflicts, diff, landing, changeset, findings, walkthrough, checks] = await Promise.all([
       detail.conflicts === null ? loadConflicts(repoId, changeId) : Promise.resolve({ value: detail.conflicts }),
@@ -1155,6 +1169,73 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
       },
       ...(options.facet === undefined ? {} : { facet: options.facet }),
       ...options.overrides
+    })
+    return
+  }
+
+  /**
+   * The change row and revisions a loaded card already carries: a picker's
+   * metadata, with no read of its own. null when no card is loaded.
+   */
+  const loadedChange = (
+    repoId: string,
+    changeId: string
+  ): { readonly change: ChangeInput; readonly payload: ChangePayload } | null => {
+    const card = ctx.store.collections.cards.get(cardIdOf(repoId, changeId))
+    if (card?.kind !== "change") return null
+    const change = ctx.store.collections.changes.get(changeRowId(repoId, changeId))
+    return change === undefined ? null : { change, payload: card.payload }
+  }
+
+  /*
+   * A picker's read: the ONE panel it names. `change.view` refreshes the
+   * whole card; a picker only moves the Diff facet's pins, so it reads the
+   * diff route alone and leaves every other panel — and every other
+   * `unread` line — at the freshness its own last read gave it. The loaded
+   * card's revisions resolve the pins; anything they cannot resolve (a
+   * revision pushed since the card was read, or no card at all) falls back
+   * to the full read, which rereads the change DTO and refuses by name when
+   * the revision truly does not exist.
+   */
+  const surfacePins = async (
+    repoId: string,
+    changeId: string,
+    pinned: { readonly from: string; readonly to: string }
+  ): Promise<string | void> => {
+    const full: ViewOptions = { pins: pinned, facet: "diff" }
+    const loaded = loadedChange(repoId, changeId)
+    if (loaded === null) return surfaceChange(repoId, changeId, full)
+    const pins = resolvePins(loaded.payload.revisions, loaded.payload.currentSeq, pinned.from, pinned.to, changeId)
+    if ("error" in pins) return surfaceChange(repoId, changeId, full)
+    const diff = await loadDiff(repoId, changeId, pins)
+    renderChange(loaded.change, loaded.payload.revisions, {
+      repos: "unread" in diff ? [] : [diff.value.stat],
+      diff: "unread" in diff ? null : {
+        from: pins.from,
+        to: pins.to,
+        files: diff.value.files,
+        /* `review.since-mine` names the reviewer; a bare pin never does. */
+        sinceReview: null
+      },
+      unread: foldUnread(loaded.payload.unread, "diff", diff),
+      facet: "diff"
+    })
+    return
+  }
+
+  /** The Checks facet's picker, on the same one-panel rule as `surfacePins`. */
+  const surfaceChecksAt = async (repoId: string, changeId: string, seq: number): Promise<string | void> => {
+    const loaded = loadedChange(repoId, changeId)
+    const revision = loaded?.payload.revisions.find((candidate) => candidate.seq === seq)
+    if (loaded === null || revision === undefined) {
+      return surfaceChange(repoId, changeId, { checksSeq: seq, facet: "checks" })
+    }
+    const checks = await loadChecks(repoId, revision.commitId)
+    renderChange(loaded.change, loaded.payload.revisions, {
+      checks: "unread" in checks ? null : checks.value,
+      checksAt: revision.seq,
+      unread: foldUnread(loaded.payload.unread, "checks", checks),
+      facet: "checks"
     })
     return
   }
@@ -1232,7 +1313,7 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
     if (refusal !== undefined) return refusal
     const resolved = resolveRepo(changeId, repo)
     if ("error" in resolved) return resolved.error
-    const error = await surfaceChange(resolved.repo, changeId, { pins: { from, to }, facet: "diff" })
+    const error = await surfacePins(resolved.repo, changeId, { from, to })
     if (error !== undefined) return error
     return { value: `Diff of ${changeId} pinned ${pinLabel(from)} → ${pinLabel(to)}.` }
   }
@@ -1267,7 +1348,7 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
     if (refusal !== undefined) return refusal
     const resolved = resolveRepo(changeId, repo)
     if ("error" in resolved) return resolved.error
-    const error = await surfaceChange(resolved.repo, changeId, { checksSeq: seq, facet: "checks" })
+    const error = await surfaceChecksAt(resolved.repo, changeId, seq)
     if (error !== undefined) return error
     return { value: `Checks of ${changeId} at rev ${seq}.` }
   }

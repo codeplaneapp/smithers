@@ -559,6 +559,98 @@ describe("createChangeSeam", () => {
     expect(requests).toContain(`GET ${CHANGE_ROUTE}/diff`)
   })
 
+  /*
+   * A picker changes ONE panel. The loaded card already carries the
+   * revisions its pins resolve against, so `change.pins` and
+   * `change.checks` read the single route they change and leave every other
+   * panel at the freshness `change.view` gave it — the Diff facet no longer
+   * waits on the walkthrough, the findings and the landing list to render.
+   */
+  test("a picker on a loaded card reads only the panel it names", async () => {
+    const { store, seam, requests } = await harness({
+      ...viewRoutes,
+      [`${CHANGE_ROUTE}/diff?from=1&to=2`]: json(200, { change_id: "qupxosqw", file_diffs: [DIFF.file_diffs[0]] }),
+      [`${REPO}/commits/b775d9/statuses?limit=100`]: json(200, {
+        statuses: [{ context: "build", status: "failure", created_at: "2026-09-01T08:30:00Z", targets_affected: 3, targets_ran: 3, targets_cached: 0, duration_ms: 900 }]
+      })
+    })
+    await seam.viewChange("qupxosqw")
+
+    requests.length = 0
+    expect(textOf(await seam.setPins("qupxosqw", "1", "2"))).toBe("Diff of qupxosqw pinned rev 1 → rev 2.")
+    expect(requests).toEqual([`GET ${CHANGE_ROUTE}/diff?from=1&to=2`])
+    expect(payloadOf(store)?.diff?.from).toBe("1")
+    expect(payloadOf(store)?.diff?.to).toBe("2")
+    expect(payloadOf(store)?.diff?.files).toHaveLength(1)
+    expect(payloadOf(store)?.repos).toEqual([{ repo: "will/smithers", additions: 1, deletions: 1 }])
+    expect(payloadOf(store)?.facet).toBe("diff")
+    /* every panel the pin does not name keeps what change.view read. */
+    expect(payloadOf(store)?.checks).toHaveLength(2)
+    expect(payloadOf(store)?.checksAt).toBe(2)
+    expect(payloadOf(store)?.findings).toHaveLength(2)
+    expect(payloadOf(store)?.walkthrough?.sections).toHaveLength(2)
+    expect(payloadOf(store)?.threads).toHaveLength(3)
+    expect(payloadOf(store)?.stack?.landingNumber).toBe(42)
+    expect(payloadOf(store)?.conflicts).toEqual([{ path: "src/app.ts", state: "unresolved" }])
+
+    requests.length = 0
+    expect(textOf(await seam.checksAt("qupxosqw", 1))).toBe("Checks of qupxosqw at rev 1.")
+    expect(requests).toEqual([`GET ${REPO}/commits/b775d9/statuses?limit=100`])
+    expect(payloadOf(store)?.checks).toEqual([
+      { context: "build", state: "failure", targetsAffected: 3, targetsRan: 3, targetsCached: 0, durationMs: 900 }
+    ])
+    expect(payloadOf(store)?.checksAt).toBe(1)
+    expect(payloadOf(store)?.facet).toBe("checks")
+    /* the diff the checks picker left alone. */
+    expect(payloadOf(store)?.diff?.from).toBe("1")
+    expect(payloadOf(store)?.walkthrough?.sections).toHaveLength(2)
+  })
+
+  test("a picker's own unread answer marks its panel, and only its panel", async () => {
+    /* No `from=1&to=2` route: the interdiff answers 404, the rest of the card stands. */
+    const { store, seam } = await harness(viewRoutes)
+    await seam.viewChange("qupxosqw")
+    expect(textOf(await seam.setPins("qupxosqw", "1", "2"))).toBe("Diff of qupxosqw pinned rev 1 → rev 2.")
+    expect(payloadOf(store)?.diff).toBeNull()
+    expect(payloadOf(store)?.unread?.diff).toBeDefined()
+    expect(payloadOf(store)?.checks).toHaveLength(2)
+    expect(payloadOf(store)?.walkthrough?.sections).toHaveLength(2)
+  })
+
+  test("a picker for a revision the loaded card lacks rereads the change first", async () => {
+    const routes: Record<string, Route> = {
+      ...viewRoutes,
+      [`${CHANGE_ROUTE}/diff?from=1&to=3`]: json(200, { change_id: "qupxosqw", file_diffs: [DIFF.file_diffs[1]] }),
+      [`${REPO}/commits/c99f01/statuses?limit=100`]: json(200, { statuses: [] })
+    }
+    const { store, seam, requests } = await harness(routes)
+    await seam.viewChange("qupxosqw")
+    /* A third revision lands after the card was read. */
+    routes[CHANGE_ROUTE] = json(200, {
+      ...CHANGE,
+      current_seq: 3,
+      revisions: [
+        ...CHANGE.revisions,
+        { seq: 3, commit_id: "c99f01", parent_commit_id: "p3", source: "push", operation_ids: [], created_at: "2026-09-01T11:00:00Z" }
+      ]
+    })
+
+    requests.length = 0
+    expect(textOf(await seam.setPins("qupxosqw", "1", "3"))).toBe("Diff of qupxosqw pinned rev 1 → rev 3.")
+    expect(requests[0]).toBe(`GET ${CHANGE_ROUTE}`)
+    expect(requests).toContain(`GET ${CHANGE_ROUTE}/diff?from=1&to=3`)
+    expect(payloadOf(store)?.diff?.to).toBe("3")
+
+    requests.length = 0
+    expect(textOf(await seam.checksAt("qupxosqw", 3))).toBe("Checks of qupxosqw at rev 3.")
+    expect(requests).toContain(`GET ${REPO}/commits/c99f01/statuses?limit=100`)
+    expect(payloadOf(store)?.checksAt).toBe(3)
+
+    /* A revision no read records still refuses by name. */
+    expect(textOf(await seam.setPins("qupxosqw", "1", "9"))).toBe("qupxosqw has no rev 9 — its revisions are 1 → 3.")
+    expect(textOf(await seam.checksAt("qupxosqw", 9))).toBe("qupxosqw has no rev 9 to read checks at.")
+  })
+
   test("review.since-mine pins the diff from my last_reviewed_seq to current and names it", async () => {
     const { store, seam, requests } = await harness({
       ...viewRoutes,
