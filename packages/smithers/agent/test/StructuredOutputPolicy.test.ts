@@ -157,7 +157,7 @@ const seats = (model: Model.Model): Layer.Layer<SeatResolver.SeatResolver> =>
     resolve: (id) =>
       Effect.sync(() => {
         resolvedSeats.push(id)
-        return Seat.make({ id, model, route, contextWindowTokens: 200_000 })
+        return Seat.make({ id, modelId: Seat.modelIdOf(id), model, route, contextWindowTokens: 200_000 })
       })
   })
 

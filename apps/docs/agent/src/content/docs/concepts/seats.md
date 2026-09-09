@@ -27,13 +27,17 @@ anything it likes, including a bare model id or a logical name like `fast` or
 ## The resolved half
 
 `Seat.Seat` is the resolved half, and the only thing `Agent.run` accepts: a
-live `Model`, the `RouteResolver` that seals its requests, and the model's
-context window in tokens so compaction has a real budget. The three arrive
+provider `modelId`, a live `Model`, the `RouteResolver` that seals its requests,
+and the model's context window in tokens so compaction has a real budget. They arrive
 together because they are one fact: the model you stream from, the route its
 requests are sealed under, and the budget its answers are compacted against.
 `Seat.make` constructs one, and a `SeatResolver` implementation is what calls
 it. A caller reaches a seat through the resolver, never by assembling one from
 a model and a route it happened to hold.
+
+`id` retains the declared string, for example `reviewer`. `modelId` names the
+selected provider model, for example `claude-sonnet-4-5`. Generation and
+compaction use `modelId`.
 
 The context window must never be zero: zero is the controller's "compaction
 disabled", and a resolver that resolves a window must not silently disable it.

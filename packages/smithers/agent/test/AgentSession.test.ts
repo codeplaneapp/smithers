@@ -339,6 +339,7 @@ const seat = (model: Model.Model): SeatResolver.Service["resolve"] => (id) =>
   Effect.succeed(
     Seat.make({
       id,
+      modelId: "test-model",
       model,
       route,
       contextWindowTokens: SeatResolver.contextWindowTokensFor("test-model")

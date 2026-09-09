@@ -95,9 +95,9 @@ const silent: ScriptedModel.Step = {
   ]
 }
 
-const opening = (): ContextWindow.ContextWindow =>
+const opening = (modelId = "test-model"): ContextWindow.ContextWindow =>
   ContextWindow.make({
-    modelId: "test-model",
+    modelId,
     segments: [
       { kind: "system", zone: "prefix", content: [ModelRequest.SystemPart.make({ text: "cell contract" })] },
       { kind: "transcript", zone: "tail", content: [ModelRequest.Message.user("start")] }
@@ -398,19 +398,19 @@ describe("CellTurn seat and placement", () => {
     expect(engine.recorder.sealStep[0]?.keyMaterial.placement).toBeUndefined()
   })
 
-  it("reads a seat that names no provider as the whole model id", async () => {
+  it("uses the resolved model id for a bare seat", async () => {
     const { model } = await run({
       script: [emits(`ctx.done("done")`)],
-      state: state({ seat: "bare-model" })
+      state: state({ seat: "bare-model", contextWindow: opening("bare-model") })
     })
 
     expect(model.recorder.requests[0]?.modelId).toBe("bare-model")
   })
 
-  it("takes only the segment after the first colon of a provider-qualified seat", async () => {
+  it("preserves colons in the resolved provider model id", async () => {
     const { model } = await run({
       script: [emits(`ctx.done("done")`)],
-      state: state({ seat: "bedrock:us.anthropic:claude" })
+      state: state({ seat: "bedrock:us.anthropic:claude", contextWindow: opening("us.anthropic:claude") })
     })
 
     expect(model.recorder.requests[0]?.modelId).toBe("us.anthropic:claude")

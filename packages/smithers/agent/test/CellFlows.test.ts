@@ -310,6 +310,7 @@ const collect = (options: {
       session: "session-1",
       seat: Seat.make({
         id: "anthropic:test-model",
+        modelId: "test-model",
         model: recorded(options.requests ?? [], options.cells),
         route,
         contextWindowTokens: 0

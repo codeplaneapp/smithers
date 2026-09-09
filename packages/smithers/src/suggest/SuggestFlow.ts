@@ -381,6 +381,7 @@ export const layerScripted = (config: { readonly root: string; readonly script: 
         Effect.succeed(
           Seat.make({
             id,
+            modelId: Seat.modelIdOf(id),
             model,
             route: { prepare: () => Effect.succeed(preparedRequest) },
             contextWindowTokens: 200_000

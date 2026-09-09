@@ -227,7 +227,7 @@ export const layerFor = (options: LayerOptions) => {
     resolve: (id) =>
       options.seats.resolve(id).pipe(
         Effect.map(({ model, route }) =>
-          Seat.make({ id, model, route, contextWindowTokens: defaultContextWindowTokens })
+          Seat.make({ id, modelId: Seat.modelIdOf(id), model, route, contextWindowTokens: defaultContextWindowTokens })
         )
       )
   })

@@ -29,9 +29,9 @@ import * as Schema from "effect/Schema"
 import type * as FlowEngineLike from "./FlowEngineLike.ts"
 
 /**
- * One resolved seat: the id it was declared as, the model to stream from, the
- * route that seals its requests, and the model's context window so compaction
- * has a real budget.
+ * One resolved seat: the declared id, the resolved provider model id, the model
+ * to stream from, the route that seals its requests, and the model's context
+ * window so compaction has a real budget.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -39,6 +39,8 @@ import type * as FlowEngineLike from "./FlowEngineLike.ts"
 export interface Seat {
   /** The declared seat string this record was resolved from. */
   readonly id: string
+  /** The resolved provider model id used for generation and compaction. */
+  readonly modelId: string
   readonly model: Model.Model
   readonly route: FlowEngineLike.RouteResolver
   /** Zero disables compaction, so a resolver must never report it. */

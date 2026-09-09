@@ -73,7 +73,7 @@ import * as CellPlugin from "./CellPlugin.ts"
 import * as Checkpointed from "./Checkpointed.ts"
 import * as FlowEngineLike from "./FlowEngineLike.ts"
 import type * as QuotaPolicy from "./QuotaPolicy.ts"
-import * as Seat from "./Seat.ts"
+import type * as Seat from "./Seat.ts"
 
 /**
  * Everything one assembled cell run declares.
@@ -249,7 +249,7 @@ const opening = (
   }
   return CellTurn.teach(
     ContextWindow.make({
-      modelId: Seat.modelIdOf(options.seat.id),
+      modelId: options.seat.modelId,
       segments: [
         ...declared,
         // The task itself is a PREFIX segment, so it survives compaction: a

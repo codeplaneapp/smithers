@@ -496,13 +496,15 @@ mental model, see [Seats](./concepts/seats.md).
 ```ts
 interface Seat {
   readonly id: string
+  readonly modelId: string
   readonly model: Model.Model
   readonly route: FlowEngineLike.RouteResolver
   readonly contextWindowTokens: number
 }
 ```
 
-One resolved seat: the id it was declared as, the model to stream from, the
+One resolved seat: the declared `id`, the provider `modelId` used for generation
+and compaction, the model to stream from, the
 route that seals its requests, and the model's context window in tokens so
 compaction has a real budget. `contextWindowTokens` must never be zero: zero is
 the controller's "compaction disabled".

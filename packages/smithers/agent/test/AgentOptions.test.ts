@@ -179,6 +179,7 @@ const collect = (options: RunOptions) =>
       prompt: options.prompt ?? "do the task",
       seat: Seat.make({
         id: "anthropic:test-model",
+        modelId: "test-model",
         model: options.model,
         route,
         contextWindowTokens: options.contextWindowTokens ?? 0

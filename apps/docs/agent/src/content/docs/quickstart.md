@@ -108,6 +108,7 @@ const seats = SeatResolver.layer({
     Effect.succeed(
       Seat.make({
         id,
+        modelId: "test-model",
         model: scripted,
         route: { prepare: () => Effect.succeed(prepared) },
         contextWindowTokens: 200_000

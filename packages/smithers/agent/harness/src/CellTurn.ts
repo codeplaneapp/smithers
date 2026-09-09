@@ -937,7 +937,7 @@ const requestFrom = (
   }
   return Result.succeed(
     ModelRequest.ModelRequest.make({
-      modelId: modelIdFromSeat(state.seat),
+      modelId: contextWindow.modelId,
       system: rendered.system,
       messages: [...rendered.messages, ModelRequest.Message.user(stateSection(state))],
       // A cell-first frame never declares provider tools: the cell is the plan
@@ -1799,7 +1799,7 @@ const compacted = (
     // itself, which is a bug here rather than a condition a caller could act on.
     const step = yield* Compaction.declare(state.contextWindow, prefixLength, {
       identity: "flows/harness/CellTurn.compaction",
-      modelId: modelIdFromSeat(state.seat),
+      modelId: state.contextWindow.modelId,
       params: state.modelParams
     }).pipe(Effect.orDie)
     const summaryRequest = yield* Compaction.summaryRequest(state.contextWindow, step).pipe(Effect.orDie)

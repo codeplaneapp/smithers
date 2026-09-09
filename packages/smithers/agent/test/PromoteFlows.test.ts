@@ -267,6 +267,7 @@ describe("flows/write-flow", () => {
           agent.run({
             session: "promotion",
             seat: Seat.make({
+              modelId: "test",
               id: "test",
               model,
               contextWindowTokens: 128000,

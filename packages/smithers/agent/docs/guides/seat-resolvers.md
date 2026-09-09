@@ -24,6 +24,7 @@ const seats = SeatResolver.layer({
     Effect.succeed(
       Seat.make({
         id,
+        modelId: "claude-sonnet-4-5", // the resolved provider model id
         model, // a live Model.Model
         route, // a FlowEngineLike.RouteResolver
         contextWindowTokens: 200_000
@@ -32,8 +33,10 @@ const seats = SeatResolver.layer({
 })
 ```
 
-A resolved seat carries three things, and they arrive together:
+A resolved seat preserves the declared `id` and carries four resolved fields:
 
+- `modelId`: the provider model id used for generation and compaction. An alias
+  such as `reviewer` stays in `id`; its selected model goes in `modelId`.
 - `model`: the live `Model` the run streams from.
 - `route`: the `RouteResolver` that seals the run's requests. For a configured
   provider route, `FlowEngineLike.routeResolver(route)` adapts it; a test
@@ -67,7 +70,7 @@ const seats = SeatResolver.layer({
   resolve: (id) =>
     apiKeyFor(id) === undefined
       ? Effect.fail(new Seat.SeatUnresolved({ seat: id, message: `No API key is configured for ${id}` }))
-      : Effect.succeed(Seat.make({ id, model: modelFor(id), route, contextWindowTokens: 200_000 }))
+      : Effect.succeed(Seat.make({ id, modelId: modelIdFor(id), model: modelFor(id), route, contextWindowTokens: 200_000 }))
 })
 ```
 

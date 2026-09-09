@@ -333,7 +333,7 @@ const layer = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(
     AgentAction.layerHost({ registry, limits: { calls: 8 }, capabilityEnvelope: [], maxFrames: 4 }),
     SeatResolver.layer({
-      resolve: (id) => Effect.succeed(Seat.make({ id, model, route, contextWindowTokens: 200_000 }))
+      resolve: (id) => Effect.succeed(Seat.make({ id, modelId: "test-model", model, route, contextWindowTokens: 200_000 }))
     }),
     Agent.layer
   )),

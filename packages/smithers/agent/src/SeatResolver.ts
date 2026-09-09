@@ -12,7 +12,9 @@
  * Because the resolver owns the seat vocabulary, a host is free to define its
  * own. The `provider:modelId` convention is what the Node resolver understands,
  * not a rule the agent enforces — a resolver that maps `reviewer` onto a
- * particular model is an ordinary implementation of this one method.
+ * particular model is an ordinary implementation of this one method. The
+ * returned seat retains `id: "reviewer"` and supplies the provider model id in
+ * `modelId` for generation and compaction.
  *
  * @since 1.0.0-rc.0
  */

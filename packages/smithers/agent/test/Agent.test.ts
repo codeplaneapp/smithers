@@ -38,6 +38,7 @@ import type * as Budget from "../src/Budget.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import type * as QuotaPolicy from "../src/QuotaPolicy.ts"
 import * as Seat from "../src/Seat.ts"
+import * as SeatResolver from "../src/SeatResolver.ts"
 import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
@@ -260,6 +261,8 @@ const drive = <A, E>(
 const flows = [descriptor("fs/list", { tier: "sealed" }), descriptor("fs/write", { tier: "irreversible" })]
 
 const collect = (options: {
+  readonly maxFrames?: number | undefined
+  readonly seat?: Seat.Seat | undefined
   readonly registry: Registry.Registry
   readonly model: Model.Model
   readonly implementations?: ReadonlyMap<string, CellCalls.Implementation> | undefined
@@ -274,8 +277,9 @@ const collect = (options: {
     const events: Array<AgentEvent.AgentEvent> = []
     yield* agent.run({
       session: "session-1",
-      seat: Seat.make({
+      seat: options.seat ?? Seat.make({
         id: "anthropic:test-model",
+        modelId: "test-model",
         model: options.model,
         route,
         contextWindowTokens: 0
@@ -288,7 +292,7 @@ const collect = (options: {
       plugins: options.plugins,
       config: options.config,
       memory: options.memory,
-      maxFrames: 3
+      maxFrames: options.maxFrames ?? 3
     }).pipe(
       Stream.runForEach((event) => Effect.sync(() => events.push(event))),
       Effect.provide(Agent.layerDefaults)
@@ -301,6 +305,49 @@ const collect = (options: {
   }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
 
 describe("Agent.run", () => {
+  it.each([false, true])(
+    "uses the resolved provider model id for an opaque seat alias (compaction: %s)",
+    async (compact) => {
+      const modelIds: Array<string> = []
+      const routeModelIds: Array<string> = []
+      const delegate = recordedCells([], [
+        compact ? "throw new Error(\"detail \".repeat(12000))" : "ctx.done(\"done\")"
+      ])
+      const model = Model.make({
+        stream: (request) => {
+          modelIds.push(request.modelId)
+          return delegate.stream(request)
+        }
+      })
+      const resolver = SeatResolver.make({
+        resolve: (id) =>
+          Effect.succeed(Seat.make({
+            id,
+            modelId: "provider-model",
+            model,
+            route: {
+              prepare: (request) => {
+                routeModelIds.push(request.modelId)
+                return Effect.succeed(prepared)
+              }
+            },
+            contextWindowTokens: compact ? 40_000 : 200_000
+          }))
+      })
+      const seat = await Effect.runPromise(resolver.resolve("reviewer"))
+      const outcome = await drive(collect({ seat, registry: registryOf([]), model, maxFrames: 5 }))
+
+      expect(outcome._tag).toBe("completed")
+      expect(seat.id).toBe("reviewer")
+      const events = outcome._tag === "completed" ? outcome.value as ReadonlyArray<AgentEvent.AgentEvent> : []
+      expect(events.some((event) => event._tag === "compaction-settled")).toBe(compact)
+      expect(modelIds.length).toBeGreaterThan(0)
+      expect(new Set(modelIds)).toEqual(new Set(["provider-model"]))
+      expect(routeModelIds.length).toBeGreaterThan(0)
+      expect(new Set(routeModelIds)).toEqual(new Set(["provider-model"]))
+    }
+  )
+
   it("runs a whole cell frame on the assembled production stack", async () => {
     const requests: Array<string> = []
     const executed: Array<string> = []
@@ -377,9 +424,9 @@ describe("Agent.run", () => {
         yield* agent.run({
           session: "session-2",
           seat: Seat.make({
-            // A bare model id is a degenerate but legal seat, and it is used
-            // verbatim rather than split on a separator that is not there.
+            // A resolver may choose the declared name as the provider model id.
             id: "test-model",
+            modelId: "test-model",
             model: recorded(requests),
             route,
             contextWindowTokens: 200_000
@@ -687,7 +734,13 @@ describe("Agent service", () => {
 
   const options: Agent.Options = {
     session: "session-noop",
-    seat: Seat.make({ id: "anthropic:test-model", model: recorded([]), route, contextWindowTokens: 0 }),
+    seat: Seat.make({
+      id: "anthropic:test-model",
+      modelId: "test-model",
+      model: recorded([]),
+      route,
+      contextWindowTokens: 0
+    }),
     prompt: "nothing to do",
     registry: registryOf([])
   }

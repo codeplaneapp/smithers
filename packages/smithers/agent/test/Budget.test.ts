@@ -108,7 +108,8 @@ const host: AgentAction.Host = {
 
 const seats = (model: Model.Model): Layer.Layer<SeatResolver.SeatResolver> =>
   SeatResolver.layer({
-    resolve: (id) => Effect.succeed(Seat.make({ id, model, route, contextWindowTokens: 200_000 }))
+    resolve: (id) =>
+      Effect.succeed(Seat.make({ id, modelId: Seat.modelIdOf(id), model, route, contextWindowTokens: 200_000 }))
   })
 
 const Review = Schema.Struct({ approved: Schema.Boolean })

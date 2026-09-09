@@ -54,8 +54,9 @@ describe("NodeControl.seatResolver providers", () => {
     const resolved = await Effect.runPromise(resolve(keyed, seat))
 
     expect(resolved.id).toBe(seat)
+    expect(resolved.modelId).toBe(Seat.modelIdOf(seat))
     expect(resolved.contextWindowTokens).toBe(tokens)
-    const request = await prepared(resolved, Seat.modelIdOf(seat))
+    const request = await prepared(resolved, resolved.modelId)
     expect(request.url).toBe(url)
     // The credential is applied by Auth as the request leaves; it never enters
     // the sealed, credential-free view.

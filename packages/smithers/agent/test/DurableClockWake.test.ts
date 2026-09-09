@@ -117,6 +117,7 @@ describe("a durable wait nested inside a cell action", () => {
           session: "session-1",
           seat: Seat.make({
             id: "anthropic:test-model",
+            modelId: "test-model",
             model: recorded([
               `const waited = await ctx.call("wait", { seconds: 61 })
   ctx.done(String(waited.waitedSeconds))`

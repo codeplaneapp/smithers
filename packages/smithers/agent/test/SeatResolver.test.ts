@@ -119,7 +119,15 @@ describe("SeatResolver service", () => {
     })
     const resolve = SeatResolver.contextWindowResolver(SeatResolver.make({
       resolve: (id) =>
-        Effect.succeed(Seat.make({ id, model: {} as never, route: {} as never, contextWindowTokens: 40_000 }))
+        Effect.succeed(
+          Seat.make({
+            id,
+            modelId: Seat.modelIdOf(id),
+            model: {} as never,
+            route: {} as never,
+            contextWindowTokens: 40_000
+          })
+        )
     }))
     expect(await Effect.runPromise(resolve("reviewer"))).toBe(40_000)
   })
@@ -136,7 +144,7 @@ describe("SeatResolver service", () => {
   it("takes an override for its one method, as a value and as a layer", async () => {
     const model = { stream: () => Effect.die("unused") } as never
     const route = { prepare: () => Effect.die("unused") } as never
-    const resolved = Seat.make({ id: "test:model", model, route, contextWindowTokens: 128_000 })
+    const resolved = Seat.make({ id: "test:model", modelId: "model", model, route, contextWindowTokens: 128_000 })
 
     const overridden = SeatResolver.makeNoop({ resolve: () => Effect.succeed(resolved) })
     expect(await Effect.runPromise(overridden.resolve("test:model"))).toBe(resolved)

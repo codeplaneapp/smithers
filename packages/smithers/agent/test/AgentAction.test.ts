@@ -92,7 +92,8 @@ const host: AgentAction.Host = {
 /** The other half of the seam: a scripted model behind the host's resolver. */
 const seats = (model: Model.Model): Layer.Layer<SeatResolver.SeatResolver> =>
   SeatResolver.layer({
-    resolve: (id) => Effect.succeed(Seat.make({ id, model, route, contextWindowTokens: 200_000 }))
+    resolve: (id) =>
+      Effect.succeed(Seat.make({ id, modelId: Seat.modelIdOf(id), model, route, contextWindowTokens: 200_000 }))
   })
 
 const Review = Schema.Struct({

@@ -226,7 +226,8 @@ const registryLayer = (overrides: Partial<Registry.Registry> = {}): Layer.Layer<
   )
 
 const seatLayer = SeatResolver.layer({
-  resolve: (id) => Effect.succeed(Seat.make({ id, model, route, contextWindowTokens: 200_000 }))
+  resolve: (id) =>
+    Effect.succeed(Seat.make({ id, modelId: Seat.modelIdOf(id), model, route, contextWindowTokens: 200_000 }))
 })
 
 /** The ask call a stub agent issues, in the shape the cell boundary builds. */

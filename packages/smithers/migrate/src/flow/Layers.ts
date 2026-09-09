@@ -119,6 +119,7 @@ const seatOf = <Body, Frame, Event, State>(
     )
     return Seat.make({
       id: declared,
+      modelId,
       model,
       route: FlowEngineLike.routeResolver(route),
       contextWindowTokens: SeatResolver.contextWindowTokensFor(modelId)
@@ -617,6 +618,7 @@ export const layerScripted = (config: NodeConfig & { readonly script: Script }) 
         Effect.succeed(
           Seat.make({
             id,
+            modelId: Seat.modelIdOf(id),
             model,
             route: { prepare: () => Effect.succeed(preparedRequest) },
             contextWindowTokens: 200_000
