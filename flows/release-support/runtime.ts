@@ -9,7 +9,9 @@ import { Action, HumanTask, Interpreter } from "@smthrs/flow"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Registry from "@smthrs/registry/Registry"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, type Scope } from "effect"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import { hostname } from "node:os"
 import { dirname } from "node:path"
 import * as Content from "../release-content/workflow.ts"
@@ -17,10 +19,18 @@ import * as Release from "../release/workflow.ts"
 import { actionLayers } from "./operations.ts"
 import { relativePath } from "./io.ts"
 
+/** Host composition only. Bun owns its fetch pool; Node owns replaceable Undici agents. */
+export const modelTransport: Effect.Effect<RequestExecutor.Transport, never, Scope.Scope> = Effect.suspend(() =>
+  typeof (globalThis as { Bun?: unknown }).Bun === "undefined"
+    ? rebuildableTransport(NodeHttpClient.makeDispatcher)
+    : Effect.map(HttpClient.HttpClient, RequestExecutor.fixed).pipe(Effect.provide(
+      FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.RequestInit)({ redirect: "manual" })))
+    )))
+
 /** The same provider/auth routing as the Smithers CLI, with named release roles. */
 export const liveSeats = (model: string) => Layer.effect(SeatResolver.SeatResolver,
   Effect.gen(function*() {
-    const transport = yield* rebuildableTransport(NodeHttpClient.makeDispatcher)
+    const transport = yield* modelTransport
     const executor = yield* RequestExecutor.makeWith(transport)
     const resolver = seatResolver(process.env, executor)
     return SeatResolver.make({ resolve: () => resolver.resolve(model) })

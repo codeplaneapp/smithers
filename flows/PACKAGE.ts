@@ -33,6 +33,10 @@ const recording = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//flows/test/recording.test.ts")]),
   srcs: [sources], deps: [], cwd
 })
+const provider = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//flows/test/provider-runtime.test.ts")]),
+  srcs: [sources], deps: [], cwd
+})
 
 const coding = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//flows/test/coding.test.ts")]),
@@ -43,4 +47,4 @@ const wiki = Smithers.NodeTest({
   srcs: [sources, Smithers.file("//factory/wiki/catalog.ts")], deps: [], cwd
 })
 
-export const Package = Smithers.Package({ targets: { coding, pack, check, suite, recording, wiki } })
+export const Package = Smithers.Package({ targets: { coding, pack, check, suite, recording, provider, wiki } })

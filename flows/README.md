@@ -36,6 +36,16 @@ not the checkout around it.
 
 ## Gates
 
+The shared release and wiki model-seat composition in
+`release-support/runtime.ts` selects the HTTP adapter at the executable host
+boundary. Node owns a replaceable Undici dispatcher; Bun uses Effect's fetch
+client through dependency injection and `RequestExecutor.fixed`, because Bun
+owns that connection pool. Both transports leave redirects un-followed. The
+model, provider routing, authentication and agent actions remain unchanged.
+`//flows:provider` runs a real local streaming server through both native
+executables, including a rebuild and scope closure; it needs Node and Bun on
+the test host. These transport checks do not establish a live provider result.
+
 ```sh
 node --test flows/pack.test.mjs      # registry, capabilities, detector, real CLI
 smithers-build test //flows/...      # the same suite as a build target
