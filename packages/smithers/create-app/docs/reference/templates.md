@@ -30,7 +30,8 @@ example; it is not a public scaffold in this release candidate.
 The default template ships its ignore rules as `_gitignore` so npm includes
 them in the tarball. Scaffolding writes that file as `.gitignore`, excluding
 `node_modules`, `dist`, `.wrangler`, `.flows`, and `.dev.vars` from Git.
-The pack regression test checks every default template file and the count above.
+The pack regression test extracts an npm tarball, checks every default template
+file and the count above, and scaffolds an app to verify its ignore rules.
 
 ## Shared shape
 
@@ -49,6 +50,7 @@ Both templates are the same app skeleton:
 | `src/`                               | The browser entry point and styles                                         |
 | `routes.gen.ts`, `routes.ui.gen.ts`  | Generated. Run `pnpm routes` after adding a routed file                    |
 | `.smithers/`                         | Workspace configuration for the Smithers build CLI, not for the app itself |
+| `_gitignore` (`default`)            | Packable ignore rules; scaffold writes `.gitignore`                        |
 
 Both carry the same scripts, and `aomi` adds one:
 
