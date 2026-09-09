@@ -1179,8 +1179,10 @@
       },
       "devDependencies": {
         "@effect/language-service": "0.87.2",
+        "@effect/platform-node": "4.0.0-rc.112",
         "@effect/vitest": "4.0.0-rc.112",
         "@eslint/js": "9.39.5",
+        "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/engine": "1.0.0-rc.0",
         "@smthrs/flows": "1.0.0-rc.0",
         "@smthrs/jj": "1.0.0-rc.0",
