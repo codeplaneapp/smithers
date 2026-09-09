@@ -7,10 +7,12 @@
  * the assertion to an untyped exit check.
  */
 import * as Effect from "effect/Effect"
-import type { EngineSubject as Subject } from "../src/EngineSubject.ts"
+import * as Ref from "effect/Ref"
+import type { EngineSubject as Subject, FlowSpec, JournalEntryLike, StepSpec } from "../src/EngineSubject.ts"
 import * as EngineSubject from "../src/EngineSubject.ts"
 import * as MemoryEngine from "../src/MemoryEngine.ts"
 import * as Race from "../src/pins/Race.ts"
+import * as Replay from "../src/pins/Replay.ts"
 import { EngineUnavailableError } from "../src/TestingError.ts"
 import { expect, it } from "../src/Vitest.ts"
 
@@ -81,4 +83,84 @@ it.scoped("reports a subject that re-races instead of replaying its recorded win
       pin: "race/recorded-winner-replay"
     })
     expect((error as { readonly message: string }).message).toContain("reconstruct the journaled winner")
+  }))
+
+const raceBranchKeys = (flow: FlowSpec): ReadonlySet<string> => {
+  const keys = new Set<string>()
+  const visit = (step: StepSpec): void => {
+    if (step.kind !== "race") return
+    for (const branch of step.branches) {
+      keys.add(branch.key)
+      visit(branch)
+    }
+  }
+  flow.steps.forEach(visit)
+  return keys
+}
+
+interface ReflectedExecution {
+  readonly journal: ReadonlyArray<JournalEntryLike>
+}
+
+interface ReflectedState {
+  readonly executions: ReadonlyMap<string, ReflectedExecution>
+}
+
+// The store exposes no mutation API, and `resume` runs the flow the store
+// already holds, so rewriting the submitted spec cannot express this subject.
+// Reflection builds the one implementation the race replay pins exist to
+// reject: an engine that still caches terminal results and completed steps but
+// has lost the recorded winner it would otherwise replay.
+const forgetRecordedWinners = (
+  store: MemoryEngine.EngineStore,
+  branchKeys: ReadonlySet<string>
+): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    const stateRef = Reflect.get(
+      store,
+      Object.getOwnPropertySymbols(store)[0]!
+    ) as Ref.Ref<ReflectedState>
+    return Ref.update(stateRef, (state) => {
+      const executions = new Map<string, ReflectedExecution>()
+      for (const [executionId, execution] of state.executions) {
+        executions.set(executionId, {
+          ...execution,
+          journal: execution.journal.filter(
+            (entry) => !(branchKeys.has(entry.stepKey) && entry.outcome === "completed")
+          )
+        })
+      }
+      return { ...state, executions }
+    })
+  })
+
+it.scoped("reports a subject that keeps terminal results but forgets its recorded race winner", () =>
+  Effect.gen(function*() {
+    const store = yield* MemoryEngine.makeStore()
+    const base = yield* MemoryEngine.make(store)
+    let branchKeys: ReadonlySet<string> = new Set()
+    const forgetsWinners = EngineSubject.make({
+      name: "forgets-recorded-race-winners",
+      run: (options) => {
+        branchKeys = raceBranchKeys(options.flow)
+        return base.run(options)
+      },
+      result: base.result,
+      interrupt: base.interrupt,
+      resume: (executionId) => Effect.andThen(forgetRecordedWinners(store, branchKeys), base.resume(executionId)),
+      journal: base.journal
+    })
+
+    // Only race reconstruction is gone: completed-prefix and suspended-frontier
+    // replay still hold, which is exactly the subject the race pins used to
+    // certify while resuming a finished execution.
+    for (const replayCase of Replay.cases) {
+      yield* replayCase.run(forgetsWinners)
+    }
+
+    for (const pin of ["race/recorded-winner-replay", "race/recorded-loser-interruption"]) {
+      const conformanceCase = Race.cases.find((candidate) => candidate.name === pin)!
+      const error = yield* conformanceCase.run(forgetsWinners).pipe(Effect.flip)
+      expect(error, pin).toMatchObject({ code: "conformance_violation", pin })
+    }
   }))

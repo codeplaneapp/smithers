@@ -110,7 +110,11 @@ does not satisfy this.
 
 **A replay reconstructs the journaled winner rather than re-racing.** The pins
 prove it adversarially: they invert the timing on the replay so the recorded
-loser would win a fresh race, and then require the recorded winner anyway.
+loser would win a fresh race, and then require the recorded winner anyway. The
+raced flow parks on a step after the race, so the replay resumes an unfinished
+execution and has to rebuild the race from its journal. Resuming a flow that
+already finished proves nothing here, because every subject hands back the
+terminal result without re-entering the body.
 
 A branch claims a replay slot from the same key ledger as a step, so `sealed`
 selects a branch's identity exactly as it selects a step's. Two races that

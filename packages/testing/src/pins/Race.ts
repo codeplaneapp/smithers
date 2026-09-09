@@ -22,16 +22,24 @@ const recordedWinnerPin = "race/recorded-winner-replay"
 const recordedLoserPin = "race/recorded-loser-interruption"
 
 interface RaceObservation {
+  /** The suspended outcome of the fresh run, parked at the step after the race. */
   readonly fresh: ExecutionResult
   readonly replayed: ExecutionResult
   readonly freshJournal: ReadonlyArray<JournalEntryLike>
   readonly replayedJournal: ReadonlyArray<JournalEntryLike>
   readonly winnerKey: string
   readonly loserKey: string
+  readonly frontierKey: string
   readonly winnerRuns: number
   readonly loserRuns: number
   readonly loserInterruptions: number
+  readonly frontierRuns: number
 }
+
+const entriesFor = (
+  journal: ReadonlyArray<JournalEntryLike>,
+  stepKey: string
+): ReadonlyArray<JournalEntryLike> => journal.filter((entry) => entry.stepKey === stepKey)
 
 const successfulFiber = <A, E>(
   pin: string,
@@ -40,6 +48,18 @@ const successfulFiber = <A, E>(
 ): Effect.Effect<A, ConformanceViolation> =>
   Exit.isSuccess(exit) ? Effect.succeed(exit.value) : fail(pin, message, "successful result", exit.cause)
 
+/**
+ * Races two branches, parks the flow on a step *after* the race, then resumes
+ * that unfinished execution under inverted branch timing.
+ *
+ * The frontier step is what makes the replay assertions bite. A flow whose only
+ * step is the race settles on the fresh run, and every subject short-circuits
+ * `resume` on a terminal execution, so replaying one certified nothing beyond
+ * terminal-result reuse: an engine that had lost recorded-winner lookup
+ * entirely still passed. Suspending after the race forces resume to re-enter
+ * the flow and rebuild the race from its journal, while the recorded loser is
+ * the only branch that could win were it re-raced.
+ */
 const runRace = (
   pin: string,
   suffix: string,
@@ -57,6 +77,7 @@ const runRace = (
     const winnerRuns = yield* Ref.make(0)
     const loserRuns = yield* Ref.make(0)
     const loserInterruptions = yield* Ref.make(0)
+    const frontierRuns = yield* Ref.make(0)
     let replayPhase = false
 
     const winner: StepSpec = {
@@ -97,14 +118,31 @@ const runRace = (
           )
         })
     }
+    // Suspends on its first invocation and returns the race's output on its
+    // second, so the flow's value stays the winner's value across the
+    // suspension and a replay that re-raced would report the loser's instead.
+    const frontierKey = `race/${suffix}/frontier`
+    const frontier: StepSpec = {
+      key: frontierKey,
+      sealed: false,
+      kind: "step",
+      run: (input) =>
+        Effect.flatMap(
+          Ref.updateAndGet(frontierRuns, (count) => count + 1),
+          (count) => count === 1 ? Effect.interrupt : Effect.succeed(input)
+        )
+    }
     const flow: FlowSpec = {
       name: `testing/race/${suffix}`,
-      steps: [{
-        key: `race/${suffix}/parent`,
-        sealed: true,
-        kind: "race",
-        branches: [winner, loser]
-      }]
+      steps: [
+        {
+          key: `race/${suffix}/parent`,
+          sealed: true,
+          kind: "race",
+          branches: [winner, loser]
+        },
+        frontier
+      ]
     }
     const executionId = `testing/race/${suffix}/execution`
     const freshFiber = yield* invoke(pin, "run(fork)", () =>
@@ -125,12 +163,12 @@ const runRace = (
     const freshExit = yield* awaitFiber(
       pin,
       freshFiber,
-      "The fresh race did not settle after its deterministic winner was released."
+      "The fresh race did not park at its frontier after the deterministic winner was released."
     )
     const fresh = yield* successfulFiber(
       pin,
       freshExit,
-      "The fresh race escaped as a failure or defect."
+      "The fresh race escaped as a failure or defect instead of suspending at its frontier."
     )
     const freshJournal = yield* invoke(pin, "journal(fresh)", () => engine.journal(executionId))
 
@@ -157,9 +195,11 @@ const runRace = (
       replayedJournal,
       winnerKey,
       loserKey,
+      frontierKey,
       winnerRuns: yield* Ref.get(winnerRuns),
       loserRuns: yield* Ref.get(loserRuns),
-      loserInterruptions: yield* Ref.get(loserInterruptions)
+      loserInterruptions: yield* Ref.get(loserInterruptions),
+      frontierRuns: yield* Ref.get(frontierRuns)
     }
   })
 
@@ -174,12 +214,19 @@ const loserInterrupted: ConformanceCase = {
   run: (engine) =>
     Effect.gen(function*() {
       const observed = yield* runRace(loserInterruptedPin, "loser-interrupted", engine)
+      const freshWinner = entriesFor(observed.freshJournal, observed.winnerKey)
       yield* assert(
         loserInterruptedPin,
-        observed.fresh.status === "completed" && observed.fresh.value === "recorded-winner",
-        "The released branch must deterministically win the fresh race.",
-        { status: "completed", value: "recorded-winner" },
-        observed.fresh
+        observed.fresh.status === "suspended" &&
+          freshWinner.length === 1 &&
+          freshWinner[0]?.outcome === "completed" &&
+          freshWinner[0]?.value === "recorded-winner",
+        "The released branch must deterministically win the fresh race, which then parks at its frontier.",
+        {
+          status: "suspended",
+          winner: [{ stepKey: observed.winnerKey, outcome: "completed", value: "recorded-winner" }]
+        },
+        { status: observed.fresh.status, winner: freshWinner }
       )
       yield* assert(
         loserInterruptedPin,
@@ -214,6 +261,13 @@ const recordedWinnerReplay: ConformanceCase = {
       const observed = yield* runRace(recordedWinnerPin, "recorded-winner-replay", engine)
       yield* assert(
         recordedWinnerPin,
+        observed.fresh.status === "suspended" && observed.frontierRuns === 2,
+        "Replay must re-enter the suspended flow rather than hand back a terminal result, so the race is rebuilt from its journal.",
+        { freshStatus: "suspended", frontierRuns: 2 },
+        { freshStatus: observed.fresh.status, frontierRuns: observed.frontierRuns }
+      )
+      yield* assert(
+        recordedWinnerPin,
         observed.replayed.status === "completed" && observed.replayed.value === "recorded-winner",
         "Replay must reconstruct the journaled winner instead of re-racing; the recorded loser is timed to win replay.",
         { status: "completed", value: "recorded-winner" },
@@ -229,19 +283,24 @@ const recordedWinnerReplay: ConformanceCase = {
           loserRuns: observed.loserRuns
         }
       )
+      const replayedPrefix = observed.replayedJournal.slice(0, observed.freshJournal.length)
       yield* assert(
         recordedWinnerPin,
-        same(observed.fresh.value, observed.replayed.value) &&
-          same(observed.freshJournal, observed.replayedJournal),
-        "Replay must preserve the recorded decision, output, and journal.",
-        {
-          value: observed.fresh.value,
-          journal: observed.freshJournal
-        },
-        {
-          value: observed.replayed.value,
-          journal: observed.replayedJournal
-        }
+        same(replayedPrefix, observed.freshJournal),
+        "Replay must preserve the recorded decision and every journal entry the fresh race wrote.",
+        observed.freshJournal,
+        replayedPrefix
+      )
+      const resumedTail = observed.replayedJournal.slice(observed.freshJournal.length)
+      yield* assert(
+        recordedWinnerPin,
+        resumedTail.length === 1 &&
+          resumedTail[0]?.stepKey === observed.frontierKey &&
+          resumedTail[0]?.outcome === "completed" &&
+          same(resumedTail[0]?.value, observed.replayed.value),
+        "Replay must journal only the resumed frontier, carrying the recorded winner it was handed.",
+        [{ stepKey: observed.frontierKey, outcome: "completed", value: observed.replayed.value }],
+        resumedTail
       )
     })
 }
