@@ -2,6 +2,7 @@ import * as Flow from "@smthrs/core/Flow"
 import * as Binding from "@smthrs/scorers/Binding"
 import * as Scorer from "@smthrs/scorers/Scorer"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import { EvalError } from "../src/EvalError.ts"
 import * as Suite from "../src/Suite.ts"
@@ -16,6 +17,18 @@ const scorer = Scorer.make({
   version: "1",
   name: "exact",
   score: () => Effect.succeed({ score: 1 })
+})
+
+class JudgeUnavailable extends Schema.TaggedError<JudgeUnavailable>()(
+  "packages/smithers/agent/evals/test/Suite/JudgeUnavailable",
+  { model: Schema.String }
+) {}
+
+const judge = Scorer.make<JudgeUnavailable>({
+  id: "packages/smithers/agent/evals/test/Suite/judge",
+  version: "1",
+  name: "judge",
+  score: () => Effect.fail(new JudgeUnavailable({ model: "none" }))
 })
 
 describe("Suite", () => {
@@ -452,5 +465,20 @@ describe("Suite", () => {
     const text = await readFile(new URL("./fixtures/suite.jsonl", import.meta.url), "utf8")
     const suite = await Effect.runPromise(Suite.fromJsonLines(text, { name: "fixture", concurrency: 1 }))
     expect(suite.cases.map((suiteCase) => suiteCase.name)).toEqual(["adds numbers", "multiplies numbers"])
+  })
+
+  it("accepts bindings whose scorers declare their own failures", async () => {
+    // Compile-time: `Suite.Binding` is `@smthrs/scorers`'s binding, so a suite
+    // holds scorers with unrelated typed failures without a cast.
+    const suite = await Effect.runPromise(Suite.make({
+      name: "typed-scorers",
+      concurrency: 1,
+      cases: [{ name: "a", input: 1 }],
+      bindings: [
+        Binding.make({ scorer, appliesTo: target }),
+        Binding.make({ scorer: judge, appliesTo: target })
+      ]
+    }))
+    expect(suite.bindings.map((binding) => binding.scorer.name)).toEqual(["exact", "judge"])
   })
 })

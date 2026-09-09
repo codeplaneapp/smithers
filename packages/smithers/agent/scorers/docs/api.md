@@ -124,6 +124,12 @@ Changing either moves every sampling decision already taken downstream.
 step key. Nothing in this package calls `Sampling.decide` on a binding's
 behalf; a host does, once per candidate step.
 
+A binding is the error boundary: `Binding.scorer` is `Scorer<unknown>`, so a
+scorer declared with its own typed failure binds without a cast and one list
+holds scorers that fail in unrelated ways. Nothing is lost by erasing the type
+here, because a binding never runs its scorer and the runner already accepts an
+unknown scorer failure, recording it as an inconclusive observation.
+
 ## Failures
 
 `ScorerError.code` is stable and its `cause` is preserved. No failure retains
@@ -241,53 +247,53 @@ builds the store needs neither.
 
 Every public export, once.
 
-| Export                               | Category     | Summary                                                                         |
-| ------------------------------------ | ------------ | ------------------------------------------------------------------------------- |
-| `ScorerError.ScorerErrorCode`        | models       | The eight stable failure codes, as a schema and a type.                         |
-| `ScorerError.ScorerError`            | errors       | A typed declaration, execution, or persistence failure.                         |
-| `Scorer.Input`                       | schemas      | Input supplied to a scorer flow.                                                |
-| `Scorer.Result`                      | schemas      | Successful scorer output, carrying the inclusive `[0, 1]` score bound.          |
-| `Scorer.Scorer`                      | models       | A declaration-only flow with an independent durable identity.                   |
+| Export                               | Category     | Summary                                                                           |
+| ------------------------------------ | ------------ | --------------------------------------------------------------------------------- |
+| `ScorerError.ScorerErrorCode`        | models       | The eight stable failure codes, as a schema and a type.                           |
+| `ScorerError.ScorerError`            | errors       | A typed declaration, execution, or persistence failure.                           |
+| `Scorer.Input`                       | schemas      | Input supplied to a scorer flow.                                                  |
+| `Scorer.Result`                      | schemas      | Successful scorer output, carrying the inclusive `[0, 1]` score bound.            |
+| `Scorer.Scorer`                      | models       | A declaration-only flow with an independent durable identity.                     |
 | `Scorer.MakeOptions`                 | models       | Options for `Scorer.make`, minus `input`, `output`, `body`, `model`, and `flows`. |
-| `Scorer.make`                        | constructors | Declares a scorer and derives its `scorerKey`. Throws at plan time.             |
-| `Scorer.validate`                    | validation   | Decodes a scorer result against `Result`.                                       |
-| `Binding.Binding`                    | models       | A scorer, ground truth, context, and sampling policy attached to a target flow. |
-| `Binding.make`                       | constructors | Creates a binding, defaulting to sampling every target step.                    |
-| `Sampling.Sampling`                  | schemas      | `"all"`, `"none"`, or a `{ratio, seed}` policy over the open interval `(0, 1)`. |
-| `Sampling.decide`                    | predicates   | Decides a sample from stable target, scorer, and seed material.                 |
-| `ScoreStore.maxReasonBytes`          | models       | Maximum stored size of an observation `reason`, in UTF-8 bytes.                 |
-| `ScoreStore.maxMetadataBytes`        | models       | Maximum encoded size of an observation `meta`, in UTF-8 bytes.                  |
-| `ScoreStore.maxIdentityBytes`        | models       | Maximum size of a `recordOnce` job identity, in UTF-8 bytes.                    |
-| `ScoreStore.maxObservations`         | models       | Largest page `observations` returns, and its default.                           |
-| `ScoreStore.ObservationBase`         | models       | Fields shared by successful and inconclusive observations.                      |
-| `ScoreStore.ScoreObservation`        | models       | A successful score retained by the store.                                       |
-| `ScoreStore.InconclusiveObservation` | models       | A scorer failure retained without failing its target.                           |
-| `ScoreStore.Observation`             | schemas      | The durable observation contract, as a runtime schema and a type.               |
-| `ScoreStore.Aggregate`               | models       | Count, mean, and minimum over successful scores, plus the inconclusive count.   |
-| `ScoreStore.Page`                    | models       | Page bounds for `observations`: `limit`, `offset`, and the `before` filter.     |
-| `ScoreStore.Service`                 | services     | The durable score store implementation.                                         |
-| `ScoreStore.ScoreStore`              | services     | Context service for durable scorer observations.                                |
-| `ScoreStore.make`                    | constructors | Constructs a score store.                                                       |
-| `ScoreStore.makeNoop`                | constructors | Constructs an inoperative score store.                                          |
-| `ScoreStore.layerNoop`               | layers       | Provides the inoperative score store.                                           |
-| `ScoreStore.validate`                | validation   | Decodes an observation against `Observation` before it is persisted.            |
-| `SqlScoreStore.make`                 | constructors | Builds the SQL-backed store and applies its migrations.                         |
-| `SqlScoreStore.layer`                | layers       | Provides the SQL-backed score store.                                            |
-| `Runner.Job`                         | models       | One scorer execution request and its durable idempotency key.                   |
-| `Runner.BatchOptions`                | models       | Batch execution options.                                                        |
-| `Runner.Recorded`                    | models       | Whether a batch observation was persisted, duplicated, or failed.               |
-| `Runner.Outcome`                     | models       | A batch observation tagged with its job identity and durable write result.      |
-| `Runner.Service`                     | services     | The runtime scorer runner implementation.                                       |
-| `Runner.Runner`                      | services     | Context service for live and batch scorer execution.                            |
-| `Runner.make`                        | constructors | Constructs a scorer runner.                                                     |
-| `Runner.makeNoop`                    | constructors | Constructs an inoperative scorer runner.                                        |
-| `Runner.layerNoop`                   | layers       | Provides the inoperative scorer runner.                                         |
-| `Runner.jobIdentity`                 | constructors | Builds a length-prefixed `Job.identity` from its components.                    |
-| `Runner.inconclusive`                | converting   | Converts a scorer failure into a typed inconclusive observation.                |
-| `RunnerLive.Options`                 | models       | Live runner worker configuration.                                               |
-| `RunnerLive.layer`                   | layers       | Provides the scoped queue and the blocking batch runner.                        |
-| `Migrations.run`                     | migrations   | Applies all score-store migrations.                                             |
-| `Migrations.layer`                   | layers       | Applies score-store migrations when the layer is constructed.                   |
+| `Scorer.make`                        | constructors | Declares a scorer and derives its `scorerKey`. Throws at plan time.               |
+| `Scorer.validate`                    | validation   | Decodes a scorer result against `Result`.                                         |
+| `Binding.Binding`                    | models       | A `Scorer<unknown>`, ground truth, context, and sampling attached to a flow.      |
+| `Binding.make`                       | constructors | Creates a binding, defaulting to sampling every target step.                      |
+| `Sampling.Sampling`                  | schemas      | `"all"`, `"none"`, or a `{ratio, seed}` policy over the open interval `(0, 1)`.   |
+| `Sampling.decide`                    | predicates   | Decides a sample from stable target, scorer, and seed material.                   |
+| `ScoreStore.maxReasonBytes`          | models       | Maximum stored size of an observation `reason`, in UTF-8 bytes.                   |
+| `ScoreStore.maxMetadataBytes`        | models       | Maximum encoded size of an observation `meta`, in UTF-8 bytes.                    |
+| `ScoreStore.maxIdentityBytes`        | models       | Maximum size of a `recordOnce` job identity, in UTF-8 bytes.                      |
+| `ScoreStore.maxObservations`         | models       | Largest page `observations` returns, and its default.                             |
+| `ScoreStore.ObservationBase`         | models       | Fields shared by successful and inconclusive observations.                        |
+| `ScoreStore.ScoreObservation`        | models       | A successful score retained by the store.                                         |
+| `ScoreStore.InconclusiveObservation` | models       | A scorer failure retained without failing its target.                             |
+| `ScoreStore.Observation`             | schemas      | The durable observation contract, as a runtime schema and a type.                 |
+| `ScoreStore.Aggregate`               | models       | Count, mean, and minimum over successful scores, plus the inconclusive count.     |
+| `ScoreStore.Page`                    | models       | Page bounds for `observations`: `limit`, `offset`, and the `before` filter.       |
+| `ScoreStore.Service`                 | services     | The durable score store implementation.                                           |
+| `ScoreStore.ScoreStore`              | services     | Context service for durable scorer observations.                                  |
+| `ScoreStore.make`                    | constructors | Constructs a score store.                                                         |
+| `ScoreStore.makeNoop`                | constructors | Constructs an inoperative score store.                                            |
+| `ScoreStore.layerNoop`               | layers       | Provides the inoperative score store.                                             |
+| `ScoreStore.validate`                | validation   | Decodes an observation against `Observation` before it is persisted.              |
+| `SqlScoreStore.make`                 | constructors | Builds the SQL-backed store and applies its migrations.                           |
+| `SqlScoreStore.layer`                | layers       | Provides the SQL-backed score store.                                              |
+| `Runner.Job`                         | models       | One scorer execution request and its durable idempotency key.                     |
+| `Runner.BatchOptions`                | models       | Batch execution options.                                                          |
+| `Runner.Recorded`                    | models       | Whether a batch observation was persisted, duplicated, or failed.                 |
+| `Runner.Outcome`                     | models       | A batch observation tagged with its job identity and durable write result.        |
+| `Runner.Service`                     | services     | The runtime scorer runner implementation.                                         |
+| `Runner.Runner`                      | services     | Context service for live and batch scorer execution.                              |
+| `Runner.make`                        | constructors | Constructs a scorer runner.                                                       |
+| `Runner.makeNoop`                    | constructors | Constructs an inoperative scorer runner.                                          |
+| `Runner.layerNoop`                   | layers       | Provides the inoperative scorer runner.                                           |
+| `Runner.jobIdentity`                 | constructors | Builds a length-prefixed `Job.identity` from its components.                      |
+| `Runner.inconclusive`                | converting   | Converts a scorer failure into a typed inconclusive observation.                  |
+| `RunnerLive.Options`                 | models       | Live runner worker configuration.                                                 |
+| `RunnerLive.layer`                   | layers       | Provides the scoped queue and the blocking batch runner.                          |
+| `Migrations.run`                     | migrations   | Applies all score-store migrations.                                               |
+| `Migrations.layer`                   | layers       | Applies score-store migrations when the layer is constructed.                     |
 
 ### ScoreGate export index
 

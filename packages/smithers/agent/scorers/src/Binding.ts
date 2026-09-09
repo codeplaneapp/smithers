@@ -23,11 +23,17 @@ import type { Scorer } from "./Scorer.ts"
  * truth is frequently a value with no JSON representation, and refusing those
  * at binding time would be the larger break.
  *
+ * A binding is where a scorer's declared failure is erased: `scorer` is
+ * `Scorer<unknown>`, so a `Scorer<E>` from `Scorer.make` binds without a cast
+ * and one list holds scorers that fail in unrelated ways. Nothing is checked
+ * away by the erasure, because a binding never runs its scorer and the runner
+ * already accepts an unknown scorer failure.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface Binding {
-  readonly scorer: Scorer
+  readonly scorer: Scorer<unknown>
   readonly appliesTo: Flow.Any
   readonly groundTruth?: unknown
   readonly context?: unknown
