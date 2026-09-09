@@ -128,6 +128,37 @@ describe("Namespace", () => {
     }
   })
 
+  // A decoded group is schema-valid by construction, so `matches` must never
+  // answer false for it on budget grounds. The reference evaluator is a plain
+  // recursion over the same tree, so the two can only disagree on bookkeeping.
+  it("evaluates decoded groups at the node budget exactly as a reference evaluator does", () => {
+    const decode = Schema.decodeUnknownSync(Namespace.TagGroup)
+    const reference = (group: Namespace.TagGroup, record: ReadonlyArray<string>): boolean =>
+      "tags" in group
+        ? record.length > 0 && group.tags.every((tag) => record.includes(tag))
+        : "and" in group
+        ? group.and.every((child) => reference(child, record))
+        : "or" in group
+        ? group.or.some((child) => reference(child, record))
+        : !reference(group.not, record)
+    const miss = (): Namespace.TagGroup => ({ tags: ["scope:secret"], match: "all_strict" })
+    const flatOr = (nodes: number): unknown => ({ or: [...Array.from({ length: nodes - 2 }, miss), leaf()] })
+    const nestedAndOr = (nodes: number): unknown => ({
+      and: [{ or: [...Array.from({ length: nodes - 5 }, miss), leaf()] }, { not: miss() }]
+    })
+    for (const nodes of [Namespace.MAX_TAG_GROUP_NODES - 1, Namespace.MAX_TAG_GROUP_NODES]) {
+      for (const shape of [flatOr(nodes), nestedAndOr(nodes)]) {
+        const group = decode(shape)
+        for (const record of [["scope:project"], ["branch:main"]]) {
+          expect(Namespace.matches(group, record)).toBe(reference(group, record))
+        }
+        expect(Namespace.matches(group, ["scope:project"])).toBe(true)
+      }
+    }
+    expect(() => decode(flatOr(Namespace.MAX_TAG_GROUP_NODES + 1))).toThrow(/node count exceeds/u)
+    expect(() => decode(nestedAndOr(Namespace.MAX_TAG_GROUP_NODES + 1))).toThrow(/node count exceeds/u)
+  })
+
   it("evaluates an undecoded over-budget group as false without recursive stack growth", () => {
     expect(Namespace.matches(nested(500), ["scope:project"])).toBe(false)
   })

@@ -320,11 +320,16 @@ export const matches = (tagGroup: TagGroup, tags: ReadonlyArray<string>): boolea
   const pending: Array<Frame> = [{ group: tagGroup, depth: 1, expanded: false }]
   const values: Array<boolean> = []
   let nodes = 0
+  // Expanded frames wait on `pending` for their children's values, so they are
+  // not part of the node budget: the lookahead counts only unvisited frames,
+  // matching the decoder's count so a schema-valid group is never refused here.
+  let unvisited = 1
   while (pending.length > 0) {
     const frame = pending.pop()!
     const group = frame.group
     if (!frame.expanded) {
       nodes += 1
+      unvisited -= 1
       if (frame.depth > MAX_TAG_GROUP_DEPTH || nodes > MAX_TAG_GROUP_NODES) return false
       if ("tags" in group) {
         if (!isTags(group.tags) || (group.match !== undefined && !isMatchMode(group.match))) return false
@@ -334,10 +339,11 @@ export const matches = (tagGroup: TagGroup, tags: ReadonlyArray<string>): boolea
       pending.push({ ...frame, expanded: true })
       const children = "and" in group ? group.and : "or" in group ? group.or : "not" in group ? [group.not] : undefined
       if (children === undefined || !Array.isArray(children)) return false
-      if (nodes + pending.length + children.length > MAX_TAG_GROUP_NODES) return false
+      if (nodes + unvisited + children.length > MAX_TAG_GROUP_NODES) return false
       for (let index = children.length - 1; index >= 0; index--) {
         pending.push({ group: children[index]!, depth: frame.depth + 1, expanded: false })
       }
+      unvisited += children.length
       continue
     }
     if ("not" in group) {
