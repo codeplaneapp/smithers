@@ -271,21 +271,22 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     nodeOutput: async (
       repo: string,
       runId: string,
-      nodeId: string
+      nodeId: string,
+      binding?: GatewayWorkspaceBinding
     ): Promise<GatewayResult<NodeOutputRow | undefined>> =>
-      decodeNodeOutputRow(await projection(repo, { _tag: "node-output", runId, nodeId })),
+      decodeNodeOutputRow(await projection(repo, { _tag: "node-output", runId, nodeId }, binding)),
 
     /** What happened to a run, in words: the run summary's diagnosis. */
-    explain: async (repo: string, runId: string): Promise<GatewayResult<string | undefined>> =>
-      map(decodeRunSummaryRow(await projection(repo, { _tag: "run-summary", runId })), (row) => row?.verdict),
+    explain: async (repo: string, runId: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<string | undefined>> =>
+      map(decodeRunSummaryRow(await projection(repo, { _tag: "run-summary", runId }, binding)), (row) => row?.verdict),
 
     /** Stop a run. Durable: the next read of it says cancelled. */
-    cancel: (repo: string, runId: string, reason?: string): Promise<GatewayResult<unknown>> =>
+    cancel: (repo: string, runId: string, reason?: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<unknown>> =>
       call(repo, "Cancel", {
         runId,
         idempotencyKey: `cancel:${runId}`,
         reason: reason === undefined || reason.trim() === "" ? "the human stopped it" : reason
-      }),
+      }, binding),
 
     /*
      * Lane runs — the run lifecycle beyond launch and cancel.
@@ -299,20 +300,20 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
      */
 
     /** Restart a parked run (or tell the run's owner to). */
-    resume: (repo: string, runId: string, reason?: string): Promise<GatewayResult<unknown>> =>
+    resume: (repo: string, runId: string, reason?: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<unknown>> =>
       call(repo, "Resume", {
         runId,
         idempotencyKey: `resume:${runId}:${crypto.randomUUID()}`,
         ...(reason === undefined ? {} : { reason })
-      }),
+      }, binding),
 
     /** Deliver a named signal to a run parked on a wait. */
-    signal: (repo: string, runId: string, name: string, payload: unknown): Promise<GatewayResult<unknown>> =>
+    signal: (repo: string, runId: string, name: string, payload: unknown, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<unknown>> =>
       call(repo, "Signal", {
         runId,
         signal: { name, payload: payload ?? {} },
         idempotencyKey: `signal:${runId}:${name}:${crypto.randomUUID()}`
-      }),
+      }, binding),
 
     /**
      * Steer a running agent. The steer envelope's principal is the server's
@@ -327,7 +328,8 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
         | { readonly kind: "Message"; readonly body: string }
         | { readonly kind: "Seat"; readonly seat: string }
         | { readonly kind: "Thinking"; readonly thinking: string }
-        | { readonly kind: "Tools"; readonly toolNames: ReadonlyArray<string> }
+        | { readonly kind: "Tools"; readonly toolNames: ReadonlyArray<string> },
+      binding?: GatewayWorkspaceBinding
     ): Promise<GatewayResult<unknown>> => {
       const now = Date.now()
       const nonce = crypto.randomUUID()
@@ -346,7 +348,7 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
           ? { ...envelope, kind: "Thinking", thinking: item.thinking }
           : { ...envelope, kind: "Tools", toolNames: [...item.toolNames] }
       ) as SteerMessage
-      return call(repo, "Steer", { runId, message, idempotencyKey: `steer:${runId}:${nonce}` })
+      return call(repo, "Steer", { runId, message, idempotencyKey: `steer:${runId}:${nonce}` }, binding)
     },
 
     /** Every run on the workspace, one summary row each (the run inbox's read). */
@@ -358,12 +360,12 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
       decodeApprovalRows(await projection(repo, { _tag: "approvals" }, binding)),
 
     /** One run's turn-by-turn transcript. */
-    transcript: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<TranscriptRow>>> =>
-      decodeTranscriptRows(await projection(repo, { _tag: "transcript", runId })),
+    transcript: async (repo: string, runId: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<TranscriptRow>>> =>
+      decodeTranscriptRows(await projection(repo, { _tag: "transcript", runId }, binding)),
 
     /** One run's raw control events, in journal order. */
-    runEvents: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<ControlEvent>>> =>
-      decodeControlEventRows(await projection(repo, { _tag: "run-events", runId }))
+    runEvents: async (repo: string, runId: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<ControlEvent>>> =>
+      decodeControlEventRows(await projection(repo, { _tag: "run-events", runId }, binding))
   }
 }
 

@@ -596,6 +596,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       repo: z.string().optional(),
       /** Owning gateway; omission keeps legacy cards unbound. */
       workspaceId: GatewayWorkspaceIdSchema.optional(),
+      /** Version 1 records an explicit legacy route when workspaceId is absent. */
+      gatewayBindingVersion: z.literal(1).optional(),
       decision: z.enum(["approved", "denied"]).optional(),
       decidedAt: z.number().optional(),
       /** A decision is in flight to the backend: the card must not be re-decided. */
@@ -749,6 +751,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       repo: z.string(),
       /** Owning Plue gateway binding; omission identifies a legacy unbound run. */
       workspaceId: GatewayWorkspaceIdSchema.optional(),
+      /** Version 1 records an explicit legacy route when workspaceId is absent. */
+      gatewayBindingVersion: z.literal(1).optional(),
       runId: z.string(),
       workflow: z.string(),
       phase: z.enum([
@@ -931,6 +935,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       repo: z.string(),
       /** Owning gateway; omission keeps legacy cards unbound. */
       workspaceId: GatewayWorkspaceIdSchema.optional(),
+      /** Version 1 records an explicit legacy route when workspaceId is absent. */
+      gatewayBindingVersion: z.literal(1).optional(),
       /** Every status the unfiltered workspace carried when listed; the filter chips read it. Optional for older cards. */
       statuses: z.array(z.string()).optional(),
       status: z.string().optional(),
@@ -962,6 +968,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       repo: z.string(),
       /** Owning gateway; omission keeps legacy cards unbound. */
       workspaceId: GatewayWorkspaceIdSchema.optional(),
+      /** Version 1 records an explicit legacy route when workspaceId is absent. */
+      gatewayBindingVersion: z.literal(1).optional(),
       approvals: z.array(
         z.object({
           runId: z.string(),

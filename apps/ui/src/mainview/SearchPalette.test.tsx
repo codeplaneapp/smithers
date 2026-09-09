@@ -13,6 +13,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import App from "./App"
+import { runSearchRef } from "./flows/RunCommand"
 import { ControllerTestProvider } from "./ControllerContext"
 import type { NativeRepositories } from "./native/NativeBridge"
 import type { AgentPort } from "./runtime/AgentPort"
@@ -179,7 +180,7 @@ describe("§3 the keyboard contract", () => {
     expect(view.store.session().paletteOpen).toBe(true)
     expect(palette(view.host)?.dataset["mode"]).toBe("all")
     // Files (both prefix matches, in listing order), the run (contains), then the flow whose summary says "compose".
-    expect(rows(view.host)).toEqual(["src/Composer.tsx", "src/Compose.css", "run-compose", "chat.send"])
+    expect(rows(view.host)).toEqual(["src/Composer.tsx", "src/Compose.css", runSearchRef("run-compose", "runs-1"), "chat.send"])
     await press(view, "Escape")
     expect(view.store.session().paletteOpen).toBe(false)
     expect(palette(view.host)).toBeNull()
@@ -201,11 +202,11 @@ describe("§3 the keyboard contract", () => {
     await press(view, "ArrowDown")
     expect(highlighted(view.host)?.dataset["ref"]).toBe("src/Compose.css")
     await press(view, "Tab")
-    expect(highlighted(view.host)?.dataset["ref"]).toBe("run-compose")
+    expect(highlighted(view.host)?.dataset["ref"]).toBe(runSearchRef("run-compose", "runs-1"))
     await press(view, "Tab")
     expect(highlighted(view.host)?.dataset["ref"]).toBe("chat.send")
     await press(view, "Tab", { shift: true })
-    expect(highlighted(view.host)?.dataset["ref"]).toBe("run-compose")
+    expect(highlighted(view.host)?.dataset["ref"]).toBe(runSearchRef("run-compose", "runs-1"))
   })
 
   test("→ opens the item's actions (registered flows), ← walks back, Enter on an action runs it", async () => {
@@ -214,7 +215,7 @@ describe("§3 the keyboard contract", () => {
     await press(view, "k", { meta: true })
     expect(palette(view.host)?.dataset["mode"]).toBe("runs")
     await press(view, "ArrowRight")
-    expect(view.store.session().paletteActionsRef).toBe("run-compose")
+    expect(view.store.session().paletteActionsRef).toBe(runSearchRef("run-compose", "runs-1"))
     const actions = rows(view.host)
     expect(actions[0]).toBe("runs.open")
     expect(actions).toContain("runs.resume")
@@ -222,10 +223,10 @@ describe("§3 the keyboard contract", () => {
     expect(view.host.querySelector("[data-testid='palette-chip']")?.textContent).toBe("actions")
     await press(view, "ArrowLeft")
     expect(view.store.session().paletteActionsRef).toBeNull()
-    expect(rows(view.host)).toEqual(["run-compose"])
+    expect(rows(view.host)).toEqual([runSearchRef("run-compose", "runs-1")])
     // A second Cmd+K on the highlighted item opens the actions too.
     await press(view, "k", { meta: true })
-    expect(view.store.session().paletteActionsRef).toBe("run-compose")
+    expect(view.store.session().paletteActionsRef).toBe(runSearchRef("run-compose", "runs-1"))
     await press(view, "ArrowDown")
     await press(view, "Enter")
     expect(invoked(view.store).map((row) => row.name)).toContain("runs.resume")
@@ -256,7 +257,7 @@ describe("§3 the keyboard contract", () => {
     await view.act(() => view.controller.changeDraft("run:compose"))
     await press(view, "k", { meta: true })
     await press(view, "Enter", { meta: true })
-    expect(invoked(view.store)).toContainEqual({ name: "runs.resume", args: "run-compose" })
+    expect(invoked(view.store)).toContainEqual({ name: "runs.resume", args: "sourceCard=runs-1 run-compose" })
     // A file's primary flow is Implement (§2), which is not registered: Cmd+Enter runs nothing and never invents a flow.
     await view.act(() => view.controller.changeDraft("Composer.tsx"))
     await press(view, "k", { meta: true })

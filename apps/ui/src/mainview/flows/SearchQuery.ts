@@ -7,6 +7,7 @@
  */
 import type { SearchAction, SearchItem, SearchItemKind } from "@smthrs/rpc/Cards"
 import { assembleArgs, formFieldsFor } from "./FlowForms"
+import { runSearchPayload } from "./RunCommand"
 import type { FlowEntry } from "./registry"
 import { nameOf, namespaceOf } from "./registry"
 
@@ -445,7 +446,7 @@ export const refPayload = (kind: SearchItemKind, ref: string): Readonly<Record<s
     case "history":
       return { sha: ref }
     case "run":
-      return { runId: ref }
+      return runSearchPayload(ref)
     case "change":
       return { changeId: ref }
     case "issue":

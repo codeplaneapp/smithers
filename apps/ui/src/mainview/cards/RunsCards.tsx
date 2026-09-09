@@ -98,7 +98,7 @@ export const RunListCardBody = ({
                   variant="outline"
                   data-flow="runs.open"
                   data-testid={`runs-open-${run.runId}`}
-                  onClick={() => onRunCommand("runs.open", run.runId)}
+                  onClick={() => onRunCommand("runs.open", `sourceCard=${card.id} ${run.runId}`)}
                 >
                   Open
                 </Button>
@@ -114,7 +114,7 @@ export const RunListCardBody = ({
               variant="outline"
               data-flow="flow.run.stop-all"
               data-testid="run-list-stop-all"
-              onClick={() => onRunCommand("flow.run.stop-all", repo)}
+              onClick={() => onRunCommand("flow.run.stop-all", `sourceCard=${card.id} ${repo}`)}
             >
               Stop all {liveCount}
             </Button>

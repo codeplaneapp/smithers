@@ -10,6 +10,7 @@ import type { Repo } from "@smthrs/rpc/LocalApp"
 import { activeRepoOf, parseRepoSelection } from "./AppState"
 import type { CloudRepository } from "./AppState"
 import type { AppStore } from "./AppStore"
+import { cardContainsRun, runScopeFromCard, sameRunScope, type RunScope } from "./RunReference"
 
 const REPO_TOKEN = /^[\w.-]+\/[\w.-]+$/
 
@@ -125,28 +126,17 @@ export type GatewayBinding = { readonly workspaceId?: string } | { readonly erro
 /** Persisted provenance wins over the currently selected workspace, including legacy omission. */
 export const gatewayRunContextFor = (store: AppStore, runId: string):
   { readonly repo: string; readonly workspaceId?: string } | { readonly error: string } | undefined => {
-  const trace = store.collections.cards.get(`flow-run-${runId}`)
-  const authoritative = trace?.kind === "run-trace" && trace.payload.runId === runId ? trace.payload : undefined
-  let found: { repo: string; workspaceId?: string } | undefined = authoritative === undefined ? undefined
-    : { repo: authoritative.repo, ...(authoritative.workspaceId === undefined ? {} : { workspaceId: authoritative.workspaceId }) }
+  let found: RunScope | undefined
   for (const card of store.collections.cards.values()) {
-    const owns = card.kind === "run-trace" ? card.payload.runId === runId
-      : card.kind === "approval" ? card.payload.runId === runId
-      : card.kind === "run-list" ? card.payload.runs.some((row) => row.runId === runId)
-      : card.kind === "approvals-inbox" ? card.payload.approvals.some((row) => row.runId === runId) : false
-    if (!owns || !("repo" in card.payload) || typeof card.payload.repo !== "string") continue
-    const workspaceId = "workspaceId" in card.payload && typeof card.payload.workspaceId === "string" ? card.payload.workspaceId : undefined
-    // Before ancillary cards stored bindings, even a bound run's list/approval
-    // omitted this field. Only its already-recorded run card can repair that
-    // omission; never infer historical ownership from the active selection.
-    if (workspaceId === undefined && authoritative?.workspaceId !== undefined &&
-      card.kind !== "run-trace" && card.payload.repo === authoritative.repo) continue
-    if (found !== undefined && (found.repo !== card.payload.repo || found.workspaceId !== workspaceId)) {
-      return { error: `The recorded run has conflicting gateway workspaces: ${found.repo}@${found.workspaceId ?? "legacy (no workspace)"} and ${card.payload.repo}@${workspaceId ?? "legacy (no workspace)"} on card ${card.id}.` }
+    if (!cardContainsRun(card, runId)) continue
+    const scope = runScopeFromCard(store, card, runId)
+    if (scope === undefined) continue
+    if (found !== undefined && !sameRunScope(found, scope)) {
+      return { error: `The recorded run has conflicting gateway workspaces: ${found.repo}@${found.workspaceId ?? "legacy (no workspace)"} and ${scope.repo}@${scope.workspaceId ?? "legacy (no workspace)"} on card ${card.id}. Supply sourceCard to select the recorded run.` }
     }
-    found = { repo: card.payload.repo, ...(workspaceId === undefined ? {} : { workspaceId }) }
+    found = scope
   }
-  return found
+  return found === undefined ? undefined : { repo: found.repo, ...(found.workspaceId === undefined ? {} : { workspaceId: found.workspaceId }) }
 }
 
 export const gatewayBindingFor = (store: AppStore, repo: string, runId?: string): GatewayBinding => {

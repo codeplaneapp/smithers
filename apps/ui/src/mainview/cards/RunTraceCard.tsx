@@ -15,6 +15,7 @@
  * enter the same runs.trace.* flows with their actor recorded. This component
  * holds no state of its own.
  */
+import { runSourceCommand } from "../flows/RunCommand"
 import { EmptyState, StatusPill } from "@smthrs/ui"
 import { CodingPlanBody } from "./CodingPlanCard"
 import type { Card } from "../state/AppState"
@@ -98,11 +99,12 @@ export const selectedSpan = (card: RunTraceCard, model: TraceModel): TraceSpan =
 
 export const RunTraceBody = ({
   card,
-  onRunCommand
+  onRunCommand: sendRunCommand
 }: {
   readonly card: RunTraceCard
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
+  const onRunCommand = runSourceCommand(card.id, sendRunCommand)
   const { runId, phase, kind } = card.payload
   const model = traceOf(card)
   const view = card.payload.traceView ?? "turns"

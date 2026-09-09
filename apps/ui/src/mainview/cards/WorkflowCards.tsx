@@ -5,6 +5,7 @@
  * exported because the Flows pane and the runs tests mount them directly: one
  * list with two mounts, never a second implementation of the same listing.
  */
+import { runSourceCommand } from "../flows/RunCommand"
 import { Button, Markdown } from "@smthrs/ui"
 import { useState } from "react"
 import type { KeyboardEvent } from "react"
@@ -37,7 +38,7 @@ export const WorkflowRunCardBody = ({
   card,
   onStopRun,
   onRetryRun,
-  onRunCommand,
+  onRunCommand: sendRunCommand,
   debugVerbose = false
 }: {
   readonly card: Extract<Card, { kind: "run-trace" }>
@@ -46,6 +47,7 @@ export const WorkflowRunCardBody = ({
   readonly onRunCommand: (name: string, args?: string) => void
   readonly debugVerbose?: boolean
 }) => {
+  const onRunCommand = runSourceCommand(card.id, sendRunCommand)
   const { phase, steps, result, error, observationError, runId, kind } = card.payload
   const facet = card.payload.facet ?? "steps"
   return (

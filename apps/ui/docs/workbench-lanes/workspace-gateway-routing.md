@@ -90,3 +90,49 @@ capability, legacy isolation, durable-cache restart, and selection changes durin
 actual controller provisioning. Run-card tests follow with a later run operation
 under another active selection. The bound cloud host still needs to be staged
 and deployed for a real end-to-end cloud run; these tests do not claim deployment.
+
+## Workspace-qualified UI run references
+
+A control run ID belongs to its gateway database. Two workspaces may both return
+`run-1`. The app keeps those backend IDs unchanged and addresses a displayed run
+by `(repo, workspaceId-or-legacy, runId)`. New bound run/approval card IDs encode
+that tuple. Existing cards are found by their payload and retain their old IDs,
+so persisted messages, frames and links still point to the same card. A new legacy
+card retains its old short ID when unused, otherwise it receives a qualified ID.
+
+The existing run flows now accept optional `sourceCard`: `runs.open`, `resume`,
+`rerun`, `signal`, `steer`, `seat`, `thinking`, `tools`, `logs`, `steps`, `events`,
+`trace.filter`, `trace.select`, `trace.view`, `trace.live`, `coding.select`, plus
+`approvals.open` and `flow.run.stop-all`. This is an extension to their public
+flow inputs, not a new backend service. Their embedded buttons send the same
+input the agent or slash door can supply:
+
+```text
+/runs.steer sourceCard=flow-run@owner%2Frepo@83e75ae5-0920-4000-8000-000000000001@run-1 run-1 use the smaller diff
+```
+
+`sourceCard` comes first for these commands, keeping freeform message and JSON
+arguments intact. A source must contain the requested run; an explicit different
+repository refuses. A run-trace may open a child only when its control journal
+actually records that child run ID. Native execution IDs do not establish a child
+control run. Bare IDs still work when recorded provenance is unique and refuse
+when several gateways contain the ID. Every asynchronous card action and pump
+captures its own binding before awaiting a response.
+
+New internal card metadata `gatewayBindingVersion: 1` distinguishes an explicitly
+captured legacy gateway from an old ancillary row written before bindings were
+recorded. Only old rows lacking that marker may inherit the already-recorded
+raw-key run-trace binding. Newly captured legacy rows stay legacy even when an
+older bound run has the same ID. The version is optional for persistence
+compatibility; no collection migration discards or renames historical cards.
+Refreshing an old list keeps its old card ID and pins the uniquely recorded
+gateway. A historical list whose rows imply different gateways refuses the
+refresh; it cannot choose one from the current workspace selection.
+
+Run search results keep separate opaque references for each recorded scope and
+carry `sourceCard` into their existing Open, Resume and action-panel commands.
+Their secondary line names the repository and bound workspace so equal backend
+IDs remain distinguishable. Older bare search references continue to resolve
+through the normal ambiguity check. Run lists and traces use the existing
+runtime-owned-card boundary: agents obtain them by invoking flows and cannot
+forge or rewrite their gateway provenance through `card.show` or `card.update`.

@@ -24,6 +24,7 @@ import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import type { RunSummaryRow } from "./gateway"
 import type { WorkflowController } from "./workflows"
+import { approvalCardIdFor, cardContainsRun, runCardInScope, runScopeFromCard, sameRunScope, type RunScope } from "../RunReference"
 import { gatewayBindingFor, gatewayRunContextFor } from "../RepoContext"
 
 export interface RunsController {
@@ -35,31 +36,28 @@ export interface RunsController {
     readonly by?: string
     readonly repo?: string
   }) => Promise<CommandResult>
-  readonly openRun: (runId: string, repo?: string) => Promise<CommandResult>
-  readonly resumeRun: (runId: string) => Promise<CommandResult>
-  readonly rerunRun: (runId: string) => Promise<CommandResult>
-  readonly signalRun: (runId: string, name: string, payload?: string) => Promise<CommandResult>
-  readonly steerRun: (runId: string, body: string) => Promise<CommandResult>
-  readonly steerRunSeat: (runId: string, seat: string) => Promise<CommandResult>
-  readonly steerRunThinking: (runId: string, thinking: string) => Promise<CommandResult>
-  readonly steerRunTools: (runId: string, toolNames: string) => Promise<CommandResult>
-  readonly showRunLogs: (runId: string, follow?: boolean) => Promise<CommandResult>
-  readonly showRunSteps: (runId: string) => CommandResult
-  readonly showRunEvents: (runId: string) => Promise<CommandResult>
+  readonly openRun: (runId: string, repo?: string, sourceCard?: string) => Promise<CommandResult>
+  readonly resumeRun: (runId: string, sourceCard?: string) => Promise<CommandResult>
+  readonly rerunRun: (runId: string, sourceCard?: string) => Promise<CommandResult>
+  readonly signalRun: (runId: string, name: string, payload?: string, sourceCard?: string) => Promise<CommandResult>
+  readonly steerRun: (runId: string, body: string, sourceCard?: string) => Promise<CommandResult>
+  readonly steerRunSeat: (runId: string, seat: string, sourceCard?: string) => Promise<CommandResult>
+  readonly steerRunThinking: (runId: string, thinking: string, sourceCard?: string) => Promise<CommandResult>
+  readonly steerRunTools: (runId: string, toolNames: string, sourceCard?: string) => Promise<CommandResult>
+  readonly showRunLogs: (runId: string, follow?: boolean, sourceCard?: string) => Promise<CommandResult>
+  readonly showRunSteps: (runId: string, sourceCard?: string) => CommandResult
+  readonly showRunEvents: (runId: string, sourceCard?: string) => Promise<CommandResult>
   /** `runs.trace.filter <runId> <filter>`: the trace's active filter, in the card payload (spec 06 §5, §6). */
-  readonly traceFilter: (runId: string, filter: TraceFilter) => CommandResult
+  readonly traceFilter: (runId: string, filter: TraceFilter, sourceCard?: string) => CommandResult
   /** `runs.trace.select <runId> <nodeId> [seq]`: the trace's selection and scrub cursor; leaves live tail. */
-  readonly traceSelect: (runId: string, nodeId: string, seq?: number) => CommandResult
-  readonly traceView: (runId: string, view: TraceView) => CommandResult
-  readonly traceLive: (runId: string) => CommandResult
-  readonly selectCodingChange: (runId: string, changeId: string) => CommandResult
-  readonly stopAllRuns: (repo?: string) => Promise<CommandResult>
+  readonly traceSelect: (runId: string, nodeId: string, seq?: number, sourceCard?: string) => CommandResult
+  readonly traceView: (runId: string, view: TraceView, sourceCard?: string) => CommandResult
+  readonly traceLive: (runId: string, sourceCard?: string) => CommandResult
+  readonly selectCodingChange: (runId: string, changeId: string, sourceCard?: string) => CommandResult
+  readonly stopAllRuns: (repo?: string, sourceCard?: string) => Promise<CommandResult>
   readonly listApprovals: (repo?: string) => Promise<CommandResult>
-  readonly openApproval: (runId: string) => Promise<CommandResult>
+  readonly openApproval: (runId: string, sourceCard?: string) => Promise<CommandResult>
 }
-
-/** The card id a run's card has always had. */
-const runCardId = (runId: string): string => `flow-run-${runId}`
 
 /** Why a run is not moving, in one word the card can render. */
 const waitingWord = (row: RunSummaryRow): string | undefined =>
@@ -77,42 +75,40 @@ export const createRunsController = (
 ): RunsController => {
   const { store, gateway } = ctx
 
-  const runCardFor = (runId: string): Extract<Card, { kind: "run-trace" }> | undefined => {
-    const card = store.collections.cards.get(runCardId(runId))
-    return card?.kind === "run-trace" ? card : undefined
-  }
-
-  const patchRunCard = (
-    runId: string,
-    patch: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>
-  ): void => {
-    const card = runCardFor(runId)
+  const runCardFor = (scope: RunScope) => runCardInScope(store, scope)
+  const patchRunCard = (scope: RunScope, patch: Partial<Extract<Card, { kind: "run-trace" }>["payload"]>): void => {
+    const card = runCardFor(scope)
     if (card === undefined) return
-    store.dispatch({
-      type: "card.updated",
-      actor: "system",
-      id: card.id,
-      patch: { payload: { ...card.payload, ...patch } }
-    })
+    store.dispatch({ type: "card.updated", actor: "system", id: card.id, patch: { payload: { ...card.payload, ...patch } } })
+  }
+  const pokeRun = (scope: RunScope): void => {
+    const card = runCardFor(scope)
+    if (card !== undefined) ctx.pumpPokes.get(card.id)?.()
   }
 
-  /** Wake the run's pump so an act's effect shows on the card this cycle, not next poll. */
-  const pokeRun = (runId: string): void => {
-    ctx.pumpPokes.get(runCardId(runId))?.()
-  }
-
-  /**
-   * Where a run-id act aims: the run card's own repo when the card is in hand,
-   * the loaded-repository answer otherwise (the loaded set is the universe).
-   */
-  const repoForRun = (
-    runId: string,
-    preferred?: string
-  ): { readonly repo: string } | { readonly error: string } => {
-    if (preferred !== undefined) return { repo: preferred }
+  /** Capture the address once, before any await. An explicit source must actually contain this run. */
+  const resolveRun = (runId: string, sourceCard?: string, preferred?: string, allowChild = false): RunScope | { readonly error: string } => {
+    if (sourceCard !== undefined) {
+      const source = store.collections.cards.get(sourceCard)
+      if (source === undefined || !cardContainsRun(source, runId, allowChild)) {
+        return { error: `Card ${sourceCard} does not record run ${runId}.` }
+      }
+      const scope = runScopeFromCard(store, source, runId)
+      if (scope === undefined || (preferred !== undefined && preferred !== scope.repo)) {
+        return { error: "The source card belongs to another repository or has no recorded gateway." }
+      }
+      return scope
+    }
     const recorded = gatewayRunContextFor(store, runId)
-    if (recorded !== undefined) return recorded
-    return workflows.workflowTargetRepo()
+    if (recorded !== undefined) {
+      if ("error" in recorded) return recorded
+      if (preferred !== undefined && preferred !== recorded.repo) return { error: "The run belongs to another repository." }
+      return { ...recorded, runId }
+    }
+    const target = workflows.workflowTargetRepo(preferred)
+    if ("error" in target) return target
+    const binding = gatewayBindingFor(store, target.repo)
+    return "error" in binding ? binding : { repo: target.repo, runId, ...binding }
   }
 
   const listRuns = async (args: {
@@ -140,10 +136,17 @@ export const createRunsController = (
     if (args.sourceCard !== undefined && (source?.kind !== "run-list" || source.payload.repo !== repo)) {
       return "The run list is unavailable or belongs to another repository."
     }
-    const binding = source?.kind === "run-list"
+    let binding = source?.kind === "run-list"
       ? (source.payload.workspaceId === undefined ? {} : { workspaceId: source.payload.workspaceId })
       : gatewayBindingFor(store, repo)
     if ("error" in binding) return binding.error
+    if (source?.kind === "run-list" && source.payload.workspaceId === undefined && source.payload.gatewayBindingVersion === undefined) {
+      const scopes = source.payload.runs.map((run) => runScopeFromCard(store, source, run.runId)!)
+      if (scopes.some((scope) => scope.workspaceId !== scopes[0]?.workspaceId)) {
+        return "The historical run list records several gateways. Open a run from its own recorded card before listing that workspace."
+      }
+      binding = { workspaceId: scopes[0]?.workspaceId }
+    }
     const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
     const listed = await gateway.workspaceRuns(repo, binding)
@@ -155,7 +158,7 @@ export const createRunsController = (
         (args.lineage === undefined || row.lineageId === args.lineage)
       )
       .sort((left, right) => right.createdAt - left.createdAt)
-    const cardId = `run-list-${repo}${binding.workspaceId === undefined ? "" : `-${binding.workspaceId}`}`
+    const cardId = source?.kind === "run-list" ? source.id : `run-list-${repo}${binding.workspaceId === undefined ? "" : `-${binding.workspaceId}`}`
     const existing = store.collections.cards.get(cardId)
     const card: Card = {
       id: cardId,
@@ -165,7 +168,7 @@ export const createRunsController = (
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: existing?.ordinal ?? nextTranscriptOrdinal(),
       payload: {
-        repo, ...binding,
+        repo, ...binding, gatewayBindingVersion: 1,
         ...(args.status === undefined ? {} : { status: args.status }),
         ...(args.flow === undefined ? {} : { flow: args.flow }),
         ...(args.lineage === undefined ? {} : { lineage: args.lineage }),
@@ -190,14 +193,13 @@ export const createRunsController = (
     }
   }
 
-  const openRun = async (runId: string, repoArg?: string): Promise<CommandResult> => {
+  const openRun = async (runId: string, repoArg?: string, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const target = repoForRun(runId, repoArg)
+    const target = resolveRun(runId, sourceCard, repoArg, true)
     if ("error" in target) return target.error
     const repo = target.repo
-    const binding = gatewayBindingFor(store, repo, runId)
-    if ("error" in binding) return binding.error
+    const binding = { workspaceId: target.workspaceId }
     const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
     const summary = await gateway.run(repo, runId, binding)
@@ -220,26 +222,29 @@ export const createRunsController = (
     return { value: `run-opened run=${runId} repo=${repo}` }
   }
 
-  const resumeRun = async (runId: string): Promise<CommandResult> => {
+  const resumeRun = async (runId: string, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const target = repoForRun(runId)
+    const target = resolveRun(runId, sourceCard)
     if ("error" in target) return target.error
-    const card = runCardFor(runId)
+    const card = runCardFor(target)
     const resumed = await gateway.resume(
       target.repo,
       runId,
-      card?.payload.waiting === "executor" ? "Nothing was driving the run." : undefined
+      card?.payload.waiting === "executor" ? "Nothing was driving the run." : undefined,
+      { workspaceId: target.workspaceId }
     )
     if (resumed.status !== "ok") return resumed.message
-    pokeRun(runId)
+    pokeRun(target)
     return { value: `resume-requested run=${runId}` }
   }
 
-  const rerunRun = async (runId: string): Promise<CommandResult> => {
+  const rerunRun = async (runId: string, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const card = runCardFor(runId)
+    const target = resolveRun(runId, sourceCard)
+    if ("error" in target) return target.error
+    const card = runCardFor(target)
     if (card === undefined) {
       return `Open the run first (runs.open ${runId}) — rerunning needs the card that knows the flow and its launch input.`
     }
@@ -247,8 +252,7 @@ export const createRunsController = (
       return `This run's launch input isn't recorded on this client, so there's nothing faithful to rerun — start the flow fresh with flow.run ${card.payload.workflow}.`
     }
     const repo = card.payload.repo
-    const binding = gatewayBindingFor(store, repo, runId)
-    if ("error" in binding) return binding.error
+    const binding = { workspaceId: target.workspaceId }
     const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
     const launched = await workflows.launchWorkflow({
@@ -262,7 +266,7 @@ export const createRunsController = (
     return { value: `run-started workflow=${card.payload.workflow} run=${launched.runId} repo=${repo}` }
   }
 
-  const signalRun = async (runId: string, name: string, payloadText?: string): Promise<CommandResult> => {
+  const signalRun = async (runId: string, name: string, payloadText?: string, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
     if (name.trim() === "") return "runs.signal needs the signal's name."
@@ -274,11 +278,11 @@ export const createRunsController = (
         return `That signal payload isn't JSON: ${payloadText}`
       }
     }
-    const target = repoForRun(runId)
+    const target = resolveRun(runId, sourceCard)
     if ("error" in target) return target.error
-    const signaled = await gateway.signal(target.repo, runId, name.trim(), payload)
+    const signaled = await gateway.signal(target.repo, runId, name.trim(), payload, { workspaceId: target.workspaceId })
     if (signaled.status !== "ok") return signaled.message
-    pokeRun(runId)
+    pokeRun(target)
     return { value: `signal-sent run=${runId} signal=${name.trim()}` }
   }
 
@@ -288,39 +292,40 @@ export const createRunsController = (
       | { readonly kind: "Message"; readonly body: string }
       | { readonly kind: "Seat"; readonly seat: string }
       | { readonly kind: "Thinking"; readonly thinking: string }
-      | { readonly kind: "Tools"; readonly toolNames: ReadonlyArray<string> }
+      | { readonly kind: "Tools"; readonly toolNames: ReadonlyArray<string> },
+    sourceCard?: string
   ): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const target = repoForRun(runId)
+    const target = resolveRun(runId, sourceCard)
     if ("error" in target) return target.error
-    const steered = await gateway.steer(target.repo, runId, item)
+    const steered = await gateway.steer(target.repo, runId, item, { workspaceId: target.workspaceId })
     if (steered.status !== "ok") return steered.message
-    patchRunCard(runId, { steeringPending: true })
-    pokeRun(runId)
+    patchRunCard(target, { steeringPending: true })
+    pokeRun(target)
     return { value: `steered run=${runId}` }
   }
 
-  const steerRun = (runId: string, body: string): Promise<CommandResult> =>
+  const steerRun = (runId: string, body: string, sourceCard?: string): Promise<CommandResult> =>
     body.trim() === ""
       ? Promise.resolve("runs.steer needs the message to deliver.")
-      : steer(runId, { kind: "Message", body })
+      : steer(runId, { kind: "Message", body }, sourceCard)
 
-  const steerRunSeat = (runId: string, seat: string): Promise<CommandResult> =>
+  const steerRunSeat = (runId: string, seat: string, sourceCard?: string): Promise<CommandResult> =>
     seat.trim() === ""
       ? Promise.resolve("runs.seat needs the seat to move the run to.")
-      : steer(runId, { kind: "Seat", seat: seat.trim() })
+      : steer(runId, { kind: "Seat", seat: seat.trim() }, sourceCard)
 
-  const steerRunThinking = (runId: string, thinking: string): Promise<CommandResult> =>
+  const steerRunThinking = (runId: string, thinking: string, sourceCard?: string): Promise<CommandResult> =>
     thinking.trim() === ""
       ? Promise.resolve("runs.thinking needs the thinking level.")
-      : steer(runId, { kind: "Thinking", thinking: thinking.trim() })
+      : steer(runId, { kind: "Thinking", thinking: thinking.trim() }, sourceCard)
 
-  const steerRunTools = (runId: string, toolNames: string): Promise<CommandResult> => {
+  const steerRunTools = (runId: string, toolNames: string, sourceCard?: string): Promise<CommandResult> => {
     const names = toolNames.split(",").map((name) => name.trim()).filter((name) => name !== "")
     return names.length === 0
       ? Promise.resolve("runs.tools needs the tool names, comma-separated.")
-      : steer(runId, { kind: "Tools", toolNames: names })
+      : steer(runId, { kind: "Tools", toolNames: names }, sourceCard)
   }
 
   /**
@@ -328,17 +333,17 @@ export const createRunsController = (
    * the rows current while the run moves); without it the tab is one snapshot
    * of where the transcript stood when asked.
    */
-  const showRunLogs = async (runId: string, follow?: boolean): Promise<CommandResult> => {
+  const showRunLogs = async (runId: string, follow?: boolean, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const card = runCardFor(runId)
-    if (card === undefined) return `Open the run first (runs.open ${runId}) — the transcript lives on its card.`
-    const target = repoForRun(runId)
+    const target = resolveRun(runId, sourceCard)
     if ("error" in target) return target.error
+    const card = runCardFor(target)
+    if (card === undefined) return `Open the run first (runs.open ${runId}) — the transcript lives on its card.`
     const following = follow === true ? card.payload.follow !== true : false
-    const transcript = await gateway.transcript(target.repo, runId)
+    const transcript = await gateway.transcript(target.repo, runId, { workspaceId: target.workspaceId })
     if (transcript.status !== "ok") return transcript.message
-    patchRunCard(runId, {
+    patchRunCard(target, {
       facet: "transcript",
       follow: following,
       transcriptRows: transcript.value.map((row) => ({
@@ -349,32 +354,34 @@ export const createRunsController = (
         text: row.text
       }))
     })
-    if (following) pokeRun(runId)
+    if (following) pokeRun(target)
     return { value: following ? `following run=${runId}` : `transcript run=${runId}` }
   }
 
   /** Back to the default facet; unfollows the transcript if it was following. */
-  const showRunSteps = (runId: string): CommandResult => {
-    const card = runCardFor(runId)
+  const showRunSteps = (runId: string, sourceCard?: string): CommandResult => {
+    const target = resolveRun(runId, sourceCard)
+    if ("error" in target) return target.error
+    const card = runCardFor(target)
     if (card === undefined) return `Open the run first (runs.open ${runId}).`
-    patchRunCard(runId, { facet: "steps", follow: false })
+    patchRunCard(target, { facet: "steps", follow: false })
     return { value: `steps run=${runId}` }
   }
 
   /** The raw journal, a debug surface: it exists only where verbose does. */
-  const showRunEvents = async (runId: string): Promise<CommandResult> => {
+  const showRunEvents = async (runId: string, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
     if (store.session().verbose !== true) {
       return "The events tab is the run's raw journal — a debug view. Turn on /debug.verbose first."
     }
-    const card = runCardFor(runId)
-    if (card === undefined) return `Open the run first (runs.open ${runId}) — the events live on its card.`
-    const target = repoForRun(runId)
+    const target = resolveRun(runId, sourceCard)
     if ("error" in target) return target.error
-    const events = await gateway.runEvents(target.repo, runId)
+    const card = runCardFor(target)
+    if (card === undefined) return `Open the run first (runs.open ${runId}) — the events live on its card.`
+    const events = await gateway.runEvents(target.repo, runId, { workspaceId: target.workspaceId })
     if (events.status !== "ok") return events.message
-    patchRunCard(runId, {
+    patchRunCard(target, {
       facet: "events",
       events: events.value.map((event) => ({ ...(event as unknown as Record<string, unknown>) }))
     })
@@ -388,8 +395,10 @@ export const createRunsController = (
    * and no request leaves the browser. The pump keeps the journal current on
    * its own cycle.
    */
-  const traceFilter = (runId: string, filter: TraceFilter): CommandResult => {
-    const card = runCardFor(runId)
+  const traceFilter = (runId: string, filter: TraceFilter, sourceCard?: string): CommandResult => {
+    const target = resolveRun(runId, sourceCard)
+    if ("error" in target) return target.error
+    const card = runCardFor(target)
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
     store.dispatch({
       type: "card.updated",
@@ -400,8 +409,10 @@ export const createRunsController = (
     return { value: `trace-filter run=${runId} filter=${filter}` }
   }
 
-  const traceSelect = (runId: string, nodeId: string, seq?: number): CommandResult => {
-    const card = runCardFor(runId)
+  const traceSelect = (runId: string, nodeId: string, seq?: number, sourceCard?: string): CommandResult => {
+    const target = resolveRun(runId, sourceCard)
+    if ("error" in target) return target.error
+    const card = runCardFor(target)
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
     // The node must be one the journal in hand folds to; a made-up id selects nothing, so say so.
     const { workflow, phase, kind, events } = card.payload
@@ -433,8 +444,10 @@ export const createRunsController = (
     return { value: `trace-select run=${runId} node=${nodeId}${seq === undefined ? "" : ` seq=${seq}`}` }
   }
 
-  const selectCodingChange = (runId: string, changeId: string): CommandResult => {
-    const card = runCardFor(runId)
+  const selectCodingChange = (runId: string, changeId: string, sourceCard?: string): CommandResult => {
+    const target = resolveRun(runId, sourceCard)
+    if ("error" in target) return target.error
+    const card = runCardFor(target)
     if (card === undefined) return `Open the run first (runs.open ${runId}): its plan lives on the card.`
     if (!codingPlanOf(card)?.changes.some((change) => change.id === changeId)) return `Run ${runId} has no recorded planned Change ${changeId}.`
     const { codingChangeId: previous, ...payload } = card.payload
@@ -443,8 +456,10 @@ export const createRunsController = (
     return { value: `coding-plan-selection run=${runId} change=${previous === changeId ? "none" : changeId}` }
   }
 
-  const traceView = (runId: string, view: TraceView): CommandResult => {
-    const card = runCardFor(runId)
+  const traceView = (runId: string, view: TraceView, sourceCard?: string): CommandResult => {
+    const target = resolveRun(runId, sourceCard)
+    if ("error" in target) return target.error
+    const card = runCardFor(target)
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
     store.dispatch({
       type: "card.updated",
@@ -455,8 +470,10 @@ export const createRunsController = (
     return { value: `trace-view run=${runId} view=${view}` }
   }
 
-  const traceLive = (runId: string): CommandResult => {
-    const card = runCardFor(runId)
+  const traceLive = (runId: string, sourceCard?: string): CommandResult => {
+    const target = resolveRun(runId, sourceCard)
+    if ("error" in target) return target.error
+    const card = runCardFor(target)
     if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
     const { selection: _selection, cursorSeq: _cursorSeq, ...payload } = card.payload
     // card.updated merges payload fields. Replace the card to remove the cursor
@@ -472,7 +489,7 @@ export const createRunsController = (
   /** Stop every live run card's run — one workspace's, when named. Each cancel is durable; the cards settle from the pump. */
   /** The wire statuses the run inbox counts as live (mirrors RunsCards LIVE_STATUSES). */
   const RUN_LIST_LIVE_STATUSES: ReadonlySet<string> = new Set(["accepted", "running", "parked", "waiting-approval"])
-  const stopAllRuns = async (repoArg?: string): Promise<CommandResult> => {
+  const stopAllRuns = async (repoArg?: string, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
     /*
@@ -481,14 +498,16 @@ export const createRunsController = (
      * filter — never just the runs this client happens to hold cards for.
      * With no inbox open, the client's live cards are the only known set.
      */
+    const source = sourceCard === undefined ? undefined : store.collections.cards.get(sourceCard)
+    if (sourceCard !== undefined && (source?.kind !== "run-list" || (repoArg !== undefined && source.payload.repo !== repoArg))) return "The run list is unavailable or belongs to another repository."
     const inboxes = [...store.collections.cards.values()].filter(
-      (card) => card.kind === "run-list" && (repoArg === undefined || card.payload.repo === repoArg)
+      (card) => card.kind === "run-list" && (sourceCard === undefined || card.id === sourceCard) && (repoArg === undefined || card.payload.repo === repoArg)
     ) as Array<Extract<Card, { kind: "run-list" }>>
-    const live: Array<{ readonly repo: string; readonly runId: string }> = inboxes.length > 0
+    const live: Array<RunScope> = inboxes.length > 0
       ? inboxes.flatMap((card) =>
         card.payload.runs
           .filter((run) => RUN_LIST_LIVE_STATUSES.has(run.status))
-          .map((run) => ({ repo: card.payload.repo, runId: run.runId }))
+          .map((run) => (runScopeFromCard(store, card, run.runId)!))
       )
       : ([...store.collections.cards.values()].filter(
         (card) =>
@@ -499,12 +518,12 @@ export const createRunsController = (
             card.payload.phase === "reconnecting")
       ) as Array<Extract<Card, { kind: "run-trace" }>>)
         .filter((card) => repoArg === undefined || card.payload.repo === repoArg)
-        .map((card) => ({ repo: card.payload.repo, runId: card.payload.runId }))
+        .map((card) => ({ repo: card.payload.repo, runId: card.payload.runId, workspaceId: card.payload.workspaceId }))
     if (live.length === 0) return repoArg === undefined ? "No runs are live." : `No runs are live on ${repoArg}.`
     let stopped = 0
     let firstRefusal: string | undefined
-    for (const card of live) {
-      const cancelled = await gateway.cancel(card.repo, card.runId, "the human stopped every run")
+    for (const card of live.filter((scope, index) => live.findIndex((other) => sameRunScope(other, scope)) === index)) {
+      const cancelled = await gateway.cancel(card.repo, card.runId, "the human stopped every run", { workspaceId: card.workspaceId })
       if (cancelled.status === "ok") {
         stopped += 1
       } else if (firstRefusal === undefined) {
@@ -542,7 +561,7 @@ export const createRunsController = (
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: existing?.ordinal ?? nextTranscriptOrdinal(),
       payload: {
-        repo, ...binding,
+        repo, ...binding, gatewayBindingVersion: 1,
         approvals: pending.map((row) => {
           // A row's recorded decision survives a refresh: the freeze is the
           // server's answer, not something a re-list may thaw.
@@ -573,18 +592,17 @@ export const createRunsController = (
    * the same cards the pump would have upserted, so deciding them rides the
    * existing per-card path (`approval.approve` / `approval.deny`) unchanged.
    */
-  const openApproval = async (runId: string): Promise<CommandResult> => {
+  const openApproval = async (runId: string, sourceCard?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const target = repoForRun(runId)
+    const target = resolveRun(runId, sourceCard)
     if ("error" in target) return target.error
     const repo = target.repo
-    const binding = gatewayBindingFor(store, repo, runId)
-    if ("error" in binding) return binding.error
+    const binding = { workspaceId: target.workspaceId }
     const alreadyOpen = [...store.collections.cards.values()].filter(
       (card) =>
         store.approvalRequest(card.id) !== undefined && card.kind === "approval" && card.payload.runId === runId &&
-        card.payload.decision === undefined
+        sameRunScope(runScopeFromCard(store, card, runId) ?? { repo: "", runId }, target) && card.payload.decision === undefined
     )
     if (alreadyOpen.length > 0) {
       return {
@@ -601,7 +619,7 @@ export const createRunsController = (
     if (pending.length === 0) return `Run ${runId} has no approvals pending.`
     for (const approval of pending) {
       const card: Card = {
-        id: `approval-${runId}-${approval.requestId}`,
+        id: approvalCardIdFor(store, target, approval.requestId),
         kind: "approval",
         title: approval.title,
         status: "active",
@@ -612,7 +630,7 @@ export const createRunsController = (
           runId,
           requestId: approval.requestId,
           approval: approval.payload as Record<string, unknown>,
-          repo, ...binding
+          repo, ...binding, gatewayBindingVersion: 1
         }
       }
       store.dispatch({ type: "card.upsert", actor: "system", card })

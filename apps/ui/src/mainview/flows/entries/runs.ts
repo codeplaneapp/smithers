@@ -58,100 +58,100 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "runs.open",
     summary: "Open a run as a card that tracks it",
     runtime: ["cloud"],
-    args: "<runId> [owner/repo]",
+    args: "[sourceCard=id] <runId> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
-      runId: Schema.String,
+      sourceCard: Schema.optional(Schema.String), runId: Schema.String,
       repo: Schema.optional(Schema.String)
     }),
-    handler: ({ runId, repo }) => actions.openRun(runId, repo)
+    handler: ({ runId, repo, sourceCard }) => actions.openRun(runId, repo, sourceCard)
   }),
   flow({
     name: "runs.resume",
     confirm: "resume the run",
     summary: "Resume a parked run",
     runtime: ["cloud"],
-    args: "<runId>",
+    args: "[sourceCard=id] <runId>",
     requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String }),
-    handler: ({ runId }) => actions.resumeRun(runId)
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String }),
+    handler: ({ runId, sourceCard }) => actions.resumeRun(runId, sourceCard)
   }),
   flow({
     /* A relaunch is real work on the user's workspace: the launch capability. */
     name: "runs.rerun",
     summary: "Run a run's flow again with the same input",
     runtime: ["cloud"],
-    args: "<runId>",
+    args: "[sourceCard=id] <runId>",
     requires: ["signed-in"],
     capabilities: ["outbound:launch"],
-    input: Schema.Struct({ runId: Schema.String }),
-    handler: ({ runId }) => actions.rerunRun(runId)
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String }),
+    handler: ({ runId, sourceCard }) => actions.rerunRun(runId, sourceCard)
   }),
   flow({
     name: "runs.signal",
     confirm: "release the run's wait with a signal",
     summary: "Deliver a named signal to a waiting run",
     runtime: ["cloud"],
-    args: "<runId> <name> [json]",
+    args: "[sourceCard=id] <runId> <name> [json]",
     requires: ["signed-in"],
     input: Schema.Struct({
-      runId: Schema.String,
+      sourceCard: Schema.optional(Schema.String), runId: Schema.String,
       name: Schema.String,
       payload: Schema.optional(Schema.String)
     }),
-    handler: ({ runId, name, payload }) => actions.signalRun(runId, name, payload)
+    handler: ({ runId, name, payload, sourceCard }) => actions.signalRun(runId, name, payload, sourceCard)
   }),
   flow({
     name: "runs.steer",
     confirm: "steer the running agent",
     summary: "Send an operator message into a running run",
     runtime: ["cloud"],
-    args: "<runId> <message>",
+    args: "[sourceCard=id] <runId> <message>",
     requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String, body: Schema.String }),
-    handler: ({ runId, body }) => actions.steerRun(runId, body)
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String, body: Schema.String }),
+    handler: ({ runId, body, sourceCard }) => actions.steerRun(runId, body, sourceCard)
   }),
   flow({
     name: "runs.seat",
     confirm: "change the run's seat",
     summary: "Move a run to a different model seat",
     runtime: ["cloud"],
-    args: "<runId> <seat>",
+    args: "[sourceCard=id] <runId> <seat>",
     requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String, seat: Schema.String }),
-    handler: ({ runId, seat }) => actions.steerRunSeat(runId, seat)
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String, seat: Schema.String }),
+    handler: ({ runId, seat, sourceCard }) => actions.steerRunSeat(runId, seat, sourceCard)
   }),
   flow({
     name: "runs.thinking",
     confirm: "change the run's thinking level",
     summary: "Change a run's thinking level",
     runtime: ["cloud"],
-    args: "<runId> <level>",
+    args: "[sourceCard=id] <runId> <level>",
     requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String, thinking: Schema.String }),
-    handler: ({ runId, thinking }) => actions.steerRunThinking(runId, thinking)
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String, thinking: Schema.String }),
+    handler: ({ runId, thinking, sourceCard }) => actions.steerRunThinking(runId, thinking, sourceCard)
   }),
   flow({
     name: "runs.tools",
     confirm: "change the run's tools",
     summary: "Add tools to a run's active set",
     runtime: ["cloud"],
-    args: "<runId> <names,comma-separated>",
+    args: "[sourceCard=id] <runId> <names,comma-separated>",
     requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String, toolNames: Schema.String }),
-    handler: ({ runId, toolNames }) => actions.steerRunTools(runId, toolNames)
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String, toolNames: Schema.String }),
+    handler: ({ runId, toolNames, sourceCard }) => actions.steerRunTools(runId, toolNames, sourceCard)
   }),
   flow({
     name: "runs.logs",
     summary: "Show a run's transcript on its card (--follow keeps it live)",
     runtime: ["cloud"],
-    args: "<runId> [--follow]",
+    args: "[sourceCard=id] <runId> [--follow]",
     requires: ["signed-in"],
     input: Schema.Struct({
-      runId: Schema.String,
+      sourceCard: Schema.optional(Schema.String), runId: Schema.String,
       follow: Schema.optional(Schema.Boolean)
     }),
-    handler: ({ runId, follow }) => actions.showRunLogs(runId, follow)
+    handler: ({ runId, follow, sourceCard }) => actions.showRunLogs(runId, follow, sourceCard)
   }),
   flow({
     /* The run card's Steps tab: the card's own presentation act, so it stays hidden. */
@@ -159,9 +159,9 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Show a run's steps on its card",
     runtime: ["cloud"],
     hidden: true,
-    args: "<runId>",
-    input: Schema.Struct({ runId: Schema.String }),
-    handler: ({ runId }) => actions.showRunSteps(runId)
+    args: "[sourceCard=id] <runId>",
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String }),
+    handler: ({ runId, sourceCard }) => actions.showRunSteps(runId, sourceCard)
   }),
   /*
    * The run trace's own interactions (factory spec 06 §6): the filter chips
@@ -176,57 +176,57 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Filter a run's trace: all, running, failed, model, flow, forks or messages",
     runtime: ["cloud"],
     hidden: true,
-    args: "<runId> <all|running|failed|model|flow|forks|messages>",
+    args: "[sourceCard=id] <runId> <all|running|failed|model|flow|forks|messages>",
     input: Schema.Struct({
-      runId: Schema.String,
+      sourceCard: Schema.optional(Schema.String), runId: Schema.String,
       filter: Schema.Literals(["all", "running", "failed", "model", "flow", "forks", "messages"])
     }),
-    handler: ({ runId, filter }) => actions.traceFilter(runId, filter)
+    handler: ({ runId, filter, sourceCard }) => actions.traceFilter(runId, filter, sourceCard)
   }),
   flow({
     name: "runs.trace.select",
     summary: "Select a node of a run's trace, optionally scrubbing to a journal seq",
     runtime: ["cloud"],
     hidden: true,
-    args: "<runId> <nodeId> [seq]",
-    input: Schema.Struct({ runId: Schema.String, nodeId: Schema.String, seq: Schema.optional(Schema.Number) }),
-    handler: ({ runId, nodeId, seq }) => actions.traceSelect(runId, nodeId, seq)
+    args: "[sourceCard=id] <runId> <nodeId> [seq]",
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String, nodeId: Schema.String, seq: Schema.optional(Schema.Number) }),
+    handler: ({ runId, nodeId, seq, sourceCard }) => actions.traceSelect(runId, nodeId, seq, sourceCard)
   }),
   flow({
     name: "runs.coding.select",
     summary: "Inspect or collapse a predicted Change in a coding run",
     runtime: ["cloud"],
     hidden: true,
-    args: "<runId> <changeId>",
-    input: Schema.Struct({ runId: Schema.String, changeId: Schema.String }),
-    handler: ({ runId, changeId }) => actions.selectCodingChange(runId, changeId)
+    args: "[sourceCard=id] <runId> <changeId>",
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String, changeId: Schema.String }),
+    handler: ({ runId, changeId, sourceCard }) => actions.selectCodingChange(runId, changeId, sourceCard)
   }),
   flow({
     name: "runs.trace.view",
     summary: "Show a run's turn explanations or full execution timeline in its embedded card",
     runtime: ["cloud"],
     hidden: true,
-    args: "<runId> <turns|timeline>",
-    input: Schema.Struct({ runId: Schema.String, view: Schema.Literals(["turns", "timeline"]) }),
-    handler: ({ runId, view }) => actions.traceView(runId, view)
+    args: "[sourceCard=id] <runId> <turns|timeline>",
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String, view: Schema.Literals(["turns", "timeline"]) }),
+    handler: ({ runId, view, sourceCard }) => actions.traceView(runId, view, sourceCard)
   }),
   flow({
     name: "runs.trace.live",
     summary: "Return a run's trace to its latest recorded turn",
     runtime: ["cloud"],
     hidden: true,
-    args: "<runId>",
-    input: Schema.Struct({ runId: Schema.String }),
-    handler: ({ runId }) => actions.traceLive(runId)
+    args: "[sourceCard=id] <runId>",
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String }),
+    handler: ({ runId, sourceCard }) => actions.traceLive(runId, sourceCard)
   }),
   flow({
     /* The raw journal is a debug surface; the controller gates it on verbose. */
     name: "runs.events",
     summary: "Show a run's raw events on its card (verbose)",
     runtime: ["cloud"],
-    args: "<runId>",
+    args: "[sourceCard=id] <runId>",
     requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String }),
-    handler: ({ runId }) => actions.showRunEvents(runId)
+    input: Schema.Struct({ sourceCard: Schema.optional(Schema.String), runId: Schema.String }),
+    handler: ({ runId, sourceCard }) => actions.showRunEvents(runId, sourceCard)
   })
 ]

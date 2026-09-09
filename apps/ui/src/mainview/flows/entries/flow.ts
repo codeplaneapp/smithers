@@ -205,9 +205,9 @@ export const flowRunStopAllFlows = (actions: CommandActions): ReadonlyArray<Flow
     runtime: ["cloud"],
     hidden: true,
     confirm: "stop every run",
-    args: "[owner/repo]",
+    args: "[sourceCard=id] [owner/repo]",
     requires: ["signed-in"],
-    input: Schema.Struct({ repo: Schema.optional(Schema.String) }),
-    handler: ({ repo }) => actions.stopAllRuns(repo)
+    input: Schema.Struct({ repo: Schema.optional(Schema.String), sourceCard: Schema.optional(Schema.String) }),
+    handler: ({ repo, sourceCard }) => actions.stopAllRuns(repo, sourceCard)
   })
 ]

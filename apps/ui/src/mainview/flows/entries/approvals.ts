@@ -26,9 +26,9 @@ export const approvalsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry
     name: "approvals.open",
     summary: "Open a run's pending approvals as cards",
     runtime: ["cloud"],
-    args: "<runId>",
+    args: "[sourceCard=id] <runId>",
     requires: ["signed-in"],
-    input: Schema.Struct({ runId: Schema.String }),
-    handler: ({ runId }) => actions.openApproval(runId)
+    input: Schema.Struct({ runId: Schema.String, sourceCard: Schema.optional(Schema.String) }),
+    handler: ({ runId, sourceCard }) => actions.openApproval(runId, sourceCard)
   })
 ]

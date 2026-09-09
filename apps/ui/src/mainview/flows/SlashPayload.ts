@@ -13,6 +13,7 @@
  * parsed is refused before the handler runs, which is why no handler below the
  * boundary contains an argument check.
  */
+import { splitRunSource, takesRunSource } from "./RunCommand"
 import { parseFileArgs } from "./FileArgs"
 import { isTraceFilter, TRACE_FILTER_IDS } from "../cards/RunTrace"
 import { splitTrailingRepo } from "../state/RepoContext"
@@ -1073,7 +1074,13 @@ export const payloadFor = (
   grammar?: (args: string | undefined) => Parsed
 ): Parsed => {
   const parse = GRAMMAR[name] ?? grammar
-  return parse === undefined ? NONE : parse(args)
+  if (parse === undefined) return NONE
+  if (takesRunSource(name)) {
+    const source = splitRunSource(args)
+    const parsed = parse(source.args)
+    return "payload" in parsed && source.sourceCard !== undefined ? ok({ ...parsed.payload, sourceCard: source.sourceCard }) : parsed
+  }
+  return parse(args)
 }
 
 /**

@@ -126,7 +126,7 @@ describe("the run inbox card", () => {
     const stopAll = host.querySelector("[data-testid='run-list-stop-all']")
     expect(stopAll?.textContent).toBe("Stop all 1")
     click(stopAll!)
-    expect(dispatched[0]).toEqual({ name: "flow.run.stop-all", args: REPO })
+    expect(dispatched[0]).toEqual({ name: "flow.run.stop-all", args: `sourceCard=run-list-${REPO} ${REPO}` })
   })
 
   test("a row opens its run card", () => {
@@ -138,7 +138,7 @@ describe("the run inbox card", () => {
       />
     )
     click(host.querySelector("[data-testid='runs-open-run-old']")!)
-    expect(dispatched[0]).toEqual({ name: "runs.open", args: "run-old" })
+    expect(dispatched[0]).toEqual({ name: "runs.open", args: `sourceCard=run-list-${REPO} run-old` })
   })
 })
 
@@ -255,7 +255,7 @@ describe("the run card, per phase and waiting reason", () => {
     const resume = host.querySelector("[data-testid='flow-run-resume-run-1']")
     expect(resume).not.toBeNull()
     click(resume!)
-    expect(dispatched[0]).toEqual({ name: "runs.resume", args: "run-1" })
+    expect(dispatched[0]).toEqual({ name: "runs.resume", args: "sourceCard=flow-run-run-1 run-1" })
   })
 
   test("a parked wait names its reason; an approval wait offers no Resume (the gate answers)", () => {
@@ -273,7 +273,7 @@ describe("the run card, per phase and waiting reason", () => {
     const rerun = host.querySelector("[data-testid='flow-run-rerun-run-1']")
     expect(rerun).not.toBeNull()
     click(rerun!)
-    expect(dispatched[0]).toEqual({ name: "runs.rerun", args: "run-1" })
+    expect(dispatched[0]).toEqual({ name: "runs.rerun", args: "sourceCard=flow-run-run-1 run-1" })
   })
 
   test("a queued steer reads 'steering pending · delivered at the next turn'", () => {
@@ -294,7 +294,7 @@ describe("the run card, per phase and waiting reason", () => {
     flushSync(() => {
       send?.click()
     })
-    expect(dispatched[0]).toEqual({ name: "runs.steer", args: "run-1 use the smaller diff" })
+    expect(dispatched[0]).toEqual({ name: "runs.steer", args: "sourceCard=flow-run-run-1 run-1 use the smaller diff" })
   })
 
   test("the thinking strip names the wire's own levels", () => {
@@ -313,7 +313,7 @@ describe("the run card, per phase and waiting reason", () => {
     flushSync(() => {
       select.dispatchEvent(new Event("change", { bubbles: true }))
     })
-    expect(dispatched[0]).toEqual({ name: "runs.thinking", args: "run-1 high" })
+    expect(dispatched[0]).toEqual({ name: "runs.thinking", args: "sourceCard=flow-run-run-1 run-1 high" })
   })
 
   test("the transcript facet renders its rows; the steps tab is the way back", () => {
@@ -324,7 +324,7 @@ describe("the run card, per phase and waiting reason", () => {
     })
     expect(host.querySelector("[data-testid='flow-run-transcript-run-1']")?.textContent).toContain("turn 1 begins")
     click(host.querySelector("[data-testid='flow-run-facet-steps-run-1']")!)
-    expect(dispatched[0]).toEqual({ name: "runs.steps", args: "run-1" })
+    expect(dispatched[0]).toEqual({ name: "runs.steps", args: "sourceCard=flow-run-run-1 run-1" })
   })
 
   test("the events tab exists only under verbose, and renders the raw event JSON", () => {

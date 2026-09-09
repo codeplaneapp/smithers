@@ -1,11 +1,13 @@
+import { runSourceCommand } from "../flows/RunCommand"
 import type { Card } from "../state/AppState"
 import { codingPlanOf } from "./CodingPlan"
 
 /** Predicted ownership is visible before execution. Recorded receipts arrive through the run journal. */
-export const CodingPlanBody = ({ card, onRunCommand }: {
+export const CodingPlanBody = ({ card, onRunCommand: sendRunCommand }: {
   readonly card: Extract<Card, { kind: "run-trace" }>
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
+  const onRunCommand = runSourceCommand(card.id, sendRunCommand)
   const plan = codingPlanOf(card)
   if (plan === undefined) return null
   const selected = plan.changes.find((change) => change.id === card.payload.codingChangeId)

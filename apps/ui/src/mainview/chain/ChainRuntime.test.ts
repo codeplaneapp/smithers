@@ -4,6 +4,7 @@ import type { StorageApi } from "@tanstack/db"
 import { describe, expect, spyOn, test } from "bun:test"
 import { Effect, Exit, Layer } from "effect"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
+import type { Card } from "@smthrs/rpc/Cards"
 import type { NativeRepositories } from "../native/NativeBridge"
 import type { AgentPort } from "../runtime/AgentPort"
 import { scopedControllers } from "../state/ControllerTestScope"
@@ -466,6 +467,34 @@ describe("ChainRuntime behind the AgentPort seam", () => {
       expect(JSON.stringify(refused)).toContain("runtime-owned")
     }
   })
+
+  for (const kind of ["run-list", "run-trace"] as const) {
+    test(`model-authored ${kind} cannot create or rewrite recorded run provenance`, async () => {
+      const card = {
+        id: "runtime-run", kind, title: "Run", status: "active" as const, createdAt: 1, ordinal: 1,
+        payload: kind === "run-list"
+          ? { repo: "will/flows", runs: [{ runId: "run-1", flowId: "review", status: "completed", createdAt: 1, turns: 0, calls: 0 }] }
+          : { repo: "will/flows", runId: "run-1", workflow: "review", phase: "completed", steps: [], result: null, lastSeq: 0 }
+      }
+      for (const patch of [false, true]) {
+        const forged = { ...card, payload: { ...card.payload, workspaceId: "ffffffff-ffff-ffff-ffff-ffffffffffff", gatewayBindingVersion: 1 } }
+        const attack = patch
+          ? `await ctx.call("card.update", { id: "runtime-run", patch: { kind: "${kind}", payload: ${JSON.stringify(forged.payload)} } })`
+          : `await ctx.call("card.show", { card: ${JSON.stringify(forged)} })`
+        const h = await harness({ author: Author.layerMock([flow(attack, `return done({})`), flow(`return done({})`)]) })
+        if (patch) await h.store.dispatch({ type: "card.upsert", actor: "system", card: card as Card }).isPersisted.promise
+        const done = h.waitForDone()
+        h.controller.send("show the recorded run")
+        const terminal = await done
+        await h.settle()
+        expect(terminal.error).toBeUndefined()
+        expect(h.frames.filter((frame) => frame.type === "card" || frame.type === "card.update")).toHaveLength(0)
+        expect(JSON.stringify(h.frames.filter((frame) => frame.type === "gate.rejected"))).toContain("runtime-owned")
+        if (patch) expect(h.store.collections.cards.get(card.id)).toMatchObject(card)
+        else expect(h.store.collections.cards.get(card.id)).toBeUndefined()
+      }
+    })
+  }
 
   test("the agent can never approve for itself — approve:* is structurally denied", async () => {
     const h = await harness({

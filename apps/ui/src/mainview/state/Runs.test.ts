@@ -14,6 +14,7 @@ import type { StorageApi } from "@tanstack/db"
 import { CODING_PLAN } from "../cards/fixtures/CodingPlan"
 import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
+import { runCardInScope, approvalCardIdFor } from "./RunReference"
 import { gatewayRunContextFor } from "./RepoContext"
 import type { NativeRepositories } from "../native/NativeBridge"
 import type { AgentPort } from "../runtime/AgentPort"
@@ -843,9 +844,9 @@ describe("workspace-bound run cards", () => {
     await controller.commands.run("runs.list", `completed sourceCard=${listId} ${REPO}`)
     await controller.commands.run("runs.open", "listed")
     await controller.commands.run("approvals.open", "gated")
-    expect(store.collections.cards.get("flow-run-listed")).toMatchObject({ payload: { workspaceId } })
-    expect(store.collections.cards.get("approval-gated-gate-a")).toMatchObject({ payload: { workspaceId } })
-    await controller.commands.run("approval.approve", "approval-gated-gate-a")
+    expect(runCardInScope(store, { repo: REPO, runId: "listed", workspaceId })).toMatchObject({ payload: { workspaceId } })
+    expect(store.collections.cards.get(approvalCardIdFor(store, { repo: REPO, runId: "gated", workspaceId }, "gate-a"))).toMatchObject({ payload: { workspaceId } })
+    await controller.commands.run("approval.approve", approvalCardIdFor(store, { repo: REPO, runId: "gated", workspaceId }, "gate-a"))
     await controller.commands.run("approval.approve", `${inboxId}:gate-b`)
     await waitFor(() => double.state.submitted.length === 2, 10_000)
     for (const call of double.calls.filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).toMatchObject({ workspaceId })
@@ -857,12 +858,15 @@ describe("workspace-bound run cards", () => {
     const double = relay({ runs: [{ runId: "run-1", flowId: "review-pr", status: "completed" }], approvals: [approvalRow("run-1", "old-gate", "Approve")] })
     let controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store)
-    // This is the pre-fix persisted shape: ancillary cards lack a binding.
-    await controller.commands.run("runs.list", REPO)
-    await controller.commands.run("approvals.list", REPO)
-    await controller.commands.run("approvals.open", "run-1")
-    await selectWorkspace(store)
-    await controller.commands.run("flow.run", "review-pr")
+    // Actual pre-binding rows: persisted before the new writer/version existed.
+    const approval = approvalRow("run-1", "old-gate", "Approve")
+    const base = { title: "Old", status: "active" as const, createdAt: 1, ordinal: 1 }
+    for (const card of [
+      { ...base, id: "flow-run-run-1", kind: "run-trace", payload: { repo: REPO, workspaceId, runId: "run-1", workflow: "review-pr", phase: "completed", steps: [], result: null, lastSeq: 0 } },
+      { ...base, id: `run-list-${REPO}`, kind: "run-list", payload: { repo: REPO, runs: [{ runId: "run-1", flowId: "review-pr", status: "completed", createdAt: 1, turns: 0, calls: 0 }] } },
+      { ...base, id: "approval-run-1-old-gate", kind: "approval", payload: { repo: REPO, runId: "run-1", requestId: "old-gate", capability: "Approve", approval: approval.payload } },
+      { ...base, id: `approvals-inbox-${REPO}`, kind: "approvals-inbox", payload: { repo: REPO, approvals: [{ runId: "run-1", requestId: "old-gate", title: "Approve", approval: approval.payload, requestedAt: 1 }] } }
+    ] as Array<Card>) await store.dispatch({ type: "card.upsert", actor: "system", card }).isPersisted.promise
     await settle(10)
     await controller.dispose()
     store = await createAppStore({ kind: "localStorage", storage })
@@ -876,6 +880,19 @@ describe("workspace-bound run cards", () => {
     await controller.commands.run("approval.approve", `approvals-inbox-${REPO}:old-gate`)
     await waitFor(() => double.state.submitted.length === submittedBefore + 2, 10_000)
     await controller.commands.run("runs.resume", "run-1")
+    const historicalList = store.collections.cards.get(`run-list-${REPO}`)!
+    if (historicalList.kind !== "run-list") throw new Error("missing historical list")
+    await store.dispatch({ type: "card.upsert", actor: "system", card: {
+      ...historicalList, payload: { ...historicalList.payload, runs: [...historicalList.payload.runs,
+        { runId: "unbound-run", flowId: "review-pr", status: "completed", createdAt: 1, turns: 0, calls: 0 }
+      ] }
+    } }).isPersisted.promise
+    const beforeMixedRefresh = double.calls.length
+    expect(said(await controller.commands.run("runs.list", `completed sourceCard=run-list-${REPO} ${REPO}`))).toContain("several gateways")
+    expect(double.calls.length).toBe(beforeMixedRefresh)
+    await store.dispatch({ type: "card.upsert", actor: "system", card: historicalList }).isPersisted.promise
+    await controller.commands.run("runs.list", `completed sourceCard=run-list-${REPO} ${REPO}`)
+    expect(store.collections.cards.get(`run-list-${REPO}`)).toMatchObject({ payload: { workspaceId, gatewayBindingVersion: 1 } })
     for (const call of double.calls.slice(before).filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).toMatchObject({ workspaceId })
   })
 
@@ -887,6 +904,7 @@ describe("workspace-bound run cards", () => {
     await controller.commands.run("runs.list", REPO)
     await selectWorkspace(store)
     await controller.commands.run("runs.open", "legacy")
+    await waitFor(() => runCardInScope(store, { repo: REPO, runId: "legacy" })?.payload.phase === "completed")
     expect(gatewayRunContextFor(store, "legacy")).toEqual({ repo: REPO })
     for (const call of double.calls.filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).not.toHaveProperty("workspaceId")
     const listed = store.collections.cards.get(`run-list-${REPO}`)!
@@ -919,7 +937,7 @@ describe("workspace-bound run cards", () => {
       await selectWorkspace(store)
       const result = await controller.commands.run(command, command === "flow.run" ? "review-pr" : "run-1")
       expect(result.status).toBe("executed")
-      expect(store.collections.cards.get("flow-run-run-1")).toMatchObject({ kind: "run-trace", payload: { workspaceId } })
+      expect(runCardInScope(store, { repo: REPO, runId: "run-1", workspaceId })).toMatchObject({ kind: "run-trace", payload: { workspaceId } })
       expect(store.session().activeRepoKey).toBe(REPO)
       for (const call of double.calls.filter((call) => call.path.startsWith("/api/workflow/"))) {
         expect(call.body).toMatchObject({ workspaceId })
@@ -930,11 +948,174 @@ describe("workspace-bound run cards", () => {
       if (command === "flow.run") {
         const rerun = await controller.commands.run("runs.rerun", "run-1")
         expect(rerun.status).toBe("executed")
-        expect(store.collections.cards.get("flow-run-run-2")).toMatchObject({ payload: { workspaceId } })
+        expect(runCardInScope(store, { repo: REPO, runId: "run-2", workspaceId })).toMatchObject({ payload: { workspaceId } })
         const launches = double.calls.filter((call) => (call.body as { procedure?: string })?.procedure === "Run")
         expect(launches).toHaveLength(2)
         for (const launch of launches) expect(launch.body).toMatchObject({ workspaceId })
       }
     })
   }
+  test("two gateway databases can both own run-1 without sharing cards, pumps, actions or reload state", async () => {
+    const storage = memoryStorage()
+    let store = await createAppStore({ kind: "localStorage", storage })
+    const workspaceB = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    const makeDouble = (seat: string) => relay({
+      runs: [{ runId: "run-1", flowId: "review-pr", status: "completed" }],
+      approvals: [approvalRow("run-1", "same-gate", `Approve ${seat}`)],
+      transcriptLines: [{ runId: "run-1", sequence: 1, turn: 1, at: 100, kind: "message", text: seat }],
+      events: [{ kind: "control.agent.turn-opened", payload: { seat, at: 100 }, sequence: 1, occurredAt: 100 }]
+    })
+    const a = makeDouble("workspace A")
+    const b = makeDouble("workspace B")
+    const services: AppServices = { ...a.services, workflowPollMs: 100_000, fetchImpl: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {}
+      return (body.workspaceId === workspaceB ? b : a).services.fetchImpl!(input, init)
+    } }
+    let controller = createAppController(store, unavailableRepositories, silentAgent(), services)
+    await signIn(store)
+    await selectWorkspace(store)
+    expect((await controller.commands.run("flow.run", "review-pr")).status).toBe("executed")
+    await selectWorkspace(store, workspaceB)
+    expect((await controller.commands.run("flow.run", "review-pr")).status).toBe("executed")
+    const scopeA = { repo: REPO, workspaceId, runId: "run-1" }
+    const scopeB = { repo: REPO, workspaceId: workspaceB, runId: "run-1" }
+    const cardA = runCardInScope(store, scopeA)!
+    const cardB = runCardInScope(store, scopeB)!
+    expect(cardA.id).not.toBe(cardB.id)
+    await waitFor(() => runCardInScope(store, scopeA)?.payload.events?.length === 1 && runCardInScope(store, scopeB)?.payload.events?.length === 1, 10_000)
+    expect(runCardInScope(store, scopeA)?.payload.events?.[0]?.payload).toMatchObject({ seat: "workspace A" })
+    expect(runCardInScope(store, scopeB)?.payload.events?.[0]?.payload).toMatchObject({ seat: "workspace B" })
+    expect(gatewayRunContextFor(store, "run-1")).toMatchObject({ error: expect.stringContaining("conflicting") })
+    const callsBefore = a.calls.length + b.calls.length
+    expect(said(await controller.commands.run("runs.resume", "run-1"))).toContain("conflicting")
+    expect(said(await controller.commands.run("runs.open", `sourceCard=${cardA.id} wrong-run`))).toContain("does not record")
+    expect(said(await controller.commands.run("runs.open", `sourceCard=${cardA.id} run-1 other/repo`))).toContain("another repository")
+    expect(a.calls.length + b.calls.length).toBe(callsBefore)
+    for (const [card, double, seat] of [[cardA, a, "workspace A"], [cardB, b, "workspace B"]] as const) {
+      const source = `sourceCard=${card.id} run-1`
+      expect((await controller.commands.run("runs.resume", source)).status).toBe("executed")
+      expect((await controller.commands.run("runs.steer", `${source} keep sourceCard=literal`)).status).toBe("executed")
+      expect(double.state.steered.at(-1)?.message.body).toBe("keep sourceCard=literal")
+      expect((await controller.commands.run("runs.signal", `${source} go {"text":"a  b sourceCard=literal"}`)).status).toBe("executed")
+      expect(double.state.signaled.at(-1)?.signal).toEqual({ name: "go", payload: { text: "a  b sourceCard=literal" } })
+      expect((await controller.commands.run("runs.logs", source)).status).toBe("executed")
+      expect(runCardInScope(store, card.payload)?.payload.transcriptRows?.[0]?.text).toBe(seat)
+      expect((await controller.commands.run("approvals.open", source)).status).toBe("executed")
+      const approvalId = approvalCardIdFor(store, card.payload, "same-gate")
+      expect((await controller.commands.run("approval.approve", approvalId)).status).toBe("executed")
+      await waitFor(() => double.state.submitted.length === 2, 10_000) // Plan plus this gate.
+      expect(double.state.resumed).toHaveLength(1)
+    }
+    expect(approvalCardIdFor(store, scopeA, "same-gate")).not.toBe(approvalCardIdFor(store, scopeB, "same-gate"))
+    const missing = await controller.commands.runForAgent("runs.trace.view", `sourceCard=${cardA.id} run-1`)
+    expect(missing).toMatchObject({ status: "form", fields: ["view"] })
+    const form = store.collections.cards.get("form-runs.trace.view")
+    expect(form?.kind === "flow-form" && form.payload.draft).toMatchObject({ sourceCard: cardA.id, runId: "run-1" })
+    await controller.commands.run("form.set", "form-runs.trace.view view timeline")
+    expect((await controller.commands.run("form.submit", "form-runs.trace.view")).status).toBe("executed")
+    await controller.commands.run("runs.trace.filter", `sourceCard=${cardA.id} run-1 failed`)
+    expect(runCardInScope(store, scopeB)?.payload.filter).toBeUndefined()
+    await settle(10)
+    await controller.dispose()
+    store = await createAppStore({ kind: "localStorage", storage })
+    controller = createAppController(store, unavailableRepositories, silentAgent(), services)
+    await signIn(store)
+    await selectWorkspace(store, workspaceB)
+    expect(runCardInScope(store, scopeA)).toMatchObject({ id: cardA.id, payload: { filter: "failed", traceView: "timeline" } })
+    expect(runCardInScope(store, scopeB)).toMatchObject({ id: cardB.id })
+    await selectWorkspace(store)
+    await controller.commands.run("runs.list", REPO)
+    await controller.commands.run("approvals.list", REPO)
+    await selectWorkspace(store, workspaceB)
+    await controller.commands.run("runs.list", REPO)
+    await controller.commands.run("approvals.list", REPO)
+    const listA = `run-list-${REPO}-${workspaceId}`
+    const listB = `run-list-${REPO}-${workspaceB}`
+    const searchRows = controller.searchPalette("run: run-1").groups.flatMap((group) => group.items.map((row) => row.item))
+    expect(searchRows).toHaveLength(2)
+    expect(new Set(searchRows.map((item) => item.ref)).size).toBe(2)
+    for (const item of searchRows) {
+      const primary = item.actions.find((action) => action.role === "primary")!
+      expect(primary.flow).toBe("runs.resume")
+      expect(primary.args).toContain("sourceCard=")
+      expect((await controller.commands.run(primary.flow, primary.args)).status).toBe("executed")
+    }
+    expect(a.state.resumed).toHaveLength(2)
+    expect(b.state.resumed).toHaveLength(2)
+    await controller.commands.run("search.runs", "run-1")
+    const searchCard = store.collections.cards.get("search-search.runs")
+    expect(searchCard?.kind === "search-results" && searchCard.payload.items).toHaveLength(2)
+    const lastA = a.calls.length
+    expect((await controller.commands.run("runs.open", `sourceCard=${listA} run-1`)).status).toBe("executed")
+    expect((await controller.commands.run("runs.open", `sourceCard=${listB} run-1`)).status).toBe("executed")
+    expect(runCardInScope(store, scopeA)?.id).toBe(cardA.id)
+    expect(runCardInScope(store, scopeA)?.payload.filter).toBe("failed")
+    await waitFor(() => runCardInScope(store, scopeA)?.payload.phase === "completed" && runCardInScope(store, scopeB)?.payload.phase === "completed", 10_000)
+    expect(a.calls.slice(lastA).filter((call) => call.path.startsWith("/api/workflow/")).every((call) => (call.body as { workspaceId?: string }).workspaceId === workspaceId)).toBe(true)
+    const submittedA = a.state.submitted.length
+    const submittedB = b.state.submitted.length
+    await controller.commands.run("approval.approve", `approvals-inbox-${REPO}-${workspaceId}:same-gate`)
+    await controller.commands.run("approval.approve", `approvals-inbox-${REPO}-${workspaceB}:same-gate`)
+    await waitFor(() => a.state.submitted.length === submittedA + 1 && b.state.submitted.length === submittedB + 1, 10_000)
+    // Stop-all uses the source list's displayed set, not every workspace with the same repo.
+    const list = store.collections.cards.get(listA)!
+    if (list.kind !== "run-list") throw new Error("missing list")
+    await store.dispatch({ type: "card.upsert", actor: "system", card: { ...list, payload: { ...list.payload, runs: list.payload.runs.map((row) => ({ ...row, status: "running" })) } } }).isPersisted.promise
+    await controller.commands.run("flow.run.stop-all", `sourceCard=${listA} ${REPO}`)
+    expect(a.state.cancelled).toHaveLength(1)
+    expect(b.state.cancelled).toHaveLength(0)
+    await controller.commands.run("flow.run.stop", cardB.id)
+    await waitFor(() => b.state.cancelled.length === 1, 10_000)
+    for (const [double, workspace] of [[a, workspaceId], [b, workspaceB]] as const) {
+      for (const call of double.calls.filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).toMatchObject({ workspaceId: workspace })
+    }
+  }, 120_000)
+
+  test("historical raw card addresses survive while new explicit legacy cards never inherit a workspace", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-1", flowId: "review-pr", status: "completed" }, { runId: "child-1", flowId: "review-pr", status: "completed" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    const old: Extract<Card, { kind: "run-trace" }> = {
+      id: "flow-run-run-1", kind: "run-trace", title: "Old", status: "active", createdAt: 1, ordinal: 1,
+      payload: { repo: REPO, workspaceId, runId: "run-1", workflow: "review-pr", phase: "completed", steps: [], result: null, lastSeq: 0,
+        events: [
+          { kind: "control.agent.cell-call-started", payload: { flowName: "agent/spawn", input: {} }, sequence: 1, occurredAt: 1 },
+          { kind: "control.agent.cell-call-settled", payload: { flowName: "agent/spawn", outcome: "success", value: { child: "child-1" } }, sequence: 2, occurredAt: 2 },
+          { kind: "control.engine.event", sequence: 3, occurredAt: 3, payload: {
+            version: 1, executionId: "native-1", generation: 0, sequence: 1, eventId: "native-1/1",
+            sourceId: "engine", sourceSequence: 1, emittedAtMs: 3, eventType: "flows.engine.run-decision",
+            meta: { lineageId: "native-1" }, payload: { decision: "created", state: { version: 1, flowName: "coding/RunPlan", payload: {} } }
+          } }
+        ] }
+    }
+    await store.dispatch({ type: "card.upsert", actor: "system", card: old }).isPersisted.promise
+    await controller.commands.run("runs.list", REPO) // A newly recorded, explicitly legacy list.
+    const listId = `run-list-${REPO}`
+    expect(store.collections.cards.get(listId)).toMatchObject({ payload: { gatewayBindingVersion: 1 } })
+    expect(gatewayRunContextFor(store, "run-1")).toMatchObject({ error: expect.stringContaining("conflicting") })
+    let before = double.calls.length
+    expect((await controller.commands.run("runs.open", `sourceCard=${listId} run-1`)).status).toBe("executed")
+    const legacy = runCardInScope(store, { repo: REPO, runId: "run-1" })!
+    expect(legacy.id).not.toBe(old.id)
+    expect(store.collections.cards.get(old.id)).toMatchObject({ payload: { workspaceId } })
+    await waitFor(() => legacy.id !== undefined && runCardInScope(store, { repo: REPO, runId: "run-1" })?.payload.phase === "completed", 10_000)
+    for (const call of double.calls.slice(before).filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).not.toHaveProperty("workspaceId")
+    const beforeNative = double.calls.length
+    expect(said(await controller.commands.run("runs.open", `sourceCard=${old.id} native-1`))).toContain("does not record")
+    expect(double.calls.length).toBe(beforeNative)
+    // Only an actual recorded agent/spawn child can use its parent's source.
+    before = double.calls.length
+    expect((await controller.commands.run("runs.open", `sourceCard=${old.id} child-1`)).status).toBe("executed")
+    expect(runCardInScope(store, { repo: REPO, workspaceId, runId: "child-1" })).toBeDefined()
+    await waitFor(() => runCardInScope(store, { repo: REPO, workspaceId, runId: "child-1" })?.payload.phase === "completed", 10_000)
+    for (const call of double.calls.slice(before).filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).toMatchObject({ workspaceId })
+    expect((await controller.commands.run("runs.open", `sourceCard=${old.id} run-1`)).status).toBe("executed")
+    expect(runCardInScope(store, { repo: REPO, workspaceId, runId: "run-1" })?.id).toBe(old.id)
+    await waitFor(() => runCardInScope(store, { repo: REPO, workspaceId, runId: "run-1" })?.payload.phase === "completed")
+    const wireCount = double.calls.length
+    expect(said(await controller.commands.run("runs.resume", `sourceCard=${old.id} child-1`))).toContain("does not record")
+    expect(double.calls.length).toBe(wireCount)
+  }, 60_000)
+
 })

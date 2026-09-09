@@ -1,3 +1,4 @@
+import { approvalCardIdFor, runScopeFromCard, sameRunScope, type RunScope } from "../RunReference"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import type { ApprovalRow, RunStatus, RunSummaryRow } from "./gateway"
@@ -112,7 +113,7 @@ export const createWorkflowPumpController = (
     for (const approval of rows) {
       if (approval.runId !== runId || approval.status !== "pending") continue
       found += 1
-      const id = `approval-${runId}-${approval.requestId}`
+      const id = approvalCardIdFor(store, { repo, runId, workspaceId }, approval.requestId)
       if (store.approvalRequest(id) !== undefined && store.collections.cards.get(id) !== undefined) continue
       const card: Card = {
         id,
@@ -128,7 +129,7 @@ export const createWorkflowPumpController = (
           // The submit-ready envelope the gateway published: the decision goes
           // back with it unchanged, so no client reconstructs authority.
           approval: approval.payload as Record<string, unknown>,
-          repo, ...(workspaceId === undefined ? {} : { workspaceId })
+          repo, gatewayBindingVersion: 1, ...(workspaceId === undefined ? {} : { workspaceId })
         }
       }
       store.dispatch({ type: "card.upsert", actor: "system", card })
@@ -137,9 +138,13 @@ export const createWorkflowPumpController = (
   }
 
   /** A gate this run is still parked on, as the transcript itself holds it. */
-  const runAwaitsApproval = (runId: string): boolean =>
+  const runAwaitsApproval = (scope: RunScope): boolean =>
     [...store.collections.cards.values()].some(
-      (entry) => entry.kind === "approval" && entry.payload.runId === runId && entry.payload.decision === undefined
+      (entry) => {
+        if (entry.kind !== "approval" || entry.payload.runId !== scope.runId || entry.payload.decision !== undefined) return false
+        const recorded = runScopeFromCard(store, entry, scope.runId)
+        return recorded !== undefined && sameRunScope(recorded, scope)
+      }
     )
 
   /*
@@ -185,9 +190,10 @@ export const createWorkflowPumpController = (
             : { phase: "quiet", quietForMs: quietFor })
           return
         }
-        const { repo, runId } = card.payload
+        const { repo, runId, workspaceId } = card.payload
+        const binding = { workspaceId }
 
-        const summary = await gateway.run(repo, runId)
+        const summary = await gateway.run(repo, runId, binding)
         if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
         if (summary.status !== "ok" || summary.value === undefined) {
           failures += 1
@@ -208,7 +214,7 @@ export const createWorkflowPumpController = (
 
         if (row.status === "waiting-approval" || row.waitingReason === "approval") approvalPending = true
         if (approvalPending) {
-          const approvals = await gateway.approvals(repo, runId)
+          const approvals = await gateway.approvals(repo, runId, binding)
           if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
           // Keep asking until the gate is actually in hand: a parked run can
           // be readable a beat before its approval row is.
@@ -226,7 +232,7 @@ export const createWorkflowPumpController = (
          */
         let transcriptRows: Extract<Card, { kind: "run-trace" }>["payload"]["transcriptRows"]
         if (card.payload.follow === true) {
-          const transcript = await gateway.transcript(repo, runId)
+          const transcript = await gateway.transcript(repo, runId, binding)
           if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
           if (transcript.status === "ok") {
             transcriptRows = transcript.value.map((line) => ({
@@ -248,7 +254,7 @@ export const createWorkflowPumpController = (
         let events: Extract<Card, { kind: "run-trace" }>["payload"]["events"]
         let eventReadError: string | undefined
         {
-          const journal = await gateway.runEvents(repo, runId)
+          const journal = await gateway.runEvents(repo, runId, binding)
           if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
           if (journal.status === "ok") {
             events = journal.value.map((event) => ({ ...(event as unknown as Record<string, unknown>) }))
@@ -317,7 +323,7 @@ export const createWorkflowPumpController = (
         patchRunCard(cardId, {
           phase: card.payload.phase === "launching" && newSteps.length === 0 && row.status === "accepted"
             ? card.payload.phase
-            : runAwaitsApproval(runId)
+            : runAwaitsApproval(card.payload)
             ? "waiting-approval"
             : phase,
           steps: [...card.payload.steps, ...newSteps].slice(-RUN_STEPS_TAIL),
@@ -366,7 +372,7 @@ export const createWorkflowPumpController = (
     if (pump !== undefined) pump.stopped = true
     ctx.runPumps.delete(cardId)
     ctx.pumpPokes.get(cardId)?.()
-    void gateway.cancel(card.payload.repo, card.payload.runId, reason).then((cancelled) => {
+    void gateway.cancel(card.payload.repo, card.payload.runId, reason, { workspaceId: card.payload.workspaceId }).then((cancelled) => {
       patchRunCard(cardId, {
         phase: cancelled.status === "ok" ? "cancelled" : "stopped",
         steps: [

@@ -146,7 +146,7 @@ describe("the run card as a trace", () => {
     expect(row.textContent).toContain("coding/RunPlan · completed")
     expect(compact.host.querySelector("[data-testid='run-trace-pane-run-1']")).toBeNull()
     click(row)
-    expect(compact.dispatched).toEqual([{ name: "runs.trace.select", args: "run-1 engine:native:0" }])
+    expect(compact.dispatched).toEqual([{ name: "runs.trace.select", args: "sourceCard=flow-run-run-1 run-1 engine:native:0" }])
     const before = renderTrace({ events, traceView: "turns", selection: "engine:native:0", cursorSeq: 1, liveTail: false })
     expect(before.host.querySelector("[data-testid='run-trace-pane-run-1']")?.textContent).not.toContain("typecheck")
     const after = renderTrace({ events, traceView: "turns", selection: "engine:native:0", cursorSeq: 2, liveTail: false })
@@ -160,7 +160,7 @@ describe("the run card as a trace", () => {
     expect(host.querySelector("[aria-label='Call tree']")).toBeNull()
     expect(host.querySelector("[data-testid='run-trace-pane-run-1']")).toBeNull()
     click(host.querySelector("[data-turn='1']"))
-    expect(dispatched).toEqual([{ name: "runs.trace.select", args: "run-1 frame-1" }])
+    expect(dispatched).toEqual([{ name: "runs.trace.select", args: "sourceCard=flow-run-run-1 run-1 frame-1" }])
     expect(host.querySelector("[aria-label='Call tree']")).toBeNull()
 
     const selected = renderTrace({ events: JOURNAL, traceView: "turns", selection: "call-1", liveTail: false, cursorSeq: 8 })
@@ -168,7 +168,7 @@ describe("the run card as a trace", () => {
     expect(selected.host.querySelector("[aria-label='Recorded call path']")?.textContent).toContain("run run-1 · prototype / frame 1")
     expect(selected.host.querySelector("[role='alert']")?.textContent).toBe("12 fps at 500 nodes")
     click(selected.host.querySelector("[data-flow='runs.trace.live']"))
-    expect(selected.dispatched).toEqual([{ name: "runs.trace.live", args: "run-1" }])
+    expect(selected.dispatched).toEqual([{ name: "runs.trace.live", args: "sourceCard=flow-run-run-1 run-1" }])
     expect(selected.host.textContent).toContain("At #8")
   })
 
@@ -183,7 +183,7 @@ describe("the run card as a trace", () => {
     expect(before.host.querySelector("[data-testid='run-trace-pane-run-1']")?.textContent).not.toContain("run-1/child/review")
     const after = renderTrace({ events, traceView: "turns", selection: "call-1", cursorSeq: 3, liveTail: false })
     click(after.host.querySelector("[data-flow='runs.open']"))
-    expect(after.dispatched).toEqual([{ name: "runs.open", args: "run-1/child/review smithersai/smithers" }])
+    expect(after.dispatched).toEqual([{ name: "runs.open", args: "sourceCard=flow-run-run-1 run-1/child/review smithersai/smithers" }])
   })
   test("a run of kind prototype wears the never-promoted banner, offers all | messages | failed, and has no Steer row", () => {
     const { host } = renderRun({ kind: "prototype", events: JOURNAL })
@@ -247,8 +247,8 @@ describe("the run card as a trace", () => {
     click(host.querySelector("[data-trace-span='call-1']"))
     click(failed)
     expect(dispatched).toEqual([
-      { name: "runs.trace.select", args: "run-1 call-1" },
-      { name: "runs.trace.select", args: "run-1 call-1" }
+      { name: "runs.trace.select", args: "sourceCard=flow-run-run-1 run-1 call-1" },
+      { name: "runs.trace.select", args: "sourceCard=flow-run-run-1 run-1 call-1" }
     ])
     expect(pane()?.getAttribute("data-span")).toBe("run:run-1")
 
@@ -294,7 +294,7 @@ describe("the run card as a trace", () => {
     ])
     expect(host.querySelector("[data-filter='failed']")?.getAttribute("aria-pressed")).toBe("true")
     click(host.querySelector("[data-filter='all']"))
-    expect(dispatched).toEqual([{ name: "runs.trace.filter", args: "run-1 all" }])
+    expect(dispatched).toEqual([{ name: "runs.trace.filter", args: "sourceCard=flow-run-run-1 run-1 all" }])
     // The click is a request, not a change: the rows stay filtered until the payload says otherwise.
     expect(host.querySelectorAll("[data-trace-span]")).toHaveLength(4)
     expect(renderTrace({ events: JOURNAL }).host.querySelectorAll("[data-trace-span]")).toHaveLength(6)
@@ -336,7 +336,7 @@ describe("predicted coding Changes in the same run card", () => {
     expect(outline?.textContent).toContain("Connect the Wiki interface")
     expect(initial.host.querySelector("[aria-label='Predicted atomic changes']")).toBeNull()
     click(initial.host.querySelector("[data-flow='runs.coding.select']"))
-    expect(initial.dispatched).toEqual([{ name: "runs.coding.select", args: "run-1 memory" }])
+    expect(initial.dispatched).toEqual([{ name: "runs.coding.select", args: "sourceCard=flow-run-run-1 run-1 memory" }])
     const selected = renderTrace({ workflow: "coding", input: { plan: CODING_PLAN }, codingChangeId: "memory", cursorSeq: 0, traceView: undefined })
     const details = selected.host.querySelector("[aria-label='Store repository memory']")!
     expect(details.textContent).toContain("✨ feat(memory): persist causal documents")

@@ -15,6 +15,7 @@ import type { AppServices } from "../AppController"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
 import { ASK_PROPOSED, NO_FOCUSED_FILE, NO_PEOPLE_SEAM, NO_SYMBOL_INDEX, NO_TEXT_INDEX } from "./SearchSeam"
+import { runSearchRef } from "../../flows/RunCommand"
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -222,7 +223,7 @@ describe("the palette's rows (the button door) come from what the store holds", 
     const tried = controller.searchPalette("history: section:tried")
     expect(tried.groups.flatMap((group) => group.items.map((row) => row.item.title))).toEqual(["tried: regex rescan per write, lost on latency"])
     const running = controller.searchPalette("run: status:running")
-    expect(running.groups.flatMap((group) => group.items.map((row) => row.item.ref))).toEqual(["run-9"])
+    expect(running.groups.flatMap((group) => group.items.map((row) => row.item.ref))).toEqual([runSearchRef("run-9", "runs-x")])
     expect(controller.searchPalette("#412").groups.flatMap((group) => group.items.map((row) => row.item.title))).toEqual(["#412 Harden redaction on the journal path"])
   })
 
@@ -349,7 +350,7 @@ describe("§6 the flow doors", () => {
     expect(history.status).toBe("executed")
     expect(resultsCard(store, "search.history").payload.items.map((item) => item.title)).toEqual(["tried: regex rescan per write, lost on latency"])
     await controller.commands.run("search.runs", "run status:completed")
-    expect(resultsCard(store, "search.runs").payload.items.map((item) => item.ref)).toEqual(["run-7"])
+    expect(resultsCard(store, "search.runs").payload.items.map((item) => item.ref)).toEqual([runSearchRef("run-7", "runs-x")])
     await controller.commands.run("search.changes", "journal")
     expect(resultsCard(store, "search.changes").payload.items[0]).toMatchObject({ kind: "change", ref: "c1", title: "Redact the journal" })
     await controller.commands.run("search.issues", "bug is:closed")

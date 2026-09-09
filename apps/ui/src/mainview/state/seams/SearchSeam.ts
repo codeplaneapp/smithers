@@ -27,6 +27,8 @@ import type { CommandState, FlowEntry } from "../../flows/registry"
 import { recommendedNames, unmetRequirements } from "../../flows/registry"
 import type { Card, WorkingCopy } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
+import { runScopeFromCard } from "../RunReference"
+import { runSearchRef } from "../../flows/RunCommand"
 import { readEnvironment } from "./EnvironmentSeam"
 import type { SecretMetadata } from "./EnvironmentSeam"
 import { readHistory } from "./HistorySeam"
@@ -220,15 +222,24 @@ export const createSearchSeam = (ctx: SeamContext, deps: SearchSeamDeps): Search
   /** Runs the runs controller has listed or opened. */
   const runItems = (status?: string): ReadonlyArray<Fact> => {
     const seen = new Map<string, Fact>()
+    const add = (card: Card, runId: string, flow: string, phase: string): void => {
+      const scope = runScopeFromCard(ctx.store, card, runId)
+      if (scope === undefined) return
+      const key = JSON.stringify([scope.repo, scope.workspaceId ?? null, runId])
+      seen.set(key, {
+        kind: "run", ref: runSearchRef(runId, card.id), title: runId,
+        subtitle: `${flow} · ${phase} · ${scope.repo}${scope.workspaceId === undefined ? "" : ` · ${scope.workspaceId}`}`
+      })
+    }
     for (const card of cards()) {
       if (card.kind === "run-list") {
         for (const run of card.payload.runs) {
           if (status !== undefined && run.status !== status) continue
-          seen.set(run.runId, { kind: "run", ref: run.runId, title: run.runId, subtitle: `${run.flowId} · ${run.status}` })
+          add(card, run.runId, run.flowId, run.status)
         }
       }
       if (card.kind === "run-trace" && (status === undefined || card.payload.phase === status)) {
-        seen.set(card.payload.runId, { kind: "run", ref: card.payload.runId, title: card.payload.runId, subtitle: `${card.payload.workflow} · ${card.payload.phase}` })
+        add(card, card.payload.runId, card.payload.workflow, card.payload.phase)
       }
     }
     return [...seen.values()]

@@ -2,6 +2,7 @@ import { WORKFLOW_PROVISION_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import { isFlowNotFound, type GatewayWorkspaceBinding } from "./gateway"
+import { runCardIdFor, runScopeFromCard } from "../RunReference"
 import { gatewayBindingFor, resolveTargetRepo } from "../RepoContext"
 import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
 
@@ -224,7 +225,7 @@ export const createWorkflowController = (
     readonly input?: Record<string, unknown>
     readonly kind?: string
   }): string => {
-    const cardId = `flow-run-${args.runId}`
+    const cardId = runCardIdFor(store, args)
     const existing = store.collections.cards.get(cardId)
     const held = existing?.kind === "run-trace" ? existing.payload : undefined
     const card: Card = {
@@ -236,7 +237,8 @@ export const createWorkflowController = (
       ordinal: existing?.ordinal ?? nextTranscriptOrdinal(),
       payload: {
         repo: args.repo,
-        ...(args.workspaceId === undefined ? held?.workspaceId === undefined ? {} : { workspaceId: held.workspaceId } : { workspaceId: args.workspaceId }),
+        gatewayBindingVersion: 1,
+        ...(args.workspaceId === undefined ? {} : { workspaceId: args.workspaceId }),
         runId: args.runId,
         workflow: args.workflow,
         phase: "running",
@@ -516,8 +518,8 @@ export const createWorkflowController = (
       return
     }
     const binding = trusted.payload.workspaceId !== undefined ? { workspaceId: trusted.payload.workspaceId }
-      : trusted.payload.runId === undefined ? {} : gatewayBindingFor(store, repo, trusted.payload.runId)
-    const submitted = "error" in binding ? { status: "error" as const, message: binding.error } : await gateway.submitApproval(
+      : trusted.payload.runId === undefined ? {} : { workspaceId: runScopeFromCard(store, trusted, trusted.payload.runId)?.workspaceId }
+    const submitted = await gateway.submitApproval(
       repo,
       approval as Parameters<typeof gateway.submitApproval>[1],
       decision === "approved" ? "approve" : "deny",
@@ -574,8 +576,8 @@ export const createWorkflowController = (
       }
     })
     const binding = trusted.payload.workspaceId !== undefined ? { workspaceId: trusted.payload.workspaceId }
-      : gatewayBindingFor(store, trusted.payload.repo, row.runId)
-    const submitted = "error" in binding ? { status: "error" as const, message: binding.error } : await gateway.submitApproval(
+      : { workspaceId: runScopeFromCard(store, trusted, row.runId)?.workspaceId }
+    const submitted = await gateway.submitApproval(
       trusted.payload.repo,
       row.approval as Parameters<typeof gateway.submitApproval>[1],
       decision === "approved" ? "approve" : "deny",
