@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
+import * as ts from "typescript"
 import { beforeAll, describe, expect, it } from "vitest"
 import { notice } from "./golden.ts"
 
@@ -95,6 +96,51 @@ beforeAll(() => {
   }
 })
 
+/** The names one exported statement introduces. */
+const boundNames = (statement: ts.Statement): ReadonlyArray<string> => {
+  if (ts.isVariableStatement(statement)) {
+    return statement.declarationList.declarations.map((declared) => declared.name.getText())
+  }
+  if (
+    ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)
+    || ts.isEnumDeclaration(statement) || ts.isModuleDeclaration(statement)
+  ) {
+    return [statement.name.getText()]
+  }
+  if (ts.isClassDeclaration(statement) || ts.isFunctionDeclaration(statement)) {
+    return [statement.name?.text ?? "default"]
+  }
+  return ["default"]
+}
+
+/**
+ * Every name a declaration file offers an importer, in source order.
+ *
+ * The contract is that `smthrs` declares nothing, and matching text cannot
+ * state that contract. `export interface Workflow {}` and
+ * `export type Workflow = string` are exported names that carry neither an
+ * `export declare` prefix nor an `export {` clause, so a pattern written
+ * against those two spellings accepts both. Parsing states the contract
+ * directly: a module exports a name three ways, through an `export` modifier,
+ * an export clause, or an export assignment, and this reads all three off the
+ * syntax tree. It also reads only the syntax tree, so an export spelled inside
+ * a comment stays what it is, prose.
+ */
+const declaredExports = (declaration: string): ReadonlyArray<string> => {
+  const parsed = ts.createSourceFile("index.d.ts", declaration, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+  return parsed.statements.flatMap((statement) => {
+    if (ts.isExportAssignment(statement)) return [statement.isExportEquals === true ? "export =" : "default"]
+    if (ts.isExportDeclaration(statement)) {
+      const clause = statement.exportClause
+      if (clause === undefined) return ["*"]
+      return ts.isNamespaceExport(clause) ? [clause.name.text] : clause.elements.map((element) => element.name.text)
+    }
+    const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined
+    const exported = modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) === true
+    return exported ? boundNames(statement) : []
+  })
+}
+
 describe("the built entries a consumer actually loads", () => {
   it("ships every file publishConfig.exports resolves to", () => {
     expect(missingEntries()).toEqual([])
@@ -131,6 +177,88 @@ describe("the built entries a consumer actually loads", () => {
     // type-versus-runtime drift the umbrella used to be guarded against.
     const types = readFileSync(url("../dist/esm/index.d.ts"), "utf8")
 
-    expect(types).not.toMatch(/export declare|export \{ [A-Za-z]/)
+    expect(declaredExports(types)).toEqual([])
   })
+})
+
+/**
+ * A declaration this package must never emit, and the names it would hand an
+ * importer. Every case is a one line edit to `src/index.ts` away, and the
+ * empty-surface assertion is worth only what it rejects, so the reader runs
+ * against each of them here.
+ */
+const mutations = [
+  {
+    case: "an exported interface",
+    declaration: "export interface LegacyWorkflow { readonly id: string }",
+    exports: ["LegacyWorkflow"]
+  },
+  {
+    case: "an exported type alias",
+    declaration: "export type LegacyWorkflow = { readonly id: string }",
+    exports: ["LegacyWorkflow"]
+  },
+  {
+    case: "a named re-export written without spaces inside the braces",
+    declaration: "export {LegacyWorkflow} from \"./legacy.js\"",
+    exports: ["LegacyWorkflow"]
+  },
+  {
+    case: "a type-only re-export",
+    declaration: "export type { LegacyWorkflow } from \"./legacy.js\"",
+    exports: ["LegacyWorkflow"]
+  },
+  {
+    case: "a star re-export",
+    declaration: "export * from \"./legacy.js\"",
+    exports: ["*"]
+  },
+  {
+    case: "a namespace re-export",
+    declaration: "export * as legacy from \"./legacy.js\"",
+    exports: ["legacy"]
+  },
+  {
+    case: "an exported declare const, which is what the old pattern did catch",
+    declaration: "export declare const notice: string",
+    exports: ["notice"]
+  },
+  {
+    case: "an exported declare function",
+    declaration: "export declare function run(): void",
+    exports: ["run"]
+  },
+  {
+    case: "a default export",
+    declaration: "declare const notice: string\nexport default notice",
+    exports: ["default"]
+  },
+  {
+    case: "an export assignment, the CJS spelling",
+    declaration: "declare const notice: string\nexport = notice",
+    exports: ["export ="]
+  },
+  {
+    case: "the empty-module marker tsc emits for a module with no exports",
+    declaration: "export {}",
+    exports: []
+  },
+  {
+    case: "an unexported declaration, which no import can name",
+    declaration: "declare const notice: string",
+    exports: []
+  },
+  {
+    case: "a comment that spells an export, which is prose and not a declaration",
+    declaration: "/** Removed in 1.0: `export interface LegacyWorkflow {}`. */\nexport {}",
+    exports: []
+  }
+] as const
+
+describe("the reader the empty type surface assertion is made of", () => {
+  for (const mutation of mutations) {
+    it(`reports ${mutation.case}`, () => {
+      expect(declaredExports(mutation.declaration)).toEqual(mutation.exports)
+    })
+  }
 })
