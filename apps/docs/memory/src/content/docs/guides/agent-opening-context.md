@@ -54,6 +54,17 @@ Every source has an in-process memo (`Source.make` accepts a `capacity`, default
 
 The snapshot degrades rather than fail: a fetch that exceeds two seconds or fails with a typed error yields empty text and a debug log. Fiber interruption propagates unchanged, so cancellation still cancels.
 
+## The fence is a delimiter, not a trust boundary
+
+Rows are model-written: a remembered fact or an accepted note holds whatever the agent read, and the snapshot is replayed into every later run's first message. The fence therefore only marks where the snapshot starts and ends. It does not make the text inside it trustworthy, and a host must not treat fenced text as instructions.
+
+What the render does guarantee is that only `Source` writes a fence or a label. Before a row is rendered, every character that could open a fence, start a `[primer:bank]` or `[bank/key]` label, or end the line is replaced with its visible `\uXXXX` escape:
+
+- In text: `\`, `<`, `[`, and the line terminators CR, LF, NEL, LS, and PS.
+- In a bank or key label: the same set plus `]`, `:`, and `/`.
+
+So one row is always one line, a `</flows_memory_context>` inside a row renders as `\u003c/flows_memory_context>`, and a row cannot forge an attribution line. The byte cap is applied after escaping and may end the snapshot inside an escape.
+
 ## Record the snapshot across processes
 
 Memory text goes into an agent's opening context, so it is part of the very first message of the conversation. A resumed run replays a model call it already made only when the input reaching that call is identical, and the opening context is part of that input. So a resumed run that fetches memory again and gets different text repeats, and pays for, every model call underneath it. `SnapshotRecorder` is the optional port that closes that gap:
