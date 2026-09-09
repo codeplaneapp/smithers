@@ -1,3 +1,4 @@
+import { SidebarRepositoryPicker } from "../Composer"
 import { guideForwardAction } from "./navigation"
 import { useLiveQuery } from "@tanstack/react-db"
 import { createContext, Fragment, useRef, useState, type ReactNode, type CSSProperties } from "react"
@@ -241,8 +242,10 @@ export function GuideShell({ children }: { children: ReactNode }) {
           </pre>
         </div>
       </header>
+      <aside className="guide-sidebar" aria-label="Workspace sidebar">
+        <SidebarRepositoryPicker />
       {guide.library && (
-        <nav className="guide-sidebar" aria-label="Installed capabilities">
+        <nav aria-label="Installed capabilities">
           <span className="guide-section-label">YOUR PLUGINS</span>
           <button data-flow="flows" onClick={() => runCommandLive("flows")}>
             <Library size={17} />
@@ -268,6 +271,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
           </p>
         </nav>
       )}
+      </aside>
       <main className="guide-main" inert={guide.conversationOpen ? true : undefined}>
         <section className="guide-lesson" aria-label={`Lesson ${stage + 1}`}>
           <div

@@ -113,6 +113,8 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
     }
   }
   await page.keyboard.press("Tab")
+  await expect(page.getByTestId("composer-repo-trigger")).toBeFocused()
+  await page.keyboard.press("Tab")
   await expect(page.getByRole("log", { name: "Onboarding chat history" })).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(page.getByLabel("How did you hear about Smithers?")).toBeFocused()
@@ -212,4 +214,23 @@ test("the flow lesson runs a five-second flow from its keyboard button", async (
   await expect(page.getByText("Finished successfully.", { exact: true })).toBeVisible({ timeout: 8000 })
   expect(Date.now() - started).toBeGreaterThanOrEqual(5000)
   await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "4")
+})
+
+
+test("Command K shows only the input and repository selection lives in the sidebar", async ({ page }) => {
+  await page.goto("/")
+  const sidebar = page.getByRole("complementary", { name: "Workspace sidebar" })
+  await expect(sidebar.getByTestId("composer-repo-trigger")).toBeVisible()
+  await page.keyboard.press("Tab")
+  await expect(sidebar.getByTestId("composer-repo-trigger")).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(sidebar.getByRole("menu", { name: "Repository connections" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(sidebar.getByTestId("composer-repo-trigger")).toBeFocused()
+  await page.keyboard.press("Control+k")
+  const overlay = page.getByRole("dialog", { name: "Talk to Smithers" })
+  await expect(overlay.getByTestId("composer-input")).toBeFocused()
+  await expect(overlay.locator(".composer-header, .composer-actions, .composer-connect, .smithers-suggestions")).toHaveCount(0)
+  await expect(overlay.locator(".composer-wrap")).toHaveCSS("padding", "0px")
+  await expect(overlay.locator(".composer-wrap")).toHaveCSS("border-top-width", "0px")
 })

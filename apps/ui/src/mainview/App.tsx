@@ -442,6 +442,7 @@ function App() {
   const composerWrap = (
     <div className="composer-wrap" ref={composerWrapRef} hidden={composerHost === null}>
       <Composer
+        minimal
         typing={typing}
         surface={session.surface}
         surfacesMenuOpen={session.surfacesMenuOpen}

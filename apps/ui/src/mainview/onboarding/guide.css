@@ -660,18 +660,22 @@
 .guide-composer-host {
   display: contents;
 }
-/*
- * The summoned composer floats as ONE solid card — the repo selector and the
- * box together — so the content showing through the transparent layer never
- * bleeds into what you are typing.
- */
+/* The input itself owns its border and surface; no surrounding card. */
 .guide-composer-layer .composer-wrap {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.guide-composer-layer .smithers-composer {
   background: var(--g-bg);
-  border: 1px solid var(--g-line);
-  border-radius: 16px;
-  padding: 14px 18px 16px;
   box-shadow: 0 18px 60px #102a3326;
 }
+.guide-sidebar { z-index: 25; }
+.guide-sidebar .composer-menu-list { top: calc(100% + 4px); bottom: auto; left: 0; }
+.guide-sidebar .composer-connect-label { max-width: 150px; }
+.guide-sidebar .composer-connect { margin-bottom: 18px; }
+.guide-sidebar nav { display: grid; }
 /* Summoned, the palette drops below the box instead of opening off-window. */
 .guide-composer-layer .composer-wrap > .slash-menu {
   top: calc(100% + 6px);
@@ -725,7 +729,6 @@
  */
 .guide-shell[data-step="15"] .guide-atmosphere,
 .guide-shell[data-step="15"] .guide-header,
-.guide-shell[data-step="15"] .guide-sidebar,
 .guide-shell[data-step="15"] .guide-transcript,
 .guide-shell[data-step="15"] .guide-progress {
   display: none;

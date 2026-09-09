@@ -890,6 +890,7 @@ function ComposerOrigin() {
  * the right; the next-step pills render under the box, in App.tsx.
  */
 export function Composer({
+  minimal = false,
   typing,
   surface,
   surfacesMenuOpen,
@@ -901,6 +902,7 @@ export function Composer({
   autoFocus,
   placeholder
 }: {
+  readonly minimal?: boolean
   readonly typing: boolean
   readonly surface: Surface
   readonly surfacesMenuOpen: boolean
@@ -1104,10 +1106,10 @@ export function Composer({
           />
         ) :
         null}
-      <div className="composer-header" data-testid="composer-header">
+      {!minimal && <div className="composer-header" data-testid="composer-header">
         <ComposerConnect open={connectMenuOpen} triggerRef={connectTriggerRef} />
         <ComposerOrigin />
-      </div>
+      </div>}
       {
         /*
          * §6.1: Send and Stop are rendered by the composer component,
@@ -1139,7 +1141,7 @@ export function Composer({
           placeholder={placeholder}
           lifecycleStatus={typing ? "submitted" : "ready"}
           textareaProps={{ autoFocus, onKeyDown: onComposerKeyDown, ...COMPOSER_INPUT_TEST_ID }}
-          actions={
+          actions={minimal ? undefined :
             <div className="composer-actions">
               <ComposerAdd open={addMenuOpen} triggerRef={addTriggerRef} />
               <ComposerMenu
@@ -1153,4 +1155,12 @@ export function Composer({
       </div>
     </>
   )
+}
+
+/** The existing repository picker, projected in the workspace sidebar. */
+export function SidebarRepositoryPicker() {
+  const controller = useController()
+  const { data: sessions } = useLiveQuery(controller.store.collections.sessions)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  return <ComposerConnect open={sessions[0]?.connectMenuOpen === true} triggerRef={triggerRef} />
 }

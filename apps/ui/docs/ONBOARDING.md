@@ -91,3 +91,5 @@ Optional profile drafts stay local while typing; Continue submits nonempty answe
 The flows lesson has “Run a flow · R”: a real five-second asynchronous wait through `onboarding.act wait-flow`. It displays Running, then Finished successfully only after the wait completes. Repeat invocation while running does nothing. Navigation is preserved, and a reload marks an unfinished example interrupted so it can be retried.
 
 Command K displays only the composer, including in the Library lesson. There is no greeting, transcript, or “Meet the Library” panel inside the overlay. Tutorial and real chat history remain in the main view.
+
+The summoned UI is the composer input itself, without an outer card, repository header, origin label, + menu, or Chat/Connect/Wiki/Flows toolbar. Repository selection lives in the left workspace sidebar, including before plugin installation. The picker retains keyboard menu navigation and Escape restores focus.
