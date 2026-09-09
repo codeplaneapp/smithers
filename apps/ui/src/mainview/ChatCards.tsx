@@ -4,8 +4,7 @@
  *
  * Every card body lives in a family file under ./cards and registers itself in
  * cards/CardRenderers.tsx; this file never names a card kind except to stamp
- * the run id on a flow-run card's shell. pillStatus and the two workflow
- * bodies are re-exported here so their importers do not change.
+ * the run id on a flow-run card's shell.
  */
 import { Button, StatusPill } from "@smthrs/ui"
 import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "lucide-react"
@@ -14,9 +13,6 @@ import type { CardActions } from "./cards/CardFamily"
 import { pillStatus, renderCardBody } from "./cards/CardRenderers"
 import type { Card } from "./state/AppState"
 import { timeLabel as clockLabel } from "./Timestamps"
-
-export { pillStatus }
-export { WorkflowListCardBody, WorkflowRunCardBody } from "./cards/WorkflowCards"
 
 export interface CardViewProps extends CardActions {
   readonly card: Card

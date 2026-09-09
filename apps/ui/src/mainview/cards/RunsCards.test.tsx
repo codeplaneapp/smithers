@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import type { Card } from "../state/AppState"
-import { WorkflowRunCardBody } from "../ChatCards"
+import { WorkflowRunCardBody } from "./WorkflowCards"
 import { ApprovalsInboxCardBody, RunListCardBody } from "./RunsCards"
 
 /*

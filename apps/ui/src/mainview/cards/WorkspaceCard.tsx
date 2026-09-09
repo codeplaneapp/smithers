@@ -36,7 +36,7 @@ import { DESKTOP_NOT_READY, GUEST_NOT_READY } from "../state/seams/WorkspaceSeam
 import { timeLabel } from "../Timestamps"
 import { FileListCardBody } from "./FileCards"
 import type { CardFamily } from "./CardFamily"
-import { defaultPill } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export interface WorkspaceCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -741,5 +741,6 @@ export const workspaceCardFamily: CardFamily<"workspace" | "environment-images">
     render: (card, actions) => <WorkspaceCardBody card={card} onRunCommand={actions.onRunCommand} />,
     pill: (card) => card.payload.status
   },
-  "environment-images": { render: (card) => <EnvironmentImagesCardBody card={card} />, pill: defaultPill }
+  /* The catalogue is a read: the seam upserts it once, already settled, so it never waits on an act. */
+  "environment-images": { render: (card) => <EnvironmentImagesCardBody card={card} />, pill: settledPill }
 }

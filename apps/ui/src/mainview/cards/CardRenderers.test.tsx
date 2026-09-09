@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { CardSchema } from "@smthrs/rpc/Cards"
 import type { Card } from "@smthrs/rpc/Cards"
 import { CardView } from "../ChatCards"
+import { defaultPill } from "./CardFamily"
 import { CARD_FAMILIES, CARD_RENDERERS, pillStatus } from "./CardRenderers"
 
 /*
@@ -106,6 +107,54 @@ describe("CardRenderers", () => {
     }
     expect(pillStatus(chooser)).toBe("pending")
     expect(pillStatus({ ...chooser, status: "acted" })).toBe("done")
+  })
+
+  /*
+   * The fallback is the one pill rule no family chose, so a kind reaching it
+   * by omission wears Pending forever (§28.3: a settled read badged PENDING is
+   * indistinguishable from a hung one). Every kind on it is listed here, so
+   * adding a kind without picking its pill fails this test rather than
+   * shipping a stuck badge.
+   */
+  test("only the kinds that genuinely wait on an act fall back to the default pill", () => {
+    const onDefault = Object.entries(CARD_RENDERERS)
+      .filter(([, entry]) => entry.pill === defaultPill)
+      .map(([kind]) => kind)
+      .sort()
+    expect(onDefault).toEqual(["service-log", "workflow-repo"])
+  })
+
+  test("a settled environment-images listing is done, not pending", () => {
+    /* WorkspaceSeam upserts this card with status "active" once the read has settled. */
+    const images: Card = {
+      ...base,
+      kind: "environment-images",
+      status: "active",
+      payload: { repo: "o/r", images: [] }
+    }
+    expect(pillStatus(images)).toBe("done")
+  })
+
+  test("an agent that exited with no exit code is stopped, not done", () => {
+    /* Cards.ts: exitCode is "null when unknown (the tab was closed)" — AgentCardBody reads it "stopped". */
+    const agent: Card = {
+      ...base,
+      kind: "agent",
+      status: "active",
+      payload: {
+        harnessId: "claude",
+        displayName: "reviewer",
+        tabId: "tab-1",
+        sessionId: "sess-1",
+        cwd: "/tmp/repo",
+        phase: "exited",
+        exitCode: null
+      }
+    }
+    expect(pillStatus(agent)).toBe("stopped")
+    expect(pillStatus({ ...agent, payload: { ...agent.payload, exitCode: 0 } })).toBe("done")
+    expect(pillStatus({ ...agent, payload: { ...agent.payload, exitCode: 1 } })).toBe("failed")
+    expect(pillStatus({ ...agent, payload: { ...agent.payload, phase: "running" } })).toBe("running")
   })
 
   test("the shell mounts the body from the kind's family entry", () => {

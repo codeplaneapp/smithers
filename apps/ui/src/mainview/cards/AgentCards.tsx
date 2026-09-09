@@ -183,10 +183,16 @@ const ExplainCardBody = ({ card }: { readonly card: Extract<Card, { kind: "expla
 export const agentCardFamily: CardFamily<"agent" | "explain" | "agents" | "agent-models"> = {
   agent: {
     render: (card, actions) => <AgentCardBody card={card} onRunCommand={actions.onRunCommand} />,
-    /* A subagent's pill is its process: running, done on a clean exit, failed otherwise. */
+    /*
+     * A subagent's pill is its process: running, done on a clean exit, failed
+     * otherwise. A null exit code is the unknown outcome (Cards.ts: "null when
+     * unknown (the tab was closed)"), so it wears the neutral "stopped" the
+     * body already reads out — never a green Done nobody can vouch for.
+     */
     pill: (card) => {
       if (card.payload.phase === "running") return "running"
-      return card.payload.exitCode === 0 || card.payload.exitCode === null ? "done" : "failed"
+      if (card.payload.exitCode === null) return "stopped"
+      return card.payload.exitCode === 0 ? "done" : "failed"
     }
   },
   explain: {
