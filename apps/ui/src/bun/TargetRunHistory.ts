@@ -1,26 +1,38 @@
-import { appendFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, readdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { RunRecordSchema, TargetRunEventSchema } from "@smthrs/rpc/TargetGraph"
 import type { RunRecord, RunReplayResponse, TargetRunEvent } from "@smthrs/rpc/TargetGraph"
+import { readJournalLines } from "./JournalLines"
 import type { TargetRun } from "./Targets"
 
 type HistoryLine = { readonly type: "record"; readonly record: RunRecord } | { readonly type: "event"; readonly event: TargetRunEvent }
 
 interface StoredRun {
   record: RunRecord
-  events: Array<TargetRunEvent>
+  /** The resident event tail; undefined once evicted, replay then re-reads the journal. */
+  events: Array<TargetRunEvent> | undefined
   readonly path: string
   queue: Promise<void>
   appendError?: Error
   /** Retained stdout/stderr characters, kept under MAX_RETAINED_LOG_CHARS. */
   logChars: number
+  /** Log characters enqueued for append and not yet written or failed. */
+  pendingChars: number
+  /** Callers waiting for `pendingChars` to fall back under MAX_PENDING_LOG_CHARS. */
+  readonly waiters: Array<() => void>
 }
 
 export interface TargetRunHistory {
   /** Wait for queued writes; reject if any append in this store failed. */
   readonly flush: () => Promise<void>
   readonly start: (run: TargetRun) => Promise<void>
-  readonly event: (run: TargetRun, event: TargetRunEvent) => void
+  /**
+   * Queues the frame for the journal. Resolves at once while the run's
+   * unwritten log backlog is under MAX_PENDING_LOG_CHARS, otherwise when it
+   * drains under it; a producer that awaits it paces itself to the disk.
+   * Never rejects: an append failure is recorded on the run and by `flush`.
+   */
+  readonly event: (run: TargetRun, event: TargetRunEvent) => Promise<void>
   readonly list: (repoId: string, repo: string) => Promise<ReadonlyArray<RunRecord>>
   readonly replay: (runId: string, repos?: ReadonlyArray<{ readonly id: string; readonly path: string }>) => Promise<RunReplayResponse | undefined>
 }
@@ -28,12 +40,30 @@ export interface TargetRunHistory {
 /*
  * The in-memory cap on one run's retained stdout/stderr. The .jsonl journal on
  * disk keeps every successfully appended frame; append failures mark the run
- * degraded and stop further writes. This bounds the heap, because `runs`
- * holds every run of the process and a chatty node emits megabytes. The TAIL is what a human
- * reads, so eviction drops the OLDEST log frames and never a structured frame
+ * degraded and stop further writes. This bounds the heap per run, because a
+ * chatty node emits megabytes. The TAIL is what a human reads, so eviction
+ * drops the OLDEST log frames and never a structured frame
  * (started/node/summary/exit/error), which the timeline and overlay need whole.
  */
 export const MAX_RETAINED_LOG_CHARS = 1_000_000
+
+/*
+ * The unwritten log backlog one run may hold before `event` stops resolving at
+ * once. A child can outrun the disk by orders of magnitude; without a high
+ * water mark the append chain grows with every frame the child ever wrote.
+ */
+export const MAX_PENDING_LOG_CHARS = 4_000_000
+
+/*
+ * How many settled runs keep their event tail in memory. Records (one small
+ * object per run) stay resident for `list`; a replay of an evicted run
+ * re-reads its journal, capped the same way. Live runs are never evicted, nor
+ * are degraded ones: their acknowledged prefix is the truth, not the disk.
+ */
+export const MAX_RESIDENT_RUNS = 16
+
+/** Journals read at once while a repository's history loads. */
+export const MAX_JOURNAL_LOADS = 4
 
 const runsDir = (repo: string): string => join(repo, ".flows", "ui", "runs")
 const encode = (line: HistoryLine): string => `${JSON.stringify(line)}\n`
@@ -62,6 +92,22 @@ const capLogs = (events: Array<TargetRunEvent>): { events: Array<TargetRunEvent>
   return { events: kept, logChars: total }
 }
 
+interface Tail {
+  events: Array<TargetRunEvent>
+  logChars: number
+}
+
+/** Appends one frame and keeps the tail under the cap as it grows. */
+const retain = (tail: Tail, event: TargetRunEvent): void => {
+  tail.events.push(event)
+  tail.logChars += logChars(event)
+  if (tail.logChars > MAX_RETAINED_LOG_CHARS) {
+    const capped = capLogs(tail.events)
+    tail.events = capped.events
+    tail.logChars = capped.logChars
+  }
+}
+
 const applyEvent = (record: RunRecord, event: TargetRunEvent, endedAt: number): RunRecord => {
   if (event.type === "started") return { ...record, status: "running" }
   if (event.type === "summary") return { ...record, summary: event.summary }
@@ -70,6 +116,40 @@ const applyEvent = (record: RunRecord, event: TargetRunEvent, endedAt: number): 
   }
   return record
 }
+
+/*
+ * Parses one journal line by line. The full text never exists in memory:
+ * with `keep`, the event tail is capped while parsing, without it only the
+ * record is derived. A repository's journals can total gigabytes; the peak is
+ * one chunk plus one capped tail per concurrently loading journal.
+ */
+const readJournal = async (path: string, repoId: string, keep: boolean): Promise<{ record: RunRecord | undefined } & Tail> => {
+  let record: RunRecord | undefined
+  const tail: Tail = { events: [], logChars: 0 }
+  try {
+    for await (const line of readJournalLines(path)) {
+      if (line === "") continue
+      try {
+        const parsed = JSON.parse(line) as { type?: unknown; record?: unknown; event?: unknown }
+        if (parsed.type === "record") {
+          const checked = RunRecordSchema.safeParse(parsed.record)
+          if (checked.success && checked.data.repoId === repoId) record = checked.data
+        } else if (parsed.type === "event") {
+          const checked = TargetRunEventSchema.safeParse(parsed.event)
+          if (checked.success) {
+            if (keep) retain(tail, checked.data)
+            // Terminal status/time comes from the final record. Rebuild the
+            // durable prefix's other facts even when that record is missing.
+            if (record !== undefined && checked.data.type !== "exit") record = applyEvent(record, checked.data, 0)
+          }
+        }
+      } catch { /* A partial final line after a crash is ignored. */ }
+    }
+  } catch { return { record: undefined, events: [], logChars: 0 } }
+  return { record, ...tail }
+}
+
+const settled = (stored: StoredRun): boolean => stored.record.status === "done" || stored.record.status === "failed"
 
 export const createTargetRunHistory = (options: { readonly log?: (line: string) => void } = {}): TargetRunHistory => {
   const runs = new Map<string, StoredRun>()
@@ -80,6 +160,21 @@ export const createTargetRunHistory = (options: { readonly log?: (line: string) 
    * are on disk.
    */
   const loading = new Map<string, Promise<void>>()
+  /** Runs whose events are resident, least recently used first. */
+  const resident = new Map<string, StoredRun>()
+
+  const touch = (stored: StoredRun): void => {
+    resident.delete(stored.record.runId)
+    resident.set(stored.record.runId, stored)
+    if (resident.size <= MAX_RESIDENT_RUNS) return
+    for (const [runId, candidate] of resident) {
+      if (resident.size <= MAX_RESIDENT_RUNS) break
+      if (candidate === stored || !settled(candidate) || candidate.appendError !== undefined) continue
+      resident.delete(runId)
+      candidate.events = undefined
+      candidate.logChars = 0
+    }
+  }
 
   const loadRepo = (repoId: string, repo: string): Promise<void> => {
     const inFlight = loading.get(repo)
@@ -93,43 +188,33 @@ export const createTargetRunHistory = (options: { readonly log?: (line: string) 
     const dir = runsDir(repo)
     let names: Array<string>
     try { names = await readdir(dir) } catch { return }
-    await Promise.all(names.filter((name) => name.endsWith(".jsonl")).map(async (name) => {
+    const pending = names.filter((name) => name.endsWith(".jsonl")).sort()
+    const load = async (name: string): Promise<void> => {
       const path = join(dir, name)
-      let text: string
-      try { text = await readFile(path, "utf8") } catch { return }
-      let record: RunRecord | undefined
-      const events: Array<TargetRunEvent> = []
-      for (const line of text.split(/\r?\n/)) {
-        if (line === "") continue
-        try {
-          const parsed = JSON.parse(line) as { type?: unknown; record?: unknown; event?: unknown }
-          if (parsed.type === "record") {
-            const checked = RunRecordSchema.safeParse(parsed.record)
-            if (checked.success && checked.data.repoId === repoId) record = checked.data
-          } else if (parsed.type === "event") {
-            const checked = TargetRunEventSchema.safeParse(parsed.event)
-            if (checked.success) {
-              events.push(checked.data)
-              // Terminal status/time comes from the final record. Rebuild the
-              // durable prefix's other facts even when that record is missing.
-              if (record !== undefined && checked.data.type !== "exit") record = applyEvent(record, checked.data, 0)
-            }
-          }
-        } catch { /* A partial final line after a crash is ignored. */ }
-      }
+      /* Only the record is derived here; replay reads the tail on demand. */
+      let { record } = await readJournal(path, repoId, false)
+      if (record === undefined) return
       // A record that never settled belongs to a run that died with the
       // previous process; after a restart it can never finish, so report it
       // as failed instead of leaving it "running" forever.
-      if (record !== undefined) {
-        if (record.status === "pending" || record.status === "running") record = {
-          ...record, status: "failed",
-          journal: { state: "degraded", error: "Journal has no terminal record; the run was interrupted or an append failed." }
-        }
-        /* A journal on disk can be arbitrarily large; the heap copy is capped. */
-        const capped = capLogs(events)
-        runs.set(record.runId, { record, events: capped.events, path, queue: Promise.resolve(), logChars: capped.logChars })
+      if (record.status === "pending" || record.status === "running") record = {
+        ...record, status: "failed",
+        journal: { state: "degraded", error: "Journal has no terminal record; the run was interrupted or an append failed." }
       }
+      // A run started in this process is already registered; its live state wins.
+      if (runs.has(record.runId)) return
+      runs.set(record.runId, { record, events: undefined, path, queue: Promise.resolve(), logChars: 0, pendingChars: 0, waiters: [] })
+    }
+    await Promise.all(Array.from({ length: MAX_JOURNAL_LOADS }, async () => {
+      for (let name = pending.shift(); name !== undefined; name = pending.shift()) await load(name)
     }))
+  }
+
+  const release = (stored: StoredRun, chars: number): void => {
+    stored.pendingChars -= chars
+    if (stored.pendingChars > MAX_PENDING_LOG_CHARS) return
+    const waiters = stored.waiters.splice(0)
+    for (const wake of waiters) wake()
   }
 
   return {
@@ -151,19 +236,25 @@ export const createTargetRunHistory = (options: { readonly log?: (line: string) 
         await mkdir(dir, { recursive: true })
         await writeFile(path, encode({ type: "record", record }))
       })
-      const stored: StoredRun = { record, events: [], path, queue: initialized, logChars: 0 }
+      const stored: StoredRun = { record, events: [], path, queue: initialized, logChars: 0, pendingChars: 0, waiters: [] }
       runs.set(run.runId, stored)
+      touch(stored)
       try {
         await initialized
       } catch (error) {
-        if (runs.get(run.runId) === stored) runs.delete(run.runId)
+        if (runs.get(run.runId) === stored) {
+          runs.delete(run.runId)
+          resident.delete(run.runId)
+        }
         throw error
       }
     },
     event: (run, event) => {
       const stored = runs.get(run.runId)
-      if (stored === undefined) return
+      if (stored === undefined) return Promise.resolve()
       const endedAt = Date.now()
+      const chars = logChars(event)
+      stored.pendingChars += chars
       stored.queue = stored.queue.then(async () => {
         // A missing frame must never be followed by an apparently complete
         // journal. Keep the first error and the last acknowledged prefix.
@@ -172,13 +263,14 @@ export const createTargetRunHistory = (options: { readonly log?: (line: string) 
         const line = encode({ type: "event", event }) + (event.type === "exit" ? encode({ type: "record", record }) : "")
         await appendFile(stored.path, line)
         stored.record = record
-        stored.events.push(event)
-        stored.logChars += logChars(event)
-        if (stored.logChars > MAX_RETAINED_LOG_CHARS) {
-          const capped = capLogs(stored.events)
-          stored.events = capped.events
-          stored.logChars = capped.logChars
+        if (stored.events !== undefined) {
+          const tail: Tail = { events: stored.events, logChars: stored.logChars }
+          retain(tail, event)
+          stored.events = tail.events
+          stored.logChars = tail.logChars
         }
+        // The exit frame settles the run; from here its tail may be evicted.
+        if (event.type === "exit") touch(stored)
       }).catch((error: unknown) => {
         if (stored.appendError !== undefined) return
         const message = `Target run ${run.runId} journal append failed: ${error instanceof Error ? error.message : String(error)}`
@@ -191,7 +283,9 @@ export const createTargetRunHistory = (options: { readonly log?: (line: string) 
         // Logging is diagnostic; even a throwing logger cannot erase the
         // failure retained for list/replay and the rejecting flush boundary.
         try { (options.log ?? console.error)(message) } catch { /* Error remains on the record. */ }
-      })
+      }).finally(() => release(stored, chars))
+      if (stored.pendingChars <= MAX_PENDING_LOG_CHARS) return Promise.resolve()
+      return new Promise<void>((resolve) => stored.waiters.push(resolve))
     },
     list: async (repoId, repo) => {
       await loadRepo(repoId, repo)
@@ -204,6 +298,16 @@ export const createTargetRunHistory = (options: { readonly log?: (line: string) 
       const stored = runs.get(runId)
       if (stored === undefined) return undefined
       await stored.queue
+      if (stored.events === undefined) {
+        const loaded = await readJournal(stored.path, stored.record.repoId, true)
+        // The queue is idle and the run settled, so the journal is complete;
+        // a concurrent replay may have restored the tail meanwhile.
+        if (stored.events === undefined) {
+          stored.events = loaded.events
+          stored.logChars = loaded.logChars
+        }
+      }
+      touch(stored)
       const events = stored.events.map((event, index) => ({ event, index }))
         .sort((a, b) => (a.event.seq ?? a.index) - (b.event.seq ?? b.index) || a.index - b.index)
         .map(({ event }) => event)

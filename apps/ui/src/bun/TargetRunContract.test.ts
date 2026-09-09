@@ -41,7 +41,7 @@ const fakeCli = async (script: string): Promise<{ cli: string; node: NodeSidecar
 const collect = async (script: string): Promise<{ frames: Array<TargetRunEvent>; run: TargetRun }> => {
   const { cli, node } = await fakeCli(script)
   const frames: Array<TargetRunEvent> = []
-  const runner = createTargetRunner({ publish: () => {}, cli, autoStartMs: 5, onEvent: (_run, frame) => frames.push(frame) })
+  const runner = createTargetRunner({ publish: () => {}, cli, autoStartMs: 5, onEvent: (_run, frame) => { frames.push(frame) } })
   const run = runner.start({ repoId: "r", repo: scratch, workspace: ".", label: "//src:build", node, edges: [] })
   runner.attach(run.runId)
   await new Promise<void>((resolve) => {
@@ -146,4 +146,52 @@ test("a chatty run does not grow the in-memory run store without bound", async (
   /* The tail is kept, not the head: the end of a run is what explains it. */
   const logs = (replay?.events ?? []).filter((event) => event.type === "stdout")
   expect(logs.length).toBeGreaterThan(0)
+})
+
+test("the runner reads the next chunk of child output only after the consumer took the last one", async () => {
+  /*
+   * The pump used to hand every chunk to `onEvent` as fast as the pipe
+   * delivered it, so a chatty child queued its whole output in the journal's
+   * append chain before one byte reached the disk. Now a consumer that
+   * returns a promise paces the reads: while it holds the first frame, no
+   * later frame is delivered, even after the child has finished writing.
+   */
+  const marker = join(scratch, "wrote-everything")
+  const { cli, node } = await fakeCli(`
+    import { writeSync, writeFileSync } from "node:fs"
+    const buffer = Buffer.from("x".repeat(12_000_000))
+    let offset = 0
+    while (offset < buffer.length) offset += writeSync(1, buffer, offset)
+    writeFileSync(${JSON.stringify(marker)}, "")
+  `)
+  const frames: Array<TargetRunEvent> = []
+  let releaseFirst: (() => void) | undefined
+  const runner = createTargetRunner({
+    publish: () => {}, cli, autoStartMs: 5,
+    onEvent: (_run, frame) => {
+      frames.push(frame)
+      if (frame.type === "stdout" && releaseFirst === undefined) return new Promise<void>((resolve) => { releaseFirst = resolve })
+      return undefined
+    }
+  })
+  const run = runner.start({ repoId: "r", repo: scratch, workspace: ".", label: "//src:build", node, edges: [] })
+  runner.attach(run.runId)
+  const until = async (ready: () => boolean | Promise<boolean>): Promise<void> => {
+    for (let attempt = 0; attempt < 3000; attempt++) {
+      if (await ready()) return
+      await Bun.sleep(10)
+    }
+    throw new Error("condition not met")
+  }
+  await until(() => releaseFirst !== undefined)
+  await until(() => Bun.file(marker).exists())
+  await Bun.sleep(100)
+  expect(frames.filter((frame) => frame.type === "stdout")).toHaveLength(1)
+  expect(frames.some((frame) => frame.type === "exit")).toBe(false)
+  releaseFirst!()
+  await until(() => frames.some((frame) => frame.type === "exit"))
+  const delivered = frames.filter((frame) => frame.type === "stdout").reduce((total, frame) => total + (frame as { data: string }).data.length, 0)
+  expect(delivered).toBe(12_000_000)
+  expect(frames.find((frame) => frame.type === "exit")).toMatchObject({ code: 0 })
+  await runner.stop()
 })

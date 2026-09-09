@@ -207,6 +207,17 @@ run are not appended or acknowledged. An unsettled history record becomes
 `history.flush()` waits for queued appends and rejects on any append failure;
 server shutdown awaits it after target termination, alongside independent
 finalizers. It does not provide an fsync guarantee.
+Target history memory is bounded independently of journal size. Loading a
+repository streams at most four journals at a time line by line and keeps only
+each run's record. A run's resident stdout/stderr tail is capped at 1,000,000
+characters, dropping the oldest log frames and never a structured frame. At
+most 16 settled runs keep their event tail resident, in last-use order; a
+replay of an evicted run re-reads its journal with the same cap. Live and
+degraded runs are never evicted. A run's unwritten log backlog is capped at
+4,000,000 characters: `history.event()` resolves once the backlog is under
+the cap, and the runner reads the next chunk of child output only after the
+previous frame's consumer resolved. Output the child has already written to
+its pipe is buffered by the runtime and is outside this bound.
 After restart, a journal missing its terminal record reports degraded history
 with a generic interruption error. The original filesystem error is available
 only in the failing process and its log, since a failed disk cannot reliably

@@ -249,7 +249,12 @@ export interface TargetRunnerOptions {
   /** A run nobody attached to starts on its own after this long. */
   readonly autoStartMs?: number
   readonly log?: (line: string) => void
-  readonly onEvent?: (run: TargetRun, event: TargetRunEvent) => void
+  /**
+   * Observes every recorded frame. A returned promise is awaited before the
+   * next chunk of child output is read, so a journal that cannot keep up
+   * paces the run instead of queueing every frame the child ever wrote.
+   */
+  readonly onEvent?: (run: TargetRun, event: TargetRunEvent) => void | Promise<void>
   /** Maximum pending/running children; default 4. */
   readonly maxActiveRuns?: number
   /** Maximum retained run handles; settled handles are evicted oldest-first. */
@@ -579,12 +584,12 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
    * use; without it two frames in one millisecond — or any untimed frame —
    * are unordered by construction.
    */
-  const emit = (run: TargetRun, frame: TargetRunEvent): void => {
+  const emit = (run: TargetRun, frame: TargetRunEvent): void | Promise<void> => {
     const live = runs.get(run.runId)
     const sequenced = { ...frame, seq: live?.nextSeq ?? 0 } as TargetRunEvent
     if (live !== undefined) live.nextSeq += 1
     options.publish(runTopic(run.runId), { type: "target-run", runId: run.runId, frame: sequenced })
-    options.onEvent?.(run, sequenced)
+    return options.onEvent?.(run, sequenced)
   }
 
   const pump = async (stream: ReadableStream<Uint8Array>, live: Live, type: "stdout" | "stderr"): Promise<void> => {
@@ -598,18 +603,19 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
         const data = decoder.decode(value, { stream: true })
         if (data !== "") {
           const label = /^(\/\/\S+)/.exec(data)?.[1]
-          emit(live.run, { type, data, ...(label === undefined ? {} : { label }) })
+          // Backpressure: the next read waits for the consumer of this frame.
+          await emit(live.run, { type, data, ...(label === undefined ? {} : { label }) })
           for (const event of live.parser.push(type, data)) {
             if (event.type === "summary") live.summaryEmitted = true
-            emit(live.run, event)
+            await emit(live.run, event)
           }
         }
       }
       const rest = decoder.decode()
       if (rest !== "") {
         const label = /^(\/\/\S+)/.exec(rest)?.[1]
-        emit(live.run, { type, data: rest, ...(label === undefined ? {} : { label }) })
-        for (const event of live.parser.push(type, rest)) emit(live.run, event)
+        await emit(live.run, { type, data: rest, ...(label === undefined ? {} : { label }) })
+        for (const event of live.parser.push(type, rest)) await emit(live.run, event)
       }
     } finally {
       reader.releaseLock()
