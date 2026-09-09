@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
@@ -14,7 +18,17 @@
     "noEmit": true,
     "allowJs": true,
     "checkJs": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["release/**/*.ts", "release-content/**/*.ts", "release-support/**/*.ts", "coding/**/*.ts", "test/**/*.ts", "PACKAGE.ts"]
+  "include": [
+    "release/**/*.ts",
+    "release-content/**/*.ts",
+    "release-support/**/*.ts",
+    "test/**/*.ts",
+    "PACKAGE.ts",
+    "wiki/**/*.ts",
+    "coding/**/*.ts"
+  ]
 }

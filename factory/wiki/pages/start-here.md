@@ -1,0 +1,28 @@
+# Start here
+
+Smithers combines typed durable flows, a coding agent, a repository build graph and an embedded product UI. Follow the owner of a behavior before changing it: the agent calls capabilities, a flow describes work, a runtime executes the plan, and a card projects state for a person.
+
+## Choose the owning layer
+
+| Concern | Start here |
+| --- | --- |
+| Declare a named action or compose a flow | `packages/smithers/flows/flow` |
+| Supply SQL, execution stores and platform services | `packages/smithers/flows/src/Runtime.ts` |
+| Attach Node or Bun host implementations | `NodeRuntime` or `BunRuntime` in the same package |
+| Run a schema-bound model step | `packages/smithers/agent/src/AgentAction.ts` |
+| Declare repository dependencies and checks | `PACKAGE.ts`, using `@smthrs/targets` |
+| Add a product interaction | `apps/ui/AGENTS.md`, then the existing flow registry and card family |
+
+The runtime and UI laws are boundaries for contributors. They are not evidence that every desired coding feature already exists.
+
+## Follow the durable path
+
+An action declares its name and schemas; its implementation is an Effect layer. A flow body composes calls into a plan without performing the side effects. The runtime supplies the engine, journal, run store and platform services. Reopening the same execution identity lets the engine reuse recorded work rather than starting the external operations again.
+
+The coding agent uses this machinery too. Its generated JavaScript cells run in QuickJS and call registered capabilities through `ctx.call`. The host chooses the models and the capability envelope. A model's explanation is evidence to assess, not an authority to create a second execution system.
+
+## Follow the product path
+
+The UI's engineering rules require capability outputs to embed in the conversation with the composer visible. Slash commands, buttons and agent tools share one flow; missing required input becomes a schema-derived form. React components project state held in TanStack DB and changed through an actor-tagged dispatcher.
+
+Start with the linked focused pages. Each includes exact captured source files, a content identity and its semantic verification state. A verified source snapshot does not establish that a build passed or that production was deployed.

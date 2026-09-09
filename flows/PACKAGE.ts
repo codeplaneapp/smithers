@@ -38,5 +38,9 @@ const coding = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//flows/test/coding.test.ts")]),
   srcs: [sources], deps: [], cwd
 })
+const wiki = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//flows/test/wiki.test.ts")]),
+  srcs: [sources, Smithers.file("//factory/wiki/catalog.ts")], deps: [], cwd
+})
 
-export const Package = Smithers.Package({ targets: { pack, check, suite, recording, coding } })
+export const Package = Smithers.Package({ targets: { coding, pack, check, suite, recording, wiki } })
