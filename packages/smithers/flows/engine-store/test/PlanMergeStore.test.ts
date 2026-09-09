@@ -5,7 +5,7 @@ import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { KeyMaterial, Plan, PlanStore, StepKey } from "@smthrs/plan"
 import { RunStore } from "@smthrs/run-store"
 import { Effect, Exit, Option } from "effect"
-import type * as Crypto from "effect/Crypto"
+import * as Crypto from "effect/Crypto"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as PlanMerges from "../src/internal/PlanMerges.ts"
 import * as Migrations from "../src/Migrations.ts"
@@ -117,6 +117,65 @@ describe("PlanMergeStore", () => {
         .toMatchObject({ code: "incompatible_state" })
     })))
 
+  it.effect("keeps merge write SQL and hashing linear and recovery SQL constant as history grows", () =>
+    fixture(Effect.gen(function*() {
+      const { identity, intent, completion, merges, append } = yield* seed
+      const writer = yield* DurableWriter
+      const sql = yield* SqlClient.SqlClient
+      yield* merges.intend(identity, intent, owner)
+      yield* writer.write(append)
+      const crypto = yield* Crypto.Crypto
+      let hashes = 0
+      let statements = 0
+      const instrumented = new Proxy(sql, {
+        apply(target, receiver, args) {
+          statements++
+          return Reflect.apply(target, receiver, args)
+        }
+      })
+      const measured = yield* PlanMergeStore.make.pipe(
+        Effect.provideService(SqlClient.SqlClient, instrumented),
+        Effect.provideService(Crypto.Crypto, {
+          ...crypto,
+          digest: (algorithm, data) => {
+            hashes++
+            return crypto.digest(algorithm, data)
+          }
+        })
+      )
+      const batchSize = 12
+      const counts: Array<{ intend: number; complete: number; list: number; hashes: number }> = []
+      for (let batch = 0; batch < 3; batch++) {
+        let intends = 0
+        let completes = 0
+        hashes = 0
+        for (let index = 0; index < batchSize; index++) {
+          statements = 0
+          yield* measured.intend(identity, { ...intent, nodeId: `stored-${batch * batchSize + index}` }, owner)
+          intends += statements
+          statements = 0
+          expect(yield* writer.write(measured.complete(identity, intent.nodeId, completion, owner)))
+            .toEqual(completion)
+          completes += statements
+        }
+        const writeHashes = hashes
+        statements = 0
+        const decisions = yield* measured.list(identity, owner)
+        expect(decisions).toHaveLength(1 + (batch + 1) * batchSize)
+        expect(decisions[0]).toEqual({ intent, completion })
+        expect(decisions.slice(1).every((decision) => decision.completion === undefined)).toBe(true)
+        expect(decisions.map((decision) => decision.intent.nodeId))
+          .toEqual(decisions.map((decision) => decision.intent.nodeId).sort())
+        counts.push({ intend: intends, complete: completes, list: statements, hashes: writeHashes })
+      }
+      expect(counts[1]).toEqual(counts[0])
+      expect(counts[2]).toEqual(counts[0])
+      expect(counts[0]!.intend).toBeLessThanOrEqual(batchSize * 6)
+      expect(counts[0]!.complete).toBeLessThanOrEqual(batchSize * 4)
+      expect(counts[0]!.list).toBeLessThanOrEqual(4)
+      expect(counts[0]!.hashes).toBe(batchSize * 4)
+    })))
+
   it.effect("fences every operation and rejects speculative reads", () =>
     fixture(Effect.gen(function*() {
       const { identity, merges, intent, completion } = yield* seed
@@ -179,6 +238,17 @@ describe("PlanMergeStore", () => {
       const sql = yield* SqlClient.SqlClient
       yield* merges.intend(identity, intent, owner)
       yield* writer.write(append)
+      const assertCorrupt = Effect.gen(function*() {
+        for (
+          const operation of [
+            merges.list(identity, owner).pipe(Effect.asVoid),
+            merges.intend(identity, intent, owner).pipe(Effect.asVoid),
+            writer.write(merges.complete(identity, intent.nodeId, completion, owner)).pipe(Effect.asVoid)
+          ]
+        ) {
+          expect(yield* Effect.flip(operation)).toMatchObject({ code: "corrupt_state" })
+        }
+      })
       yield* sql`DROP TRIGGER flows_plan_merge_intents_no_update`
       yield* sql`DROP TRIGGER flows_plan_merge_completions_no_update`
       const changeIntent = (value: unknown, checksum?: string) => {
@@ -192,10 +262,10 @@ describe("PlanMergeStore", () => {
         }, { ...intent, nodeKey: "x".repeat(PlanMergeStore.maximumDecisionCharacters) }]
       ) {
         yield* changeIntent(value)
-        expect(yield* Effect.flip(merges.list(identity, owner))).toMatchObject({ code: "corrupt_state" })
+        yield* assertCorrupt
       }
       yield* changeIntent(intent, "0".repeat(64))
-      expect(yield* Effect.flip(merges.list(identity, owner))).toMatchObject({ code: "corrupt_state" })
+      yield* assertCorrupt
       yield* changeIntent(intent)
       for (
         const value of [{ ...completion, generation: 2 }, { ...completion, mergeId: "other" }, {
@@ -205,7 +275,7 @@ describe("PlanMergeStore", () => {
       ) {
         const json = JSON.stringify(value)
         yield* sql`UPDATE flows_plan_merge_completions SET completion_json = ${json}, checksum = ${sha256(json)}`
-        expect(yield* Effect.flip(merges.list(identity, owner))).toMatchObject({ code: "corrupt_state" })
+        yield* assertCorrupt
       }
     })))
 
@@ -281,7 +351,7 @@ describe("PlanMergeStore", () => {
         const writer = yield* DurableWriter
         const maximum = Plan.maximumPlanNodes
         // Populate a real database at N-1; each row has distinct valid content
-        // and its actual checksum, so admission must validate real stored rows.
+        // and its actual checksum, so the ceiling uses real stored rows.
         const rows = Array.from({ length: maximum - 1 }, (_, index) => {
           const nodeId = `stored-${index}`
           const json = JSON.stringify({ ...intent, nodeId, peers: [] })

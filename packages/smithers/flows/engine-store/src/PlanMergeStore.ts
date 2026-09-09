@@ -192,14 +192,25 @@ export const make: Effect.Effect<Service, never, SqlClient.SqlClient | DurableWr
         }
         return yield* decode(Schema.fromJsonString(schema), row.json, "corrupt_state")
       })
-    const load = (identity: Identity) =>
+    const load = (identity: Identity, nodeId?: string) =>
       Effect.gen(function*() {
         const rows = yield* sql<
-          { nodeId: string; json: string; checksum: string }
-        >`SELECT stopped_node_id AS "nodeId", intent_json AS json, checksum
-      FROM flows_plan_merge_intents WHERE run_id = ${identity.runId} ORDER BY stopped_node_id LIMIT ${
-          Plan.maximumPlanNodes + 1
-        }`
+          {
+            nodeId: string
+            json: string
+            checksum: string
+            generation: number | null
+            mergeId: string | null
+            completionJson: string | null
+            completionChecksum: string | null
+          }
+        >`SELECT i.stopped_node_id AS "nodeId", i.intent_json AS json, i.checksum,
+        c.generation, c.merge_node_id AS "mergeId", c.completion_json AS "completionJson",
+        c.checksum AS "completionChecksum"
+      FROM flows_plan_merge_intents i LEFT JOIN flows_plan_merge_completions c
+        ON c.run_id = i.run_id AND c.stopped_node_id = i.stopped_node_id
+      WHERE i.run_id = ${identity.runId} ${nodeId === undefined ? sql`` : sql`AND i.stopped_node_id = ${nodeId}`}
+      ORDER BY i.stopped_node_id LIMIT ${Plan.maximumPlanNodes + 1}`
         if (rows.length > Plan.maximumPlanNodes) {
           return yield* Effect.fail(error("corrupt_state", "too many merge decisions for one plan"))
         }
@@ -210,16 +221,14 @@ export const make: Effect.Effect<Service, never, SqlClient.SqlClient | DurableWr
             if (intent.nodeId !== row.nodeId || intent.peers.includes(intent.nodeId)) {
               return yield* Effect.fail(error("corrupt_state", "merge intent identity is inconsistent"))
             }
-            const completed = yield* sql<
-              { generation: number; mergeId: string; json: string; checksum: string }
-            >`SELECT generation, merge_node_id AS "mergeId", completion_json AS json, checksum
-        FROM flows_plan_merge_completions WHERE run_id = ${identity.runId} AND stopped_node_id = ${row.nodeId}`
-            if (completed.length === 0) return { intent } satisfies Decision
-            const value = completed[0]!
-            const completion = yield* stored(Completion, value)
+            if (row.completionJson === null) return { intent } satisfies Decision
+            const completion = yield* stored(Completion, {
+              json: row.completionJson,
+              checksum: row.completionChecksum!
+            })
             yield* unique(completion.winners, "corrupt_state")
             if (
-              completion.generation !== value.generation || completion.mergeId !== value.mergeId ||
+              completion.generation !== row.generation || completion.mergeId !== row.mergeId ||
               completion.winners.some((id) => !intent.peers.includes(id))
             ) {
               return yield* Effect.fail(error("corrupt_state", "merge completion does not match its intent"))
@@ -251,10 +260,11 @@ export const make: Effect.Effect<Service, never, SqlClient.SqlClient | DurableWr
         const data = yield* encoded(intent)
         return yield* writer.write(Effect.gen(function*() {
           yield* fence(identity, owner, true)
-          const decisions = yield* load(identity)
-          const existing = decisions.find((decision) => decision.intent.nodeId === intent.nodeId)
+          const [existing] = yield* load(identity, intent.nodeId)
           if (existing !== undefined) return existing.intent
-          if (decisions.length >= Plan.maximumPlanNodes) {
+          const [count] = yield* sql<{ count: number }>`SELECT count(*) AS count
+        FROM flows_plan_merge_intents WHERE run_id = ${identity.runId}`
+          if (count!.count >= Plan.maximumPlanNodes) {
             return yield* Effect.fail(error("invalid_input", "too many merge intents for one plan"))
           }
           yield* sql`INSERT INTO flows_plan_merge_intents (run_id, stopped_node_id, intent_json, checksum)
@@ -277,7 +287,7 @@ export const make: Effect.Effect<Service, never, SqlClient.SqlClient | DurableWr
         const data = yield* encoded(completion)
         return yield* writer.write(Effect.gen(function*() {
           yield* fence(identity, owner, true)
-          const decision = (yield* load(identity)).find((candidate) => candidate.intent.nodeId === nodeId)
+          const [decision] = yield* load(identity, nodeId)
           if (decision === undefined) {
             return yield* Effect.fail(error("corrupt_state", "merge completion has no intent"))
           }
