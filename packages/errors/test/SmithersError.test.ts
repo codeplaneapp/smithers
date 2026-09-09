@@ -311,11 +311,17 @@ describe("error refinements", () => {
       summary: "s",
       docsUrl: "d"
     }
+    class Context {
+      retryable = true
+    }
     for (
       const error of [
         Object.assign(new Error("f"), base),
         Object.assign(new Error("f"), base, { details: {} }),
-        Object.assign(new Error("f"), base, { details: { retryable: true } })
+        Object.assign(new Error("f"), base, { details: { retryable: true } }),
+        Object.assign(new Error("f"), base, { details: new Date(0) }),
+        Object.assign(new Error("f"), base, { details: new Map([["retryable", true]]) }),
+        Object.assign(new Error("f"), base, { details: new Context() })
       ]
     ) {
       expect(hasSmithersErrorShape(error)).toBe(true)

@@ -26,8 +26,8 @@
   `cause: undefined`.
 - Renamed `knownSmithersErrorCodes` to `smithersErrorCodes` and
   `isKnownSmithersErrorCode` to `isSmithersErrorCode`.
-- `hasSmithersErrorShape` now rejects a `details` value that is not a plain
-  non-null object.
+- `hasSmithersErrorShape` now rejects a `details` value that is not a non-null
+  object, and rejects an array. A `Date`, a `Map`, or a class instance passes.
 - Install `name` as a non-enumerable own property and install `details` as an
   own property only when the caller supplies one, so logs no longer print
   `details: undefined`.
