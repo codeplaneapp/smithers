@@ -74,6 +74,76 @@ export const maxConcurrentArtifactTransfers = 2
 /** Successful readiness checks are coalesced for this monotonic interval. */
 export const healthCacheMilliseconds = 1000
 
+/**
+ * Stops waiting on an uncooperative dependency when the request ends. A
+ * cancellable operation must settle (including SQL rollback) before its slot
+ * can be reused. Plain promises have no underlying cancellation to drain.
+ */
+export const waitForAbort = (work, signal) => {
+  if (signal === undefined) return Promise.resolve(work)
+  return new Promise((resolve, reject) => {
+    let aborting = false
+    const cleanup = () => signal.removeEventListener("abort", abort)
+    const abort = () => {
+      if (aborting) return
+      aborting = true
+      cleanup()
+      void (async () => {
+        try {
+          if (typeof work?.cancel === "function") {
+            try {
+              work.cancel()
+            } finally {
+              await work
+            }
+          }
+        } catch {
+          // Cancellation normally rejects the operation being drained.
+        }
+        reject(signal.reason)
+      })()
+    }
+    Promise.resolve(work).then((value) => {
+      if (aborting) return
+      cleanup()
+      resolve(value)
+    }, (cause) => {
+      if (aborting) return
+      cleanup()
+      reject(cause)
+    })
+    signal.addEventListener("abort", abort, { once: true })
+    if (signal.aborted) abort()
+  })
+}
+
+const requestLifetime = (parent, milliseconds) => {
+  const controller = new globalThis.AbortController()
+  const abort = () => controller.abort(parent.reason)
+  parent?.addEventListener("abort", abort, { once: true })
+  if (parent?.aborted) abort()
+  const timer = setTimeout(
+    () => controller.abort(new globalThis.DOMException("request deadline exceeded", "TimeoutError")),
+    milliseconds
+  )
+  timer.unref?.()
+  return {
+    signal: controller.signal,
+    close: () => {
+      clearTimeout(timer)
+      parent?.removeEventListener("abort", abort)
+    }
+  }
+}
+
+const requestStorage = (service, signal) =>
+  Object.fromEntries(
+    Object.entries(service).map(([name, method]) => [name, (...args) => {
+      signal.throwIfAborted()
+      return waitForAbort(method(...args, signal), signal)
+    }])
+  )
+
 const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false })
 const textEncoder = new TextEncoder()
 
@@ -198,7 +268,7 @@ const readBody = async (request, limit) => {
   let chunks = 0
   try {
     while (true) {
-      const chunk = await reader.read()
+      const chunk = await waitForAbort(reader.read(), request.signal)
       if (chunk.done) break
       chunks += 1
       if (chunks > maxBodyChunks) {
@@ -750,7 +820,18 @@ const handleArtifact = async (request, digest, contentStore, maxArtifactBytes) =
  *
  * This is the translation of `heldWhileStreaming` in infra/worker/protocol.ts.
  */
-const heldWhileStreaming = (response, release) => {
+const heldWhileStreaming = (response, release, signal) => {
+  const finish = release
+  let streamController
+  const abort = () => {
+    streamController.error(signal.reason)
+    void reader.cancel(signal.reason).catch(() => undefined)
+    release()
+  }
+  release = () => {
+    signal.removeEventListener("abort", abort)
+    finish()
+  }
   const body = response.body
   if (body === null) {
     release()
@@ -758,6 +839,11 @@ const heldWhileStreaming = (response, release) => {
   }
   const reader = body.getReader()
   const held = new ReadableStream({
+    start(controller) {
+      streamController = controller
+      signal.addEventListener("abort", abort, { once: true })
+      if (signal.aborted) abort()
+    },
     async pull(controller) {
       try {
         const chunk = await reader.read()
@@ -1004,7 +1090,11 @@ const normalizeDependencies = (value) => {
  *
  * @category constructors
  */
-export const createHandler = (dependencies) => {
+export const createHandler = (dependencies, {
+  requestTimeoutMilliseconds = 15_000,
+  transferTimeoutMilliseconds = 60_000,
+  healthTimeoutMilliseconds = 5_000
+} = {}) => {
   const { actionCache, contentStore, health, maxArtifactBytes, readTokenHash, writeTokenHash } = normalizeDependencies(
     dependencies
   )
@@ -1023,13 +1113,15 @@ export const createHandler = (dependencies) => {
     const now = monotonicNow()
     if (now >= lastHealthyAt && now - lastHealthyAt < healthCacheMilliseconds) return Promise.resolve()
     if (healthInFlight !== null) return healthInFlight
+    const lifetime = requestLifetime(undefined, healthTimeoutMilliseconds)
     let current
     current = Promise.resolve()
-      .then(() => health())
+      .then(() => waitForAbort(health(lifetime.signal), lifetime.signal))
       .then(() => {
         lastHealthyAt = monotonicNow()
       })
       .finally(() => {
+        lifetime.close()
         if (healthInFlight === current) healthInFlight = null
       })
     healthInFlight = current
@@ -1040,8 +1132,25 @@ export const createHandler = (dependencies) => {
     // Set when a response leaves holding both permits until its body ends, so
     // the outer release below does not hand back a slot that is still in use.
     let streaming = false
+    let lifetime
     try {
       const url = new URL(request.url)
+      const milliseconds = url.pathname === "/healthz" ?
+        healthTimeoutMilliseconds
+        : url.pathname.startsWith("/cas/") && (request.method === "GET" || request.method === "PUT")
+        ? transferTimeoutMilliseconds :
+        requestTimeoutMilliseconds
+      lifetime = requestLifetime(request.signal, milliseconds)
+      request = {
+        url: request.url,
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+        signal: lifetime.signal
+      }
+      const requestActionCache = requestStorage(actionCache, lifetime.signal)
+      const requestContentStore = requestStorage(contentStore, lifetime.signal)
+      lifetime.signal.throwIfAborted()
       if (activeCacheRequests >= maxConcurrentCacheRequests) {
         await discardBody(request.body)
         return busy("too many simultaneous cache requests")
@@ -1058,7 +1167,7 @@ export const createHandler = (dependencies) => {
             return methodNotAllowed("GET, HEAD")
           }
           await discardBody(request.body)
-          await ready()
+          await waitForAbort(ready(), lifetime.signal)
           return request.method === "HEAD" ? empty(200) : json(200, { ok: true })
         }
         const credential = presentedCredential(request, expectedWriteTokenHash, expectedReadTokenHash)
@@ -1083,7 +1192,7 @@ export const createHandler = (dependencies) => {
           }
           activeFindMissingRequests += 1
           try {
-            return await handleFindMissing(request, contentStore)
+            return await handleFindMissing(request, requestContentStore)
           } finally {
             activeFindMissingRequests -= 1
           }
@@ -1103,12 +1212,12 @@ export const createHandler = (dependencies) => {
             }
             activeActionCachePublications += 1
             try {
-              return await handleActionCache(request, keyDigest, url, actionCache)
+              return await handleActionCache(request, keyDigest, url, requestActionCache)
             } finally {
               activeActionCachePublications -= 1
             }
           }
-          const response = await handleActionCache(request, keyDigest, url, actionCache)
+          const response = await handleActionCache(request, keyDigest, url, requestActionCache)
           // A hit streams its stored body after the handler returns, so the
           // request slot has to outlive the return and end with the stream.
           if (request.method !== "GET" || response.status !== 200 || response.body === null) {
@@ -1120,7 +1229,8 @@ export const createHandler = (dependencies) => {
             if (released) return
             released = true
             activeCacheRequests -= 1
-          })
+            lifetime.close()
+          }, lifetime.signal)
         }
         if (segments.length === 3 && segments[0] === "" && segments[1] === "cas") {
           let digest
@@ -1138,7 +1248,7 @@ export const createHandler = (dependencies) => {
             activeArtifactTransfers += 1
             let transferred = false
             try {
-              const response = await handleArtifact(request, digest, contentStore, maxArtifactBytes)
+              const response = await handleArtifact(request, digest, requestContentStore, maxArtifactBytes)
               // A `PUT` body is buffered inside the slot, so the transfer is
               // over when the handler returns. A `GET` body streams after it,
               // so the slot that bounds artifact transfers has to outlive the
@@ -1154,12 +1264,13 @@ export const createHandler = (dependencies) => {
                 released = true
                 activeArtifactTransfers -= 1
                 activeCacheRequests -= 1
-              })
+                lifetime.close()
+              }, lifetime.signal)
             } finally {
               if (!transferred) activeArtifactTransfers -= 1
             }
           }
-          return await handleArtifact(request, digest, contentStore, maxArtifactBytes)
+          return await handleArtifact(request, digest, requestContentStore, maxArtifactBytes)
         }
         await discardBody(request.body)
         return empty(404)
@@ -1174,6 +1285,8 @@ export const createHandler = (dependencies) => {
       // the request that produced it, and the request carries the bearer token.
       console.error(describeFailure(cause))
       return json(503, { error: "the cache tier failed to answer" })
+    } finally {
+      if (!streaming) lifetime?.close()
     }
   }
 }

@@ -227,6 +227,18 @@ runs as the image's unprivileged user on a read-only root filesystem, drops all
 Linux capabilities, and enables `no-new-privileges`. Postgres is limited to
 512 MiB with no swap, and the service's SQL pool uses at most eight connections.
 
+Requests cancel on client disconnect or a route deadline: five seconds for
+readiness, 60 seconds for artifact uploads and downloads, and 15 seconds for
+other routes. Dependency timeouts answer `503`. Response streams retain their
+admission permits until completion, cancellation, or the route deadline.
+Storage receives the request's abort signal; cancelled SQL statements and
+publication rollback settle before their permits are released. Each SQL
+connection enforces a ten-second statement timeout, a two-second lock timeout,
+a ten-second idle-transaction timeout, and a five-second connection timeout.
+Readiness probes share one bounded check and cache successful checks for one
+second. Startup readiness and each shutdown wait are bounded to five seconds;
+a stalled listener is force-stopped and database connections are force-closed.
+
 Terraform marks credentials and the database URL sensitive, which suppresses
 ordinary CLI display but does not encrypt Terraform state or Docker container
 inspection output. Keep state in an encrypted, access-controlled backend and

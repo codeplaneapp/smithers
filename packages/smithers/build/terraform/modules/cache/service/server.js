@@ -16,7 +16,7 @@
  */
 import { SQL } from "bun"
 import { readConfig } from "./config.js"
-import { createHandler, describeFailure, maxActionCacheBodyBytes } from "./protocol.js"
+import { createHandler, describeFailure, maxActionCacheBodyBytes, waitForAbort } from "./protocol.js"
 import { createStorage } from "./storage.js"
 
 /** Exit code for a configuration failure, the sysexits.h EX_CONFIG value. */
@@ -48,7 +48,22 @@ export const requestBodyCap = (maxArtifactBytes) => Math.max(maxArtifactBytes, m
 export const main = async (env = process.env, runtime = {}) => {
   const processRuntime = runtime.process ?? process
   const logger = runtime.console ?? console
-  const openSql = runtime.openSql ?? ((databaseUrl) => new SQL(databaseUrl, { max: 8 }))
+  const openSql = runtime.openSql ?? ((databaseUrl, options) => new SQL(databaseUrl, options))
+  const lifecycleTimeoutMilliseconds = runtime.lifecycleTimeoutMilliseconds ?? 5_000
+  const bounded = async (run) => {
+    const controller = new globalThis.AbortController()
+    const timer = setTimeout(
+      () => controller.abort(new globalThis.DOMException("lifecycle deadline exceeded", "TimeoutError")),
+      lifecycleTimeoutMilliseconds
+    )
+    try {
+      // The outer promise deliberately has no cancel hook. Startup/shutdown
+      // must reach forced connection cleanup even if the driver cannot drain.
+      return await waitForAbort(Promise.resolve().then(() => run(controller.signal)), controller.signal)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
   const serve = runtime.serve ?? ((options) => Bun.serve(options))
   const result = readConfig(env)
   if (!result.ok) {
@@ -57,15 +72,24 @@ export const main = async (env = process.env, runtime = {}) => {
     return null
   }
   const config = result.config
-  const database = openSql(config.databaseUrl)
+  const database = openSql(config.databaseUrl, {
+    max: 8,
+    connectionTimeout: 5,
+    connection: {
+      statement_timeout: "10000",
+      lock_timeout: "2000",
+      idle_in_transaction_session_timeout: "10000"
+    }
+  })
+  const closeDatabase = () => bounded(() => database.close?.({ timeout: 0 }))
   const { actionCache, contentStore, health } = createStorage(database)
   try {
-    await health()
+    await bounded((signal) => health(signal))
   } catch (cause) {
     logger.error("smithers build cache: database readiness check failed")
     logger.error(describeFailure(cause))
     try {
-      await database.close?.()
+      await closeDatabase()
     } catch (closeCause) {
       logger.error(describeFailure(closeCause))
     }
@@ -102,7 +126,7 @@ export const main = async (env = process.env, runtime = {}) => {
     logger.error("smithers build cache: listener startup failed")
     logger.error(describeFailure(cause))
     try {
-      await database.close?.()
+      await closeDatabase()
     } catch (closeCause) {
       logger.error(describeFailure(closeCause))
     }
@@ -121,12 +145,17 @@ export const main = async (env = process.env, runtime = {}) => {
       removeSignalHandlers()
       let failure = null
       try {
-        await server.stop?.()
+        await bounded(() => server.stop?.())
       } catch (cause) {
         failure = cause
+        try {
+          await bounded(() => server.stop?.(true))
+        } catch {
+          // Still close SQL when forcing the listener also fails to settle.
+        }
       }
       try {
-        await database.close?.()
+        await closeDatabase()
       } catch (cause) {
         failure ??= cause
       }

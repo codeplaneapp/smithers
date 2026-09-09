@@ -125,3 +125,71 @@ describe("server lifecycle", () => {
     expect(fake.calls.close).toBe(1)
   })
 })
+
+test("closes SQL and reports a listener startup failure", async () => {
+  const fake = runtime()
+  fake.runtime.serve = () => {
+    throw new Error("EADDRINUSE")
+  }
+  expect(await main(environment, fake.runtime)).toBeNull()
+  expect(fake.calls.close).toBe(1)
+  expect(fake.runtime.process.exitCode).toBe(75)
+  expect(fake.calls.logs.filter((line) => line[1].includes("listener startup failed"))).toEqual([
+    ["error", "smithers build cache: listener startup failed"]
+  ])
+})
+
+test("bounds startup when SQL never answers or closes", async () => {
+  const fake = runtime()
+  fake.runtime.lifecycleTimeoutMilliseconds = 20
+  const sql = () => new Promise(() => {})
+  sql.close = () => {
+    fake.calls.close += 1
+    return new Promise(() => {})
+  }
+  fake.runtime.openSql = () => sql
+  const result = await Promise.race([main(environment, fake.runtime), Bun.sleep(200).then(() => "stalled")])
+  expect(result).toBeNull()
+  expect(fake.calls.serve).toBe(0)
+  expect(fake.calls.close).toBe(1)
+  expect(fake.runtime.process.exitCode).toBe(75)
+})
+
+test("bounds shutdown and forces a stalled listener closed", async () => {
+  const fake = runtime()
+  fake.runtime.lifecycleTimeoutMilliseconds = 20
+  const stops = []
+  fake.runtime.serve = () => ({
+    port: 8080,
+    stop: (force) => {
+      stops.push(force)
+      return new Promise(() => {})
+    }
+  })
+  const started = await main(environment, fake.runtime)
+  const result = await Promise.race([
+    started.close().then(() => "closed", () => "failed"),
+    Bun.sleep(200).then(() => "stalled")
+  ])
+  expect(result).toBe("failed")
+  expect(stops).toEqual([undefined, true])
+  expect(fake.calls.close).toBe(1)
+  expect(fake.runtime.process.listenerCount("SIGTERM")).toBe(0)
+})
+
+test("configures pool connection, statement, and lock deadlines", async () => {
+  const fake = runtime()
+  const open = fake.runtime.openSql
+  let options
+  fake.runtime.openSql = (url, value) => {
+    options = value
+    return open(url)
+  }
+  const started = await main(environment, fake.runtime)
+  await started.close()
+  expect(options).toEqual({
+    max: 8,
+    connectionTimeout: 5,
+    connection: { statement_timeout: "10000", lock_timeout: "2000", idle_in_transaction_session_timeout: "10000" }
+  })
+})

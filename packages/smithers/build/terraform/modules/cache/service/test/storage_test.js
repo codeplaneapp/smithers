@@ -644,3 +644,101 @@ describe("schema health", () => {
     await expect(createStorage(missing.sql).health()).rejects.toThrow("schema version")
   })
 })
+
+describe("SQL cancellation", () => {
+  test("cancels every single-statement route and waits for SQL to settle", async () => {
+    const routes = [
+      (storage, signal) => storage.actionCache.get("key", signal),
+      (storage, signal) => storage.actionCache.delete("key", null, signal),
+      (storage, signal) => storage.contentStore.get("digest", signal),
+      (storage, signal) => storage.contentStore.has("digest", signal),
+      (storage, signal) => storage.contentStore.presentDigests(["digest"], signal),
+      (storage, signal) => storage.health(signal)
+    ]
+    for (const route of routes) {
+      let finish
+      let cancelled = 0
+      const query = new Promise((_resolve, reject) => {
+        finish = reject
+      })
+      query.cancel = () => {
+        cancelled += 1
+      }
+      const controller = new globalThis.AbortController()
+      const work = route(createStorage(() => query), controller.signal)
+      let settled = false
+      const checked = work.catch(() => {
+        settled = true
+      })
+      controller.abort()
+      for (let turn = 0; turn < 20; turn += 1) await Promise.resolve()
+      expect(cancelled).toBe(1)
+      expect(settled).toBe(false)
+      finish(new Error("SQL cancelled"))
+      await checked
+      expect(settled).toBe(true)
+    }
+  })
+
+  test("cancels publication and drains rollback without starting another statement", async () => {
+    for (
+      const publish of [
+        (storage, signal) => storage.actionCache.put("key", publication, signal),
+        (storage, signal) => storage.contentStore.put("digest", new Uint8Array([1]), signal)
+      ]
+    ) {
+      const controller = new globalThis.AbortController()
+      let statements = 0
+      let cancelled = 0
+      let finishQuery
+      let finishRollback
+      const query = new Promise((_resolve, reject) => {
+        finishQuery = reject
+      })
+      query.cancel = () => {
+        cancelled += 1
+        finishQuery(new Error("cancelled"))
+      }
+      const rollback = new Promise((resolve) => {
+        finishRollback = resolve
+      })
+      const sql = () => {
+        statements += 1
+        return query
+      }
+      sql.begin = async (run) => {
+        try {
+          return await run(sql)
+        } catch (cause) {
+          await rollback
+          throw cause
+        }
+      }
+      let settled = false
+      const work = publish(createStorage(sql), controller.signal)
+      const checked = work.catch(() => {
+        settled = true
+      })
+      controller.abort()
+      for (let turn = 0; turn < 30; turn += 1) await Promise.resolve()
+      expect(cancelled).toBe(1)
+      expect(statements).toBe(1)
+      expect(settled).toBe(false)
+      finishRollback()
+      await checked
+      expect(settled).toBe(true)
+    }
+  })
+
+  test("does not start SQL for an already aborted request", async () => {
+    const controller = new globalThis.AbortController()
+    controller.abort()
+    let calls = 0
+    const storage = createStorage(() => {
+      calls += 1
+      return Promise.resolve([])
+    })
+    await expect(storage.actionCache.get("key", controller.signal)).rejects.toThrow()
+    expect(calls).toBe(0)
+  })
+})

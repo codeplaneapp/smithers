@@ -24,6 +24,8 @@ import {
   maxReferencedDigests
 } from "../protocol.js"
 
+import { createStorage } from "../storage.js"
+
 const readToken = "read-token-with-sufficient-entropy-for-unit-tests"
 const writeToken = "write-token-with-sufficient-entropy-for-unit-tests"
 const readTokenHash = new Bun.CryptoHasher("sha256").update(readToken, "utf8").digest("hex")
@@ -85,7 +87,7 @@ const failingStorage = () => {
   }
 }
 
-const makeHandler = (overrides = {}) =>
+const makeHandler = (overrides = {}, deadlines = {}) =>
   createHandler({
     actionCache: overrides.actionCache ?? memoryActionCache(),
     contentStore: overrides.contentStore ?? memoryContentStore(),
@@ -93,7 +95,7 @@ const makeHandler = (overrides = {}) =>
     readTokenHash: Object.hasOwn(overrides, "readTokenHash") ? overrides.readTokenHash : readTokenHash,
     writeTokenHash: Object.hasOwn(overrides, "writeTokenHash") ? overrides.writeTokenHash : writeTokenHash,
     maxArtifactBytes: overrides.maxArtifactBytes ?? 1024
-  })
+  }, deadlines)
 
 const requestAs = (credential, path, init = {}) => {
   const headers = new Headers(init.headers)
@@ -1832,4 +1834,130 @@ describe("canonicalJson", () => {
     expect(proxyReads).toBe(0)
     expect(() => canonicalJson("x".repeat(maxCanonicalJsonBytes + 1))).toThrow("byte bound")
   })
+})
+
+describe("request cancellation", () => {
+  test("releases all 64 permits when clients abort stalled storage", async () => {
+    let entered = 0
+    const signals = []
+    const handler = makeHandler({
+      actionCache: {
+        ...memoryActionCache(),
+        get: (_key, signal) => {
+          entered += 1
+          signals.push(signal)
+          return new Promise(() => {})
+        }
+      }
+    })
+    const controllers = Array.from({ length: maxConcurrentCacheRequests }, () => new globalThis.AbortController())
+    const pending = controllers.map((controller) => handler(request(`/ac/${keyDigest}`, { signal: controller.signal })))
+    for (let turn = 0; turn < 30; turn += 1) await Promise.resolve()
+    expect(entered).toBe(64)
+    for (const controller of controllers) controller.abort()
+    const outcome = await Promise.race([
+      Promise.all(pending).then((responses) => responses.map((response) => response.status)),
+      Bun.sleep(100).then(() => "stalled")
+    ])
+    expect(outcome).toEqual(Array(64).fill(503))
+    expect(signals.every((signal) => signal?.aborted)).toBe(true)
+    expect((await handler(request("/healthz"))).status).toBe(200)
+  })
+})
+
+test("deadlines recover readiness from a dependency that never settles", async () => {
+  let calls = 0
+  const handler = makeHandler({
+    health: () => {
+      calls += 1
+      return calls === 1 ? new Promise(() => {}) : Promise.resolve(true)
+    }
+  }, { healthTimeoutMilliseconds: 20 })
+  expect((await handler(request("/healthz"))).status).toBe(503)
+  await Bun.sleep(30)
+  expect((await handler(request("/healthz"))).status).toBe(200)
+  expect(calls).toBe(2)
+})
+
+test("deadlines bound stalled reads without a client abort", async () => {
+  const handler = makeHandler({
+    actionCache: {
+      ...memoryActionCache(),
+      get: () => new Promise(() => {})
+    }
+  }, { requestTimeoutMilliseconds: 20 })
+  expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(503)
+  expect((await handler(request("/healthz"))).status).toBe(200)
+})
+
+test("aborting a stalled upload prevents a later publication", async () => {
+  let puts = 0
+  let cancelled = false
+  const handler = makeHandler({
+    actionCache: {
+      ...memoryActionCache(),
+      put: async () => {
+        puts += 1
+        return "inserted"
+      }
+    }
+  }, { requestTimeoutMilliseconds: 20 })
+  const body = new ReadableStream({
+    pull: () => new Promise(() => {}),
+    cancel: () => {
+      cancelled = true
+    }
+  })
+  const response = await handler(request(`/ac/${keyDigest}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body
+  }))
+  expect(response.status).toBe(503)
+  expect(puts).toBe(0)
+  expect(cancelled).toBe(true)
+})
+
+test("a stalled download releases its transfer permit at the deadline", async () => {
+  const handler = makeHandler({
+    contentStore: {
+      ...memoryContentStore(),
+      get: async () => ({ body: new ReadableStream({ pull: () => new Promise(() => {}) }) })
+    }
+  }, { transferTimeoutMilliseconds: 20 })
+  const first = await handler(request(`/cas/${keyDigest}`))
+  const second = await handler(request(`/cas/${keyDigest}`))
+  expect(first.status).toBe(200)
+  expect(second.status).toBe(200)
+  expect((await handler(request(`/cas/${keyDigest}`))).status).toBe(429)
+  await Bun.sleep(40)
+  const next = await handler(request(`/cas/${keyDigest}`))
+  expect(next.status).toBe(200)
+  await next.body.cancel()
+})
+
+test("keeps admission occupied until cancelled SQL has actually settled", async () => {
+  const finishes = []
+  let cancelled = 0
+  const storage = createStorage(() => {
+    const query = new Promise((_resolve, reject) => {
+      finishes.push(reject)
+    })
+    query.cancel = () => {
+      cancelled += 1
+    }
+    return query
+  })
+  const handler = makeHandler({ actionCache: storage.actionCache })
+  const controller = new globalThis.AbortController()
+  const pending = Array.from({ length: 64 }, () => handler(request(`/ac/${keyDigest}`, { signal: controller.signal })))
+  for (let turn = 0; turn < 30; turn += 1) await Promise.resolve()
+  expect(finishes).toHaveLength(64)
+  controller.abort()
+  for (let turn = 0; turn < 30; turn += 1) await Promise.resolve()
+  expect(cancelled).toBe(64)
+  expect((await handler(request("/healthz"))).status).toBe(429)
+  for (const finish of finishes) finish(new Error("cancelled SQL settled"))
+  expect((await Promise.all(pending)).every((response) => response.status === 503)).toBe(true)
+  expect((await handler(request("/healthz"))).status).toBe(200)
 })

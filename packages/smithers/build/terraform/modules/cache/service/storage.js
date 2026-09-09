@@ -43,6 +43,8 @@
  * Postgres already executes atomically, so none of them opens a transaction.
  */
 
+import { waitForAbort } from "./protocol.js"
+
 /**
  * Advisory-lock class for action-cache publication.
  *
@@ -112,7 +114,7 @@ const digestArray = (digests) =>
  *
  * @category constructors
  */
-export const createStorage = (sql) => {
+const storageQueries = (sql) => {
   /**
    * Records which stored blobs a published entry mentions.
    *
@@ -406,4 +408,43 @@ export const createStorage = (sql) => {
   }
 
   return { actionCache, contentStore, health }
+}
+
+/** Binds cancellation to each statement and waits for transaction rollback. */
+export const createStorage = (sql) => {
+  const bind = (service, name) => (...args) => {
+    const parent = args.at(-1) instanceof globalThis.AbortSignal ? args.pop() : undefined
+    const controller = new globalThis.AbortController()
+    const signal = parent === undefined ? controller.signal : globalThis.AbortSignal.any([parent, controller.signal])
+    const scoped = (connection) => {
+      const query = (...parameters) => {
+        signal.throwIfAborted()
+        return waitForAbort(connection(...parameters), signal)
+      }
+      query.begin = (run) => {
+        signal.throwIfAborted()
+        return connection.begin(async (tx) => {
+          signal.throwIfAborted()
+          const result = await run(scoped(tx))
+          signal.throwIfAborted()
+          return result
+        })
+      }
+      return query
+    }
+    const methods = storageQueries(scoped(sql))
+    const work = (service === null ? methods[name] : methods[service][name])(...args)
+    // The signal cancels the current statement. Exposing cancel tells the
+    // protocol to drain this promise, including BEGIN/COMMIT/ROLLBACK, before
+    // releasing admission. No later statement may start after cancellation.
+    work.cancel = () => controller.abort(new globalThis.DOMException("storage operation cancelled", "AbortError"))
+    return work
+  }
+  return {
+    actionCache: Object.fromEntries(["get", "put", "delete"].map((name) => [name, bind("actionCache", name)])),
+    contentStore: Object.fromEntries(
+      ["get", "has", "put", "presentDigests"].map((name) => [name, bind("contentStore", name)])
+    ),
+    health: bind(null, "health")
+  }
 }
