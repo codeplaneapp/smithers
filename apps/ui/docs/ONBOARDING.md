@@ -2,7 +2,7 @@
 
 **Owner:** Will · **Direction:** September 8, 2026 · **Status:** v0 implementation for hands-on iteration
 
-This brief replaces the always-visible-chat and fixed sidebar model. Smithers opens as a quiet workspace. The UI itself is the default view: full-screen, with no composer. Command K / Control K summons ONLY the composer — one solid floating card in a transparent layer over the content, dismissed with Escape, a click outside, or a second Command K. The conversation lives in the full-screen UI underneath, never inside the summon layer. The homepage is separate work.
+This brief replaces the always-visible-chat and fixed sidebar model. Smithers opens as a quiet workspace. The UI itself is the default view: full-screen, with no composer. Command K / Control K summons ONLY the composer — a solid bottom dock that animates open and pushes the content up, dismissed with Escape or a second Command K. The conversation lives in the full-screen UI underneath, never inside the dock. The homepage is separate work.
 
 ## The feeling
 
@@ -25,7 +25,7 @@ The reusable `smithers-control` glow means Smithers controls a surface: a faint 
 5. **UI widgets.** An optional form asks how the user found Smithers and what they want to build; answers are saved when continuing.
 6. **Flows.** Explain executable instructions and offer the five-second example with R.
 7. **New flows.** Smithers can create useful flows for the user.
-8. **Call me when you need me.** Hide the conversation; the user performs Command K / Control K (a touch/click fallback is available). The composer arrives floating in its transparent layer over the lesson; demonstrate Escape and restore focus.
+8. **Call me when you need me.** Hide the conversation; the user performs Command K / Control K (a touch/click fallback is available). The composer slides in from the bottom and resizes the lesson above; demonstrate Escape and restore focus.
 9. **Install Library.** Explain plugins as the way capabilities are added. The user's explicit action adds the Library to the empty sidebar.
 10. **Add Librarian.** Explain its wiki and mythical-history capabilities before revealing them.
 11. **Two background flows.** Describe what each proposed run does, why it exists, and how to inspect progress. In live mode, ask for the repository and approval before launching. Background work must use existing flow execution, run identifiers, and receipts.
@@ -80,7 +80,7 @@ The opening message is “Hello. I’m Smithers. Let me show how Smithers works�
 
 Tutorial lessons append Smithers messages to a continuous, scrollable chat history. Earlier messages remain mounted; only the newest message animates. The persisted lesson position reconstructs the history on reload; Back rewinds and `/tut` starts over. Interactive examples and the current actions sit below the transcript. A new message OPENS its place — its grid track grows over 450ms so the history above shifts up while the actions below move down as one stable row; the row never re-animates and never trades places with a retiring copy, and its buttons are keyed per step so the activated control never morphs mid-gesture. The transcript scrolls smoothly to the newest message. Reduced motion switches immediately; browsers without animatable grid tracks show the message in place.
 
-The workspace step hands the window to the app: the tutorial chrome (transcript, header, wordmark, plugin shelf, progress) retires, the app stands full-screen without a composer, and only the outro card (the accepted direction and the two start actions) and the footer float above it. Command K summons the composer over the workspace; a sent message and its reply land in the full-screen conversation underneath. Toasts keep reporting through the guide's stack while the guide is mounted.
+The workspace step hands the window to the app: the tutorial chrome (transcript, header, wordmark, plugin shelf, progress) retires, the app stands full-screen without a composer, and only the outro card (the accepted direction and the two start actions) and the footer float above it. Command K summons the composer below the workspace; a sent message and its reply land in the full-screen conversation underneath. Toasts keep reporting through the guide's stack while the guide is mounted.
 
 The notification lesson waits for the user: “Send me a notification” displays an inline N shortcut. Clicking it or pressing N sends the same sample notification without advancing the lesson. Text fields retain ordinary typing.
 
@@ -90,7 +90,7 @@ Optional profile drafts stay local while typing; Continue submits nonempty answe
 
 The flows lesson has “Run a flow · R”: a real five-second asynchronous wait through `onboarding.act wait-flow`. It displays Running, then Finished successfully only after the wait completes. Repeat invocation while running does nothing. Navigation is preserved, and a reload marks an unfinished example interrupted so it can be retried.
 
-Command K displays only the composer, including in the Library lesson. There is no greeting, transcript, or “Meet the Library” panel inside the overlay. Tutorial and real chat history remain in the main view.
+Command K displays only the composer, including in the Library lesson. There is no greeting, transcript, or “Meet the Library” panel inside the dock. Tutorial and real chat history remain in the main view.
 
 The summoned UI is the composer input itself, without an outer card, repository header, origin label, + menu, or Chat/Connect/Wiki/Flows toolbar. Repository selection lives in the left workspace sidebar, including before plugin installation. The picker retains keyboard menu navigation and Escape restores focus.
 

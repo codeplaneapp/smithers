@@ -22,9 +22,9 @@ import "./guide.css"
 /*
  * Where the summoned composer goes. The guide renders the app full-screen
  * with the composer hidden; Command-K summons ONLY the composer into the
- * transparent overlay — the chat history stays in the full-screen UI.
+ * bottom dock — the chat history stays in the workspace above.
  * `undefined` outside the guide (the bare app keeps its docked composer),
- * null while the conversation is closed, the portal host element once open.
+ * null until the persistent portal host mounts.
  */
 export const GuideComposerHost = createContext<HTMLDivElement | null | undefined>(undefined)
 
@@ -92,7 +92,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const stage = guide.step
   const lastScrolledStep = useRef(-1)
   const transcriptRef = useRef<HTMLDivElement>(null)
-  /* The portal host the summoned composer renders into; null while closed. */
+  /* Keep the portal mounted so closing can animate without losing the draft. */
   const [composerHost, setComposerHost] = useState<HTMLDivElement | null>(null)
   /*
    * Only a message that mounts AT the current stage enters with the open
@@ -132,10 +132,8 @@ export function GuideShell({ children }: { children: ReactNode }) {
   }
   const runCommandClose = () => {
     runCommandGuide("close")
-    requestAnimationFrame(() => {
-      if (previousFocus.current?.isConnected) previousFocus.current.focus()
-      else (opener.current ?? document.querySelector<HTMLElement>(".guide-shell"))?.focus()
-    })
+    if (previousFocus.current?.isConnected) previousFocus.current.focus()
+    else (opener.current ?? document.querySelector<HTMLElement>(".guide-shell"))?.focus()
   }
   const runCommandLive = (name: string) => {
     runCommandOpen()
@@ -170,6 +168,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
         .all()
         .map((command) => command.name)
         .join(" ")}
+      data-conversation-open={guide.conversationOpen}
       data-step={stage}
       data-theme={sessions[0]?.theme ?? "light"}
       tabIndex={-1}
@@ -229,15 +228,16 @@ export function GuideShell({ children }: { children: ReactNode }) {
         }
       }}
     >
+      <div className="guide-content">
       {
         /*
          * The app IS the default view: full-screen, without a composer. The
          * guide chrome covers it during the lessons; at the workspace step the
          * chrome steps aside (guide.css) and the app takes the window. The
-         * composer itself is summoned into the transparent Command-K overlay.
+         * composer itself is summoned into the bottom Command-K dock.
          */
       }
-      <div className="guide-app" inert={guide.conversationOpen ? true : undefined}>
+      <div className="guide-app">
         {children}
       </div>
       <div className="guide-atmosphere" aria-hidden="true">
@@ -290,7 +290,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
         </nav>
       )}
       </aside>
-      <main className="guide-main" inert={guide.conversationOpen ? true : undefined}>
+      <main className="guide-main">
         <section className="guide-lesson" aria-label={`Lesson ${stage + 1}`}>
           <div
             className="guide-transcript"
@@ -666,47 +666,22 @@ export function GuideShell({ children }: { children: ReactNode }) {
           </button>
         )}
       </footer>
-      {guide.conversationOpen && (
+      </div>
         <div
-          className="guide-composer-backdrop"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) runCommandClose()
-          }}
+          className="guide-composer-dock"
+          inert={!guide.conversationOpen ? true : undefined}
+          aria-hidden={!guide.conversationOpen}
         >
-          {
-            /*
-             * Command-K summons ONLY the composer: a transparent layer over
-             * the content, the composer floating in it. The conversation
-             * itself stays in the full-screen UI underneath.
-             */
-          }
+        <div className="guide-composer-clip">
           <section
             className="guide-composer-layer"
             role="dialog"
-            aria-modal="true"
             aria-label="Talk to Smithers"
-            onKeyDown={(event) => {
-              if (event.key !== "Tab") return
-              const elements = Array.from(
-                event.currentTarget.querySelectorAll<HTMLElement>(
-                  'button:not([disabled]), textarea, input, [tabindex="0"]',
-                ),
-              ).filter((el) => el.getClientRects().length > 0)
-              const first = elements[0],
-                last = elements.at(-1)
-              if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault()
-                last?.focus()
-              } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault()
-                first?.focus()
-              }
-            }}
           >
             <div className="guide-composer-host" ref={setComposerHost} />
           </section>
         </div>
-      )}
+        </div>
       {!guide.conversationOpen && toasts.length > 0 && (
         <aside className="guide-toasts" aria-label="Notifications">
           {toasts.map((toast) => (

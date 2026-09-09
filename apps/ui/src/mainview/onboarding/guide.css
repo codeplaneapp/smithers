@@ -636,26 +636,36 @@
   max-width: 460px;
   margin-top: 10px;
 }
-/*
- * The Command-K summon: a TRANSPARENT layer over the content — no dim, no
- * blur, no panel — carrying only the composer. The conversation itself lives
- * in the full-screen UI underneath.
- */
-.guide-composer-backdrop {
-  position: fixed;
-  inset: 0;
+/* The dock grows in layout, lifting the workspace as the input slides in. */
+.guide-composer-dock {
+  display: grid;
+  grid-template-rows: 0fr;
+  flex-shrink: 0;
+  visibility: hidden;
+  background: var(--g-bg);
   z-index: 80;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: min(14dvh, 120px) 24px 24px;
-  animation: guide-fade 0.2s both;
+  transition: grid-template-rows 320ms cubic-bezier(.2, .7, .2, 1), visibility 0s 320ms;
+}
+.guide-shell[data-conversation-open="true"] .guide-composer-dock {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.guide-composer-clip {
+  min-height: 0;
+  overflow: hidden;
 }
 .guide-composer-layer {
-  width: min(760px, 100%);
-  display: grid;
-  gap: 14px;
-  animation: guide-palette-in 0.3s cubic-bezier(0.18, 0.8, 0.3, 1) both;
+  width: min(808px, 100%);
+  margin: 0 auto;
+  padding: 20px 24px;
+  max-height: 50dvh;
+  overflow-y: auto;
+  transform: translateY(100%);
+  transition: transform 320ms cubic-bezier(.2, .7, .2, 1);
+}
+.guide-shell[data-conversation-open="true"] .guide-composer-layer {
+  transform: translateY(0);
 }
 .guide-composer-host {
   display: contents;
@@ -676,9 +686,11 @@
 .guide-sidebar .composer-connect-label { max-width: 150px; }
 .guide-sidebar .composer-connect { margin-bottom: 18px; }
 .guide-sidebar nav { display: grid; }
-/* Summoned, the palette drops below the box instead of opening off-window. */
+/* Results share the dock’s scroll area, so they cannot run off-window. */
+  margin-top: 6px;
 .guide-composer-layer .composer-wrap > .slash-menu {
-  top: calc(100% + 6px);
+  position: relative;
+  top: auto;
   bottom: auto;
 }
 .guide-summoned {
@@ -843,16 +855,6 @@
     transform: translateY(0);
   }
 }
-@keyframes guide-palette-in {
-  from {
-    opacity: 0;
-    transform: translateY(-14px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
 @keyframes guide-fade {
   from {
     opacity: 0;
@@ -963,9 +965,8 @@
   .guide-board-cards article {
     padding: 12px 9px;
   }
-  .guide-composer-backdrop {
-    padding: 10px;
-    padding-top: min(10dvh, 60px);
+  .guide-composer-layer {
+    padding: 12px;
   }
   .guide-background-flows > div {
     padding: 17px;
@@ -1016,6 +1017,18 @@
   }
   .guide-primary:hover {
     transform: none;
+  overflow: hidden;
+}
+.guide-content {
+  /* Maximized frames resize with this area, including fixed descendants. */
+  contain: layout;
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
   }
 }
 /* Keep long lessons scrollable and their footer out of the reading column. */

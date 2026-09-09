@@ -6,7 +6,7 @@ Users must be able to operate all of Smithers without a mouse. Every action need
 
 ## Current onboarding brief (Will, 2026-09-08)
 
-The new shell opens with a one-second SMITHERS entrance and progressively introduces capabilities. The UI is the default view: full-screen, no composer. Command-K summons ONLY the composer — one solid floating card in a transparent layer over the content; the chat history lives in the full-screen UI underneath. This explicit brief supersedes the always-visible-chat and fixed-sidebar requirements below. Outputs still use the existing flows and shared state; the guide is documented in `docs/ONBOARDING.md`.
+The new shell opens with a one-second SMITHERS entrance and progressively introduces capabilities. The UI is the default view: full-screen, no composer. Command-K summons ONLY the composer — a solid bottom dock that animates open and pushes the content up; the chat history lives in the workspace above. Escape or a second Command-K closes the dock with the reverse animation. This explicit brief supersedes the always-visible-chat and fixed-sidebar requirements below. Outputs still use the existing flows and shared state; the guide is documented in `docs/ONBOARDING.md`.
 
 
 ## ⚖️ THE EMBED LAW — read this before anything else (will, 2026-08-09, permanent)
