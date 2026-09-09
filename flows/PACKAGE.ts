@@ -34,4 +34,9 @@ const recording = Smithers.NodeTest({
   srcs: [sources], deps: [], cwd
 })
 
-export const Package = Smithers.Package({ targets: { pack, check, suite, recording } })
+const coding = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//flows/test/coding.test.ts")]),
+  srcs: [sources], deps: [], cwd
+})
+
+export const Package = Smithers.Package({ targets: { pack, check, suite, recording, coding } })

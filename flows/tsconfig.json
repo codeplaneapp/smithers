@@ -16,5 +16,5 @@
     "checkJs": false,
     "types": ["node"]
   },
-  "include": ["release/**/*.ts", "release-content/**/*.ts", "release-support/**/*.ts", "test/**/*.ts", "PACKAGE.ts"]
+  "include": ["release/**/*.ts", "release-content/**/*.ts", "release-support/**/*.ts", "coding/**/*.ts", "test/**/*.ts", "PACKAGE.ts"]
 }
