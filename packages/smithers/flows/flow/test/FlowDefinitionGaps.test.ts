@@ -1,7 +1,7 @@
 // Deep reviewed and polished by a human on 2026-08-10.
 
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
-import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
+import { Action, DurableDeferred, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
@@ -253,6 +253,44 @@ describe("concurrent action bookkeeping", () => {
       expect(yield* flow.execute({ id: "x" }, { executionId: "run-pair" })).toBe("slow+quick")
       // the quick action settled first, while the slow one was still in flight
       expect(events).toEqual(["quick", "slow"])
+    }).pipe(Effect.provide(layer))
+  })
+
+  effect("preserves the cause of an inline action suspended inside raceAll", () => {
+    const Step = Action.make("Definition/race-suspension/step", {
+      payload: {},
+      success: Schema.String,
+      error: Schema.String
+    })
+    const flow = Flow.make("Definition/race-suspension", {
+      payload: {},
+      success: Schema.String,
+      error: Schema.String,
+      body: () => Step.call({})
+    }).annotate(Flow.SuspendOnFailure, true)
+    const layer = layerWired(Layer.mergeAll(
+      Step.toLayer(() =>
+        DurableDeferred.raceAll({
+          name: "suspended-failure",
+          success: Schema.String,
+          error: Schema.String,
+          effects: [Action.make({
+            name: "Definition/race-suspension/failing",
+            success: Schema.String,
+            error: Schema.String,
+            execute: Effect.fail("race-boom")
+          })]
+        })
+      ),
+      Interpreter.layer(flow)
+    ))
+    return Effect.gen(function*() {
+      yield* flow.execute({}, { executionId: "run-race-suspend", discard: true })
+      const suspended = yield* pollUntil(flow.poll("run-race-suspend"), (result) => result._tag === "Suspended")
+      expect(Option.isSome(suspended) && suspended.value._tag).toBe("Suspended")
+      if (Option.isSome(suspended) && suspended.value._tag === "Suspended") {
+        expect(String(suspended.value.cause)).toContain("race-boom")
+      }
     }).pipe(Effect.provide(layer))
   })
 

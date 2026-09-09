@@ -339,6 +339,8 @@ Waits for the durable deferred, suspending the current flow when no persisted co
 
 Runs an effect and records its exit into the durable deferred, resuming the flows waiting on that deferred. The data-last form takes the deferred alone.
 
+An interrupt-only exit records nothing. Mixed causes record only their non-interrupt reasons. The effect uses the current flow instance: nested durable waits can suspend, and suspension causes, waiting annotations, and handoffs remain visible to the enclosing flow.
+
 ### `DurableDeferred.raceAll`
 
 - **Signature:** `raceAll(options: { name: string; success: Success; error: Error; effects: Effects }): Effect.Effect<...>`

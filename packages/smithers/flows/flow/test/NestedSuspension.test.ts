@@ -90,6 +90,48 @@ describe("an action that awaits a durable deferred on the flow's own instance", 
       expect(instance.suspended).toBe(true)
     }))
 
+  for (const wrapper of ["into", "raceAll"] as const) {
+    it.live(`suspends through ${wrapper} on the flow's own instance`, () =>
+      Effect.gen(function*() {
+        const instance = makeInstance(Host, `nested-suspension/${wrapper}`)
+        const result = yield* withCrypto(
+          Effect.gen(function*() {
+            const services = yield* Effect.context<
+              Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
+            >()
+            const wait = DurableDeferred.await(gate)
+            const wrapped = wrapper === "into"
+              ? DurableDeferred.into(wait, DurableDeferred.make("nested-suspension/result", { success: Schema.String }))
+              : DurableDeferred.raceAll({
+                name: "nested-suspension/race",
+                success: Schema.String,
+                error: Schema.Never,
+                effects: [
+                  wait,
+                  DurableDeferred.await(DurableDeferred.make("nested-suspension/other", {
+                    success: Schema.String
+                  }))
+                ]
+              })
+            return yield* settlement(Flow.intoResult(Action.make({
+              name: `nested-suspension/${wrapper}`,
+              success: Schema.String,
+              tier: "irreversible",
+              idempotencyKey: `nested-suspension-${wrapper}`,
+              execute: Effect.provide(wrapped, services)
+            })))
+          }).pipe(
+            Effect.provideService(FlowRuntime.FlowInstance, instance),
+            Effect.provide(layerMemory)
+          )
+        )
+
+        expect(typeof result === "string" ? result : result._tag).toBe("Suspended")
+        expect(instance.suspended).toBe(true)
+        expect(instance.actionState.count).toBe(0)
+      }))
+  }
+
   it.live("still holds a suspension for a sibling action that is still running", () =>
     Effect.gen(function*() {
       // The behaviour the enclosing-region exemption must not cost: two actions

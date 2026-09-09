@@ -221,10 +221,11 @@ export const into: {
     Effect.contextWith(
       (context: Context.Context<FlowRuntime | FlowInstance>) => {
         const engine = Context.get(context, FlowRuntime)
-        const parentInstance = Context.get(context, FlowInstance)
-        const instance = { ...parentInstance }
+        const instance = Context.get(context, FlowInstance)
+        // Keep the original instance: action regions identify their ancestors
+        // by reference, and suspension metadata belongs to the enclosing flow.
         return Effect.onExit(
-          Effect.provideService(effect, FlowInstance, instance),
+          effect,
           // Untraced because completion encoding is called for each deferred result.
           Effect.fnUntraced(function*(exit) {
             if (Exit.isFailure(exit)) {
@@ -239,15 +240,6 @@ export const into: {
                 // Recording here would durably persist the empty non-interrupt
                 // partition, and first-writer-wins would replay that empty
                 // cause forever instead of the real completion.
-                if (instance.suspended) {
-                  parentInstance.suspended = true
-                }
-                // A recorded interrupt is a durable outcome, so the parent
-                // instance must classify it as completion instead of an
-                // external suspension interrupt.
-                if (instance.interrupted) {
-                  parentInstance.interrupted = true
-                }
                 return
               } else if (interrupts.length > 0) {
                 exit = Exit.failCause(Cause.fromReasons(reasons))

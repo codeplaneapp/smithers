@@ -11,7 +11,7 @@ import { Action, DurableDeferred, Flow, FlowRuntime, Interpreter } from "@smthrs
 import { Cause, Context, Effect, Exit, Fiber, Latch, Layer, Option, Schedule, Schema, Scope } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { withCrypto } from "./Crypto.ts"
-import { layerWired, makeInstance } from "./MemoryFlowRuntime.ts"
+import { layerMemory, layerWired, makeInstance } from "./MemoryFlowRuntime.ts"
 
 const effect = (name: string, body: () => Effect.Effect<void, unknown, Crypto.Crypto>) =>
   it.effect(name, () => withCrypto(body()))
@@ -293,21 +293,65 @@ describe("DurableDeferred.into", () => {
     }).pipe(Effect.provide(layer))
   })
 
-  effect("an interrupt-only cause without a suspension is still recorded", () => {
+  effect("preserves a handoff written by the wrapped effect", () =>
+    Effect.gen(function*() {
+      const instance = makeInstance(Host, "handoff-inside-into")
+      const handoff = new Flow.Handoff({ flow: "Gaps/next", payload: { id: "next" } })
+      const result = yield* Flow.intoResult(DurableDeferred.into(
+        Effect.gen(function*() {
+          const current = yield* FlowRuntime.FlowInstance
+          current.handoff = handoff
+        }),
+        DurableDeferred.make("Gaps/handoff-result")
+      )).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, instance),
+        Effect.provide(layerMemory)
+      )
+      expect(result).toEqual(handoff)
+      expect(instance.handoff).toBe(handoff)
+    }))
+
+  effect("an interrupt-only exit records nothing", () => {
     const gate = DurableDeferred.make("Gaps/interrupted", { error: Schema.String })
+    let recorded: Option.Option<Exit.Exit<unknown, unknown>> | undefined
     const layer = hosted(() =>
       DurableDeferred.into(Effect.interrupt as Effect.Effect<void, string>, gate).pipe(
-        Effect.orDie
+        Effect.orDie,
+        Effect.onExit(() =>
+          Effect.gen(function*() {
+            const engine = yield* FlowRuntime.FlowRuntime
+            recorded = yield* engine.deferredResult(gate)
+          })
+        )
       )
     )
     return Effect.gen(function*() {
       const exit = yield* Host.execute({ id: "interrupted" }).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
+      expect(recorded).toEqual(Option.none())
     }).pipe(Effect.provide(layer))
   })
 })
 
 describe("FlowRuntime.annotateWaiting", () => {
+  effect("preserves the declared reason and token when suspending inside into", () =>
+    Effect.gen(function*() {
+      const instance = makeInstance(Host, "waiting-inside-into")
+      const gate = DurableDeferred.make("Gaps/waiting-inside-into")
+      const result = yield* Flow.intoResult(DurableDeferred.into(
+        Effect.gen(function*() {
+          yield* FlowRuntime.annotateWaiting({ reason: "approval", token: "req-into" })
+          yield* DurableDeferred.await(gate)
+        }),
+        DurableDeferred.make("Gaps/waiting-result")
+      )).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, instance),
+        Effect.provide(layerMemory)
+      )
+      expect(result._tag).toBe("Suspended")
+      expect(instance.waiting).toEqual({ reason: "approval", token: "req-into" })
+    }))
+
   effect("records the declared classification on the instance", () =>
     Effect.gen(function*() {
       const instance = makeInstance(Host, "waiting")
