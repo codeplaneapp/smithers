@@ -1,6 +1,6 @@
 import { Catalog, Chain, Journal, Prompt, QuickJsRunner, Steering, SubChains } from "@smthrs/chain"
 import type { Author, Event, Outcome, ScriptRunner } from "@smthrs/chain"
-import { Effect, Exit, Fiber, Layer, Ref } from "effect"
+import { Effect, Exit, Fiber, Layer, Option, Ref, Schema } from "effect"
 import { CardPatchSchema, CardSchema } from "@smthrs/rpc/Cards"
 import type { AgentChatMessage, AgentTurnFrame, FetchLike, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { CommandRegistry } from "../flows/Commands"
@@ -9,6 +9,7 @@ import type { AppStore } from "../state/AppStore"
 import { isRuntimeOwnedCard } from "../state/isRuntimeOwnedCard"
 import { makeCollectionJournal } from "./CollectionJournal"
 import { commandEntries, disclosedEntries } from "./FlowCatalog"
+import { retiredLineageKey } from "./LineageRetirement"
 import { createChainPolicy } from "./Policy"
 import { layerAuthor } from "./StreamModel"
 import { worldviewEntries } from "./Worldview"
@@ -44,6 +45,12 @@ export interface ChainRuntimeOptions {
 }
 
 const CONTEXT_MESSAGE_LIMIT = 30
+const MAX_BACKGROUNDS = 3
+const BackgroundSpec = Schema.Struct({
+  goal: Schema.String,
+  context: Schema.optional(Schema.Array(Schema.String))
+})
+const decodeBackground = Schema.decodeUnknownOption(BackgroundSpec)
 
 const contextLines = (messages: ReadonlyArray<AgentChatMessage>): ReadonlyArray<string> =>
   messages
@@ -210,6 +217,8 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
    * background lineage can resume through the same runner.
    */
   const backgroundGoals = new Map<string, { readonly goal: string; readonly context: ReadonlyArray<string> }>()
+  const queuedBackgrounds = new Set<string>()
+  const activeBackgrounds = new Set<string>()
   const pendingNotes: Array<string> = []
 
   const emit: Emit = (frame) => {
@@ -266,7 +275,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
     }
   }
 
-  const runBackground = (lineage: string): void => {
+  const runBackground = async (lineage: string): Promise<void> => {
     const spec = backgroundGoals.get(lineage)
     if (spec === undefined) return
     const journalLayer = Layer.succeed(Journal.Journal)(
@@ -288,14 +297,19 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
       maxLinks: options.maxLinks,
       maxCallsPerLink: options.maxCallsPerLink
     }).pipe(Effect.provide(Layer.mergeAll(base, catalog))) as Effect.Effect<Outcome.RunResult, unknown, never>
-    void Effect.runPromise(
+    await Effect.runPromise(
       Effect.exit(program) as Effect.Effect<
         { readonly _tag: string; readonly value?: Outcome.RunResult; readonly cause?: unknown },
         never,
         never
       >
-    ).then((exit) => {
+    ).then(async (exit) => {
       if (exit._tag !== "Success") {
+        // Retirement lives outside the journal: even a gapped or corrupt
+        // journal must be durably excluded before its failure is announced.
+        await options.store.dispatch({
+          type: "chain.lineage.retired", actor: "system", lineageId: lineage
+        }).isPersisted.promise
         deliverNote(`A background task failed: ${spec.goal}`)
         backgroundGoals.delete(lineage)
         return
@@ -335,10 +349,8 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
         return
       }
       /*
-       * A non-approval park has no wake-up: only approval parks resume
-       * (resolveApproval re-runs the lineage). Keeping the entry would
-       * park one of the MAX_BACKGROUNDS slots on a task that can never
-       * move again, so the dormant lineage leaves the registry here.
+       * Script parks are terminal, including park("approval"). Only a
+       * policy ApprovalWait can resume through resolveApproval.
        */
       backgroundGoals.delete(lineage)
       deliverNote(`A background task paused (${outcome.reason.code}): ${spec.goal}`)
@@ -346,11 +358,31 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
   }
 
   /*
-   * The spawn tier is deliberately free: SubChains bounds depth (4) and the
-   * per-chain budgets bound each lineage, so the remaining unbounded axis is
-   * concurrent background count — capped here.
+   * Fresh intents, recovered backlogs, and approval resumes share one queue.
+   * A slot covers the entire run and terminal persistence; approval waits
+   * release it while retaining their goal for the human's decision.
    */
-  const MAX_BACKGROUNDS = 3
+  const drainBackgrounds = (): void => {
+    for (const lineage of queuedBackgrounds) {
+      if (activeBackgrounds.size >= MAX_BACKGROUNDS) break
+      queuedBackgrounds.delete(lineage)
+      activeBackgrounds.add(lineage)
+      void runBackground(lineage).catch((cause) => {
+        // A failed retirement receipt must not become a reported, forgotten
+        // failure. Keep the goal registered and leave recovery to the next boot.
+        console.error("Background completion could not be persisted", cause)
+      }).finally(() => {
+        activeBackgrounds.delete(lineage)
+        drainBackgrounds()
+      })
+    }
+  }
+
+  const enqueueBackground = (lineage: string): void => {
+    if (!backgroundGoals.has(lineage) || activeBackgrounds.has(lineage)) return
+    queuedBackgrounds.add(lineage)
+    queueMicrotask(drainBackgrounds)
+  }
 
   /** The concierge's door to unattended work: spawn now, hear back later. */
   const backgroundEntry: Catalog.Entry = {
@@ -359,28 +391,18 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
       "Start a background sub-agent that works while you answer. Payload: { goal: string, context?: string[] }. Returns { lineage } immediately; its result arrives later as a note.",
     capabilities: [SubChains.agentCapability],
     handler: (payload) => {
-      const record = typeof payload === "object" && payload !== null
-        ? (payload as { readonly goal?: unknown; readonly context?: unknown })
-        : {}
-      if (typeof record.goal !== "string" || record.goal === "") {
+      const decoded = decodeBackground(payload)
+      if (Option.isNone(decoded) || decoded.value.goal === "") {
         return Effect.fail(
           new Catalog.CallError({ name: "background", message: `"background" takes { goal, context? }` })
         )
       }
-      if (backgroundGoals.size >= MAX_BACKGROUNDS) {
-        return Effect.fail(
-          new Catalog.CallError({
-            name: "background",
-            message: `${MAX_BACKGROUNDS} background tasks are already running — wait for one to finish`
-          })
-        )
-      }
-      const context = Array.isArray(record.context) ? record.context.map((line) => String(line)) : []
+      const { goal, context = [] } = decoded.value
       return Effect.sync(() => {
         // Nondeterminism is fine here: the settled result journals the
         // lineage id, so replay returns it without spawning again.
         const lineage = `bg-${crypto.randomUUID()}`
-        backgroundGoals.set(lineage, { goal: record.goal as string, context })
+        backgroundGoals.set(lineage, { goal, context })
         /*
          * The child may start only after the parent's CallSettled append is
          * durable. A crash before that append therefore leaves no child
@@ -394,19 +416,30 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
 
   /*
    * Boot reconciliation: a reload must not orphan background work. The
-   * journal is the record — any bg lineage without a root Done terminal
-   * re-registers; ones waiting on a persisted approval card wait for the
-   * decision, the rest resume from their settled prefix.
+   * Parent intents own the goal and context; child events own terminal state.
+   * Collection iteration is not journal order, so neither can overwrite the
+   * other and root terminals are selected by sequence. Policy approval waits
+   * have no LinkEnded; every recorded Done or Park is terminal.
    */
   const resumeBackgrounds = (): void => {
-    const byLineage = new Map<string, { goal: string; done: boolean }>()
+    const byLineage = new Map<string, {
+      spec: typeof BackgroundSpec.Type | undefined
+      hasIntent: boolean
+      terminalSeq: number
+      done: boolean
+    }>()
+    const entryFor = (lineage: string) => {
+      const entry = byLineage.get(lineage) ?? { spec: undefined, hasIntent: false, terminalSeq: -1, done: false }
+      byLineage.set(lineage, entry)
+      return entry
+    }
     for (const record of options.store.collections.chainEvents.values()) {
       const event = record.event as {
         readonly _tag: string
         readonly chain?: string
         readonly goal?: string
         readonly name?: string
-        readonly payload?: { readonly goal?: unknown }
+        readonly payload?: unknown
         readonly result?: { readonly lineage?: unknown }
         readonly outcome?: { readonly _tag?: string }
       }
@@ -416,25 +449,29 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
         typeof event.result?.lineage === "string" &&
         event.result.lineage.startsWith("bg-")
       ) {
-        const goal = typeof event.payload?.goal === "string" ? event.payload.goal : ""
-        byLineage.set(event.result.lineage, { goal, done: false })
+        const entry = entryFor(event.result.lineage)
+        entry.hasIntent = true
+        entry.spec = Option.getOrUndefined(decodeBackground(event.payload))
       }
       if (!record.lineageId.startsWith("bg-")) continue
-      const entry = byLineage.get(record.lineageId) ?? { goal: "", done: false }
-      if (event._tag === "ChainStarted" && event.chain === undefined) {
-        entry.goal = event.goal ?? ""
+      const entry = entryFor(record.lineageId)
+      if (event._tag === "ChainStarted" && (event.chain ?? "") === "" && !entry.hasIntent) {
+        entry.spec = { goal: event.goal ?? "", context: [] }
       }
-      if (event._tag === "LinkEnded" && event.chain === undefined && event.outcome?._tag === "Done") {
-        entry.done = true
+      if (event._tag === "LinkEnded" && (event.chain ?? "") === "" && record.seq > entry.terminalSeq) {
+        entry.terminalSeq = record.seq
+        entry.done = event.outcome?._tag === "Done" || event.outcome?._tag === "Park"
       }
-      byLineage.set(record.lineageId, entry)
     }
     for (const [lineage, entry] of byLineage) {
-      if (entry.done || backgroundGoals.has(lineage)) continue
-      backgroundGoals.set(lineage, { goal: entry.goal, context: [] })
+      if (entry.done || backgroundGoals.has(lineage) ||
+        options.store.collections.retiredChainLineages.has(retiredLineageKey(lineage))) continue
+      // A malformed parent intent must not run with silently discarded context.
+      if (entry.spec === undefined || entry.spec.goal === "") continue
+      backgroundGoals.set(lineage, { goal: entry.spec.goal, context: entry.spec.context ?? [] })
       const card = options.store.collections.cards.get(`chain-approval-${lineage}`)
       const awaitingDecision = card?.kind === "approval" && card.status !== "acted"
-      if (!awaitingDecision) queueMicrotask(() => runBackground(lineage))
+      if (!awaitingDecision) enqueueBackground(lineage)
     }
   }
   resumeBackgrounds()
@@ -477,7 +514,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
             event.name === "background" &&
             typeof (event.result as { readonly lineage?: unknown }).lineage === "string"
           ) {
-            runBackground((event.result as { readonly lineage: string }).lineage)
+            enqueueBackground((event.result as { readonly lineage: string }).lineage)
           }
         }
       )
@@ -603,7 +640,7 @@ export const createChainRuntime = (options: ChainRuntimeOptions): AgentPort => {
       // A background lineage resumes through its own runner — no turn
       // lifecycle to re-enter; the controller only freezes the card.
       if (resolved && backgroundGoals.has(runId)) {
-        queueMicrotask(() => runBackground(runId))
+        enqueueBackground(runId)
       }
       return resolved
     },

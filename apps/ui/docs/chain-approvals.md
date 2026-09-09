@@ -17,6 +17,15 @@ A script returning `park("approval")` records a terminal `Park`, not a policy
 ask. It emits a park frame but cannot create an actionable approval card.
 Only the chain's `ApprovalWait` result enters the policy approval path.
 
+Background recovery restores the goal and string context from the parent's
+settled `background` call. Malformed intents do not run. Any root `Done` or
+`Park` terminal prevents restart, including script-authored approval parks.
+Policy waits retain their goal and wait for the persisted approval card.
+Fresh work, recovered work, and approved resumes share a queue with at most
+three active backgrounds. A waiting approval releases its execution slot.
+Failed backgrounds are durably retired before the failure note is delivered,
+including failures caused by unreadable journals. Reload does not retry them.
+
 Cancellation follows the fiber's settled exit. A stop after a successful
 approval wait cannot discard its card. The agent seat keeps the originating
 backend across the park's done frame so the same lineage resumes there;

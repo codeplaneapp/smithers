@@ -112,6 +112,175 @@ const harness = async (options: {
   return { store, controller, frames, nativeRequests: native.requests, waitForDone, settle }
 }
 
+const waitUntil = async (ready: () => boolean): Promise<void> => {
+  for (let tick = 0; !ready() && tick < 300; tick += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  expect(ready()).toBe(true)
+}
+
+const seedBackground = async (
+  store: AppStore,
+  lineageId: string,
+  context: ReadonlyArray<string> = [],
+  started = true
+): Promise<void> => {
+  await store.dispatch({
+    type: "chain.event.appended", actor: "system", lineageId: `parent-${lineageId}`, seq: 0,
+    event: {
+      _tag: "CallSettled", link: 0, index: 0, name: "background",
+      payload: { goal: lineageId, context }, result: { lineage: lineageId }
+    }
+  }).isPersisted.promise
+  if (started) {
+    await store.dispatch({
+      type: "chain.event.appended", actor: "system", lineageId, seq: 0,
+      event: { _tag: "ChainStarted", goal: lineageId, envelope: null }
+    }).isPersisted.promise
+  }
+}
+
+describe("background boot reconciliation", () => {
+  test("terminal backgrounds do not announce themselves on successive boots", async () => {
+    const storage = memoryStorage()
+    const seed = await createAppStore({ kind: "localStorage", storage })
+    for (const code of ["quota", "timer", "event", "plugin", "approval", "done"]) {
+      const lineageId = `bg-terminal-${code}`
+      await seedBackground(seed, lineageId)
+      await seed.dispatch({
+        type: "chain.event.appended", actor: "system", lineageId, seq: 1,
+        event: { _tag: "LinkEnded", link: 0, outcome: code === "done"
+          ? { _tag: "Done", value: {} }
+          : { _tag: "Park", reason: { code, message: "terminal fixture" } } }
+      }).isPersisted.promise
+    }
+    await seed.dispose?.()
+    for (let boot = 0; boot < 2; boot += 1) {
+      const h = await harness({ storage, author: Author.layerMock([]) })
+      await new Promise(resolve => setTimeout(resolve, 100))
+      await h.controller.dispose()
+      await h.settle()
+      expect([...h.store.collections.messages.values()].filter(message =>
+        message.text.startsWith("A background task"))).toHaveLength(0)
+    }
+  })
+
+  for (const started of [false, true]) {
+    test(`parent context survives a crash ${started ? "during first authoring" : "before child start"}`, async () => {
+      const storage = memoryStorage()
+      const seed = await createAppStore({ kind: "localStorage", storage })
+      const context = ["Only inspect repository alpha; never touch repository beta."]
+      await seedBackground(seed, "bg-context", context, started)
+      await seed.dispose?.()
+      const contexts: Array<ReadonlyArray<string>> = []
+      const h = await harness({ storage, author: Author.layerFn(input => {
+        contexts.push(input.context)
+        return flow(`return done({})`)
+      }) })
+      await waitUntil(() => [...h.store.collections.messages.values()].some(message =>
+        message.text.startsWith("A background task finished")))
+      await h.settle()
+      expect(contexts).toEqual([["bg-context", ...context]])
+    })
+  }
+
+  test("recovered backlog runs at most three backgrounds and drains the queue", async () => {
+    const storage = memoryStorage()
+    const seed = await createAppStore({ kind: "localStorage", storage })
+    for (let index = 0; index < 5; index += 1) await seedBackground(seed, `bg-backlog-${index}`)
+    await seed.dispose?.()
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let started = 0, active = 0, peak = 0
+    const h = await harness({ storage, author: Layer.succeed(Author.Author)({
+      author: () => Effect.promise(async () => {
+        started += 1
+        active += 1
+        peak = Math.max(peak, active)
+        await gate
+        active -= 1
+        return flow(`return done({})`)
+      })
+    }) })
+    try {
+      await waitUntil(() => started >= 3)
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(started).toBe(3)
+      expect(peak).toBe(3)
+    } finally {
+      release()
+      await waitUntil(() => [...h.store.collections.messages.values()].filter(message =>
+        message.text.startsWith("A background task finished")).length === 5)
+      await h.settle()
+    }
+    expect(started).toBe(5)
+    expect(peak).toBe(3)
+  })
+
+  test("fresh backgrounds queue behind the same three active slots", async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let started = 0, active = 0, peak = 0
+    const h = await harness({ author: Layer.succeed(Author.Author)({
+      author: input => Effect.promise(async () => {
+        if (!input.context.includes("background-child")) return flow(
+          `for (let i = 0; i < 5; i++) await ctx.call("background", { goal: "child " + i, context: ["background-child"] })`,
+          `return done({})`
+        )
+        started += 1
+        active += 1
+        peak = Math.max(peak, active)
+        await gate
+        active -= 1
+        return flow(`return done({})`)
+      })
+    }) })
+    try {
+      const done = h.waitForDone()
+      h.controller.send("spawn five children")
+      expect((await done).error).toBeUndefined()
+      expect([...h.store.collections.chainEvents.values()].filter(record => {
+        const event = record.event as { _tag?: string; name?: string }
+        return event._tag === "CallSettled" && event.name === "background"
+      })).toHaveLength(5)
+      expect(started).toBe(3)
+    } finally {
+      release()
+      await waitUntil(() => active === 0)
+    }
+    await waitUntil(() => [...h.store.collections.messages.values()].filter(message =>
+      message.text.startsWith("A background task finished")).length === 5)
+    await h.settle()
+    expect(peak).toBe(3)
+  })
+
+  for (const gapped of [false, true]) {
+    test(`a ${gapped ? "gapped journal" : "failed author"} is retired before announcing failure`, async () => {
+      const storage = memoryStorage()
+      const seed = await createAppStore({ kind: "localStorage", storage })
+      await seedBackground(seed, "bg-failure")
+      if (gapped) {
+        await seed.dispatch({
+          type: "chain.event.appended", actor: "system", lineageId: "bg-failure", seq: 2,
+          event: { _tag: "ChainStarted", goal: "bg-failure", envelope: null }
+        }).isPersisted.promise
+      }
+      await seed.dispose?.()
+      const first = await harness({ storage, author: Author.layerMock([]) })
+      await waitUntil(() => [...first.store.collections.messages.values()].some(message =>
+        message.text.startsWith("A background task failed")))
+      await first.controller.dispose()
+      await first.settle()
+      const second = await harness({ storage, author: Author.layerMock([]) })
+      await new Promise(resolve => setTimeout(resolve, 100))
+      await second.settle()
+      expect([...second.store.collections.messages.values()].filter(message =>
+        message.text.startsWith("A background task failed"))).toHaveLength(1)
+      expect(second.store.collections.retiredChainLineages.size).toBe(1)
+    })
+  }
+})
+
 describe("ChainRuntime behind the AgentPort seam", () => {
   test("a chain turn drives the real app end-to-end through send()", async () => {
     const h = await harness({ author: Author.layerMock(scripts) })

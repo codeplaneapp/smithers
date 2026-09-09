@@ -1761,6 +1761,15 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           })
           break
 
+        case "chain.lineage.retired": {
+          const id = retiredLineageKey(transition.lineageId)
+          if (!collections.retiredChainLineages.has(id)) collections.retiredChainLineages.insert({ id })
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+
         case "chain.event.appended":
           collections.chainEvents.insert({
             id: `chain-${transition.lineageId}-${transition.seq}`,

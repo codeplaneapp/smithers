@@ -51,7 +51,7 @@ export const makeCollectionJournal = (options: CollectionJournalOptions): Journa
     if (store.collections.retiredChainLineages.has(retirementKey)) {
       throw new Journal.JournalError({
         message:
-          "This chain lineage was retired when its account data was cleared. Start a new lineage; its removed history cannot be replayed."
+          "This chain lineage was retired. Start a new lineage; its history cannot be replayed."
       })
     }
     const records = [...store.collections.chainEvents.values()]
