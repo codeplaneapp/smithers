@@ -135,6 +135,23 @@ name, the caller's input, the rendered prompt, the declared seat, the lowered
 placement, the declared capabilities, and the declared collaborator flows. One
 registered driver therefore runs many descriptors.
 
+The bridge retains a delegate's `successSchema` and `errorSchema` through both
+inline calls and dispatched, cached calls. Every `Flow.make` value already
+provides these codecs; custom structural `Executable.Delegate` implementations
+may supply the same optional fields. Omitting them preserves the historical
+`Schema.Unknown` JSON-only behavior. Declared transformations and typed errors
+therefore encode and replay using the delegate's contract.
+The catalog erases static codec service requirements, extending the existing
+`Delegate.call`/`execute` service erasure. The delegate's host owns these same
+codecs and must supply their services
+when registering and executing the catalog; erasure does not make codecs
+service-free.
+
+Retaining these codecs changes bridge step keys once, because result schemas
+participate in graph and cache identity. Previously recorded bridge rows are
+not reused under the corrected keys. A `Flow.make` delegate that declares no
+`error` carries `Schema.Never`, and the bridge's error channel is `Never` too.
+
 ## Workflow packs
 
 A pack is a directory with a `pack.json` manifest, the shareable unit a project

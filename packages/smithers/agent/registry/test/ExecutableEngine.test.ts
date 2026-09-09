@@ -30,6 +30,7 @@ import * as Workspace from "@smthrs/kernel/Workspace"
 import { Node, Plan } from "@smthrs/plan"
 import { type Ownership, RunStore } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -214,6 +215,82 @@ const execute = (
   )
 
 describe("a discovered flow runs on the durable engine", () => {
+  for (const name of ["greet", "tuned", "cacheable"]) {
+    it.effect(`persists and replays transforming results and typed failures through ${name}`, () =>
+      Effect.gen(function*() {
+        class Refused extends Schema.TaggedError<Refused>()("test/BridgeRefused", { message: Schema.String }) {}
+        let calls = 0
+        const TypedRun = Action.make("registry-test/TypedRun", {
+          payload: Executable.Invocation,
+          success: Schema.NumberFromString,
+          error: Refused
+        })
+        const Typed = Flow.make(name === "cacheable" ? "agent" : "test/echo", {
+          payload: Executable.Invocation,
+          success: Schema.NumberFromString,
+          error: Refused,
+          body: (payload) => TypedRun.call(payload)
+        })
+        const descriptor = yield* descriptorNamed(name)
+        const executable = yield* Executable.fromDescriptor(descriptor, { delegates: [Typed] }).pipe(
+          Effect.provide(platform)
+        )
+        const registration = Layer.mergeAll(
+          TypedRun.toLayer((payload) =>
+            Effect.suspend(() => {
+              calls++
+              return payload.input === "refuse"
+                ? Effect.fail(new Refused({ message: "expected refusal" }))
+                : Effect.succeed(42)
+            })
+          ),
+          Interpreter.layer(Typed),
+          executable.layer
+        ).pipe(Layer.provideMerge(Action.layerImplementations))
+        const filename = join(workspace(`codecs-${name}`), "engine.db")
+        for (const input of ["succeed", "refuse"]) {
+          const incarnations = name === "cacheable" && input === "succeed"
+            ? ["first", "reopened", "sibling"]
+            : ["first", "reopened"]
+          for (const incarnation of incarnations) {
+            const executionId = `codecs-${name}-${input}${incarnation === "sibling" ? "-new-run" : ""}`
+            const observed = yield* Effect.gen(function*() {
+              const exit = yield* executable.flow.execute({ input }, { executionId }).pipe(Effect.exit)
+              const row = yield* (yield* RunStore.RunStore).get(executionId)
+              return { exit, state: JSON.parse(row.stateJson), status: row.status }
+            }).pipe(
+              Effect.provide(durable(filename, `${executionId}-${incarnation}`, registration)),
+              Effect.scoped
+            )
+            if (input === "succeed") {
+              expect(observed.exit).toEqual(Exit.succeed(42))
+              expect(observed.status).toBe("completed")
+              expect(observed.state.result).toMatchObject({ exit: { _tag: "Success", value: "42" } })
+            } else {
+              expect(Exit.isFailure(observed.exit)).toBe(true)
+              if (Exit.isFailure(observed.exit)) {
+                expect(observed.exit.cause.reasons).toHaveLength(1)
+                const reason = observed.exit.cause.reasons[0]!
+                expect(reason._tag).toBe("Fail")
+                if (reason._tag === "Fail") {
+                  expect(reason.error).toBeInstanceOf(Refused)
+                  expect(reason.error).toEqual(new Refused({ message: "expected refusal" }))
+                }
+              }
+              expect(observed.status).toBe("failed")
+              expect(observed.state.result.exit.cause).toContainEqual({
+                _tag: "Fail",
+                error: { _tag: "test/BridgeRefused", message: "expected refusal" }
+              })
+            }
+            // Reopening serves terminal results; a separate cacheable run also
+            // decodes the stored string through the dispatched action codec.
+            expect(calls).toBe(input === "succeed" ? 1 : 2)
+          }
+        }
+      }))
+  }
+
   it.effect("drives a flow.ts descriptor to completion over SQLite", () =>
     Effect.gen(function*() {
       spawned.length = 0

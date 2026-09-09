@@ -175,6 +175,12 @@ export type Invocation = typeof Invocation.Type
 export interface Delegate {
   readonly _tag: string
   /**
+   * Existing Flow codecs, preserved in inline and dispatched bridges. Custom
+   * delegates without codecs keep their historical Unknown/JSON-only behavior.
+   */
+  readonly successSchema?: Schema.Top | undefined
+  readonly errorSchema?: Schema.Top | undefined
+  /**
    * Places the delegation in the caller's plan. This is the shape a descriptor
    * that declares no cache policy takes: the delegate's own topology — its
    * fan-out, its priorities, its waits — is part of the plan the engine builds
@@ -306,8 +312,18 @@ export interface Executable {
   readonly lowered: Lowered
   /** The envelope the delegate receives for a given caller input. */
   readonly invocation: (input: Schema.Json) => Invocation
-  /** The durable flow, tagged with the descriptor's registry name. */
-  readonly flow: RuntimeFlow.Flow<string, typeof Payload, typeof Schema.Unknown, typeof Schema.Unknown, any>
+  /**
+   * The durable flow, tagged with the descriptor's registry name. Delegate
+   * already erases its call/execute services at this dynamic boundary; the
+   * same host owns its codec services when registering and executing.
+   */
+  readonly flow: RuntimeFlow.Flow<
+    string,
+    typeof Payload,
+    Schema.Codec<unknown, unknown>,
+    Schema.Codec<unknown, unknown>,
+    any
+  >
   /** Registers {@link Executable.flow} with the runtime. */
   readonly layer: Layer.Layer<never, never, Registration>
 }
@@ -694,16 +710,16 @@ const dispatchedAction = (options: {
   const { cache, delegate, descriptor, tag } = options
   const declaration = Action.make(tag, {
     payload: Invocation,
-    success: Schema.Unknown,
-    error: Schema.Unknown
+    success: delegate.successSchema ?? Schema.Unknown,
+    error: delegate.errorSchema ?? Schema.Unknown
   })
   const layer = declaration.toLayer((envelope: Invocation) => {
     const identityEnvelope = Schema.encodeUnknownSync(Invocation)(envelope) as unknown as Schema.Json
     return CacheEnvironment.withCache(
       Action.make({
         name: `${tag}/run`,
-        success: Schema.Unknown,
-        error: Schema.Unknown,
+        success: delegate.successSchema ?? Schema.Unknown,
+        error: delegate.errorSchema ?? Schema.Unknown,
         // The descriptor's own reversibility tier, declared or inferred from its
         // projected authority, and never widened here. It is also the gate on
         // reuse: `ActionPersistence` caches a `sealed` dispatch and nothing
@@ -846,8 +862,10 @@ export const fromDescriptor = (
     )
     const flow = RuntimeFlow.make(descriptor.name, {
       payload: Payload,
-      success: Schema.Unknown,
-      error: Schema.Unknown,
+      // Preserve the delegate's codecs through the named bridge. Unknown loses
+      // transformations and cannot encode tagged Error instances as JSON.
+      success: delegate.successSchema ?? Schema.Unknown,
+      error: delegate.errorSchema ?? Schema.Unknown,
       annotations: annotationsOf(lowered),
       body: build
     })
@@ -856,7 +874,10 @@ export const fromDescriptor = (
       delegate: name,
       lowered,
       invocation,
-      flow,
+      // The catalog cannot name services of a dynamically selected delegate.
+      // Keep its exact schema objects. Delegate.call/execute already erase
+      // services; the delegate's registrant also owns these codec services.
+      flow: flow as Executable["flow"],
       // The cast erases the requirement `bridge` minted for itself. Its key is
       // built from a tag this function computes, so no caller can spell the
       // type, and nothing outside the bridged flow's own body asks for it.

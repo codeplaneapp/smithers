@@ -18,6 +18,7 @@ import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import { Node } from "@smthrs/plan"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
@@ -110,6 +111,32 @@ const attemptMutation = (mutation: () => void): void => {
 }
 
 describe("delegate resolution", () => {
+  for (const name of ["greet", "tuned"]) {
+    it.effect(`preserves delegate result codecs through ${name}'s bridge`, () =>
+      Effect.gen(function*() {
+        class Refused extends Schema.TaggedError<Refused>()("test/Refused", { message: Schema.String }) {}
+        const Typed = Flow.make("test/echo", {
+          payload: Executable.Invocation,
+          success: Schema.NumberFromString,
+          error: Refused,
+          body: () => Node.succeed(42)
+        })
+        const descriptor = yield* descriptorNamed(name)
+        const executable = yield* Executable.fromDescriptor(descriptor, options({ delegates: [Typed] }))
+        const codec = Schema.toCodecJson(
+          Flow.Result({ success: executable.flow.successSchema, error: executable.flow.errorSchema })
+        )
+        const success = new Flow.Complete({ exit: Exit.succeed(42) })
+        const encoded = yield* Schema.encodeEffect(codec)(success)
+        expect(encoded).toMatchObject({ _tag: "Complete", exit: { _tag: "Success", value: "42" } })
+        expect(yield* Schema.decodeEffect(codec)(encoded)).toEqual(success)
+        const failed = new Flow.Complete({ exit: Exit.fail(new Refused({ message: "expected refusal" })) })
+        const failure = yield* Schema.encodeEffect(codec)(failed)
+        const decoded = yield* Schema.decodeEffect(codec)(failure)
+        expect(decoded).toEqual(failed)
+      }).pipe(Effect.provide(platform)))
+  }
+
   it.effect("delegates to the one flow a descriptor names", () =>
     Effect.gen(function*() {
       const descriptor = yield* descriptorNamed("greet")
