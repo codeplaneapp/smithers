@@ -2,7 +2,7 @@
 
 **Owner:** Will · **Direction:** September 8, 2026 · **Status:** v0 implementation for hands-on iteration
 
-This brief replaces the always-visible-chat and fixed sidebar model. Smithers opens as a quiet workspace. The conversation lives in a translucent panel at the top of the window, summoned with Command K / Control K and dismissed with Escape. The homepage is separate work.
+This brief replaces the always-visible-chat and fixed sidebar model. Smithers opens as a quiet workspace. The UI itself is the default view: full-screen, with no composer. Command K / Control K summons ONLY the composer — one solid floating card in a transparent layer over the content, dismissed with Escape, a click outside, or a second Command K. The conversation lives in the full-screen UI underneath, never inside the summon layer. The homepage is separate work.
 
 ## The feeling
 
@@ -25,7 +25,7 @@ The reusable `smithers-control` glow means Smithers controls a surface: a faint 
 5. **Flows.** Explain executable instructions as the common model for everything in the app.
 6. **Dark mode.** Run a real local theme transition and let the workspace change around the user.
 7. **Light mode.** Run the reverse transition. Nothing advances on a reading timer.
-8. **Call me when you need me.** Hide the conversation; the user performs Command K / Control K (a touch/click fallback is available). Open the translucent top conversation, demonstrate Escape, and restore focus.
+8. **Call me when you need me.** Hide the conversation; the user performs Command K / Control K (a touch/click fallback is available). The composer arrives floating in its transparent layer over the lesson; demonstrate Escape and restore focus.
 9. **Install Library.** Explain plugins as the way capabilities are added. The user's explicit action adds the Library to the empty sidebar.
 10. **Add Librarian.** Explain its wiki and mythical-history capabilities before revealing them.
 11. **Two background flows.** Describe what each proposed run does, why it exists, and how to inspect progress. In live mode, ask for the repository and approval before launching. Background work must use existing flow execution, run identifiers, and receipts.
@@ -64,7 +64,7 @@ Keyboard-only operation is a rule for the whole product. Required interactions m
 
 ## Opening pace refinement
 
-The wordmark still settles in about one second. The rest is deliberately slower: one introduction message at 2.65s, words from 3.05s with pauses between sentences, and the invitation at 5.4s. Subsequent lesson messages reveal word by word. Layout reserves the full message space; assistive technology receives one complete message, not a stream of word announcements. Reduced motion is immediate. Enter/Right can advance immediately for a returning or fast reader.
+The wordmark settles in about one second, then the meeting moves quickly: the introduction card arrives at 1.2s, its words reveal from 1.5s at 30ms per word with 120ms pauses between sentences, and the invitation is up by ~2.4s. Subsequent lessons reveal word by word on the same cadence while the message card opens. Reduced motion is immediate. Enter/Right can advance immediately for a returning or fast reader.
 
 ## Practice review
 
@@ -78,6 +78,16 @@ Use `/debug.reset` for a fresh-user test: sign out of active app sessions, clear
 
 The opening message is “Hello. I’m Smithers. Let me show how Smithers works”. Every lesson uses the same minimal structure: one Smithers message, its interactive example when needed, and buttons with inline key hints. No separate greeting headings, eyebrows, decorative top icons, or chapter labels. Message text appears once in the DOM, with the same accessible text animating visually.
 
-Tutorial lessons append Smithers messages to a continuous, scrollable chat history. Earlier messages remain mounted; only the newest message animates. The persisted lesson position reconstructs the history on reload; Back rewinds and `/tut` starts over. Interactive examples and the current actions sit below the transcript. Each action change fades the retiring controls out over 120ms and introduces the new controls over 260ms. Retiring controls are inert and hidden from assistive technology; reduced motion switches immediately.
+Tutorial lessons append Smithers messages to a continuous, scrollable chat history. Earlier messages remain mounted; only the newest message animates. The persisted lesson position reconstructs the history on reload; Back rewinds and `/tut` starts over. Interactive examples and the current actions sit below the transcript. A new message OPENS its place — its grid track grows over 450ms so the history above shifts up while the actions below move down as one stable row; the row never re-animates and never trades places with a retiring copy, and its buttons are keyed per step so the activated control never morphs mid-gesture. The transcript scrolls smoothly to the newest message. Reduced motion switches immediately; browsers without animatable grid tracks show the message in place.
+
+The workspace step hands the window to the app: the tutorial chrome (transcript, header, wordmark, plugin shelf, progress) retires, the app stands full-screen without a composer, and only the outro card (the accepted direction and the two start actions) and the footer float above it. Command K summons the composer over the workspace; a sent message and its reply land in the full-screen conversation underneath. Toasts keep reporting through the guide's stack while the guide is mounted.
 
 The notification lesson waits for the user: “Send me a notification” displays an inline N shortcut. Clicking it or pressing N sends the same sample notification without advancing the lesson. Text fields retain ordinary typing.
+
+## Cloud answers and the first real flow
+
+Optional profile drafts stay local while typing; Continue submits nonempty answers to `https://bug.smithers.sh/api/onboarding-answers`. The form says they are shared with the Smithers team. Cloudflare KV (`BUGS`, `onboarding:` prefix) stores answers and receipt time for operator review; a stable UUID makes retries replace the same record. Failed saves keep the form open. Empty forms still advance. See `apps/bug-worker/ONBOARDING.md` for private review/export. Local reset does not erase submitted answers.
+
+The flows lesson has “Run a flow · R”: a real five-second asynchronous wait through `onboarding.act wait-flow`. It displays Running, then Finished successfully only after the wait completes. Repeat invocation while running does nothing. Navigation is preserved, and a reload marks an unfinished example interrupted so it can be retried.
+
+Command K displays only the composer, including in the Library lesson. There is no greeting, transcript, or “Meet the Library” panel inside the overlay. Tutorial and real chat history remain in the main view.

@@ -230,9 +230,10 @@
 }
 .guide-actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
+  justify-content: center;
+  gap: 18px 28px;
   margin-top: 30px;
 }
 .guide-primary {
@@ -285,7 +286,6 @@
 }
 .guide-text-button {
   color: var(--g-accent) !important;
-  margin-top: 18px;
   padding: 0;
 }
 .guide-footer {
@@ -636,73 +636,54 @@
   max-width: 460px;
   margin-top: 10px;
 }
-.guide-conversation-backdrop {
+/*
+ * The Command-K summon: a TRANSPARENT layer over the content — no dim, no
+ * blur, no panel — carrying only the composer. The conversation itself lives
+ * in the full-screen UI underneath.
+ */
+.guide-composer-backdrop {
   position: fixed;
   inset: 0;
   z-index: 80;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 28px;
-  background: #14272626;
-  backdrop-filter: blur(5px);
+  padding: min(14dvh, 120px) 24px 24px;
   animation: guide-fade 0.2s both;
 }
-.guide-conversation {
-  width: min(840px, 100%);
-  height: min(720px, calc(100dvh - 56px));
-  display: flex;
-  flex-direction: column;
-  background: color-mix(in srgb, var(--g-bg) 86%, transparent);
-  backdrop-filter: blur(35px);
-  border: 1px solid var(--g-line);
-  border-radius: 16px;
-  box-shadow: 0 28px 100px #102a3338;
-  overflow: hidden;
+.guide-composer-layer {
+  width: min(760px, 100%);
+  display: grid;
+  gap: 14px;
   animation: guide-palette-in 0.3s cubic-bezier(0.18, 0.8, 0.3, 1) both;
 }
-.guide-conversation-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--g-line);
-  padding: 17px 22px;
-  font-size: 12px;
+.guide-composer-host {
+  display: contents;
 }
-.guide-conversation-header > span {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+/*
+ * The summoned composer floats as ONE solid card — the repo selector and the
+ * box together — so the content showing through the transparent layer never
+ * bleeds into what you are typing.
+ */
+.guide-composer-layer .composer-wrap {
+  background: var(--g-bg);
+  border: 1px solid var(--g-line);
+  border-radius: 16px;
+  padding: 14px 18px 16px;
+  box-shadow: 0 18px 60px #102a3326;
 }
-.guide-conversation-header button {
-  background: none;
-  border: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--g-muted);
-}
-.guide-conversation-header button span {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 10px;
-}
-.guide-conversation .app-shell {
-  --chrome-bar-width: 0px;
-  overflow: hidden;
-  background: transparent;
-}
-.guide-conversation .chrome-bar {
-  display: none;
-}
-.guide-conversation .app-main {
-  min-width: 0;
-  width: 100%;
-}
-.guide-conversation .composer-wrap {
-  position: relative;
+/* Summoned, the palette drops below the box instead of opening off-window. */
+.guide-composer-layer .composer-wrap > .slash-menu {
+  top: calc(100% + 6px);
+  bottom: auto;
 }
 .guide-summoned {
-  padding: 36px;
+  padding: 30px 36px;
+  background: var(--g-panel);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--g-line);
+  border-radius: 14px;
+  box-shadow: 0 18px 60px #102a3322;
 }
 .guide-summoned p {
   font-size: 15px;
@@ -711,6 +692,62 @@
 }
 .guide-summoned .guide-primary {
   margin-top: 16px;
+}
+/*
+ * The app is the default full-screen UI: mounted live under the guide chrome,
+ * hidden during the lessons, and revealed when the guide reaches the
+ * workspace step — where the outro and the footer float above it.
+ */
+.guide-app {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: flex;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 0.5s ease,
+    visibility 0s linear 0.5s;
+}
+.guide-app > .app-shell {
+  flex: 1;
+  min-width: 0;
+}
+.guide-shell[data-step="15"] .guide-app {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0s;
+}
+/*
+ * The workspace step hands the window to the app: the tutorial chrome
+ * (transcript, header, atmosphere, plugin shelf, progress) retires, and only
+ * the outro card and the footer float above the full-screen UI.
+ */
+.guide-shell[data-step="15"] .guide-atmosphere,
+.guide-shell[data-step="15"] .guide-header,
+.guide-shell[data-step="15"] .guide-sidebar,
+.guide-shell[data-step="15"] .guide-transcript,
+.guide-shell[data-step="15"] .guide-progress {
+  display: none;
+}
+.guide-shell[data-step="15"] .guide-start-actions {
+  background: var(--g-panel);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--g-line);
+  border-radius: 14px;
+  padding: 24px 28px;
+  box-shadow: 0 18px 60px #102a3322;
+}
+.guide-shell[data-step="15"] .guide-main {
+  pointer-events: none;
+}
+.guide-shell[data-step="15"] .guide-lesson > * {
+  pointer-events: auto;
+}
+.guide-shell[data-step="15"] .guide-footer {
+  background: var(--g-panel);
+  backdrop-filter: blur(18px);
+  border-top: 1px solid var(--g-line);
 }
 .guide-toasts {
   position: fixed;
@@ -923,12 +960,9 @@
   .guide-board-cards article {
     padding: 12px 9px;
   }
-  .guide-conversation-backdrop {
+  .guide-composer-backdrop {
     padding: 10px;
-  }
-  .guide-conversation {
-    height: calc(100dvh - 20px);
-    border-radius: 12px;
+    padding-top: min(10dvh, 60px);
   }
   .guide-background-flows > div {
     padding: 17px;
@@ -1000,9 +1034,6 @@
   flex-shrink: 0;
   margin-top: auto;
 }
-.guide-conversation {
-  flex-shrink: 0;
-}
 
 
 
@@ -1014,11 +1045,12 @@
   animation-delay: calc(.2s + var(--word-delay));
 }
 .guide-shell[data-step="0"] .guide-lesson { animation: none; }
-.guide-shell[data-step="0"] .guide-lesson h1 { animation: guide-rise .8s 1.9s both; }
-.guide-shell[data-step="0"] .guide-dialogue { animation: guide-rise .75s 2.65s both, smithers-control-breathe 4s 3s ease-in-out infinite; }
-.guide-shell[data-step="0"] .guide-speaker { animation: guide-fade .6s 2.85s both; }
-.guide-shell[data-step="0"] .guide-word { animation-delay: calc(3.05s + var(--word-delay)); }
-.guide-shell[data-step="0"] .guide-actions { animation: guide-rise .6s 5.4s both; }
+.guide-shell[data-step="0"] .guide-lesson h1 { animation: guide-rise .8s 1s both; }
+.guide-shell[data-step="0"] .guide-message[data-enter="true"] { animation: none; }
+.guide-shell[data-step="0"] .guide-message[data-enter="true"] > .guide-dialogue { overflow: visible; animation: guide-rise .75s 1.2s both, smithers-control-breathe 4s 1.8s ease-in-out infinite; }
+.guide-shell[data-step="0"] .guide-speaker { animation: guide-fade .6s 1.35s both; }
+.guide-shell[data-step="0"] .guide-word { animation-delay: calc(1.5s + var(--word-delay)); }
+.guide-shell[data-step="0"] .guide-actions { animation: guide-rise .6s 2.4s both; }
 @media (prefers-reduced-motion: reduce) { .guide-word { opacity: 1; } }
 /* Tabbing to the invitation reveals it immediately, including its focus ring. */
 .guide-shell[data-step="0"] .guide-actions:has(:focus-visible) { animation: none; }
@@ -1040,21 +1072,35 @@
   max-height: min(48dvh, 440px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-behavior: smooth;
   padding: 10px;
   margin: -10px;
   scrollbar-width: thin;
   scrollbar-color: var(--g-line) transparent;
+  /* A passive log, not a control: focusable for arrow-key scrolling, never ringed. */
+  outline: none;
 }
-.guide-transcript:focus-visible { outline: 2px solid var(--g-accent); outline-offset: 4px; }
-.guide-transcript .guide-dialogue { animation: guide-rise 400ms ease both; }
+/*
+ * A new message OPENS its place: the wrapper's grid track grows 0fr → 1fr, so
+ * the messages above shift up while the actions below move down as one stable
+ * row — nothing jumps, nothing crossfades. Browsers without animatable grid
+ * tracks show the message instantly, the same content either way.
+ */
+.guide-message { display: grid; grid-template-rows: 1fr; }
+.guide-message > .guide-dialogue { min-height: 0; }
+.guide-message[data-enter="true"] { animation: guide-message-open .45s cubic-bezier(.2, .7, .2, 1) both; }
+.guide-message[data-enter="true"] > .guide-dialogue { overflow: hidden; animation: guide-message-in .35s .08s ease both; }
+@keyframes guide-message-open { from { grid-template-rows: 0fr; } to { grid-template-rows: 1fr; } }
+@keyframes guide-message-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+/* The lesson's interactive example arrives with the message, in place. */
+.guide-lesson > .guide-form,
+.guide-lesson > .guide-plugin-card,
+.guide-lesson > .guide-practice-note,
+.guide-lesson > .guide-background-flows,
+.guide-lesson > .guide-prototype,
+.guide-lesson > .guide-history,
+.guide-lesson > .guide-pr,
+.guide-lesson > .guide-start-actions {
+  animation: guide-rise .45s ease both;
+}
 .guide-transcript .guide-dialogue[data-current="false"] .guide-word { animation: none; opacity: 1; }
-.guide-action-transition { display: grid; }
-.guide-action-current, .guide-action-retiring { grid-area: 1 / 1; min-width: 0; }
-.guide-action-current { animation: guide-actions-in 260ms 120ms ease both; }
-.guide-action-retiring { animation: guide-actions-out 120ms ease both; pointer-events: none; }
-@keyframes guide-actions-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes guide-actions-out { to { opacity: 0; transform: translateY(-6px); } }
-@media (prefers-reduced-motion: reduce) {
-  .guide-action-retiring { display: none; }
-  .guide-action-current, .guide-transcript .guide-dialogue { animation: none; }
-}

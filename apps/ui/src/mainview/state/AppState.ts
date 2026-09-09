@@ -653,6 +653,8 @@ export const DEFAULT_PALETTE: Palette = "night-owl"
 export const isPalette = (value: string): value is Palette => (PALETTES as ReadonlyArray<string>).includes(value)
 
 export const GuideSchema = z.object({
+  responseId: z.string().uuid().optional(),
+  demoRun: z.object({ id: z.string(), status: z.enum(["running", "succeeded", "interrupted"]), startedAt: z.number(), finishedAt: z.number().optional() }).optional(),
   version: z.literal(1),
   playthrough: z.number().int().nonnegative().optional(),
   step: z.number().int().min(0).max(15),

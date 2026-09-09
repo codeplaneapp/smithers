@@ -1,4 +1,4 @@
-import { GuideShell } from "./onboarding/GuideShell"
+import { GuideComposerHost, GuideShell } from "./onboarding/GuideShell"
 import {
   Badge,
   Button,
@@ -28,8 +28,9 @@ import {
   Workflow
 } from "lucide-react"
 import { BacklinksPanel, OutlineView } from "@smthrs/ui/vault"
-import { lazy, Suspense, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useMemo, useContext, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
+import { createPortal } from "react-dom"
 import { CardView } from "./ChatCards"
 import { cardActions } from "./cards/CardActions"
 import { TriggerListCardBody } from "./cards/TriggersCard"
@@ -180,6 +181,12 @@ function App() {
   const surfacesTriggerRef = useRef<HTMLButtonElement>(null)
   /* The composer wrap: Cmd+K focuses the textarea inside it (the palette opens on the composer). */
   const composerWrapRef = useRef<HTMLDivElement>(null)
+  /*
+   * The guide's composer host: inside the guide shell the composer is hidden
+   * by default and Command-K summons ONLY it into the transparent overlay;
+   * outside the guide (undefined) the composer stays docked as before.
+   */
+  const composerHost = useContext(GuideComposerHost)
   /* The connect trigger has the same shell-level Escape exit as surfaces. */
   const connectTriggerRef = useRef<HTMLButtonElement>(null)
   /* The composer's `+` menu is the third session menu the shell closes the same way. */
@@ -425,6 +432,50 @@ function App() {
     if (entryOrdinal(left) !== entryOrdinal(right)) return entryOrdinal(left) - entryOrdinal(right)
     return entryCreatedAt(left) - entryCreatedAt(right)
   })
+
+  /*
+   * The composer's one home. Docked in the chat column when the app stands
+   * alone; hidden while the guide owns the window (the UI is full-screen
+   * without a composer by default); summoned through a portal into the
+   * guide's transparent Command-K overlay, where it is the only thing shown.
+   */
+  const composerWrap = (
+    <div className="composer-wrap" ref={composerWrapRef} hidden={composerHost === null}>
+      <Composer
+        typing={typing}
+        surface={session.surface}
+        surfacesMenuOpen={session.surfacesMenuOpen}
+        connectMenuOpen={session.connectMenuOpen === true}
+        addMenuOpen={session.addMenuOpen === true}
+        surfacesTriggerRef={surfacesTriggerRef}
+        connectTriggerRef={connectTriggerRef}
+        addTriggerRef={addTriggerRef}
+        autoFocus={composerHost ? true : authMessage === undefined}
+        placeholder="Ask Smithers to work on something…"
+      />
+      {/* The next-step pills sit UNDER the chat box; DOM order is focus order: composer, then pills. Feature-flagged (features.suggestionPills), on for the cloud host. */}
+      {composerHost === undefined && controller.features.suggestionPills ? <SuggestionGroup className="smithers-suggestions">
+        {suggestions.map((suggestion) => (
+          <Suggestion
+            className="smithers-suggestion"
+            data-gold={suggestion.emphasis === "primary"}
+            data-flow={suggestion.flow}
+            key={suggestion.id}
+            suggestion={suggestion.label}
+            title={suggestion.why}
+            disabled={typing}
+            onClick={() =>
+              suggestion.args === undefined
+                ? controller.runCommand(suggestion.flow)
+                : controller.runCommandArgs(suggestion.flow, suggestion.args)}
+          >
+            <Sparkles size={12} />
+            {suggestion.label}
+          </Suggestion>
+        ))}
+      </SuggestionGroup> : null}
+    </div>
+  )
 
   return (
     // data-flows is the live registry manifest (visible AND hidden names):
@@ -727,41 +778,7 @@ function App() {
             )}
           </ChatTranscript>
 
-          <div className="composer-wrap" ref={composerWrapRef}>
-            <Composer
-              typing={typing}
-              surface={session.surface}
-              surfacesMenuOpen={session.surfacesMenuOpen}
-              connectMenuOpen={session.connectMenuOpen === true}
-              addMenuOpen={session.addMenuOpen === true}
-              surfacesTriggerRef={surfacesTriggerRef}
-              connectTriggerRef={connectTriggerRef}
-              addTriggerRef={addTriggerRef}
-              autoFocus={authMessage === undefined}
-              placeholder="Ask Smithers to work on something…"
-            />
-            {/* The next-step pills sit UNDER the chat box; DOM order is focus order: composer, then pills. Feature-flagged (features.suggestionPills), on for the cloud host. */}
-            {controller.features.suggestionPills ? <SuggestionGroup className="smithers-suggestions">
-              {suggestions.map((suggestion) => (
-                <Suggestion
-                  className="smithers-suggestion"
-                  data-gold={suggestion.emphasis === "primary"}
-                  data-flow={suggestion.flow}
-                  key={suggestion.id}
-                  suggestion={suggestion.label}
-                  title={suggestion.why}
-                  disabled={typing}
-                  onClick={() =>
-                    suggestion.args === undefined
-                      ? controller.runCommand(suggestion.flow)
-                      : controller.runCommandArgs(suggestion.flow, suggestion.args)}
-                >
-                  <Sparkles size={12} />
-                  {suggestion.label}
-                </Suggestion>
-              ))}
-            </SuggestionGroup> : null}
-          </div>
+          {composerHost ? createPortal(composerWrap, composerHost) : composerWrap}
 
         </div>
 
@@ -1040,13 +1057,30 @@ function App() {
         onCancel={() => controller.runCommand("admin.reset.cancel")}
       />
 
-      {/* The one shared toast stack: every background flow past 300ms reports here. */}
-      <ToastStack
-        toasts={toasts}
-        onDismiss={(id) => controller.runCommandArgs("toast.dismiss", id)}
-      />
+      {/*
+       * The one shared toast stack: every background flow past 300ms reports
+       * here. Inside the guide shell the guide's own stack is the toast
+       * surface — this one is confined to the app layer's stacking context
+       * (invisible during the lessons, covered by the floating chrome at the
+       * workspace) and would duplicate every notification.
+       */}
+      {composerHost === undefined ?
+        (
+          <ToastStack
+            toasts={toasts}
+            onDismiss={(id) => controller.runCommandArgs("toast.dismiss", id)}
+          />
+        ) :
+        null}
     </div>
   )
 }
 
-export default function GuidedApp() { return <GuideShell><App /></GuideShell> }
+/*
+ * The bare app is the default export: the DOM suites mount it directly, and
+ * inside it the composer keeps its docked home. The product mount is the
+ * guide-wrapped shell (AppIsland takes GuidedApp), where the UI stands
+ * full-screen and Command-K summons the composer.
+ */
+export default App
+export function GuidedApp() { return <GuideShell><App /></GuideShell> }

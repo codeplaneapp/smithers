@@ -1,7 +1,6 @@
-import { AnimatedGuideActions } from "./AnimatedGuideActions"
 import { guideForwardAction } from "./navigation"
 import { useLiveQuery } from "@tanstack/react-db"
-import { useRef, useState, type ReactNode, type CSSProperties } from "react"
+import { createContext, Fragment, useRef, useState, type ReactNode, type CSSProperties } from "react"
 import {
   BookOpen,
   Check,
@@ -18,6 +17,15 @@ import {
 import { useController } from "../ControllerContext"
 import { initialGuide } from "../state/AppState"
 import "./guide.css"
+
+/*
+ * Where the summoned composer goes. The guide renders the app full-screen
+ * with the composer hidden; Command-K summons ONLY the composer into the
+ * transparent overlay — the chat history stays in the full-screen UI.
+ * `undefined` outside the guide (the bare app keeps its docked composer),
+ * null while the conversation is closed, the portal host element once open.
+ */
+export const GuideComposerHost = createContext<HTMLDivElement | null | undefined>(undefined)
 
 const WORDMARK = [
   "███████╗███╗   ███╗██╗████████╗██╗  ██╗███████╗██████╗ ███████╗",
@@ -82,6 +90,16 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const guide = sessions[0]?.guide ?? initialGuide()
   const stage = guide.step
   const lastScrolledStep = useRef(-1)
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  /* The portal host the summoned composer renders into; null while closed. */
+  const [composerHost, setComposerHost] = useState<HTMLDivElement | null>(null)
+  /*
+   * Only a message that mounts AT the current stage enters with the open
+   * animation — Back rewinds the history and an earlier message becoming
+   * current again must not re-enter.
+   */
+  const enteredStep = useRef(-1)
+  if (stage > enteredStep.current) enteredStep.current = stage
   const opener = useRef<HTMLButtonElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
   // Transient save acknowledgement only; field values and progression live in the store.
@@ -89,7 +107,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const saveSequence = useRef(0)
   const runCommandGuide = (action: string, value?: string) => {
     const args = `${action}${value === undefined ? "" : ` ${JSON.stringify(value)}`}`
-    if (["heard", "project", "title"].includes(action)) {
+    if (action === "next" && stage === 3) {
       const sequence = ++saveSequence.current
       setSaveStatus("saving")
       void controller.commands.run("onboarding.act", args).then(
@@ -108,7 +126,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
     previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     runCommandGuide("open")
     requestAnimationFrame(() =>
-      document.querySelector<HTMLTextAreaElement>(".guide-conversation textarea")?.focus(),
+      document.querySelector<HTMLTextAreaElement>(".guide-composer-layer textarea")?.focus(),
     )
   }
   const runCommandClose = () => {
@@ -139,6 +157,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
     </button>
   )
   return (
+    <GuideComposerHost.Provider value={composerHost}>
     <div
       key={guide.playthrough ?? 0}
       className="guide-shell"
@@ -173,7 +192,10 @@ export function GuideShell({ children }: { children: ReactNode }) {
           // Text editing retains arrows/Enter. Enter on a focused button retains its native action.
           if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
           if (event.key === "Enter" && target?.closest("button, a")) return
-          if (stage === 2 && event.key.toLowerCase() === "n") {
+          if (stage === 4 && event.key.toLowerCase() === "r") {
+            event.preventDefault()
+            if (!event.repeat) runCommandGuide("wait-flow")
+          } else if (stage === 2 && event.key.toLowerCase() === "n") {
             event.preventDefault()
             if (!event.repeat) runCommandGuide("notify")
           } else if (event.key === "ArrowRight" || event.key === "Enter") {
@@ -188,6 +210,17 @@ export function GuideShell({ children }: { children: ReactNode }) {
         }
       }}
     >
+      {
+        /*
+         * The app IS the default view: full-screen, without a composer. The
+         * guide chrome covers it during the lessons; at the workspace step the
+         * chrome steps aside (guide.css) and the app takes the window. The
+         * composer itself is summoned into the transparent Command-K overlay.
+         */
+      }
+      <div className="guide-app" inert={guide.conversationOpen ? true : undefined}>
+        {children}
+      </div>
       <div className="guide-atmosphere" aria-hidden="true">
         <i />
         <i />
@@ -245,28 +278,39 @@ export function GuideShell({ children }: { children: ReactNode }) {
             aria-relevant="additions"
             tabIndex={0}
             ref={(node) => {
+              transcriptRef.current = node
               if (node && lastScrolledStep.current !== stage) {
                 lastScrolledStep.current = stage
-                requestAnimationFrame(() => { node.scrollTop = node.scrollHeight })
+                requestAnimationFrame(() => { node.scrollTo({ top: node.scrollHeight }) })
               }
             }}
           >
             {lessons.slice(0, stage + 1).map((message, messageStep) => (
-              <article
+              <div
                 key={messageStep}
-                className="guide-dialogue smithers-control"
-                data-message-step={messageStep}
-                data-current={messageStep === stage}
-                data-controlled={messageStep === stage && (stage < 7 || stage === 10)}
+                className="guide-message"
+                data-enter={messageStep === stage && messageStep === enteredStep.current}
+                onAnimationEnd={(event) => {
+                  /* The open grows the history: settle the scroll at the bottom. */
+                  if (event.target !== event.currentTarget) return
+                  transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight })
+                }}
               >
-                <div className="guide-speaker"><span />SMITHERS</div>
-                <p>
-                  {message.split(" ").map((word, index, words) => {
-                    const pauses = words.slice(0, index).filter(part => /[.!?]$/.test(part)).length
-                    return <span key={index} className="guide-word" style={{ "--word-delay": `${index * .065 + pauses * .35}s` } as CSSProperties}>{word}{" "}</span>
-                  })}
-                </p>
-              </article>
+                <article
+                  className="guide-dialogue smithers-control"
+                  data-message-step={messageStep}
+                  data-current={messageStep === stage}
+                  data-controlled={messageStep === stage && (stage < 7 || stage === 10)}
+                >
+                  <div className="guide-speaker"><span />SMITHERS</div>
+                  <p>
+                    {message.split(" ").map((word, index, words) => {
+                      const pauses = words.slice(0, index).filter(part => /[.!?]$/.test(part)).length
+                      return <span key={index} className="guide-word" style={{ "--word-delay": `${index * .03 + pauses * .12}s` } as CSSProperties}>{word}{" "}</span>
+                    })}
+                  </p>
+                </article>
+              </div>
             ))}
           </div>
           {stage === 3 && (
@@ -301,10 +345,10 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 {saveStatus === "saving"
                   ? "Saving…"
                   : saveStatus === "saved"
-                    ? "Saved on this device. Both answers are optional."
+                    ? "Saved."
                     : saveStatus === "failed"
                       ? "Your answer could not be saved. Please try again."
-                      : "Optional · your answers stay in this app on this device."}
+                      : "Answers are optional and shared with the Smithers team when you continue."}
               </p>
             </form>
           )}
@@ -456,7 +500,13 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </div>
             </div>
           )}
-          <AnimatedGuideActions step={stage}>
+          {
+            /*
+             * The actions are ONE stable row: a new lesson message appends
+             * above it and the row just moves with the layout — the controls
+             * never re-animate or trade places with a retiring copy.
+             */
+          }
           {stage === 15 && (
             <div className="guide-start-actions">
               {guide.acceptedPracticeTitle && <p className="guide-review-accepted"><Check size={14} /> Practice accepted: “{guide.acceptedPracticeTitle}”</p>}
@@ -479,10 +529,31 @@ export function GuideShell({ children }: { children: ReactNode }) {
             </div>
           )}
           <div className="guide-actions">
+            {
+              /*
+               * The buttons of the next step are DIFFERENT controls, keyed by
+               * step so reconciliation swaps the activated node out instead of
+               * morphing it in place: a pointer click that advances into the
+               * profile lesson must not let the browser's activation behavior
+               * submit the freshly-mounted form the same gesture became (one
+               * click was advancing 2 → 3 → 4 in a single gesture).
+               */
+            }
+            <Fragment key={stage}>
             {stage === 2 && (
               <button className="guide-text-button" aria-keyshortcuts="N" data-flow="onboarding.act" onClick={() => runCommandGuide("notify")}>
                 Send me a notification {keyHint("N")}
               </button>
+            )}
+            {stage === 4 && (
+              <div className="guide-flow-example">
+                <button className="guide-secondary" data-flow="onboarding.act" aria-keyshortcuts="R" disabled={guide.demoRun?.status === "running"} onClick={() => runCommandGuide("wait-flow")}>
+                  Run a flow {keyHint("R")}
+                </button>
+                <p role="status" aria-live="polite">
+                  {guide.demoRun?.status === "running" ? "Running · waiting 5 seconds…" : guide.demoRun?.status === "succeeded" ? "Finished successfully." : guide.demoRun?.status === "interrupted" ? "The example was interrupted. Run it again." : "Wait 5 seconds, then finish."}
+                </p>
+              </div>
             )}
             {stage === 3 ? (
               <button type="submit" form="guide-profile" aria-keyshortcuts="Enter ArrowRight" className="guide-primary" data-flow="onboarding.act">
@@ -540,8 +611,8 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 Back {keyHint("←")}
               </button>
             )}
+            </Fragment>
           </div>
-          </AnimatedGuideActions>
         </section>
       </main>
       <footer className="guide-footer">
@@ -577,24 +648,23 @@ export function GuideShell({ children }: { children: ReactNode }) {
       </footer>
       {guide.conversationOpen && (
         <div
-          className="guide-conversation-backdrop"
+          className="guide-composer-backdrop"
           onClick={(event) => {
             if (event.target === event.currentTarget) runCommandClose()
           }}
         >
+          {
+            /*
+             * Command-K summons ONLY the composer: a transparent layer over
+             * the content, the composer floating in it. The conversation
+             * itself stays in the full-screen UI underneath.
+             */
+          }
           <section
-            className="guide-conversation smithers-control"
-            data-controlled="true"
+            className="guide-composer-layer"
             role="dialog"
             aria-modal="true"
             aria-label="Talk to Smithers"
-            ref={(node) => {
-              if (node && !node.contains(document.activeElement))
-                (
-                  node.querySelector<HTMLTextAreaElement>("textarea") ??
-                  node.querySelector<HTMLButtonElement>("button")
-                )?.focus()
-            }}
             onKeyDown={(event) => {
               if (event.key !== "Tab") return
               const elements = Array.from(
@@ -613,29 +683,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               }
             }}
           >
-            <div className="guide-conversation-header">
-              <span>
-                <Sparkles size={15} />
-                Smithers
-              </span>
-              <button data-flow="onboarding.act" aria-label="Close conversation" onClick={runCommandClose}>
-                {keyHint("Esc")}
-                <X size={16} />
-              </button>
-            </div>
-            {stage === 8 && (
-              <div className="guide-summoned">
-                <p>
-                  There you are. This is where we’ll talk. Press Escape when you want your space back. Now let’s give your workspace its first
-                  capability.
-                </p>
-                <button className="guide-primary" data-flow="onboarding.act" onClick={runCommandClose}>
-                  Meet the Library
-                  {keyHint("Esc")}
-                </button>
-              </div>
-            )}
-            {children}
+            <div className="guide-composer-host" ref={setComposerHost} />
           </section>
         </div>
       )}
@@ -661,5 +709,6 @@ export function GuideShell({ children }: { children: ReactNode }) {
         </aside>
       )}
     </div>
+    </GuideComposerHost.Provider>
   )
 }

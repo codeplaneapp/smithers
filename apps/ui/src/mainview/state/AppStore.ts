@@ -3120,6 +3120,13 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     return transaction
   }
 
+  const interruptedGuide = collections.sessions.get(SESSION_ID)?.guide
+  if (interruptedGuide?.demoRun?.status === "running") {
+    await dispatch({ type: "guide.changed", actor: "system", guide: {
+      ...interruptedGuide, demoRun: { ...interruptedGuide.demoRun, status: "interrupted" },
+    } }).isPersisted.promise
+  }
+
   // Boot reconciliation: a persisted "responding" phase means the app went
   // away mid-turn — no done frame can ever arrive for that stream. Name it
   // through the dispatcher (journaled, actor system) instead of restoring a

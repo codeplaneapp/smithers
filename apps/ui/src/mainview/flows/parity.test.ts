@@ -158,7 +158,7 @@ describe("launch-law parity: every affordance is a command", () => {
         .filter(([, count]) => count > 0)
     )
     expect(counts).toEqual({
-      "../onboarding/GuideShell.tsx": 18, // Delegates to the shared onboarding and existing app flows.
+      "../onboarding/GuideShell.tsx": 17, // Delegates to the shared onboarding and existing app flows; the Command-K overlay is the summoned composer with no chrome of its own.
       /*
        * The chrome Sign in button (LOCAL-APP.md: sign-in is an option in the
        * chrome, never a gate on the chat) is one of ChromeBar's nine below.
@@ -294,8 +294,13 @@ describe("launch-law parity: every affordance is a command", () => {
        * onRunCommand with data-flow set.
        */
       "../cards/ChangeCards.tsx": 21,
-      /* Connection, world and browser card interactions. */
-      "../cards/ConversationCards.tsx": 4,
+      /*
+       * Connection, world and browser card interactions, plus the embedded
+       * wiki collaboration cards (ad438463a6): page Previous/Next and the
+       * pager's onSelect, the view-mode pickers (wiki.card.view), cloud
+       * Open page, and Refresh (wiki.sync) — all through onRunCommand.
+       */
+      "../cards/ConversationCards.tsx": 10,
       /*
        * The targets table: History in the toolbar, the view, kind and state
        * chips (target.filter), each row's star (target.star / unstar),

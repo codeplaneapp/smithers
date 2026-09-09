@@ -1,3 +1,4 @@
+import { handleOnboardingAnswers } from "./onboardingAnswers.ts";
 import type { BugWorkerEnv } from "./env.ts";
 import { bugReportSchema } from "./bugReportSchema.ts";
 import { newBugId } from "./newBugId.ts";
@@ -202,6 +203,9 @@ export function createBugWorker(overrides?: Partial<BugWorkerDeps>) {
       }
       if (url.pathname === "/api/repo-requests" || url.pathname.startsWith("/api/repo-requests/")) {
         return handleRepoRequests(request, env, deps);
+      }
+      if (url.pathname === "/api/onboarding-answers") {
+        return handleOnboardingAnswers(request, env, deps.now());
       }
       if (url.pathname === "/api/repo-claims") {
         return handleRepoClaims(request, env, deps);

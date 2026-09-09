@@ -135,10 +135,12 @@ describe("wave 10 — admin-only affordances are absent, not hidden (§2/§2b)",
     const { host } = mount(controller)
     expect(host.querySelector(".corner-reset-btn")).toBeNull()
     expect(host.querySelector(".devtools-panel")).toBeNull()
-    // The registry manifest in the DOM carries no admin or reset names.
+    // The registry manifest in the DOM carries no admin or admin-reset names.
     const manifest = host.querySelector(".app-shell")?.getAttribute("data-flows") ?? ""
     expect(manifest).not.toContain("admin.")
-    expect(manifest).not.toContain("reset")
+    expect(manifest).not.toContain("admin.reset")
+    /* `/debug.reset` is every user's own fresh-start door (ONBOARDING.md), never the admin reset. */
+    expect(manifest).not.toContain("corner-reset")
     // The admin plugin's debug flows; `debug.verbose` is every session's own switch.
     expect(manifest).not.toContain("debug.snapshot")
     expect(manifest).not.toContain("debug.events")

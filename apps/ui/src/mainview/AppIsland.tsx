@@ -1,5 +1,5 @@
 import { StrictMode, Suspense } from "react"
-import App from "./App"
+import { GuidedApp } from "./App"
 import { controllerBootPromise, ControllerProvider } from "./ControllerProvider"
 import { SessionShell } from "./SessionShell"
 import { MountedSignal, StartupErrorBoundary } from "./StartupBoundary"
@@ -31,7 +31,7 @@ export default function AppIsland() {
         <Suspense fallback={<SessionShell />}>
           <ControllerProvider boot={controllerBootPromise()}>
             <MountedSignal onMounted={watchdog.markMounted} />
-            <App />
+            <GuidedApp />
           </ControllerProvider>
         </Suspense>
       </StartupErrorBoundary>
