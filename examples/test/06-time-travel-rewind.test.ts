@@ -15,7 +15,17 @@ it.effect("re-derives state at a frame and rewinds the journal suffix", () =>
     // Folded from an ORDINARY engine journal: nothing in the example writes
     // `meta.lineageId`, the engine does.
     expect(summary.derivedAttempts).toBeGreaterThan(0)
-    expect(summary.archivedCount).toBeGreaterThan(0)
-    expect(summary.remainingSeqs.length).toBeLessThan(summary.totalEntries)
+
+    // The rewind keeps the frame and archives only what followed it, so the
+    // journal that survives is exactly the committed prefix through the frame.
+    const prefix = summary.beforeSeqs.filter((seq) => seq <= summary.frameSeq)
+    const suffix = summary.beforeSeqs.filter((seq) => seq > summary.frameSeq)
+    expect(prefix).toContain(summary.frameSeq)
+    expect(suffix.length).toBeGreaterThan(0)
+    expect(summary.remainingSeqs).toEqual(prefix)
+    expect(summary.archivedCount).toBe(suffix.length)
+    // Truncation is a database write: a store opened afterwards reads the same
+    // prefix, so nothing beyond the frame survives a restart either.
+    expect(summary.persistedSeqs).toEqual(prefix)
     expect(summary.auditStatus).toBe("completed")
   }))

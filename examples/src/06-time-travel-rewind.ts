@@ -17,7 +17,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import { durableEngine } from "./durable-layer.ts"
+import { durableEngine, requirements } from "./durable-layer.ts"
 
 /** The declared step the flow's body names; the wait lives in its implementation. */
 export const Post = Action.make("examples/Post", {
@@ -62,9 +62,15 @@ const layer = (filename: string) =>
 
 export interface Summary {
   readonly derivedAttempts: number
-  readonly totalEntries: number
+  /** The frame the rewind addressed. Everything after it is the archived suffix. */
+  readonly frameSeq: number
+  /** Every journal seq the run had recorded before the rewind, in order. */
+  readonly beforeSeqs: ReadonlyArray<number>
   readonly archivedCount: number
+  /** The seqs the journal still holds: the committed prefix through the frame. */
   readonly remainingSeqs: ReadonlyArray<number>
+  /** The same prefix, read from a database opened after the rewind committed. */
+  readonly persistedSeqs: ReadonlyArray<number>
   readonly auditStatus: string
 }
 
@@ -83,7 +89,11 @@ const post = () =>
     return `${amount}:${settlement}`
   })
 
-export const main = (filename: string): Effect.Effect<Summary> =>
+/** The run id both passes below read, typed once. */
+const runId = "ledger-1" as JournalEvent.RunId
+
+/** Executes the run, inspects the middle frame, and rewinds to it. */
+const rewindAtMidpoint = (filename: string) =>
   Effect.gen(function*() {
     // Drive the run until it parks at the deferred. It releases ownership on
     // the way out, which is the state a rewind requires.
@@ -91,7 +101,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
 
     const journal = yield* Journal.Journal
     yield* journal.flush
-    const before = yield* journal.entries({ runId: "ledger-1" as JournalEvent.RunId, limit: 200 })
+    const before = yield* journal.entries({ runId, limit: 200 })
     // Rewind to the middle of what the run recorded.
     const seq = before.entries[Math.floor(before.entries.length / 2)]!.seq
     const position = { runId: "ledger-1", frame: { lineageId, seq } }
@@ -112,7 +122,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
     const timeTravel = yield* TimeTravel
     const result = yield* timeTravel.rewind(position)
 
-    const remaining = yield* journal.entries({ runId: "ledger-1" as JournalEvent.RunId, limit: 200 })
+    const remaining = yield* journal.entries({ runId, limit: 200 })
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const audits = yield* sql<{ readonly status: string }>`
       SELECT status FROM flows_time_travel_audits WHERE id = ${result.auditId}
@@ -120,13 +130,34 @@ export const main = (filename: string): Effect.Effect<Summary> =>
 
     return {
       derivedAttempts,
-      totalEntries: before.entries.length,
+      frameSeq: seq,
+      beforeSeqs: before.entries.map((committed) => committed.seq),
       archivedCount: result.archive.archived,
       remainingSeqs: remaining.entries.map((committed) => committed.seq),
       auditStatus: audits[0]?.status ?? "missing"
     }
   }).pipe(
     Effect.provide(layer(filename)),
-    Effect.scoped,
-    Effect.orDie
+    Effect.scoped
   )
+
+/**
+ * Reads the journal back over the same file, from stores opened after the
+ * rewind committed. The truncation is a database write, not an in-memory view,
+ * so the prefix a later process reads is the one the rewind left behind.
+ */
+const reopen = (filename: string) =>
+  Effect.gen(function*() {
+    const journal = yield* Journal.Journal
+    const entries = yield* journal.entries({ runId, limit: 200 })
+    return entries.entries.map((committed) => committed.seq)
+  }).pipe(
+    Effect.provide(requirements(filename)),
+    Effect.scoped
+  )
+
+export const main = (filename: string): Effect.Effect<Summary> =>
+  Effect.gen(function*() {
+    const rewound = yield* rewindAtMidpoint(filename)
+    return { ...rewound, persistedSeqs: yield* reopen(filename) }
+  }).pipe(Effect.orDie)
