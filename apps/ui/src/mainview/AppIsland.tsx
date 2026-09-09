@@ -1,5 +1,4 @@
-import { StrictMode, Suspense } from "react"
-import { GuidedApp } from "./App"
+import { lazy, StrictMode, Suspense } from "react"
 import { controllerBootPromise, ControllerProvider } from "./ControllerProvider"
 import { SessionShell } from "./SessionShell"
 import { MountedSignal, StartupErrorBoundary } from "./StartupBoundary"
@@ -22,18 +21,22 @@ import "./index.css"
  * cannot report itself; importing this module arms it.
  */
 
+const GuidedApp = lazy(() => import("./App").then(({ GuidedApp }) => ({ default: GuidedApp })))
+
 const watchdog = browserStartupWatchdog({ clientErrors: createClientErrorReporter({ fetchImpl: createAppFetch() }) })
 
 export default function AppIsland() {
   return (
     <StrictMode>
       <StartupErrorBoundary onError={watchdog.handleRenderFailure}>
-        <Suspense fallback={<SessionShell />}>
-          <ControllerProvider boot={controllerBootPromise()}>
-            <MountedSignal onMounted={watchdog.markMounted} />
-            <GuidedApp />
-          </ControllerProvider>
-        </Suspense>
+        <SessionShell>
+          <Suspense fallback={null}>
+            <ControllerProvider boot={controllerBootPromise()}>
+              <MountedSignal onMounted={watchdog.markMounted} />
+              <GuidedApp />
+            </ControllerProvider>
+          </Suspense>
+        </SessionShell>
       </StartupErrorBoundary>
     </StrictMode>
   )

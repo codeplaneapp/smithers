@@ -9,7 +9,7 @@ import type { AppController } from "./state/AppController"
  * lands in a chunk of its own. Both hosts are browser-only — main.tsx renders
  * AppIsland into `#root`, apps/site renders it as an Astro `client:only`
  * island — so nothing here has to survive a server render; what the split buys
- * is the paint order. The Suspense fallback shows while the boot chunk and the
+ * is the paint order. The persistent entrance paints while the boot chunk and the
  * native bridge it pulls in are still in flight, which e2e/playwright/
  * startup.spec.ts holds open by routing `ControllerBoot.client*.js`.
  */

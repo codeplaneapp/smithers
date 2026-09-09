@@ -2,7 +2,7 @@ import { Spinner } from "@smthrs/ui"
 import { SidebarRepositoryPicker } from "../Composer"
 import { guideForwardAction } from "./navigation"
 import { useLiveQuery } from "@tanstack/react-db"
-import { createContext, Fragment, useRef, useState, type ReactNode, type CSSProperties } from "react"
+import { createContext, Fragment, useRef, useState, type ReactNode } from "react"
 import {
   BookOpen,
   Check,
@@ -28,14 +28,6 @@ import "./guide.css"
  */
 export const GuideComposerHost = createContext<HTMLDivElement | null | undefined>(undefined)
 
-const WORDMARK = [
-  "███████╗███╗   ███╗██╗████████╗██╗  ██╗███████╗██████╗ ███████╗",
-  "██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║██╔════╝██╔══██╗██╔════╝",
-  "███████╗██╔████╔██║██║   ██║   ███████║█████╗  ██████╔╝███████╗",
-  "╚════██║██║╚██╔╝██║██║   ██║   ██╔══██║██╔══╝  ██╔══██╗╚════██║",
-  "███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║███████╗██║  ██║███████║",
-  "╚══════╝╚═╝     ╚═╝╚═╝╚═╝   ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝",
-]
 const lessons = [
   "Hello. I’m Smithers. Let me show how Smithers works",
   "I am more than a chat app. I control this entire UI. And I will help you get work done. For example, let’s change the theme.",
@@ -259,16 +251,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
         <span className="guide-location">
           {stage < 8 ? "" : stage < 15 ? "Your first adventure" : "Your workspace"}
         </span>
-        <div className="guide-wordmark" aria-label="Smithers">
-          <pre aria-hidden="true">
-            {WORDMARK.map((line, i) => (
-              <span key={i} style={{ "--row": i } as CSSProperties}>
-                {line}
-                {"\n"}
-              </span>
-            ))}
-          </pre>
-        </div>
+
       </header>
       <aside className="guide-sidebar" aria-label="Workspace sidebar">
         <SidebarRepositoryPicker />

@@ -23,8 +23,8 @@ export interface StartupWatchdog {
  * outside React, because a React that never runs cannot report itself.
  *
  * Mounting is an explicit signal, never inferred from the DOM. Both entries
- * fill `#root` before the app exists — the SPA renders a Suspense fallback into
- * it, and the server renders the session shell into it — so "is `#root` empty"
+ * fill `#root` with the persistent entrance before the app exists, so
+ * "is `#root` empty"
  * answers "no" from the first frame and would disable this guard entirely.
  */
 export const startStartupWatchdog = (options: StartupWatchdogOptions): StartupWatchdog => {
