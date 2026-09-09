@@ -295,6 +295,28 @@ const output = (
   })
 
 describe("CloudflareSandbox", () => {
+  for (const execution of ["exec", "process"] as const) {
+    it.effect(`deletes guest inherited environment in ${execution} mode`, () =>
+      Effect.gen(function*() {
+        const workerBinding = binding()
+        const provider = CloudflareSandbox.make({ sdk, binding: workerBinding, execution, workdir: root })
+        yield* acquired(provider, (session) =>
+          Effect.gen(function*() {
+            const run = (command: string, env = {}) =>
+              Effect.scoped(Effect.flatMap(session.spawn(command, { env }), output))
+            expect((yield* run(`printf '%s' "\${HOME+present}"`)).stdout).toBe("present")
+            const result = yield* run(`printf '%s:%s' "\${HOME+present}" "$KEEP"`, {
+              KEEP: "a 'quoted' $value",
+              HOME: undefined,
+              PATH: undefined
+            })
+            expect(result).toEqual({ stdout: ":a 'quoted' $value", stderr: "", code: 0 })
+            expect(workerBinding.instances[0]!.events.some((event) => event.includes("-u HOME"))).toBe(true)
+            expect((yield* run(`printf '%s' "\${HOME+present}"`)).stdout).toBe("present")
+          }))
+      }), 60_000)
+  }
+
   it.effect("conforms in exec mode and forwards only named resolver options", () =>
     Effect.gen(function*() {
       const workerBinding = binding()

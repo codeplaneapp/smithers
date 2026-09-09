@@ -36,17 +36,6 @@ const failure = providerFailure
 const captured = (text: string): Stream.Stream<Uint8Array, ProviderError> =>
   text === "" ? Stream.empty : Stream.make(encoder.encode(text))
 
-const environment = (
-  values: Readonly<Record<string, string | undefined>> | undefined
-): Record<string, string> | undefined => {
-  if (values === undefined) return undefined
-  const resolved: Record<string, string> = {}
-  for (const [key, value] of Object.entries(values)) {
-    if (value !== undefined) resolved[key] = value
-  }
-  return resolved
-}
-
 /**
  * Renders bytes as the latin1 byte string just-bash's `stdinKind: "bytes"`
  * expects: one character per byte, so a 0xFF stays one byte instead of the
@@ -83,7 +72,9 @@ const rootedAt = (workdir: string) => (path: string): string => {
  * just-bash merges into the interpreter's environment for that one call; and
  * `options.stdin` as `stdin` with `stdinKind: "bytes"`, the latin1 byte-string
  * form just-bash forwards verbatim, so binary input reaches the command
- * unchanged. The cross-surface checks a session must pass, a process reading
+ * unchanged. Environment deletion is refused with `spawn_error` before exec,
+ * because the injected interpreter interface can only merge string values.
+ * The cross-surface checks a session must pass, a process reading
  * a file `writeFile` put there and `readFile` returning what a process wrote,
  * rely on nothing beyond the `<` and `>` redirections just-bash documents.
  *
@@ -120,11 +111,22 @@ export const make = (options: JustBashSandboxOptions): Provider => {
           workdir,
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
             yield* checkEnvironmentNames(spawnOptions.env)
-            const env = environment(spawnOptions.env)
+            const env: Record<string, string> = {}
+            for (const [name, value] of Object.entries(spawnOptions.env ?? {})) {
+              if (value === undefined) {
+                return yield* Effect.fail(
+                  new ProviderError({
+                    code: "spawn_error",
+                    message: `just-bash: environment deletion is unsupported (${name}); the interpreter only merges env`
+                  })
+                )
+              }
+              env[name] = value
+            }
             const stdin = spawnOptions.stdin
             const execOptions: JustBashExecOptions = {
               cwd: resolve(spawnOptions.cwd ?? workdir),
-              ...(env === undefined ? {} : { env }),
+              ...(spawnOptions.env === undefined ? {} : { env }),
               ...(stdin === undefined ? {} : { stdin: latin1(stdin), stdinKind: "bytes" as const })
             }
             const result = yield* gate.withPermit(

@@ -118,8 +118,8 @@ export interface CheckOptions {
  * The file checks state the contract's own obligations: byte round-trips of
  * a small binary payload, an empty file, and a 64 KiB one; `not_found` for
  * absence; parent creation; the workdir default and a relative `cwd`;
- * environment delivery; refusal of an environment name a guest shell would
- * drop; standard input delivery; standard error delivery; and a working
+ * environment delivery; deletion of inherited HOME or a typed refusal;
+ * refusal of an environment name a guest shell would drop; standard input delivery; standard error delivery; and a working
  * session after release and reacquire. Two checks look across
  * surfaces on purpose. A session that served `readFile` from somewhere other
  * than the machine its processes run on would pass every file check and
@@ -176,6 +176,21 @@ export const check = (
       }))
     const environment = yield* inSession(provider, session, deadline, (live) =>
       run(live, `printf '%s' "$SANDBOX_CONFORMANCE"`, { env: { SANDBOX_CONFORMANCE: "delivered" } }))
+    const deletedEnvironment = yield* inSession(provider, session, deadline, (live) =>
+      Effect.gen(function*() {
+        // HOME comes from the guest, never from a command default. Check its
+        // presence first so deleting an already-absent variable cannot pass.
+        const before = yield* run(live, `printf '%s' "\${HOME+present}"`)
+        const after = yield* Effect.scoped(Effect.matchEffect(
+          live.spawn(`printf '%s' "\${HOME+present}"`, { env: { HOME: undefined } }),
+          {
+            onFailure: (error) =>
+              Effect.succeed(error),
+            onSuccess: output
+          }
+        ))
+        return { before, after }
+      }))
     const unusableEnvironment = yield* inSession(provider, session, deadline, (live) =>
       Effect.flip(run(live, "true", { env: { "not-a-shell-name": "x" } })))
     const stdin = yield* inSession(provider, session, deadline, (live) =>
@@ -263,6 +278,16 @@ export const check = (
         expected: `stdout "delivered" from the spawn's env`,
         actual: shown(environment)
       },
+      Exit.isSuccess(deletedEnvironment) && deletedEnvironment.value.before === "present#0" &&
+        (deletedEnvironment.value.after === "#0" ||
+          (deletedEnvironment.value.after instanceof ProviderError &&
+            deletedEnvironment.value.after.code === "spawn_error"))
+        ? undefined
+        : {
+          check: "deletes-inherited-environment-or-refuses",
+          expected: "guest HOME present before deletion, then absent or spawn refused with ProviderError spawn_error",
+          actual: shown(deletedEnvironment)
+        },
       Exit.isSuccess(unusableEnvironment) && unusableEnvironment.value instanceof ProviderError
         ? undefined
         : {

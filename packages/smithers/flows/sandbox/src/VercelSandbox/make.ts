@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -247,20 +248,16 @@ export const make = (options: VercelSandboxOptions): Provider => ({
         spawn: (command, spawnOptions) =>
           Effect.flatMap(
             Effect.andThen(checkEnvironmentNames(spawnOptions.env), redirect(command, spawnOptions.stdin)),
-            (fed) =>
-              Effect.map(
+            (fed) => {
+              const guest = environmentCommand(fed, { ...options.commandEnv, ...spawnOptions.env })
+              return Effect.map(
                 run({
                   cmd: "sh",
                   // `-c`, never `-lc`: profile output from a login shell would
                   // precede the command's own stdout on this transport.
-                  args: ["-c", fed],
+                  args: ["-c", guest.command],
                   cwd: resolveCwd(spawnOptions.cwd),
-                  // Overlay first so a per-spawn `undefined` removes a command default.
-                  env: Object.fromEntries(
-                    Object.entries({ ...options.commandEnv, ...spawnOptions.env }).filter(
-                      (entry): entry is [string, string] => entry[1] !== undefined
-                    )
-                  )
+                  env: guest.env
                 }),
                 (result) => ({
                   stdout: output(() => result.stdout(), "could not read command stdout"),
@@ -268,6 +265,7 @@ export const make = (options: VercelSandboxOptions): Provider => ({
                   exitCode: Effect.succeed(result.exitCode)
                 })
               )
+            }
           ),
         readFile: (path) =>
           Effect.flatMap(

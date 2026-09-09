@@ -1336,6 +1336,7 @@ describe("AwsSandbox", () => {
         "runs-in-its-workdir",
         "roots-a-relative-cwd",
         "delivers-the-environment",
+        "deletes-inherited-environment-or-refuses",
         "delivers-standard-input",
         "delivers-standard-error",
         "files-reach-processes",

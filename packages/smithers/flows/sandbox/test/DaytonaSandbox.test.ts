@@ -249,6 +249,22 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("DaytonaSandbox", () => {
+  it.effect("deletes guest inherited environment separately from command defaults", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk()
+      const provider = DaytonaSandbox.make({ sdk: fake.sdk, commandEnv: { DEFAULT: "default" } })
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          expect((yield* output(session, `printf '%s' "\${HOME+present}"`)).stdout).toBe("present")
+          const result = yield* output(session, `printf '%s:%s:%s' "\${HOME+present}" "$DEFAULT" "$KEEP"`, {
+            env: { KEEP: "a 'quoted' $value", HOME: undefined, PATH: undefined, DEFAULT: undefined }
+          })
+          expect(result).toEqual({ stdout: "::a 'quoted' $value", code: 0 })
+          expect(fake.recorded.executes.at(-1)?.command).toContain("-u HOME")
+          expect((yield* output(session, `printf '%s' "\${HOME+present}"`)).stdout).toBe("present")
+        }))
+    }), 60_000)
+
   it.effect("passes SandboxConformance running real shells against a real tree", () =>
     Effect.gen(function*() {
       const { sdk } = fakeSdk()
@@ -294,11 +310,10 @@ describe("DaytonaSandbox", () => {
       expect(fake.recorded.executes[1]).toMatchObject({
         cwd: "/tmp"
       })
-      expect(fake.recorded.executes[1]?.env).toEqual({
-        STATIC_PROOF: "static",
-        KEEP_ME: "kept",
-        SPAWN_PROOF: "spawn"
-      })
+      expect(fake.recorded.executes[1]?.env).toEqual({})
+      expect(fake.recorded.executes[1]?.command).toContain(
+        "-u REMOVE_ME -u OMITTED STATIC_PROOF=static KEEP_ME=kept SPAWN_PROOF=spawn /bin/sh -c"
+      )
       expect(fake.machines.size).toBe(0)
     }))
 

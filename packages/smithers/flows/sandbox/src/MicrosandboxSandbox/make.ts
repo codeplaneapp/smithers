@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
@@ -363,21 +364,30 @@ export const make = (options: MicrosandboxSandboxOptions): Provider => ({
         remoteId: opened.sandbox.name,
         workdir,
         spawn: (command, spawnOptions) =>
-          Effect.andThen(
-            checkEnvironmentNames(spawnOptions.env),
-            Effect.map(
+          Effect.gen(function*() {
+            yield* checkEnvironmentNames(spawnOptions.env)
+            if (!shell.startsWith("/") && Object.values(spawnOptions.env ?? {}).includes(undefined)) {
+              return yield* Effect.fail(
+                new ProviderError({
+                  code: "spawn_error",
+                  message: "microsandbox: environment deletion requires an absolute shell path"
+                })
+              )
+            }
+            const guest = environmentCommand(command, { ...options.env, ...spawnOptions.env }, shell)
+            return yield* Effect.map(
               execute(
                 opened.sandbox,
-                commandLine(shell, command, nix),
+                commandLine(shell, guest.command, nix),
                 resolveCwd(spawnOptions.cwd),
-                environment(options.env, spawnOptions.env),
+                guest.env,
                 spawnOptions.stdin,
                 "spawn_error",
                 `\`${command}\` could not run in ${name}`
               ),
               processOf
             )
-          ),
+          }),
         readFile: (path) =>
           Effect.tryPromise({
             try: () => opened.sandbox.fs().read(path),

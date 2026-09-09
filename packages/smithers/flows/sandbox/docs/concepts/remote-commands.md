@@ -94,10 +94,22 @@ interprets the command, on dash but not on bash. A spawn carrying such a name
 is refused with `spawn_error` naming it, on every provider and both platforms,
 rather than losing the variable in the guest.
 
-An entry set to `undefined` is not a name at all: it asks for the variable to
-be absent, which every provider implements with `env -u` rather than by
-omitting an assignment, so a value the machine was created with is genuinely
-gone from the command's environment.
+An entry set to `undefined` requests deletion of an inherited variable for
+that command. Removing a command default alone does not clear guest inheritance.
+
+| Provider                                                                  | Deletion behavior                                                                                                                                                                                             |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DirectorySandbox`                                                        | Removes the entry from the child environment before spawning.                                                                                                                                                 |
+| `ContainerSandbox`, `KubernetesSandbox`                                   | Uses guest `env -u` before the command shell.                                                                                                                                                                 |
+| `AwsSandbox`                                                              | Uses guest `env -u`; environment overrides require `exec.streamingSpawner`, otherwise `unavailable`.                                                                                                          |
+| `CloudflareSandbox` (exec and process), `VercelSandbox`, `DaytonaSandbox` | Uses `/usr/bin/env -u NAME ... /bin/sh -c ...` in the guest, with removals before assignments. Requires those guest executables.                                                                              |
+| `MicrosandboxSandbox`                                                     | Uses guest `/usr/bin/env -u` before the configured command shell, including inside `nix develop`. Requires guest `/usr/bin/env`; refuses deletion with `spawn_error` if the configured shell is not absolute. |
+| `JustBashSandbox`                                                         | Refuses with `ProviderError` code `spawn_error` before interpreter execution. Its injected interface only merges string values.                                                                               |
+
+`SandboxConformance` checks that guest `HOME` exists before requesting its
+deletion, then requires absence or a typed spawn refusal. Provision test guests
+with `HOME` set. This check is separate from environment delivery and removal
+of provider command defaults.
 
 ## Read next
 

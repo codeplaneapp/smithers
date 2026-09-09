@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { env as hostEnv } from "node:process"
 import * as JustBashSandbox from "../src/JustBashSandbox/index.ts"
+import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
 import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
@@ -128,6 +129,23 @@ const output = (session: Session, command: string, options: Parameters<Session["
 const budget = 60_000
 
 describe("JustBashSandbox", () => {
+  it.effect("refuses guest inherited environment deletion before interpreter execution", () =>
+    Effect.gen(function*() {
+      const { fs } = yield* services
+      const fake = justBash()
+      const provider = JustBashSandbox.make({ bash: fake.bash, fs, root })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const session = yield* provider.acquire("env-delete")
+        expect((yield* output(session, `printf '%s' "\${HOME+present}"`)).stdout).toBe("present")
+        const calls = fake.calls.length
+        const error = yield* Effect.flip(session.spawn("touch must-not-run", { env: { HOME: undefined } }))
+        expect(error).toBeInstanceOf(ProviderError)
+        expect(error.code).toBe("spawn_error")
+        expect(error.message).toContain("environment deletion is unsupported")
+        expect(fake.calls).toHaveLength(calls)
+      }))
+    }), 60_000)
+
   it.effect(
     "passes SandboxConformance with a real interpreter and filesystem on one real tree",
     () =>
@@ -200,12 +218,13 @@ describe("JustBashSandbox", () => {
             expect((yield* output(session, "pwd", { cwd: "" })).stdout).toBe(`${session.workdir}\n`)
             expect((yield* output(session, "pwd", { cwd: root })).stdout).toBe(`${root}\n`)
 
-            // Defined environment entries are merged for the one call; an
-            // `undefined` value is dropped rather than sent as text.
-            const env = yield* output(session, `printf '%s:%s' "$KEPT" "$DROPPED"`, {
-              env: { KEPT: "yes", DROPPED: undefined }
+            // Defined environment entries are merged for this one call.
+            const env = yield* output(session, `printf '%s' "$KEPT"`, {
+              env: { KEPT: "yes" }
             })
-            expect(env.stdout).toBe("yes:")
+            expect(env.stdout).toBe("yes")
+            const refusal = yield* Effect.flip(output(session, "true", { env: { DROPPED: undefined } }))
+            expect(refusal.code).toBe("spawn_error")
             expect(fake.calls.at(-1)?.options.env).toEqual({ KEPT: "yes" })
 
             // Run-to-completion replay, the other documented divergence: both

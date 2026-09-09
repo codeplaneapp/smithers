@@ -47,6 +47,34 @@ const checkNames = (violations: ReadonlyArray<{ readonly check: string }>): Read
   violations.map((violation) => violation.check)
 
 describe("SandboxConformance", () => {
+  it.live("names a session that silently drops guest inherited environment deletions", () =>
+    Effect.gen(function*() {
+      const dropping = warped((session) => ({
+        ...session,
+        spawn: (command, options) =>
+          session.spawn(command, {
+            ...options,
+            env: Object.fromEntries(Object.entries(options.env ?? {}).filter(([, value]) => value !== undefined))
+          })
+      }))
+      expect(checkNames(yield* SandboxConformance.check(dropping)))
+        .toContain("deletes-inherited-environment-or-refuses")
+    }), 120_000)
+
+  it.live("does not accept deleting an already absent guest variable as proof", () =>
+    Effect.gen(function*() {
+      const absent = warped((session) => ({
+        ...session,
+        spawn: (command, options) =>
+          session.spawn(command, {
+            ...options,
+            env: { ...options.env, HOME: undefined }
+          })
+      }))
+      expect(checkNames(yield* SandboxConformance.check(absent)))
+        .toContain("deletes-inherited-environment-or-refuses")
+    }), 120_000)
+
   for (const phase of ["acquire", "body", "release"] as const) {
     it.effect(`bounds a stuck session ${phase}, including reacquire, and starts cleanup`, () =>
       Effect.gen(function*() {

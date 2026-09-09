@@ -7,6 +7,7 @@ import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
+import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
@@ -47,13 +48,6 @@ const parentOf = (path: string): string | undefined => {
   const separator = path.lastIndexOf("/")
   return separator < 0 ? undefined : separator === 0 ? "/" : path.slice(0, separator)
 }
-
-const definedEnv = (
-  env: Readonly<Record<string, string | undefined>> | undefined
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(env ?? {}).filter((entry): entry is [string, string] => entry[1] !== undefined)
-  )
 
 const errorCodeOf = (cause: unknown): unknown =>
   typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined
@@ -156,15 +150,16 @@ export const make = <Binding>(options: CloudflareSandboxOptions<Binding>): Provi
           Effect.flatMap(
             Effect.andThen(checkEnvironmentNames(spawnOptions.env), redirect(command, spawnOptions.stdin)),
             (fed) => {
+              const guest = environmentCommand(fed, spawnOptions.env)
               const commandOptions = {
                 cwd: resolveCwd(spawnOptions.cwd),
-                env: definedEnv(spawnOptions.env)
+                env: guest.env
               }
               return options.execution === "process"
                 ? Effect.flatMap(
                   attempt(
                     async () => {
-                      const started = await sandbox.startProcess(fed, commandOptions)
+                      const started = await sandbox.startProcess(guest.command, commandOptions)
                       const exit = await started.waitForExit()
                       const logs = await started.getLogs()
                       return {
@@ -184,7 +179,7 @@ export const make = <Binding>(options: CloudflareSandboxOptions<Binding>): Provi
                 )
                 : Effect.map(
                   attempt(
-                    () => sandbox.exec(fed, commandOptions),
+                    () => sandbox.exec(guest.command, commandOptions),
                     "spawn_error",
                     `exec failed for ${command}`
                   ),

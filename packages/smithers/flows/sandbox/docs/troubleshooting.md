@@ -176,8 +176,34 @@ never held.
 
 **What to change.** Do not treat `isRunning` as a liveness question about the
 guest; use `SandboxHealth` for that. Pass the environment you want explicitly,
-and delete an inherited variable by setting it to `undefined`, which every
-provider implements with `env -u`.
+and request deletion of an inherited variable by setting it to `undefined`.
+`DirectorySandbox` removes it before spawning. Container, Kubernetes, AWS,
+Cloudflare, Vercel, and Daytona apply guest `env -u`; AWS requires its streaming
+transport. Cloudflare (both execution modes), Vercel, and Daytona require
+`/usr/bin/env` and `/bin/sh` in the guest and apply removals before assignments.
+Microsandbox applies the same guest removal before its configured shell, inside
+`nix develop` when configured. Deletion requires an absolute configured shell path, otherwise `spawn_error`.
+JustBash refuses deletion with `spawn_error` before executing the command.
+See [Remote commands](./concepts/remote-commands.md#environment-names-are-checked-before-the-command-runs).
+
+## "just-bash: environment deletion is unsupported"
+
+**What happened.** An `env` entry was `undefined`. The injected interpreter
+interface merges string values and cannot remove an inherited value, so the
+provider refused with `ProviderError` code `spawn_error` before `exec`.
+
+**What to change.** Use a provider that supports deletion. Omit the entry only
+when retaining the inherited value is intended.
+
+## "deletes-inherited-environment-or-refuses"
+
+**What happened.** Conformance could not observe guest `HOME` before deletion,
+or the deletion request neither removed it nor failed with a typed spawn refusal.
+
+**What to change.** Provision the test guest with `HOME` set, preserve
+`undefined` overrides, and apply deletion inside the guest before running the
+command. A test that only removes a command default does not prove deletion of
+an inherited guest value.
 
 ## Two runs fought over one machine
 

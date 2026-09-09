@@ -6,6 +6,7 @@
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import { environmentCommand } from "../internal/environmentCommand.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -212,17 +213,13 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
         spawn: (command, spawnOptions) =>
           Effect.flatMap(
             Effect.andThen(checkEnvironmentNames(spawnOptions.env), redirect(command, spawnOptions.stdin)),
-            (fed) =>
-              Effect.map(
+            (fed) => {
+              const guest = environmentCommand(fed, { ...options.commandEnv, ...spawnOptions.env })
+              return Effect.map(
                 execute(
-                  fed,
+                  guest.command,
                   resolveCwd(spawnOptions.cwd),
-                  // Overlay first so a per-spawn `undefined` removes a command default.
-                  Object.fromEntries(
-                    Object.entries({ ...options.commandEnv, ...spawnOptions.env }).filter(
-                      (entry): entry is [string, string] => entry[1] !== undefined
-                    )
-                  )
+                  guest.env
                 ),
                 (result) => ({
                   // `result` is the command's combined output: the wire
@@ -234,6 +231,7 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
                   exitCode: Effect.succeed(result.exitCode)
                 })
               )
+            }
           ),
         readFile: (path) =>
           Effect.tryPromise({

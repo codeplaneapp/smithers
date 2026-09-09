@@ -224,6 +224,26 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("VercelSandbox", () => {
+  it.effect("deletes guest inherited environment separately from command defaults", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk()
+      const provider = VercelSandbox.make({
+        sdk: fake.sdk,
+        workdir: dir("env-delete"),
+        commandEnv: { DEFAULT: "default" }
+      })
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          expect((yield* output(session, `printf '%s' "\${HOME+present}"`)).stdout).toBe("present")
+          const result = yield* output(session, `printf '%s:%s:%s' "\${HOME+present}" "$DEFAULT" "$KEEP"`, {
+            env: { KEEP: "a 'quoted' $value", HOME: undefined, PATH: undefined, DEFAULT: undefined }
+          })
+          expect(result).toEqual({ stdout: "::a 'quoted' $value", code: 0 })
+          expect(fake.recorded.commands.at(-1)?.args?.join(" ")).toContain("-u HOME")
+          expect((yield* output(session, `printf '%s' "\${HOME+present}"`)).stdout).toBe("present")
+        }))
+    }), 60_000)
+
   it.effect("passes SandboxConformance running real programs against a real tree", () =>
     Effect.gen(function*() {
       const { recorded, sdk } = fakeSdk()
@@ -294,7 +314,10 @@ describe("VercelSandbox", () => {
       expect(recorded.stopped).toHaveLength(2)
       const spawned = recorded.commands.find((command) => command.cmd === "sh")
       expect(spawned?.args?.[0]).toBe("-c")
-      expect(spawned?.env).toEqual({ STATIC_PROOF: "static", KEEP_ME: "kept", SPAWN_PROOF: "spawn" })
+      expect(spawned?.env).toEqual({})
+      expect(spawned?.args?.[1]).toContain(
+        "-u REMOVE_ME -u OMITTED STATIC_PROOF=static KEEP_ME=kept SPAWN_PROOF=spawn /bin/sh -c"
+      )
     }))
 
   it.effect("resolves caller-supplied credential sources in precedence order", () =>

@@ -377,6 +377,54 @@ const output = (process: RemoteProcess) =>
   )
 
 describe("MicrosandboxSandbox", () => {
+  it.effect("refuses deletion with a relative shell before guest execution", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk()
+      const provider = MicrosandboxSandbox.make({ sdk: fake.sdk, workdir: root, shell: "sh" })
+      yield* inSession(provider, "relative-shell", (session) =>
+        Effect.gen(function*() {
+          const calls = fake.recorded.execs.length
+          const error = yield* Effect.scoped(
+            Effect.flip(session.spawn("true", { env: { HOME: undefined, PATH: undefined } }))
+          )
+          expect(error.code).toBe("spawn_error")
+          expect(error.message).toContain("absolute shell path")
+          expect(fake.recorded.execs).toHaveLength(calls)
+        }))
+    }))
+
+  for (const inNix of [false, true]) {
+    it.effect(
+      `deletes guest inherited environment separately from command defaults (nix=${inNix})`,
+      () =>
+        Effect.gen(function*() {
+          const fake = fakeSdk()
+          const provider = MicrosandboxSandbox.make({
+            sdk: fake.sdk,
+            workdir: root,
+            shell: "/bin/bash",
+            ...(inNix ? { environment: { flake: "{ }", nix: fakeNix().nix } } : {})
+          })
+          yield* inSession(provider, "env-delete", (session) =>
+            Effect.gen(function*() {
+              const run = (command: string, env = {}) =>
+                Effect.scoped(Effect.flatMap(session.spawn(command, { env }), output))
+              expect((yield* run(`printf '%s' "\${HOME+present}"`))[0]).toBe("present")
+              expect(
+                yield* run(`printf '%s:%s' "\${HOME+present}" "$KEEP"`, {
+                  KEEP: "a 'quoted' $value",
+                  HOME: undefined,
+                  PATH: undefined
+                })
+              ).toEqual([":a 'quoted' $value", "", 0])
+              expect(fake.recorded.execs.at(-1)?.args.at(-1)).toContain("-u HOME -u PATH")
+              expect(fake.recorded.execs.at(-1)?.args.at(-1)).toContain("/bin/bash -c")
+            }))
+        }),
+      60_000
+    )
+  }
+
   it.effect("passes SandboxConformance running real shells against real files", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()
@@ -463,13 +511,14 @@ describe("MicrosandboxSandbox", () => {
       expect(result.relative).toEqual([`${workdir}/sub\n`, "", 0])
       expect(result.emptied[2]).toBe(0)
       expect(Array.from(result.emptyCopy)).toEqual([])
-      const spawned = fake.recorded.execs.find(({ env }) => env["DYNAMIC"] === "yes")
+      const spawned = fake.recorded.execs.find(({ args }) => args[1]?.includes("DYNAMIC=yes"))
       expect(spawned).toMatchObject({
         shell: "/bin/bash",
         cwd: root,
-        env: { KEPT: "base", DYNAMIC: "yes" }
+        env: {}
       })
       expect(spawned?.env["STATIC"]).toBeUndefined()
+      expect(spawned?.args[1]).toContain("-u STATIC KEPT=base DYNAMIC=yes /bin/bash -c")
       expect(fake.recorded.builds[0]?.settings).toEqual({
         image: "alpine:3.22",
         cpus: 2,
@@ -495,7 +544,7 @@ describe("MicrosandboxSandbox", () => {
   // nixos/nix image behaves the same from the provider's side; the microVM
   // itself is not available on this host.
   const fakeNix = (): { readonly nix: string; readonly log: string } => {
-    const nixDir = join(root, "fake-nix")
+    const nixDir = mkdtempSync(join(root, "fake-nix-"))
     mkdirSync(nixDir, { recursive: true })
     const log = join(nixDir, "argv.log")
     const nix = join(nixDir, "nix")
