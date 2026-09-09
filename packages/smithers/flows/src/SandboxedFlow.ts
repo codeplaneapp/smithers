@@ -192,7 +192,8 @@ export interface ExecuteOptions {
   /**
    * The wall-clock budget for the whole session, acquisition through result
    * readback. Default ten minutes. It is measured on the platform timer, not
-   * the ambient `Clock`, so it fires under a frozen test clock too.
+   * the ambient `Clock`, so it fires under a frozen test clock too. Infinite
+   * durations disable the deadline; long finite durations use timer chunks.
    */
   readonly timeout?: Duration.Input | undefined
 }
@@ -272,6 +273,103 @@ const tail = (text: string): string => {
   const redacted = String(redact(text))
   return redacted.length > quotedOutputBytes ? `…${redacted.slice(redacted.length - quotedOutputBytes)}` : redacted
 }
+
+/** Drain continuously, retaining a byte ring and at most two small redaction segments. */
+const drainTail = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
+  Effect.gen(function*() {
+    const ring = new Uint8Array(quotedOutputBytes)
+    const decoder = new TextDecoder()
+    const encoder = new TextEncoder()
+    let cursor = 0
+    let retained = 0
+    let truncated = false
+    let pending = ""
+    let omitLine = false
+    let omitKey = false
+    let omitStream = false
+    const append = (text: string) => {
+      for (const byte of encoder.encode(text)) {
+        ring[cursor] = byte
+        cursor = (cursor + 1) % ring.length
+        if (retained < ring.length) retained++
+        else truncated = true
+      }
+    }
+    const accept = (text: string) => {
+      if (omitStream) return
+      // A redacted credential can continue across transport chunks. Once
+      // matched, omit that line's remainder instead of retaining its suffix.
+      for (const [index, line] of text.split("\n").entries()) {
+        if (index > 0) {
+          if (omitKey) pending = ""
+          else if (omitLine) {
+            append("\n")
+            pending = ""
+          } else pending += "\n"
+          omitLine = false
+        }
+        if (omitLine) continue
+        pending += line
+        const begin = !omitKey ? /-----BEGIN[^-]*PRIVATE KEY-----/.exec(pending) : null
+        if (begin !== null) {
+          append(String(redact(pending.slice(0, begin.index))) + "[REDACTED]")
+          pending = pending.slice(begin.index + begin[0].length)
+          omitKey = true
+        }
+        if (omitKey) {
+          const end = /-----END[^-]*-----/.exec(pending)
+          if (end === null) {
+            pending = pending.slice(-quotedOutputBytes)
+            continue
+          }
+          pending = pending.slice(end.index + end[0].length)
+          omitKey = false
+        }
+        const safe = String(redact(pending))
+        if (safe !== pending) {
+          append(safe)
+          pending = ""
+          omitLine = true
+        } else if (pending.length > quotedOutputBytes) {
+          // A quoted credential may not match until its closing quote arrives.
+          // Refuse to discard its prefix and expose the unrecognized suffix.
+          for (const quote of ["\"", "'"]) {
+            if (!pending.includes(quote)) continue
+            const completed = pending + quote
+            const protectedText = String(redact(completed))
+            if (protectedText !== completed) {
+              append(protectedText)
+              pending = ""
+              omitStream = true
+              return
+            }
+          }
+          let cut = pending.length - quotedOutputBytes
+          // Keep a surrogate pair together before UTF-8 encoding.
+          const unit = pending.charCodeAt(cut)
+          if (unit >= 0xDC00 && unit <= 0xDFFF) cut--
+          append(pending.slice(0, cut))
+          pending = pending.slice(cut)
+        }
+      }
+    }
+    yield* Stream.runForEach(stream, (chunk) =>
+      Effect.sync(() => {
+        // Never decode an arbitrarily large provider chunk into a host string.
+        for (let offset = 0; offset < chunk.length; offset += quotedOutputBytes) {
+          accept(decoder.decode(chunk.subarray(offset, offset + quotedOutputBytes), { stream: true }))
+        }
+      }))
+    accept(decoder.decode())
+    if (!omitKey) append(String(redact(pending)))
+    const bytes = new Uint8Array(retained)
+    const start = retained === ring.length ? cursor : 0
+    for (let index = 0; index < retained; index++) bytes[index] = ring[(start + index) % ring.length]!
+    let offset = 0
+    // A ring wrap can discard the start of a UTF-8 code point.
+    while (offset < bytes.length && (bytes[offset]! & 0xC0) === 0x80) offset++
+    return `${truncated ? "…" : ""}${new TextDecoder().decode(bytes.subarray(offset))}`
+  })
 
 const failure = (
   code: SandboxedFlowError["code"],
@@ -379,7 +477,16 @@ const bundle = (entry: URL | string): Effect.Effect<Uint8Array, SandboxedFlowErr
 const expired = (deadline: Duration.Input): Effect.Effect<never, SandboxedFlowError> =>
   Effect.flatMap(
     Effect.callback<void>((resume) => {
-      const timer = setTimeout(() => resume(Effect.void), Duration.toMillis(deadline))
+      const budget = Duration.toMillis(deadline)
+      if (!Number.isFinite(budget)) return Effect.void
+      const started = performance.now()
+      let timer: ReturnType<typeof setTimeout>
+      const schedule = () => {
+        const remaining = budget - (performance.now() - started)
+        if (remaining <= 0) resume(Effect.void)
+        else timer = setTimeout(schedule, Math.min(remaining, 2_147_483_647))
+      }
+      schedule()
       return Effect.sync(() => clearTimeout(timer))
     }),
     () =>
@@ -409,6 +516,56 @@ const snapshot = (
     Effect.mapError((cause) => failure("session_failed", `the workspace could not be listed: ${cause.message}`, cause))
   )
 
+/** Read at most the budget plus one byte, without the unbounded readFile transport. */
+const readBounded = (
+  session: Sandbox.Session,
+  path: string,
+  limit: number,
+  code: "result_overflow" | "diff_overflow",
+  context: string
+): Effect.Effect<Uint8Array, SandboxedFlowError> =>
+  Effect.scoped(Effect.gen(function*() {
+    const chunks: Array<Uint8Array> = []
+    let total = 0
+    const consume = (stream: Stream.Stream<Uint8Array, SandboxedFlowError>) =>
+      Stream.runForEach(stream, (bytes) => {
+        total += bytes.length
+        if (total > limit) {
+          return Effect.fail(failure(code, `the read exceeds its remaining byte budget; the limit is ${limit}`))
+        }
+        chunks.push(new Uint8Array(bytes))
+        return Effect.void
+      })
+    if (session.files?.stream !== undefined) {
+      yield* consume(
+        session.files.stream(path, { bytesToRead: limit + 1, chunkSize: Math.min(limit + 1, 64 * 1024) }).pipe(
+          Stream.mapError((cause) => failure("session_failed", `${context}: ${cause.message}`, cause))
+        )
+      )
+    } else {
+      // Bound output in the guest too: some remote transports buffer a whole
+      // command response before exposing stdout as a stream.
+      const process = yield* session.spawn(
+        `head -c ${CommandLine.quote(String(limit + 1))} ${CommandLine.quote(path)}`,
+        {}
+      )
+        .pipe(Effect.mapError(sessionFailure(context)))
+      const [, stderr, exitCode] = yield* Effect.all([
+        consume(process.stdout.pipe(Stream.mapError(sessionFailure(context)))),
+        drainTail(process.stderr).pipe(Effect.mapError(sessionFailure(context))),
+        process.exitCode.pipe(Effect.mapError(sessionFailure(context)))
+      ], { concurrency: "unbounded" })
+      if (exitCode !== 0) return yield* Effect.fail(failure("session_failed", `${context}: ${tail(stderr)}`))
+    }
+    const result = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      result.set(chunk, offset)
+      offset += chunk.length
+    }
+    return result
+  }))
+
 /** Reads every file the guest created or resized, within the limits. */
 const collect = (
   session: Sandbox.Session,
@@ -431,14 +588,18 @@ const collect = (
       )
     }
     const diff: Array<DiffEntry> = []
+    let collected = 0
     for (const [path] of changed) {
-      const bytes = yield* session.readFile(`${workdir}/${path}`).pipe(
-        Effect.mapError(sessionFailure(`the changed file ${path} could not be read back`))
+      const bytes = yield* readBounded(
+        session,
+        `${workdir}/${path}`,
+        limits.diffBytes - collected,
+        "diff_overflow",
+        `the changed file ${path} could not be read back`
       )
-      // A plain copy: a provider answers with whatever its transport holds,
-      // a pooled `Buffer` for the local directory, and the diff is data the
-      // caller keeps.
-      diff.push({ path, bytes: new Uint8Array(bytes) })
+      collected += bytes.length
+      // readBounded owns these plain bytes; the diff is data the caller keeps.
+      diff.push({ path, bytes })
     }
     return diff
   })
@@ -453,18 +614,25 @@ const readResult = (
 ): Effect.Effect<typeof Guest.Result.Type, SandboxedFlowError> =>
   Effect.gen(function*() {
     const outputs = `stdout: ${tail(run.stdout).trim() || "(empty)"}; stderr: ${tail(run.stderr).trim() || "(empty)"}`
-    const bytes = yield* session.readFile(resultPath).pipe(
+    const info = yield* Sandbox.fileSystem(session).stat(resultPath).pipe(
       Effect.mapError((cause) =>
-        cause.code === "not_found"
+        cause.reason._tag === "NotFound"
           ? failure("result_unreadable", `the guest exited 0 without writing a result; ${outputs}`, cause)
-          : sessionFailure("the result could not be read back")(cause)
+          : failure("session_failed", `the result could not be read back: ${cause.message}`, cause)
       )
     )
-    if (bytes.length > limits.resultBytes) {
+    if (Number(info.size) > limits.resultBytes) {
       return yield* Effect.fail(
-        failure("result_overflow", `the result holds ${bytes.length} bytes; the limit is ${limits.resultBytes}`)
+        failure("result_overflow", `the result holds ${info.size} bytes; the limit is ${limits.resultBytes}`)
       )
     }
+    const bytes = yield* readBounded(
+      session,
+      resultPath,
+      limits.resultBytes,
+      "result_overflow",
+      "the result could not be read back"
+    )
     const result = yield* Effect.try({
       try: () => Schema.decodeUnknownSync(Guest.Result)(JSON.parse(new TextDecoder().decode(bytes))),
       catch: (cause) =>
@@ -568,8 +736,8 @@ export const execute = <
               })
               const [stdout, stderr, code] = yield* Effect.all(
                 [
-                  Stream.mkString(Stream.decodeText(process.stdout)),
-                  Stream.mkString(Stream.decodeText(process.stderr)),
+                  drainTail(process.stdout),
+                  drainTail(process.stderr),
                   process.exitCode
                 ],
                 { concurrency: "unbounded" }

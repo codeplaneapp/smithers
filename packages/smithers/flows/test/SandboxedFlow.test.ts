@@ -2,15 +2,16 @@
  * `SandboxedFlow` against `DirectorySandbox`: a real bundle, a real guest
  * process, real files, and every failure the host can name.
  *
- * Nothing under test is doubled. The provider is the scratch-directory one
+ * The integration provider is the scratch-directory one
  * over the Node filesystem and spawner, the guest is a real `node` (or `bun`)
  * process running the bundle, and the faults below are injected one layer
  * OUTSIDE the module: a wrapping provider that refuses one operation, a
  * runtime command that exits the way a broken image would, an entry the
  * bundler cannot find, and a host-side declaration that drifted from the one
- * the guest ran.
+ * the guest ran. Limit regressions additionally use a controlled guest with
+ * a real filesystem and observable streaming transport.
  */
-import { NodeCrypto } from "@effect/platform-node"
+import { NodeCrypto, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
 import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as Node from "@smthrs/plan/Node"
@@ -26,16 +27,20 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { spawnSync } from "node:child_process"
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { vi } from "vitest"
 import { Action, Engine, Flow, FlowRuntime, Interpreter, RetryPolicy } from "../src/index.ts"
 import * as Guest from "../src/internal/SandboxedFlowGuest.ts"
 import * as SandboxedFlow from "../src/SandboxedFlow.ts"
 import * as childEntry from "./fixtures/sandboxed-child.ts"
 import * as pureEntry from "./fixtures/sandboxed-pure.ts"
+
+vi.mock("effect/Stream", { spy: true })
 
 const { ProviderError } = RemoteChildProcessSpawner
 const { Failing, Filler, Inspector, Sleeper, Sum, Writer } = childEntry
@@ -105,7 +110,29 @@ const faulty = (base: Sandbox.Provider, faults: Faults): Sandbox.Provider => ({
               })
             )
         }
-        : session.files
+        : faults.readFile === undefined ?
+        session.files :
+        {
+          ...session.files,
+          stream: (path) =>
+            Stream.unwrap(
+              (faults.readFile?.(path) === true
+                ? Effect.fail(PlatformError.systemError({
+                  _tag: "Unknown",
+                  module: "FileSystem",
+                  method: "stream",
+                  description: `read refused for ${path}`
+                }))
+                : session.readFile(path).pipe(Effect.mapError(() =>
+                  PlatformError.systemError({
+                    _tag: "Unknown",
+                    module: "FileSystem",
+                    method: "stream",
+                    description: `read failed for ${path}`
+                  })
+                ))).pipe(Effect.map(Stream.succeed))
+            )
+        }
     }))
 })
 
@@ -287,6 +314,365 @@ describe.skipIf(!bunInstalled)("SandboxedFlow.execute under bun", () => {
         runtime: "bun"
       })
       expect(result.output.runtime).toBe("bun")
+    }), 60_000)
+})
+
+/** A real filesystem with a controlled guest and observable readback transport. */
+const limitedGuest = (options: {
+  readonly output?: string
+  readonly files?: ReadonlyArray<string>
+  readonly staleSize?: number
+  readonly noise?: Stream.Stream<Uint8Array, RemoteChildProcessSpawner.ProviderError>
+  readonly resultSize?: number
+  readonly failure?: string
+  readonly native?: boolean
+} = {}) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem.pipe(Effect.provide(NodeFileSystem.layer))
+    const fileError = (cause: unknown) => new ProviderError({ code: "unknown", message: String(cause) })
+    const directory: Sandbox.Provider = {
+      acquire: (key) =>
+        Effect.gen(function*() {
+          const workdir = yield* fs.makeTempDirectoryScoped({ directory: root }).pipe(Effect.mapError(fileError))
+          return {
+            id: key,
+            remoteId: key,
+            workdir,
+            files: { stat: fs.stat, readDirectory: fs.readDirectory, remove: fs.remove },
+            readFile: (path) => fs.readFile(path).pipe(Effect.mapError(fileError)),
+            writeFile: (path, bytes) =>
+              fs.makeDirectory(dirname(path), { recursive: true }).pipe(
+                Effect.andThen(fs.writeFile(path, bytes)),
+                Effect.mapError(fileError)
+              ),
+            spawn: (command) =>
+              Effect.sync(() => {
+                const child = spawnSync("/bin/sh", ["-c", command], { cwd: workdir })
+                return {
+                  stdout: Stream.succeed(child.stdout),
+                  stderr: Stream.succeed(child.stderr),
+                  exitCode: Effect.succeed(child.status ?? 1)
+                }
+              })
+          } satisfies Sandbox.Session
+        })
+    }
+    const reads: Array<string> = []
+    const streamed: Array<{ path: string; bytesToRead: unknown }> = []
+    let attempt = ""
+    const nativeStream: FileSystem.FileSystem["stream"] = (path, settings) => {
+      streamed.push({ path, bytesToRead: settings?.bytesToRead })
+      return fs.stream(path, settings)
+    }
+    const wrapped: Sandbox.Provider = {
+      acquire: (key) =>
+        Effect.map(directory.acquire(key), (session) => ({
+          ...session,
+          writeFile: (path, bytes) => {
+            if (path.endsWith("request.json")) attempt = JSON.parse(new TextDecoder().decode(bytes)).attempt
+            return session.writeFile(path, bytes)
+          },
+          readFile: (path) => {
+            reads.push(path)
+            return session.readFile(path)
+          },
+          files: {
+            ...session.files,
+            stat: (path) =>
+              fs.stat(path).pipe(Effect.map((info) => ({
+                ...info,
+                size: FileSystem.Size(
+                  path.endsWith("result.json")
+                    ? options.resultSize ?? Number(info.size)
+                    : options.staleSize ?? Number(info.size)
+                )
+              }))),
+            ...(options.native === false ? {} : { stream: nativeStream })
+          },
+          spawn: (command, settings) =>
+            Effect.gen(function*() {
+              if (settings.env === undefined) return yield* session.spawn(command, settings)
+              yield* session.writeFile(
+                settings.env!.SMITHERS_SANDBOX_RESULT_PATH!,
+                new TextEncoder().encode(
+                  JSON.stringify(
+                    options.failure === undefined ?
+                      { attempt, status: "succeeded", output: options.output ?? "ok" }
+                      : { attempt, status: "failed", error: options.failure }
+                  )
+                )
+              )
+              for (const [i, content] of (options.files ?? []).entries()) {
+                yield* session.writeFile(`${session.workdir}/file-${i}`, new TextEncoder().encode(content))
+              }
+              return {
+                stdout: options.noise ?? Stream.empty,
+                stderr: options.noise ?? Stream.empty,
+                exitCode: Effect.as(Effect.sleep("20 millis"), 0)
+              }
+            })
+        }))
+    }
+    return { provider: wrapped, reads, streamed }
+  })
+
+describe("sandbox limit boundaries", () => {
+  const resultSize = (output: string) =>
+    new TextEncoder().encode(JSON.stringify({
+      attempt: "x".repeat(36),
+      status: "succeeded",
+      output
+    })).length
+
+  for (const output of ["", "é🌍"]) {
+    for (const extra of [0, 1]) {
+      it.live(
+        `result bytes accept N and reject N+1: ${JSON.stringify(output)}, extra ${extra}`,
+        () =>
+          Effect.gen(function*() {
+            const guest = yield* limitedGuest({ output })
+            const limit = resultSize(output) - extra
+            const exit = yield* SandboxedFlow.execute(pureEntry.Constant, { value: output }, {
+              provider: guest.provider,
+              session: "result-boundary",
+              entry: pure,
+              limits: { resultBytes: limit }
+            }).pipe(Effect.exit)
+            if (extra === 0) expect(Exit.isSuccess(exit) && exit.value.output).toBe(output)
+            else {expect(Exit.isFailure(exit) && exit.cause.reasons[0]).toMatchObject({
+                error: { code: "result_overflow" }
+              })}
+          }),
+        60_000
+      )
+    }
+  }
+
+  for (const bound of ["diffBytes", "files"] as const) {
+    for (const limit of [0, 2]) {
+      for (const extra of [0, 1]) {
+        it.live(`${bound} accepts N and rejects N+1: N=${limit}, extra ${extra}`, () =>
+          Effect.gen(function*() {
+            const contents = bound === "files" ?
+              Array<string>(limit + extra).fill("")
+              : limit === 0
+              ? ["x".repeat(extra)]
+              : ["é", "x".repeat(extra)]
+            const guest = yield* limitedGuest({ files: contents })
+            const exit = yield* SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+              provider: guest.provider,
+              session: "diff-boundary",
+              entry: pure,
+              collectDiff: true,
+              limits: { [bound]: limit }
+            }).pipe(Effect.exit)
+            if (extra === 0) {
+              expect(Exit.isSuccess(exit)).toBe(true)
+              if (Exit.isSuccess(exit)) {
+                expect(
+                  bound === "files" ?
+                    exit.value.diff.length
+                    : exit.value.diff.reduce((sum, file) => sum + file.bytes.length, 0)
+                ).toBe(limit)
+              }
+            } else {expect(Exit.isFailure(exit) && exit.cause.reasons[0]).toMatchObject({
+                error: { code: "diff_overflow" }
+              })}
+          }), 60_000)
+      }
+    }
+  }
+
+  it.live("rejects a zero-byte result budget before downloading", () =>
+    Effect.gen(function*() {
+      const guest = yield* limitedGuest()
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "zero-result",
+        entry: pure,
+        limits: { resultBytes: 0 }
+      }))
+      expect(failure.code).toBe("result_overflow")
+      expect(guest.reads).toEqual([])
+      expect(guest.streamed).toEqual([])
+    }), 60_000)
+
+  it.live("stops a growing result at the byte budget plus one", () =>
+    Effect.gen(function*() {
+      const guest = yield* limitedGuest({ output: "x".repeat(100_000), resultSize: 1 })
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "growing-result",
+        entry: pure,
+        limits: { resultBytes: 100 }
+      }))
+      expect(failure.code).toBe("result_overflow")
+      expect(guest.reads).toEqual([])
+      expect(guest.streamed.map((read) => Number(read.bytesToRead))).toEqual([101])
+    }), 60_000)
+
+  it.live("rejects actual aggregate diff bytes when files grow after stat", () =>
+    Effect.gen(function*() {
+      const guest = yield* limitedGuest({ files: ["é", "abcd"], staleSize: 1 })
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "growing-diff",
+        entry: pure,
+        collectDiff: true,
+        limits: { diffBytes: 5 }
+      }))
+      expect(failure.code).toBe("diff_overflow")
+      expect(guest.reads).toEqual([])
+      expect(
+        guest.streamed.filter((read) => !read.path.endsWith("result.json"))
+          .map((read) => Number(read.bytesToRead))
+      ).toEqual([6, 4])
+    }), 60_000)
+
+  for (const native of [true, false]) {
+    it.live(`bounds a growing diff using ${native ? "native streams" : "guest head"}`, () =>
+      Effect.gen(function*() {
+        const guest = yield* limitedGuest({ files: ["x".repeat(100_000)], staleSize: 1, native })
+        const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+          provider: guest.provider,
+          session: "bounded-transport",
+          entry: pure,
+          collectDiff: true,
+          limits: { diffBytes: 2 }
+        }))
+        expect(failure.code).toBe("diff_overflow")
+        expect(guest.reads).toEqual([])
+      }), 60_000)
+  }
+
+  for (const timeout of [Duration.zero, Duration.millis(5)]) {
+    it.live(`expires a ${Duration.toMillis(timeout)} millisecond budget`, () =>
+      Effect.gen(function*() {
+        const guest = yield* limitedGuest()
+        const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+          provider: guest.provider,
+          session: "short-timeout",
+          entry: pure,
+          timeout
+        }))
+        expect(failure.code).toBe("deadline_exceeded")
+      }), 60_000)
+  }
+
+  for (const timeout of [Duration.infinity, Duration.days(30)]) {
+    it.live(`does not immediately expire ${Duration.toMillis(timeout)} milliseconds`, () =>
+      Effect.gen(function*() {
+        const guest = yield* limitedGuest()
+        const result = yield* SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+          provider: guest.provider,
+          session: "long-timeout",
+          entry: pure,
+          timeout
+        })
+        expect(result.output).toBe("ok")
+      }), 60_000)
+  }
+
+  it.live("redacts credentials across chunks and preserves subsequent UTF-8 diagnostics", () =>
+    Effect.gen(function*() {
+      const credential = "synthetic-output-secret".repeat(400)
+      const bytes = new TextEncoder().encode(`Bearer ${credential}\n${"é".repeat(2100)}🌍 tail`)
+      const noise = Stream.fromIterable(
+        Array.from({ length: Math.ceil(bytes.length / 31) }, (_, i) => bytes.subarray(i * 31, (i + 1) * 31))
+      )
+      const guest = yield* limitedGuest({ noise, failure: "refused" })
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "chunked-diagnostics",
+        entry: pure
+      }))
+      expect(failure.code).toBe("flow_failed")
+      expect(failure.message).not.toContain("synthetic-output-secret")
+      expect(failure.message).toContain("🌍 tail")
+      expect(failure.message.length).toBeLessThan(8400)
+    }), 60_000)
+
+  it.live("redacts multiline private keys while retaining a UTF-8 tail", () =>
+    Effect.gen(function*() {
+      const bytes = new TextEncoder().encode(
+        `-----BEGIN PRIVATE KEY-----\n${"private-material".repeat(800)}\n-----END PRIVATE KEY-----\n${
+          "🌍".repeat(2100)
+        } tail`
+      )
+      const noise = Stream.fromIterable(
+        Array.from({ length: Math.ceil(bytes.length / 31) }, (_, i) => bytes.subarray(i * 31, (i + 1) * 31))
+      )
+      const guest = yield* limitedGuest({ noise, failure: "refused" })
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "private-key-diagnostics",
+        entry: pure
+      }))
+      expect(failure.message).not.toContain("private-material")
+      expect(failure.message).not.toContain("�")
+      expect(failure.message).toContain("🌍 tail")
+    }), 60_000)
+
+  it.live("redacts a JSON credential whose key and value span lines", () =>
+    Effect.gen(function*() {
+      const noise = Stream.fromIterable([
+        new TextEncoder().encode("{\n  \"password\":\n"),
+        new TextEncoder().encode("  \"synthetic-multiline-credential\"\n}\nreadable tail")
+      ])
+      const guest = yield* limitedGuest({ noise, failure: "refused" })
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "json-diagnostics",
+        entry: pure
+      }))
+      expect(failure.message).not.toContain("synthetic-multiline-credential")
+      expect(failure.message).toContain("[REDACTED]")
+      expect(failure.message).toContain("readable tail")
+    }), 60_000)
+
+  it.live("does not expose the suffix of an overlong quoted credential", () =>
+    Effect.gen(function*() {
+      const bytes = new TextEncoder().encode(`{\n"password":\n"${"synthetic-quoted-credential".repeat(400)}"\n}`)
+      const noise = Stream.fromIterable(
+        Array.from({ length: Math.ceil(bytes.length / 31) }, (_, i) => bytes.subarray(i * 31, (i + 1) * 31))
+      )
+      const guest = yield* limitedGuest({ noise, failure: "refused" })
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "quoted-diagnostics",
+        entry: pure
+      }))
+      expect(failure.message).not.toContain("synthetic-quoted-credential")
+      expect(failure.message).toContain("[REDACTED]")
+    }), 60_000)
+
+  it.live("drains noisy streams without a whole-output string collector", () =>
+    Effect.gen(function*() {
+      const collector = vi.spyOn(Stream, "mkString").mockClear()
+      let drained = 0
+      const bytes = new TextEncoder().encode("x".repeat(16_384))
+      const noise = Stream.fromIterable(Array.from({ length: 256 }, () => bytes)).pipe(
+        Stream.tap(() =>
+          Effect.sync(() => {
+            drained++
+          })
+        )
+      )
+      try {
+        const guest = yield* limitedGuest({ noise, failure: "noisy failure" })
+        const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+          provider: guest.provider,
+          session: "noisy",
+          entry: pure
+        }))
+        expect(failure.code).toBe("flow_failed")
+        expect(failure.message).toContain(`stdout: …${"x".repeat(4096)}; stderr: …${"x".repeat(4096)}`)
+        expect(failure.message.length).toBeLessThan(8400)
+        expect(drained).toBe(512)
+        expect(collector).not.toHaveBeenCalled()
+      } finally {
+        collector.mockRestore()
+      }
     }), 60_000)
 })
 
@@ -1026,12 +1412,20 @@ describe("the guest runner in process", () => {
         acquire: (key) =>
           Effect.map(directory.acquire(key), (session) => ({
             ...session,
-            readFile: (path) =>
-              session.readFile(path).pipe(Effect.map((current) => {
-                if (!path.endsWith("/result.json")) return current
-                const { attempt } = JSON.parse(new TextDecoder().decode(current))
-                return new TextEncoder().encode(JSON.stringify({ ...result, attempt }))
-              }))
+            files: {
+              ...session.files,
+              stream: (path) =>
+                Stream.unwrap(
+                  session.readFile(path).pipe(
+                    Effect.orDie,
+                    Effect.map((current) => {
+                      if (!path.endsWith("/result.json")) return Stream.succeed(current)
+                      const { attempt } = JSON.parse(new TextDecoder().decode(current))
+                      return Stream.succeed(new TextEncoder().encode(JSON.stringify({ ...result, attempt })))
+                    })
+                  )
+                )
+            }
           }))
       }
     })))

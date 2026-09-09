@@ -62,7 +62,10 @@ nested path arrives as its files.
 ## Bound what comes back
 
 The limits are shared with the result readback. Any bound you omit keeps its
-default.
+default. Bounds are inclusive: exactly the configured count or byte total is
+accepted. A zero diff budget permits empty files; a zero file budget permits
+no changed files. A zero result budget rejects every protocol result. Byte
+limits count encoded bytes, including multibyte UTF-8 and the result envelope.
 
 | Bound         | Default | What it caps                                      |
 | ------------- | ------- | ------------------------------------------------- |
@@ -84,8 +87,13 @@ const bounded = SandboxedFlow.execute(Writer, { count: 3 }, {
 want to derive from it.
 
 Exceeding a diff bound fails the execution with `diff_overflow`, and exceeding
-`resultBytes` fails it with `result_overflow`. Both messages quote the measured
-value and the limit, so raising the right bound needs no guessing.
+`resultBytes` fails it with `result_overflow`. Metadata sizes can refuse a read early. Readback stops at the remaining
+byte budget plus one, and actual bytes count toward the aggregate diff limit
+before a file is appended. A file that grows after the snapshot cannot bypass
+the bound. Native filesystem streams receive a bounded read request; other
+providers run `head -c` in the guest to bound transfer. The guest image must
+provide `head` with `-c` support. Overflow messages report the limit; a bounded
+read need not discover the full size of an oversized file.
 
 ## Journal the diff
 

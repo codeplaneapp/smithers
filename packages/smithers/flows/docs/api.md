@@ -421,6 +421,19 @@ const defaultLimits: ResolvedLimits
 | `diffBytes`   | 100 MiB | The total bytes collected across the diff.        |
 | `files`       | 1,000   | The number of created or resized files collected. |
 
+Limits are inclusive and count bytes, not characters. `resultBytes` includes
+the complete UTF-8 JSON envelope. Metadata can reject oversized files before
+transfer; reads stop at the byte budget plus one. Actual bytes, including any
+growth after stat, count toward `diffBytes` before each entry is appended.
+Native filesystem streams receive `bytesToRead`; other providers use guest
+`head -c`, which the image must supply. Zero permits no result bytes, no diff
+bytes (empty files are allowed), or no changed files, respectively.
+
+Guest stdout and stderr are drained concurrently with fixed-size diagnostic
+tails retaining at most 4 KiB each, plus a truncation marker. Redaction runs during collection; when a credential
+continues beyond a retained segment, the rest of that line is omitted. An
+overlong unfinished quoted credential suppresses the rest of that stream.
+
 ### `ExecuteOptions`
 
 | Field         | Type               | Default         | Meaning                                                                                                                                                                                                                        |
@@ -431,7 +444,7 @@ const defaultLimits: ResolvedLimits
 | `runtime`     | `string`           | `"node"`        | The guest executable that runs the bundle: `"node"`, `"bun"`, or an executable path. Each path is quoted as one shell word. Use a wrapper script for flags.                                                                    |
 | `collectDiff` | `boolean`          | `false`         | Whether to collect the files the guest created or resized.                                                                                                                                                                     |
 | `limits`      | `Limits`           | `defaultLimits` | Bounds on the result and the diff.                                                                                                                                                                                             |
-| `timeout`     | `Duration.Input`   | 10 minutes      | The wall-clock budget for the whole session, acquisition through result readback. Measured on the platform timer, so it fires under a frozen test clock too.                                                                   |
+| `timeout`     | `Duration.Input`   | 10 minutes      | The wall-clock budget for the whole session, acquisition through result readback. Uses platform timers, including chunked timers for long finite budgets. `Duration.infinity` disables the deadline.                           |
 
 ### `DiffEntry`, `Diff`, and `Result`
 
