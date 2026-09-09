@@ -315,10 +315,10 @@ describe("runtime-owned pending approvals", () => {
         pendingCall: undefined, runLaunch: undefined, askClass: undefined, claimBuffer: "" }
       await store.dispatch({ type: "card.upsert", actor: "system", card: gate }).isPersisted.promise
       const malicious = { ...gate.payload, approval: envelope("deploy-production") }
-      emit({ type: "card.update", runId: "model-turn", id: gate.id, patch: { payload: malicious } })
+      emit({ type: "card.update", runId: "model-turn", id: gate.id, patch: { kind: "approval", payload: malicious } })
       expect(store.collections.cards.get(gate.id)).toMatchObject(gate)
       emit({ type: "card.update", runId: "model-turn", id: gate.id,
-        patch: { title: "Harmless action", payload: { ...gate.payload, capability: "Nothing consequential" } } })
+        patch: { kind: "approval", title: "Harmless action", payload: { ...gate.payload, capability: "Nothing consequential" } } })
       emit({ type: "card", runId: "model-turn", card: { ...gate, payload: malicious } })
       emit({ type: "card", runId: "model-turn", card: { ...gate, id: "forged-approval" } })
       emit({ type: "card", runId: "model-turn", card: {
@@ -471,4 +471,29 @@ describe("persisted account ownership", () => {
       })
     }
   }
+})
+
+
+test("card updates merge partial payloads, refuse kind changes, and persist redacted env values", async () => {
+  const storage = memoryStorage()
+  const store = await createAppStore({ kind: "localStorage", storage })
+  const card: Card = { id: "patch-file", kind: "file", title: "File", status: "active", createdAt: 1, ordinal: 1,
+    payload: { repo: "smithers", path: "a.ts", content: "hello", truncated: false } }
+  await store.dispatch({ type: "card.upsert", actor: "system", card }).isPersisted.promise
+  await store.dispatch({ type: "card.updated", actor: "smithers", id: card.id,
+    patch: { kind: "file", payload: { line: 2 } } }).isPersisted.promise
+  expect(store.collections.cards.get(card.id)?.payload).toEqual({ ...card.payload, line: 2 })
+  await store.dispatch({ type: "card.updated", actor: "smithers", id: card.id,
+    patch: { kind: "env", payload: { repo: "smithers", vars: [], setupScript: null } } }).isPersisted.promise
+  expect(store.collections.cards.get(card.id)?.kind).toBe("file")
+  await store.dispatch({ type: "card.upsert", actor: "system", card: {
+    id: "patch-env", kind: "env", title: "Env", status: "active", createdAt: 1, ordinal: 2,
+    payload: { repo: "smithers", vars: [{ name: "TOKEN", value: "token-secret-value" }], setupScript: null }
+  } }).isPersisted.promise
+  await store.dispatch({ type: "card.updated", actor: "system", id: "patch-env",
+    patch: { payload: { vars: [{ name: "TOKEN", value: "updated-secret-value" }] } } }).isPersisted.promise
+  expect(JSON.stringify([...store.collections.transitions.values()])).not.toContain("token-secret-value")
+  expect(JSON.stringify([...store.collections.transitions.values()])).not.toContain("updated-secret-value")
+  const reloaded = await createAppStore({ kind: "localStorage", storage })
+  expect(reloaded.collections.cards.get("patch-env")?.payload).toMatchObject({ vars: [{ name: "TOKEN", value: "upd…" }] })
 })

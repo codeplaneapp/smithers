@@ -565,7 +565,7 @@ export type SearchItem = z.infer<typeof SearchItemSchema>
  * @since 1.0.0
  * @category schemas
  */
-export const CardSchema = z.discriminatedUnion("kind", [
+const CurrentCardSchema = z.discriminatedUnion("kind", [
   z.object({
     ...cardBaseShape,
     kind: z.literal("plan"),
@@ -1099,7 +1099,15 @@ export const CardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("env"),
     payload: z.object({
       repo: z.string(),
-      vars: z.array(z.object({ name: z.string(), value: z.string() })),
+      /**
+       * Display-only values: decoding keeps at most three leading characters
+       * and replaces the rest with an ellipsis. Short values are fully masked.
+       * Raw values must be re-read upstream; never persist them in a card.
+       */
+      vars: z.array(z.object({
+        name: z.string(),
+        value: z.string().transform((value) => value.length > 3 ? `${value.slice(0, 3)}…` : "…")
+      })),
       setupScript: z.string().nullable()
     })
   }),
@@ -2141,6 +2149,96 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   })
 ])
+// The last agent-form wire shape before 13585bde95. Validate before
+// migrating so malformed rows still follow the storage quarantine path.
+const LegacyAgentFormCardSchema = z.object({
+  ...cardBaseShape,
+  kind: z.literal("agent-form"),
+  payload: z.object({
+    mode: z.enum(["create", "edit"]),
+    draft: z.object({
+      id: z.string(),
+      label: z.string(),
+      purpose: z.string(),
+      harness: z.enum(HARNESS_IDS).optional(),
+      model: z.string()
+    }),
+    harnesses: z.array(z.object({
+      id: z.enum(HARNESS_IDS),
+      displayName: z.string(),
+      status: z.enum(["signed-in", "api-key", "binary-only", "unavailable"]),
+      account: z.string()
+    })),
+    models: z.array(z.string()),
+    modelsSource: z.enum(["list", "suggestions"]).optional(),
+    modelsReason: z.string().optional(),
+    phase: z.enum(["editing", "saving", "saved", "cancelled", "failed"]),
+    error: z.string().optional()
+  })
+})
+
+/**
+ * Decodes current cards and upgrades historical agent-form drafts, including
+ * cards embedded in snapshots, before validating the current contract.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const CardSchema = Object.assign(
+  z.preprocess((value: z.input<typeof CurrentCardSchema> | z.input<typeof LegacyAgentFormCardSchema>) => {
+    if (typeof value !== "object" || value === null || !("kind" in value) || value.kind !== "agent-form") return value
+    const legacy = LegacyAgentFormCardSchema.safeParse(value)
+    if (!legacy.success) return value
+    const { payload, ...base } = legacy.data
+    const creating = payload.mode === "create"
+    return {
+      ...base,
+      kind: "flow-form",
+      status: payload.phase === "saved" || payload.phase === "cancelled" ? "acted" : base.status,
+      payload: {
+        flow: creating ? "agent.create" : "agent.edit",
+        via: "user",
+        fields: [
+          ...(creating ?
+            [
+              { name: "id", label: "Id", kind: "text", required: true },
+              {
+                name: "harness",
+                label: "Harness",
+                kind: "select",
+                required: true,
+                optionsFrom: "agent-harnesses",
+                options: payload.harnesses.map((harness) => ({
+                  value: harness.id,
+                  label: harness.displayName,
+                  disabled: harness.status === "binary-only" || harness.status === "unavailable",
+                  reason: harness.status
+                }))
+              }
+            ] :
+            []),
+          {
+            name: "model",
+            label: "Model",
+            kind: "text",
+            required: creating,
+            optionsFrom: "harness-models",
+            options: payload.models.map((model) => ({ value: model, label: model }))
+          },
+          { name: "purpose", label: "Purpose", kind: "text", required: false },
+          { name: "label", label: "Label", kind: "text", required: false }
+        ],
+        // Optional harnesses must be absent rather than undefined: the current
+        // draft is a record of scalar values, not an object with optional keys.
+        draft: Object.fromEntries(Object.entries(payload.draft).filter(([, entry]) => entry !== undefined)),
+        given: creating ? {} : { id: payload.draft.id },
+        ...(payload.error === undefined ? {} : { error: payload.error })
+      }
+    }
+  }, CurrentCardSchema),
+  { options: CurrentCardSchema.options }
+)
+
 /**
  * The decoded value accepted by {@link CardSchema}.
  *
@@ -2149,20 +2247,41 @@ export const CardSchema = z.discriminatedUnion("kind", [
  */
 export type Card = z.infer<typeof CardSchema>
 
+type ShallowPatch<T> = { [K in keyof T]?: T[K] | undefined }
+type PatchFor<C extends Card> = C extends Card
+  ? Pick<C, "kind"> & ShallowPatch<Pick<C, "title" | "body" | "status" | "createdAt" | "ordinal">> & {
+    payload?: (C extends { kind: "repo-onboarding" } ? C["payload"] : ShallowPatch<C["payload"]>) | undefined
+  }
+  : never
+
+// Derive each branch from the card itself so enums, caps and redaction cannot
+// drift. A stage-changing onboarding payload is an atomic replacement: the
+// required fields depend on the new stage and cannot be partially inherited.
+const cardPatchOptions = CurrentCardSchema.options.map((card) => {
+  const payload = card.shape.payload
+  return z.object({
+    kind: card.shape.kind,
+    title: cardBaseShape.title.optional(),
+    body: cardBaseShape.body,
+    status: cardBaseShape.status.optional(),
+    createdAt: cardBaseShape.createdAt.optional(),
+    ordinal: cardBaseShape.ordinal.optional(),
+    payload: (payload instanceof z.ZodObject ? payload.partial() : payload).optional()
+  })
+})
+
 /**
- * Validates card patch values at the RPC boundary.
+ * Validates kind-specific, shallow payload patches at the RPC boundary.
+ * Consumers must match the existing kind and validate the merged card.
  *
  * @since 1.0.0
  * @category schemas
  */
-export const CardPatchSchema = z.object({
-  title: z.string().optional(),
-  body: z.string().optional(),
-  status: z.enum(["active", "acted", "error"]).optional(),
-  payload: z.unknown().optional(),
-  createdAt: z.number().optional(),
-  ordinal: z.number().int().nonnegative().optional()
-})
+export const CardPatchSchema: z.ZodType<PatchFor<Card>> = z.discriminatedUnion(
+  "kind",
+  cardPatchOptions as [typeof cardPatchOptions[number], ...Array<typeof cardPatchOptions[number]>]
+) as z.ZodType<PatchFor<Card>>
+
 /**
  * The decoded value accepted by {@link CardPatchSchema}.
  *

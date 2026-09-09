@@ -140,7 +140,7 @@ describe("createCloudAgent", () => {
       fetchImpl: async () =>
         ndjsonResponse([
           { type: "card", card: planCard },
-          { type: "card.update", id: "card-plan", patch: { status: "acted" } },
+          { type: "card.update", id: "card-plan", patch: { kind: "plan", status: "acted" } },
           { type: "card", card: { id: "card-bad", kind: "nonsense" } },
           { type: "done" }
         ])
@@ -150,7 +150,7 @@ describe("createCloudAgent", () => {
     await until(() => frames.some((frame) => frame.type === "done"), "the card turn's done frame")
     expect(frames).toEqual([
       { runId: "run-1", type: "card", card: planCard },
-      { runId: "run-1", type: "card.update", id: "card-plan", patch: { status: "acted" } },
+      { runId: "run-1", type: "card.update", id: "card-plan", patch: { kind: "plan", status: "acted" } },
       { runId: "run-1", type: "done" }
     ])
   })

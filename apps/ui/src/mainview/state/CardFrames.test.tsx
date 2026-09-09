@@ -110,7 +110,7 @@ describe("server-emitted card frames", () => {
       scriptedAgent([
         { runId: "turn", type: "card", card: planCard },
         { runId: "turn", type: "card", card: statusCard },
-        { runId: "turn", type: "card.update", id: "card-status", patch: { payload: { progress: 1 } } },
+        { runId: "turn", type: "card.update", id: "card-status", patch: { kind: "status", payload: { progress: 1 } } },
         { runId: "turn", type: "delta", kind: "text", text: "Cards are live." },
         { runId: "turn", type: "done" }
       ])

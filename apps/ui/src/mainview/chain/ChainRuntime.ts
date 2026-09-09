@@ -129,8 +129,8 @@ const surfaceEntries = (emit: Emit, runId: string, store: AppStore): ReadonlyArr
       }
       return Effect.sync(() => {
         const payload = patch.data.payload
-        const untrusted = typeof payload === "object" && payload !== null && !Array.isArray(payload) && "via" in payload
-          ? { ...patch.data, payload: { ...payload, via: "agent" } }
+        const untrusted = patch.data.kind === "flow-form" && payload !== undefined
+          ? { ...patch.data, payload: { ...patch.data.payload, via: "agent" as const } }
           : patch.data
         emit({ runId, type: "card.update", id: record.id as string, patch: untrusted })
         return { updated: record.id }

@@ -116,16 +116,19 @@ export const createTurnController = (
     const patch = CardPatchSchema.safeParse(frame.patch)
     const existing = store.collections.cards.get(frame.id)
     if (isRuntimeOwnedCard(existing) || store.approvalRequest(frame.id) !== undefined) return
-    if (!patch.success || existing === undefined) {
+    if (!patch.success || existing === undefined || patch.data.kind !== existing.kind) {
       console.warn("Smithers dropped a card.update frame for an unknown or invalid card", frame.id)
       return
     }
-    const merged = CardSchema.safeParse({ ...existing, ...patch.data, id: existing.id })
+    const merged = CardSchema.safeParse({ ...existing, ...patch.data, id: existing.id,
+      payload: patch.data.payload === undefined ? existing.payload :
+        existing.kind === "repo-onboarding" ? patch.data.payload : { ...existing.payload, ...patch.data.payload }
+    })
     if (!merged.success) {
       console.warn("Smithers dropped a card.update frame that fails schema", merged.error)
       return
     }
-    store.dispatch({ type: "card.updated", actor: "smithers", id: frame.id, patch: patch.data })
+    store.dispatch({ type: "card.updated", actor: "smithers", id: frame.id, patch: merged.data })
   }
 
   /** The transcript as the chat contract reads it: no tool-act lines, no empty bubbles. */

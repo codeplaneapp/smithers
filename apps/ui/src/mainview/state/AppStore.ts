@@ -32,6 +32,7 @@ import {
   BillingAccountSchema,
   BranchSchema,
   CardSchema,
+  CardPatchSchema,
   cardFrameId,
   ChainEventRecordSchema,
   RetiredChainLineageSchema,
@@ -1102,6 +1103,14 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
   }
 
   const dispatch = (transition: AppTransition): Transaction => {
+    // The transition journal persists its input as well as the card collection.
+    // Redact before either writer or the verbose trace can observe env values.
+    if (transition.type === "card.upsert" && transition.card.kind === "env") {
+      transition = { ...transition, card: CardSchema.parse(transition.card) }
+    } else if (transition.type === "card.updated" &&
+      (transition.patch.kind ?? collections.cards.get(transition.id)?.kind) === "env") {
+      transition = { ...transition, patch: CardPatchSchema.parse({ ...transition.patch, kind: "env" }) }
+    }
     const current = session()
     const revision = current.revision + 1
     const createdAt = Date.now()
@@ -2003,7 +2012,17 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           if (existing === undefined) return
           if (existing.kind === "approval") return
           if (existing.kind === "approvals-inbox" && transition.actor === "smithers") return
-          let patch = transition.patch
+          if (transition.patch.kind !== undefined && transition.patch.kind !== existing.kind) return
+          const decoded = CardPatchSchema.safeParse({ ...transition.patch, kind: existing.kind })
+          if (!decoded.success) return
+          const candidate = CardSchema.safeParse({
+            ...existing,
+            ...decoded.data,
+            payload: decoded.data.payload === undefined ? existing.payload :
+              existing.kind === "repo-onboarding" ? decoded.data.payload : { ...existing.payload, ...decoded.data.payload }
+          })
+          if (!candidate.success) return
+          let patch: typeof transition.patch = candidate.data
           if (existing.kind === "approvals-inbox") {
             const trusted = approvalRequest(transition.id)
             const merged = CardSchema.safeParse({ ...existing, ...patch })

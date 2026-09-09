@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest"
-import { CardSchema } from "../src/Cards.ts"
+import { z } from "zod"
+import { CardPatchSchema, CardSchema } from "../src/Cards.ts"
 import { LSP_DIAGNOSTICS_CAP } from "../src/LocalApp.ts"
+import { AgentTurnFrameSchema } from "../src/NativeAgent.ts"
 
 const base = { id: "card-r1", title: "Aomi", status: "active", createdAt: 0, ordinal: 0 }
 
@@ -222,14 +224,6 @@ describe("the agent cards", () => {
     expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, via: "system" } }).success).toBe(
       false
     )
-    // The hand-made agent form is gone: the generic card is the only form.
-    expect(
-      CardSchema.safeParse({
-        ...base,
-        kind: "agent-form",
-        payload: { mode: "create", draft: {}, harnesses: [], models: [], phase: "editing" }
-      }).success
-    ).toBe(false)
   })
 
   test("the models card is what the harness printed, with its source", () => {
@@ -263,5 +257,129 @@ describe("the agent cards", () => {
     expect(CardSchema.safeParse({ ...base, kind: "agent", payload: { ...payload, roleId: "Not An Id" } }).success).toBe(
       false
     )
+  })
+})
+
+describe("persisted card upgrades", () => {
+  const draft = { id: "reviewer", label: "Reviewer", purpose: "Review diffs", harness: "codex", model: "gpt-5.6-terra" }
+  const legacy = {
+    ...base,
+    kind: "agent-form",
+    payload: {
+      mode: "create",
+      draft,
+      harnesses: [{ id: "codex", displayName: "Codex", status: "api-key", account: "" }],
+      models: ["gpt-5.6-terra"],
+      modelsSource: "suggestions",
+      phase: "editing"
+    }
+  }
+
+  test.each(["create", "edit"])("upgrades a historical %s draft, including embedded snapshots", (mode) => {
+    const saved = { ...legacy, payload: { ...legacy.payload, mode } }
+    const card = CardSchema.parse(JSON.parse(JSON.stringify(saved)))
+    expect(card.id).toBe(legacy.id)
+    expect(card.kind).toBe("flow-form")
+    if (card.kind !== "flow-form") throw new Error("draft was not upgraded")
+    expect(card.payload.flow).toBe(`agent.${mode}`)
+    expect(card.payload.draft).toEqual(draft)
+    expect(card.payload.via).toBe("user")
+    expect(card.payload.fields.map((field) => field.name)).toEqual(
+      mode === "create" ? ["id", "harness", "model", "purpose", "label"] : ["model", "purpose", "label"]
+    )
+    expect(card.payload.given).toEqual(mode === "edit" ? { id: draft.id } : {})
+    expect(z.object({ cards: z.array(CardSchema) }).parse({ cards: [saved] }).cards).toEqual([card])
+    expect(CardSchema.parse(card)).toEqual(card)
+  })
+
+  test("keeps settled forms settled and interrupted saves editable", () => {
+    for (const phase of ["saved", "cancelled", "saving", "failed"]) {
+      const card = CardSchema.parse({ ...legacy, payload: { ...legacy.payload, phase, error: "last refusal" } })
+      expect(card.status).toBe(phase === "saved" || phase === "cancelled" ? "acted" : base.status)
+      expect(card.payload).toMatchObject({ draft, error: "last refusal" })
+    }
+  })
+
+  test("does not upgrade a malformed historical row", () => {
+    expect(CardSchema.safeParse({ ...legacy, payload: { ...legacy.payload, draft: {} } }).success).toBe(false)
+  })
+})
+
+describe("card patch validation", () => {
+  test("the native card.update frame requires the same kind validation", () => {
+    expect(
+      AgentTurnFrameSchema.safeParse({
+        runId: "run-1",
+        type: "card.update",
+        id: base.id,
+        patch: { kind: "file", payload: { line: 0 } }
+      }).success
+    ).toBe(false)
+    expect(
+      AgentTurnFrameSchema.safeParse({
+        runId: "run-1",
+        type: "card.update",
+        id: base.id,
+        patch: { kind: "file", payload: { line: 1 } }
+      }).success
+    ).toBe(true)
+  })
+
+  test("metadata is optional but kind is required; nested stage payloads remain atomic", () => {
+    expect(CardPatchSchema.parse({ kind: "file", title: "After" })).toEqual({ kind: "file", title: "After" })
+    expect(CardPatchSchema.safeParse({ title: "After" }).success).toBe(false)
+    expect(CardPatchSchema.safeParse({ kind: "repo-onboarding", payload: { stage: "welcome" } }).success).toBe(false)
+    expect(
+      CardPatchSchema.safeParse({
+        kind: "repo-onboarding",
+        payload: { stage: "welcome", repo: "smithers", summary: null }
+      }).success
+    ).toBe(true)
+    expect(CardPatchSchema.safeParse({ kind: "agent", payload: { roleId: "Bad Id" } }).success).toBe(false)
+  })
+
+  const diagnostic = { line: 1, character: 1, endLine: 1, endCharacter: 2, severity: "error", message: "bad" }
+  test("refuses file diagnostics above the cap on card.update", () => {
+    expect(
+      CardPatchSchema.safeParse({
+        kind: "file",
+        payload: {
+          diagnostics: Array.from({ length: LSP_DIAGNOSTICS_CAP + 1 }, () => diagnostic)
+        }
+      }).success
+    ).toBe(false)
+  })
+  test("accepts partial file payloads at the cap and rejects invalid anchors and missing kinds", () => {
+    expect(CardPatchSchema.parse({
+      kind: "file",
+      payload: {
+        diagnostics: Array.from({ length: LSP_DIAGNOSTICS_CAP }, () => diagnostic)
+      }
+    })).toMatchObject({ kind: "file" })
+    expect(CardPatchSchema.safeParse({ kind: "file", payload: { line: 0 } }).success).toBe(false)
+    expect(CardPatchSchema.safeParse({ payload: { line: 1 } }).success).toBe(false)
+    expect(CardPatchSchema.safeParse({ kind: "file", payload: { intel: { state: "installing" } } }).success).toBe(false)
+  })
+})
+
+describe("env card persistence", () => {
+  test("redacts values on initial decoding, patches, and repeated reads", () => {
+    const vars = [{ name: "DATABASE_URL", value: "postgres://user:password@host/db" }, { name: "PIN", value: "12" }]
+    const card = CardSchema.parse({
+      ...base,
+      kind: "env",
+      payload: { repo: "smithers", vars, setupScript: null, secretNames: ["TOKEN"] }
+    })
+    expect(card.payload).toMatchObject({ vars: [{ name: "DATABASE_URL", value: "pos…" }, { name: "PIN", value: "…" }] })
+    expect(JSON.stringify(card)).not.toContain("password")
+    expect(CardSchema.parse(card)).toEqual(card)
+    expect(CardPatchSchema.parse({ kind: "env", payload: { vars } })).toMatchObject({
+      payload: {
+        vars: [
+          { name: "DATABASE_URL", value: "pos…" },
+          { name: "PIN", value: "…" }
+        ]
+      }
+    })
   })
 })

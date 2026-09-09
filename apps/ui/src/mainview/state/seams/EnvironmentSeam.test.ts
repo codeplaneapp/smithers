@@ -163,7 +163,7 @@ describe("environment seam — env.view", () => {
     expect(card?.title).toBe("Agent environment · will/flows")
     expect(card?.status).toBe("active")
     expect(card?.payload.repo).toBe("will/flows")
-    expect(card?.payload.vars).toEqual([{ name: "CI", value: "1" }])
+    expect(card?.payload.vars).toEqual([{ name: "CI", value: "…" }])
     expect(card?.payload.setupScript).toBe("bun install")
     // Secrets are the secrets card's: not even their names ride on the env card.
     expect(JSON.stringify(card)).not.toContain("NPM_TOKEN")
@@ -204,9 +204,9 @@ describe("environment seam — env.set", () => {
     expect(first.status).toBe("executed")
     expect(second.status).toBe("executed")
     expect(envCard(store)?.payload.vars).toEqual([
-      { name: "CI", value: "1" },
-      { name: "FIRST", value: "1" },
-      { name: "SECOND", value: "2" }
+      { name: "CI", value: "…" },
+      { name: "FIRST", value: "…" },
+      { name: "SECOND", value: "…" }
     ])
   })
 
@@ -233,8 +233,8 @@ describe("environment seam — env.set", () => {
 
     const card = envCard(store)
     expect(card?.payload.vars).toEqual([
-      { name: "CI", value: "1" },
-      { name: "NODE_ENV", value: "production" }
+      { name: "CI", value: "…" },
+      { name: "NODE_ENV", value: "pro…" }
     ])
     expect(card?.payload.setupScript).toBe("bun install")
   })
@@ -248,7 +248,7 @@ describe("environment seam — env.set", () => {
       setup_script: "bun install",
       env: [{ name: "CI", value: "0" }]
     })
-    expect(envCard(store)?.payload.vars).toEqual([{ name: "CI", value: "0" }])
+    expect(envCard(store)?.payload.vars).toEqual([{ name: "CI", value: "…" }])
   })
 
   test("a value carrying = signs splits on the FIRST = only", async () => {

@@ -1339,7 +1339,9 @@ export type AppTransition =
     id: string
   }
   | { type: "card.upsert"; actor: Actor; card: Card }
-  | { type: "card.updated"; actor: Actor; id: string; patch: CardPatch }
+  // Local producers may omit kind: the store binds it to the existing card.
+  // RPC producers must pass the discriminated CardPatchSchema instead.
+  | { type: "card.updated"; actor: Actor; id: string; patch: Omit<CardPatch, "kind"> & { kind?: Card["kind"] } }
   | {
     type: "card.approval.decision.pending"
     actor: "user"
