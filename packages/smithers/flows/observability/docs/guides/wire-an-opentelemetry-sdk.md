@@ -61,15 +61,18 @@ import * as BrowserOtel from "@smthrs/observability/BrowserOtel"
 
 const telemetry = BrowserOtel.layerOtel({
   resource: { serviceName: "console-ui" },
-  spanProcessor: new BatchSpanProcessor(
-    new OTLPTraceExporter({ url: "https://otlp.example.com/v1/traces" })
-  )
+  spanProcessor: () =>
+    new BatchSpanProcessor(
+      new OTLPTraceExporter({ url: "https://otlp.example.com/v1/traces" })
+    )
 })
 ```
 
 Every processor field is optional, and a layer with none still builds: it
-provides the resource and bridges nothing. Pass an array to install several
-processors for one signal.
+provides the resource and bridges nothing. Return an array to install several
+processors for one signal. Each field is a factory because the layer owns what
+it returns: the factory runs once at acquisition, and the web SDK shuts down
+every processor and reader when the scope closes.
 
 If all you need in a browser is OTLP delivery, use `Otlp.layerFetch` instead.
 It is smaller, needs no SDK, and is browser-safe by construction.
@@ -77,14 +80,16 @@ It is smaller, needs no SDK, and is browser-safe by construction.
 ## Bridge providers you control
 
 `Otel.layerOtel` allocates no exporter at all. It takes an OpenTelemetry
-`TracerProvider`, `LoggerProvider`, and metric readers, and bridges Effect's
-tracer, logger, and metrics onto them. Provider fields also accept synchronous
-factories. Each factory runs during layer acquisition, after resource validation,
-and receives the same resource as the metric producer. Pass it to the SDK
-constructor to export all signals with the configured service identity:
+`TracerProvider` and `LoggerProvider`, plus a factory that builds the metric
+readers, and bridges Effect's tracer, logger, and metrics onto them. Provider
+fields also accept synchronous factories. Every factory runs during layer
+acquisition, after resource validation, and the provider factories receive the
+same resource as the metric producer. Pass it to the SDK constructor to export
+all signals with the configured service identity:
 
 ```ts
 import { LoggerProvider } from "@opentelemetry/sdk-logs"
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics"
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base"
 import * as Otel from "@smthrs/observability/Otel"
 import * as Effect from "effect/Effect"
@@ -97,15 +102,17 @@ const telemetry = Otel.layerOtel({
     serviceVersion: "2.4.1",
     attributes: { region: "us-west" }
   },
-  tracerProvider: (resource) => tracerProvider = new BasicTracerProvider({
-    resource,
-    spanProcessors: [spanProcessor]
-  }),
-  loggerProvider: (resource) => loggerProvider = new LoggerProvider({
-    resource,
-    processors: [logRecordProcessor]
-  }),
-  metricReader,
+  tracerProvider: (resource) =>
+    tracerProvider = new BasicTracerProvider({
+      resource,
+      spanProcessors: [spanProcessor]
+    }),
+  loggerProvider: (resource) =>
+    loggerProvider = new LoggerProvider({
+      resource,
+      processors: [logRecordProcessor]
+    }),
+  metricReader: () => new PeriodicExportingMetricReader({ exporter: metricExporter }),
   metricTemporality: "cumulative"
 })
 
@@ -116,10 +123,14 @@ try {
 }
 ```
 
-Construct `spanProcessor`, `logRecordProcessor`, and `metricReader` with your
-exporters before building the layer. The application owns provider flushing and
-shutdown, including providers returned by factories. The metric bridge manages
-its supplied readers through the layer scope.
+Ownership splits between the two kinds of field. Providers are borrowed: the
+application owns their flushing and shutdown, including providers returned by
+factories, and this layer never shuts one down. Readers are owned: the
+`metricReader` factory runs once during acquisition, and closing the scope shuts
+down every reader it returned. Build the readers inside the factory rather than
+handing over one a longer-lived composition still exports through, which that
+shutdown would disable. Construct `spanProcessor` and `logRecordProcessor` with
+your exporters and give them to the provider you build.
 
 You can still pass existing providers directly. The layer cannot change the
 resource they captured at construction. In that form, the resource option
@@ -128,9 +139,9 @@ attributes. Construct both providers with the intended resource before injection
 or use the factories above to receive the validated resource.
 
 Each of the three is optional and each is bridged only when supplied, so a
-composition with a tracer and no meter installs only the tracer bridge. An
-empty `metricReader` array is treated as no metrics at all rather than as a
-misconfigured reader.
+composition with a tracer and no meter installs only the tracer bridge. A
+`metricReader` factory that returns an empty array registers no reader at all
+rather than a misconfigured one.
 
 Two options control merge behavior: `loggerMergeWithExisting` keeps the ambient
 Effect loggers alongside the OpenTelemetry logger, and `metricTemporality`

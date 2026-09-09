@@ -1,6 +1,9 @@
-import { Effect, Metric } from "effect"
+import { InMemoryLogRecordExporter, SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs"
+import { InMemoryMetricExporter, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics"
+import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base"
+import { Effect, Logger, Metric } from "effect"
 import { createServer, type Server } from "node:http"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as BrowserOtel from "../src/BrowserOtel.ts"
 import * as NodeOtel from "../src/NodeOtel.ts"
 
@@ -116,6 +119,40 @@ describe("NodeOtel.layerOtel", () => {
   })
 })
 
+/**
+ * The browser layer forwards caller-built processors and readers into the web
+ * SDK, which owns them: it shuts each one down when the scope closes. The
+ * in-memory exporters clear themselves on that shutdown, so every signal is
+ * read inside the scope and asserted after it.
+ */
+const emitAndRead = <A>(
+  options: BrowserOtel.Options,
+  metricReaders: ReadonlyArray<PeriodicExportingMetricReader>,
+  read: () => A
+) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      yield* Effect.void.pipe(Effect.withSpan("browser-span"))
+      yield* Effect.logInfo("browser record")
+      yield* Metric.update(Metric.counter("browser.records"), 2)
+      for (const reader of metricReaders) yield* Effect.promise(() => reader.forceFlush())
+      return read()
+    }).pipe(
+      Effect.provide(BrowserOtel.layerOtel(options)),
+      Effect.provideService(Metric.MetricRegistry, new Map()),
+      Effect.scoped
+    )
+  )
+
+const spanNames = (exporter: InMemorySpanExporter) => exporter.getFinishedSpans().map((span) => span.name)
+const logBodies = (exporter: InMemoryLogRecordExporter) => exporter.getFinishedLogRecords().map((record) => record.body)
+const counters = (exporter: InMemoryMetricExporter) =>
+  exporter.getMetrics().flatMap((metrics) =>
+    metrics.scopeMetrics.flatMap((scope) =>
+      scope.metrics.map((metric) => [metric.descriptor.name, metric.dataPoints.map((point) => point.value)] as const)
+    )
+  )
+
 describe("BrowserOtel.layerOtel", () => {
   it("builds and releases a layer with no caller-supplied processors", async () => {
     const result = await Effect.runPromise(
@@ -127,5 +164,100 @@ describe("BrowserOtel.layerOtel", () => {
       )
     )
     expect(result).toBe("ok")
+  })
+
+  it("forwards each signal to a single injected processor and shuts it down on release", async () => {
+    const traceExporter = new InMemorySpanExporter()
+    const logExporter = new InMemoryLogRecordExporter()
+    const metricExporter = new InMemoryMetricExporter(0)
+    const spanProcessor = new SimpleSpanProcessor(traceExporter)
+    const logRecordProcessor = new SimpleLogRecordProcessor({ exporter: logExporter })
+    const metricReader = new PeriodicExportingMetricReader({
+      exporter: metricExporter,
+      exportIntervalMillis: 60_000
+    })
+    const spanShutdown = vi.spyOn(spanProcessor, "shutdown")
+    const logShutdown = vi.spyOn(logRecordProcessor, "shutdown")
+    const readerShutdown = vi.spyOn(metricReader, "shutdown")
+
+    const received = await emitAndRead(
+      {
+        resource: { serviceName: "flows-test", serviceVersion: "1" },
+        spanProcessor: () => spanProcessor,
+        logRecordProcessor: () => logRecordProcessor,
+        metricReader: () => metricReader,
+        loggerMergeWithExisting: false
+      },
+      [metricReader],
+      () => ({
+        spans: spanNames(traceExporter),
+        logs: logBodies(logExporter),
+        metrics: counters(metricExporter)
+      })
+    )
+
+    expect(received.spans).toEqual(["browser-span"])
+    expect(received.logs).toEqual(["browser record"])
+    expect(received.metrics).toEqual([["browser.records", [2]]])
+    expect(spanShutdown).toHaveBeenCalledTimes(1)
+    expect(logShutdown).toHaveBeenCalledTimes(1)
+    expect(readerShutdown).toHaveBeenCalledTimes(1)
+  })
+
+  it("installs every processor and reader an array holds", async () => {
+    const traceExporters = [new InMemorySpanExporter(), new InMemorySpanExporter()]
+    const logExporters = [new InMemoryLogRecordExporter(), new InMemoryLogRecordExporter()]
+    const metricExporters = [new InMemoryMetricExporter(0), new InMemoryMetricExporter(0)]
+    const metricReaders = metricExporters.map((exporter) =>
+      new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 60_000 })
+    )
+    const received = await emitAndRead(
+      {
+        resource: { serviceName: "flows-test", serviceVersion: "1" },
+        spanProcessor: () => traceExporters.map((exporter) => new SimpleSpanProcessor(exporter)),
+        logRecordProcessor: () => logExporters.map((exporter) => new SimpleLogRecordProcessor({ exporter })),
+        metricReader: () => metricReaders,
+        loggerMergeWithExisting: false
+      },
+      metricReaders,
+      () => ({
+        spans: traceExporters.map(spanNames),
+        logs: logExporters.map(logBodies),
+        metrics: metricExporters.map(counters)
+      })
+    )
+
+    expect(received.spans).toEqual([["browser-span"], ["browser-span"]])
+    expect(received.logs).toEqual([["browser record"], ["browser record"]])
+    expect(received.metrics).toEqual([[["browser.records", [2]]], [["browser.records", [2]]]])
+  })
+
+  it.each([
+    [true, ["browser record"]],
+    [false, []]
+  ])("keeps the ambient loggers when loggerMergeWithExisting is %s", async (merge, ambient) => {
+    const logExporter = new InMemoryLogRecordExporter()
+    const ambientMessages: Array<unknown> = []
+    const ambientLogger = Logger.make<unknown, void>((options) => {
+      ambientMessages.push(options.message)
+    })
+    let exported: ReadonlyArray<unknown> = []
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* Effect.logInfo("browser record")
+        exported = logBodies(logExporter)
+      }).pipe(
+        Effect.provide(BrowserOtel.layerOtel({
+          resource: { serviceName: "flows-test" },
+          logRecordProcessor: () => new SimpleLogRecordProcessor({ exporter: logExporter }),
+          loggerMergeWithExisting: merge
+        })),
+        Effect.provide(Logger.layer([ambientLogger])),
+        Effect.scoped
+      )
+    )
+
+    expect(exported).toEqual(["browser record"])
+    expect(ambientMessages.flat()).toEqual(ambient)
   })
 })

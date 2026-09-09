@@ -16,7 +16,7 @@ they allocate for you.
 | `Otlp.layer`            | Effect's three OTLP exporters. You provide the `HttpClient`                | You need a specific HTTP client, such as Undici on Node.                          |
 | `NodeOtel.layerOtel`    | The Node OpenTelemetry SDK: three OTLP/HTTP exporters and their processors | Node code that must run through the OpenTelemetry SDK.                            |
 | `BrowserOtel.layerOtel` | The web OpenTelemetry SDK around processors and readers you construct      | Browser code that must run through the OpenTelemetry SDK.                         |
-| `Otel.layerOtel`        | Effect bridges; optional caller factories build providers                 | The application controls SDK provider construction.                       |
+| `Otel.layerOtel`        | Effect bridges; optional caller factories build providers                  | The application controls SDK provider construction.                               |
 
 Each has an explicit do-nothing counterpart: `Otlp.layerNoop` and
 `Otel.layerNoop` both provide nothing and export nothing, so wiring code

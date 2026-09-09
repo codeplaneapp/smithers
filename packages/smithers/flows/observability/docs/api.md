@@ -551,15 +551,29 @@ already built. This module allocates no exporter.
 ```ts
 interface Options {
   readonly resource: Resource.Configuration
-  readonly tracerProvider?: Api.TracerProvider | undefined
-  readonly loggerProvider?: LoggerProvider | undefined
-  readonly metricReader?: MetricReader | ReadonlyArray<MetricReader> | undefined
+  readonly tracerProvider?:
+    | Api.TracerProvider
+    | ((resource: Resource) => Api.TracerProvider)
+    | undefined
+  readonly loggerProvider?:
+    | LoggerProvider
+    | ((resource: Resource) => LoggerProvider)
+    | undefined
+  readonly metricReader?: (() => MetricReader | ReadonlyArray<MetricReader>) | undefined
   readonly loggerMergeWithExisting?: boolean | undefined
   readonly metricTemporality?: OtelMetrics.TemporalityPreference | undefined
 }
 ```
 
 `metricTemporality` is `"cumulative"` or `"delta"`.
+
+Ownership differs by field. `tracerProvider` and `loggerProvider` are borrowed:
+the layer bridges onto them and never flushes or shuts one down, including a
+provider a factory returned. `metricReader` is owned: the factory runs once
+during layer acquisition, after resource validation, and closing the layer's
+scope shuts down every reader it returned. Build the readers inside the
+factory. Returning a reader that a longer-lived composition still exports
+through disables that reader when this scope closes.
 
 ### Otel.layerOtel
 
@@ -568,9 +582,9 @@ const layerOtel: (options: Options) => Layer.Layer<never, Resource.InvalidResour
 ```
 
 Bridges Effect's tracer, logger, and metrics onto the supplied providers and
-readers, over the validated resource. Each bridge is installed only when its
-provider is supplied, and an empty `metricReader` array is treated as no
-metrics at all.
+the readers the `metricReader` factory returns, over the validated resource.
+Each bridge is installed only when its provider or factory is supplied, and a
+factory that returns an empty array registers no reader at all.
 
 ### Otel.layerNoop
 
@@ -626,15 +640,18 @@ from `@smthrs/observability/BrowserOtel`.
 ```ts
 interface Options {
   readonly resource: Resource.Configuration
-  readonly spanProcessor?: SpanProcessor | ReadonlyArray<SpanProcessor> | undefined
-  readonly logRecordProcessor?: LogRecordProcessor | ReadonlyArray<LogRecordProcessor> | undefined
-  readonly metricReader?: MetricReader | ReadonlyArray<MetricReader> | undefined
+  readonly spanProcessor?: (() => SpanProcessor | ReadonlyArray<SpanProcessor>) | undefined
+  readonly logRecordProcessor?: (() => LogRecordProcessor | ReadonlyArray<LogRecordProcessor>) | undefined
+  readonly metricReader?: (() => MetricReader | ReadonlyArray<MetricReader>) | undefined
   readonly loggerMergeWithExisting?: boolean | undefined
 }
 ```
 
-Processors and readers are created by the caller, which keeps this module free
-of Node imports and free of browser exporter policy.
+Processors and readers are created by the caller's factories, which keeps this
+module free of Node imports and free of browser exporter policy. Every factory
+is owned: it runs once during layer acquisition, after resource validation, and
+the web SDK shuts down everything it returned when the scope closes. A factory
+that returns an empty array installs nothing for that signal.
 
 ### BrowserOtel.layerOtel
 
@@ -643,5 +660,5 @@ const layerOtel: (options: Options) => Layer.Layer<never, Resource.InvalidResour
 ```
 
 Builds a scoped browser OpenTelemetry layer over the validated resource. A
-layer with no processors at all still builds; it provides the resource and
-bridges nothing.
+layer with no processor factories at all still builds; it provides the resource
+and bridges nothing.
