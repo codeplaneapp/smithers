@@ -106,7 +106,10 @@ export const loadEgressPage = async (
   const answer = await createCloudClient(ctx).get(`${path}${query}`, path)
   if ("error" in answer) return { error: answer.error }
   const { body, response } = answer
-  const raw = Array.isArray(body) ? body : isRecord(body) && Array.isArray(body.items) ? body.items : []
+  if (!Array.isArray(body)) {
+    return { error: "Smithers Cloud answered an egress audit payload in a shape Smithers can't read." }
+  }
+  const raw = body
   const rows = raw.flatMap((entry) => {
     const parsed = parseEgressRow(entry)
     return parsed === null ? [] : [parsed]
