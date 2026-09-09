@@ -81,24 +81,6 @@ describe("browserFetch guards", () => {
     if (!redirect.ok) expect(redirect.message).toContain("credentials")
   })
 
-  test("URL credentials never become an implicit Authorization header, including on redirects", async () => {
-    let fetches = 0
-    const deps = {
-      resolveHost: publicResolver,
-      fetchImpl: async () => {
-        fetches += 1
-        return new Response(null, { status: 302, headers: { location: "https://user:secret@example.com/" } })
-      }
-    }
-    const direct = await browserFetch("https://user:secret@example.com/", deps)
-    expect(direct.ok).toBe(false)
-    expect(fetches).toBe(0)
-    const redirect = await browserFetch("https://example.com/", deps)
-    expect(redirect.ok).toBe(false)
-    expect(fetches).toBe(1)
-    if (!redirect.ok) expect(redirect.message).toContain("credentials")
-  })
-
   test("internal hostnames are refused without resolving", async () => {
     for (const host of ["localhost", "db.internal", "nas.local", "home.lan"]) {
       let resolved = 0
@@ -180,6 +162,48 @@ describe("browserFetch guards", () => {
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) expect(outcome.message).toContain("private")
   })
+
+  test("an errored redirect body returns an honest failure when there is nowhere to go", async () => {
+    const outcome = await browserFetch("https://example.com/", {
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("body disconnected"))
+            }
+          }),
+          { status: 302 }
+        )
+    })
+    expect(outcome).toEqual({ ok: false, message: "The page answered HTTP 302 with nowhere to go." })
+  })
+
+  test.each(["pending", "rejecting"])("a %s redirect cancellation does not block the next hop", async (cleanup) => {
+    let fetches = 0
+    let cancelled = false
+    const outcome = await browserFetch("https://example.com/", {
+      timeoutMs: 20,
+      resolveHost: publicResolver,
+      fetchImpl: async () => {
+        fetches += 1
+        return fetches === 1
+          ? new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled = true
+                return cleanup === "pending" ? new Promise(() => {}) : Promise.reject(new Error("cleanup failed"))
+              }
+            }),
+            { status: 302, headers: { location: "https://next.example.com/" } }
+          )
+          : okPage("<p>ok</p>")
+      }
+    })
+    expect(outcome).toMatchObject({ ok: true, finalUrl: "https://next.example.com/", text: "ok" })
+    expect(fetches).toBe(2)
+    expect(cancelled).toBe(true)
+  }, 1000)
 
   test("pins each request to the address approved for that redirect hop", async () => {
     const connected: Array<string> = []
@@ -281,6 +305,28 @@ describe("browserFetch guards", () => {
     if (outcome.ok) expect(outcome.text.length).toBeLessThanOrEqual(20_000)
   })
 
+  test.each(["pending", "rejecting"])("a %s size-cap cancellation does not block the result", async (cleanup) => {
+    let cancelReason: unknown
+    const outcome = await browserFetch("https://example.com/", {
+      timeoutMs: 20,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("x".repeat(BROWSER_FETCH_MAX_BYTES + 1)))
+            },
+            cancel(reason) {
+              cancelReason = reason
+              return cleanup === "pending" ? new Promise(() => {}) : Promise.reject(new Error("cleanup failed"))
+            }
+          })
+        )
+    })
+    expect(outcome).toMatchObject({ ok: true, text: "x".repeat(BROWSER_FETCH_MAX_TEXT) })
+    expect(cancelReason).toBe("size cap")
+  }, 1000)
+
   test("an unreachable host is an honest failure, never a throw", async () => {
     const outcome = await browserFetch("https://example.com/", {
       resolveHost: publicResolver,
@@ -306,6 +352,45 @@ describe("browserFetch guards", () => {
     if (!outcome.ok) expect(outcome.message).toContain("took too long")
     expect(fetched).toBe(false)
   })
+
+  test("the total deadline bounds a fetchImpl that never returns headers", async () => {
+    let fetched = false
+    const outcome = await browserFetch("https://example.com/", {
+      timeoutMs: 20,
+      resolveHost: publicResolver,
+      fetchImpl: () => {
+        fetched = true
+        return new Promise(() => {})
+      }
+    })
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.message).toContain("took too long")
+    expect(fetched).toBe(true)
+  }, 1000)
+
+  test("the total deadline still fires on a redirect hop while cleanup is pending", async () => {
+    const signals: Array<AbortSignal | null | undefined> = []
+    const outcome = await browserFetch("https://example.com/", {
+      timeoutMs: 20,
+      resolveHost: publicResolver,
+      fetchImpl: async (_input, init) => {
+        signals.push(init.signal)
+        if (signals.length > 1) return new Promise(() => {})
+        return new Response(
+          new ReadableStream({
+            cancel() {
+              return new Promise(() => {})
+            }
+          }),
+          { status: 302, headers: { location: "https://next.example.com/" } }
+        )
+      }
+    })
+    expect(outcome).toEqual({ ok: false, message: "Reading next.example.com took too long and was stopped." })
+    expect(signals).toHaveLength(2)
+    expect(signals[1]).toBe(signals[0])
+    expect(signals[1]?.aborted).toBe(true)
+  }, 1000)
 
   test("a stalled body times out and cancels its stream after headers arrive", async () => {
     let cancelled = false

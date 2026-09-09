@@ -326,7 +326,7 @@ const readCapped = async (body: ReadableStream<Uint8Array>, signal: AbortSignal)
     received += value.byteLength
     chunks.push(value)
     if (received >= BROWSER_FETCH_MAX_BYTES) {
-      await reader.cancel("size cap").catch(() => {})
+      void reader.cancel("size cap").catch(() => {})
       break
     }
   }
@@ -359,6 +359,8 @@ export interface BrowserFetchDeps {
 }
 
 /** Fetch-and-extract one page under the browser tool's hard guards.
+ * `timeoutMs` bounds caller settlement across DNS, headers, redirects and body reads.
+ * Transport cleanup is best-effort and fire-and-forget; cancellation failures are ignored.
  * @since 1.0.0
  * @category conversions
  */
@@ -414,7 +416,7 @@ export const browserFetch = async (
     }
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location")
-      await response.body?.cancel()
+      void response.body?.cancel().catch(() => {})
       if (location === null) {
         return { ok: false, message: `The page answered HTTP ${response.status} with nowhere to go.` }
       }
