@@ -11,6 +11,7 @@ import * as AgentEvent from "../src/AgentEvent.ts"
 import * as Cell from "../src/Cell.ts"
 import * as EngineLike from "../src/EngineLike.ts"
 import * as DemandText from "../src/internal/demandText.ts"
+import { printsObservation } from "../src/internal/printsObservation.ts"
 import * as Transcript from "../src/Transcript.ts"
 import { entry, journal } from "./fixtures/journal.ts"
 
@@ -276,7 +277,7 @@ describe("Transcript", () => {
         })
       )
     ])).toEqual([
-      ModelRequest.Message.user("What your cell printed:\nbefore failing\n\nemit a corrected cell")
+      ModelRequest.Message.user(`${printsObservation("before failing")}\n\nemit a corrected cell`)
     ])
   })
 
@@ -411,8 +412,8 @@ describe("Transcript", () => {
       print(2, "cell-b", "from b"),
       entry(3, settled.eventType, settled)
     ])).toEqual([
-      ModelRequest.Message.user("What your cell printed:\nfrom a"),
-      ModelRequest.Message.user("What your cell printed:\nfrom b"),
+      ModelRequest.Message.user(printsObservation("from a")),
+      ModelRequest.Message.user(printsObservation("from b")),
       ModelRequest.Message.user("try cell-a again")
     ])
   })
@@ -478,7 +479,7 @@ describe("Transcript", () => {
 
     expect(state.messages.map((item) => item.message.role)).toEqual(["assistant", "user", "user"])
     expect(state.messages[1]?.message).toEqual(
-      ModelRequest.Message.user("What your cell printed:\nfound it")
+      ModelRequest.Message.user(printsObservation("found it"))
     )
     expect(state.messages[2]?.message).toEqual(
       ModelRequest.Message.user(

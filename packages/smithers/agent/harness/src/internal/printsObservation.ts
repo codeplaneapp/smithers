@@ -16,6 +16,8 @@
  * @private
  */
 
+import { untrustedData } from "./untrustedData.ts"
+
 /**
  * Renders one frame's print buffer as the user turn its successor read.
  *
@@ -26,4 +28,4 @@
 export const printsObservation = (prints: string): string =>
   prints === ""
     ? "Your cell printed nothing, so this turn opens with nothing new to read. Everything it bound is still in the realm; print what you need to look at."
-    : `What your cell printed:\n${prints}`
+    : untrustedData(`What your cell printed:\n${prints}`, "cell print buffer (may contain repository and tool output)")

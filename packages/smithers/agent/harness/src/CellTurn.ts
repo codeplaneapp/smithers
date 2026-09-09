@@ -34,6 +34,7 @@ import * as cellPrompt from "./internal/cellPrompt.ts"
 import * as DemandText from "./internal/demandText.ts"
 import * as elide from "./internal/elide.ts"
 import { printsObservation } from "./internal/printsObservation.ts"
+import { untrustedData } from "./internal/untrustedData.ts"
 import * as NarrowedCheck from "./NarrowedCheck.ts"
 import * as Sandbox from "./Sandbox.ts"
 import * as Steering from "./Steering.ts"
@@ -780,6 +781,14 @@ export const make = (options: {
   })
 
 /**
+ * Host-measured container facts accepted by {@link teach}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Environment = cellPrompt.Environment
+
+/**
  * Prepends the cell contract and the callable-flow catalog to a context window.
  *
  * The model is taught one thing — how to write a cell — and shown exactly the
@@ -793,11 +802,18 @@ export const make = (options: {
  */
 export const teach = (
   contextWindow: ContextWindow.ContextWindow,
-  flows: ReadonlyArray<Descriptor.FlowDescriptor>
+  flows: ReadonlyArray<Descriptor.FlowDescriptor>,
+  environment?: Environment
 ): ContextWindow.ContextWindow => {
-  const projections: Record<string, Cell.FlowProjection> = {}
-  for (const descriptor of flows) projections[descriptor.name] = Cell.project(descriptor)
-  const taught = cellPrompt.make(projections, {}).map((section) =>
+  const projections: Record<string, Cell.FlowProjection & Pick<Descriptor.FlowDescriptor, "provenance" | "path">> = {}
+  for (const descriptor of flows) {
+    projections[descriptor.name] = {
+      ...Cell.project(descriptor),
+      provenance: descriptor.provenance,
+      path: descriptor.path
+    }
+  }
+  const taught = cellPrompt.make(projections, environment).map((section) =>
     ContextWindow.makeSegment({
       kind: "system",
       zone: "prefix",
@@ -1820,7 +1836,9 @@ const compacted = (
         message: "The sealed compaction step returned no text summary"
       })
     }
-    const summary = ModelRequest.Message.user(text)
+    const summary = ModelRequest.Message.user(
+      untrustedData(text.map((part) => part.text).join("\n"), "compaction summary of conversation and tool output")
+    )
     const contextWindow = yield* Compaction.apply(state.contextWindow, step, summary).pipe(Effect.orDie)
     yield* emit(
       new AgentEvent.CompactionSettled({

@@ -61,8 +61,10 @@
  */
 import * as Digest from "@smthrs/core/Digest"
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
+import type * as Descriptor from "@smthrs/registry/Descriptor"
 import { Option } from "effect"
 import type * as Cell from "../Cell.ts"
+import { untrustedData } from "./untrustedData.ts"
 
 /**
  * One rendered prompt section, with the digest that identifies its
@@ -207,7 +209,9 @@ const environmentText = (environment: Environment): string => {
 
 const digest = (id: Section["id"], text: string): string => Digest.digest(CanonicalJson.stringify({ id, text }))
 
-const catalogText = (flows: Readonly<Record<string, Cell.FlowProjection>>): string => {
+type CatalogProjection = Cell.FlowProjection & Partial<Pick<Descriptor.FlowDescriptor, "provenance" | "path">>
+
+const catalogText = (flows: Readonly<Record<string, CatalogProjection>>): string => {
   const names = Object.keys(flows).sort()
   if (names.length === 0) {
     return "No flows are callable in this run. Complete or park; ctx.call has nothing to reach."
@@ -217,7 +221,12 @@ const catalogText = (flows: Readonly<Record<string, Cell.FlowProjection>>): stri
     const capabilities = projection.capabilities.length === 0
       ? ""
       : ` capabilities=${[...projection.capabilities].sort().join(",")}`
-    const heading = `- ${name} (${projection.tier})${capabilities}: ${projection.description}`
+    const origin = JSON.stringify({
+      source: projection.provenance?.source ?? "unknown",
+      root: projection.provenance?.root,
+      path: projection.path
+    })
+    const heading = `- ${name} (${projection.tier})${capabilities}: ${projection.description}\n  provenance: ${origin}`
     // The input schema is the difference between choosing a call and guessing
     // one. A rejected input costs a whole frame, so a catalog that names a
     // flow without saying what it takes spends the run's frame budget on
@@ -226,7 +235,9 @@ const catalogText = (flows: Readonly<Record<string, Cell.FlowProjection>>): stri
       ? heading
       : `${heading}\n  input: ${JSON.stringify(projection.input.value)}`
   })
-  return `Flows callable with ctx.call in this frame:\n${lines.join("\n")}`
+  return `Flows callable with ctx.call in this frame:\n${
+    untrustedData(lines.join("\n"), "flow catalog (descriptor provenance follows)")
+  }`
 }
 
 /**
@@ -246,7 +257,7 @@ const catalogText = (flows: Readonly<Record<string, Cell.FlowProjection>>): stri
  * @slop
  */
 export const make = (
-  flows: Readonly<Record<string, Cell.FlowProjection>>,
+  flows: Readonly<Record<string, CatalogProjection>>,
   environment: Environment = {}
 ): ReadonlyArray<Section> => {
   const facts = environmentText(environment)

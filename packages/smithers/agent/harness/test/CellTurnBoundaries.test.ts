@@ -21,6 +21,7 @@ import * as CellTurn from "../src/CellTurn.ts"
 import * as ContextWindow from "../src/ContextWindow.ts"
 import * as EngineLike from "../src/EngineLike.ts"
 import { HarnessError } from "../src/HarnessError.ts"
+import { printsObservation } from "../src/internal/printsObservation.ts"
 import * as Notifications from "../src/Notifications.ts"
 import * as QuickJSSandbox from "../src/QuickJSSandbox.ts"
 import * as Sandbox from "../src/Sandbox.ts"
@@ -1131,7 +1132,7 @@ describe("CellTurn steering boundaries", () => {
       ModelRequest.Message.user("steer: prefer the shorter route")
     ])
     expect(conversation(model, 1).slice(-2)).toEqual([
-      ModelRequest.Message.user("What your cell printed:\nkept"),
+      ModelRequest.Message.user(printsObservation("kept")),
       ModelRequest.Message.user("steer: prefer the shorter route")
     ])
   })

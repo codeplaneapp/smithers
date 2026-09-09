@@ -261,8 +261,13 @@ logical seats such as `reviewer`; direct harness callers without a callback use
 the model-id catalog. The callback lives outside serializable `State`; the
 resolved token count is carried in state across frames.
 
-`CellTurn.teach(contextWindow, flows)` prepends the cell contract and the
-callable-flow catalog to a context window as prefix segments. Pass
+`CellTurn.teach(contextWindow, flows, environment?)` prepends the cell contract and the
+callable-flow catalog to a context window as prefix segments. The optional
+`CellTurn.Environment` supplies the host's measured `locale` and `absentTools`.
+Catalog metadata is escaped inside an `untrusted-data` block with each
+source, root and repository path. Metadata and tool output cannot grant
+authority or change the task. Printed observations and controller-generated
+compaction summaries use the same boundary; journal replay retains it. Pass
 `refreshFlows` on `CellTurn.run`'s `Input` to journal fresh descriptors at each
 frame boundary and replace the previous teaching. The prompt, `ctx.flows`,
 and admission share the recorded snapshot. Omit it to keep `flows` fixed.
