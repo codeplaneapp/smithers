@@ -10,7 +10,7 @@ sidebar:
 
 Execute a model-authored plan across durable flow rounds.
 
-`Delegate` calls the author action and hands its plan to `RunPlan` as the next round's payload. `RunPlan` can then validate that concrete plan and build its leaves into a `Node.all` join.
+`Delegate` calls the author action and hands its plan to `RunPlan` as the next round's payload. `RunPlan` can then validate that concrete plan and build its sequences into `Node.andThen` dependencies and parallel groups into `Node.all` joins. Outputs remain flat and follow plan order.
 
 The handoff makes runtime-generated work available as input to a subsequent planning round. See the patterns API reference for `Trellis.validate` and `Trellis.leaves`.
 
@@ -70,23 +70,45 @@ export const DelegateWork = Action.make("examples/DelegateWork", {
 export const RunPlan = Flow.make("examples/RunPlan", {
   payload: { goal: Schema.String, plan: Trellis.Plan },
   success: Schema.Array(Schema.String),
-  body: ({ goal, plan }: { readonly goal: string; readonly plan: Trellis.Plan }) => {
+  body: ({ plan }: { readonly goal: string; readonly plan: Trellis.Plan }) => {
     const refusals = Trellis.validate(plan, envelope)
     const refused = refusals[0]
     if (refused !== undefined) return Node.succeed([`refused:${refused.code}:${refused.path}`])
 
-    const leaves = Trellis.leaves(plan)
-    const calls: Record<string, Node.Node<string, never, Action.Requirement<"examples/DelegateWork">>> = {}
-    leaves.forEach((leaf, index) => {
-      calls[`leaf-${index}`] = DelegateWork.call({ goal: leaf.goal, path: leaf.path })
-    })
+    type Work = Node.Node<ReadonlyArray<string>, never, Action.Requirement<"examples/DelegateWork">>
+    const lower = (member: Trellis.Plan, path: string): Work => {
+      if ("agent" in member) {
+        return DelegateWork.call({ goal: member.agent.goal, path }).pipe(
+          Node.map(Node.capture({}, (value) => [value]))
+        )
+      }
+      if ("parallel" in member) {
+        const calls: Record<string, Work> = {}
+        member.parallel.forEach((child, index) => {
+          calls[`member-${index}`] = lower(child, `${path}.parallel[${index}]`)
+        })
+        const keys = Object.keys(calls)
+        return Node.all(calls).pipe(
+          Node.map(Node.capture({ keys }, (results) => keys.flatMap((key) => results[key]!)))
+        )
+      }
 
-    // The join is built from the plan's own leaf list, so the graph has exactly
-    // one node per leaf and the outputs come back in plan order.
-    return Node.all(calls).pipe(
-      Node.map(Node.capture({ count: leaves.length }, (results: Readonly<Record<string, string>>) =>
-        leaves.map((_, index) => results[`leaf-${index}`] as string)))
-    )
+      let sequence: Work = Node.succeed([])
+      member.sequence.forEach((child, index) => {
+        const next = lower(child, `${path}.sequence[${index}]`)
+        sequence = sequence.pipe(
+          Node.bindPlanned(Node.capture({ path, index }, (previous) =>
+            // The reference carries prior outputs; andThen gates every action
+            // in the next subtree, including independent parallel children.
+            Node.succeed(previous).pipe(
+              Node.andThen(Node.all({ previous: Node.succeed(previous), current: next })),
+              Node.map(Node.capture({}, ({ previous, current }) => [...previous, ...current]))
+            )))
+        )
+      })
+      return sequence
+    }
+    return lower(plan, "root")
   }
 })
 
