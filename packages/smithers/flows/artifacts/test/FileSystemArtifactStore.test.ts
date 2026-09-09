@@ -719,6 +719,64 @@ describe("reads, probes, and refusals", () => {
       expect(yield* withCrypto(artifacts.has(digest))).toBe(true)
     }))
 
+  it.effect("bounds concurrent batch probes and preserves first-request order", () =>
+    Effect.gen(function*() {
+      const requested = Array.from({ length: 40 }, (_, i) => (39 - i).toString(16).padStart(64, "0"))
+      const calls: Array<string> = []
+      const completed: Array<string> = []
+      let active = 0
+      let peak = 0
+      let elapsed = 0
+      const fs = FileSystem.makeNoop({
+        exists: (path) =>
+          Effect.gen(function*() {
+            const digest = path.slice(path.lastIndexOf("/") + 1)
+            calls.push(digest)
+            peak = Math.max(peak, ++active)
+            yield* Effect.sleep(digest === requested[0] ? "10 millis" : "1 milli")
+            active--
+            completed.push(digest)
+            return digest === requested[3]
+          })
+      })
+      const artifacts = ArtifactStore.makeFileSystem(fs)
+      const running = yield* Effect.gen(function*() {
+        const start = yield* Clock.currentTimeMillis
+        const missing = yield* artifacts.findMissing([...requested, requested[0]!, requested[3]!])
+        elapsed = (yield* Clock.currentTimeMillis) - start
+        return missing
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("1 second")
+      expect(yield* Fiber.join(running)).toEqual(requested.filter((digest) => digest !== requested[3]))
+      expect(calls).toEqual(requested)
+      expect(elapsed).toBeLessThanOrEqual(10)
+      expect(completed[0]).not.toBe(requested[0])
+      expect(peak).toBe(16)
+      expect(active).toBe(0)
+    }))
+
+  it.effect("validates the entire batch before probing the filesystem", () =>
+    Effect.gen(function*() {
+      const calls: Array<string> = []
+      const fs = FileSystem.makeNoop({
+        exists: (path) =>
+          Effect.sync(() => {
+            calls.push(path)
+            return false
+          })
+      })
+      const exit = yield* ArtifactStore.makeFileSystem(fs).findMissing([digest, "invalid"]).pipe(Effect.exit)
+      expect(errorOf(exit)).toMatchObject({ code: "invalid_digest" })
+      expect(calls).toEqual([])
+    }))
+
+  it.effect("keeps batch probe failures as typed store failures", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ failExists: true })
+      const exit = yield* store(host).findMissing([digest, sha256(bytes("absent"))]).pipe(Effect.exit)
+      expect(errorOf(exit)).toMatchObject({ code: "unavailable" })
+    }))
+
   it.effect("returns a deduplicated subset of the probed digests", () =>
     Effect.gen(function*() {
       const host = memoryFs()

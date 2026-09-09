@@ -203,33 +203,38 @@ export const makeFileSystem = (
       )
       for (const child of children) entries.push(`${parent}/${child}`)
     }
-    const blobs: Array<BlobStat> = []
-    for (const entry of entries) {
-      if (entry.includes(".tmp-")) continue
+    const candidates = entries.filter((entry) => {
+      if (entry.includes(".tmp-")) return false
       const separator = entry.indexOf("/")
       const fan = entry.slice(0, separator)
       const digest = entry.slice(separator + 1)
-      if (!/^[0-9a-f]{64}$/.test(digest) || fan !== digest.slice(0, 2)) continue
-      // The stat is per-candidate and tolerant: a blob another process
-      // removed between the listing and here simply is not in the
-      // inventory, and one whose mtime the host cannot report offers no
-      // age evidence, so the sweep must never judge it.
-      const info = yield* Effect.gen(function*() {
-        yield* checkRoot
-        yield* ArtifactPath.guard(fs, `${directory}/${fan}`)
-        yield* ArtifactPath.guard(fs, `${directory}/${entry}`, "File")
-        return yield* fs.stat(`${directory}/${entry}`)
-      }).pipe(Effect.option)
-      if (Option.isNone(info) || info.value.type !== "File") continue
-      const mtime = Option.getOrUndefined(info.value.mtime)
-      if (mtime === undefined) continue
-      blobs.push({
-        digest,
-        modifiedAtMs: mtime.getTime(),
-        sizeBytes: Number(info.value.size)
-      })
-    }
-    return blobs
+      return /^[0-9a-f]{64}$/.test(digest) && fan === digest.slice(0, 2)
+    })
+    const blobs = yield* Effect.forEach(candidates, (entry) =>
+      Effect.gen(function*() {
+        const separator = entry.indexOf("/")
+        const fan = entry.slice(0, separator)
+        const digest = entry.slice(separator + 1)
+        // The stat is per-candidate and tolerant: a blob another process
+        // removed between the listing and here simply is not in the
+        // inventory, and one whose mtime the host cannot report offers no
+        // age evidence, so the sweep must never judge it.
+        const info = yield* Effect.gen(function*() {
+          yield* checkRoot
+          yield* ArtifactPath.guard(fs, `${directory}/${fan}`)
+          yield* ArtifactPath.guard(fs, `${directory}/${entry}`, "File")
+          return yield* fs.stat(`${directory}/${entry}`)
+        }).pipe(Effect.option)
+        if (Option.isNone(info) || info.value.type !== "File") return undefined
+        const mtime = Option.getOrUndefined(info.value.mtime)
+        if (mtime === undefined) return undefined
+        return {
+          digest,
+          modifiedAtMs: mtime.getTime(),
+          sizeBytes: Number(info.value.size)
+        }
+      }), { concurrency: 16 })
+    return blobs.filter((blob) => blob !== undefined)
   })
 
   const remove: Service["remove"] = Effect.fn("ArtifactSweep.remove")((digest, removeOptions) =>

@@ -97,6 +97,10 @@ and are renamed into place. Every deduplicated `put` verifies the existing blob
 and rewrites an unreadable or mismatched address atomically, then freshens the
 blob's modification time so a retention sweep reads it as recently referenced.
 
+`findMissing` deduplicates and validates the full input before filesystem
+probes, then checks at most 16 addresses concurrently. Missing digests retain
+first-request order; a failed probe fails the batch as `unavailable`.
+
 | `FileSystemOptions` field | Default            | Meaning                                                                                                                                                                                                                     |
 | ------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `directory`               | `defaultDirectory` | Where blobs are stored. Workspace-relative, so a workspace can be moved or copied whole. An `ArtifactSweep` over the same store must name the same directory.                                                               |
@@ -311,6 +315,10 @@ modification time is measurable. It skips temp files, lock files, foreign
 paths, nested paths, directories sitting at blob addresses, and entries that
 disappear during the scan. A directory that was never created is an empty
 inventory, not a failure.
+
+Candidate metadata reads run with concurrency 16 and retain directory-listing
+order. Each candidate keeps its path checks; a failed metadata read skips only
+that candidate.
 
 `remove` returns `false` for three outcomes a caller cannot tell apart, all of
 which mean nothing was reclaimed and retrying later is safe: the blob was

@@ -191,6 +191,61 @@ const sweepFor = (host: ReturnType<typeof memoryFs>) =>
   ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
 
 describe("inventory", () => {
+  it.effect("bounds concurrent metadata reads while preserving order and conservative skips", () =>
+    Effect.gen(function*() {
+      const digests = Array.from({ length: 40 }, (_, i) => `aa${(39 - i).toString(16).padStart(62, "0")}`)
+      const paths = digests.map((digest) => `.flows/objects/aa/${digest}`)
+      const host = memoryFs({
+        seed: Object.fromEntries(paths.filter((_, i) => i !== 2 && i !== 4).map((path) => [path, artifact])),
+        withoutMtimeFor: paths[1]!,
+        phantoms: [`aa/${digests[2]}`],
+        directories: [`aa/${digests[4]}`]
+      })
+      const calls: Array<string> = []
+      const completed: Array<string> = []
+      let active = 0
+      let peak = 0
+      let elapsed = 0
+      const fs = {
+        ...host.fs,
+        readDirectory: (path: string) =>
+          path === ".flows/objects/aa"
+            ? Effect.succeed([...digests, `${digests[0]}.tmp-abc`, "foreign", `bb${"0".repeat(62)}`])
+            : host.fs.readDirectory(path),
+        stat: (path: string) =>
+          paths.includes(path)
+            ? Effect.gen(function*() {
+              calls.push(path)
+              peak = Math.max(peak, ++active)
+              yield* Effect.sleep(path === paths[0] ? "10 millis" : "1 milli")
+              active--
+              completed.push(path)
+              if (path === paths[3]) return yield* Effect.fail(systemError("PermissionDenied", "stat"))
+              return yield* host.fs.stat(path)
+            })
+            : host.fs.stat(path)
+      }
+      const running = yield* Effect.gen(function*() {
+        const start = yield* Clock.currentTimeMillis
+        const listed = yield* ArtifactSweep.makeFileSystem(fs).inventory
+        elapsed = (yield* Clock.currentTimeMillis) - start
+        return listed
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("1 second")
+      expect(yield* Fiber.join(running)).toEqual(
+        digests.filter((_, i) => i === 0 || i > 4).map((digest) => ({
+          digest,
+          modifiedAtMs: 0,
+          sizeBytes: bytes(artifact).length
+        }))
+      )
+      expect(new Set(calls)).toEqual(new Set(paths))
+      expect(elapsed).toBeLessThanOrEqual(20)
+      expect(completed[0]).not.toBe(paths[0])
+      expect(peak).toBe(16)
+      expect(active).toBe(0)
+    }))
+
   it.effect("lists blobs with their age and size, and nothing else", () =>
     Effect.gen(function*() {
       const host = memoryFs({

@@ -645,11 +645,9 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
     Effect.gen(function*() {
       const requested = distinct(digests)
       yield* Effect.annotateCurrentSpan({ count: requested.length })
-      const missing: Array<string> = []
-      for (const digest of requested) {
-        if (!(yield* has(digest))) missing.push(digest)
-      }
-      return missing
+      yield* Effect.forEach(requested, validateDigest, { discard: true })
+      const present = yield* Effect.forEach(requested, has, { concurrency: 16 })
+      return requested.filter((_, index) => !present[index])
     })
   )
 
