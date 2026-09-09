@@ -223,6 +223,18 @@ describe("opaque local repositories", () => {
     expect(`${second.stdout}\n${second.stderr}`).toContain("//:childTest  hit")
   }, 60_000)
 
+  it("re-executes the child on a second run while its working tree is dirty", async () => {
+    const root = await workspace()
+    const first = await serveCli(root, ["//:suite"])
+    expect(first.exitCode).toBe(0)
+    await Fs.writeFile(NodePath.join(root, "child", "dirty.txt"), "uncommitted")
+    const second = await serveCli(root, ["//:suite"])
+    expect(second.exitCode).toBe(0)
+    expect(`${second.stdout}\n${second.stderr}`).toContain("//:childTest  ran")
+    // Two in-process runs like the clean case above, with the budget doubled
+    // because the second run cannot replay the child and pays for it again.
+  }, 120_000)
+
   it("accepts repository targets through Alias and gates", async () => {
     const root = await workspace()
     const query = await serveCli(root, ["query", "//:alias", "--format", "json"])

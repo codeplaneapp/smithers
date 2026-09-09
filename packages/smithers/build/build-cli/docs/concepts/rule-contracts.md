@@ -43,8 +43,10 @@ input resolution, and preview keys. `PackageRunner` owns admission, service
 acquisition, execution, output verification, and cache publication. Its
 artifact lifecycle restores before running and captures only a successful
 result. `RulePolicy` declares each rule's default mode, cache eligibility,
-capabilities, and scheduling flags in one place. `ServiceSupervisor` owns
-service lifetimes; extracting a rule introduces no new scheduler or cache.
+capabilities, and scheduling flags in one place. Its table is typed against
+the native rule union, so a new or renamed rule fails typecheck until its
+policy is stated. `ServiceSupervisor` owns service lifetimes; extracting a
+rule introduces no new scheduler or cache.
 
 The public `FetchExec` functions remain adapters to the same planner and
 download implementation. Its error class, limits, result type, and URL

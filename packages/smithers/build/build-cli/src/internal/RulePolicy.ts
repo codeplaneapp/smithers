@@ -3,7 +3,7 @@
  *
  * @since 1.0.0
  */
-import type { Mode, PlannedRule } from "./RuleContract.ts"
+import type { Mode, PlannedRule, Selection } from "./RuleContract.ts"
 
 interface Policy {
   readonly overlay?: boolean
@@ -17,19 +17,30 @@ interface Policy {
   readonly cache?: "always" | "read" | "execute" | "check" | "clean-repository"
 }
 
-const policies: Readonly<Record<string, Policy>> = {
+/** Every rule the planner selects natively; declaration bodies are named at runtime. */
+type NativeRule = Exclude<Selection, { readonly family: "body" }>["rule"]
+
+/** A row per native rule, so a new or renamed rule fails typecheck until it is stated here.
+ * Declaration bodies may add rows; they are looked up through the string index.
+ */
+const policies: Readonly<Record<NativeRule, Policy>> & Readonly<Record<string, Policy>> = {
   "Agent.Diff": { outward: true, exclusive: true, writes: true },
   "Agent.Lint": { check: true },
   "Agent.Pr": { outward: true, exclusive: true, writes: true },
+  "Alias": {},
   "Anvil.Fork": { outward: true, service: true },
   "Api.Compat": { cache: "always" },
   "Bundler.Rspack.build": { writes: true, cache: "always" },
   "Bundler.Rspack.resolve": { cache: "always" },
-  "Cargo.Clippy": { cache: "read" },
-  "Cargo.Deny": { cache: "read" },
+  "Cargo.AppSet": {},
+  "Cargo.Build": { writes: true },
+  "Cargo.Clippy": { writes: true, cache: "read" },
+  "Cargo.Deny": { writes: true, cache: "read" },
+  "Cargo.Doc": { writes: true },
+  "Cargo.Fetch": { writes: true },
   "Cargo.Fmt": { check: true, cache: "read" },
-  "Cargo.Nextest": { cache: "read" },
-  "Cargo.Test": { cache: "read" },
+  "Cargo.Nextest": { writes: true, cache: "read" },
+  "Cargo.Test": { writes: true, cache: "read" },
   "Changesets.Publish": { outward: true },
   "Changesets.Version": { check: true, writes: true, cache: "check" },
   "Clean": { outward: true, keyOnly: true, writes: true },
@@ -44,6 +55,7 @@ const policies: Readonly<Record<string, Policy>> = {
   "Docs.Page": { outward: true, attended: true, exclusive: true, writes: true },
   "FactoryProjection": { check: true },
   "Fetch": { writes: true, cache: "always" },
+  "Filegroup": {},
   "Foundry.Build": { overlay: true, writes: true, cache: "always" },
   "Foundry.Fmt": { check: true, cache: "check" },
   "Foundry.Test": { overlay: true, cache: "execute" },
@@ -63,7 +75,10 @@ const policies: Readonly<Record<string, Policy>> = {
   "Go.Generate": { check: true, cache: "check" },
   "Go.Lint": { check: true, cache: "check" },
   "Go.ModDownload": { cache: "always" },
+  "Go.Packages": {},
   "Go.Test": { cache: "always" },
+  "ImportClosure": {},
+  "Install": {},
   "Literal": { writes: true, cache: "always" },
   "Markdown.CodeBlocks": { cache: "always" },
   "Materialize": { writes: true },
@@ -82,6 +97,7 @@ const policies: Readonly<Record<string, Policy>> = {
   "Shell.Serve": { outward: true, service: true },
   "Shell.Test": { overlay: true, cache: "execute" },
   "Size.Budgets": { cache: "always" },
+  "Suite": {},
   "TargetIndex": { check: true },
   "Test": { cache: "always" }
 }
@@ -109,10 +125,7 @@ export const cacheable = (rule: string, mode: Mode, repositoryDirty: boolean | u
  */
 export const capabilities = (rule: string, mode: Mode, sandbox: PlannedRule["sandbox"]): ReadonlyArray<string> => {
   const result = ["fs:read", "proc:spawn"]
-  if (
-    mode === "write" || of(rule).writes ||
-    (rule.startsWith("Cargo.") && rule !== "Cargo.AppSet" && rule !== "Cargo.Fmt")
-  ) result.push("fs:write")
+  if (mode === "write" || of(rule).writes) result.push("fs:write")
   if (sandbox === "none" || (typeof sandbox === "object" && sandbox.network === true)) result.push("net:open")
   else if (typeof sandbox === "object" && sandbox.network === "loopback") result.push("net:loopback")
   return result
