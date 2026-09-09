@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Effect, Layer, Option } from "effect"
+import { Deferred, Effect, Layer, Option } from "effect"
 import { TestClock } from "effect/testing"
 import * as AttemptStore from "../src/AttemptStore.ts"
 import * as Migrations from "../src/Migrations.ts"
@@ -88,34 +88,70 @@ describe("AttemptStore ownership interleavings", () => {
       expect(result.stored).toMatchObject({ state: "completed", outcome: { writer: "new" } })
     }))
 
-  it.effect("pins the run-terminal/attempt-terminal race to a fenced or fully finished attempt", () =>
-    Effect.gen(function*() {
-      const result = yield* migrated(
-        Effect.gen(function*() {
-          const { attempts, runs } = yield* arrange
-          const [runTransition, attemptFinish] = yield* Effect.all(
-            [
-              runs.transitionOwned(id.runId, ownerB, "completed", "{\"terminal\":true}"),
-              attempts.finish({ ...id, state: "completed", finishedAtMs: 50, outcome: { writer: "new" } }, ownerB)
-            ],
-            { concurrency: "unbounded" }
-          )
-          return {
-            attempt: Option.getOrThrow(yield* attempts.get(id)),
-            attemptFinish,
-            run: yield* runs.get(id.runId),
-            runTransition
-          }
-        })
-      )
+  for (const first of ["run", "attempt"] as const) {
+    it.effect(`pins the run-terminal/attempt-terminal race when ${first} finishes first`, () =>
+      Effect.gen(function*() {
+        const result = yield* migrated(
+          Effect.gen(function*() {
+            const { attempts, runs } = yield* arrange
+            const before = Option.getOrThrow(yield* attempts.get(id))
+            expect(before).toEqual({
+              ...id,
+              state: "running",
+              startedAtMs: 10,
+              outcome: { writer: "old", phase: "running" },
+              meta: { writer: "old" }
+            })
+            const finished = {
+              ...id,
+              state: "completed",
+              finishedAtMs: 50,
+              outcome: { writer: "new" },
+              meta: { writer: "new", terminal: true }
+            }
+            // Release the second write only after the first has committed,
+            // exercising both serializations without relying on scheduling.
+            const firstDone = yield* Deferred.make<void>()
+            const [runTransition, attemptFinish] = yield* Effect.all(
+              [
+                Effect.gen(function*() {
+                  if (first === "attempt") yield* Deferred.await(firstDone)
+                  const transition = yield* runs.transitionOwned(id.runId, ownerB, "completed", "{\"terminal\":true}")
+                  if (first === "run") yield* Deferred.succeed(firstDone, undefined)
+                  return transition
+                }),
+                Effect.gen(function*() {
+                  if (first === "run") yield* Deferred.await(firstDone)
+                  const finish = yield* attempts.finish(finished, ownerB)
+                  if (first === "attempt") yield* Deferred.succeed(firstDone, undefined)
+                  return finish
+                })
+              ],
+              { concurrency: "unbounded" }
+            )
+            return {
+              attempt: Option.getOrThrow(yield* attempts.get(id)),
+              attemptFinish,
+              before,
+              finished,
+              run: yield* runs.get(id.runId),
+              runTransition
+            }
+          })
+        )
 
-      expect(result.runTransition).toEqual({ _tag: "Transitioned" })
-      expect(["Finished", "FenceLost"]).toContain(result.attemptFinish._tag)
-      expect(result.run.status).toBe("completed")
-      expect(result.attemptFinish._tag === "Finished" ? result.attempt.state : "running").toBe(
-        result.attemptFinish._tag === "Finished" ? "completed" : "running"
-      )
-    }))
+        expect(result.runTransition).toEqual({ _tag: "Transitioned" })
+        expect(result.run.status).toBe("completed")
+        if (first === "attempt") {
+          expect(result.attempt).toEqual({ ...result.before, ...result.finished })
+          expect(result.attemptFinish).toEqual({ _tag: "Finished" })
+        } else {
+          expect(result.attempt).toStrictEqual(result.before)
+          expect(result.attempt).not.toHaveProperty("finishedAtMs")
+          expect(result.attemptFinish).toEqual({ _tag: "FenceLost" })
+        }
+      }))
+  }
 
   // `patch` is fenced on run ownership like every other write: a delayed
   // patch from the pre-takeover owner arrives after the takeover owner

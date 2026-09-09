@@ -2,7 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { Effect, Layer, Option } from "effect"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as AttemptStore from "../src/AttemptStore.ts"
 import * as Migrations from "../src/Migrations.ts"
 import type { OwnerId } from "../src/Ownership.ts"
@@ -190,6 +191,45 @@ describe("AttemptStore options", () => {
         Effect.gen(function*() {
           const other: OwnerId = { hostId: "host", pid: 2, nonce: "other" }
           expect(yield* store.put(attempt({ state: "running" }), other)).toEqual({ _tag: "FenceLost" })
+          const original = attempt({
+            state: "running",
+            heartbeatAtMs: 2,
+            checkpoint: { cursor: "original" },
+            error: { message: "original" },
+            outcome: { writer: "original" }
+          })
+          expect(yield* store.put(original, owner)).toEqual({ _tag: "Inserted" })
+          const id = { runId: original.runId, stepKeyDigest: original.stepKeyDigest, attempt: original.attempt }
+          const sql = yield* SqlClient.SqlClient
+          const before = JSON.stringify(yield* sql`SELECT * FROM flows_attempts`)
+          const runs = yield* RunStore.RunStore
+          const stale = yield* runs.get("run")
+          yield* TestClock.adjust("31001 millis")
+          expect(
+            yield* runs.claimAndOwn(
+              "run",
+              { status: stale.status, owner: stale.owner, heartbeatAtMs: stale.heartbeatAtMs },
+              other,
+              31_001,
+              { expectedOwner: owner, checkedAtMs: 31_001, kind: "same-host-pid-dead" }
+            )
+          ).toEqual({ _tag: "Activated" })
+          const replacement = attempt({
+            state: "completed",
+            startedAtMs: 9,
+            heartbeatAtMs: 10,
+            finishedAtMs: 11,
+            checkpoint: { cursor: "replacement" },
+            error: { message: "replacement" },
+            outcome: { writer: "replacement" },
+            meta: { a: 2 }
+          })
+          const stalePut = yield* store.put(replacement, owner)
+          expect(JSON.stringify(yield* sql`SELECT * FROM flows_attempts`)).toBe(before)
+          expect(Option.getOrThrow(yield* store.get(id))).toEqual(original)
+          expect(stalePut).toEqual({ _tag: "FenceLost" })
+          expect(yield* store.put(replacement, other)).toEqual({ _tag: "Upserted" })
+          expect(Option.getOrThrow(yield* store.get(id))).toEqual(replacement)
         })
     ))
 
