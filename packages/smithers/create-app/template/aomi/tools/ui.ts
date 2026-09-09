@@ -46,13 +46,14 @@ export class UiError extends Schema.TaggedError<UiError>()("aomi/tools/UiError",
 /** Where a rendered card goes. The Worker binds one per turn. */
 export interface CardSinkService {
   readonly emit: (card: AppCard) => Effect.Effect<void>
+  /** Replace the full card by id, inserting it if absent. */
   readonly update: (card: AppCard) => Effect.Effect<void>
 }
 
 /** Service tag for the turn's card sink. */
 export class CardSink extends Context.Service<CardSink, CardSinkService>()("aomi/tools/CardSink") {}
 
-/** A sink that appends every card to `collected`, in emission order. */
+/** A sink that appends emissions and replaces updates by id, inserting absent ids. */
 export const makeCollecting = (collected: Array<AppCard>): CardSinkService =>
   CardSink.of({
     emit: (card) => Effect.sync(() => void collected.push(card)),
@@ -122,6 +123,12 @@ export const layerNoPanes = (): Layer.Layer<PaneNames> => layerPanes([])
 // ---------------------------------------------------------------------------
 
 export const PaneInput = Schema.Struct({
+  cardId: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        "Omit to create a card. Supply a returned cardId to replace the full card; inserts if absent. Props are replaced, not merged, and an omitted title clears the previous heading."
+    })
+  ),
   name: Schema.String.annotate({ description: "Registered pane name, as listed in the failure message when wrong" }),
   props: Schema.Unknown.annotate({ description: "Props object the pane's own schema decodes" }),
   title: Schema.optionalKey(Schema.String.annotate({ description: "Card heading; the pane's own title is used when omitted" }))
@@ -129,7 +136,9 @@ export const PaneInput = Schema.Struct({
 export type PaneInput = typeof PaneInput.Type
 
 export const PaneOutput = Schema.Struct({
-  cardId: Schema.String.annotate({ description: "Id of the emitted card; pass it back to update the same card" })
+  cardId: Schema.String.annotate({
+    description: "Id of the card; pass as cardId to ui/pane to replace it with a registered pane"
+  })
 })
 export type PaneOutput = typeof PaneOutput.Type
 
@@ -149,7 +158,7 @@ export type HtmlOutput = typeof HtmlOutput.Type
 const paneFlow = Flow.make({
   name: "ui/pane",
   description:
-    "Render a registered pane as a card in the transcript. Prefer this over prose whenever a pane fits the data; a wrong name is refused with the list of registered panes.",
+    "Render a registered pane as a card in the transcript, or replace a card by supplying cardId. Prefer this over prose whenever a pane fits the data; a wrong name is refused with the list of registered panes.",
   input: PaneInput,
   output: PaneOutput,
   capabilities: [],
@@ -174,10 +183,10 @@ const htmlFlow = Flow.make({
  * A card id that is stable across a replay.
  *
  * The cell re-executes from the top after a crash or a permission park, so a
- * random id would emit a second card for the same call. The frame and the
- * call's ordinal within its cell are exactly the pair that does not move.
+ * random id would emit a second card for the same call. The execution session,
+ * frame and call ordinal stay fixed on replay; the session separates runs.
  */
-const cardIdOf = (frame: number, ordinal: number): string => `card-${frame}-${ordinal}`
+const cardIdOf = (session: string, frame: number, ordinal: number): string => `card-${session}-${frame}-${ordinal}`
 
 const unknownPane = (name: string, panes: ReadonlyArray<RegisteredPane>): UiError =>
   new UiError({
@@ -206,15 +215,17 @@ export const uiSource = (services: Context.Context<CardSink | PaneNames>): FlowB
             const pane = panes.find((entry) => entry.name === input.name)
             if (pane === undefined) return yield* Effect.fail(unknownPane(input.name, panes))
             const sink = yield* CardSink
-            const cardId = cardIdOf(call.identity.frame, call.identity.ordinal)
-            yield* sink.emit({
+            const cardId = input.cardId ?? cardIdOf(call.identity.session, call.identity.frame, call.identity.ordinal)
+            const card: AppCard = {
               kind: "pane",
               id: cardId,
               name: pane.name,
               props: input.props,
               fullscreen: pane.fullscreen,
               ...(input.title === undefined ? {} : { title: input.title })
-            })
+            }
+            if (input.cardId === undefined) yield* sink.emit(card)
+            else yield* sink.update(card)
             return { cardId }
           })
       }),
@@ -227,7 +238,7 @@ export const uiSource = (services: Context.Context<CardSink | PaneNames>): FlowB
         handler: (input, call) =>
           Effect.gen(function*() {
             const sink = yield* CardSink
-            const cardId = cardIdOf(call.identity.frame, call.identity.ordinal)
+            const cardId = cardIdOf(call.identity.session, call.identity.frame, call.identity.ordinal)
             yield* sink.emit({
               kind: "html",
               id: cardId,
