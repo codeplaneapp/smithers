@@ -292,7 +292,7 @@ const cosine = (left: ArrayLike<number>, right: ArrayLike<number>): number => {
 }
 
 const recency = (updatedAtMs: number, nowMs: number, halfLifeMs: number): number =>
-  Math.exp(-Math.max(0, nowMs - updatedAtMs) / halfLifeMs)
+  2 ** (-Math.max(0, nowMs - updatedAtMs) / halfLifeMs)
 
 /**
  * Computes a semantic recall result from a vector projection and authoritative
