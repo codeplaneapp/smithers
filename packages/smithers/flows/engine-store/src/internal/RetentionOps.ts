@@ -41,8 +41,11 @@
  * compacting them to a checkpoint, and it happens in the same transaction as
  * the run row, which is the property a compaction could not have given.
  *
- * The operation is idempotent and converges: a bounded pass deletes what it
- * can see, and the next pass continues from what is left.
+ * The operation is idempotent. With a positive integer limit and a fixed,
+ * finite, acyclic run lineage, each successful non-dry pass deletes at least
+ * one collectable run until none remain. Continuation children are selected
+ * before parents; parents pinned by excluded children do not consume the
+ * bound. Runs protected by age or live lineage remain until eligible.
  *
  * @since 0.1.0
  */
@@ -164,8 +167,11 @@ export interface RetainReport {
  */
 export interface Service {
   /**
-   * Deletes every aged terminal run and its dependents in one transaction.
-   * Explicit only — nothing in the engine composition ever calls this.
+   * Deletes up to `limit` aged terminal runs and their dependents atomically.
+   * With a positive integer limit and a fixed, finite, acyclic lineage, each
+   * successful non-dry pass makes progress until all collectable runs are gone,
+   * including continuation chains longer than the bound. Age and live-lineage
+   * protection still apply. Explicit only; nothing schedules this operation.
    */
   readonly retain: (
     options: RetainOptions
@@ -621,26 +627,52 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const journal = yield* Journal.Journal
 
-    /**
-     * Aged terminal runs no live run stands above or below, oldest first,
-     * bounded by the pass's limit.
-     *
-     * The lineage filters run BEFORE the bound, and that is what makes a
-     * bounded pass converge. A workspace whose oldest thousand aged runs all
-     * hang under one parked parent would otherwise fill the window with runs
-     * the pass then has to retain, and report nothing collected while younger
-     * collectable runs sat behind them, pass after pass.
-     */
-    const candidatesOf = (cutoffMs: number, limit: number) =>
-      sql<{ readonly run_id: string; readonly parent_run_id: string | null }>`
-        ${sql.unsafe(lineagePrelude())}
-        SELECT run_id, parent_run_id FROM flows_runs
+    // A continuation parent must outlive every child excluded by age or
+    // live lineage. Propagate that exclusion before applying the pass bound.
+    const scanPrelude = (cutoffMs: number) =>
+      sql`
+      ${sql.unsafe(lineagePrelude())},
+      eligible(run_id) AS (
+        SELECT run_id FROM flows_runs
         WHERE ${sql.in("status", terminalStatuses)}
           AND COALESCE(finished_at_ms, created_at_ms) <= ${cutoffMs}
           AND run_id NOT IN (SELECT run_id FROM under_live)
           AND run_id NOT IN (SELECT run_id FROM over_live)
-        ORDER BY COALESCE(finished_at_ms, created_at_ms), run_id
-        LIMIT ${limit}
+      ),
+      blocked(run_id) AS (
+        SELECT run_id FROM flows_runs WHERE run_id NOT IN (SELECT run_id FROM eligible)
+        UNION
+        SELECT runs.parent_run_id FROM flows_runs AS runs
+        JOIN blocked ON blocked.run_id = runs.run_id
+        WHERE runs.parent_run_id IS NOT NULL
+      )
+    `
+
+    /**
+     * Select children before parents so every bounded window is deletable.
+     * Depth walks from roots, visiting each continuation row once; corrupt
+     * cycles have no root and cannot enter the deletion set. Live-lineage and
+     * age exclusions propagate upward before LIMIT, so pinned parents cannot
+     * consume the bound. The report still presents selected runs oldest first.
+     */
+    const candidatesOf = (cutoffMs: number, limit: number) =>
+      sql<{ readonly run_id: string; readonly parent_run_id: string | null }>`
+        ${scanPrelude(cutoffMs)},
+        depths(run_id, depth) AS (
+          SELECT run_id, 0 FROM flows_runs WHERE parent_run_id IS NULL
+          UNION ALL
+          SELECT runs.run_id, depths.depth + 1 FROM flows_runs AS runs
+          JOIN depths ON runs.parent_run_id = depths.run_id
+        ),
+        selected AS (
+          SELECT runs.run_id, runs.parent_run_id,
+            COALESCE(runs.finished_at_ms, runs.created_at_ms) AS finished_at_ms
+          FROM flows_runs AS runs JOIN depths ON depths.run_id = runs.run_id
+          WHERE runs.run_id NOT IN (SELECT run_id FROM blocked)
+          ORDER BY depths.depth DESC, COALESCE(runs.finished_at_ms, runs.created_at_ms), runs.run_id
+          LIMIT ${limit}
+        )
+        SELECT run_id, parent_run_id FROM selected ORDER BY finished_at_ms, run_id
       `.pipe(
         Effect.map((rows): ReadonlyArray<Candidate> =>
           rows.map((row) => ({ runId: row.run_id, parentRunId: row.parent_run_id }))
@@ -649,9 +681,8 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
       )
 
     /**
-     * The aged terminal runs a live run holds back, and which side it stands
-     * on: `liveDescendant` when the run is an ancestor of something not
-     * terminal, otherwise it is a descendant of something not terminal.
+     * Aged terminal runs held by live lineage or an excluded continuation
+     * descendant. An upward exclusion takes precedence over a live ancestor.
      *
      * These runs are never candidates — `candidatesOf` excludes them — so this
      * read exists to say WHY a workspace with aged runs collected fewer than
@@ -660,17 +691,18 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
      */
     const retainedByLineage = (cutoffMs: number, limit: number) =>
       sql<{ readonly run_id: string; readonly live_descendant: number }>`
-        ${sql.unsafe(lineagePrelude())}
+        ${scanPrelude(cutoffMs)}
         SELECT
           run_id,
-          (run_id IN (SELECT run_id FROM over_live)) AS live_descendant
+          (run_id IN (SELECT run_id FROM over_live) OR EXISTS (
+            SELECT 1 FROM flows_runs AS child
+            WHERE child.parent_run_id = flows_runs.run_id
+              AND child.run_id IN (SELECT run_id FROM blocked)
+          )) AS live_descendant
         FROM flows_runs
         WHERE ${sql.in("status", terminalStatuses)}
           AND COALESCE(finished_at_ms, created_at_ms) <= ${cutoffMs}
-          AND (
-            run_id IN (SELECT run_id FROM under_live)
-            OR run_id IN (SELECT run_id FROM over_live)
-          )
+          AND run_id IN (SELECT run_id FROM blocked)
         ORDER BY COALESCE(finished_at_ms, created_at_ms), run_id
         LIMIT ${limit}
       `.pipe(Effect.mapError(scanning("the run lineage")))
@@ -698,7 +730,6 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
           dryRun: options.dryRun === true,
           assumeLadder: true
         })
-        for (const runId of removed.pinned) retained.add(runId)
 
         return {
           cutoffMs,

@@ -738,6 +738,170 @@ describe("retention", () => {
       )
     ))
 
+  for (
+    const { length, limit, unrelated } of [
+      { length: 2, limit: 1, unrelated: false },
+      { length: RetentionOps.defaultLimit + 1, limit: undefined, unrelated: false },
+      { length: 3, limit: 1, unrelated: true }
+    ]
+  ) {
+    it.effect(`converges over a terminal chain of ${length} with limit ${limit ?? "default"}${unrelated ? " and a younger unrelated run" : ""}`, () =>
+      withCrypto(
+        Effect.gen(function*() {
+          const retain = yield* retention
+          const sql = yield* SqlClient.SqlClient
+          const ids = Array.from({ length }, (_, index) => `round-${String(index).padStart(4, "0")}`)
+          for (const [index, runId] of ids.entries()) {
+            yield* activate(runId, ids[index - 1])
+            yield* finish(runId, "completed")
+          }
+          if (unrelated) {
+            yield* TestClock.adjust(agingMs)
+            yield* activate("unrelated")
+            yield* finish("unrelated", "completed")
+          }
+          yield* TestClock.adjust(agingMs)
+
+          const remaining = new Set(unrelated ? [...ids, "unrelated"] : ids)
+          const options = { olderThanMs: thresholdMs, limit }
+          while (remaining.size > 0) {
+            const planned = yield* retain.retain({ ...options, dryRun: true })
+            const report = yield* retain.retain(options)
+            expect({ ...planned, dryRun: false }).toEqual(report)
+            expect(report.runs).toBeGreaterThan(0)
+            expect(report.runs).toBeLessThanOrEqual(limit ?? RetentionOps.defaultLimit)
+            for (const runId of report.runIds) {
+              expect(remaining.delete(runId)).toBe(true)
+            }
+            const rows = yield* sql<{ readonly run_id: string }>`SELECT run_id FROM flows_runs ORDER BY run_id`
+            expect(rows.map((row) => row.run_id)).toEqual([...remaining].sort())
+            expect(yield* sql`PRAGMA foreign_key_check`).toEqual([])
+          }
+          expect((yield* retain.retain(options)).runs).toBe(0)
+        }).pipe(
+          Effect.provideService(Jj.Jj, jj),
+          Effect.provide(StepBoundary.layerTest()),
+          Effect.provide(stores)
+        )
+      ))
+  }
+
+  it.effect("fills the bound past parents pinned by a younger terminal descendant", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        yield* activate("parent")
+        yield* finish("parent", "completed")
+        yield* activate("child", "parent")
+        yield* finish("child", "completed")
+        yield* TestClock.adjust(agingMs)
+        yield* activate("unrelated")
+        yield* finish("unrelated", "completed")
+        yield* TestClock.adjust(agingMs)
+        yield* activate("fresh", "child")
+        yield* finish("fresh", "completed")
+
+        const first = yield* retain.retain({ olderThanMs: thresholdMs, limit: 1 })
+        expect(first.runIds).toEqual(["unrelated"])
+        expect(first.retainedForLiveDescendants).toEqual(["child"])
+        expect(yield* parentRunIdOf("fresh")).toBe("child")
+        expect(yield* parentRunIdOf("child")).toBe("parent")
+        yield* TestClock.adjust(agingMs)
+        for (const runId of ["fresh", "child", "parent"]) {
+          expect((yield* retain.retain({ olderThanMs: thresholdMs, limit: 1 })).runIds).toEqual([runId])
+        }
+        expect((yield* retain.retain({ olderThanMs: thresholdMs, limit: 1 })).runs).toBe(0)
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
+  it.effect("collects a branching continuation lineage without selecting a parent before either child", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        const sql = yield* SqlClient.SqlClient
+        for (
+          const [runId, parent] of [
+            ["root", undefined],
+            ["left", "root"],
+            ["right", "root"],
+            ["leaf", "left"]
+          ] as const
+        ) {
+          yield* activate(runId, parent)
+          yield* finish(runId, "completed")
+        }
+        yield* TestClock.adjust(agingMs)
+        expect((yield* retain.retain({ olderThanMs: thresholdMs, limit: 2 })).runIds).toEqual(["leaf", "left"])
+        expect(yield* sql`PRAGMA foreign_key_check`).toEqual([])
+        expect((yield* retain.retain({ olderThanMs: thresholdMs, limit: 2 })).runIds).toEqual(["right", "root"])
+        expect(yield* sql`SELECT run_id FROM flows_runs`).toEqual([])
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
+  it.effect("rolls back every table when a late retain delete aborts", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        const sql = yield* SqlClient.SqlClient
+        const state = yield* DurableEngineState.DurableEngineState
+        for (const runId of ["aged", "survivor"]) {
+          yield* activate(runId)
+          yield* seedDependents(runId)
+          yield* seedTimeTravelReceipt(runId)
+          yield* finish(runId, "completed")
+        }
+        yield* state.recordRunParent("aged", "survivor")
+        yield* TestClock.adjust(agingMs)
+
+        // ABORT rolls back only the failing statement. Attempts and journal
+        // rows have already been deleted when this late inventory entry fires.
+        yield* sql`CREATE TRIGGER refuse_retention_archive
+          BEFORE DELETE ON flows_time_travel_archive
+          WHEN OLD.run_id = 'aged'
+            AND NOT EXISTS (SELECT 1 FROM flows_attempts WHERE run_id = 'aged')
+            AND NOT EXISTS (SELECT 1 FROM flows_journal_events WHERE run_id = 'aged')
+          BEGIN SELECT RAISE(ABORT, 'late retention delete'); END`.pipe(Effect.orDie)
+        const snapshot = Effect.gen(function*() {
+          const tables = yield* sql<{ readonly name: string }>`
+            SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name
+          `
+          const rows: Record<string, ReadonlyArray<string>> = {}
+          for (const { name } of tables) {
+            rows[name] = (yield* sql`SELECT * FROM ${sql(name)}`).map((row) => JSON.stringify(row)).sort()
+          }
+          return rows
+        }).pipe(Effect.orDie)
+        const before = yield* snapshot
+        expect((yield* footprint("aged")).attempts).toBe(1)
+        expect((yield* footprint("aged")).journal).toBe(1)
+
+        const exit = yield* Effect.exit(retain.retain({ olderThanMs: thresholdMs, limit: 1 }))
+
+        expect(exit._tag).toBe("Failure")
+        if (exit._tag !== "Failure") return
+        expect(exit.cause.reasons[0]).toMatchObject({
+          error: { code: "delete_failed", message: "flows_time_travel_archive could not be collected" }
+        })
+        expect(yield* snapshot).toEqual(before)
+        yield* sql`DROP TRIGGER refuse_retention_archive`.pipe(Effect.orDie)
+        expect((yield* retain.retain({ olderThanMs: thresholdMs, limit: 1 })).runIds).toEqual(["aged"])
+        expect((yield* footprint("aged")).runs).toBe(0)
+        expect((yield* footprint("survivor")).journal).toBe(1)
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
   it.effect("fails typed when the schema it deletes from is not there", () =>
     withCrypto(
       Effect.gen(function*() {
@@ -754,7 +918,7 @@ describe("retention", () => {
         if (exit._tag !== "Failure") return
         const error = exit.cause.reasons[0]
         expect(error).toMatchObject({ error: { code: "delete_failed" } })
-        // The transaction rolled back: nothing was half-deleted.
+        // Counting detects the missing table before deletion begins.
         expect(yield* countOf("flows_runs", "run_id", "aged")).toBe(1)
       }).pipe(
         Effect.provideService(Jj.Jj, jj),
