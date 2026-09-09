@@ -533,13 +533,17 @@ const invalidPath = (path: string): WorkspaceError =>
  * other absolute path, and anything traversing upward, is refused rather than
  * silently confined.
  */
-const normalizePath = (root: string, path: string): Result.Result<string, WorkspaceError> => {
+const normalizePath = (root: string, path: string, allowRoot = false): Result.Result<string, WorkspaceError> => {
   const slashed = path.replaceAll("\\", "/")
-  const rooted = root !== "" && slashed.startsWith(`${root}/`) ? slashed.slice(root.length + 1) : slashed
+  const rooted = slashed === root
+    ? ""
+    : root !== "" && slashed.startsWith(`${root}/`)
+    ? slashed.slice(root.length + 1)
+    : slashed
   const parts = rooted.split("/")
   if (rooted.startsWith("/") || parts.some((part) => part === "..")) return Result.fail(invalidPath(path))
   const compact = parts.filter((part) => part !== "" && part !== ".").join("/")
-  return compact === "" ? Result.fail(invalidPath(path)) : Result.succeed(compact)
+  return compact === "" && !allowRoot ? Result.fail(invalidPath(path)) : Result.succeed(compact)
 }
 
 /**
@@ -732,8 +736,8 @@ const notFound = (path: string): WorkspaceError =>
 const transaction = (base: ReadonlyMap<string, Uint8Array>, trace: Trace, root: string) => {
   const files = new Map(base)
   const produced = new Set<string>()
-  const resolvePath = (path: string): Effect.Effect<string, WorkspaceError> => {
-    const normalized = normalizePath(root, path)
+  const resolvePath = (path: string, allowRoot = false): Effect.Effect<string, WorkspaceError> => {
+    const normalized = normalizePath(root, path, allowRoot)
     return Result.isFailure(normalized) ? Effect.fail(normalized.failure) : Effect.succeed(normalized.success)
   }
   const readBytes = Effect.fn("WorkspaceSandbox.read")(function*(path: string) {
@@ -777,10 +781,20 @@ const transaction = (base: ReadonlyMap<string, Uint8Array>, trace: Trace, root: 
     // untraced — under the declared-set host an undeclared path is absent by
     // construction, the Bazel forest's own deterministic answer.
     exists: (path) =>
-      resolvePath(path).pipe(
+      resolvePath(path, true).pipe(
         Effect.map((key) => {
-          const present = files.has(key)
-          if (present) trace.attemptedReads.push({ path: key, produced: produced.has(key) })
+          if (key === "") return true
+          if (files.has(key)) {
+            trace.attemptedReads.push({ path: key, produced: produced.has(key) })
+            return true
+          }
+          const prefix = `${key}/`
+          let present = false
+          for (const candidate of files.keys()) {
+            if (!candidate.startsWith(prefix)) continue
+            trace.attemptedReads.push({ path: candidate, produced: produced.has(candidate) })
+            present = true
+          }
           return present
         }),
         // A path the transaction cannot even name does not exist in it; that
@@ -802,9 +816,9 @@ const transaction = (base: ReadonlyMap<string, Uint8Array>, trace: Trace, root: 
     // works unchanged, and listing one is a prefix scan.
     makeDirectory: () => Effect.void,
     readDirectory: (path) =>
-      resolvePath(path).pipe(
+      resolvePath(path, true).pipe(
         Effect.map((key) => {
-          const prefix = `${key}/`
+          const prefix = key === "" ? "" : `${key}/`
           const entries = new Set<string>()
           for (const candidate of files.keys()) {
             if (!candidate.startsWith(prefix)) continue

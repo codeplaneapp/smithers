@@ -124,8 +124,15 @@ violation check, and the provenance cannot drift between them.
 A body that reaches the host through a service the transaction does not seed is
 outside the transaction. Denying that ambient access is the VM and
 `SandboxProvider` story in [`@smthrs/sandbox`](/api/sandbox). The transaction's
-`FileSystem` surface is also deliberately partial, and a settled bundle is
-applied without a human diff-review gate, which is a known limitation.
+`FileSystem` surface is deliberately partial. `readDirectory` lists immediate
+children and accepts `""`, `"."`, and the absolute workspace root as the root.
+`exists` recognizes the root, files, and directories implied by visible file
+paths. The root exists even when the transaction is empty; empty subdirectories
+are not retained, and `makeDirectory` is a no-op. File reads, writes, and removals
+require a non-root path. Paths containing `..` are refused. Directory probes
+trace the visible files that establish their results for declaration checks.
+A settled bundle is applied without a human diff-review gate, which is a known
+limitation.
 
 ## StepSandbox is the scope-safe front door
 

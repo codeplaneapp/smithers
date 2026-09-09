@@ -534,6 +534,90 @@ describe("WorkspaceSandbox expected mode", () => {
  * isolated.
  */
 describe("WorkspaceSandbox transaction filesystem", () => {
+  for (const host of ["memory", "filesystem"] as const) {
+    for (const probe of ["root listing", "directory presence", "empty root", "invalid paths"] as const) {
+      it.effect(`${host}: supports ${probe}`, () =>
+        withCrypto(
+          Effect.scoped(Effect.gen(function*() {
+            const hostFs = yield* FileSystem.FileSystem
+            const root = yield* hostFs.makeTempDirectoryScoped({ prefix: "wsx-directories-" })
+            yield* hostFs.makeDirectory(`${root}/dir/nested`, { recursive: true })
+            const initial = { "a.txt": "A", "dir/b.txt": "B", "dir/nested/c.txt": "C" }
+            for (const [path, content] of Object.entries(initial)) {
+              yield* hostFs.writeFileString(`${root}/${path}`, content)
+            }
+            const sandbox = host === "memory"
+              ? (yield* WorkspaceSandbox.makeMemory(probe === "empty root" ? {} : initial)).service
+              : WorkspaceSandbox.makeFileSystem(hostFs, yield* ArtifactStore.ArtifactStore, root)
+            const roots = host === "memory" ? [".", ""] : [".", "", root, `${root}/`]
+            const result = yield* sandbox.execute({
+              descriptor: descriptor({
+                readSet: probe === "empty root"
+                  ? []
+                  : Object.entries(initial).map(([path, content]) => read(path, content)),
+                writeSet: ["new/**"]
+              }),
+              workflow: Effect.gen(function*() {
+                const fs = yield* FileSystem.FileSystem
+                if (probe === "root listing" || probe === "empty root") {
+                  for (const path of roots) {
+                    expect(yield* fs.readDirectory(path)).toEqual(probe === "empty root" ? [] : ["a.txt", "dir"])
+                    expect(yield* fs.exists(path)).toBe(true)
+                  }
+                } else if (probe === "directory presence") {
+                  for (
+                    const path of [
+                      "dir",
+                      "dir/nested",
+                      "dir/",
+                      "./dir",
+                      ...(host === "filesystem" ? [`${root}/dir`] : [])
+                    ]
+                  ) {
+                    expect(yield* fs.exists(path)).toBe(true)
+                  }
+                  expect(yield* fs.readDirectory("dir")).toEqual(["b.txt", "nested"])
+                  expect(yield* fs.exists("a.txt")).toBe(true)
+                  expect(yield* fs.exists("di")).toBe(false)
+                  expect(yield* fs.exists("missing")).toBe(false)
+                  yield* fs.writeFileString("new/file.txt", "new")
+                  expect(yield* fs.exists("new")).toBe(true)
+                  yield* fs.remove("new/file.txt")
+                  expect(yield* fs.exists("new")).toBe(false)
+                } else {
+                  for (const path of [...roots, "..", "dir/../a.txt", `${root}/../escape.txt`]) {
+                    expect((yield* Effect.flip(fs.writeFileString(path, "bad")))._tag).toBe("PlatformError")
+                    expect((yield* Effect.flip(fs.remove(path)))._tag).toBe("PlatformError")
+                    expect((yield* Effect.flip(fs.readFile(path)))._tag).toBe("PlatformError")
+                  }
+                  expect(yield* fs.exists("..")).toBe(false)
+                  expect((yield* Effect.flip(fs.readDirectory("..")))._tag).toBe("PlatformError")
+                }
+              })
+            })
+            expect(result._tag).toBe("Accepted")
+            expect(result.violations).toEqual([])
+          })).pipe(Effect.provide(ArtifactStore.layerMemory.pipe(Layer.provideMerge(NodeFileSystem.layer))))
+        ))
+    }
+  }
+
+  it.effect("traces the files whose presence establishes an implicit directory", () =>
+    withCrypto(Effect.gen(function*() {
+      const test = yield* WorkspaceSandbox.makeMemory({ "secret/value.txt": "secret" })
+      const result = yield* test.service.execute({
+        descriptor: descriptor(),
+        workflow: Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          expect(yield* fs.exists("secret")).toBe(true)
+        })
+      })
+      expect(result._tag).toBe("Invalidated")
+      expect(result.violations).toMatchObject([
+        { kind: "undeclared-read", resource: { kind: "file", id: "secret/value.txt" } }
+      ])
+    })))
+
   it.effect("serves an ordinary FileSystem body over the transaction", () =>
     Effect.gen(function*() {
       const program = Effect.gen(function*() {
