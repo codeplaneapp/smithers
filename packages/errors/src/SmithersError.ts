@@ -119,14 +119,23 @@ export const isSmithersError = (value: unknown): value is SmithersError => value
  * closed vocabulary and string summary and documentation URL fields.
  * `details`, when present, must be a non-null object.
  *
+ * Inspecting the value runs caller code: a property getter, or a proxy trap
+ * reached by the prototype lookup, belongs to whoever built the error. Every
+ * read is inside a `try`, so an inspection that throws answers `false` instead
+ * of escaping and replacing the failure being classified.
+ *
  * @category refinements
  * @since 1.0.0
  */
 export const hasSmithersErrorShape = (value: unknown): value is SmithersError => {
-  if (!(value instanceof Error)) return false
-  const details = (value as SmithersError).details
-  return isSmithersErrorCode((value as SmithersError).code) &&
-    typeof (value as SmithersError).summary === "string" &&
-    typeof (value as SmithersError).docsUrl === "string" &&
-    (details === undefined || (typeof details === "object" && details !== null && !Array.isArray(details)))
+  try {
+    if (!(value instanceof Error)) return false
+    const details = (value as SmithersError).details
+    return isSmithersErrorCode((value as SmithersError).code) &&
+      typeof (value as SmithersError).summary === "string" &&
+      typeof (value as SmithersError).docsUrl === "string" &&
+      (details === undefined || (typeof details === "object" && details !== null && !Array.isArray(details)))
+  } catch {
+    return false
+  }
 }

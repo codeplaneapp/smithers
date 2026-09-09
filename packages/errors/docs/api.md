@@ -112,6 +112,11 @@ when all four hold:
 3. `value.summary` and `value.docsUrl` are both strings.
 4. `value.details` is absent, or is a non-null object that is not an array.
 
+Every inspection runs inside a `try`. A throwing property getter on any of the
+four fields, or a proxy whose prototype lookup throws, answers `false` rather
+than escaping the refinement, so classifying a hostile value cannot replace the
+failure being handled.
+
 Narrows `value.code` to `SmithersErrorCode`, so an exhaustive `switch` type
 checks after the call. Use it for a value that crossed a module-instance
 boundary. It cannot distinguish a correct instance from a deliberate forgery

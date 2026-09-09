@@ -74,6 +74,24 @@ A `details` value that is a string, `null`, a number, or an array is refused
 too. Every one of those would break a caller that spreads or reads keys from
 `details`.
 
+Inspecting a value runs caller code, so every read is inside a `try` and an
+inspection that throws answers `false`:
+
+```ts
+const hostile = Object.assign(new Error("f"), { code: "INVALID_INPUT", summary: "s", docsUrl: "d" })
+Object.defineProperty(hostile, "code", {
+  get() {
+    throw new Error("boom")
+  }
+})
+
+hasSmithersErrorShape(hostile) // false, and no exception escapes
+```
+
+The same holds for a revoked proxy and for a proxy whose prototype lookup
+throws. This is what keeps the refinement usable in a `catch`: one that threw
+would replace the failure being classified with the accessor's error.
+
 What it cannot refuse is a deliberate forgery: a plain `Error` with all four
 fields set correctly passes. The refinement answers "this value is safe to
 read as a `SmithersError`", not "this value was raised by Smithers". Use it on
@@ -84,7 +102,9 @@ values from a module boundary you trust, not on values from a network.
 A subclass refinement combines both, because neither is sufficient alone:
 `instanceof` misses the cross-copy instance, and a `name` check accepts a
 forgery. Check the class or the name, then the structure, then the extra
-fields your own conversions read.
+fields your own conversions read. Wrap the whole refinement in a `try` the way
+`hasSmithersErrorShape` does, because the extra fields you read are caller code
+too and an inspection that throws must answer `false`.
 `Core.IntegrationError.isIntegrationError` in
 [`@smthrs/integrations`](/api/integrations) is the worked example, and
 [Raise a SmithersError from an adapter](./raise-an-error.md#ship-a-refinement-with-the-subclass)

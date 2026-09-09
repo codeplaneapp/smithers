@@ -327,6 +327,48 @@ describe("error refinements", () => {
       expect(hasSmithersErrorShape(error)).toBe(true)
     }
   })
+
+  it("answers false when an inspected property getter throws", () => {
+    for (const field of ["code", "summary", "docsUrl", "details"]) {
+      const error = Object.assign(new Error("original provider failure"), {
+        code: "INVALID_INPUT",
+        summary: "original provider failure",
+        docsUrl: ERROR_REFERENCE_URL,
+        details: {}
+      })
+      Object.defineProperty(error, field, {
+        get(): never {
+          throw new Error(`${field} getter failed`)
+        }
+      })
+      expect(() => hasSmithersErrorShape(error)).not.toThrow()
+      expect(hasSmithersErrorShape(error)).toBe(false)
+    }
+  })
+
+  it("answers false for a revoked proxy", () => {
+    const { proxy, revoke } = Proxy.revocable(
+      Object.assign(new Error("f"), {
+        code: "INVALID_INPUT",
+        summary: "s",
+        docsUrl: ERROR_REFERENCE_URL
+      }),
+      {}
+    )
+    revoke()
+    expect(() => hasSmithersErrorShape(proxy)).not.toThrow()
+    expect(hasSmithersErrorShape(proxy)).toBe(false)
+  })
+
+  it("answers false when the prototype lookup throws", () => {
+    const hostile = new Proxy({}, {
+      getPrototypeOf(): never {
+        throw new Error("prototype lookup failed")
+      }
+    })
+    expect(() => hasSmithersErrorShape(hostile)).not.toThrow()
+    expect(hasSmithersErrorShape(hostile)).toBe(false)
+  })
 })
 
 describe("error codes", () => {
