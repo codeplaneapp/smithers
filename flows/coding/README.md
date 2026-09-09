@@ -117,10 +117,22 @@ snapshot without changing ownership. A changed parent, conflicted tree, or
 different working-copy identity refuses acceptance. Reads/writes in the agent
 report are explanatory observations, not a security boundary or test evidence.
 
+Native reads and mutations retry lock contention, unknown responses and the
+installed guest's transient subprocess-failure envelope twice with
+the exact original request before recording a terminal failure. Request IDs
+include the product Change, ordinal and phase, so multiple inlined Changes do
+not collide. Revision conflicts refuse acceptance and require replanning; they
+never refresh an expected revision silently. These are private recipe contracts.
+An oversized response is terminal because replay would return the same oversized
+receipt. Inline implementations require a known atom list; a parent revision can
+be an upstream planned value and is resolved through the graph before mapping.
+
 A real JJ/SQLite test creates two atoms with actual file writes, reopens and
 replays the run without editing again, amends the older atom, verifies the later
 atom retains its JJ ID with a new parent/commit and correct files, and refuses
-an incorrectly parented edit. The agent in this test is scripted; a live model
+an incorrectly parented edit. It also recovers a lost acknowledgement after a
+real mutation, retries lock contention, implements two inlined Changes without
+ID collisions, and refuses to retry a revision conflict. The agent in this test is scripted; a live model
 and complete production host still require the configured composition.
 
 This is a validated implementation pass, not the complete coding product. Its

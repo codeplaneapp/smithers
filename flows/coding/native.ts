@@ -81,7 +81,7 @@ const failure = (code: string, message: string) => new NativeCodingError({ code,
 const capture = <E>(stream: Stream.Stream<Uint8Array, E>, limit: number) =>
   Stream.runFoldEffect(stream, () => ({ text: "", bytes: 0, decoder: new TextDecoder() }), (state, chunk) => {
     const bytes = state.bytes + chunk.length
-    if (bytes > limit) return Effect.fail(failure("response_too_large", "Native coding output exceeded its bounded response size; retry the identical operation to recover its receipt"))
+    if (bytes > limit) return Effect.fail(failure("response_too_large", "Native coding output exceeded its bounded response size; inspect the existing native receipt before replanning"))
     return Effect.succeed({ ...state, bytes, text: state.text + state.decoder.decode(chunk, { stream: true }) })
   }).pipe(Effect.map(state => state.text + state.decoder.decode()))
 
@@ -140,8 +140,20 @@ export const ReadNative = Action.make("coding/ReadNative", {
 export const ApplyNative = Action.make("coding/ApplyNative", {
   payload: { operation: Operation }, success: OperationResult, error: NativeCodingError, nondeterministic: true
 })
+const transient = (error: NativeCodingError) =>
+  error.code === "outcome_unknown" || error.code === "workspace_busy" || error.code === "guest_failure"
+
+/** Reads use the same guest lock; retry transient admission/transport failures. */
+export const readNative = (changeIds: ReadonlyArray<string> = []) =>
+  Effect.flatMap(NativeCoding, native => native.read(changeIds)).pipe(Action.retry({ times: 2, while: transient }))
+
 /** Merge into the existing runtime's action table; never create another one. */
 export const nativeActions = Layer.mergeAll(
-  ReadNative.toLayer(({ changeIds }) => Effect.flatMap(NativeCoding, native => native.read(changeIds))),
-  ApplyNative.toLayer(({ operation }) => Effect.flatMap(NativeCoding, native => native.apply(operation)))
+  ReadNative.toLayer(({ changeIds }) => readNative(changeIds)),
+  ApplyNative.toLayer(({ operation }) => Effect.flatMap(NativeCoding, native => native.apply(operation)).pipe(
+    // Retry inside the durable action before its terminal result is recorded.
+    // Never refresh the request: native receipts recover an accepted mutation
+    // whose response was lost. Conflicting revisions still require replanning.
+    Action.retry({ times: 2, while: transient })
+  ))
 )

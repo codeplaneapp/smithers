@@ -4,19 +4,19 @@ import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import * as Executable from "@smthrs/registry/Executable"
 import { Effect, Layer, Option, Schema } from "effect"
-import { ApplyNative, NativeCoding, NativeCodingError, Operation, OperationResult, requestIdFor } from "./native.ts"
+import { ApplyNative, NativeCodingError, Operation, OperationResult, readNative, requestIdFor } from "./native.ts"
 import { AtomicPlan, Change, CodingError, Implementation, Revision } from "./schema.ts"
 
 const Error = Schema.Union([CodingError, NativeCodingError, AgentAction.AgentFailure])
 const EditReport = Schema.Struct({ summary: Schema.NonEmptyString, reads: Schema.Array(Schema.String), writes: Schema.Array(Schema.String) })
 const Entry = Action.make("coding/prepare-atom", {
-  payload: { atom: AtomicPlan, parent: Revision, ordinal: Schema.Number },
+  payload: { change: Schema.NonEmptyString, atom: AtomicPlan, parent: Revision, ordinal: Schema.Number },
   success: Operation, error: Error, nondeterministic: true
 })
 const Prepare = Action.make("coding/prepare-atom-mutation", {
   // The recorded edit report is also the graph dependency: file capture cannot
   // be prepared until the agent has finished writing this atom.
-  payload: { phase: Schema.Literals(["snapshot", "describe"]), atom: AtomicPlan, revision: Revision, parent: Revision, ordinal: Schema.Number, editing: EditReport },
+  payload: { change: Schema.NonEmptyString, phase: Schema.Literals(["snapshot", "describe"]), atom: AtomicPlan, revision: Revision, parent: Revision, ordinal: Schema.Number, editing: EditReport },
   success: Operation, error: Error, nondeterministic: true
 })
 const Observe = Action.make("coding/observe-atom", {
@@ -45,8 +45,7 @@ const sameCode = (left: Revision, right: Revision) =>
   left.parentCommitIds.length === right.parentCommitIds.length && left.parentCommitIds.every((id, i) => id === right.parentCommitIds[i])
 
 const readParent = (parent: Revision, changeId?: string) => Effect.gen(function*() {
-  const native = yield* NativeCoding
-  const read = yield* native.read([...new Set([parent.changeId, ...(changeId ? [changeId] : [])])])
+  const read = yield* readNative([...new Set([parent.changeId, ...(changeId ? [changeId] : [])])])
   const currentParent = read.revisions.find(value => value.changeId === parent.changeId)
   if (!currentParent || currentParent.kind !== "resolved" || !sameCode(currentParent, parent)) {
     return yield* stale("The atom's parent changed; replan before editing its files")
@@ -54,12 +53,12 @@ const readParent = (parent: Revision, changeId?: string) => Effect.gen(function*
   return { read, parent: currentParent }
 })
 
-/** Prepared requests are journaled separately, so a lost native acknowledgement replays the original request. */
+/** Prepared requests are journaled separately; bounded transient retries resend them unchanged. */
 export const atomOperations = Layer.mergeAll(
-  Entry.toLayer(({ atom, parent, ordinal }) => Effect.gen(function*() {
+  Entry.toLayer(({ change, atom, parent, ordinal }) => Effect.gen(function*() {
     const instance = yield* FlowRuntime.FlowInstance
     const current = yield* readParent(parent, atom.changeId ?? undefined)
-    const requestId = requestIdFor(instance.executionId, `atom/${ordinal}/enter`)
+    const requestId = requestIdFor(instance.executionId, JSON.stringify([change, ordinal, "enter"]))
     if (atom.changeId === null) return {
       operation: "create" as const, requestId, expectedOperationId: current.read.operationId,
       target: current.parent, description: atom.message
@@ -70,7 +69,7 @@ export const atomOperations = Layer.mergeAll(
     }
     return { operation: "edit" as const, requestId, expectedOperationId: current.read.operationId, target }
   })),
-  Prepare.toLayer(({ phase, atom, revision, parent, ordinal }) => Effect.gen(function*() {
+  Prepare.toLayer(({ change, phase, atom, revision, parent, ordinal }) => Effect.gen(function*() {
     const instance = yield* FlowRuntime.FlowInstance
     const current = yield* readParent(parent, revision.changeId)
     const target = current.read.head
@@ -81,7 +80,7 @@ export const atomOperations = Layer.mergeAll(
     }
     // The existing head reporter may have captured the agent's file edits.
     // Snapshot accepts that same native change, but never a different parent.
-    const expected = { requestId: requestIdFor(instance.executionId, `atom/${ordinal}/${phase}`), expectedOperationId: current.read.operationId, target }
+    const expected = { requestId: requestIdFor(instance.executionId, JSON.stringify([change, ordinal, phase])), expectedOperationId: current.read.operationId, target }
     return phase === "snapshot" ? { ...expected, operation: "snapshot" as const }
       : { ...expected, operation: "describe" as const, description: atom.message }
   })),
@@ -97,17 +96,17 @@ export const atomOperations = Layer.mergeAll(
 )
 
 const Atom = Flow.make("coding/ImplementAtom", {
-  payload: { atom: AtomicPlan, parent: Revision, ordinal: Schema.Number, memoryRevision: Schema.String },
+  payload: { change: Schema.NonEmptyString, atom: AtomicPlan, parent: Revision, ordinal: Schema.Number, memoryRevision: Schema.String },
   success: Schema.Struct({ revision: Revision, reads: Schema.Array(Schema.String), writes: Schema.Array(Schema.String) }),
   error: Error,
-  body: ({ atom, parent, ordinal, memoryRevision }) => Entry.call({ atom, parent, ordinal }).pipe(
+  body: ({ change, atom, parent, ordinal, memoryRevision }) => Entry.call({ change, atom, parent, ordinal }).pipe(
     Node.bindPlanned(operation => ApplyNative.call({ operation })),
     Node.bindPlanned(result => Observe.call({ result, parent, expectedChangeId: atom.changeId })),
     Node.bindPlanned(revision => EditAtom.call({ atom, parent, revision, memoryRevision }).pipe(
-      Node.bindPlanned(report => Node.all({ report: Node.succeed(report), final: Prepare.call({ phase: "snapshot", atom, revision, parent, ordinal, editing: report }).pipe(
+      Node.bindPlanned(report => Node.all({ report: Node.succeed(report), final: Prepare.call({ change, phase: "snapshot", atom, revision, parent, ordinal, editing: report }).pipe(
         Node.bindPlanned(operation => ApplyNative.call({ operation })),
         Node.bindPlanned(result => Observe.call({ result, parent, expectedChangeId: revision.changeId })),
-        Node.bindPlanned(snapshot => Prepare.call({ phase: "describe", atom, revision: snapshot, parent, ordinal, editing: report })),
+        Node.bindPlanned(snapshot => Prepare.call({ change, phase: "describe", atom, revision: snapshot, parent, ordinal, editing: report })),
         Node.bindPlanned(operation => ApplyNative.call({ operation })),
         Node.bindPlanned(result => Observe.call({ result, parent, expectedChangeId: revision.changeId }))
       ) }).pipe(Node.map(({ report, final }) => ({ revision: final, reads: report.reads, writes: report.writes }))))
@@ -119,7 +118,7 @@ type AtomResult = typeof Atom.successSchema.Type
 type AtomsNode = Node.Node<ReadonlyArray<AtomResult>, typeof Error.Type, Node.Services<ReturnType<typeof Atom.call>>>
 const atoms = (change: typeof Change.Type, parent: Parameters<typeof Atom.call>[0]["parent"], memoryRevision: string, ordinal: number): AtomsNode => {
   const atom = change.atoms[ordinal]
-  return atom === undefined ? Node.succeed([]) : Atom.call({ atom, parent, memoryRevision, ordinal }).pipe(
+  return atom === undefined ? Node.succeed([]) : Atom.call({ change: change.id, atom, parent, memoryRevision, ordinal }).pipe(
     Node.bindPlanned(result => Node.all({ current: Node.succeed(result), rest: atoms(change, result.revision, memoryRevision, ordinal + 1) })
       .pipe(Node.map(({ current, rest }) => [current, ...rest])))
   )
@@ -129,10 +128,19 @@ const atoms = (change: typeof Change.Type, parent: Parameters<typeof Atom.call>[
 export const ImplementAtoms = Flow.make("coding/ImplementAtoms", {
   payload: { change: Change, parent: Revision, memoryRevision: Schema.NonEmptyString },
   success: Implementation, error: Error,
-  body: ({ change, parent, memoryRevision }) => atoms(change, parent, memoryRevision, 0).pipe(Node.map(results => ({
-    change: change.id, parent, atoms: results.map(result => result.revision), head: results.at(-1)!.revision,
-    reads: [...new Set(results.flatMap(result => result.reads))], writes: [...new Set(results.flatMap(result => result.writes))]
-  })))
+  // An inlined caller can supply a planned parent. Carry it through the graph
+  // so the mapper receives the resolved revision instead of capturing a proxy.
+  body: ({ change, parent, memoryRevision }) => {
+    if (!Array.isArray(change.atoms)) throw new CodingError({
+      code: "invalid_plan", message: "An inline implementation needs a known atom list; materialize the Change before planning it"
+    })
+    return Node.all({
+      change: Node.succeed(change.id), parent: Node.succeed(parent), results: atoms(change, parent, memoryRevision, 0)
+    }).pipe(Node.map(({ change, parent, results }) => ({
+      change, parent, atoms: results.map(result => result.revision), head: results.at(-1)!.revision,
+      reads: [...new Set(results.flatMap(result => result.reads))], writes: [...new Set(results.flatMap(result => result.writes))]
+    })))
+  }
 })
 
 const Refuse = Action.make("coding/refuse-atom-input", { payload: {}, success: Implementation, error: CodingError })

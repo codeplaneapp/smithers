@@ -8,5 +8,5 @@ export default Flow.make({
   output: Result,
   capabilities: ["*"],
   flows: ["coding/RunPlan"],
-  effects: { reads: ["**"], writes: ["**"], mode: "expected", onConflict: "serialize", tier: "sealed" }
+  effects: { reads: ["**"], writes: ["**"], mode: "expected", onConflict: "serialize", tier: "irreversible" }
 })
