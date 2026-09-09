@@ -12,6 +12,7 @@ import * as RunStore from "@smthrs/run-store/RunStore"
 import type * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -165,6 +166,7 @@ export type AuditDetail = typeof AuditDetail.Type
  * @category models
  */
 export interface Options {
+  readonly compensationTimeout?: Duration.Input | undefined
   readonly runId: string
   readonly frame: Frame
   readonly owner: OwnerId
@@ -910,7 +912,7 @@ export const rewind = (
                     return store.updateAudit(auditId, { detail: nextDetail }).pipe(
                       Effect.tap(() => Effect.sync(() => (detail = nextDetail)))
                     )
-                  })
+                  }, options.compensationTimeout)
                   compensation = { handlerReceipts }
                   // The receipts reach durable storage BEFORE the next irreversible
                   // step. They used to land only after `restoreWorkspace`, so a
@@ -923,18 +925,25 @@ export const rewind = (
                   yield* store.updateAudit(auditId, { detail })
                   yield* runHook(options, "compensate-effects")
 
-                  // `restoreWorkspace` owns these receipts: every failure path in
-                  // it rolls them back before failing. The tracked compensation is
-                  // therefore emptied so the outer failure branch cannot roll them
-                  // back a SECOND time. A handler's `rollback` re-performs the
-                  // effect the revert undid and nothing requires it to be
-                  // idempotent, so the duplicate was a duplicated side effect.
-                  const restored = yield* Effect.exit(Compensation.restoreWorkspace(plan, handlerReceipts))
+                  // Preparation owns handler cleanup on failure. Once prepared,
+                  // persist BOTH pointers before jj can change the workspace.
+                  const prepared = yield* Effect.exit(
+                    Compensation.prepareWorkspace(plan, handlerReceipts, options.compensationTimeout)
+                  )
+                  if (Exit.isFailure(prepared)) {
+                    compensation = { handlerReceipts: [] }
+                    return yield* Effect.failCause(prepared.cause)
+                  }
+                  compensation = prepared.value
+                  detail = { ...detail, compensation }
+                  yield* store.updateAudit(auditId, { detail })
+                  const restored = yield* Effect.exit(
+                    Compensation.restorePreparedWorkspace(compensation, options.compensationTimeout)
+                  )
                   if (Exit.isFailure(restored)) {
                     compensation = { handlerReceipts: [] }
                     return yield* Effect.failCause(restored.cause)
                   }
-                  compensation = restored.value
                   yield* runHook(options, "restore-workspace")
                   detail = {
                     ...detail,
@@ -1076,7 +1085,7 @@ export const rewind = (
           }
 
           if (!archiveCommitted) {
-            const rollbackExit = yield* Effect.exit(Compensation.rollback(compensation))
+            const rollbackExit = yield* Effect.exit(Compensation.rollback(compensation, options.compensationTimeout))
             if (Exit.isSuccess(rollbackExit) && detail?.compensation !== undefined) {
               const { compensation: _, ...stripped } = detail
               detail = stripped

@@ -2,10 +2,15 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Jj from "@smthrs/jj"
 import { jjError } from "@smthrs/jj"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
+import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { TestClock } from "effect/testing"
 import type { EffectRecord } from "../src/EffectBoundary.ts"
 import * as Compensation from "../src/internal/Compensation.ts"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
@@ -833,4 +838,84 @@ describe("Compensation.toStoreReceipts", () => {
       receipt: expect.objectContaining({ id: "send:rollback" })
     }])
   })
+})
+
+describe("Compensation deadlines", () => {
+  it.effect("lets interruption finish after a stalled rollback reaches its deadline", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const registry = registryOf([{
+        kind: "send",
+        tier: "irreversible",
+        requiresIdempotencyKey: true,
+        residue: () => "residue",
+        revert: () => Effect.succeed({}),
+        rollback: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+      }])
+      const fiber = yield* Effect.forkChild(
+        Compensation.rollback({
+          handlerReceipts: [{
+            id: "receipt",
+            data: {},
+            effect: record({ id: "send", kind: "send", tier: "irreversible", seq: 1 })
+          }]
+        }, "1 second").pipe(Effect.provide(registry), Effect.provide(jjOf())),
+        { startImmediately: true }
+      )
+      yield* Deferred.await(entered)
+      const interrupted = yield* Effect.forkChild(Fiber.interrupt(fiber), { startImmediately: true })
+      yield* TestClock.adjust("2 seconds")
+      yield* Fiber.join(interrupted)
+      expect((yield* Fiber.await(fiber))._tag).toBe("Failure")
+    }))
+
+  for (const operation of ["revert", "rollback", "snapshot", "restore"] as const) {
+    it.effect(`bounds a nonterminating ${operation} inside the atomic region`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const hang = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+        const send = record({ id: "send", kind: "send", tier: "irreversible", seq: 1 })
+        const registry = registryOf([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "residue",
+          revert: () => operation === "revert" ? hang : Effect.succeed({}),
+          rollback: () => operation === "rollback" ? hang : Effect.void
+        }])
+        const plan = yield* Compensation.assess([
+          operation === "revert" ? send : record({ id: "write", kind: "fs", tier: "compensable", seq: 1 })
+        ], "target").pipe(Effect.provide(cache()), Effect.provide(registry))
+        const work = operation === "revert"
+          ? Compensation.compensate(plan, undefined, "1 second")
+          : operation === "rollback"
+          ? Compensation.rollback({ handlerReceipts: [{ id: "receipt", effect: send, data: {} }] }, "1 second")
+          : Compensation.restoreWorkspace(plan, [], "1 second")
+        const fiber = yield* Effect.forkChild(
+          work.pipe(
+            Effect.provide(registry),
+            Effect.provide(jjOf({
+              snapshot: () =>
+                operation === "snapshot"
+                  ? hang.pipe(Effect.as({ changeId: "current" }))
+                  : Effect.succeed({ changeId: "current" }),
+              restore: (id) => operation === "restore" && id === "target" ? hang : Effect.void
+            }))
+          ),
+          { startImmediately: true }
+        )
+        yield* Deferred.await(entered)
+        yield* Effect.gen(function*() {
+          yield* TestClock.adjust("2 seconds")
+          const result = fiber.pollUnsafe()
+          expect(result?._tag).toBe("Failure")
+          if (result !== undefined && Exit.isFailure(result)) {
+            const failure = Cause.squash(result.cause) as TimeTravelError
+            expect(failure.code).toBe("compensation_failed")
+            expect(JSON.stringify(failure.cause)).toContain("TimeoutError")
+          }
+        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined).pipe(Effect.andThen(Fiber.await(fiber)))))
+      }))
+  }
 })

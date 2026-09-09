@@ -6,6 +6,7 @@
 import { Jj } from "@smthrs/jj"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as Cause from "effect/Cause"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
@@ -100,6 +101,19 @@ export const Result = Schema.Struct({
  * @category models
  */
 export type Result = typeof Result.Type
+
+/**
+ * Deadline for each external compensation operation.
+ *
+ * @since 0.1.0
+ * @category constants
+ */
+export const defaultTimeout = Duration.minutes(3)
+
+// The protocol stays masked, but the timeout must be able to interrupt its
+// external worker. Otherwise timeout waits forever for the losing fiber.
+const bounded = <A, E, R>(work: Effect.Effect<A, E, R>, timeout: Duration.Input) =>
+  Effect.interruptible(work).pipe(Effect.timeout(timeout))
 
 const sealedAssessment = (
   effect: EffectRecord,
@@ -196,12 +210,13 @@ const causeMessage = (cause: Cause.Cause<unknown>): string => {
 
 const rollbackHandlers = (
   registry: EffectHandlerRegistry["Service"],
-  receipts: ReadonlyArray<RollbackReceipt>
+  receipts: ReadonlyArray<RollbackReceipt>,
+  timeout: Duration.Input
 ): Effect.Effect<void, TimeTravelError> =>
   Effect.gen(function*() {
     const failures: Array<TimeTravelError> = []
     for (const receipt of [...receipts].reverse()) {
-      const rollbackExit = yield* Effect.exit(registry.rollback(receipt))
+      const rollbackExit = yield* Effect.exit(bounded(registry.rollback(receipt), timeout))
       if (Exit.isFailure(rollbackExit)) {
         failures.push(
           error(
@@ -248,7 +263,8 @@ export const compensate = (
   plan: Plan,
   onReceipts?: (
     receipts: ReadonlyArray<RollbackReceipt>
-  ) => Effect.Effect<void, TimeTravelError>
+  ) => Effect.Effect<void, TimeTravelError>,
+  timeout: Duration.Input = defaultTimeout
 ): Effect.Effect<
   ReadonlyArray<RollbackReceipt>,
   TimeTravelError,
@@ -270,9 +286,9 @@ export const compensate = (
           .sort((left, right) => right.seq - left.seq)
 
         for (const effect of effects) {
-          const revertExit = yield* Effect.exit(registry.revert(effect))
+          const revertExit = yield* Effect.exit(bounded(registry.revert(effect), timeout))
           if (Exit.isFailure(revertExit)) {
-            const rollbackExit = yield* Effect.exit(rollbackHandlers(registry, receipts))
+            const rollbackExit = yield* Effect.exit(rollbackHandlers(registry, receipts, timeout))
             return yield* Effect.fail(
               error(
                 "compensation_failed",
@@ -288,7 +304,7 @@ export const compensate = (
           if (onReceipts !== undefined) {
             const durableExit = yield* Effect.exit(onReceipts([...receipts]))
             if (Exit.isFailure(durableExit)) {
-              const rollbackExit = yield* Effect.exit(rollbackHandlers(registry, receipts))
+              const rollbackExit = yield* Effect.exit(rollbackHandlers(registry, receipts, timeout))
               return yield* Effect.fail(
                 error(
                   "compensation_failed",
@@ -308,8 +324,8 @@ export const compensate = (
   })
 
 /**
- * Snapshots the current jj state and restores the target pointer after tier-3
- * compensation.
+ * Snapshots the current jj state and prepares both workspace pointers after
+ * tier-3 compensation, without restoring the target.
  *
  * The caller hands ownership of `handlerReceipts` over with the call: EVERY
  * failure path here rolls them back before the failure escapes, so the caller
@@ -323,16 +339,17 @@ export const compensate = (
  * @since 0.1.0
  * @category compensation
  */
-export const restoreWorkspace = (
+export const prepareWorkspace = (
   plan: Plan,
-  handlerReceipts: ReadonlyArray<RollbackReceipt>
+  handlerReceipts: ReadonlyArray<RollbackReceipt>,
+  timeout: Duration.Input = defaultTimeout
 ): Effect.Effect<Result, TimeTravelError, EffectHandlerRegistry | Jj> =>
   Effect.gen(function*() {
     const registry = yield* EffectHandlerRegistry
     // A cleanup failure on these two paths is logged rather than folded into
     // the refusal: both mean the plan itself was malformed before any jj work
     // started, and that is what the caller has to be told about.
-    const cleanUp = rollbackHandlers(registry, handlerReceipts).pipe(
+    const cleanUp = rollbackHandlers(registry, handlerReceipts, timeout).pipe(
       Effect.catchCause((cause) => Effect.logError("time-travel: rollback after a refused restore failed", cause))
     )
     yield* assertExecutable(plan).pipe(Effect.tapError(() => cleanUp))
@@ -346,9 +363,9 @@ export const restoreWorkspace = (
 
     return yield* Effect.uninterruptible(
       Effect.gen(function*() {
-        const currentExit = yield* Effect.exit(jj.snapshot("flows rewind pre-restore"))
+        const currentExit = yield* Effect.exit(bounded(jj.snapshot("flows rewind pre-restore"), timeout))
         if (Exit.isFailure(currentExit)) {
-          const handlerRollback = yield* Effect.exit(rollbackHandlers(registry, handlerReceipts))
+          const handlerRollback = yield* Effect.exit(rollbackHandlers(registry, handlerReceipts, timeout))
           return yield* Effect.fail(
             error(
               "compensation_failed",
@@ -364,27 +381,63 @@ export const restoreWorkspace = (
           currentChangeId: currentExit.value.changeId,
           targetChangeId: plan.targetChangeId!
         }
-        const restoreExit = yield* Effect.exit(jj.restore(workspace.targetChangeId))
-        if (Exit.isFailure(restoreExit)) {
-          const workspaceRollback = yield* Effect.exit(jj.restore(workspace.currentChangeId))
-          const handlerRollback = yield* Effect.exit(rollbackHandlers(registry, handlerReceipts))
-          return yield* Effect.fail(
-            error(
-              "compensation_failed",
-              `could not restore jj state ${workspace.targetChangeId}: ${causeMessage(restoreExit.cause)}`,
-              {
-                restore: restoreExit.cause,
-                workspaceRollback: Exit.isFailure(workspaceRollback) ? workspaceRollback.cause : undefined,
-                handlerRollback: Exit.isFailure(handlerRollback) ? handlerRollback.cause : undefined
-              }
-            )
-          )
-        }
-
         return { handlerReceipts, workspace }
       })
     )
   })
+
+/**
+ * Restores a prepared workspace. The caller must durably record the result
+ * before this call. On failure this operation owns cleanup of its receipts.
+ *
+ * @since 0.1.0
+ * @category compensation
+ */
+export const restorePreparedWorkspace = (
+  result: Result,
+  timeout: Duration.Input = defaultTimeout
+): Effect.Effect<Result, TimeTravelError, EffectHandlerRegistry | Jj> =>
+  Effect.uninterruptible(Effect.gen(function*() {
+    const { handlerReceipts, workspace } = result
+    if (workspace === undefined) return result
+    const jj = yield* Jj
+    const registry = yield* EffectHandlerRegistry
+    const restoreExit = yield* Effect.exit(bounded(jj.restore(workspace.targetChangeId), timeout))
+    if (Exit.isFailure(restoreExit)) {
+      const workspaceRollback = yield* Effect.exit(bounded(jj.restore(workspace.currentChangeId), timeout))
+      const handlerRollback = yield* Effect.exit(rollbackHandlers(registry, handlerReceipts, timeout))
+      return yield* Effect.fail(
+        error(
+          "compensation_failed",
+          `could not restore jj state ${workspace.targetChangeId}: ${causeMessage(restoreExit.cause)}`,
+          {
+            restore: restoreExit.cause,
+            workspaceRollback: Exit.isFailure(workspaceRollback) ? workspaceRollback.cause : undefined,
+            handlerRollback: Exit.isFailure(handlerRollback) ? handlerRollback.cause : undefined
+          }
+        )
+      )
+    }
+    return result
+  }))
+
+/**
+ * Prepares and restores a workspace without a durable protocol boundary.
+ * Rewind uses the two operations separately to persist the rollback pointer.
+ *
+ * @since 0.1.0
+ * @category compensation
+ */
+export const restoreWorkspace = (
+  plan: Plan,
+  handlerReceipts: ReadonlyArray<RollbackReceipt>,
+  timeout: Duration.Input = defaultTimeout
+): Effect.Effect<Result, TimeTravelError, EffectHandlerRegistry | Jj> =>
+  Effect.uninterruptible(
+    prepareWorkspace(plan, handlerReceipts, timeout).pipe(
+      Effect.flatMap((result) => restorePreparedWorkspace(result, timeout))
+    )
+  )
 
 /**
  * Runs tier-3 compensation and then tier-2 workspace restoration.
@@ -393,11 +446,12 @@ export const restoreWorkspace = (
  * @category compensation
  */
 export const execute = (
-  plan: Plan
+  plan: Plan,
+  timeout: Duration.Input = defaultTimeout
 ): Effect.Effect<Result, TimeTravelError, EffectHandlerRegistry | Jj> =>
   Effect.uninterruptible(
-    compensate(plan).pipe(
-      Effect.flatMap((receipts) => restoreWorkspace(plan, receipts))
+    compensate(plan, undefined, timeout).pipe(
+      Effect.flatMap((receipts) => restoreWorkspace(plan, receipts, timeout))
     )
   )
 
@@ -411,7 +465,8 @@ export const execute = (
  * @category compensation
  */
 export const rollback = (
-  result: Result
+  result: Result,
+  timeout: Duration.Input = defaultTimeout
 ): Effect.Effect<void, TimeTravelError, EffectHandlerRegistry | Jj> =>
   Effect.gen(function*() {
     const registry = yield* EffectHandlerRegistry
@@ -420,10 +475,10 @@ export const rollback = (
       Effect.gen(function*() {
         const failures: Array<unknown> = []
         if (result.workspace !== undefined) {
-          const workspaceExit = yield* Effect.exit(jj.restore(result.workspace.currentChangeId))
+          const workspaceExit = yield* Effect.exit(bounded(jj.restore(result.workspace.currentChangeId), timeout))
           if (Exit.isFailure(workspaceExit)) failures.push(workspaceExit.cause)
         }
-        const handlerExit = yield* Effect.exit(rollbackHandlers(registry, result.handlerReceipts))
+        const handlerExit = yield* Effect.exit(rollbackHandlers(registry, result.handlerReceipts, timeout))
         if (Exit.isFailure(handlerExit)) failures.push(handlerExit.cause)
         if (failures.length > 0) {
           return yield* Effect.fail(

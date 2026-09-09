@@ -1,16 +1,114 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Jj } from "@smthrs/jj"
 import * as Effect from "effect/Effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { spawn } from "node:child_process"
+import { readFile, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as EffectBoundary from "../src/EffectBoundary.ts"
 import { TimeTravel } from "../src/TimeTravel.ts"
+import { TimeTravelStore } from "../src/TimeTravelStore.ts"
 import { awaitCheckpoint, jjInstalled, killHard, runReal, runState, withRealFixture } from "./RealTimeTravelHarness.ts"
 
 const childFixture = fileURLToPath(new URL("./fixtures/rewind-crash-child.ts", import.meta.url))
 
 describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
+  it.effect(
+    "recovers the original tree after SIGKILL between jj.restore and the compensated audit write",
+    () =>
+      withRealFixture("flows-rewind-restore-crash-", (fixture) =>
+        Effect.gen(function*() {
+          const runId = "workspace-crash"
+          const note = join(fixture.repository, "note.txt")
+          yield* Effect.promise(() => writeFile(note, "target\n"))
+          yield* runReal(
+            fixture.databaseFile,
+            Effect.gen(function*() {
+              const jj = yield* Jj
+              const target = yield* jj.snapshot("target")
+              const store = yield* TimeTravelStore
+              yield* store.recordSnapshot({
+                runId,
+                frame: { lineageId: `${runId}/root`, seq: 0 },
+                changeId: target.changeId
+              })
+              const sql = yield* SqlClient.SqlClient
+              yield* sql`
+            INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+            VALUES (${runId}, 'suspended', 0, ${runState("WorkspaceCrash")})
+          `
+              const meta = JSON.stringify({ lineageId: `${runId}/root` })
+              const boundary = JSON.stringify({
+                version: 1,
+                effect: {
+                  id: "write",
+                  kind: "fs",
+                  tier: "compensable",
+                  status: "succeeded",
+                  runId,
+                  lineageId: `${runId}/root`,
+                  durableBoundary: true,
+                  providerStream: false
+                }
+              })
+              yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json)
+            VALUES (${runId}, 0, 'workspace-base', 'crash', 0, 0, 'baseline', '{}', ${meta}),
+                   (${runId}, 1, 'workspace-effect', 'crash', 1, 1, ${EffectBoundary.eventType}, ${boundary}, ${meta})
+          `
+            })
+          )
+          yield* Effect.promise(() => writeFile(note, "original\n"))
+          const child = spawn(process.execPath, [childFixture, fixture.databaseFile, runId, "after-restore"], {
+            cwd: fixture.repository,
+            env: { ...process.env, JJ_EDITOR: "true" }
+          })
+          try {
+            expect(yield* Effect.promise(() => awaitCheckpoint(child, "workspace crash child"))).toEqual({
+              stage: "after-restore"
+            })
+            yield* Effect.promise(() => killHard(child))
+            expect(yield* Effect.promise(() => readFile(note, "utf8"))).toBe("target\n")
+            yield* runReal(
+              fixture.databaseFile,
+              Effect.gen(function*() {
+                const sql = yield* SqlClient.SqlClient
+                const audits = yield* sql<{ readonly detail_json: string }>`
+              SELECT detail_json FROM flows_time_travel_audits WHERE id = ${`${runId}-audit`}
+            `
+                expect(JSON.parse(audits[0]!.detail_json)).toMatchObject({
+                  phase: "preflight_complete",
+                  compensation: {
+                    workspace: { currentChangeId: expect.any(String), targetChangeId: expect.any(String) }
+                  }
+                })
+                yield* sql`UPDATE flows_runs SET started_at_ms = 0, heartbeat_at_ms = 0 WHERE run_id = ${runId}`
+              })
+            )
+            yield* TestClock.adjust("1 minute")
+            yield* runReal(
+              fixture.databaseFile,
+              Effect.gen(function*() {
+                yield* TimeTravel
+                const sql = yield* SqlClient.SqlClient
+                const audits = yield* sql<{ readonly status: string; readonly detail_json: string }>`
+              SELECT status, detail_json FROM flows_time_travel_audits WHERE id = ${`${runId}-audit`}
+            `
+                expect(audits[0]!.status).toBe("failed")
+                expect(JSON.parse(audits[0]!.detail_json).phase).toBe("rolled_back")
+              })
+            )
+            expect(yield* Effect.promise(() => readFile(note, "utf8"))).toBe("original\n")
+          } finally {
+            yield* Effect.promise(() => killHard(child))
+          }
+        })),
+    { timeout: 120_000 }
+  )
+
   // The finite budget covers four real child processes, SIGKILL, and fresh recovery layers.
   it.effect("recovers real process deaths after audit write and archive commit", () =>
     Effect.gen(function*() {

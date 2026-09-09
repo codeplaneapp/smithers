@@ -11,6 +11,7 @@ import type { LivenessEvidence, OwnerId } from "@smthrs/run-store/Ownership"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -28,6 +29,7 @@ import { AuditDetail } from "./Rewind.ts"
  * @category models
  */
 export interface Options {
+  readonly compensationTimeout?: Duration.Input | undefined
   readonly owner: OwnerId
   readonly livenessEvidence?: (
     audit: Audit,
@@ -431,7 +433,7 @@ const recoverOne = (
               }
 
               if (detail.compensation !== undefined) {
-                yield* Compensation.rollback(detail.compensation)
+                yield* Compensation.rollback(detail.compensation, options.compensationTimeout)
                 const { compensation: _, ...stripped } = detail
                 detail = stripped
                 // A successful rollback is a non-idempotent fact. Persist it

@@ -35,6 +35,7 @@ import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Random from "effect/Random"
@@ -42,6 +43,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import { CompensationHandlers } from "./CompensationHandlers.ts"
 import { Frame } from "./Frame.ts"
+import * as Compensation from "./internal/Compensation.ts"
 import * as EffectHandlerRegistry from "./internal/EffectHandlerRegistry.ts"
 import * as ForkOperation from "./internal/Fork.ts"
 import * as HistoryLimit from "./internal/HistoryLimit.ts"
@@ -292,6 +294,12 @@ const mintOwner: Effect.Effect<OwnerId> = Effect.gen(function*() {
  */
 export interface Options {
   /**
+   * Deadline per handler revert/rollback and jj compensation call, and for
+   * awaiting startup recovery. Defaults to three minutes. Must be finite and
+   * positive. Timeout failures carry `compensation_failed` with the cause.
+   */
+  readonly compensationTimeout?: Duration.Input | undefined
+  /**
    * Whether the owner recorded on a run is still working, asked before startup
    * recovery takes an interrupted rewind's run over or rewind cancels a running
    * detached child under `detachedChildren: "cancel"`.
@@ -359,6 +367,13 @@ export const makeWith = (
 ): Effect.Effect<Service, TimeTravelError, Requirements | Scope.Scope> =>
   Effect.gen(function*() {
     const scope = yield* Effect.scope
+    const compensationTimeout = yield* Effect.try({
+      try: () => Duration.fromInputUnsafe(options.compensationTimeout ?? Compensation.defaultTimeout),
+      catch: (cause) => error("invalid", "compensationTimeout must be a finite positive duration", cause)
+    })
+    if (!Duration.isFinite(compensationTimeout) || Duration.toMillis(compensationTimeout) <= 0) {
+      return yield* Effect.fail(error("invalid", "compensationTimeout must be a finite positive duration"))
+    }
     const services = yield* Effect.context<Requirements>()
     const historyLimit = yield* HistoryLimit.resolve(options.maxHistoryEntries, HistoryLimit.defaultMaxHistoryEntries)
     const owner = yield* mintOwner
@@ -402,10 +417,22 @@ export const makeWith = (
     // finished or rolled back before this service accepts new work. An audit
     // whose run is still held elsewhere is declined rather than closed, so it
     // survives for the next build to pick up.
-    const outcomes = yield* provided(Recovery.recover({
-      owner,
-      livenessEvidence: (_audit, row, claimant, nowMs) => liveness(row, claimant, nowMs)
-    }))
+    const recovery = yield* Effect.forkChild(
+      Effect.interruptible(provided(Recovery.recover({
+        owner,
+        compensationTimeout,
+        livenessEvidence: (_audit, row, claimant, nowMs) => liveness(row, claimant, nowMs)
+      }))),
+      { startImmediately: true }
+    )
+    const outcomes = yield* Fiber.join(recovery).pipe(
+      Effect.timeout(compensationTimeout),
+      Effect.catchTag("TimeoutError", (cause) =>
+        Effect.fail(error("compensation_failed", "startup recovery exceeded its deadline", cause))),
+      Effect.onError(() =>
+        Fiber.interrupt(recovery)
+      )
+    )
     // A `Failed` outcome closes an audit terminally. Discarding the array made
     // that invisible to the composition, so an operator learned about a rewind
     // recovery could not finish only by reading the audit table by hand.
@@ -575,6 +602,7 @@ export const makeWith = (
                         runId: position.runId,
                         frame: position.frame,
                         owner,
+                        compensationTimeout,
                         detachedChildPolicy,
                         childLivenessEvidence: (_childRunId, row, claimant, nowMs) => liveness(row, claimant, nowMs),
                         maxEntries,

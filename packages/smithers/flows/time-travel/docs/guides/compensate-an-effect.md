@@ -60,6 +60,17 @@ replays these in reverse order. It is required even when the answer is "nothing
 to undo", because a silent default would make a handler that forgot to write
 one indistinguishable from one that deliberately has nothing to do.
 
+`revert` and `rollback` must be bounded and honor interruption. Bound network
+requests and cleanup in the adapter; do not mask an indefinite wait. Time travel
+applies `TimeTravel.Options.compensationTimeout` to each handler call and jj
+snapshot or restore, including rollback. The default is three minutes. A timeout
+fails with `compensation_failed` and retains the timeout in its cause. Startup
+recovery runs in a child fiber and is awaited with the same deadline.
+
+Before restoring a workspace, rewind snapshots its current state and durably
+records both current and target pointers. Startup recovery restores the recorded
+current pointer whether the process died before or after the target restore.
+
 ## How a handler is matched to evidence
 
 A handler is held to what the journal recorded, and each of these mismatches

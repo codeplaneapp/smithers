@@ -9,10 +9,10 @@ const runId = process.argv[3]
 const stage = process.argv[4]
 if (
   filename === undefined || runId === undefined ||
-  !["after-audit", "after-archive", "before-child-cancel", "before-commit"].includes(stage ?? "")
+  !["after-audit", "after-archive", "before-child-cancel", "before-commit", "after-restore"].includes(stage ?? "")
 ) {
   throw new Error(
-    "usage: rewind-crash-child.ts <database> <run-id> <after-audit|after-archive|before-child-cancel|before-commit>"
+    "usage: rewind-crash-child.ts <database> <run-id> <after-audit|after-archive|before-child-cancel|before-commit|after-restore>"
   )
 }
 
@@ -42,11 +42,16 @@ await Effect.runPromise(runReal(
       owner: { hostId: `crash-child:${process.pid}`, pid: process.pid, nonce: `crash-child:${process.pid}` },
       auditId: `${runId}-audit`,
       detachedChildPolicy: "cancel",
-      ...((stage === "after-audit" || stage === "before-commit")
+      ...((stage === "after-audit" || stage === "before-commit" || stage === "after-restore")
         ? {
           hooks: {
             beforeStep: (step) =>
-              step === (stage === "before-commit" ? "archive-and-truncate" : "write-audit")
+              step ===
+                  (stage === "after-restore"
+                    ? "restore-workspace"
+                    : stage === "before-commit"
+                    ? "archive-and-truncate"
+                    : "write-audit")
                 ? checkpoint.pipe(Effect.andThen(Effect.never))
                 : Effect.void
           }
