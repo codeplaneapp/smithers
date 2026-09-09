@@ -70,7 +70,7 @@ The cloud proxy (`/api/cloud/*`, lane piper) forwards to `SMITHERS_CLOUD_API`
 (default `https://api.jjhub.tech`) with the same rules as the identity proxy:
 Host and Origin follow the upstream, `content-length` and the local session
 header are dropped, Set-Cookie is re-scoped, and the request carries
-`Authorization: Bearer` from the Bun-side credential — the cloud token NEVER
+`Authorization: Bearer` from the Bun-side credential. The cloud token NEVER
 reaches the renderer. Cloud sign-in (`/api/cloud-auth/*`) is the CLI's browser
 flow: start answers the login URL, the callback lands on a loopback listener,
 and the token lives in the macOS keychain (`smithers-cloud`) plus Bun memory;
@@ -115,12 +115,12 @@ Language servers (`apps/ui/src/bun/lsp/`) read: `/api/lsp/*` requires read
 access. One `typescript-language-server --stdio` runs per (repository,
 language), started on the first request from a static registry that names
 the binary, its argv and its install line (the renderer names none of them).
-The binary is found on the HOST — the harness candidate dirs and PATH — and
+The binary is found on the HOST (the harness candidate dirs and PATH) and
 never inside the repository: a `node_modules/.bin/typescript-language-server`
 a repository ships is a program the repository chose, and opening a
 repository (read-only or not) runs nothing it ships. The server runs under
 the `lsp` sandbox policy (no network, scratch-only writes) with an
-environment of its own (`HOME`, `PATH`, `TMPDIR`, locale, zone — none of the
+environment of its own (`HOME`, `PATH`, `TMPDIR`, locale, zone, and none of the
 provider keys, SSH agent or config dirs the PTY allowlist hands a harness).
 At most four run; the least recently used makes room; ten idle minutes with
 no request in flight, `POST /api/repo/close` and shutdown end them (LSP
@@ -262,10 +262,10 @@ declares its length.
 | DELETE | `/api/pty/:id` | Stop a PTY |
 | ANY | `/api/cloud/*` | Cloud proxy to `SMITHERS_CLOUD_API` (Bearer from the Bun credential; 501 offline) |
 | POST | `/api/cloud-auth/start` | Begin the browser login; answers `{ url }` |
-| GET | `/api/cloud-auth/session` | `{ state, username, expiresAt }` — never the token |
+| GET | `/api/cloud-auth/session` | `{ state, username, expiresAt }`, never the token |
 | POST | `/api/cloud-auth/sign-out` | Delete the keychain credential and the in-memory token |
 | POST | `/api/linear-auth/start` | Begin the Linear OAuth handoff (lane sync): a loopback listener on a random port waits for the cloud's redirect; answers `{ url }` to open. 501 offline |
-| GET | `/api/linear-auth/session` | `{ state: "idle" \| "waiting" \| "authorized", setupKey? }` — the setup key once the callback lands, never the token |
+| GET | `/api/linear-auth/session` | `{ state: "idle" \| "waiting" \| "authorized", setupKey? }`, the setup key once the callback lands, never the token |
 
 `POST /api/targets/affected` requests CLI plan inputs and uses static declaration
 inputs when a target has no plan input list. An empty plan list is authoritative.
@@ -294,10 +294,10 @@ A file card of a CLOUD repository asks the language server plue runs inside
 the repository's running workspace instead (lane L6, plue#505): the renderer's
 `CloudLspClient` creates the session (`POST …/workspace/sessions
 { workspace_id, kind: "lsp", language }` through `/api/cloud/`), opens
-`/api/cloud-ws/repos/{o}/{r}/workspace/sessions/{id}/lsp` — the same tunnel
+`/api/cloud-ws/repos/{o}/{r}/workspace/sessions/{id}/lsp`, the same tunnel
 as the terminal, with plue's `lsp` subprotocol and a 1 MiB frame cap on that
 branch alone (a larger message crosses as `{ seq, last, data }` fragments the
-renderer reassembles up to 16 MiB) — and speaks LSP itself: `initialize` with
+renderer reassembles up to 16 MiB), and speaks LSP itself: `initialize` with
 `rootUri file:///home/developer/workspace`, `initialized`, `didOpen` with the
 card's text at its checkout-relative path, then hover, definition and the
 publications. A refused upgrade closes the renderer's socket with a 44xx code
@@ -344,33 +344,33 @@ surfaces; the file states the detail, and its tests pin it.
 The run lifecycle (lane `runs`, `docs/workbench-lanes/runs.md`) adds three
 surfaces, all over the workspace gateway's own projections and procedures:
 
-- **`run-list`** (`/runs.list [status] [flow] [by=] [lineage=] [owner/repo]`) —
+- **`run-list`** (`/runs.list [status] [flow] [by=] [lineage=] [owner/repo]`):
   the workspace's runs from the `workspace-runs` projection, newest first, a
   mono count line by status in the header and filter chips that re-invoke
   `runs.list` with the chip's argument. A row's Open materializes the run's
   own card (`/runs.open <runId>`); the footer's `Stop all N` runs
   `/flow.run.stop-all` (a confirming flow). `by=` refuses honestly: the wire's
   run summary records no launcher.
-- **`approvals-inbox`** (`/approvals.list [owner/repo]`) — every pending gate
+- **`approvals-inbox`** (`/approvals.list [owner/repo]`): every pending gate
   across the workspace's runs (the `approvals` projection with no run id).
   Each row carries the submit-ready envelope the gateway published, so its
   Approve/Deny dispatch the ordinary `approval.approve` / `approval.deny`
   flows addressed `inboxCardId:requestId` and the decision goes back
   unchanged. `/approvals.open <runId>` materializes one run's gates as
   ordinary approval cards.
-- **`flow-run`** — the run card grows the lifecycle beyond launch: Stop on
+- **`flow-run`** grows the run card's lifecycle beyond launch: Stop on
   every non-terminal phase (`/flow.run.stop <cardId> [reason]`, confirming),
   Resume when the control plane names a wait other than an approval
-  (`/runs.resume`), Run again when settled (`/runs.rerun` — the launch input
+  (`/runs.resume`), Run again when settled (`/runs.rerun`, the launch input
   recorded on the card at launch; an honest refusal when this client never
   saw it), and a steer row (`/runs.steer`, `/runs.seat`, `/runs.thinking`,
   `/runs.tools`) whose queued state reads `steering pending · delivered at
   the next turn`. A waiting run names the control plane's reason:
   `accepted · nothing is driving it` for an accepted run, the wait's word for
   a parked one. Three facet tabs switch the body: Steps (default),
-  Transcript (`/runs.logs <runId> [--follow]` — follow merges the
+  Transcript (`/runs.logs <runId> [--follow]`: follow merges the
   `transcript` projection on the pump's own cycle), and Events
-  (`/runs.events <runId>` — the raw journal, rendered only where
+  (`/runs.events <runId>`, the raw journal, rendered only where
   `/debug.verbose` is on).
 
 Lane `citc` (ADR 0002) adds the persistent cloud computers:
@@ -461,19 +461,19 @@ Lane `change` (ADR 0003) makes the change the unit of review:
 Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
 
 - **`connector-setup`** (`/linear.connect [owner/repo]`, `/github.app
-  [owner/repo]`) — one card kind serves both handoffs. The Linear half is
+  [owner/repo]`): one card kind serves both handoffs. The Linear half is
   the wizard: the steps authorize → team → repository → confirm render as
   rows that fill in (`authorized as Will`, `ENG · Engineering`), a failed
   step reads the server error verbatim (`authorization expired · Open
   Linear again`), and the OAuth handoff rides the Bun server's
-  `/api/linear-auth/*` receiver — the setup key, never a token, reaches the
+  `/api/linear-auth/*` receiver. The setup key, never a token, reaches the
   renderer. On confirm the SAME card turns into the connected state:
   `ENG · Engineering → org/repo`, the last-sync age, and Sync now /
   Activity / Disconnect (`/linear.sync`, `/linear.activity`,
-  `/linear.disconnect` — the last confirming). The GitHub half renders the
-  App status read (`/github.app`) — installed `· installation <id> ·
+  `/linear.disconnect`, the last confirming). The GitHub half renders the
+  App status read (`/github.app`): installed `· installation <id> ·
   configured`, or the trusted install link with Open GitHub
-  (`/github.app.open`) — plus Re-check and Reconcile
+  (`/github.app.open`), plus Re-check and Reconcile
   (`/github.reconcile`; the route is 404 in prod today and its message
   shows verbatim). `/repos.app` stays as `github.app`'s hidden alias.
 - **`sync-ops`** (`/linear.sync [integration]`, `/linear.activity
@@ -496,8 +496,8 @@ Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
   failed phase's Retry through `/repos.import.retry <jobId>` (the route
   exists), and the done state's workspace link (`/workspace.view`). A
   structured 429 (`code: "github_rate_limited"`) renders the ADR's
-  rate-limit line on every sync card — `GitHub rate limit reached · 0 of
-  5,000 · resets 12:40 · Retry after` — as does a status answer whose
+  rate-limit line on every sync card (`GitHub rate limit reached · 0 of
+  5,000 · resets 12:40 · Retry after`), as does a status answer whose
   remaining budget drops under a fifth; a plain 429 invents no reset.
 - **`issue`** names the Linear link the DTO carries (`Linear ENG-482`,
   linked) or offers Link to Linear…, the button door of
@@ -510,12 +510,12 @@ Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
 
 The Connectors surface's rows read only what the app has read: GitHub's
 count is the App statuses its own act filed, Linear's per-team state is the
-integrations the seam loaded — a repository never checked is absent, never
+integrations the seam loaded. A repository never checked is absent, never
 assumed.
 
 The composer's origin chip carries the probed checkout's pin: `~/smithers ·
 qupxosqw · a03f5f` (`changeId#seq` only when the changes collection knows a
-sequence — never from a commit comparison alone), beside piper's `N ahead of
+sequence, never from a commit comparison alone), beside piper's `N ahead of
 main`. `rev N exists · view` renders only when BOTH seqs are known.
 
 ## Navigation and persistence
@@ -541,7 +541,7 @@ the same store as cards. Fullscreen is explicit; the composer remains mounted
 and usable while a card is maximized.
 
 Repositories have one address space (lane piper, ADR 0001): the sidebar's
-Repos section is the tree `org/ → repo → working copies` — cloud repositories
+Repos section is the tree `org/ → repo → working copies`: cloud repositories
 from the signed-in inventory, local checkouts nested under their repository
 when the remote parses into it (standalone rows otherwise), cloud workspaces
 beneath their repo. Selecting a repo row names `org/repo`; selecting a copy
@@ -550,7 +550,7 @@ selection lives (`~/smithers · 3 ahead of main`, or `head @ qupxosqw` at a
 repository's head). File cards carry the global address
 (`/org/repo/path`) and the position the read was taken at; when the
 repository's head commit has moved since, a "head moved" line offers an
-explicit refresh — nothing re-reads on its own. `/files.list` and
+explicit refresh. Nothing re-reads on its own. `/files.list` and
 `/files.read` accept a global path (`/files.read /org/repo/README.md`) when
 the two-segment prefix is a repository the app knows.
 

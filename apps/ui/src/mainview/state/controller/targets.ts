@@ -16,14 +16,19 @@ import type { TargetRunClient } from "../TargetRunClient"
 import type { ControllerContext } from "./context"
 
 /*
- * Lane L3 (docs/LOCAL-APP.md "Auto-load flow"): opening a repository through
- * the local origin and loading its Smithers targets into a trusted typed card.
- * The card owns its Run buttons; model output never supplies executable UI.
- * Every store change goes through the dispatcher with its actor.
+ * Lane L3 (docs/LOCAL-APP.md "Target presentation"): opening a repository
+ * through the local origin, and listing its Smithers targets into a trusted
+ * typed card. Opening renders nothing; listing is the explicit act that draws
+ * the card. The card owns its Run buttons; model output never supplies
+ * executable UI. Every store change goes through the dispatcher with its actor.
  */
 
 export interface TargetsController {
-  /** `POST /api/repo/open`, then the repo card and the auto-load flow. */
+  /**
+   * `POST /api/repo/open`, then refresh the sidebar's repository mirror.
+   * Registering the repository renders nothing; `listTargets` is the explicit
+   * act that draws a card.
+   */
   readonly openRepo: (request: RepositoryOpenRequest) => Promise<string | void>
   /** List the repository's Smithers targets as the trusted targets card (the explicit act; opening renders nothing). */
   readonly listTargets: (repoId?: string) => Promise<string | void>
