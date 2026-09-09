@@ -182,6 +182,46 @@ describe("the approvals inbox card", () => {
     )
     expect(refused.textContent).toContain("Stale: already decided")
   })
+
+  /*
+   * The resolution stamp answers WHEN the decision was taken. A gate raised in
+   * the morning and answered in the afternoon must read the afternoon time —
+   * stamping requestedAt told the human the decision happened at the moment
+   * the gate was raised.
+   */
+  test("a decided row stamps the decision time, not the request time", () => {
+    const midnight = new Date()
+    midnight.setHours(0, 0, 0, 0)
+    const requestedAt = midnight.getTime() + 9 * 3_600_000 + 5 * 60_000
+    const decidedAt = midnight.getTime() + 14 * 3_600_000 + 47 * 60_000
+    const reading = (at: number): string =>
+      new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    const approved = render(
+      <ApprovalsInboxCardBody
+        card={inboxCard([{ ...gate, requestedAt, decision: "approved", decidedAt }])}
+        onDecideApproval={() => {}}
+      />
+    )
+    expect(approved.querySelector("[data-slot='confirmation-accepted']")?.textContent)
+      .toBe(`Approved — ${reading(decidedAt)}`)
+    expect(approved.querySelector("[data-slot='confirmation-accepted']")?.textContent)
+      .not.toContain(reading(requestedAt))
+    const denied = render(
+      <ApprovalsInboxCardBody
+        card={inboxCard([{ ...gate, requestedAt, decision: "denied", decidedAt }])}
+        onDecideApproval={() => {}}
+      />
+    )
+    expect(denied.querySelector("[data-slot='confirmation-rejected']")?.textContent)
+      .toBe(`Denied — ${reading(decidedAt)}`)
+  })
+
+  test("a decided row with no decision time states the decision alone", () => {
+    const host = render(
+      <ApprovalsInboxCardBody card={inboxCard([{ ...gate, decision: "denied" }])} onDecideApproval={() => {}} />
+    )
+    expect(host.querySelector("[data-slot='confirmation-rejected']")?.textContent).toBe("Denied")
+  })
 })
 
 describe("the run card, per phase and waiting reason", () => {

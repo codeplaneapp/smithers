@@ -467,6 +467,7 @@ export const createRunsController = (
             approval: row.payload as Record<string, unknown>,
             requestedAt: row.requestedAt,
             ...(before?.decision === undefined ? {} : { decision: before.decision }),
+            ...(before?.decidedAt === undefined ? {} : { decidedAt: before.decidedAt }),
             ...(before?.decisionError === undefined ? {} : { decisionError: before.decisionError })
           }
         })

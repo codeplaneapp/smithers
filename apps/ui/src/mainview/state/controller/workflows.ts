@@ -557,10 +557,12 @@ export const createWorkflowController = (
     )
     const latest = store.collections.cards.get(cardId)
     if (latest === undefined || latest.kind !== "approvals-inbox") return
+    // The decision time is when the server took it, never the gate's requestedAt.
+    const decidedAt = Date.now()
     const approvals = latest.payload.approvals.map((entry) =>
       entry.requestId === requestId
         ? submitted.status === "ok"
-          ? { ...entry, decision, decisionError: undefined, pending: undefined }
+          ? { ...entry, decision, decidedAt, decisionError: undefined, pending: undefined }
           : { ...entry, decisionError: submitted.message, pending: undefined }
         : entry
     )

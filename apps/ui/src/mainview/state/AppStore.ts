@@ -2014,8 +2014,8 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
             patch = { status: patch.status, payload: { ...trusted.payload,
               approvals: trusted.payload.approvals.map((row) => {
                 const update = updates.find((entry) => entry.requestId === row.requestId)
-                return { ...row, decision: update?.decision, pending: update?.pending,
-                  decisionError: update?.decisionError }
+                return { ...row, decision: update?.decision, decidedAt: update?.decidedAt,
+                  pending: update?.pending, decisionError: update?.decisionError }
               }) } }
             if (patch.status === undefined) delete patch.status
           }

@@ -946,6 +946,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
           approval: z.record(z.string(), z.unknown()),
           requestedAt: z.number(),
           decision: z.enum(["approved", "denied"]).optional(),
+          /** When the decision was submitted, never when the gate was raised; absent until one is made, so a row states only the time it knows. */
+          decidedAt: z.number().optional(),
           decisionError: z.string().optional(),
           /** A decision is in flight: the buttons hide until the server answers, so a second click cannot send a contradicting decision. */
           pending: z.boolean().optional()

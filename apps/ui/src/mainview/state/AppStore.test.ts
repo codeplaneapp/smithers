@@ -397,10 +397,17 @@ describe("runtime-owned pending approvals", () => {
       expect(store.approvalRequest(inbox.id)?.payload).toEqual(inbox.payload)
       expect(store.collections.cards.get(inbox.id)?.payload).toEqual(inbox.payload)
       const workflows = createWorkflowController(ctx, () => 1, async () => {})
+      const before = Date.now()
       await workflows.forwardInboxApprovalDecision(inbox.id, "read-logs", "approved")
       await workflows.forwardInboxApprovalDecision(inbox.id, "read-logs", "approved")
       expect(calls).toHaveLength(1)
       expect(calls[0]?.payload).toMatchObject({ ...envelope("read-logs"), decision: "approve" })
+      // The row records WHEN the decision was taken, never the gate's requestedAt.
+      const settled = store.collections.cards.get(inbox.id)
+      const row = settled?.kind === "approvals-inbox" ? settled.payload.approvals[0] : undefined
+      expect(row?.decision).toBe("approved")
+      expect(row?.decidedAt).toBeGreaterThanOrEqual(before)
+      expect(row?.requestedAt).toBe(1)
     } finally {
       await ctx.dispose()
       await store.dispose?.()

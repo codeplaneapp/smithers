@@ -147,6 +147,11 @@ export const ApprovalsInboxCardBody = ({
         const state = approval.decisionError !== undefined
           ? "failed-submission"
           : approval.decision ?? "requested"
+        // The stamp states WHEN the decision was made, never when the gate was
+        // raised; a row that has no decision time says only what it decided.
+        const stamp = approval.decidedAt === undefined
+          ? undefined
+          : `${approval.decision === "denied" ? "Denied" : "Approved"} — ${clockLabel(approval.decidedAt)}`
         return (
           <Confirmation key={approval.requestId} state={state}>
             <ConfirmationRequest>
@@ -176,8 +181,8 @@ export const ApprovalsInboxCardBody = ({
                 </p>
               ) :
               null}
-            <ConfirmationAccepted>Approved — {clockLabel(approval.requestedAt)}</ConfirmationAccepted>
-            <ConfirmationRejected>Denied — {clockLabel(approval.requestedAt)}</ConfirmationRejected>
+            <ConfirmationAccepted>{stamp}</ConfirmationAccepted>
+            <ConfirmationRejected>{stamp}</ConfirmationRejected>
           </Confirmation>
         )
       })}
