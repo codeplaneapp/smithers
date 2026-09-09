@@ -41,6 +41,9 @@
  *
  * `get`, `delete`, `has`, and `presentDigests` are single statements, which
  * Postgres already executes atomically, so none of them opens a transaction.
+ * The reads carry their access-record refresh in that same statement, as a
+ * data-modifying CTE that fires only outside the grace window
+ * (`lruTouchGraceSeconds`); they answer from the read, never from the update.
  */
 
 import { waitForAbort } from "./protocol.js"
@@ -60,6 +63,31 @@ const artifactLockClass = 0x74666361
 
 /** The only schema version this service binary understands. */
 export const cacheSchemaVersion = 1
+
+/**
+ * How stale an access record may be before a read refreshes it.
+ *
+ * `last_accessed_at` is indexed in both stores, so writing it is never a HOT
+ * update: each touch writes a new heap tuple, a new btree entry, WAL for both,
+ * and a dead tuple for autovacuum. A cache read is overwhelmingly a hit on a
+ * blob some other reader just took, so touching on every read spends that write
+ * to move a timestamp by milliseconds.
+ *
+ * Reads therefore refresh the record only once per window and otherwise read
+ * without writing. The record is never more than this far behind the read it
+ * describes, which is the only property eviction needs: release orders by
+ * `last_accessed_at` against a cutoff an operator chooses to be older than the
+ * longest expected publication (migrations/0001_initial.sql), and this window
+ * is smaller than that cutoff by orders of magnitude.
+ *
+ * `access_count` follows the same window, so it counts refreshes rather than
+ * reads. Nothing reads it back as a read count; it is operator telemetry.
+ *
+ * Publication touches are deliberately not throttled: `touchEntry` and
+ * `touchArtifact` run once per publication under a lock already held, and their
+ * freshening is what fences a release against the publication in flight.
+ */
+const lruTouchGraceSeconds = 300
 
 /**
  * Folds a key to the advisory-lock object id publication serializes on.
@@ -192,18 +220,37 @@ const storageQueries = (sql) => {
      * Returns the published document verbatim.
      *
      * The read is also the access record, in one statement, so tracking cannot
-     * drift from the reads it is supposed to describe.
+     * drift from the reads it is supposed to describe. `candidate` decides both
+     * halves from one index scan: the outer select answers from it, and the
+     * update fires only when the record it read is older than the grace window.
+     *
+     * The answer never comes from the update's own `RETURNING`. Two concurrent
+     * readers of one stale row both pass the predicate against the statement
+     * snapshot, the loser's re-check under READ COMMITTED sees the winner's
+     * fresh row and updates nothing, and reading the answer from there would
+     * report a present entry as a miss.
      */
     get: async (keyDigest) => {
       const rows = await sql`
-        UPDATE smithers_build_cache_entry
-        SET last_accessed_at = now(),
-            access_count = CASE
-              WHEN access_count < 9223372036854775807 THEN access_count + 1
-              ELSE access_count
-            END
-        WHERE key_digest = ${keyDigest}
-        RETURNING body
+        WITH candidate AS (
+          SELECT key_digest, last_accessed_at
+          FROM smithers_build_cache_entry
+          WHERE key_digest = ${keyDigest}
+        ), touched AS (
+          UPDATE smithers_build_cache_entry AS entry
+          SET last_accessed_at = now(),
+              access_count = CASE
+                WHEN access_count < 9223372036854775807 THEN access_count + 1
+                ELSE access_count
+              END
+          FROM candidate
+          WHERE entry.key_digest = candidate.key_digest
+            AND candidate.last_accessed_at < now() - ${lruTouchGraceSeconds}::double precision * interval '1 second'
+          RETURNING entry.key_digest
+        )
+        SELECT entry.body
+        FROM smithers_build_cache_entry AS entry
+        JOIN candidate ON candidate.key_digest = entry.key_digest
       `
       return rows.length === 0 ? null : rows[0].body
     },
@@ -311,38 +358,74 @@ const storageQueries = (sql) => {
   const contentStore = {
     has: async (digest) => {
       const rows = await sql`
-        UPDATE smithers_build_artifact
-        SET last_accessed_at = now(),
-            access_count = CASE
-              WHEN access_count < 9223372036854775807 THEN access_count + 1
-              ELSE access_count
-            END
-        WHERE digest = ${digest}
-        RETURNING octet_length(content) = size_bytes AS valid
+        WITH candidate AS (
+          SELECT digest, last_accessed_at
+          FROM smithers_build_artifact
+          WHERE digest = ${digest}
+        ), touched AS (
+          UPDATE smithers_build_artifact AS artifact
+          SET last_accessed_at = now(),
+              access_count = CASE
+                WHEN access_count < 9223372036854775807 THEN access_count + 1
+                ELSE access_count
+              END
+          FROM candidate
+          WHERE artifact.digest = candidate.digest
+            AND candidate.last_accessed_at < now() - ${lruTouchGraceSeconds}::double precision * interval '1 second'
+          RETURNING artifact.digest
+        )
+        SELECT octet_length(artifact.content) = artifact.size_bytes AS valid
+        FROM smithers_build_artifact AS artifact
+        JOIN candidate ON candidate.digest = artifact.digest
       `
       if (rows.length === 0) return false
       if (rows[0].valid !== true) throw new Error("stored artifact failed its integrity check")
       return true
     },
 
+    /**
+     * Returns the stored bytes.
+     *
+     * The check is on length, the same one `has` uses, and not on a re-hash of
+     * the content. The address is a database invariant: the table's
+     * `smithers_build_artifact_content_address_is_valid` CHECK evaluates
+     * `digest = encode(sha256(content), 'hex')` on every insert and every
+     * update, and `put` re-verifies a stored row and repairs it before it
+     * reports one present. Re-hashing here would spend a SHA-256 over up to
+     * 16 MiB per download to re-derive what no write can have violated.
+     *
+     * `candidate` carries the key and the access record only, so the blob is
+     * never copied into a CTE tuplestore on its way to the client.
+     */
     get: async (digest) => {
       const rows = await sql`
-        UPDATE smithers_build_artifact
-        SET last_accessed_at = now(),
-            access_count = CASE
-              WHEN access_count < 9223372036854775807 THEN access_count + 1
-              ELSE access_count
-            END
-        WHERE digest = ${digest}
-        RETURNING content, size_bytes,
-          digest = encode(sha256(content), 'hex') AS valid_digest
+        WITH candidate AS (
+          SELECT digest, last_accessed_at
+          FROM smithers_build_artifact
+          WHERE digest = ${digest}
+        ), touched AS (
+          UPDATE smithers_build_artifact AS artifact
+          SET last_accessed_at = now(),
+              access_count = CASE
+                WHEN access_count < 9223372036854775807 THEN access_count + 1
+                ELSE access_count
+              END
+          FROM candidate
+          WHERE artifact.digest = candidate.digest
+            AND candidate.last_accessed_at < now() - ${lruTouchGraceSeconds}::double precision * interval '1 second'
+          RETURNING artifact.digest
+        )
+        SELECT artifact.content, artifact.size_bytes,
+          octet_length(artifact.content) = artifact.size_bytes AS valid
+        FROM smithers_build_artifact AS artifact
+        JOIN candidate ON candidate.digest = artifact.digest
       `
       if (rows.length === 0) return null
       const row = rows[0]
       if (
         !(row.content instanceof Uint8Array) ||
         Number(row.size_bytes) !== row.content.byteLength ||
-        row.valid_digest !== true
+        row.valid !== true
       ) {
         throw new Error("stored artifact failed its integrity check")
       }
@@ -375,18 +458,32 @@ const storageQueries = (sql) => {
      * Freshens and reports the blobs that are present.
      *
      * A successful probe is publication evidence. Freshening present blobs
-     * fences an age-based release until the client can publish its entry.
+     * fences an age-based release until the client can publish its entry. The
+     * grace window bounds how far behind that evidence can be, so the cutoff an
+     * operator releases against has to be older than the longest expected
+     * publication plus that window rather than the publication alone.
      */
     presentDigests: async (digests) => {
       const rows = await sql`
-        UPDATE smithers_build_artifact
-        SET last_accessed_at = now(),
-            access_count = CASE
-              WHEN access_count < 9223372036854775807 THEN access_count + 1
-              ELSE access_count
-            END
-        WHERE digest = ANY(${digestArray(digests)}::char(64)[])
-        RETURNING digest, octet_length(content) = size_bytes AS valid
+        WITH candidate AS (
+          SELECT digest, last_accessed_at
+          FROM smithers_build_artifact
+          WHERE digest = ANY(${digestArray(digests)}::char(64)[])
+        ), touched AS (
+          UPDATE smithers_build_artifact AS artifact
+          SET last_accessed_at = now(),
+              access_count = CASE
+                WHEN access_count < 9223372036854775807 THEN access_count + 1
+                ELSE access_count
+              END
+          FROM candidate
+          WHERE artifact.digest = candidate.digest
+            AND candidate.last_accessed_at < now() - ${lruTouchGraceSeconds}::double precision * interval '1 second'
+          RETURNING artifact.digest
+        )
+        SELECT artifact.digest, octet_length(artifact.content) = artifact.size_bytes AS valid
+        FROM smithers_build_artifact AS artifact
+        JOIN candidate ON candidate.digest = artifact.digest
       `
       if (rows.some((row) => row.valid !== true)) {
         throw new Error("stored artifact failed its integrity check")

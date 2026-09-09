@@ -256,7 +256,20 @@ describe("action cache reads", () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].text).toContain("UPDATE smithers_build_cache_entry")
     expect(calls[0].text).toContain("last_accessed_at = now()")
-    expect(calls[0].values).toEqual(["key"])
+    expect(calls[0].values).toEqual(["key", 300])
+  })
+
+  test("refreshes the access record only outside the grace window", async () => {
+    const { sql, calls } = fakeSql([[{ body: publication.body }]])
+    await createStorage(sql).actionCache.get("key")
+    // last_accessed_at is indexed, so an unconditional touch makes every read a
+    // non-HOT write. The update is gated on the record it read being stale, and
+    // the answer comes from the read so a lost update is never reported a miss.
+    expect(calls[0].text).toContain(
+      "candidate.last_accessed_at < now() - ?::double precision * interval '1 second'"
+    )
+    expect(calls[0].text).toContain("JOIN candidate ON candidate.key_digest = entry.key_digest")
+    expect(calls[0].values[1]).toBe(300)
   })
 
   test("reports a miss as null rather than as a failure", async () => {
@@ -541,7 +554,7 @@ describe("content store", () => {
     const fetched = fakeSql([[{
       content: new Uint8Array([1, 2, 3]),
       size_bytes: 3,
-      valid_digest: true
+      valid: true
     }]])
     const store = (fake) => createStorage(fake.sql).contentStore
 
@@ -549,6 +562,15 @@ describe("content store", () => {
     expect(await store(absent).has("a".repeat(64))).toBe(false)
     expect(await store(fetched).get("a".repeat(64))).toEqual({ body: new Uint8Array([1, 2, 3]) })
     expect(fetched.calls[0].text).toContain("WHEN access_count < 9223372036854775807")
+  })
+
+  test("serves a blob on its length check rather than by re-hashing it", async () => {
+    const fetched = fakeSql([[{ content: new Uint8Array([1, 2, 3]), size_bytes: 3, valid: true }]])
+    await createStorage(fetched.sql).contentStore.get("a".repeat(64))
+    // The address is a CHECK constraint the table enforces on every write, so a
+    // download must not spend a SHA-256 over the blob to re-derive it.
+    expect(fetched.calls[0].text).not.toContain("sha256")
+    expect(fetched.calls[0].text).toContain("octet_length(artifact.content) = artifact.size_bytes AS valid")
   })
 
   test("reports a missing blob as null", async () => {
@@ -620,14 +642,23 @@ describe("content store", () => {
 
   test("fails reads and probes when a stored row violates its address", async () => {
     const corruptHas = fakeSql([[{ valid: false }]])
+    // Two independent failures, so neither masks the other: the row the
+    // database judged invalid, and a row whose bytes disagree with the length
+    // it reported on the wire.
     const corruptGet = fakeSql([[{
+      content: new Uint8Array([1, 2, 3]),
+      size_bytes: 3,
+      valid: false
+    }]])
+    const shortGet = fakeSql([[{
       content: new Uint8Array([1]),
       size_bytes: 2,
-      valid_digest: false
+      valid: true
     }]])
     const corruptBatch = fakeSql([[{ digest: "a".repeat(64), valid: false }]])
     await expect(createStorage(corruptHas.sql).contentStore.has("a".repeat(64))).rejects.toThrow("integrity")
     await expect(createStorage(corruptGet.sql).contentStore.get("a".repeat(64))).rejects.toThrow("integrity")
+    await expect(createStorage(shortGet.sql).contentStore.get("a".repeat(64))).rejects.toThrow("integrity")
     await expect(
       createStorage(corruptBatch.sql).contentStore.presentDigests(["a".repeat(64)])
     ).rejects.toThrow("integrity")

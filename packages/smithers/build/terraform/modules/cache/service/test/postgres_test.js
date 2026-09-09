@@ -114,14 +114,114 @@ describe.skipIf(databaseUrl.length === 0)("storage on a real Postgres", () => {
     await clear()
     await storeBlob()
     await storage.actionCache.put("key", publicationOf(`{"a":1}`, []))
-    await sql`UPDATE smithers_build_artifact SET access_count = 9223372036854775807 WHERE digest = ${blob}`
-    await sql`UPDATE smithers_build_cache_entry SET access_count = 9223372036854775807 WHERE key_digest = 'key'`
+    // Backdated so the reads below are outside the access-record grace window
+    // and actually attempt the increment. Against fresh rows they would refresh
+    // nothing and this would assert that a statement that never ran overflowed
+    // nothing.
+    await sql`
+      UPDATE smithers_build_artifact
+      SET access_count = 9223372036854775807, last_accessed_at = now() - interval '1 hour'
+      WHERE digest = ${blob}
+    `
+    await sql`
+      UPDATE smithers_build_cache_entry
+      SET access_count = 9223372036854775807, last_accessed_at = now() - interval '1 hour'
+      WHERE key_digest = 'key'
+    `
     expect(await storage.contentStore.has(blob)).toBe(true)
     expect(await storage.actionCache.get("key")).not.toBeNull()
     const artifact = await sql`SELECT access_count::text AS count FROM smithers_build_artifact WHERE digest = ${blob}`
     const entry = await sql`SELECT access_count::text AS count FROM smithers_build_cache_entry WHERE key_digest = 'key'`
     expect(artifact[0].count).toBe("9223372036854775807")
     expect(entry[0].count).toBe("9223372036854775807")
+  })
+
+  /*
+   * The access record is indexed in both stores, so writing it on every read
+   * costs a new heap tuple, a new btree entry, WAL for both, and a dead tuple.
+   * `xmin` is how that is observable: a row Postgres rewrote carries a new one.
+   */
+  const entryVersion = async () => {
+    const rows = await sql`
+      SELECT xmin::text AS version, last_accessed_at FROM smithers_build_cache_entry WHERE key_digest = 'key'
+    `
+    return rows[0]
+  }
+
+  const artifactVersion = async () => {
+    const rows = await sql`SELECT xmin::text AS version FROM smithers_build_artifact WHERE digest = ${blob}`
+    return rows[0].version
+  }
+
+  const backdate = () =>
+    sql`
+    UPDATE smithers_build_cache_entry SET last_accessed_at = now() - interval '1 hour' WHERE key_digest = 'key'
+  `
+
+  test("does not rewrite an entry whose access record is already fresh", async () => {
+    await clear()
+    await storeBlob()
+    await storage.actionCache.put("key", publicationOf(`{"a":1}`))
+
+    const before = await entryVersion()
+    expect(await storage.actionCache.get("key")).not.toBeNull()
+    expect((await entryVersion()).version).toBe(before.version)
+
+    await backdate()
+    const stale = await entryVersion()
+    expect(await storage.actionCache.get("key")).not.toBeNull()
+    const refreshed = await entryVersion()
+    expect(refreshed.version).not.toBe(stale.version)
+    expect(refreshed.last_accessed_at.getTime()).toBeGreaterThan(stale.last_accessed_at.getTime())
+  })
+
+  test("does not rewrite a blob whose access record is already fresh", async () => {
+    await clear()
+    await storeBlob()
+
+    const before = await artifactVersion()
+    expect(await storage.contentStore.has(blob)).toBe(true)
+    expect(new TextDecoder().decode((await storage.contentStore.get(blob)).body)).toBe("artifact bytes")
+    expect([...(await storage.contentStore.presentDigests([blob]))]).toEqual([blob])
+    expect(await artifactVersion()).toBe(before)
+
+    await sql`UPDATE smithers_build_artifact SET last_accessed_at = now() - interval '1 hour' WHERE digest = ${blob}`
+    const stale = await artifactVersion()
+    expect(await storage.contentStore.has(blob)).toBe(true)
+    expect(await artifactVersion()).not.toBe(stale)
+  })
+
+  test("keeps a read out of the release cutoff's reach", async () => {
+    await clear()
+    await storeBlob()
+    await storage.actionCache.put("key", publicationOf(`{"a":1}`, []))
+    await backdate()
+    expect(await storage.actionCache.get("key")).not.toBeNull()
+
+    const released = await sql`SELECT smithers_build_release_entries(now() - interval '30 minutes', 10) AS count`
+    expect(Number(released[0].count)).toBe(0)
+    expect(await storage.actionCache.get("key")).not.toBeNull()
+  })
+
+  /*
+   * The throttle must never be read as the answer. Rival readers of one stale
+   * row all pass the staleness predicate against their own snapshot, and under
+   * READ COMMITTED every loser's re-check sees the winner's fresh row and
+   * updates nothing. A read that answered from the update's RETURNING would
+   * report those losers a miss and send them off to rebuild a cached step.
+   */
+  test("answers every rival reader of one stale row", async () => {
+    await clear()
+    await storeBlob()
+    await storage.actionCache.put("key", publicationOf(`{"a":1}`))
+    await backdate()
+    await sql`UPDATE smithers_build_artifact SET last_accessed_at = now() - interval '1 hour' WHERE digest = ${blob}`
+
+    const bodies = await Promise.all(Array.from({ length: 8 }, () => storage.actionCache.get("key")))
+    expect(bodies.filter((body) => body !== null)).toHaveLength(8)
+
+    const probes = await Promise.all(Array.from({ length: 8 }, () => storage.contentStore.presentDigests([blob])))
+    expect(probes.filter((present) => present.has(blob))).toHaveLength(8)
   })
 
   test("classifies a publication, a re-publication, and a divergent result", async () => {

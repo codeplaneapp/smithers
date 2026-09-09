@@ -124,9 +124,13 @@ WHERE NOT EXISTS (
 -- its own; an operator or a scheduled job calls these two functions, and the
 -- returned counts are what a human approves against.
 --
--- Use a cutoff older than the longest expected publication. CAS probes update
--- last_accessed_at before the client publishes its cache entry. The grace
--- interval prevents release from winning between those two requests.
+-- Use a cutoff older than the longest expected publication, plus the read
+-- service's access-record grace window (lruTouchGraceSeconds in
+-- service/storage.js, five minutes). CAS probes update last_accessed_at before
+-- the client publishes its cache entry, and a probe that finds the record
+-- already fresh within that window leaves it alone rather than paying an
+-- indexed write per read, so the record trails the probe by at most the window.
+-- The grace interval prevents release from winning between those two requests.
 --
 -- A negative or null budget releases nothing rather than raising: `LIMIT` on a
 -- negative value is an error, and an operator who typed one deserves a count
