@@ -29,7 +29,11 @@ if (values.help) {
   const incremental = values["reuse-run"] ? await import("./reuse.ts") : undefined
   if (incremental && !values.verified) throw new Error("--reuse-run requires --verified and the existing database containing that terminal run")
   const runtime = typeof (globalThis as { Bun?: unknown }).Bun === "undefined" ? await import("@smthrs/flows/NodeRuntime") : await import("@smthrs/flows/BunRuntime")
-  const input: Input = { pages, mode: values.verified ? "verified" : "preview", reviewer: values.model }
+  // Credentials stay in the existing seat resolver. The receipt distinguishes
+  // its subscription route so a different provider route cannot reuse approval.
+  const reviewer = values.model.startsWith("openai:") && process.env.SMITHERS_OPENAI_AUTH === "chatgpt"
+    ? `openai-chatgpt:${values.model.slice("openai:".length)}` : values.model
+  const input: Input = { pages, mode: values.verified ? "verified" : "preview", reviewer }
   // A preflight source capture validates the declared evidence before admission;
   // actions independently recapture and the write gate rechecks it after review.
   await Effect.runPromise(Effect.forEach(pages, (page) => operations({ root, output }).collect(page)).pipe(Effect.provide(NodeServices.layer)))
@@ -43,7 +47,7 @@ if (values.help) {
     ...[output, `${output}/**`].map((resource) => rule("fs:write", resource))
   ]
   const runId = values.run ?? `wiki-${crypto.randomUUID()}`
-  console.log(JSON.stringify({ runId, output, mode: input.mode, model: values.verified ? values.model : null }))
+  console.log(JSON.stringify({ runId, output, mode: input.mode, model: values.verified ? values.model : null, reviewer: values.verified ? reviewer : null }))
   const execute = Effect.gen(function*() {
     if (incremental) return yield* incremental.IncrementalWiki.execute({ ...input, mode: "verified", priorRunId: values["reuse-run"]! }, { executionId: runId })
     return yield* Wiki.execute(input, { executionId: runId })
