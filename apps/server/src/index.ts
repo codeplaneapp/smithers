@@ -30,7 +30,7 @@ import { browserFetch, browserFetchResponseBody, resolveHostOverHttps } from "@s
 import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
 import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
-import { appendClientError, ClientErrorLog, readClientErrors } from "./clientErrorLog"
+import { appendClientError, CLIENT_ERROR_UNKNOWN_SOURCE, ClientErrorLog, readClientErrors } from "./clientErrorLog"
 import type { ClientErrorNamespace } from "./clientErrorLog"
 import { handleCloudRoleTurn, isCloudRoleTurn, turnHints } from "./cloudRoleTurn"
 import type { CloudRoleEnv, TurnRequest } from "./cloudRoleTurn"
@@ -57,6 +57,7 @@ import {
   ANONYMOUS_ALL_CEILING,
   ANONYMOUS_ALL_KEY,
   ANONYMOUS_CEILING,
+  anonymousBucketAddress,
   anonymousTurnKey,
   spendTurn,
   turnLimitResponse,
@@ -212,8 +213,22 @@ const STRIPPED_IDENTITY_HEADERS = [
   "x-user-login",
   "x-smithers-token-id",
   "x-smithers-service-token",
+  "x-smithers-admin-token",
   "authorization"
 ] as const
+
+/**
+ * The siblings' own admin surfaces. The product spends the admin token only
+ * from its /api/admin/* routes, after the caller's session validates as
+ * admin:true (handleAdmin, forwardAdminCall). The transparent proxies never
+ * reach these paths: a caller who holds an upstream admin credential can use
+ * it against the upstream directly, and one who does not gets the canonical
+ * 404, so nothing here is enumerable.
+ */
+const SIBLING_ADMIN_ROUTE_PREFIXES = ["/api/identity/admin/", "/api/billing/admin/"] as const
+
+const siblingAdminRoute = (pathname: string): boolean =>
+  SIBLING_ADMIN_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix))
 
 /*
  * Retired raw gateway mounts. The old static proxy used deployment credentials
@@ -1098,6 +1113,7 @@ const proxyToIdentity = (request: Request, env: WorkerEnv): Promise<Response> =>
     )
   }
   const url = new URL(request.url)
+  if (siblingAdminRoute(url.pathname)) return Promise.resolve(notFound())
   const target = new URL(url.pathname + url.search, upstream)
   const headers = new Headers(request.headers)
   for (const name of STRIPPED_IDENTITY_HEADERS) headers.delete(name)
@@ -1669,6 +1685,7 @@ const proxyToBilling = async (request: Request, env: WorkerEnv): Promise<Respons
     return notConfigured("The billing seam", "BILLING_UPSTREAM_URL is unset. Balance is unavailable")
   }
   const url = new URL(request.url)
+  if (siblingAdminRoute(url.pathname)) return notFound()
   const target = new URL(url.pathname + url.search, upstream)
   const headers = new Headers(request.headers)
   for (const name of STRIPPED_IDENTITY_HEADERS) headers.delete(name)
@@ -2401,14 +2418,28 @@ const platformFailureMessage = (status: number, body: string): string => {
 
 /*
  * Frontend error ingest (multi's /api/client-errors, minimal form): bounded
- * body, per-isolate rate limit, logged to the worker tail — enough to stop
- * flying blind on client crashes in the alpha without storing anything.
+ * body, logged to the worker tail, kept in the client-error log. The
+ * throttle is the log's own (clientErrorLog.ts): a counter here would be per
+ * isolate, and workerd runs as many isolates as a flood asks for.
  */
 const CLIENT_ERRORS_PATH = "/api/client-errors"
 const CLIENT_ERROR_MAX_BODY = 16 * 1024
-const CLIENT_ERROR_WINDOW_MS = 60_000
-const CLIENT_ERROR_WINDOW_MAX = 120
-let clientErrorWindow = { start: 0, count: 0 }
+
+/**
+ * The source a report is counted against: the client address Cloudflare
+ * reports, one IPv6 /64 per bucket as for anonymous turns. Never stored.
+ */
+const clientErrorSource = (request: Request): string => {
+  const ip = request.headers.get("cf-connecting-ip")?.trim() ?? ""
+  return ip === "" ? CLIENT_ERROR_UNKNOWN_SOURCE : anonymousBucketAddress(ip)
+}
+
+/** The session cookie the identity worker sets. Its value is never read here, only its presence. */
+const SESSION_COOKIE = "smithers_session"
+
+/** The request carried a session cookie. Presence only: the log's eviction order needs no more. */
+const carriesSessionCookie = (request: Request): boolean =>
+  (request.headers.get("cookie") ?? "").split(";").some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`))
 
 /**
  * Read a body under its byte cap: a declared content-length over the cap
@@ -2444,37 +2475,38 @@ const readBoundedBody = async (request: Request, limit: number): Promise<ArrayBu
 }
 
 const handleClientError = async (request: Request, env: WorkerEnv): Promise<Response> => {
-  const now = Date.now()
-  if (now - clientErrorWindow.start > CLIENT_ERROR_WINDOW_MS) {
-    clientErrorWindow = { start: now, count: 0 }
-  }
-  clientErrorWindow.count += 1
-  if (clientErrorWindow.count > CLIENT_ERROR_WINDOW_MAX) {
-    return json(429, { status: "error", message: "Too many error reports." })
-  }
   const body = await readBoundedBody(request, CLIENT_ERROR_MAX_BODY)
   if (body === undefined) {
     return json(413, { status: "error", message: "Error report too large." })
   }
   const text = new TextDecoder().decode(body)
-  console.error("client-error:", text)
-  // console.error alone lives exactly as long as someone is tailing. The log
-  // is what makes an alpha user's crash readable afterwards, through
-  // GET /api/admin/errors; it is bounded and it never fails the report.
+  // The log is what makes an alpha user's crash readable afterwards, through
+  // GET /api/admin/errors; it is bounded, it decides the throttle, and it
+  // never fails the report. console.error alone lives exactly as long as
+  // someone is tailing, so a throttled report is not worth a tail line.
   const referer = request.headers.get("referer")
   const userAgent = request.headers.get("user-agent")
-  await appendClientError(env.CLIENT_ERRORS, {
-    at: new Date(now).toISOString(),
-    ...(referer === null ? {} : { page: referer }),
-    ...(userAgent === null ? {} : { userAgent }),
-    report: ((): unknown => {
-      try {
-        return JSON.parse(text)
-      } catch {
-        return text
-      }
-    })()
-  })
+  const outcome = await appendClientError(
+    env.CLIENT_ERRORS,
+    {
+      at: new Date().toISOString(),
+      ...(referer === null ? {} : { page: referer }),
+      ...(userAgent === null ? {} : { userAgent }),
+      ...(carriesSessionCookie(request) ? { signedIn: true } : {}),
+      report: ((): unknown => {
+        try {
+          return JSON.parse(text)
+        } catch {
+          return text
+        }
+      })()
+    },
+    clientErrorSource(request)
+  )
+  if (outcome === "throttled") {
+    return json(429, { status: "error", message: "Too many error reports." })
+  }
+  console.error("client-error:", text)
   return json(202, { status: "accepted" })
 }
 

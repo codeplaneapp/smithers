@@ -3260,3 +3260,82 @@ describe("cloud roles on Cerebras", () => {
     expect(wire.calls.upstream.length).toBe(0)
   })
 })
+
+/*
+ * The identity and billing workers each expose an admin surface behind
+ * `x-smithers-admin-token`. The product spends that token only from its own
+ * /api/admin/* routes, after the caller's session validates as admin:true.
+ * The transparent proxies must therefore never carry a client-supplied admin
+ * token, and must never reach the siblings' admin paths at all.
+ */
+describe("sibling admin surfaces are unreachable through the transparent proxies", () => {
+  const env: WorkerEnv = {
+    ...assetsEnv(),
+    IDENTITY_UPSTREAM_URL: "https://identity.test",
+    BILLING_UPSTREAM_URL: "https://billing.test",
+    BILLING_PRODUCT_SERVICE_TOKEN: "product-service-token-123"
+  }
+
+  test("a client-supplied x-smithers-admin-token is stripped by both proxies, even for an admin session", async () => {
+    const seen: Array<{ host: string; path: string; token: string | null }> = []
+    await withMockedFetch(
+      (request) => {
+        const url = new URL(request.url)
+        if (url.hostname !== "identity.test" && url.hostname !== "billing.test") return undefined
+        if (url.pathname === "/api/identity/validate") {
+          return new Response(JSON.stringify({ login: "will", allowlisted: true, admin: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        }
+        seen.push({ host: url.hostname, path: url.pathname, token: request.headers.get("x-smithers-admin-token") })
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } })
+      },
+      async () => {
+        for (const path of ["/api/identity/whoami", "/api/billing/balance"]) {
+          const response = await worker.fetch(
+            new Request(`https://mvp.test${path}`, {
+              headers: { cookie: "smithers_session=abc", "x-smithers-admin-token": "forged" }
+            }),
+            env
+          )
+          expect(`${path} → ${response.status}`).toBe(`${path} → 200`)
+        }
+        expect(seen.map((call) => call.path)).toEqual(["/api/identity/whoami", "/api/billing/balance"])
+        for (const call of seen) expect(`${call.host} ${call.path}: ${call.token}`).toBe(`${call.host} ${call.path}: null`)
+      }
+    )
+  })
+
+  test("the siblings' admin paths answer the canonical 404 and are never forwarded", async () => {
+    const forwarded: Array<string> = []
+    await withMockedFetch(
+      (request) => {
+        const url = new URL(request.url)
+        if (url.hostname !== "identity.test" && url.hostname !== "billing.test") return undefined
+        forwarded.push(url.pathname)
+        return new Response("{}", { status: 200 })
+      },
+      async () => {
+        for (const [method, path] of [
+          ["GET", "/api/identity/admin/allowlist"],
+          ["POST", "/api/identity/admin/allowlist"],
+          ["GET", "/api/identity/admin/requests"],
+          ["GET", "/api/billing/admin/grants"],
+          ["POST", "/api/billing/admin/grants"]
+        ] as const) {
+          const response = await worker.fetch(
+            new Request(`https://mvp.test${path}`, {
+              method,
+              headers: { "x-smithers-admin-token": "forged", cookie: "smithers_session=abc" }
+            }),
+            env
+          )
+          expect(`${method} ${path} → ${response.status}`).toBe(`${method} ${path} → 404`)
+          expect(await response.json()).toEqual({ status: "error", message: "Not found." })
+        }
+        expect(forwarded).toEqual([])
+      }
+    )
+  })
+})

@@ -6,6 +6,10 @@ import {
   CLIENT_ERROR_LOG_LIMIT,
   CLIENT_ERROR_LOG_MAX_BYTES,
   CLIENT_ERROR_RECORD_MAX_BYTES,
+  CLIENT_ERROR_SOURCE_WINDOW_MAX,
+  CLIENT_ERROR_TEXT_MAX_BYTES,
+  CLIENT_ERROR_WINDOW_MAX,
+  CLIENT_ERROR_WINDOW_MS,
   ClientErrorLog,
   readClientErrors
 } from "./clientErrorLog"
@@ -27,7 +31,12 @@ const memoryStorage = (): ClientErrorStorage => {
   }
 }
 
-const memoryLog = (): ClientErrorNamespace & { readonly names: () => Array<string> } => {
+/**
+ * A log with an injectable clock. The throttle window is the Durable Object's,
+ * so a test that wants to feed the ring more than one window's worth of
+ * reports advances the clock; a test of the throttle freezes it.
+ */
+const memoryLog = (now: () => number = Date.now): ClientErrorNamespace & { readonly names: () => Array<string> } => {
   const logs = new Map<string, ClientErrorLog>()
   return {
     names: () => [...logs.keys()],
@@ -36,12 +45,18 @@ const memoryLog = (): ClientErrorNamespace & { readonly names: () => Array<strin
       const name = String(id)
       let log = logs.get(name)
       if (log === undefined) {
-        log = new ClientErrorLog({ storage: memoryStorage() })
+        log = new ClientErrorLog({ storage: memoryStorage(), now })
         logs.set(name, log)
       }
       return { fetch: (request) => log.fetch(request) }
     }
   }
+}
+
+/** Every read is a new throttle window: the ring alone is under test. */
+const unthrottled = (): (() => number) => {
+  let tick = 0
+  return () => (tick += CLIENT_ERROR_WINDOW_MS + 1)
 }
 
 const adminEnv = (logs?: ClientErrorNamespace): WorkerEnv => ({
@@ -92,7 +107,7 @@ describe("the client-error log (Durable Object state)", () => {
   })
 
   test("is bounded: an error storm evicts the oldest, never the newest", async () => {
-    const logs = memoryLog()
+    const logs = memoryLog(unthrottled())
     for (let index = 0; index < CLIENT_ERROR_LOG_LIMIT + 25; index += 1) {
       await appendClientError(logs, { at: new Date(index).toISOString(), report: { index } })
     }
@@ -342,7 +357,7 @@ describe("the log stays inside one storage value", () => {
   })
 
   test("the log never exceeds its byte budget, whatever it is fed", async () => {
-    const logs = memoryLog()
+    const logs = memoryLog(unthrottled())
     for (let index = 0; index < CLIENT_ERROR_LOG_LIMIT + 20; index += 1) {
       await appendClientError(logs, bigReport(16_000, new Date(index).toISOString()))
     }
@@ -397,5 +412,100 @@ describe("the byte bound counts bytes, not characters", () => {
     expect(new TextEncoder().encode(JSON.stringify(capped)).length).toBeLessThanOrEqual(
       CLIENT_ERROR_RECORD_MAX_BYTES
     )
+  })
+})
+
+/*
+ * The route is unauthenticated by design: it must record a crash that happens
+ * before or during sign-in. So the only thing standing between an anonymous
+ * flood and the log is the throttle, and a per-isolate counter is no throttle
+ * at all — workerd runs many isolates. The log's own Durable Object is the one
+ * authority, and it keeps a signed-in user's report out of an anonymous
+ * flood's reach.
+ */
+describe("the client-error throttle is the log's, not the isolate's", () => {
+  const frozen = (): (() => number) => () => 1_700_000_000_000
+  const anonymous = (index: number, chars = 3_500): Request =>
+    report("/api/client-errors", { message: "x".repeat(chars), index }, { "cf-connecting-ip": `203.0.113.${index}` })
+  const signedIn = (message: string): Request =>
+    report("/api/client-errors", { message }, { cookie: "smithers_session=abc", "cf-connecting-ip": "198.51.100.9" })
+
+  test("one genuine report survives 40 anonymous 4 KiB reports in one window", async () => {
+    const logs = memoryLog(frozen())
+    const env = adminEnv(logs)
+    expect((await worker.fetch(signedIn("the real crash"), env)).status).toBe(202)
+    for (let index = 0; index < 40; index += 1) {
+      expect((await worker.fetch(anonymous(index), env)).status).toBe(202)
+    }
+    const read = await readClientErrors(logs)
+    expect(new TextEncoder().encode(JSON.stringify(read.reports)).length).toBeLessThanOrEqual(CLIENT_ERROR_LOG_MAX_BYTES)
+    const genuine = read.reports.find((row) => (row.report as { message: string }).message === "the real crash")
+    expect(genuine?.signedIn).toBe(true)
+    // The flood still fills what is left: the noise is recorded, the report survives.
+    expect(read.reports.length).toBeGreaterThan(10)
+  })
+
+  test("a signed-in report is never evicted by anonymous noise, however much arrives", async () => {
+    const logs = memoryLog(unthrottled())
+    await appendClientError(logs, { at: "2026-08-18T00:00:00.000Z", signedIn: true, report: { message: "mine" } })
+    for (let index = 0; index < CLIENT_ERROR_LOG_LIMIT + 50; index += 1) {
+      await appendClientError(logs, { at: new Date(index + 1).toISOString(), report: { message: "x".repeat(3_500) } })
+    }
+    const read = await readClientErrors(logs)
+    expect(read.reports.some((row) => (row.report as { message: string }).message === "mine")).toBe(true)
+    // Still newest first: the genuine report is the oldest in the log.
+    expect(read.reports.at(-1)?.signedIn).toBe(true)
+  })
+
+  test("one source is capped inside the window, and other sources are not", async () => {
+    const logs = memoryLog(frozen())
+    const env = adminEnv(logs)
+    const flood = (index: number): Request =>
+      report("/api/client-errors", { index }, { "cf-connecting-ip": "203.0.113.7" })
+    for (let index = 0; index < CLIENT_ERROR_SOURCE_WINDOW_MAX; index += 1) {
+      expect((await worker.fetch(flood(index), env)).status).toBe(202)
+    }
+    const refused = await worker.fetch(flood(CLIENT_ERROR_SOURCE_WINDOW_MAX), env)
+    expect(refused.status).toBe(429)
+    expect((await worker.fetch(anonymous(1, 10), env)).status).toBe(202)
+    expect((await readClientErrors(logs)).total).toBe(CLIENT_ERROR_SOURCE_WINDOW_MAX + 1)
+  })
+
+  test("the window ceiling is global across sources, and a new window opens it again", async () => {
+    let now = 1_700_000_000_000
+    const logs = memoryLog(() => now)
+    const env = adminEnv(logs)
+    for (let index = 0; index < CLIENT_ERROR_WINDOW_MAX; index += 1) {
+      expect((await worker.fetch(anonymous(index % 250, 10), env)).status).toBe(202)
+    }
+    expect((await worker.fetch(anonymous(251, 10), env)).status).toBe(429)
+    expect((await worker.fetch(signedIn("also refused: the ceiling is the ceiling"), env)).status).toBe(429)
+    now += CLIENT_ERROR_WINDOW_MS + 1
+    expect((await worker.fetch(anonymous(251, 10), env)).status).toBe(202)
+  })
+
+  test("an IPv6 visitor's /64 is one source", async () => {
+    const logs = memoryLog(frozen())
+    const env = adminEnv(logs)
+    for (let index = 0; index < CLIENT_ERROR_SOURCE_WINDOW_MAX; index += 1) {
+      const ip = `2001:db8:0:0:${index.toString(16)}::1`
+      expect((await worker.fetch(report("/api/client-errors", { index }, { "cf-connecting-ip": ip }), env)).status).toBe(202)
+    }
+    const response = await worker.fetch(report("/api/client-errors", {}, { "cf-connecting-ip": "2001:db8::ffff" }), env)
+    expect(response.status).toBe(429)
+  })
+
+  test("the page and the user agent are capped, so a record cannot outgrow its budget through its headers", () => {
+    const capped = capRecord({
+      at: "2026-08-18T00:00:00.000Z",
+      page: `https://smithers.sh/#${"p".repeat(10_000)}`,
+      userAgent: "u".repeat(10_000),
+      report: { message: "boom" }
+    })
+    expect(new TextEncoder().encode(JSON.stringify(capped)).length).toBeLessThanOrEqual(CLIENT_ERROR_RECORD_MAX_BYTES)
+    expect(new TextEncoder().encode(capped.page ?? "").length).toBeLessThanOrEqual(CLIENT_ERROR_TEXT_MAX_BYTES)
+    expect(new TextEncoder().encode(capped.userAgent ?? "").length).toBeLessThanOrEqual(CLIENT_ERROR_TEXT_MAX_BYTES)
+    expect(capped.page).toStartWith("https://smithers.sh/#ppp")
+    expect(capped.report).toEqual({ message: "boom" })
   })
 })
