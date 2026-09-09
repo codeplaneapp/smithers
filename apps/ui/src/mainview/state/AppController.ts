@@ -31,6 +31,7 @@ import type { AccountController } from "./controller/account"
 import { createAuthBillingController } from "./controller/auth-billing"
 import { createConnectorController } from "./controller/connectors"
 import { createControllerContext } from "./controller/context"
+import type { NetEntry } from "./controller/context"
 import { createFailureController } from "./controller/failures"
 import { createFramesController } from "./controller/frames"
 import { createPresentationController } from "./controller/presentation"
@@ -323,6 +324,12 @@ export interface AppController {
    * read — dispatching from a render is a re-render loop.
    */
   readonly netTap: () => string
+  /**
+   * The same ring as rows, for the panel that renders them. `netTap`
+   * serializes for the debug read a human types; a renderer takes the rows
+   * so nothing has to parse that string back into a shape it restates.
+   */
+  readonly netTapEntries: () => ReadonlyArray<NetEntry>
   /** Drop every chain grant and pending denial (admin /debug.grants.reset). */
   readonly resetGrants: () => Promise<string | { readonly value: string }>
   /**
@@ -795,6 +802,7 @@ export const createAppController = (
     debugEvents,
     debugChain,
     netTap,
+    netTapEntries,
     debugNet,
     resetGrants,
     debugSeams,
@@ -1337,6 +1345,7 @@ export const createAppController = (
     debugChain,
     debugNet,
     netTap,
+    netTapEntries,
     resetGrants,
     debugSeams,
     toggleTheme,
@@ -1687,6 +1696,7 @@ export const createAppController = (
     debugChain,
     debugNet,
     netTap,
+    netTapEntries,
     resetGrants,
     debugSeams,
     toggleTheme,

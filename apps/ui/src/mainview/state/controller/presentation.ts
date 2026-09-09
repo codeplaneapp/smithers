@@ -3,7 +3,7 @@ import { foldLineages } from "../../chain/DebugFolds"
 import { DEFAULT_PALETTE, isPalette, PALETTES, WIKI_DISPLAY_NAME } from "../AppState"
 import type { Card, Palette } from "../AppState"
 import { THEME_PICKER_CARD_ID } from "../AppStore"
-import type { ControllerContext } from "./context"
+import type { ControllerContext, NetEntry } from "./context"
 
 export interface PresentationController {
   readonly showChat: () => void
@@ -22,6 +22,7 @@ export interface PresentationController {
   readonly debugSnapshot: () => { readonly value: string }
   readonly debugEvents: () => { readonly value: string }
   readonly debugChain: () => { readonly value: string }
+  readonly netTapEntries: () => ReadonlyArray<NetEntry>
   readonly netTap: () => string
   readonly debugNet: () => { readonly value: string }
   readonly resetGrants: () => Promise<string | { readonly value: string }>
@@ -284,7 +285,9 @@ export const createPresentationController = (
     )
   }
 
-  const netTap = (): string => JSON.stringify([...ctx.netRing].reverse())
+  const netTapEntries = (): ReadonlyArray<NetEntry> => [...ctx.netRing].reverse()
+
+  const netTap = (): string => JSON.stringify(netTapEntries())
 
   const debugNet = (): { readonly value: string } => surfaceDebugRead("Network tap", netTap())
 
@@ -506,6 +509,7 @@ export const createPresentationController = (
     debugSnapshot,
     debugEvents,
     debugChain,
+    netTapEntries,
     netTap,
     debugNet,
     resetGrants,

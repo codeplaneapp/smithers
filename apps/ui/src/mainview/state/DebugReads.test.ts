@@ -127,6 +127,10 @@ describe("the debug reads render for the human", () => {
     const before = store.collections.messages.size
     JSON.parse(controller.netTap())
     JSON.parse(controller.netTap())
+    // The panel reads rows, not the serialized form; both stay silent.
+    controller.netTapEntries()
+    controller.netTapEntries()
     expect(store.collections.messages.size).toBe(before)
+    expect(controller.netTapEntries()).toEqual(JSON.parse(controller.netTap()))
   })
 })

@@ -1,9 +1,32 @@
 import { useLiveQuery } from "@tanstack/react-db"
 import { Sparkles } from "lucide-react"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { foldLineages } from "./chain/DebugFolds"
 import { useController } from "./ControllerContext"
 import { SurfaceHeader } from "./SurfaceChrome"
+
+/** What a dump reads off any collection: a live row count and its rows. */
+type DumpedCollection = { readonly size: number; readonly values: () => Iterable<unknown> }
+
+/*
+ * One collection, dumped only while it is open. The panel re-renders on every
+ * dispatch, so copying and stringifying thirteen collections' rows for a
+ * closed <details> is work nobody is reading; `size` is a live count the
+ * collection already keeps.
+ */
+function CollectionDump({ name, collection }: { readonly name: string; readonly collection: DumpedCollection }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li>
+      <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+        <summary>
+          <code>{name}</code> <span>{collection.size} rows</span>
+        </summary>
+        {open ? <pre className="devtools-json">{JSON.stringify([...collection.values()].slice(-50), null, 2)}</pre> : null}
+      </details>
+    </li>
+  )
+}
 
 /*
  * The admin dev-tools panel (§2b/§2d): the machinery, visible for admin
@@ -16,7 +39,10 @@ export function DevtoolsPanel() {
   const { data: toolCallRows } = useLiveQuery(controller.store.collections.toolCalls)
   const { data: chainEventRows } = useLiveQuery(controller.store.collections.chainEvents)
   const { data: transitionRows } = useLiveQuery(controller.store.collections.transitions)
-  const toolCalls = [...toolCallRows].sort((left, right) => left.createdAt - right.createdAt).slice(-30)
+  const toolCalls = useMemo(
+    () => [...toolCallRows].sort((left, right) => left.createdAt - right.createdAt).slice(-30),
+    [toolCallRows]
+  )
   const identity = controller.store.collections.identitySessions.get("identity")
   const billing = controller.store.collections.billingAccounts.get("billing")
   const registryState = controller.commands.state()
@@ -27,21 +53,23 @@ export function DevtoolsPanel() {
    */
   const [seqCap, setSeqCap] = useState("")
   const cap = seqCap.trim() === "" ? undefined : Number(seqCap)
-  const lineages = foldLineages(
-    [...chainEventRows],
-    cap !== undefined && Number.isFinite(cap) ? cap : undefined
-  )
-  const transitions = [...transitionRows].sort((left, right) => right.revision - left.revision).slice(0, 100)
   /*
-   * The whole store, as SQLite sees it: every collection with its live row
-   * count and a bounded dump. Reads are plain .values() snapshots — the
-   * transitions live query above re-renders this panel on every dispatch,
-   * so the dumps stay current without thirteen more subscriptions.
+   * The transitions live query below re-renders this panel on every dispatch
+   * — every streamed token. The fold is the panel's one expensive read, so it
+   * is keyed on the chainEvents query's own array: it replays only when the
+   * journal itself grows or the scrubber moves, not once per token.
    */
-  const collectionDumps = Object.entries(controller.store.collections).map(([name, collection]) => {
-    const rows = [...(collection as { values: () => Iterable<unknown> }).values()]
-    return { name, count: rows.length, rows: rows.slice(-50) }
-  })
+  const lineages = useMemo(
+    () => foldLineages([...chainEventRows], cap !== undefined && Number.isFinite(cap) ? cap : undefined),
+    [chainEventRows, cap]
+  )
+  const transitions = useMemo(
+    () => [...transitionRows].sort((left, right) => right.revision - left.revision).slice(0, 100),
+    [transitionRows]
+  )
+  const collections = Object.entries(controller.store.collections) as ReadonlyArray<[string, DumpedCollection]>
+  // The ring as rows: the controller's serialized read is for the human who types /debug.net.
+  const netEntries = controller.netTapEntries()
   return (
     <aside className="devtools-panel" aria-label="Dev tools">
       <SurfaceHeader
@@ -120,16 +148,7 @@ export function DevtoolsPanel() {
         <section className="devtools-section" aria-label="Store collections">
           <h3>Store · {controller.store.persistenceMode}</h3>
           <ul className="devtools-transitions">
-            {collectionDumps.map((dump) => (
-              <li key={dump.name}>
-                <details>
-                  <summary>
-                    <code>{dump.name}</code> <span>{dump.count} rows</span>
-                  </summary>
-                  <pre className="devtools-json">{JSON.stringify(dump.rows, null, 2)}</pre>
-                </details>
-              </li>
-            ))}
+            {collections.map(([name, collection]) => <CollectionDump key={name} name={name} collection={collection} />)}
           </ul>
         </section>
         <section className="devtools-section" aria-label="Transitions">
@@ -152,28 +171,17 @@ export function DevtoolsPanel() {
         </section>
         <section className="devtools-section" aria-label="Network tap">
           <h3>Network</h3>
-          {(() => {
-            const entries = JSON.parse(controller.netTap()) as ReadonlyArray<{
-              readonly at: number
-              readonly method: string
-              readonly url: string
-              readonly status: number | "error"
-              readonly ms: number
-            }>
-            return entries.length === 0 ?
-              <p className="devtools-empty">No requests yet.</p> :
-              (
-                <ul className="devtools-net">
-                  {entries.slice(0, 30).map((entry) => (
-                    <li key={`${entry.at}-${entry.url}`}>
-                      <code>
-                        {entry.method} {entry.url.replace(/^https?:\/\/[^/]+/, "")} {entry.status} {entry.ms}ms
-                      </code>
-                    </li>
-                  ))}
-                </ul>
-              )
-          })()}
+          {netEntries.length === 0 ? <p className="devtools-empty">No requests yet.</p> : (
+            <ul className="devtools-net">
+              {netEntries.slice(0, 30).map((entry) => (
+                <li key={`${entry.at}-${entry.url}`}>
+                  <code>
+                    {entry.method} {entry.url.replace(/^https?:\/\/[^/]+/, "")} {entry.status} {entry.ms}ms
+                  </code>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
         <section className="devtools-section" aria-label="Tool calls">
           <h3>Tool calls</h3>
