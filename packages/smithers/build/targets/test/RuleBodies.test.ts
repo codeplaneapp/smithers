@@ -312,8 +312,8 @@ describe("success shapes a rule maps out of its runs", () => {
     expect(argvOf(both["format"])).toContain("format")
   })
 
-  it("VitestCoverage reports the run, the declared directory, and the captured outputs", () => {
-    const value = plannedValue(VitestCoverage.VitestCoverage({
+  it("VitestCoverage returns the captured output manifest after the run", () => {
+    const target = VitestCoverage.VitestCoverage({
       packageManager,
       tests: [Input.glob("test/**/*.test.ts")],
       sources: [Input.glob("src/**/*.ts")],
@@ -323,14 +323,14 @@ describe("success shapes a rule maps out of its runs", () => {
       reportsDirectory: "coverage",
       thresholds: { branches: 1, functions: 2, lines: 3, statements: 4 },
       cwd: "packages/example"
-    })) as {
-      readonly run: { readonly payload: Record<string, unknown> }
-      readonly reportsDirectory: string
-      readonly outputs: unknown
-    }
-    expect(value.reportsDirectory).toBe("coverage")
-    expect(value.run.payload["argv"]).not.toContain("--config")
-    expect(value.outputs).toBeUndefined()
+    })
+    const calls = plannedCalls(target)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.payload["argv"]).not.toContain("--config")
+    expect(plannedValue(target)).toEqual({
+      action: "smithers-build/capture-outputs",
+      payload: { cwd: "packages/example", paths: ["coverage"] }
+    })
   })
 })
 

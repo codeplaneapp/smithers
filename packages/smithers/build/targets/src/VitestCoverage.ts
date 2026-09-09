@@ -40,7 +40,9 @@ export const Attrs = Schema.Struct({
   }),
   cwd: Schema.NonEmptyString.pipe(
     Schema.withConstructorDefault(Effect.succeed("."))
-  )
+  ),
+  /** Maximum run time in milliseconds. Defaults to twenty minutes. */
+  timeoutMs: Schema.Int.pipe(Schema.withConstructorDefault(Effect.succeed(1_200_000)))
 })
 
 /**
@@ -52,18 +54,12 @@ export const Attrs = Schema.Struct({
 export type Attrs = typeof Attrs.Type
 
 /**
- * Result of one coverage run: the exec result plus the directory the run
- * wrote its coverage reports into, relative to `cwd`.
+ * The shared output manifest of the captured coverage report directory.
  *
  * @category schemas
  * @since 0.1.0
  */
-export const CoverageReport = Schema.Struct({
-  run: Exec.Result,
-  reportsDirectory: Schema.NonEmptyString,
-  /** The digested manifest of the written report tree. */
-  outputs: Schema.Array(ToolBuild.Output)
-})
+export const CoverageReport = ToolBuild.Outputs
 
 /**
  * Result of one coverage run.
@@ -101,6 +97,7 @@ export const VitestCoverage = Target.make("VitestCoverage", {
   implementation: (attrs) =>
     Target.runTool({
       cwd: attrs.cwd,
+      timeoutMs: attrs.timeoutMs,
       argv: PackageManager.exec(attrs.packageManager, [
         "vitest",
         "run",
@@ -114,14 +111,6 @@ export const VitestCoverage = Target.make("VitestCoverage", {
         `--coverage.thresholds.statements=${attrs.thresholds.statements}`
       ])
     }).pipe(
-      Node.bindPlanned((run) =>
-        ToolBuild.CaptureOutputs.call({ cwd: attrs.cwd, paths: [attrs.reportsDirectory] }).pipe(
-          Node.map((captured) => ({
-            run,
-            reportsDirectory: attrs.reportsDirectory,
-            outputs: captured.outputs
-          }))
-        )
-      )
+      Node.bindPlanned(() => ToolBuild.CaptureOutputs.call({ cwd: attrs.cwd, paths: [attrs.reportsDirectory] }))
     )
 })

@@ -19,7 +19,9 @@ import * as Target from "../src/Target.ts"
 import { TsBuild } from "../src/TsBuild.ts"
 import { Typecheck } from "../src/Typecheck.ts"
 import { Vitest } from "../src/Vitest.ts"
-import { plannedArgv } from "./plan.ts"
+import { VitestCoverage } from "../src/VitestCoverage.ts"
+import { VitestWatch } from "../src/VitestWatch.ts"
+import { plannedArgv, plannedCalls } from "./plan.ts"
 import { packageManager, runtime } from "./toolchain.ts"
 
 const vitestAttrs = {
@@ -140,5 +142,43 @@ describe("a declared runtime overrides the interpreter without naming a manager"
     expect(PackageManager.under(packageManager, runtime)).toBe(packageManager)
     expect(PackageManager.under(packageManager, bun)?.name).toBe("bun")
     expect(PackageManager.under(undefined, bun)?.name).toBe("bun")
+  })
+})
+
+describe("Vitest coverage and watch deadlines", () => {
+  const coverageAttrs = {
+    packageManager,
+    tests: [],
+    sources: [],
+    deps: [],
+    config: null,
+    provider: "v8",
+    reportsDirectory: "coverage",
+    thresholds: { branches: 0, functions: 0, lines: 0, statements: 0 }
+  } as const
+  const cases = [
+    ["VitestCoverage", (timeoutMs?: number) =>
+      VitestCoverage({
+        ...coverageAttrs,
+        ...(timeoutMs === undefined ? {} : { timeoutMs })
+      })],
+    ["VitestWatch", (timeoutMs?: number) =>
+      VitestWatch({
+        tests: vitestAttrs.tests,
+        sources: vitestAttrs.sources,
+        deps: vitestAttrs.deps,
+        config: null,
+        environment: "node",
+        packageManager,
+        ...(timeoutMs === undefined ? {} : { timeoutMs })
+      })]
+  ] as const
+
+  it.each(cases)("%s defaults to twenty minutes", (_, make) => {
+    expect(plannedCalls(make())[0]?.payload["timeoutMs"]).toBe(1_200_000)
+  })
+
+  it.each(cases)("%s forwards an explicit deadline", (_, make) => {
+    expect(plannedCalls(make(2_400_000))[0]?.payload["timeoutMs"]).toBe(2_400_000)
   })
 })

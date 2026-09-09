@@ -29,7 +29,9 @@ export const Attrs = Schema.Struct({
   environment: Schema.NonEmptyString,
   cwd: Schema.NonEmptyString.pipe(
     Schema.withConstructorDefault(Effect.succeed("."))
-  )
+  ),
+  /** Maximum run time in milliseconds. Defaults to twenty minutes. */
+  timeoutMs: Schema.Int.pipe(Schema.withConstructorDefault(Effect.succeed(1_200_000)))
 })
 
 /**
@@ -65,6 +67,7 @@ export const VitestWatch = Target.make("VitestWatch", {
   implementation: (attrs) =>
     Target.runTool({
       cwd: attrs.cwd,
+      timeoutMs: attrs.timeoutMs,
       argv: PackageManager.exec(attrs.packageManager, [
         "vitest",
         "watch",

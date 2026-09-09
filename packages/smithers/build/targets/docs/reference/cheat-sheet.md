@@ -341,6 +341,10 @@ const nightly = S.Cron({
 
 ## TypeScript, testing, linting, and documentation
 
+`VitestCoverage` returns the shared `{ outputs }` manifest for its captured report
+directory. `CoverageReport` aliases the `ToolBuild.Outputs` schema. Coverage and
+watch runs default to a 1,200,000 ms timeout; set `timeoutMs` to override it.
+
 ```ts
 import { Smithers as S } from "@smthrs/targets"
 
@@ -438,6 +442,7 @@ const coverage = S.VitestCoverage({
   config: S.file("vitest.config.ts"),
   provider: "v8",
   reportsDirectory: "coverage",
+  timeoutMs: 1_200_000,
   thresholds: {
     branches: 90,
     functions: 90,
@@ -450,7 +455,8 @@ const watch = S.VitestWatch({
   sources: [sources],
   deps: [lib],
   config: S.file("vitest.config.ts"),
-  environment: "node"
+  environment: "node",
+  timeoutMs: 1_200_000
 })
 
 const biome = S.BiomeCheck({
