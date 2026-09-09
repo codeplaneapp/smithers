@@ -11,8 +11,9 @@ Worker uses `canary.smithers.sh`.
 The Worker's `name` (`smithers-mvp-web`) and its `routes` binding to
 `canary.smithers.sh` (`wrangler.jsonc:1-9`) are deliberately frozen:
 
-- Two Durable Objects (`TURN_CANCELS`, `GATEWAY_SESSIONS`) hold state keyed to
-  this Worker's identity. Renaming it, or deploying under a different name,
+- Five Durable Objects (`TURN_CANCELS`, `GATEWAY_SESSIONS`, `TURN_LIMITS`,
+  `CLIENT_ERRORS`, `RECOMMEND_LOG`) hold state keyed to this Worker's identity.
+  Renaming it, or deploying under a different name,
   creates a **fresh** Worker with **fresh, empty** Durable Object storage —
   the existing state is orphaned, not migrated.
 - The `canary.smithers.sh` custom-domain binding follows the `routes` entry
@@ -173,36 +174,6 @@ that any existing deployment has already been updated.
 
 ### Other upstream services
 
-### 1.0 gateway migration
-
-The deployment-identity gateway proxy has been removed. `/rpc`, `/projections`,
-`/sync`, `/health` and their subpaths return HTTP 410 with
-`code: "gateway_proxy_removed"`, including WebSocket upgrade requests. They
-never forward under a deployment bearer or a placeholder user. Cross-origin
-requests may be refused earlier by the existing same-origin guard.
-
-`GATEWAY_UPSTREAM_URL`, `GATEWAY_AUTH_TOKEN` and
-`GATEWAY_SESSION_USER_ID` / `_ROLE` / `_SCOPES` no longer configure this Worker.
-Remove leftover legacy secrets when deploying the new version; they are ignored
-and cannot reactivate the proxy. This is a breaking removal, not an optional
-hardening flag. A deployment identity is not evidence of an incoming user's
-authority to use a workspace.
-
-Product clients use `/api/workflow/provision` and `/api/workflow/rpc`. These
-require a validated, allowlisted session, obtain the user's Cloud identity,
-resolve gateway records by that login and repository, and apply the relay's
-procedure/path allowlist. Gateway tokens remain server-side in
-`GATEWAY_SESSIONS`; client-supplied identity headers cannot select another user.
-Keep the identity and per-user Cloud gateway configuration described in
-`wrangler.jsonc`. Clients needing the gateway's native RPC/WebSocket protocols
-must connect to a separately authenticated gateway, not to these retired mounts.
-
-The local launch/canary scripts now assert the explicit retirement response.
-Their expectations should ship with this Worker version; they are not evidence
-that any existing deployment has already been updated.
-
-### Other upstream services
-
 Sign-in, balance, chat turns, and recommendations resolve in sibling
 Workers that live in a different repository (`smithersai/ui`, under
 `workers/`).
@@ -263,14 +234,13 @@ token.
   credential is used. With neither, the reads go unauthenticated.
 
 Setting either secret needs `wrangler`, which is **not** a dependency of this
-package (`apps/server/package.json` has no `wrangler`; the deploy script shells
-out to whatever `wrangler` the environment provides). Use `npx wrangler` from
-this directory, or the copy in another worktree's `node_modules/.bin`:
+package (`apps/server/package.json` has no `wrangler`; the deploy script uses
+`bun x wrangler@4.124.0`). Use the same pinned CLI from this directory:
 
 ```sh
-npx wrangler secret put SMITHERS_GITHUB_APP_ID       # paste 4163546
-npx wrangler secret put SMITHERS_GITHUB_APP_PRIVATE_KEY  # paste the PEM, armor lines included
-npx wrangler secret list                              # confirm both are on smithers-mvp-web
+bun x wrangler@4.124.0 secret put SMITHERS_GITHUB_APP_ID       # paste 4163546
+bun x wrangler@4.124.0 secret put SMITHERS_GITHUB_APP_PRIVATE_KEY  # paste the PEM, armor lines included
+bun x wrangler@4.124.0 secret list                              # confirm both are on smithers-mvp-web
 ```
 
 Every App failure is honest and lands on the anonymous read the catalog has
@@ -336,21 +306,6 @@ declares that credential by its own name, `IDENTITY_ADMIN_TOKEN`, and prints a
 identity. Any future probe of an admin surface follows that shape: a separate,
 named credential and an honest skip, never a shared privileged session.
 
-### The engine gateway relay needs an identity upstream
-
-When `GATEWAY_UPSTREAM_URL` is set, this Worker relays `/rpc`, `/projections`,
-`/sync`, and any WebSocket upgrade to the engine gateway under its own
-`GATEWAY_AUTH_TOKEN`, which that gateway honours as the operator. Every one of
-those relays therefore requires the same validated, allowlisted session the
-workflow routes require, so `IDENTITY_UPSTREAM_URL` must be set on any
-deployment that sets `GATEWAY_UPSTREAM_URL`.
-
-Configuring the gateway upstream without the identity upstream fails closed:
-the relay answers `501` naming `IDENTITY_UPSTREAM_URL`, never an anonymous
-forward. Ordinary `GET` and `HEAD` requests to the exact `/health` mount stay
-anonymous, so a supervisor can still ask which workspace a gateway belongs to.
-A WebSocket upgrade at that path still requires a session.
-
 ## Rollback
 
 Cloudflare Workers keep prior versions. To roll back to the version recorded
@@ -364,27 +319,37 @@ run from `apps/server`, with the same `CLOUDFLARE_API_TOKEN` set. This
 targets the immediately-prior version; for a specific historical version, use
 `bun x wrangler deployments list` to find its Version ID and
 `bun x wrangler rollback <version-id>`. Rollback does not touch Durable
-Object state — `TURN_CANCELS` and `GATEWAY_SESSIONS` storage is unaffected
-either way, since it is keyed to the (unchanged) Worker identity, not to a
-version.
+Object state: storage for all five bindings listed above is unaffected,
+since it is keyed to the unchanged Worker identity, not to a version.
 
-### What the receipt records, and why every receipt on disk says `null`
+### Receipt version IDs and recovery
 
-`scripts/deploy.ts` captures wrangler's stdout (`capture: true`) and pulls the
-version id out of it with `/Current Version ID:\s*([0-9a-f-]{36})/i`. Wrangler
-4.123.0 prints `Current Version ID: <uuid>` through `logger.log`, which is
-`console.log`, which is stdout — so a **real** deploy does record the id. A
-`--dry-run` returns at `--dry-run: exiting now.` before printing any id, which
-is why every receipt in `deploy-receipts/dry-run/` carries
-`"wranglerVersionId": null`. The mechanism is sound; it has simply never been
-exercised by a credentialed run.
+`scripts/deploy.ts` pins `wrangler@4.124.0`, captures stdout, and extracts the
+version ID with `/Current Version ID:\s*([0-9a-f-]{36})/i`. A successful real
+deploy writes that ID to a timestamped receipt and `deploy-receipts/latest.json`.
+A `--dry-run` publishes nothing and prints no version ID, so its receipts in
+`deploy-receipts/dry-run/` legitimately carry `"wranglerVersionId": null`.
 
-Two residual risks remain, and `scripts/deploy.ts` does not guard either one
-today: wrangler could move the id to stderr (only stdout is captured), or
-rename the label between versions. Either turns a real deploy into a receipt
-that says `null`, and rollback then has nothing to target. The rollback probe
-below is what catches it — a real deploy whose receipt names no version fails
-the probe.
+If Wrangler succeeds but stdout has no matching version ID, the script
+exits with status 1 after publishing. It writes no fresh receipt;
+`deploy-receipts/latest.json` still describes the previous deployment if it
+exists. The nonzero exit does not undo the publish. A changed output label or
+an ID printed only on stderr can trigger this guard.
+
+1. Preserve the command output and the build's recorded git SHA and dirty
+   flag. Confirm the active version with
+   `bun x wrangler@4.124.0 deployments list` from `apps/server`, using the same
+   Cloudflare account and credentials. Do not use an older receipt as evidence
+   of what just published.
+2. Check the pinned Wrangler output and repair the parser if its format has
+   changed, then re-run the scripted deploy to obtain a fresh receipt. If
+   redeploying is unsuitable, record the verified version ID by hand in a
+   separate receipt with `worker`, `dryRun: false`, `gitSha`, `gitDirty`,
+   `timestamp`, and `wranglerVersionId` from this publish; do not relabel an
+   older receipt or guess an ID.
+3. Run `bun scripts/canary/rollback-probe.ts` against the fresh receipt (use
+   `--receipt <path>` for a manual receipt), then verify the deployed build with
+   `bun scripts/canary/build-probe.ts https://canary.smithers.sh --sha <gitSha>`.
 
 ### Probe it: `scripts/canary/rollback-probe.ts`
 
@@ -432,11 +397,11 @@ deliberately not automated.
    Record `deploy-receipts/latest.json` — call this version **N**.
 2. Run `bun scripts/canary/rollback-probe.ts`. It must pass and must name the
    prior version, **N-1**.
-3. `bun x wrangler@4.123.0 rollback <N-1 id> --message "CN-24 drill"` from
+3. `bun x wrangler@4.124.0 rollback <N-1 id> --message "CN-24 drill"` from
    `apps/server`.
 4. Confirm `https://canary.smithers.sh` serves the older build, and that
-   `bun x wrangler@4.123.0 deployments list` shows N-1 at 100%.
-5. Roll forward: `bun x wrangler@4.123.0 rollback <N id> --message "CN-24 drill, forward"`.
+   `bun x wrangler@4.124.0 deployments list` shows N-1 at 100%.
+5. Roll forward: `bun x wrangler@4.124.0 rollback <N id> --message "CN-24 drill, forward"`.
 6. Confirm the canary serves N again and re-run the probe.
 7. Write the drill up in an `apps/WAVE*-RECEIPT.md` note with both version ids
    and the timestamps, so the next person can see it was really done.

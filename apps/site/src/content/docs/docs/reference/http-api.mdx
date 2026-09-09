@@ -40,15 +40,18 @@ Two mounts are deliberate exceptions to edge authentication. `POST /rpc` authent
 
 ## Worker relay authentication
 
-When the web Worker's `GATEWAY_UPSTREAM_URL` is configured, its gateway relay
-requires a validated, allowlisted session before attaching the deployment's
-`GATEWAY_AUTH_TOKEN` or configured session identity. This includes HTTP RPC
-and WebSocket upgrades. A missing or invalid session receives 401; an account
-outside the allowlist receives 403. If `IDENTITY_UPSTREAM_URL` is unset, the
-relay fails closed with 501.
+The mounts above belong to `smthrs serve`. The web Worker has removed its raw
+gateway proxy: `/rpc`, `/projections`, `/sync`, `/health`, and their subpaths
+return HTTP 410 with code `gateway_proxy_removed`, including WebSocket upgrades.
+Cross-origin requests may be refused earlier by the same-origin guard.
+`GATEWAY_UPSTREAM_URL` and `GATEWAY_AUTH_TOKEN` are ignored and cannot restore
+the proxy. The Worker's `/health` is retired too.
 
-Only ordinary `GET` and `HEAD` requests to the exact `/health` mount remain
-anonymous. A WebSocket upgrade at that path still requires a session.
+Product clients use `/api/workflow/provision` and `/api/workflow/rpc` with a
+validated, allowlisted session. These routes resolve the user's Cloud gateway
+by login and repository, enforce a procedure/path allowlist, and keep gateway
+tokens server-side in `GATEWAY_SESSIONS`. Native RPC or WebSocket clients must
+connect to a separately authenticated gateway.
 
 ## The RPC surface
 
