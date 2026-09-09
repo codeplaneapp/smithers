@@ -241,6 +241,15 @@ declares its length.
 | POST | `/api/linear-auth/start` | Begin the Linear OAuth handoff (lane sync): a loopback listener on a random port waits for the cloud's redirect; answers `{ url }` to open. 501 offline |
 | GET | `/api/linear-auth/session` | `{ state: "idle" \| "waiting" \| "authorized", setupKey? }` — the setup key once the callback lands, never the token |
 
+`POST /api/targets/affected` requests CLI plan inputs and uses static declaration
+inputs when a target has no plan input list. An empty plan list is authoritative.
+The fallback recognizes exported or indented const bindings, the imported
+`Smithers` alias, and literal `file("path")`, `glob("pattern")`, and
+`glob(["pattern"])` calls. Package declaration edits remain inputs for their
+targets. Globstar matches zero or more path segments; each unique pattern compiles
+once per request. The response names the available input sources in `signal` and
+propagates matches through reverse graph reachability.
+
 WebSocket subscriptions carry target-run and PTY output and, on
 `lsp:<repoId>`, every diagnostics publication a language server makes for a
 file the renderer asked about (`{ type: "lsp.diagnostics", repoId, path,

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import { join, posix } from "node:path"
 import { reachable } from "@smthrs/rpc/TargetGraph"
 import type { AffectedResponse, GraphEdge, GraphNode } from "@smthrs/rpc/TargetGraph"
+import { declarationBindings } from "./DeclarationBindings"
 
 export interface DeclaredInput { readonly pattern: string; readonly source: "plan" | "declaration" }
 export type DeclaredInputs = ReadonlyMap<string, ReadonlyArray<DeclaredInput>>
@@ -12,7 +13,7 @@ const normalizePattern = (packageDir: string, pattern: string): string => {
   return posix.join(packageDir, pattern)
 }
 
-/** Best-effort static extraction of S.file/S.glob inputs and local data references. */
+/** Best-effort static extraction of imported Smithers file/glob inputs and local data references. */
 export const declarationInputs = async (repo: string, files: ReadonlyArray<string>): Promise<DeclaredInputs> => {
   /*
    * This runs inside the affected route's handler, so the reads are async:
@@ -34,11 +35,17 @@ export const declarationInputs = async (repo: string, files: ReadonlyArray<strin
     if (source === undefined) continue
     const packageDir = posix.dirname(file) === "." ? "" : posix.dirname(file)
     const definitions = new Map<string, string>()
-    const starts = [...source.matchAll(/^const\s+([A-Za-z_$][\w$]*)\s*=/gm)]
-    for (let index = 0; index < starts.length; index++) {
-      const match = starts[index]!
-      definitions.set(match[1]!, source.slice(match.index!, starts[index + 1]?.index ?? source.length))
+    for (const binding of declarationBindings(source)) {
+      definitions.set(binding.name, source.slice(binding.start, binding.end))
     }
+    const aliases: Array<string> = []
+    for (const imported of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*["'][^"']+["']/g)) {
+      for (const specifier of imported[1]!.split(",")) {
+        const smithers = /^\s*Smithers(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(specifier)
+        if (smithers !== null) aliases.push(smithers[1] ?? "Smithers")
+      }
+    }
+    const calls = aliases.map((alias) => new RegExp(`(?<![\\w$])${alias.replace(/\$/g, "\\$")}\\.(?:file|glob)\\(\\s*(?:(["'])(.*?)\\1|\\[([\\s\\S]*?)\\])`, "g"))
     const memo = new Map<string, Array<string>>()
     const inputsFor = (name: string, visiting = new Set<string>()): Array<string> => {
       const known = memo.get(name)
@@ -47,19 +54,25 @@ export const declarationInputs = async (repo: string, files: ReadonlyArray<strin
       visiting.add(name)
       const block = definitions.get(name) ?? ""
       const direct: Array<string> = []
-      for (const match of block.matchAll(/S\.file\(\s*["']([^"']+)["']/g)) direct.push(match[1]!)
-      for (const match of block.matchAll(/S\.glob\(\s*\[([\s\S]*?)\]/g)) {
-        for (const quoted of match[1]!.matchAll(/["']([^"']+)["']/g)) if (!quoted[1]!.startsWith("!")) direct.push(quoted[1]!)
+      for (const call of calls) {
+        for (const match of block.matchAll(call)) {
+          if (match[2] !== undefined) {
+            if (!match[2].startsWith("!")) direct.push(match[2])
+          } else {
+            for (const quoted of match[3]!.matchAll(/(["'])(.*?)\1/g)) if (!quoted[2]!.startsWith("!")) direct.push(quoted[2]!)
+          }
+        }
       }
       for (const ref of definitions.keys()) {
         if (ref !== name && new RegExp(`\\b${ref}\\b`).test(block)) direct.push(...inputsFor(ref, new Set(visiting)))
       }
-      const values = [...new Set(direct.map((pattern) => normalizePattern(packageDir, pattern)))]
+      // Keep references package-relative until the complete input list is resolved.
+      const values = [...new Set(direct)]
       memo.set(name, values)
       return values
     }
     for (const name of definitions.keys()) {
-      const values = inputsFor(name)
+      const values = [...new Set(inputsFor(name).map((pattern) => normalizePattern(packageDir, pattern)))]
       if (values.length > 0) result.set(labelFor(packageDir, name), values.map((pattern) => ({ pattern, source: "declaration" })))
     }
     // A declaration edit can change any target declared by that package.
@@ -75,8 +88,16 @@ const globRegex = (pattern: string): RegExp => {
   let value = ""
   for (let i = 0; i < pattern.length; i++) {
     const char = pattern[i]!
-    if (char === "*") {
-      if (pattern[i + 1] === "*") { value += ".*"; i++ } else value += "[^/]*"
+    if (char === "/" && pattern.slice(i) === "/**") {
+      value += "(?:/.*)?"
+      i += 2
+    } else if (char === "*") {
+      if (pattern[i + 1] === "*") {
+        if ((i === 0 || pattern[i - 1] === "/") && pattern[i + 2] === "/") {
+          value += "(?:.*/)?"
+          i += 2
+        } else { value += ".*"; i++ }
+      } else value += "[^/]*"
     } else if (char === "?") value += "[^/]"
     else value += char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
   }
@@ -93,10 +114,24 @@ export const computeAffected = (options: {
   readonly durationMs?: number
 }): AffectedResponse => {
   const direct = new Map<string, Array<string>>()
+  const compiled = new Map<string, RegExp>()
+  let usedPlan = false
+  let usedDeclarations = false
   for (const node of options.nodes) {
-    const declared = [...(options.declarations.get(node.label) ?? [])]
-    for (const input of node.plan?.inputs ?? []) declared.push({ pattern: input.replace(/^\.\//, ""), source: "plan" })
-    const matches = options.changedFiles.filter((file) => declared.some((input) => globRegex(input.pattern).test(file)))
+    const scanned = options.declarations.get(node.label) ?? []
+    const planned = node.plan?.inputs
+    // The plan owns source inputs; editing PACKAGE.ts can still change the target itself.
+    const declarationFile = node.source?.file ?? posix.join(node.package.slice(2), "PACKAGE.ts")
+    const declared = planned === undefined ? scanned : scanned.filter((input) => input.pattern === declarationFile)
+    usedPlan ||= planned !== undefined
+    usedDeclarations ||= declared.length > 0
+    const patterns = [...declared.map((input) => input.pattern), ...(planned ?? []).map((input) => input.replace(/^\.\//, "").replace(/^\/\//, ""))]
+    const matchers = patterns.map((pattern) => {
+      let regex = compiled.get(pattern)
+      if (regex === undefined) { regex = globRegex(pattern); compiled.set(pattern, regex) }
+      return regex
+    })
+    const matches = options.changedFiles.filter((file) => matchers.some((regex) => regex.test(file)))
     if (matches.length > 0) direct.set(node.label, matches)
   }
   const affected = new Map<string, string>()
@@ -111,7 +146,7 @@ export const computeAffected = (options: {
     base: options.base,
     changedFiles: [...options.changedFiles].sort(),
     affected: [...affected].map(([label, reason]) => ({ label, reason })).sort((a, b) => a.label.localeCompare(b.label)),
-    signal: "git status/diff + plan inputs when present + static S.file/S.glob declaration inputs + reverse graph reachability",
+    signal: ["git status/diff", ...(usedPlan ? ["plan inputs"] : []), ...(usedDeclarations ? ["static declaration inputs"] : []), "reverse graph reachability"].join(" + "),
     limits: ["Computed/glob inputs hidden behind arbitrary TypeScript cannot be recovered without a CLI plan input list."],
     durationMs: options.durationMs ?? 0
   }

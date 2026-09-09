@@ -5,6 +5,7 @@ import { dirname, join, relative, sep } from "node:path"
 import type { GraphEdge, GraphNode, TargetGraphResponse } from "@smthrs/rpc/TargetGraph"
 import { splitLabel } from "@smthrs/rpc/LocalApp"
 import type { NodeSidecar } from "./Node"
+import { declarationBindings } from "./DeclarationBindings"
 import { currentSandboxHost, loaderPolicy, wrapSandbox } from "./Sandbox"
 import type { SandboxHost } from "./Sandbox"
 import {
@@ -175,9 +176,9 @@ const declarationSet = async (repo: string): Promise<DeclarationSet> => {
     hash.update(file).update("\0").update(text).update("\0")
     if (path.endsWith("PACKAGE.ts")) {
       const packageDir = dirname(file) === "." ? "" : dirname(file)
-      for (const match of text.matchAll(/^[\t ]*(?:export[\t ]+)?const[\t ]+([A-Za-z_$][\w$]*)[\t ]*=/gm)) {
-        const line = text.slice(0, match.index).split("\n").length
-        sources.set(`//${packageDir}:${match[1]}`, { file, line })
+      for (const binding of declarationBindings(text)) {
+        const line = text.slice(0, binding.start).split("\n").length
+        sources.set(`//${packageDir}:${binding.name}`, { file, line })
       }
     }
   }

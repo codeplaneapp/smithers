@@ -78,7 +78,7 @@ export const registerTargetGraphRoutes = (
     const repo = options.repos.get(repoId)
     if (repo === undefined) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)
     const [graph, changes] = await Promise.all([
-      queryTargetGraph({ repoId, repo: repo.path, node: await options.node, ...(options.cli === undefined ? {} : { cli: options.cli }) }),
+      queryTargetGraph({ repoId, repo: repo.path, node: await options.node, plan: true, ...(options.cli === undefined ? {} : { cli: options.cli }) }),
       changedFiles(repo.path)
     ])
     const declarations = await declarationInputs(repo.path, repo.smithers.declarationFiles)
