@@ -157,7 +157,12 @@ def parent(root, path, create=False, mode=0o777):
             except FileNotFoundError:
                 if not create:
                     raise
-                os.mkdir(name, mode, dir_fd=fd)
+                try:
+                    os.mkdir(name, mode, dir_fd=fd)
+                except FileExistsError:
+                    # A competing recursive mkdir may have won. Reopen with
+                    # the same flags so a file or symlink still fails closed.
+                    pass
                 nxt = os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = nxt
@@ -1636,14 +1641,31 @@ const toInfo = (value: unknown): FileSystem.File.Info => {
   }
 }
 
-const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+const isBase64 = (encoded: string): boolean => {
+  if (encoded.length % 4 !== 0) return false
+  let end = encoded.length
+  if (encoded.endsWith("=")) {
+    end--
+    if (encoded[end - 1] === "=") end--
+  }
+  // A repeated-group regexp exhausts V8's stack on ordinary multi-MiB reads.
+  // Scan the alphabet once, excluding at most two trailing padding characters.
+  for (let index = 0; index < end; index++) {
+    const code = encoded.charCodeAt(index)
+    if (
+      !(code >= 65 && code <= 90) && !(code >= 97 && code <= 122) &&
+      !(code >= 48 && code <= 57) && code !== 43 && code !== 47
+    ) return false
+  }
+  return true
+}
 
 const toBytes = (value: unknown, limit: number): Uint8Array => {
   const payload = record(value, "read result")
   const encoded = payload.base64
   // Buffer.from silently drops characters it does not recognise, so the shape
   // is checked before the decode rather than inferred from its output.
-  if (typeof encoded !== "string" || !base64Pattern.test(encoded)) {
+  if (typeof encoded !== "string" || !isBase64(encoded)) {
     throw new Error("atomic helper returned a malformed base64 payload")
   }
   const bytes = Buffer.from(encoded, "base64")
@@ -1992,52 +2014,54 @@ const execute = (options: Options, resolved: Settings | { readonly invalid: unkn
         description: `atomic batch must contain 1 to ${limits.batchSize} operations`
       }))
     }
-    let body: Buffer
-    try {
-      const serialized = JSON.stringify(
-        request.operation === "batch"
-          ? { ...request, batchSize: limits.batchSize, batchEntry: limits.batchEntry }
-          : request
-      )
-      if (serialized === undefined) {
-        throw new Error("atomic request is not serializable")
+    // Admission bounds request serialization and framing as well as children.
+    // Queued callers retain their input, without another full payload copy.
+    return resolved.semaphore.withPermits(1)(Effect.suspend(() => {
+      let body: Buffer
+      try {
+        const serialized = JSON.stringify(
+          request.operation === "batch"
+            ? { ...request, batchSize: limits.batchSize, batchEntry: limits.batchEntry }
+            : request
+        )
+        if (serialized === undefined) {
+          throw new Error("atomic request is not serializable")
+        }
+        body = Buffer.from(serialized, "utf8")
+      } catch (cause) {
+        return Effect.fail(PlatformError.badArgument({
+          module: moduleName,
+          method: request.operation,
+          description: "atomic request is not serializable",
+          cause
+        }))
       }
-      body = Buffer.from(serialized, "utf8")
-    } catch (cause) {
-      return Effect.fail(PlatformError.badArgument({
-        module: moduleName,
-        method: request.operation,
-        description: "atomic request is not serializable",
-        cause
-      }))
-    }
-    if (body.byteLength > limits.request) {
-      // Refused before an interpreter exists: an over-limit request is caller
-      // input, and nothing about it improves by being sent.
-      return Effect.fail(PlatformError.badArgument({
-        module: moduleName,
-        method: request.operation,
-        description: `atomic request of ${body.byteLength} bytes exceeds the ${limits.request} byte limit`
-      }))
-    }
-    const header = Buffer.from(
-      `${protocol} ${body.byteLength} ${limits.request} ${limits.content} ${limits.response}\n`,
-      "ascii"
-    )
-    let executable: string
-    try {
-      executable = usableExecutable(options.executable ?? defaultExecutable, request.boundaryRoot)
-    } catch (cause) {
-      return Effect.fail(failure(request, cause))
-    }
-    // The permit is taken around the CHILD and nothing else, so a request
-    // refused before an interpreter exists never queues behind one.
-    return resolved.semaphore.withPermits(1)(spawnHelper<A>(
-      request,
-      executable,
-      Buffer.concat([header, body], header.byteLength + body.byteLength),
-      resolved
-    ))
+      if (body.byteLength > limits.request) {
+        // Refused before an interpreter exists: an over-limit request is caller
+        // input, and nothing about it improves by being sent.
+        return Effect.fail(PlatformError.badArgument({
+          module: moduleName,
+          method: request.operation,
+          description: `atomic request of ${body.byteLength} bytes exceeds the ${limits.request} byte limit`
+        }))
+      }
+      const header = Buffer.from(
+        `${protocol} ${body.byteLength} ${limits.request} ${limits.content} ${limits.response}\n`,
+        "ascii"
+      )
+      let executable: string
+      try {
+        executable = usableExecutable(options.executable ?? defaultExecutable, request.boundaryRoot)
+      } catch (cause) {
+        return Effect.fail(failure(request, cause))
+      }
+      return spawnHelper<A>(
+        request,
+        executable,
+        Buffer.concat([header, body], header.byteLength + body.byteLength),
+        resolved
+      )
+    }))
   })
 
 /**

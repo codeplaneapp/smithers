@@ -23,12 +23,14 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as Workspace from "@smthrs/kernel/Workspace"
-import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect"
+import { Effect, Fiber, FileSystem, Layer, Path, type PlatformError, Result } from "effect"
 import { execFile, spawn } from "node:child_process"
+import { createHash } from "node:crypto"
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
+import { vi } from "vitest"
 import * as AtomicFileSystem from "../src/AtomicFileSystem.ts"
 
 const directories = new Set<string>()
@@ -298,6 +300,48 @@ describe("atomic helper root identity", () => {
 })
 
 describe("atomic helper limits", () => {
+  for (const contentBytes of [4 * 1024 * 1024, 16 * 1024 * 1024]) {
+    for (const operation of ["readFile", "readFileString", "batch"] as const) {
+      it.live(
+        `reads ${contentBytes} bytes through ${operation} without overflowing the base64 validator`,
+        () =>
+          Effect.gen(function*() {
+            const root = yield* Effect.promise(() => temporaryDirectory())
+            const path = join(root, "large.txt")
+            const bytes = Buffer.alloc(contentBytes, 0x61)
+            yield* Effect.promise(() => writeFile(path, bytes))
+            yield* run(
+              root,
+              Effect.gen(function*() {
+                const fs = yield* FileSystem.FileSystem
+                if (operation === "readFileString") {
+                  expect(yield* fs.readFileString(path)).toBe(bytes.toString("utf8"))
+                } else {
+                  let actual: Uint8Array
+                  if (operation === "batch") {
+                    const response = yield* KernelFileSystem.batch(fs)!.execute([
+                      { operation: "digest", path, content: true }
+                    ])
+                    const result = Result.getOrThrow(response.entries[0]!.result)
+                    expect(result.operation).toBe("digest")
+                    if (result.operation !== "digest") throw new Error("expected digest")
+                    expect(result.sizeBytes).toBe(contentBytes)
+                    expect(result.digest).toBe(createHash("sha256").update(bytes).digest("hex"))
+                    actual = result.bytes!
+                  } else {
+                    actual = yield* fs.readFile(path)
+                  }
+                  expect(actual.byteLength).toBe(contentBytes)
+                  expect(Buffer.from(actual).equals(bytes)).toBe(true)
+                }
+              })
+            )
+          }),
+        60_000
+      )
+    }
+  }
+
   it.live("refuses every non-positive, fractional, non-finite, or over-hard-cap limit before spawning", () =>
     Effect.gen(function*() {
       const root = yield* Effect.promise(() => temporaryDirectory())
@@ -830,7 +874,13 @@ describe("atomic helper result validation", () => {
     ["a non-object read result", `{"ok":true,"value":7}`],
     ["a null read result", `{"ok":true,"value":null}`],
     ["a non-string payload", `{"ok":true,"value":{"base64":7}}`],
-    ["a payload that is not base64", `{"ok":true,"value":{"base64":"not base64!!"}}`]
+    ["a payload that is not base64", `{"ok":true,"value":{"base64":"not base64!!"}}`],
+    ...["AAA", "A===", "=AAA", "AA=A", "AAAA====", "AAA\\n", "AAAé"].map((base64) =>
+      [
+        `invalid base64 shape ${base64}`,
+        JSON.stringify({ ok: true, value: { base64 } })
+      ] as const
+    )
   ]
 
   it.live.each(readCases)("fails closed on %s", ([_name, payload]) =>
@@ -1156,6 +1206,59 @@ describe("atomic special files", () => {
    * ceiling is one semaphore for the whole layer, which is the only arrangement
    * that bounds anything: one built per request would bound nothing.
    */
+  it.live("admits queued writes before serializing or framing their payloads", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const executable = yield* Effect.promise(() => fakeInterpreter("setInterval(() => {}, 1000);"))
+      const originalConcat = Buffer.concat
+      const originalStringify = JSON.stringify
+      let frames = 0
+      let serialized = 0
+      let attempts = 0
+      const concat = vi.spyOn(Buffer, "concat").mockImplementation((chunks, length) => {
+        if (chunks.length === 2 && Buffer.from(chunks[0]!).toString("ascii").startsWith("flows-atomic/1 ")) {
+          frames++
+        }
+        return originalConcat(chunks, length)
+      })
+      const stringify = vi.spyOn(JSON, "stringify").mockImplementation((value, ...args) => {
+        if (value?.operation === "writeFileString") serialized++
+        return originalStringify(value, ...args)
+      })
+      try {
+        yield* Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const atomic = (fs as KernelFileSystem.AtomicHostFileSystem)[KernelFileSystem.AtomicFileSystemTypeId]
+          const data = "x".repeat(1024 * 1024)
+          const before = AtomicFileSystem.helperSpawns()
+          const pending = yield* Effect.forEach(Array.from({ length: 16 }, (_, index) => index), (index) =>
+            Effect.suspend(() => {
+              attempts++
+              return atomic.execute({
+                operation: "writeFileString",
+                boundaryRoot: root,
+                logicalRoot: root,
+                path: join(root, String(index)),
+                data
+              })
+            }), { concurrency: "unbounded" }).pipe(Effect.forkChild)
+          try {
+            while (attempts < 16) {
+              yield* Effect.sleep(10)
+            }
+            yield* Effect.sleep(100)
+            expect(AtomicFileSystem.helperSpawns() - before).toBe(1)
+            expect({ serialized, frames }).toEqual({ serialized: 1, frames: 1 })
+          } finally {
+            yield* Fiber.interrupt(pending)
+          }
+        }).pipe(Effect.provide(AtomicFileSystem.layerWith({ executable, concurrency: 1 })))
+      } finally {
+        stringify.mockRestore()
+        concat.mockRestore()
+      }
+    }))
+
   it.live("never runs more helper processes at once than the configured ceiling", () =>
     Effect.gen(function*() {
       const root = yield* Effect.promise(() => temporaryDirectory())

@@ -8,7 +8,7 @@ import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import { Effect, Fiber, FileSystem, Layer, Path } from "effect"
-import { execFile } from "node:child_process"
+import { execFile, spawnSync } from "node:child_process"
 import {
   chmod,
   glob,
@@ -523,6 +523,87 @@ describe("Node atomic filesystem", () => {
       expect(outcome.link.reason._tag).toBe("Unknown")
       // The refused operations left the root and its contents untouched.
       expect(yield* Effect.promise(() => readFile(join(root, "kept", "file.txt"), "utf8"))).toBe("inside")
+    }))
+
+  for (const competitor of ["directory", "file", "symlink"] as const) {
+    it.live(`reopens an intermediate mkdir race winner only when it is a directory: ${competitor}`, () =>
+      Effect.gen(function*() {
+        const root = yield* Effect.promise(async () => realpath(await temporaryDirectory()))
+        const outside = yield* Effect.promise(async () => realpath(await temporaryDirectory()))
+        const info = yield* Effect.promise(() => lstat(root))
+        // Inject a competing real syscall between ENOENT and mkdir, so the
+        // intermediate-component race is deterministic on every platform.
+        const prelude = [
+          "import os",
+          "real_mkdir = os.mkdir",
+          "injected = False",
+          "def competing_mkdir(path, mode=0o777, *, dir_fd=None):",
+          "    global injected",
+          "    if path == 'shared' and not injected:",
+          "        injected = True",
+          competitor === "directory"
+            ? "        real_mkdir(path, mode, dir_fd=dir_fd)"
+            : competitor === "file"
+            ? "        os.close(os.open(path, os.O_CREAT | os.O_WRONLY, dir_fd=dir_fd))"
+            : `        os.symlink(${JSON.stringify(outside)}, path, dir_fd=dir_fd)`,
+          "    return real_mkdir(path, mode, dir_fd=dir_fd)",
+          "os.mkdir = competing_mkdir",
+          "os.supports_dir_fd.add(competing_mkdir)",
+          ""
+        ].join("\n")
+        const body = JSON.stringify({
+          operation: "makeDirectory",
+          boundaryRoot: root,
+          logicalRoot: root,
+          rootIdentity: `${info.dev}:${info.ino}`,
+          path: join(root, "shared", "child"),
+          options: { recursive: true }
+        })
+        const child = spawnSync(AtomicFileSystem.defaultExecutable, [
+          "-I",
+          "-X",
+          "utf8",
+          "-c",
+          prelude + AtomicFileSystem.program
+        ], {
+          cwd: "/",
+          env: {},
+          encoding: "utf8",
+          timeout: 10_000,
+          input: `flows-atomic/1 ${Buffer.byteLength(body)} 10000 10000 10000\n${body}`
+        })
+        expect(child.error).toBeUndefined()
+        const answer = JSON.parse(child.stdout.slice(child.stdout.indexOf("\n") + 1))
+        if (competitor === "directory") {
+          expect(answer).toMatchObject({ ok: true })
+          expect((yield* Effect.promise(() => lstat(join(root, "shared", "child")))).isDirectory()).toBe(true)
+        } else {
+          expect(answer).toMatchObject({ ok: false })
+          expect(["ENOTDIR", "ELOOP"]).toContain(answer.code)
+          expect(yield* Effect.promise(() => gone(join(root, "shared", "child")))).toBe(true)
+          expect(yield* Effect.promise(() => gone(join(outside, "child")))).toBe(true)
+        }
+      }))
+  }
+
+  it.live("creates recursive directories concurrently under a shared missing ancestor", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      yield* run(
+        root,
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          yield* Effect.forEach(
+            Array.from({ length: 8 }, (_, index) => index),
+            (index) => fs.makeDirectory(join(root, "shared", "nested", String(index)), { recursive: true }),
+            { concurrency: "unbounded" }
+          )
+          expect((yield* fs.readDirectory(join(root, "shared", "nested"))).sort()).toEqual(
+            Array.from({ length: 8 }, (_, index) => String(index))
+          )
+        }),
+        AtomicFileSystem.layerWith({ concurrency: 2 })
+      )
     }))
 
   it.live("only lets a recursive makeDirectory succeed over a real directory", () =>
