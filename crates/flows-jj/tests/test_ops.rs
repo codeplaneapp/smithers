@@ -11,7 +11,27 @@ use std::path::PathBuf;
 
 use flows_jj::error::ErrorCode;
 use flows_jj::ops;
+use jj_lib::config::ConfigLayer;
+use jj_lib::config::ConfigSource;
+use jj_lib::config::StackedConfig;
+use jj_lib::default_backend_factories::default_backend_factories;
+use jj_lib::default_backend_factories::default_working_copy_factories;
+use jj_lib::object_id::HexPrefix;
+use jj_lib::object_id::PrefixResolution;
+use jj_lib::repo::Repo as _;
+use jj_lib::settings::UserSettings;
+use jj_lib::workspace::Workspace;
+use pollster::FutureExt as _;
 use tempfile::TempDir;
+
+/// The identity `ops` records on commits, repeated so this test can open the
+/// same repos with jj-lib directly.
+const USER_CONFIG: &str = r#"
+user.name = "Flows"
+user.email = "flows@localhost"
+operation.hostname = "flows"
+operation.username = "flows"
+"#;
 
 fn temp_root() -> (TempDir, PathBuf) {
     let temp_dir = tempfile::Builder::new()
@@ -29,6 +49,52 @@ fn write(root: &Path, name: &str, contents: impl AsRef<[u8]>) {
 
 fn read(root: &Path, name: &str) -> String {
     String::from_utf8(fs::read(root.join(name)).unwrap()).unwrap()
+}
+
+/// The description jj persisted on `change_id`, read from the repo with
+/// jj-lib. The six ops return ids and rendered text and never echo the
+/// message back, so nothing in the contract itself observes the describe
+/// step `snapshot` performs.
+fn description(root: &Path, change_id: &str) -> String {
+    let mut config = StackedConfig::with_defaults();
+    config.add_layer(ConfigLayer::parse(ConfigSource::User, USER_CONFIG).unwrap());
+    let settings = UserSettings::from_config(config).unwrap();
+    let workspace = Workspace::load(
+        &settings,
+        root,
+        &default_backend_factories(),
+        &default_working_copy_factories(),
+    )
+    .unwrap();
+    let repo = workspace
+        .repo_loader()
+        .clone()
+        .load_at_head()
+        .block_on()
+        .unwrap();
+    let prefix = HexPrefix::try_from_reverse_hex(change_id).unwrap();
+    let PrefixResolution::SingleMatch(targets) = repo.resolve_change_id_prefix(&prefix).unwrap()
+    else {
+        panic!("change id {change_id:?} does not resolve to one change");
+    };
+    let visible: Vec<_> = targets
+        .visible_with_offsets()
+        .map(|(_offset, commit_id)| commit_id)
+        .collect();
+    let [commit_id] = visible[..] else {
+        panic!("change id {change_id:?} is hidden or divergent");
+    };
+    repo.store()
+        .get_commit(commit_id)
+        .unwrap()
+        .description()
+        .to_owned()
+}
+
+/// The working-copy change id, as `status` reports it on its last line.
+fn current_change_id(root: &Path) -> String {
+    let status = ops::status(root).unwrap();
+    status.trim_end().rsplit(' ').next().unwrap().to_owned()
 }
 
 #[track_caller]
@@ -387,9 +453,36 @@ fn snapshot_sets_description_on_closed_change() {
     ops::init(&root).unwrap();
     write(&root, "a.txt", "alpha\n");
     let s1 = ops::snapshot(&root, Some("the message")).unwrap();
-    // No direct description accessor in the contract; prove it via restore:
-    // the described change resolves and restores, i.e. it was committed.
+    assert_eq!(description(&root, &s1), "the message");
+
+    // The message lands on the change that closed, not on the fresh one
+    // opened over it.
+    let fresh = current_change_id(&root);
+    assert_ne!(fresh, s1);
+    assert_eq!(description(&root, &fresh), "");
+
+    // The described change was committed: it resolves and restores.
     write(&root, "a.txt", "changed\n");
     ops::restore(&root, &s1).unwrap();
     assert_eq!(read(&root, "a.txt"), "alpha\n");
+}
+
+#[test]
+fn snapshot_describes_only_the_change_it_closes() {
+    let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
+    write(&root, "a.txt", "alpha\n");
+    let described = ops::snapshot(&root, Some("the message")).unwrap();
+
+    // `None` describes nothing and leaves earlier descriptions alone.
+    write(&root, "b.txt", "beta\n");
+    let undescribed = ops::snapshot(&root, None).unwrap();
+    assert_eq!(description(&root, &undescribed), "");
+    assert_eq!(description(&root, &described), "the message");
+
+    // An empty message is still a message: it sets an empty description.
+    write(&root, "c.txt", "gamma\n");
+    let emptied = ops::snapshot(&root, Some("")).unwrap();
+    assert_eq!(description(&root, &emptied), "");
+    assert_eq!(description(&root, &described), "the message");
 }
