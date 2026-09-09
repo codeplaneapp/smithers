@@ -1,8 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { PALETTE_MIRROR_KEY, THEME_MIRROR_KEY } from "./Appearance"
+import { PALETTE_MIRROR_KEY, rememberAppearance, THEME_MIRROR_KEY } from "./Appearance"
 import { createAppStore } from "./AppStore"
 
 /*
@@ -72,6 +72,47 @@ const runBootstrap = (options: {
   new Function("window", "document", bootstrapSource())(window, document)
   return { attributes }
 }
+
+describe("appearance mirroring when the storage accessor refuses access", () => {
+  let originalStorage: PropertyDescriptor | undefined
+  let storageReads: number
+
+  beforeEach(() => {
+    originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+    storageReads = 0
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        storageReads += 1
+        throw new DOMException("storage disabled", "SecurityError")
+      }
+    })
+  })
+
+  afterEach(() => {
+    if (originalStorage === undefined) delete (globalThis as { localStorage?: unknown }).localStorage
+    else Object.defineProperty(globalThis, "localStorage", originalStorage)
+  })
+
+  test("rememberAppearance returns when resolving localStorage throws", () => {
+    expect(rememberAppearance(THEME_MIRROR_KEY, "dark")).toBeUndefined()
+    expect(storageReads).toBeGreaterThan(0)
+  })
+
+  test("a memory-backed store boots and applies appearance changes", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    try {
+      expect(store.persistenceMode).toBe("localStorage")
+      expect(storageReads).toBeGreaterThanOrEqual(2)
+      await store.dispatch({ type: "theme.changed", actor: "user", theme: "dark" }).isPersisted.promise
+      await store.dispatch({ type: "palette.changed", actor: "user", palette: "solarized" }).isPersisted.promise
+      expect(store.session().theme).toBe("dark")
+      expect(store.session().palette).toBe("solarized")
+    } finally {
+      await store.dispose?.()
+    }
+  })
+})
 
 describe("the appearance bootstrap stamps the document before first paint", () => {
   test("the mirrored theme and palette are stamped from storage", () => {

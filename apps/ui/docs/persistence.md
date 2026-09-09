@@ -30,6 +30,10 @@ an OPFS database also exists (or its existence cannot be established), boot
 refuses to choose between potentially different histories. Appearance mirrors
 and bookkeeping stamps alone do not count as another live store.
 
+Theme and palette mirrors are best-effort. A refused localStorage accessor or
+write does not stop appearance changes or memory-backend initialization. The
+session remains the authority for both values.
+
 Fallback applies only when the browser cannot acquire the database. Once
 SQLite opens, a schema, validation, read, migration or commit failure stops
 startup and closes that handle. It does not stamp a different backend, start

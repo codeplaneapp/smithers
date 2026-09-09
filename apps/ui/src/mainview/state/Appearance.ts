@@ -30,8 +30,8 @@ export const PALETTE_MIRROR_KEY = `${PERSISTED_KEY_PREFIX}palette`
  * app down with it, so the write is best-effort by design.
  */
 export const rememberAppearance = (key: string, value: string): void => {
-  if (typeof localStorage === "undefined") return
   try {
+    if (typeof localStorage === "undefined") return
     localStorage.setItem(key, value)
   } catch {
     // No mirror this time; the app still applies the value it just set.
