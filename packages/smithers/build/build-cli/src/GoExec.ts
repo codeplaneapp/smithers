@@ -25,6 +25,10 @@ import * as StampExec from "./StampExec.ts"
  */
 export interface Context {
   readonly root: string
+  /** Cancels planning subprocesses when the run stops. */
+  readonly signal?: AbortSignal | undefined
+  /** Per-probe override in milliseconds; go list defaults to 60000, Nix to 300000. */
+  readonly timeoutMs?: number | undefined
   readonly packagePath: string
   readonly workspace: WorkspaceDeclaration.WorkspaceDeclaration
   /** The target environment used to select the executable and switched SDK. */
@@ -107,16 +111,25 @@ const execFile = (
   file: string,
   args: ReadonlyArray<string>,
   cwd: string,
-  env?: Readonly<Record<string, string>>
+  env: Readonly<Record<string, string>>,
+  options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs: number }
 ): Promise<string> =>
   new Promise((resolve, reject) => {
+    if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+      reject(new RangeError("Go probe timeoutMs must be positive and finite"))
+      return
+    }
     NodeChildProcess.execFile(
       file,
       [...args],
-      { cwd, maxBuffer: 256 * 1024 * 1024, ...(env === undefined ? {} : { env: { ...env } }) },
+      { cwd, maxBuffer: 256 * 1024 * 1024, env: { ...env }, signal: options.signal, timeout: options.timeoutMs },
       (error, stdout, stderr) => {
-        if (error !== null) reject(new Error(`${file} ${args.join(" ")} failed: ${stderr || error.message}`))
-        else resolve(stdout)
+        if (error !== null) {
+          const detail = error.killed && typeof error.code !== "string"
+            ? `timed out after ${options.timeoutMs}ms`
+            : stderr || error.message
+          reject(new Error(`${file} ${args.join(" ")} failed: ${detail}`))
+        } else resolve(stdout)
       }
     )
   })
@@ -252,7 +265,10 @@ export const resolveNix = async (name: string, context: Context): Promise<
     }
   }
   try {
-    const path = (await execFile(nix, ["develop", "--command", "which", name], context.root, hostEnvironment(context)))
+    const path = (await execFile(nix, ["develop", "--command", "which", name], context.root, hostEnvironment(context), {
+      signal: context.signal,
+      timeoutMs: context.timeoutMs ?? 300_000
+    }))
       .trim()
     if (path === "") throw new Error("which returned no path")
     return { ok: true, path, identity: { tag: "NixBin", name, nix, path, authority } }
@@ -376,6 +392,7 @@ const listed = async (
   patterns: ReadonlyArray<string>,
   deps: boolean,
   env: Readonly<Record<string, string>>,
+  context: Context,
   tests = false
 ): Promise<ReadonlyArray<GoListRow>> =>
   jsonRows(
@@ -383,7 +400,8 @@ const listed = async (
       goPath,
       ["list", ...(deps ? ["-deps"] : []), ...(tests ? ["-test"] : []), "-json", ...patterns],
       cwd,
-      env
+      env,
+      { signal: context.signal, timeoutMs: context.timeoutMs ?? 60_000 }
     )
   )
 
@@ -398,16 +416,23 @@ const selectedPackages = async (
     (selection as { readonly _tag?: unknown })._tag === "FilesDifference"
   ) {
     const difference = selection as { readonly left: unknown; readonly right: unknown }
-    const left = await listed(goPath, moduleDirectory(context), patternsOf(difference.left, context), false, env)
+    const left = await listed(
+      goPath,
+      moduleDirectory(context),
+      patternsOf(difference.left, context),
+      false,
+      env,
+      context
+    )
     const right = new Set(
-      (await listed(goPath, moduleDirectory(context), patternsOf(difference.right, context), false, env)).map((row) =>
-        row.ImportPath
-      )
+      (await listed(goPath, moduleDirectory(context), patternsOf(difference.right, context), false, env, context)).map((
+        row
+      ) => row.ImportPath)
     )
     return left.flatMap((row) => row.ImportPath !== undefined && !right.has(row.ImportPath) ? [row.ImportPath] : [])
   }
   const patterns = patternsOf(selection, context)
-  const rows = await listed(goPath, moduleDirectory(context), patterns, false, env)
+  const rows = await listed(goPath, moduleDirectory(context), patterns, false, env, context)
   return rows.flatMap((row) => row.ImportPath === undefined ? [] : [row.ImportPath])
 }
 
@@ -433,7 +458,7 @@ const closure = async (
   tests = false
 ): Promise<Closure> => {
   // Test variants add imports that only internal or external _test.go files use.
-  const rows = await listed(goPath, moduleDirectory(context), packages, true, env, tests)
+  const rows = await listed(goPath, moduleDirectory(context), packages, true, env, context, tests)
   // Key → absolute path. In-workspace files key on their workspace-relative
   // path. A module a `replace` directive points at a local directory outside
   // the workspace is neither pinned by go.sum nor covered by that path, so its

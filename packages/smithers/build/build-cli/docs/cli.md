@@ -460,7 +460,14 @@ spawned tool, in both phases. Planning strips them once, before it captures the
 host environment, so the tools it consults over workspace-controlled input
 never see them either: `forge config`, `go version`, `go env`, `go list`, `nix
 develop`, `docker info`, `docker buildx ls`, and each declared executable's
-version probe.
+version probe. Execution also withholds these names from `Git.Commit` git
+commands and hooks, and from both `Memory.Retain` ref resolution and the
+`smithers memory` subprocess.
+
+Git commit commands and both memory subprocesses have a 60-second deadline.
+Plan-time `go list` has a 60-second deadline; fallback `nix develop` tool
+resolution has a five-minute deadline. Each receives the run's abort signal.
+Git commands disable terminal credential prompts and interactive editors.
 
 ## Runtime
 

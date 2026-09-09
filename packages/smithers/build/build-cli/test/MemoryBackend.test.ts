@@ -4,7 +4,7 @@ import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 import * as MemoryBackend from "../src/MemoryBackend.ts"
 import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import { PackageIndex } from "../src/PackageIndex.ts"
@@ -308,5 +308,91 @@ esac
       locator: { find: async () => "/opt/fake/smithers" },
       cli: recordingCli().cli
     })).rejects.toThrow(/cannot resolve HEAD/)
+  })
+})
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeChildProcess>()
+  return { ...actual, execFile: vi.fn(actual.execFile) }
+})
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+})
+
+describe("subprocess boundaries", () => {
+  it("strips default and workspace cache credentials without restoring ambient values", async () => {
+    for (const name of ["SMITHERS_CACHE_URL", "SMITHERS_CACHE_TOKEN", "TEST_WORKSPACE_CACHE_CREDENTIAL"]) {
+      vi.stubEnv(name, "invented-test-marker")
+    }
+    const output = await MemoryBackend.spawnCli({
+      environment: { ...process.env, TEST_ALLOWED: "kept" },
+      sensitiveNames: ["TEST_WORKSPACE_CACHE_CREDENTIAL"]
+    }).run(process.execPath, [
+      "-e",
+      `process.stdout.write(JSON.stringify({
+      url: process.env.SMITHERS_CACHE_URL, token: process.env.SMITHERS_CACHE_TOKEN,
+      custom: process.env.TEST_WORKSPACE_CACHE_CREDENTIAL, allowed: process.env.TEST_ALLOWED
+    }))`
+    ], Os.tmpdir())
+    expect(output.exitCode).toBe(0)
+    expect(JSON.parse(output.stdout)).toEqual({ allowed: "kept" })
+  })
+
+  it.each(["git", "cli"] as const)("aborts a hung memory %s subprocess", async (kind) => {
+    const controller = new AbortController()
+    const actual = await vi.importActual<typeof NodeChildProcess>("node:child_process")
+    vi.mocked(NodeChildProcess.execFile).mockImplementationOnce(
+      ((
+        file: string,
+        args: ReadonlyArray<string>,
+        options: NodeChildProcess.ExecFileOptionsWithStringEncoding,
+        callback: (error: NodeChildProcess.ExecFileException | null, stdout: string, stderr: string) => void
+      ) => {
+        const child = actual.execFile(
+          process.execPath,
+          ["-e", "setTimeout(() => process.exit(9), 1500)"],
+          options,
+          callback
+        )
+        setTimeout(() => controller.abort(), 20)
+        return child
+      }) as typeof NodeChildProcess.execFile
+    )
+    await expect(MemoryBackend.retain({
+      root: Os.tmpdir(),
+      target: retainTarget(),
+      memory,
+      locator: { find: async () => process.execPath },
+      ...(kind === "cli" ? { resolveSource } : {}),
+      signal: controller.signal,
+      timeoutMs: 10_000
+    })).rejects.toThrow(/abort/i)
+  })
+
+  it.each(["git", "cli"] as const)("bounds a hung memory %s subprocess with a timeout", async (kind) => {
+    const actual = await vi.importActual<typeof NodeChildProcess>("node:child_process")
+    vi.mocked(NodeChildProcess.execFile).mockImplementationOnce(
+      ((
+        file: string,
+        args: ReadonlyArray<string>,
+        options: NodeChildProcess.ExecFileOptionsWithStringEncoding,
+        callback: (error: NodeChildProcess.ExecFileException | null, stdout: string, stderr: string) => void
+      ) =>
+        actual.execFile(
+          process.execPath,
+          ["-e", "setTimeout(() => process.exit(9), 1500)"],
+          options,
+          callback
+        )) as typeof NodeChildProcess.execFile
+    )
+    await expect(MemoryBackend.retain({
+      root: Os.tmpdir(),
+      target: retainTarget(),
+      memory,
+      locator: { find: async () => process.execPath },
+      ...(kind === "cli" ? { resolveSource } : {}),
+      timeoutMs: 30
+    })).rejects.toThrow(/timed out after 30ms/)
   })
 })

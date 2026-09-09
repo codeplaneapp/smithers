@@ -15,6 +15,7 @@
  *
  * @since 0.1.0
  */
+import * as Exec from "@smthrs/targets/Exec"
 import * as MemoryTarget from "@smthrs/targets/MemoryTarget"
 import type * as Target from "@smthrs/targets/Target"
 import type * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
@@ -233,8 +234,30 @@ export const pathLocator = (environment: Readonly<Record<string, string | undefi
  * @since 0.1.0
  */
 export interface SpawnCliOptions {
-  /** Wall-clock cap on one backend invocation; the process is killed past it and the run fails. */
+  /** Positive wall-clock cap on one subprocess. @default 60000 */
   readonly timeoutMs?: number | undefined
+  /** Cancels both ref resolution and backend subprocesses. */
+  readonly signal?: AbortSignal | undefined
+  /** Explicit host environment; cache credentials are removed before spawning. */
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  /** Additional workspace cache credential names to withhold. */
+  readonly sensitiveNames?: ReadonlyArray<string> | undefined
+}
+
+const subprocessEnvironment = (options: SpawnCliOptions): NodeJS.ProcessEnv =>
+  Exec.toolEnvironment(
+    Object.fromEntries(
+      Object.entries(options.environment ?? Environment.ambientEnvironment()).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined
+      )
+    ),
+    options.sensitiveNames ?? []
+  )
+
+const subprocessTimeout = (options: SpawnCliOptions): number => {
+  const timeout = options.timeoutMs ?? 60_000
+  if (!Number.isFinite(timeout) || timeout <= 0) throw new RangeError("Memory timeoutMs must be positive and finite")
+  return timeout
 }
 
 /**
@@ -245,23 +268,34 @@ export interface SpawnCliOptions {
  */
 export const spawnCli = (options: SpawnCliOptions = {}): MemoryCli => ({
   run: (binary, args, cwd) =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
+      const timeout = subprocessTimeout(options)
       NodeChildProcess.execFile(
         binary,
         [...args],
-        { cwd, maxBuffer: 8 * 1024 * 1024, ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }) },
+        {
+          cwd,
+          maxBuffer: 8 * 1024 * 1024,
+          signal: options.signal,
+          timeout,
+          env: subprocessEnvironment(options)
+        },
         (error, stdout, stderr) => {
+          if (error?.code === "ABORT_ERR") {
+            reject(error)
+            return
+          }
           const exitCode = error === null
             ? 0
             : typeof (error as { code?: unknown }).code === "number"
             ? (error as { code: number }).code
             : 1
-          const killed = error !== null && (error as { killed?: unknown }).killed === true
+          const killed = error !== null && error.killed === true && typeof error.code !== "string"
           resolve({
             exitCode,
             stdout,
-            stderr: killed && options.timeoutMs !== undefined
-              ? `${stderr}\nsmithers memory timed out after ${options.timeoutMs}ms`.trim()
+            stderr: killed
+              ? `${stderr}\nsmithers memory timed out after ${timeout}ms`.trim()
               : stderr
           })
         }
@@ -275,7 +309,7 @@ export const spawnCli = (options: SpawnCliOptions = {}): MemoryCli => ({
  * @category models
  * @since 0.1.0
  */
-export interface RetainOptions {
+export interface RetainOptions extends SpawnCliOptions {
   /** The workspace root the CLI runs in. */
   readonly root: string
   /** The `Memory.Retain` target whose validated attrs drive the invocation. */
@@ -315,15 +349,25 @@ export interface RetainResult {
 }
 
 /** Resolves one git ref to its commit sha, readably failing otherwise. */
-const gitResolveSource = (root: string, ref: string): Promise<string> =>
+const gitResolveSource = (root: string, ref: string, options: SpawnCliOptions): Promise<string> =>
   new Promise((resolve, reject) => {
+    const timeout = subprocessTimeout(options)
     NodeChildProcess.execFile(
       "git",
       ["rev-parse", "--verify", `${ref}^{commit}`],
-      { cwd: root, maxBuffer: 1024 * 1024 },
+      {
+        cwd: root,
+        maxBuffer: 1024 * 1024,
+        signal: options.signal,
+        timeout,
+        env: { ...subprocessEnvironment(options), GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true" }
+      },
       (error, stdout, stderr) => {
         if (error !== null) {
-          reject(new Error(`cannot resolve ${ref} to a commit in ${root}: ${stderr.trim() || error.message}`))
+          const detail = error.killed && typeof error.code !== "string"
+            ? `timed out after ${timeout}ms`
+            : stderr.trim() || error.message
+          reject(new Error(`cannot resolve ${ref} to a commit in ${root}: ${detail}`))
           return
         }
         resolve(stdout.trim())
@@ -363,7 +407,7 @@ export const retain = async (options: RetainOptions): Promise<RetainResult> => {
       "the S.Memory.SmithersCloud declaration names no bank to retain into"
     )
   }
-  const locator = options.locator ?? pathLocator(Environment.ambientEnvironment())
+  const locator = options.locator ?? pathLocator(options.environment ?? Environment.ambientEnvironment())
   const binary = await locator.find()
   if (binary === undefined) {
     throw new MemoryBackendUnavailable(
@@ -371,11 +415,11 @@ export const retain = async (options: RetainOptions): Promise<RetainResult> => {
       "the smithers CLI is not on PATH; install it or remove the memory declaration"
     )
   }
-  const resolveSource = options.resolveSource ?? gitResolveSource
+  const resolveSource = options.resolveSource ?? ((root, ref) => gitResolveSource(root, ref, options))
   const sha = await resolveSource(options.root, attrs.source.ref)
   const key = `commit:${sha}`
   const record = JSON.stringify({ source: attrs.source.ref, commit: sha, tags: attrs.tags })
-  const cli = options.cli ?? spawnCli()
+  const cli = options.cli ?? spawnCli(options)
   assertMemoryCliCommand("set")
   const facts: Array<RetainedFact> = []
   for (const bank of options.memory.bank) {

@@ -4,7 +4,7 @@ import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 import * as GitCommit from "../src/GitCommit.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
@@ -409,6 +409,147 @@ describe("a git command that cannot run is not an exit code", () => {
     } finally {
       if (path === undefined) delete process.env["PATH"]
       else process.env["PATH"] = path
+    }
+  })
+})
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeChildProcess>()
+  return { ...actual, execFile: vi.fn(actual.execFile) }
+})
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+})
+
+describe("subprocess bounds", () => {
+  it("passes the run signal, deadline and sanitized environment to every git command", async () => {
+    const root = await temporaryRepo()
+    await Fs.writeFile(NodePath.join(root, "feature.txt"), "new\n")
+    const controller = new AbortController()
+    vi.stubEnv("TEST_WORKSPACE_CACHE_CREDENTIAL", "invented-test-marker")
+    vi.mocked(NodeChildProcess.execFile).mockClear()
+    await GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      paths: ["feature.txt"],
+      signal: controller.signal,
+      sensitiveNames: ["TEST_WORKSPACE_CACHE_CREDENTIAL"]
+    })
+    const calls = vi.mocked(NodeChildProcess.execFile).mock.calls
+    expect(calls.length).toBeGreaterThan(5)
+    for (const call of calls) {
+      expect(call[2]).toMatchObject({
+        signal: controller.signal,
+        timeout: 60_000,
+        env: { GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true" }
+      })
+      expect(Object.hasOwn((call[2] as NodeChildProcess.ExecFileOptions).env!, "TEST_WORKSPACE_CACHE_CREDENTIAL")).toBe(
+        false
+      )
+    }
+  })
+
+  it.each(["abort", "timeout"] as const)("bounds a hung git with %s", async (mode) => {
+    const controller = new AbortController()
+    const actual = await vi.importActual<typeof NodeChildProcess>("node:child_process")
+    vi.mocked(NodeChildProcess.execFile).mockImplementationOnce(
+      ((
+        file: string,
+        args: ReadonlyArray<string>,
+        options: NodeChildProcess.ExecFileOptionsWithStringEncoding,
+        callback: (error: NodeChildProcess.ExecFileException | null, stdout: string, stderr: string) => void
+      ) => {
+        const child = actual.execFile(
+          process.execPath,
+          ["-e", "setTimeout(() => process.exit(9), 1500)"],
+          options,
+          callback
+        )
+        if (mode === "abort") setTimeout(() => controller.abort(), 20)
+        return child
+      }) as typeof NodeChildProcess.execFile
+    )
+    const error = await failure(GitCommit.commit({
+      root: Os.tmpdir(),
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      signal: controller.signal,
+      timeoutMs: mode === "timeout" ? 30 : 10_000
+    }))
+    expect(error.message).toMatch(mode === "abort" ? /ABORT_ERR/ : /timed out/)
+    expect(vi.mocked(NodeChildProcess.execFile).mock.calls.at(-1)?.[2]).toMatchObject({
+      signal: controller.signal,
+      timeout: mode === "timeout" ? 30 : 10_000,
+      env: { GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true" }
+    })
+  })
+
+  it("parses a staged rename followed by a modified sibling", async () => {
+    const root = await temporaryRepo()
+    await Fs.writeFile(NodePath.join(root, "a.txt"), "original\n")
+    await Fs.writeFile(NodePath.join(root, "sibling.txt"), "before\n")
+    await git(root, ["add", "-A"])
+    await git(root, ["commit", "-qm", "seed rename"])
+    await git(root, ["mv", "a.txt", "b.txt"])
+    await Fs.writeFile(NodePath.join(root, "sibling.txt"), "after\n")
+    expect(await git(root, ["status", "--porcelain", "-z"])).toBe("R  b.txt\0a.txt\0 M sibling.txt\0")
+    const refusal = await failure(GitCommit.commit({ root, target: fixedCommit(), gateRunner: greenGates }))
+    expect(refusal.code).toBe("unrelated_changes")
+    expect(refusal.message).toContain("carries 2 change(s)")
+    expect(refusal.message).toMatch(/declared: b.txt, sibling.txt$/)
+    const result = await GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      paths: ["b.txt", "sibling.txt"]
+    })
+    expect(result.staged).toEqual(["b.txt", "sibling.txt"])
+  })
+
+  it("skips the source of a copy record before a modified sibling", async () => {
+    const root = await temporaryRepo()
+    await Fs.writeFile(NodePath.join(root, "a.txt"), "original\n")
+    await Fs.writeFile(NodePath.join(root, "sibling.txt"), "before\n")
+    await git(root, ["add", "-A"])
+    await git(root, ["commit", "-qm", "seed copy"])
+    await Fs.copyFile(NodePath.join(root, "a.txt"), NodePath.join(root, "b.txt"))
+    await Fs.writeFile(NodePath.join(root, "sibling.txt"), "after\n")
+    await git(root, ["add", "-A"])
+    expect(await git(root, ["diff", "--cached", "-C", "--find-copies-harder", "--name-status", "-z"]))
+      .toBe("C100\0a.txt\0b.txt\0M\0sibling.txt\0")
+    // status does not consistently discover copies across Git versions. Supply
+    // its documented C record for the copy that diff -C verified above.
+    const actual = await vi.importActual<typeof NodeChildProcess>("node:child_process")
+    vi.mocked(NodeChildProcess.execFile).mockImplementation(
+      ((
+        file: string,
+        args: ReadonlyArray<string>,
+        options: NodeChildProcess.ExecFileOptionsWithStringEncoding,
+        callback: (error: NodeChildProcess.ExecFileException | null, stdout: string, stderr: string) => void
+      ) => {
+        if (args[0] === "status") {
+          queueMicrotask(() => callback(null, "C  b.txt\0a.txt\0M  sibling.txt\0", ""))
+          return {} as NodeChildProcess.ChildProcess
+        }
+        return actual.execFile(file, args, options, callback)
+      }) as typeof NodeChildProcess.execFile
+    )
+    try {
+      const refusal = await failure(GitCommit.commit({ root, target: fixedCommit(), gateRunner: greenGates }))
+      expect(refusal.code).toBe("unrelated_changes")
+      expect(refusal.message).toContain("carries 2 change(s)")
+      expect(refusal.message).toMatch(/declared: b.txt, sibling.txt$/)
+      const result = await GitCommit.commit({
+        root,
+        target: fixedCommit(),
+        gateRunner: greenGates,
+        paths: ["b.txt", "sibling.txt"]
+      })
+      expect(result.staged).toEqual(["b.txt", "sibling.txt"])
+    } finally {
+      vi.mocked(NodeChildProcess.execFile).mockImplementation(actual.execFile)
     }
   })
 })

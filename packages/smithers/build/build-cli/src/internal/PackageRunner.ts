@@ -2430,6 +2430,9 @@ export const execute = async (
           try {
             const result = await GitCommit.commit({
               root,
+              signal,
+              environment,
+              sensitiveNames: credentialNames,
               target: node.declaration,
               gateRunner: commitGateRunner,
               agentMessage: agentMessageComposer(signal),
@@ -2527,10 +2530,13 @@ export const execute = async (
           try {
             const result = await MemoryBackend.retain({
               root,
+              signal,
+              timeoutMs: memoryBackendTimeoutMs,
+              environment,
+              sensitiveNames: credentialNames,
               target: node.declaration,
               memory: index.workspace.memory,
-              locator: MemoryBackend.pathLocator(environment),
-              cli: MemoryBackend.spawnCli({ timeoutMs: memoryBackendTimeoutMs })
+              locator: MemoryBackend.pathLocator(environment)
             })
             for (const fact of result.facts) {
               log(`${node.label}  retained ${fact.namespace}/${fact.key} through ${result.binary}`)

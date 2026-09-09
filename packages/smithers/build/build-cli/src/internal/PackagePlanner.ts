@@ -865,6 +865,7 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       : { _tag: "refused", tool: { refusal: resolved.refusal, identity: resolved.identity } }
   } else if (tag === "NixBin") {
     const resolved = await GoExec.resolveNix(String(reference["name"]), {
+      signal: context.signal,
       root: context.root,
       packagePath: "",
       workspace: context.index.workspace,
@@ -1813,6 +1814,7 @@ const visit = async (
       }
       try {
         const plannedGo = await GoExec.planRule(rule, attrs as Record<string, unknown>, {
+          signal: context.signal,
           root: context.root,
           packagePath,
           workspace: context.index.workspace,

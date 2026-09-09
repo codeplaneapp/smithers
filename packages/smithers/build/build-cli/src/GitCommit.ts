@@ -19,6 +19,7 @@
  *
  * @since 0.1.0
  */
+import * as Exec from "@smthrs/targets/Exec"
 import * as GitTarget from "@smthrs/targets/GitTarget"
 import type * as Target from "@smthrs/targets/Target"
 import * as NodeChildProcess from "node:child_process"
@@ -157,12 +158,29 @@ interface GitOutput {
  * oversized `git diff --cached` report an exit 1 with no stderr and no mention
  * of the limit. They raise `spawn_failed` naming the code instead.
  */
-const git = (root: string, args: ReadonlyArray<string>): Promise<GitOutput> =>
+const git = (options: CommitOptions, args: ReadonlyArray<string>): Promise<GitOutput> =>
   new Promise((resolve, reject) => {
     NodeChildProcess.execFile(
       "git",
       [...args],
-      { cwd: root, maxBuffer: 8 * 1024 * 1024 },
+      {
+        cwd: options.root,
+        maxBuffer: 8 * 1024 * 1024,
+        signal: options.signal,
+        timeout: options.timeoutMs ?? 60_000,
+        env: {
+          ...Exec.toolEnvironment(
+            Object.fromEntries(
+              Object.entries(options.environment ?? process.env).filter(
+                (entry): entry is [string, string] => entry[1] !== undefined
+              )
+            ),
+            options.sensitiveNames ?? []
+          ),
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_EDITOR: "true"
+        }
+      },
       (error, stdout, stderr) => {
         const code: unknown = error === null ? undefined : (error as NodeJS.ErrnoException & { code?: unknown }).code
         if (typeof code === "string") {
@@ -174,14 +192,20 @@ const git = (root: string, args: ReadonlyArray<string>): Promise<GitOutput> =>
           )
           return
         }
+        if (error?.killed) {
+          reject(
+            new GitCommitError("spawn_failed", `git ${args.join(" ")} timed out after ${options.timeoutMs ?? 60_000}ms`)
+          )
+          return
+        }
         resolve({ exitCode: typeof code === "number" ? code : error === null ? 0 : 1, stdout, stderr })
       }
     )
   })
 
 /** Runs one git command that must succeed. */
-const gitOk = async (root: string, args: ReadonlyArray<string>): Promise<GitOutput> => {
-  const output = await git(root, args)
+const gitOk = async (options: CommitOptions, args: ReadonlyArray<string>): Promise<GitOutput> => {
+  const output = await git(options, args)
   if (output.exitCode !== 0) {
     throw new GitCommitError("git_failed", `git ${args.join(" ")} exited ${output.exitCode}: ${output.stderr.trim()}`)
   }
@@ -196,8 +220,11 @@ const gitOk = async (root: string, args: ReadonlyArray<string>): Promise<GitOutp
  * copy entry carries its origin path as one extra NUL-separated field, which
  * is read and discarded so the following entry is not misparsed as a path.
  */
-const status = async (root: string, pathspecs: ReadonlyArray<string>): Promise<ReadonlyArray<StatusEntry>> => {
-  const raw = (await gitOk(root, [
+const status = async (
+  options: CommitOptions,
+  pathspecs: ReadonlyArray<string>
+): Promise<ReadonlyArray<StatusEntry>> => {
+  const raw = (await gitOk(options, [
     "status",
     "--porcelain",
     "-z",
@@ -234,12 +261,12 @@ const status = async (root: string, pathspecs: ReadonlyArray<string>): Promise<R
  * alone — leaving it in the working tree is exactly what the scope is for.
  */
 const refuseUnrelated = async (
-  root: string,
+  options: CommitOptions,
   paths: ReadonlyArray<string> | undefined,
   sweepWorkingTree: boolean
 ): Promise<void> => {
   if (sweepWorkingTree) return
-  const dirty = await status(root, [])
+  const dirty = await status(options, [])
   if (dirty.length === 0) return
   if (paths === undefined) {
     const named = dirty.map((entry) => entry.path).sort()
@@ -250,7 +277,7 @@ const refuseUnrelated = async (
         `${named.length > namedOffenderLimit ? `, and ${named.length - namedOffenderLimit} more` : ""}`
     )
   }
-  const owned = new Set((await status(root, paths)).map((entry) => entry.path))
+  const owned = new Set((await status(options, paths)).map((entry) => entry.path))
   // An untracked path reports `??`; anything else in the index column is staged.
   const staged = dirty
     .filter((entry) => entry.index !== " " && entry.index !== "?" && !owned.has(entry.path))
@@ -274,6 +301,14 @@ const refuseUnrelated = async (
 export interface CommitOptions {
   /** The repository root the commit is created in. */
   readonly root: string
+  /** Cancels every git subprocess when the run stops. */
+  readonly signal?: AbortSignal | undefined
+  /** Per-command deadline in milliseconds. @default 60000 */
+  readonly timeoutMs?: number | undefined
+  /** Host environment supplied by the runner. */
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  /** Workspace cache credential names withheld from git and hooks. */
+  readonly sensitiveNames?: ReadonlyArray<string> | undefined
   /**
    * The pathspecs this commit owns, or undefined when it owns nothing.
    *
@@ -310,6 +345,9 @@ export interface CommitOptions {
  * @since 0.1.0
  */
 export const commit = async (options: CommitOptions): Promise<CommitResult> => {
+  if (!Number.isFinite(options.timeoutMs ?? 60_000) || (options.timeoutMs ?? 60_000) <= 0) {
+    throw new RangeError("Git.Commit timeoutMs must be positive and finite")
+  }
   const paths = options.paths
   if (paths !== undefined) {
     if (paths.length === 0) {
@@ -322,14 +360,14 @@ export const commit = async (options: CommitOptions): Promise<CommitResult> => {
     }
   }
   const attrs = GitTarget.commitAttrsOf(options.target)
-  const inside = await git(options.root, ["rev-parse", "--is-inside-work-tree"])
+  const inside = await git(options, ["rev-parse", "--is-inside-work-tree"])
   if (inside.exitCode !== 0 || inside.stdout.trim() !== "true") {
     throw new GitCommitError("not_a_git_repository", `${options.root} is not inside a git work tree`)
   }
-  await refuseUnrelated(options.root, paths, options.sweepWorkingTree === true)
+  await refuseUnrelated(options, paths, options.sweepWorkingTree === true)
   // `-A` includes deletions owned by the scope; `--` protects a pathspec that starts with a dash.
-  await gitOk(options.root, paths === undefined ? ["add", "-A"] : ["add", "-A", "--", ...paths])
-  const candidate = await git(options.root, ["diff", "--cached", "--quiet"])
+  await gitOk(options, paths === undefined ? ["add", "-A"] : ["add", "-A", "--", ...paths])
+  const candidate = await git(options, ["diff", "--cached", "--quiet"])
   if (candidate.exitCode === 0) {
     throw new GitCommitError("nothing_to_commit", "the staged tree is identical to HEAD")
   }
@@ -358,7 +396,7 @@ export const commit = async (options: CommitOptions): Promise<CommitResult> => {
         `the declared message agent ${agentName} has no bound AgentMessage implementation`
       )
     }
-    const diff = await gitOk(options.root, ["diff", "--cached"])
+    const diff = await gitOk(options, ["diff", "--cached"])
     message = await options.agentMessage.compose({
       root: options.root,
       agent: agentName,
@@ -368,9 +406,9 @@ export const commit = async (options: CommitOptions): Promise<CommitResult> => {
   if (message.trim() === "") {
     throw new GitCommitError("empty_message", "the commit message is empty")
   }
-  const staged = (await gitOk(options.root, ["diff", "--cached", "--name-only", "-z"]))
+  const staged = (await gitOk(options, ["diff", "--cached", "--name-only", "-z"]))
     .stdout.split("\0").slice(0, -1)
-  await gitOk(options.root, ["-c", "commit.gpgsign=false", "commit", "-m", message])
-  const sha = await gitOk(options.root, ["rev-parse", "HEAD"])
+  await gitOk(options, ["-c", "commit.gpgsign=false", "commit", "-m", message])
+  const sha = await gitOk(options, ["rev-parse", "HEAD"])
   return { sha: sha.stdout.trim(), message, staged }
 }
