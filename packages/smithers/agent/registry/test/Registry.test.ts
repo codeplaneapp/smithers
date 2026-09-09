@@ -909,3 +909,91 @@ describe("Registry stubs", () => {
     expect(listed.map((entry) => entry.name)).toEqual(names)
   })
 })
+
+describe("project source lifecycle", () => {
+  it.each([false, true])("discovers added and recreated flows when initially present: %s", async (initiallyPresent) => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped()
+        const flows = `${root}/flows`
+        if (initiallyPresent) {
+          yield* fs.makeDirectory(`${flows}/original`, { recursive: true })
+          yield* fs.writeFileString(
+            `${flows}/original/flow.mdx`,
+            "---\ndescription: Original flow.\n---\nOriginal body."
+          )
+        }
+        yield* Effect.gen(function*() {
+          const registry = yield* Registry.Registry
+          expect((yield* registry.visible()).map((entry) => entry.name)).toEqual(initiallyPresent ? ["original"] : [])
+          yield* fs.makeDirectory(`${flows}/added`, { recursive: true })
+          yield* fs.writeFileString(`${flows}/added/flow.mdx`, "---\ndescription: Added flow.\n---\nAdded body.")
+          yield* registry.refresh()
+          expect((yield* registry.visible()).map((entry) => entry.name)).toEqual(
+            initiallyPresent ? ["added", "original"] : ["added"]
+          )
+          yield* fs.remove(flows, { recursive: true })
+          yield* registry.refresh()
+          expect(yield* registry.list()).toEqual([])
+          yield* fs.makeDirectory(`${flows}/recreated`, { recursive: true })
+          yield* fs.writeFileString(
+            `${flows}/recreated/flow.mdx`,
+            "---\ndescription: Recreated flow.\n---\nRecreated body."
+          )
+          yield* registry.refresh()
+          expect((yield* registry.visible()).map((entry) => entry.name)).toEqual(["recreated"])
+        }).pipe(Effect.provide(Registry.layerProject({ root })))
+      })).pipe(Effect.provide(platformLayer))
+    )
+  })
+})
+
+describe("optional project roots with required packs", () => {
+  it("keeps missing pack roots strict on construction and refresh", async () => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped()
+        const packRoot = `${root}/pack`
+        const options: Registry.ProjectOptions = {
+          root,
+          packs: {
+            runtimeVersion: "1.0.0-rc.0",
+            installed: [{
+              dir: packRoot,
+              origin: "installed",
+              manifest: { name: "required", version: "1.0.0", flows: ["flows"] } as never
+            }]
+          }
+        }
+        const failure = yield* Effect.flip(Effect.provide(Effect.void, Registry.layerProject(options)))
+        expect(failure.code).toBe("invalid_pack")
+        expect(failure.message).toContain("required@1.0.0")
+        yield* fs.makeDirectory(`${packRoot}/flows/packed`, { recursive: true })
+        yield* fs.writeFileString(`${packRoot}/flows/packed/flow.mdx`, "---\ndescription: Pack flow.\n---\nPack body.")
+        yield* Effect.gen(function*() {
+          const registry = yield* Registry.Registry
+          expect((yield* registry.visible()).map((entry) => entry.name)).toEqual(["packed"])
+          yield* fs.remove(`${packRoot}/flows`, { recursive: true })
+          const failure = yield* Effect.flip(registry.refresh())
+          expect(failure.code).toBe("invalid_pack")
+          expect(failure.message).toContain("required@1.0.0")
+          expect((yield* registry.visible()).map((entry) => entry.name)).toEqual(["packed"])
+        }).pipe(Effect.provide(Registry.layerProject(options)))
+      })).pipe(Effect.provide(platformLayer))
+    )
+  })
+
+  it("rejects a project flows root that is a file", async () => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped()
+        yield* fs.writeFileString(`${root}/flows`, "not a directory")
+        const failure = yield* Effect.flip(Effect.provide(Effect.void, Registry.layerProject({ root })))
+        expect(failure.code).toBe("invalid_root")
+      })).pipe(Effect.provide(platformLayer))
+    )
+  })
+})

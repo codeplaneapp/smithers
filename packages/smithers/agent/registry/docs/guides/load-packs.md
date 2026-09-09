@@ -68,7 +68,7 @@ Every descriptor a pack contributes carries `provenance.pack` with the pack
 name, version, and origin, so a catalog entry says where it came from.
 
 To scan a project's own flows and its packs together, pass both to
-`Registry.layer`, or use `Executable.layerProject({ root, packs })`, which is
+`Registry.layer`, or use `Registry.layerProject({ root, packs })`, which is
 that composition. A project source is scanned first, so a project flow shadows
 a pack flow of the same name and reports it as `duplicate_name`.
 

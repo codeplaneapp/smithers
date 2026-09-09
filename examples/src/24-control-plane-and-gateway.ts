@@ -74,7 +74,7 @@ const platform = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
  * The registry the control plane lists flows from and the engine registers
  * them from: `<projectRoot>/flows/**`, scanned, with bodies still unread.
  */
-const registry = Executable.layerProject({ root: projectRoot }).pipe(Layer.provide(platform), Layer.orDie)
+const registry = Registry.layerProject({ root: projectRoot }).pipe(Layer.provide(platform), Layer.orDie)
 
 /** How a discovered descriptor is turned into something the engine can drive. */
 const bridge: Executable.Options = { delegates: [Ship] }

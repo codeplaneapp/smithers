@@ -119,6 +119,7 @@ interface Source {
   readonly root: string
   readonly naming: "path" | "frontmatter"
   readonly system?: boolean | undefined
+  readonly optionalRoot?: boolean | undefined
   readonly confinementRoot?: string | undefined
 }
 ```
@@ -128,6 +129,9 @@ each descriptor's provenance. `naming` selects whether a flow's name comes from
 its directory path below `root` or from the file's own `name` field.
 `system: true` makes a name collision with this source a
 `system_collision` failure instead of a first-found resolution.
+`optionalRoot: true` returns an empty scan when `root` is absent, checked on
+every scan. It does not suppress access failures or a non-directory root.
+Sources are required by default; declared pack roots remain required.
 `confinementRoot` bounds directories and selected entry files to that root
 when the host can resolve both real paths. `Pack.sources` sets it to the pack
 root; ordinary project sources leave it unset.
@@ -603,6 +607,39 @@ A name claimed twice by ordinary sources resolves first-found with a
 `duplicate_name` warning. A name shared with a source declared `system: true`
 fails `RegistryError { code: "system_collision" }` in either direction.
 
+### Registry.ProjectOptions and Registry.layerProject
+
+```ts
+interface ProjectOptions {
+  readonly root: string
+  readonly packs?: Registry.PackConfig | undefined
+}
+
+const layerProject: (options: ProjectOptions) => Layer.Layer<
+  Registry.Registry,
+  RegistryError | DiscoveryError,
+  FileSystem.FileSystem | Path.Path
+>
+```
+
+The registry a Node host discovers a project in: `<root>/flows/**` first, then
+every installed pack, all under one first-found registry, so a project flow
+shadows a pack flow of the same name and `refresh` rescans both.
+
+Packs are scanned through the registry's own pack path, so each pack descriptor
+carries its `provenance.pack`, a name two packs both define is reported as
+`shadowed`, and every pack's `requires.smithers` is checked against
+`PackConfig.runtimeVersion`. The runtime version rides inside `PackConfig`
+rather than beside it, so a caller cannot ask for packs without saying what
+their range is checked against.
+
+A project with no `flows/` directory has no project entries. The source stays
+configured with `optionalRoot: true`, so every `refresh()` checks it again.
+Creating the first `flows/<id>/flow.mdx` or `flow.ts` makes it discoverable on
+refresh in the same session. Removing `flows/` empties the project entries on
+refresh; recreating it makes them discoverable again. Pack entries remain,
+and a missing declared pack directory fails with `invalid_pack`.
+
 ### Registry.layerFromDescriptors
 
 ```ts
@@ -962,36 +999,8 @@ with.
 
 ### Executable.ProjectOptions and Executable.layerProject
 
-```ts
-interface ProjectOptions {
-  readonly root: string
-  readonly packs?: Registry.PackConfig | undefined
-}
-
-const layerProject: (options: ProjectOptions) => Layer.Layer<
-  Registry.Registry,
-  RegistryError | DiscoveryError,
-  FileSystem.FileSystem | Path.Path
->
-```
-
-The registry a Node host discovers a project in: `<root>/flows/**` first, then
-every installed pack, all under one first-found registry, so a project flow
-shadows a pack flow of the same name and `refresh` rescans both.
-
-Packs are scanned through the registry's own pack path, so each pack descriptor
-carries its `provenance.pack`, a name two packs both define is reported as
-`shadowed`, and every pack's `requires.smithers` is checked against
-`PackConfig.runtimeVersion`. The runtime version rides inside `PackConfig`
-rather than beside it, so a caller cannot ask for packs without saying what
-their range is checked against.
-
-A project with no `flows/` directory is not a failure: it has no flows yet,
-which is the state [`smthrs init`](/cli/init) leaves behind. That is decided
-by looking for the directory up front, so the answer stays a statement about
-the project. Catching the scan's `root_missing` instead would make a pack that
-declares a directory it does not ship read as "this project has no flows" and
-empty the registry the project's own flows were in.
+Deprecated compatibility aliases for `Registry.ProjectOptions` and
+`Registry.layerProject`, retained for one release candidate.
 
 ### Executable.fileSpecifier
 

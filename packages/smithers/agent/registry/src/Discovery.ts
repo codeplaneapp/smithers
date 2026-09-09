@@ -201,12 +201,14 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
             discoveryError({
               code: "read_failed",
               method: "scan",
+              path: source.root,
               description: `could not access source root "${source.root}"`,
               cause
             })
           )
         )
         if (!exists) {
+          if (source.optionalRoot === true) return new SourceScan({ entries, warnings })
           return yield* Effect.fail(
             discoveryError({
               code: "root_missing",

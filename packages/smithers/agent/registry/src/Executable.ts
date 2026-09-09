@@ -61,11 +61,10 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type * as Descriptor from "./Descriptor.ts"
-import * as Discovery from "./Discovery.ts"
 import { readVerifiedBody } from "./internal/Body.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
 import * as Registry from "./Registry.ts"
-import { type DiscoveryError, discoveryError, type RegistryError } from "./RegistryError.ts"
+import type { DiscoveryError, RegistryError } from "./RegistryError.ts"
 
 /**
  * The delegate a descriptor runs on when it names no single flow of its own.
@@ -1010,81 +1009,19 @@ export const layer = (
   )
 
 /**
- * How a project's flow registry is assembled.
+ * Compatibility alias for the project registry options, retained for one release candidate.
  *
+ * @deprecated Use `Registry.ProjectOptions`.
  * @category models
  * @since 1.0.0-rc.0
  */
-export interface ProjectOptions {
-  /** The project root. `<root>/flows` is scanned for `flow.ts` and `flow.mdx`. */
-  readonly root: string
-  /**
-   * Installed packs whose flows join the project's, project entries first.
-   *
-   * The runtime version rides inside {@link module:Registry.PackConfig} rather
-   * than beside it, so a caller cannot ask for packs without saying what their
-   * `requires.smithers` range is checked against.
-   */
-  readonly packs?: Registry.PackConfig | undefined
-}
+export type ProjectOptions = Registry.ProjectOptions
 
 /**
- * Provides the registry a Node host discovers a project's flows in.
+ * Compatibility alias for the project registry constructor, retained for one release candidate.
  *
- * `<root>/flows/**` first, then every installed pack's own sources, all under
- * one first-found registry, so a project flow shadows a pack flow of the same
- * name and `refresh` rescans both. Packs are scanned through the registry's own
- * pack path, so each pack descriptor carries its `provenance.pack`, a name two
- * packs both define is reported as `shadowed` naming both of them with the
- * `local` pack winning, and every pack's `requires.smithers` is checked against
- * {@link module:Registry.PackConfig.runtimeVersion}.
- *
- * A project with no `flows/` directory is not a failure: it simply has no flows
- * yet, which is the state `smithers init` leaves behind. That is decided by
- * looking for the directory, so it stays a statement about the PROJECT: a pack
- * that declares a flows directory it does not ship fails the layer as an
- * `invalid_pack` naming the pack, instead of quietly emptying the registry the
- * project's own flows were in.
- *
- * This is the value a host passes as the durable runtime's registry: the seam
- * `@smthrs/flows` `NodeRuntime` opened so discovery, and not a hand-written
- * list, feeds the executor catalog.
- *
+ * @deprecated Use `Registry.layerProject`.
  * @category layers
  * @since 1.0.0-rc.0
  */
-export const layerProject = (
-  options: ProjectOptions
-): Layer.Layer<Registry.Registry, RegistryError | DiscoveryError, FileSystem.FileSystem | Path.Path> =>
-  Layer.unwrap(
-    Effect.gen(function*() {
-      const path = yield* Path.Path
-      const fs = yield* FileSystem.FileSystem
-      const root = path.join(options.root, "flows")
-      // ASKED UP FRONT, not caught afterwards. A project with no `flows/`
-      // directory has no flows yet, which is the state `smithers init` leaves
-      // behind; catching the scan's `root_missing` instead would make every
-      // OTHER missing root — a pack that declares a directory it does not
-      // ship — read as "this project has no flows" and empty the registry the
-      // project's own flows were in.
-      const present = yield* fs.exists(root).pipe(
-        Effect.mapError((cause) =>
-          discoveryError({
-            code: "read_failed",
-            module: "Executable",
-            method: "layerProject",
-            path: root,
-            description: `could not access the project flows directory "${root}"`,
-            cause
-          })
-        )
-      )
-      const sources: ReadonlyArray<Descriptor.Source> = present
-        ? [{ source: "project", root, naming: "path" }]
-        : []
-      return Registry.layer({
-        sources,
-        ...(options.packs === undefined ? {} : { packs: options.packs })
-      }).pipe(Layer.provide(Discovery.layer))
-    })
-  )
+export const layerProject: typeof Registry.layerProject = Registry.layerProject

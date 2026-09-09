@@ -106,7 +106,7 @@ delegates to, and returns a durable flow plus the layer that registers it.
 ```ts
 import { Action } from "@smthrs/flow"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
-import { Executable } from "@smthrs/registry"
+import { Executable, Registry } from "@smthrs/registry"
 import { Layer } from "effect"
 
 const registration = Executable.layer({ delegates: [Agent, Shell] }).pipe(
@@ -120,11 +120,11 @@ const host = NodeRuntime.layerHost(
     owner: { hostId: "local" }
   },
   registration,
-  Executable.layerProject({ root: process.cwd() })
+  Registry.layerProject({ root: process.cwd() })
 )
 ```
 
-`Executable.layerProject({ root, packs })` scans `<root>/flows/**` first, then
+`Registry.layerProject({ root, packs })` scans `<root>/flows/**` first, then
 every installed pack, under one refreshable first-found registry.
 `Executable.layer` registers everything runnable, logs a warning naming each
 refusal, and provides the whole `Catalog` as a service, so a host can print what

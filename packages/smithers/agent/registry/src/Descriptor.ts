@@ -313,6 +313,8 @@ export interface Source {
   readonly root: string
   readonly naming: "path" | "frontmatter"
   readonly system?: boolean | undefined
+  /** A missing root produces an empty scan; other root failures still fail. */
+  readonly optionalRoot?: boolean | undefined
   /** Pack root whose real path bounds discovery when the host can resolve it. */
   readonly confinementRoot?: string | undefined
 }

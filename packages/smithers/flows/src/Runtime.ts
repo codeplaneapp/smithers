@@ -366,7 +366,7 @@ const layerWithRegistry = <
  *
  * `registry` is the optional catalog the registration phase reads from. A host
  * that discovers its flows rather than listing them passes
- * `@smthrs/registry`'s `Executable.layerProject({ root })` — `Discovery` over
+ * `@smthrs/registry`'s `Registry.layerProject({ root })` — `Discovery` over
  * `<root>/flows/**` plus any installed packs — and a `registerFlows` built from
  * `Executable.layer(...)`; the registry is provided beneath registration, so
  * every discovered flow is registered before the runtime accepts a launch.

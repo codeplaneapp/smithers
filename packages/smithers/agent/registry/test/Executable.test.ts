@@ -426,7 +426,7 @@ export default Flow.make({
         expect(second.lowered.cache).toEqual({ ttlMs: 9000, scope: "shared" })
         expect(second.invocation(null).placement).toBe("sandbox")
         expect(yield* fs.readDirectory(`${root}/flows/revision`)).toEqual(["flow.ts", "helper.ts"])
-      }).pipe(Effect.provide(Executable.layerProject({ root })))
+      }).pipe(Effect.provide(Registry.layerProject({ root })))
     }).pipe(Effect.scoped, Effect.provide(platform)))
 
   for (const filename of ["flow.ts", "flow"]) {
@@ -476,7 +476,7 @@ export default Flow.make({
       const logs: Array<string> = []
       const capture = Logger.make((entry) => void logs.push(JSON.stringify(entry.message)))
       const built = yield* Executable.catalog(options({ loadTimeoutMs: 500 })).pipe(
-        Effect.provide(Executable.layerProject({ root })),
+        Effect.provide(Registry.layerProject({ root })),
         Effect.provide(Logger.layer([capture])),
         Effect.timeout(5000)
       )
@@ -825,13 +825,17 @@ describe("the host's catalog", () => {
 })
 
 describe("the project registry", () => {
+  it("retains the project constructor compatibility alias", () => {
+    expect(Executable.layerProject).toBe(Registry.layerProject)
+  })
+
   it.effect("loads a module discovered through a relative project root", () =>
     Effect.gen(function*() {
       const executable = yield* Executable.fromRegistry("greet", options())
       expect(executable.delegate).toBe("test/echo")
       expect(executable.invocation({ name: "relative" }).input).toEqual({ name: "relative" })
     }).pipe(
-      Effect.provide(Executable.layerProject({ root: relative(process.cwd(), projectRoot) })),
+      Effect.provide(Registry.layerProject({ root: relative(process.cwd(), projectRoot) })),
       Effect.provide(platform)
     ))
 
@@ -853,7 +857,7 @@ describe("the project registry", () => {
         "undecided"
       ])
     }).pipe(
-      Effect.provide(Executable.layerProject({ root: projectRoot })),
+      Effect.provide(Registry.layerProject({ root: projectRoot })),
       Effect.provide(platform)
     ))
 
@@ -862,7 +866,7 @@ describe("the project registry", () => {
       const registry = yield* Registry.Registry
       expect(yield* registry.list()).toEqual([])
     }).pipe(
-      Effect.provide(Executable.layerProject({ root: `${projectRoot}/absent` })),
+      Effect.provide(Registry.layerProject({ root: `${projectRoot}/absent` })),
       Effect.provide(platform)
     ))
 
@@ -884,7 +888,7 @@ describe("the project registry", () => {
       expect(entries.find((entry) => entry.name === "greet")?.provenance.pack).toBeUndefined()
     }).pipe(
       Effect.provide(
-        Executable.layerProject({
+        Registry.layerProject({
           root: projectRoot,
           packs: {
             runtimeVersion: "1.0.0-rc.0",
@@ -920,7 +924,7 @@ describe("the project registry", () => {
       expect(shadowed[0]!.message).toContain("installed@1.0.0 (installed)")
     }).pipe(
       Effect.provide(
-        Executable.layerProject({
+        Registry.layerProject({
           root: projectRoot,
           packs: {
             runtimeVersion: "1.0.0-rc.0",
@@ -946,7 +950,7 @@ describe("the project registry", () => {
     Effect.gen(function*() {
       const exit = yield* Effect.exit(Effect.provide(
         Effect.void,
-        Executable.layerProject({
+        Registry.layerProject({
           root: projectRoot,
           packs: {
             runtimeVersion: "1.0.0-rc.0",
@@ -977,7 +981,7 @@ describe("the project registry", () => {
       }))
       const failure = yield* Effect.flip(Effect.provide(
         Effect.void,
-        Executable.layerProject({ root: projectRoot }).pipe(Layer.provide(Layer.merge(unreadable, NodePath.layer)))
+        Registry.layerProject({ root: projectRoot }).pipe(Layer.provide(Layer.merge(unreadable, NodePath.layer)))
       ))
       // "I could not look" is not "there is nothing there". Reporting an
       // unreadable root as an empty project would hide every flow behind a
@@ -993,7 +997,7 @@ describe("the project registry", () => {
       expect(names).toContain("pdf")
     }).pipe(
       Effect.provide(
-        Executable.layerProject({
+        Registry.layerProject({
           root: `${projectRoot}/absent`,
           packs: {
             runtimeVersion: "1.0.0-rc.0",
@@ -1012,7 +1016,7 @@ describe("the project registry", () => {
     Effect.gen(function*() {
       const built = yield* Effect.exit(Effect.provide(
         Effect.void,
-        Executable.layerProject({
+        Registry.layerProject({
           root: projectRoot,
           packs: {
             runtimeVersion: "1.0.0-rc.0",
@@ -1031,7 +1035,7 @@ describe("the project registry", () => {
     Effect.gen(function*() {
       const registry = yield* Effect.exit(Effect.provide(
         Effect.void,
-        Executable.layerProject({
+        Registry.layerProject({
           root: projectRoot,
           packs: {
             runtimeVersion: "1.0.0-rc.0",

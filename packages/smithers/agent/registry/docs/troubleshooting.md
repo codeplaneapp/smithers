@@ -28,13 +28,11 @@ scan.
 
 **What happened.** The source root does not exist.
 
-**What to change.** For a project's own `flows/` directory this is usually not
-an error: a project that has not created one yet has no flows. Catch this one
-code and fall back to an empty registry, and let every other discovery failure
-stay a startup defect. `Executable.layerProject` makes the same decision by
-asking whether the directory exists before scanning, which keeps a pack that
-declares a directory it does not ship from reading as "this project has no
-flows". See [Discover a project's flows](./guides/discover-a-project.md).
+**What to change.** Use `Registry.layerProject` for a project's optional
+`flows/` directory, or set `optionalRoot: true` on that source. A missing root
+then produces an empty scan on construction and refresh, so flows added later
+remain discoverable. Access errors still fail, and declared pack roots stay
+required. See [Discover a project's flows](./guides/discover-a-project.md).
 
 ### invalid_root
 

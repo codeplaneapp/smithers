@@ -17,7 +17,7 @@ import {
   FlowDescriptor,
   type Source
 } from "./Descriptor.ts"
-import { Discovery } from "./Discovery.ts"
+import { Discovery, layer as discoveryLayer } from "./Discovery.ts"
 import { readVerifiedBody } from "./internal/Body.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
 import * as Pack from "./Pack.ts"
@@ -445,6 +445,47 @@ export const layer = (
   RegistryError | DiscoveryError,
   Discovery | FileSystem.FileSystem | Path.Path
 > => Layer.effect(Registry)(make(config))
+
+/**
+ * How a project's flow registry is assembled.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface ProjectOptions {
+  /** The project root. `<root>/flows` is scanned for `flow.ts` and `flow.mdx`. */
+  readonly root: string
+  /** Installed packs, scanned after project flows and checked against `runtimeVersion`. */
+  readonly packs?: PackConfig | undefined
+}
+
+/**
+ * Provides a project's refreshable registry using portable discovery.
+ *
+ * Scans `<root>/flows` first, then installed packs with their provenance,
+ * compatibility checks, and local-pack precedence. Project flows shadow pack
+ * flows of the same name. Every refresh rescans both sources and packs.
+ *
+ * The project source remains configured when `flows/` is absent. Each scan
+ * treats that absence as empty, so creating the first flow or removing and
+ * recreating the directory is reflected on refresh. Access errors still fail,
+ * and a missing declared pack directory remains an `invalid_pack` failure.
+ *
+ * @category layers
+ * @since 1.0.0-rc.0
+ */
+export const layerProject = (
+  options: ProjectOptions
+): Layer.Layer<Registry, RegistryError | DiscoveryError, FileSystem.FileSystem | Path.Path> =>
+  Layer.unwrap(
+    Effect.gen(function*() {
+      const path = yield* Path.Path
+      return layer({
+        sources: [{ source: "project", root: path.join(options.root, "flows"), naming: "path", optionalRoot: true }],
+        ...(options.packs === undefined ? {} : { packs: options.packs })
+      }).pipe(Layer.provide(discoveryLayer))
+    })
+  )
 
 /**
  * Provides an in-memory descriptor snapshot while retaining lazy body loading.
