@@ -9,6 +9,8 @@
  * prerequisite (the requirement axis), never a mode refusal; a name that exists
  * nowhere stays `unknown-command`.
  */
+import { createCommandRegistry } from "./Commands"
+import type { CommandActions } from "./Flows"
 import { Effect } from "effect"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { CallResult } from "@smthrs/harness/Cell"
@@ -562,4 +564,39 @@ describe("app.download and app.download.prompt", () => {
       "That is not in the web app. Local repositories, terminals, build targets and local agents need the native app."
     ])
   })
+})
+
+
+describe("trace argument redaction", () => {
+  for (const invoker of ["run", "runAsAgent"] as const) {
+    for (const [name, args, expected] of [
+      ["env.set", "VALUE=ordinary words = more owner/repo", "VALUE=[REDACTED] owner/repo"],
+      ["env.set", "malformed-sensitive-input", "[REDACTED]"],
+      ["form.set", "form-env.set assignment VALUE=ordinary words", "form-env.set assignment [REDACTED]"],
+      ["form.set", "arbitrary-card arbitrary-field ordinary words", "arbitrary-card arbitrary-field [REDACTED]"],
+      ["form.submit", "form-env.set", "form-env.set"]
+    ]) {
+      test(`${invoker} redacts ${name} diagnostics without changing handler input: ${args}`, async () => {
+        const records: Parameters<CommandActions["traceFlow"]>[0][] = []
+        const received: unknown[][] = []
+        const actions = {
+          repositoryFlows: () => undefined,
+          snapshot: () => ({ surface: "chat", typing: false, hasConnectors: true, admin: false, signedOut: false }),
+          noteCommandRun: () => {},
+          traceFlow: (record) => { records.push(record) },
+          setEnvironmentVar: async (...input) => { received.push(input); return `Invalid ${args}` },
+          setFormField: async (...input) => { received.push(input); return `Invalid ${args}` },
+          submitForm: async (...input) => { received.push(input); return { value: "Saved VALUE=ordinary words" } }
+        } satisfies Partial<CommandActions>
+        const commands = createCommandRegistry(actions as unknown as CommandActions)
+        await commands[invoker](name!, args)
+        expect(received).toHaveLength(1)
+        expect(records).toHaveLength(1)
+        expect(records[0]?.args).toBe(expected!)
+        expect(records[0]?.detail).toBe("[REDACTED]")
+        if (name === "env.set") expect(received[0]?.[0]).toBe(args!.replace(/ owner\/repo$/, ""))
+        if (name === "form.set") expect(received[0]?.[2]).toBe(args!.split(/\s+/).slice(2).join(" "))
+      })
+    }
+  }
 })

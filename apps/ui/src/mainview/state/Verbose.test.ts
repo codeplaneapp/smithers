@@ -6,6 +6,8 @@
  * transcript, and the transition logger writes to the console. Off, the
  * transcript reads exactly as it would have without the switch.
  */
+import { createCommandRegistry } from "../flows/Commands"
+import type { CommandActions } from "../flows/Flows"
 import type { StorageApi } from "@tanstack/db"
 import { afterEach, describe, expect, test } from "bun:test"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
@@ -143,4 +145,63 @@ describe("/verbose", () => {
     await controller.commands.run("appearance.dark-mode")
     expect(logged.length).toBe(count)
   })
+})
+
+
+describe("sensitive flow traces", () => {
+  for (const verbose of [false, true]) {
+    for (const fails of [false, true]) {
+      test(`env.set redacts persisted and console diagnostics (verbose=${verbose}, fails=${fails})`, async () => {
+        const secret = "review-synthetic-secret-9c814"
+        const assignment = `DATABASE_PASSWORD=${secret}`
+        const persisted = new Map<string, string>()
+        const store = await createAppStore({ kind: "localStorage", storage: {
+          getItem: (key) => persisted.get(key) ?? null,
+          setItem: (key, value) => { persisted.set(key, value) },
+          removeItem: (key) => { persisted.delete(key) }
+        } })
+        if (verbose) await store.dispatch({ type: "verbose.toggled", actor: "user", on: true }).isPersisted.promise
+        const logged: unknown[][] = []
+        console.debug = (...args) => { logged.push(args) }
+        const writes: Promise<unknown>[] = []
+        const received: string[] = []
+        const actions = {
+          repositoryFlows: () => undefined,
+          snapshot: () => ({ surface: "chat", typing: false, hasConnectors: true, admin: false, signedOut: false }),
+          noteCommandRun: () => {},
+          traceFlow: (record) => { writes.push(store.dispatch(record).isPersisted.promise) },
+          setEnvironmentVar: async (value, repo) => {
+            received.push(value)
+            expect(repo).toBe("owner/repo")
+            // A seam may echo input in its error detail.
+            if (fails) return `Could not save ${value}`
+          }
+        } satisfies Partial<CommandActions>
+        const commands = createCommandRegistry(actions as unknown as CommandActions)
+        const outcome = await commands.run("env.set", `${assignment} owner/repo`)
+        await Promise.all(writes)
+        expect(outcome.status).toBe(fails ? "failed" : "executed")
+        expect(received).toEqual([assignment])
+        const rows = [...store.collections.transitions.values()].filter((row) => row.type === "flow.invoked")
+        expect(rows).toHaveLength(1)
+        expect(JSON.stringify(rows)).not.toContain(secret)
+        expect(JSON.stringify([...persisted])).not.toContain(secret)
+        const restored = await createAppStore({ kind: "localStorage", storage: {
+          getItem: (key) => persisted.get(key) ?? null,
+          setItem: (key, value) => { persisted.set(key, value) },
+          removeItem: (key) => { persisted.delete(key) }
+        } })
+        expect([...restored.collections.transitions.values()].filter((row) => row.type === "flow.invoked")).toHaveLength(1)
+        expect(JSON.stringify([...restored.collections.transitions.values()])).not.toContain(secret)
+        expect(JSON.stringify(logged)).not.toContain(secret)
+        if (verbose) {
+          expect(logged.length).toBeGreaterThan(0)
+          expect(traces(store).join("\n")).toContain("DATABASE_PASSWORD=[REDACTED]")
+          expect(traces(store).join("\n")).not.toContain(secret)
+        } else {
+          expect(logged).toEqual([])
+        }
+      })
+    }
+  }
 })

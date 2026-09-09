@@ -321,14 +321,36 @@ export const createCommandRegistry = (actions: CommandActions, agentActions: Com
     outcome: Extract<AppTransition, { type: "flow.invoked" }>["outcome"],
     detail: string | null
   ): void => {
+    // Diagnostics are persisted even with verbose off. Keep execution input
+    // untouched, but never hand environment or form values to the trace sink.
+    let tracedArgs = args ?? null
+    if (args !== undefined && (name === "env.set" || name === "form.set")) {
+      const parsed = payloadFor(name, args)
+      tracedArgs = "[REDACTED]"
+      if (!("error" in parsed)) {
+        if (name === "env.set" && typeof parsed.payload.assignment === "string") {
+          const variable = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(parsed.payload.assignment)?.[1]
+          if (variable !== undefined) {
+            tracedArgs = `${variable}=[REDACTED]${typeof parsed.payload.repo === "string" ? ` ${parsed.payload.repo}` : ""}`
+          }
+        } else if (name === "form.set") {
+          // Form schemas have no sensitivity declaration yet. Mask every
+          // value, including arbitrary card/field targets, without guessing.
+          tracedArgs = `${parsed.payload.cardId} ${parsed.payload.field} [REDACTED]`
+        }
+      }
+    }
+    // Both errors and success text can echo input; form.submit also carries
+    // the nested flow's assembled arguments even though its own args are an id.
+    const sensitive = name === "env.set" || name === "form.set" || name === "form.submit"
     actions.traceFlow({
       type: "flow.invoked",
       actor: invoker === "agent" ? "smithers" : "user",
       name,
-      args: args ?? null,
+      args: tracedArgs,
       hidden: find(name)?.metadata.hidden === true,
       outcome,
-      detail,
+      detail: sensitive && detail ? "[REDACTED]" : detail,
       durationMs: Math.max(0, Math.round(Date.now() - startedAt))
     })
   }
