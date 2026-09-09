@@ -62,7 +62,6 @@ export const Workspace = S.Workspace("example", {
 ```ts
 import { Smithers } from "@smthrs/targets"
 import { packageTargets } from "./package-targets.ts"
-import { packageTargets } from "./package-targets.ts"
 
 // PACKAGE.ts: no manager, no runtime.
 export const Package = Smithers.Package({
@@ -72,7 +71,7 @@ export const Package = Smithers.Package({
 
 A declaration overrides the interpreter one target runs under by naming a
 `runtime`, never by restating a package manager: `Smithers.Vitest({ runtime:
-Smithers.Runtime.Bun({ version: ">=1.3.0" }), ... })` runs that suite through
+Smithers.Runtime.Bun({ version: ">=1.4.0" }), ... })` runs that suite through
 `bun x` while every other target keeps the workspace manager.
 
 `Smithers.Secret("NAME")` declares an inert source without reading it. A child

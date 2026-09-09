@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import * as S from "../src/Smithers.ts"
 
 const readDoc = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
 
@@ -33,4 +34,32 @@ describe("public surface documentation", () => {
       expect(doc).toContain("Target.plan(target)")
     }
   )
+})
+
+const fencedBlocks = (doc: string): Array<string> =>
+  [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((match) => match[1] ?? "")
+
+describe("documented examples construct", () => {
+  it("README runtime overrides name a Bun requirement the constructor accepts", () => {
+    const readme = readDoc("README.md")
+    const requirements = [...readme.matchAll(/Runtime\.Bun\(\{\s*version:\s*"([^"]+)"/g)].map((match) => match[1])
+    expect(requirements.length).toBeGreaterThan(0)
+    for (const version of requirements) expect(() => S.Runtime.Bun({ version: version as never })).not.toThrow()
+  })
+
+  it("README examples declare each import binding once", () => {
+    for (const block of fencedBlocks(readDoc("README.md"))) {
+      const bindings = [...block.matchAll(/^import\s+\{([^}]*)\}/gm)]
+        .flatMap((match) => (match[1] ?? "").split(",").map((name) => name.trim().split(/\s+as\s+/).pop() ?? ""))
+        .filter((name) => name !== "")
+      expect(bindings).toEqual([...new Set(bindings)])
+    }
+  })
+
+  it("api.md documents the attrs refusal instead of an opaque-handle pass-through", () => {
+    const api = readDoc("docs/api.md")
+    expect(api).not.toMatch(/non-plain prototype passes through/)
+    expect(api).toMatch(/a target, and a\s+dependency selector/)
+    expect(api).toMatch(/refused before the schema/)
+  })
 })

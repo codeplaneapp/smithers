@@ -26,9 +26,15 @@ refuse something the schema cannot express; those are wrapped with
 
 A declaration is read exactly once, as data. The author's object is snapshotted
 before the schema sees it: a `Proxy` is refused, an accessor is refused by name,
-and a value with a non-plain prototype passes through as an opaque handle.
-Everything the target then owns is frozen, so `Target.metadata(target)` and each
-`forKind` view cannot be edited after the checks that validated them.
+and a value carrying a prototype of its own is refused before the schema decodes
+it. Attrs therefore hold primitives, plain objects, and plain arrays. Two handles
+are the exceptions, kept by identity rather than copied: a target, and a
+dependency selector. A `Date`, a `Map`, or a class instance is refused even when
+the rule's schema would accept an unknown value, so encode such a value as plain
+data. Nesting is bounded by `Target.maximumAttrsDepth` members deep and
+`Target.maximumAttrsMembers` members in total. Everything the target then owns is
+frozen, so `Target.metadata(target)` and each `forKind` view cannot be edited
+after the checks that validated them.
 
 `Target.metadata` is the planner's view: the rule id, the schema identity, the
 decoded attrs, the declared inputs, the dependency targets and selectors, the
