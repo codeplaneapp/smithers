@@ -1,6 +1,11 @@
 import * as FileSet from "@smthrs/plan/FileSet"
+import * as Plan from "@smthrs/plan/Plan"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+import { withCrypto } from "./Crypto.ts"
+import { compile, draft } from "./PlanFixtures.ts"
 
 const glob: FileSet.Glob = { _tag: "Glob", include: ["src/**/*.ts"], exclude: ["src/**/skip.ts"] }
 const tree: FileSet.TreeArtifact = { _tag: "TreeArtifact", path: "dist" }
@@ -41,6 +46,78 @@ describe("FileSet", () => {
     expect(FileSet.matchesGlob(glob, "src/a.ts")).toBe(true)
     expect(FileSet.matchesGlob(glob, "src/deep/skip.ts")).toBe(false)
     expect(FileSet.matchesGlob({ _tag: "Glob", include: ["*.ts"] }, "a.ts")).toBe(true)
+  })
+
+  it.each(
+    [
+      ["*ababac*", "ababababac", true],
+      ["*aaaaab*", "aaaaac", false],
+      ["ab*bc", "abc", false],
+      ["a*b", "ac", false],
+      ["a*b", "xb", false],
+      ["*ab*ab*", "ab", false],
+      ["*ab*ab*", "abab", true],
+      ["a***b", "ab", true],
+      ["***", "a/b", false],
+      ["**/a/**/b", "x/a/no/a/y/b", true],
+      ["**/a/**/b", "x/a/no/a/y/c", false],
+      ["**/a", "/a", false],
+      ["src/**", "src/", true],
+      ["src/**", "src", false],
+      ["**/**/a", "a", true],
+      ["**/**", "", true],
+      ["a", "a\u2028", false],
+      ["a", "a\u2029", false],
+      ["a*", "a\u2028", true]
+    ] as const
+  )("matches %j against %j as %j", (pattern, path, expected) => {
+    expect(FileSet.matchesPattern(pattern, path)).toBe(expected)
+  })
+
+  it.each(["\u2028", "\u2029"])(
+    "compiles and verifies overlapping Unicode writers containing %j",
+    async (separator) => {
+      const path = `src/a${separator}b.ts`
+      const plan = await Effect.runPromise(withCrypto(compile([
+        {
+          ...draft("glob"),
+          effects: { reads: [], writes: [{ _tag: "Glob", include: ["src/**"] }], boundaryMode: "hard" }
+        },
+        draft("exact", { writes: [path] })
+      ])))
+      expect(plan.nodes[1]!.dependsOn).toEqual(["glob"])
+      expect(plan.nodes.every((node) => node.conflicts.length === 1)).toBe(true)
+      expect(await Effect.runPromise(withCrypto(Plan.verify(JSON.parse(JSON.stringify(plan)))))).toEqual(plan)
+    }
+  )
+
+  it("compiles and verifies an admitted adversarial glob and exact reader", async () => {
+    const plan = await Effect.runPromise(withCrypto(compile([
+      {
+        ...draft("glob"),
+        effects: { reads: [], writes: [{ _tag: "Glob", include: ["*a".repeat(24) + "b"] }], boundaryMode: "hard" }
+      },
+      draft("reader", { reads: ["a".repeat(47) + "c"] })
+    ])))
+    expect(plan.nodes[1]!.dependsOn).toEqual([])
+    expect(await Effect.runPromise(withCrypto(Plan.verify(JSON.parse(JSON.stringify(plan)))))).toEqual(plan)
+  })
+
+  it("reuses compilation for canonical pattern aliases", () => {
+    const pattern = "memoized-caf\u00e9/*.ts"
+    const split = vi.spyOn(String.prototype, "split")
+    try {
+      expect(FileSet.matchesPattern(pattern, "memoized-caf\u00e9/a.ts")).toBe(true)
+      expect(FileSet.matchesPattern(pattern.normalize("NFD").replace("/", "\\"), "memoized-caf\u00e9/b.ts"))
+        .toBe(true)
+      expect(FileSet.matchesPattern(pattern, "memoized-caf\u00e9/c.js")).toBe(false)
+      const patternSplits = split.mock.contexts.filter((value, index) =>
+        String(value) === pattern && String(split.mock.calls[index]![0]) === "/"
+      )
+      expect(patternSplits).toHaveLength(1)
+    } finally {
+      split.mockRestore()
+    }
   })
 
   it("compares exact paths in canonical separator form", () => {

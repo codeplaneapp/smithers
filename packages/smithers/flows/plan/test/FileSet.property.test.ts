@@ -119,6 +119,38 @@ const fillerNonEmpty = FastCheck.array(FastCheck.constantFrom(..."xyz01\\ é."),
   .map((chars) => chars.join(""))
 
 describe("FileSet.matchesPattern properties", () => {
+  it("rejects an admitted 24-star near miss within 100 ms", () => {
+    const pattern = "*a".repeat(24) + "b"
+    const path = "a".repeat(47) + "c"
+    expect(Schema.is(FileSet.Pattern)(pattern)).toBe(true)
+    expect(Schema.is(FileSet.Pattern)(path)).toBe(true)
+    const started = performance.now()
+    expect(FileSet.matchesPattern(pattern, path)).toBe(false)
+    expect(performance.now() - started).toBeLessThan(100)
+  })
+
+  it("bounds repeated recursive segments and long literal near misses", () => {
+    const started = performance.now()
+    expect(FileSet.matchesPattern("**/a/".repeat(24) + "b", "a/".repeat(48) + "c")).toBe(false)
+    expect(FileSet.matchesPattern("*" + "a".repeat(20_000) + "b*", "a".repeat(40_000) + "c")).toBe(false)
+    expect(performance.now() - started).toBeLessThan(100)
+  })
+
+  it.each(["\u2028", "\u2029"])("trailing ** covers single-star paths containing %j", (separator) => {
+    FastCheck.assert(
+      FastCheck.property(literalText, literalText, (before, after) => {
+        const path = `src/a${before}${separator}${after}b.ts`
+        expect(Schema.is(FileSet.Pattern)(path)).toBe(true)
+        expect(FileSet.matchesPattern("src/*", path)).toBe(true)
+        expect(FileSet.matchesPattern("src/**", path)).toBe(true)
+        const glob: FileSet.Glob = { _tag: "Glob", include: ["src/**"] }
+        expect(FileSet.overlaps(glob, path)).toBe(true)
+        expect(FileSet.overlaps(path, glob)).toBe(true)
+      }),
+      { ...params, examples: [["", ""]] }
+    )
+  })
+
   it("a single `*` matches any separator-free text but never crosses a separator", () => {
     FastCheck.assert(
       FastCheck.property(

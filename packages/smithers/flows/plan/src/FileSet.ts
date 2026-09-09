@@ -230,22 +230,78 @@ export const isGlob = (value: unknown): value is Glob =>
 export const isTreeArtifact = (value: unknown): value is TreeArtifact =>
   typeof value === "object" && value !== null && "_tag" in value && value._tag === "TreeArtifact"
 
-const escape = (value: string): string => value.replaceAll(/[.+?^${}()|[\]\\]/g, "\\$&")
-
-/** Compiles Bazel's `*`/`**` path semantics without permitting traversal. */
-const patternExpression = (pattern: string): RegExp => {
-  const segments = canonical(pattern).split("/")
-  let source = "^"
-  for (let index = 0; index < segments.length; index++) {
-    const segment = segments[index]!
-    if (segment === "**") {
-      source += index === segments.length - 1 ? ".*" : "(?:[^/]+/)*"
-      continue
-    }
-    source += escape(segment).replaceAll("*", "[^/]*")
-    if (index < segments.length - 1) source += "/"
+/** KMP searches a literal without rescanning a long near-matching prefix. */
+const literalSearch = (literal: string) => {
+  const fallback = new Uint32Array(literal.length)
+  let matched = 0
+  for (let index = 1; index < literal.length; index++) {
+    while (matched > 0 && literal[index] !== literal[matched]) matched = fallback[matched - 1]!
+    if (literal[index] === literal[matched]) matched++
+    fallback[index] = matched
   }
-  return new RegExp(`${source}$`)
+  return (path: string, start: number, end: number): number => {
+    let matched = 0
+    for (let index = start; index < end; index++) {
+      while (matched > 0 && path[index] !== literal[matched]) matched = fallback[matched - 1]!
+      if (path[index] === literal[matched]) matched++
+      if (matched === literal.length) return index + 1
+    }
+    return -1
+  }
+}
+
+/** Anchored ends and disjoint literal searches make each segment match linear. */
+const segmentMatcher = (segment: string): (path: string) => boolean => {
+  const chunks = segment.split(/\*+/)
+  const prefix = chunks.shift()!
+  if (chunks.length === 0) return (path) => path === prefix
+  const suffix = chunks.pop()!
+  const searches = chunks.map(literalSearch)
+  return (path) => {
+    const end = path.length - suffix.length
+    if (prefix.length > end || !path.startsWith(prefix) || !path.endsWith(suffix)) return false
+    let position = prefix.length
+    for (const search of searches) {
+      position = search(path, position, end)
+      if (position === -1) return false
+    }
+    return true
+  }
+}
+
+const patternMatchers = new Map<string, (path: string) => boolean>()
+
+/** Compile once per canonical spelling; recursive segments use no backtracking. */
+const patternMatcher = (pattern: string): (path: string) => boolean => {
+  const key = canonical(pattern)
+  const cached = patternMatchers.get(key)
+  if (cached !== undefined) return cached
+  const segments = key.split("/").map((segment) => segment === "**" ? undefined : segmentMatcher(segment))
+  const matcher = (path: string): boolean => {
+    const parts = path.split("/")
+    // Suffix membership: next[j] says the remaining pattern matches parts[j..].
+    // Each pattern/path segment pair is visited once, even with repeated **.
+    let next = new Uint8Array(parts.length + 1)
+    next[parts.length] = 1
+    for (let index = segments.length - 1; index >= 0; index--) {
+      const segment = segments[index]
+      const current = new Uint8Array(parts.length + 1)
+      for (let part = parts.length - 1; part >= 0; part--) {
+        current[part] = segment === undefined
+          // A trailing ** accepts every remaining code unit. It still needs
+          // the separator preceding it: src/** does not match bare src.
+          ? Number(
+            index === segments.length - 1 || next[part] === 1 ||
+              (parts[part] !== "" && current[part + 1] === 1)
+          )
+          : Number(next[part + 1] === 1 && segment(parts[part]!))
+      }
+      next = current
+    }
+    return next[0] === 1
+  }
+  patternMatchers.set(key, matcher)
+  return matcher
 }
 
 /** Tests one workspace-relative path against one Bazel-style pattern.
@@ -253,7 +309,7 @@ const patternExpression = (pattern: string): RegExp => {
  * @since 0.1.0
  * @slop
  */
-export const matchesPattern = (pattern: string, path: string): boolean => patternExpression(pattern).test(path)
+export const matchesPattern = (pattern: string, path: string): boolean => patternMatcher(pattern)(path)
 
 /** Tests one file path against a glob, including exclusions.
  * @category predicates

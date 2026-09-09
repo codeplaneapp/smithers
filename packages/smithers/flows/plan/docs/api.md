@@ -1038,6 +1038,11 @@ const matchesGlob: (glob: Glob, path: string) => boolean
 
 Bazel's `*` and `**` path semantics without permitting traversal: `*` matches within one segment, `**` matches segments, and a trailing `**` matches the rest of the path. `matchesGlob` honours the glob's `exclude` list.
 
+Matching consumes the entire path, including Unicode line separators. Compiled
+matchers are cached by canonical pattern spelling. Segment matching is linear
+in the segment and pattern lengths; recursive matching visits each pattern/path
+segment pair once, without regex backtracking.
+
 ### FileSet.overlaps
 
 ```ts
