@@ -16,6 +16,14 @@ smithers-coding-host serve --root /home/developer/workspace --host 0.0.0.0 --por
 
 `coding-plan/v1` is advertised only after the configured catalog includes `coding` and `coding/implementation` with their expected native delegates, and Plue's adapter verifies the repository's provisioned native binding. Conflicted JJ state refuses startup. The gateway reports the existing protocol version and workspace hash, plus the owning gateway row ID. The ordinary CLI does not advertise this capability.
 
+Providing the private `planning` operator configuration also enables
+[`coding/request`](request.md) and its `coding-request/v1` health capability.
+This composes existing memory, planning and correction flows and returns their
+recorded `Plan` plus product outcome through the normal Control operations.
+The same verified catalog is injected into those action layers before they
+register. Planning receives the configured `planningModel`, falling back to the
+explicit implementation model, and uses the evidence-only authority recipe.
+
 Catalog imports need the existing trusted host filesystem to load verified declaration bytes through a temporary sibling module. That filesystem is scoped to startup loading. Resulting handler registrations use the original guarded context. Immutable checks separately capture the trusted filesystem only for host-owned scratch creation and cleanup; their processes retain the contained, guarded spawner. Agent file tools retain their workspace guards.
 
 Every native handler traverses recorded parent edges to its one active, approved Control root. It receives the existing `AgentAction.Host` with that root's approved capability envelope, along with the shared budget and quota policy. Construction-time services grant no execution authority. The real standard tool catalog is shared with `AgentSession`.

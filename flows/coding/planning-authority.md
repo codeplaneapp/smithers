@@ -24,3 +24,11 @@ Budget accounting, seat resolution, quota handling, steering, event delivery,
 and schema correction retain their existing services and error behavior.
 Implementation actions keep the parent's granted capabilities. Narrowing is
 scoped to the listed action handlers and cannot widen their parent authority.
+
+These roles also configure the existing injected agent with `unmovedCap: 0`.
+A planning answer or source review is expected to leave the editing workspace
+unchanged; asking it to make a change before accepting that answer wastes a
+model turn and contradicts its authority. The workspace observer remains
+installed, and other completion checks are unchanged. The override applies
+only while the listed evidence action executes. Actual editing keeps its
+ordinary unmoved-workspace check.

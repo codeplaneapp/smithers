@@ -1,5 +1,6 @@
 /** Private composition of captured-evidence model actions over existing authority. */
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Agent from "@smthrs/agent/Agent"
 import { Action, FlowRuntime } from "@smthrs/flow"
 import * as Registry from "@smthrs/registry/Registry"
 import { Effect, Layer, Option } from "effect"
@@ -26,10 +27,19 @@ const evidence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     // Read the live host after native authority restoration, and refuse if the
     // required model host was not installed rather than falling back to one.
     const current = yield* Effect.serviceOption(AgentAction.Host)
-    if (Option.isNone(current)) {
+    const agent = yield* Effect.serviceOption(Agent.Agent)
+    if (Option.isNone(current) || Option.isNone(agent)) {
       return yield* Effect.die(new Error("Evidence model action requires its runtime AgentAction.Host"))
     }
     return yield* effect.pipe(
+      // These completions answer a question about supplied evidence. Reuse the
+      // agent's existing review setting so an unchanged workspace does not
+      // demand an impossible edit or spend another model frame. Observation,
+      // capability guards and every other host/run policy remain installed.
+      Effect.provideService(Agent.Agent, {
+        ...agent.value,
+        run: options => agent.value.run({ ...options, unmovedCap: 0 })
+      }),
       Effect.provideService(AgentAction.Host, {
         ...current.value,
         registry: emptyRegistry,

@@ -79,6 +79,11 @@ after restart. It refuses unavailable or unverified project flows.
 
 ## Host composition
 
+The private [`coding/request`](request.md) entry accepts a prompt and composes
+memory-backed planning, native source admission and bounded owner correction.
+Its result is decoded by the same pure schemas that the UI uses for recorded
+plan and validation evidence. It uses the existing gateway Control operations.
+
 `planning.ts` adds the private `PreparePlan` workflow: verified wiki and native
 history gathering, a request review, an optional durable clarification, a model
 draft, and source verification before binding the existing `Plan` schema. See

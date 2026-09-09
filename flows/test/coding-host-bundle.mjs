@@ -11,8 +11,11 @@ if (!process.env.PLUE_CODING_ADAPTER_SOURCE || !process.env.PLUE_JJ_EXPORT_BINAR
 }
 const temporary = await mkdtemp(join(tmpdir(), "smithers-host-bundle-"))
 try {
-  const output = join(temporary, "coding-host-native.test.mjs")
-  await bundle(fileURLToPath(new URL("./coding-host-native.test.ts", import.meta.url)), output)
+  const mode = process.argv[2] ?? "plan"
+  if (mode !== "plan" && mode !== "request") throw new Error("Host bundle acceptance mode must be plan or request")
+  const fixture = mode === "request" ? "coding-request-host" : "coding-host-native"
+  const output = join(temporary, `${fixture}.test.mjs`)
+  await bundle(fileURLToPath(new URL(`./${fixture}.test.ts`, import.meta.url)), output)
   const status = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [process.versions.bun ? "test" : "--test", output], {
       stdio: "inherit", env: { ...process.env, SMITHERS_ACCEPTANCE_SOURCE_ROOT: fileURLToPath(new URL("../", import.meta.url)) }

@@ -91,6 +91,8 @@ export type ModuleRegistration = Layer.Layer<
   | Exclude<Effect.Services<ReturnType<typeof AgentSession.make>>, Scope.Scope>
   | FileSystem.FileSystem
   | Path.Path
+  | KernelJj.Jj
+  | SqlClient
   | KernelChildProcessSpawner.ChildProcessSpawner
   | Budget.Budget
   | QuotaPolicy.QuotaClassifier

@@ -23,8 +23,14 @@ action layers, `HumanTask.layer`, and `Interpreter.layer(PreparePlan)` through
 the runtime's existing action registration. `coding/plan` is a logical model
 seat which the deployment must resolve using its authorized provider route.
 The model prompts request planning only; they are not an authorization boundary.
-Deployment capability narrowing is required before exposing these actions on a
-host that also admits mutation tools.
+The configured coding host applies `evidenceOnly` at action execution after
+native authority restoration. It supplies an empty callable catalog and
+capability ceiling while retaining the parent's budgets, steering, plugins and
+model routing. Plugin-contributed declarations cannot widen that ceiling.
+For these evidence actions it also supplies the existing agent option
+`unmovedCap: 0`: a planning or review result need not change workspace files.
+Workspace observation remains enabled. Implementation actions keep their
+normal completion checks and mutation authority.
 
 ## Gather, clarify, draft, verify
 
