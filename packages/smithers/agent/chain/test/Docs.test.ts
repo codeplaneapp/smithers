@@ -44,6 +44,26 @@ describe("package documentation", () => {
     expect(missing).toEqual([])
   })
 
+  it.each([
+    ["README.md"],
+    ["docs", "README.md"],
+    ["docs", "guides", "resume-and-replay.md"],
+    ["docs", "contract.md"]
+  ])("bounds the crash-safety promise in %s", (...parts) => {
+    const document = read(...parts).replace(/\s+/g, " ")
+    expect(document).toContain(
+      "Chain provides exactly-once replay of journaled settled calls and at-least-once handler execution."
+    )
+    expect(document).toContain(
+      "If a handler succeeds but a crash or append failure prevents `CallSettled` from being recorded, resume can execute the handler again."
+    )
+    expect(document).toContain(
+      "Handlers must be idempotent or, for non-repeatable effects, use an external durable idempotency key derived from the stable call identity (`chain`, `link`, `ordinal` in `Catalog.CallSlot`)."
+    )
+    expect(document).not.toContain("without repeating a single side effect")
+    expect(document).not.toContain("Resume with zero repeated effects")
+  })
+
   it("states the resource limits the source actually carries", () => {
     const memoryBytes = QuickJsRunner.defaultLimits.memoryBytes ?? 0
     expect(defaultOf("QuickJS realm memory")).toBe(

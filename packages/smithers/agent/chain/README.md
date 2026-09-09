@@ -5,9 +5,15 @@
 A crash-safe agent loop for TypeScript. A model writes a small JavaScript
 program, the program's only way to reach the outside world is
 `ctx.call(name, payload)`, and every call is recorded in an append-only
-journal before the loop moves on. Run the same program again over the same
-journal and it picks up where it stopped without repeating a single side
-effect.
+journal before the loop moves on.
+
+Chain provides exactly-once replay of journaled settled calls and
+at-least-once handler execution. A matching settled call replays its recorded
+result without running its handler. If a handler succeeds but a crash or
+append failure prevents `CallSettled` from being recorded, resume can execute
+the handler again. Handlers must be idempotent or, for non-repeatable effects,
+use an external durable idempotency key derived from the stable call identity
+(`chain`, `link`, `ordinal` in `Catalog.CallSlot`).
 
 The journal is the only state. Every other structure, including the call
 cache used for replay, transcripts, and UIs, is a pure fold over it. Each

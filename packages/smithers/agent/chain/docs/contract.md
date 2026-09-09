@@ -105,6 +105,20 @@ Building the layers is separate: `QuickJsRunner.layer()` carries a
 (a browser CSP blocking it, say) fails with `runner_unavailable` while the
 runtime is constructed, before any run starts.
 
+## Execution
+
+Chain provides exactly-once replay of journaled settled calls and
+at-least-once handler execution. A matching settled call replays its recorded
+result without running its handler. If a handler succeeds but a crash or
+append failure prevents `CallSettled` from being recorded, resume can execute
+the handler again. Handlers must be idempotent or, for non-repeatable effects,
+use an external durable idempotency key derived from the stable call identity
+(`chain`, `link`, `ordinal` in `Catalog.CallSlot`).
+
+The journal binding must durably persist settlement before acknowledging
+`Journal.append` for replay to survive process loss. Handler execution and
+the settlement append are separate operations.
+
 ## Concurrency
 
 `Journal.append` takes an `expectedPosition` so an append is a

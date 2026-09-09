@@ -10,6 +10,20 @@ returns its terminal without executing anything; a half-finished link replays
 its settled calls by ordinal, with zero effects, and then runs live. There is
 no resume API to call: you run the chain again over the same journal.
 
+Chain provides exactly-once replay of journaled settled calls and
+at-least-once handler execution. A matching settled call replays its recorded
+result without running its handler. If a handler succeeds but a crash or
+append failure prevents `CallSettled` from being recorded, resume can execute
+the handler again. Handlers must be idempotent or, for non-repeatable effects,
+use an external durable idempotency key derived from the stable call identity
+(`chain`, `link`, `ordinal` in `Catalog.CallSlot`).
+
+`Chain.run` passes the slot as the handler's second argument. Reuse the key
+on every attempt and have the external service durably deduplicate the effect
+and return the recorded result. Namespace the key by the host's journal
+identity when independent journals share an external service. Chain cannot
+atomically commit an external effect together with `CallSettled`.
+
 ## Seed the journal
 
 `Journal.layerMemory` takes an optional array of prior events. Seed it with
