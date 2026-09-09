@@ -164,9 +164,9 @@ authenticated and size-limited rather than slipping past.
 `{ "code": "run_not_found", "message": "No run <id>" }`.
 
 **Cause** The control plane does not list that run. The gateway never opens the
-engine database, so a run that exists only there is invisible here. The same
-code answers a run with no events, because reading events alone cannot tell the
-two apart.
+engine database, so a run that exists only there is invisible here. Event reads
+alone cannot distinguish an unknown run from an empty run, so the gateway checks
+existence through `Control.list`. An existing run with no events projects successfully.
 
 **Fix** Confirm the run with `Control.list`, or [`smthrs ps`](/cli/ps). If the
 run is in the engine database but not the control plane, the launch never
@@ -176,13 +176,24 @@ reached the control plane and the gateway is reporting that correctly.
 
 **Symptom** A `resource_limit` `GatewayError` on a snapshot or a delta.
 
-**Cause** One run's history passed a bound: 10,000 events, or 4 MiB of encoded
-events, or 4 MiB of encoded projected rows.
+**Cause: event history** One run's history exceeds 10,000 events or 4 MiB of
+encoded events. Every run-scoped selector reads the full journal before
+projecting rows, so a narrower selector cannot bypass these fixed ceilings.
 
-**Fix** Narrow the selector. `node-output` for one node, or `run-summary`
-rather than `run-events`, folds far less than the whole journal. The fold fails
-at the first value past the bound rather than retaining the rest of a hostile
-or corrupt stream, so this is a refusal to read, not a partial answer.
+**Fix** Inspect larger histories through `Control.watch({ runId, follow: false,
+afterSequence })`, bounded with `Stream.take(n)`, or a bounded journal read.
+Resume from the last sequence read to inspect another batch. These reads expose
+events directly; they do not produce gateway projections.
+
+**Cause: projected rows** The encoded projected rows exceed 4 MiB after the
+history has passed its own limits.
+
+**Fix** Narrow the selector to reduce the projected row set, for example
+`node-output` for one node or `run-summary`. This only helps if the selected
+rows fit within the row budget.
+
+A history or row overflow refuses the snapshot or delta; it does not return a
+partial answer.
 
 ### run_unavailable with a cause that says almost nothing
 
