@@ -31,6 +31,7 @@ import * as AgentFake from "../src/AgentFake.ts"
 import type * as AgentSession from "../src/AgentSession.ts"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import { graphKeySentinel, keyMaterialWithGraph } from "../src/PackageExec.ts"
+import * as PackageTree from "../src/PackageTree.ts"
 import { executionPresentation } from "./fixtures/presentation.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
@@ -388,6 +389,106 @@ export const Package = S.Package({ targets: { svc, probe } })
     await waitFor(async () => pgrep(mark).length === 0 && pgrep(consumerMark).length === 0, 15_000)
     expect(pgrep(probeControlMarker)).not.toHaveLength(0)
   }, 90_000)
+
+  it.skipIf(PackageTree.findOnPath("go") === undefined).each(["interrupt", "health"] as const)(
+    "waits for write-set restoration after consumer %s",
+    async (failure) => {
+      const root = await temporaryWorkspace()
+      const port = await freePort()
+      const mark = marker()
+      await write(
+        root,
+        "WORKSPACE.ts",
+        workspaceModule().replace(
+          "  nodeModules:",
+          `
+  toolchains: [S.Go.Toolchain({ mod: S.file("//go.mod"), sum: S.file("//go.sum"), cgo: false,
+    versions: S.Nix.DevShell({ flake: S.file("//flake.nix"), lock: S.file("//flake.lock") }) })],
+  nodeModules:`
+        )
+      )
+      await write(root, "go.mod", "module example.test/cleanup\n\ngo 1.18\n")
+      await write(root, "go.sum", "")
+      await write(root, "flake.nix", "{}")
+      await write(root, "flake.lock", "{}")
+      await write(root, "generate.go", `package cleanup\n//go:generate ${process.execPath} consumer.mjs\n`)
+      await write(root, ".gitignore", ".flows\n.env\n")
+      await write(root, "out.txt", "original tracked")
+      await write(root, ".env", "original ignored")
+      await write(
+        root,
+        "consumer.mjs",
+        `
+import { writeFileSync } from "node:fs"
+writeFileSync("out.txt", "changed tracked")
+writeFileSync(".env", "changed ignored")
+console.error("consumer-wrote")
+${failure === "health" ? `await fetch("http://127.0.0.1:${port}/wedge")` : ""}
+setInterval(() => {}, 1000)
+`
+      )
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const svc = ${
+          serveDeclaration(
+            port,
+            mark,
+            "",
+            `
+  readiness: { http: "http://127.0.0.1:${port}/health", timeout: "10s" },
+  health: { interval: "150ms", failures: 2 }`
+          )
+        }
+const change = S.Go.Generate({ pkgs: ["."], data: [S.file("//consumer.mjs")],
+  changes: ["out.txt"], services: [svc], sandbox: "none" })
+export const Package = S.Package({ targets: { svc, change } })
+`
+      )
+      commitAll(root)
+      const controller = new AbortController()
+      const revertIgnored = PackageTree.revertIgnored
+      const reverting: Array<Promise<boolean>> = []
+      let stashDirectory: string | undefined
+      let restored = false
+      const revert = vi.spyOn(PackageTree, "revertIgnored").mockImplementation((snapshot, path) => {
+        stashDirectory = snapshot.stash.directory
+        const pending = (async () => {
+          // Hold the revert long enough for the service scope to close first.
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          const result = await revertIgnored(snapshot, path)
+          restored = true
+          return result
+        })()
+        reverting.push(pending)
+        return pending
+      })
+      try {
+        const result = await serve(root, ["//:change", "--write"], {
+          signal: controller.signal,
+          onLog: (line) => {
+            if (failure === "interrupt" && line.includes("consumer-wrote")) controller.abort()
+          }
+        })
+        expect(result.exitCode).toBe(1)
+        expect(result.logs, result.output).toContain("consumer-wrote")
+        if (failure === "health") expect(result.logs).toContain("service //:svc unhealthy")
+        expect(restored).toBe(true)
+        expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("original tracked")
+        expect(await Fs.readFile(NodePath.join(root, ".env"), "utf8")).toBe("original ignored")
+        expect(stashDirectory).toBeDefined()
+        expect(existsSync(stashDirectory!)).toBe(false)
+        expectNoProcesses(mark)
+      } finally {
+        // Drain the intentionally delayed cleanup even on the pre-fix failure.
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        await Promise.allSettled(reverting)
+        revert.mockRestore()
+      }
+    },
+    60_000
+  )
 
   it("runs a Serve root in the foreground until interrupted, then applies the stop contract", async () => {
     const root = await temporaryWorkspace()

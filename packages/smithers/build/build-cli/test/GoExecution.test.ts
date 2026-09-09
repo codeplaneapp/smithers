@@ -3,7 +3,7 @@ import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it, vi } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import * as GoExec from "../src/GoExec.ts"
 import * as PackageTree from "../src/PackageTree.ts"
@@ -87,6 +87,9 @@ const serve = async (root: string, args: ReadonlyArray<string>) => {
   }
   return { exitCode, output, logs }
 }
+const packageWithoutSandbox = (source: string): string =>
+  source.replaceAll("sandbox: { network: true }", "sandbox: \"none\"")
+
 const fixture = async (): Promise<string> => {
   const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-go-exec-")))
   temporaryDirectories.push(root)
@@ -278,12 +281,63 @@ func TestExternalImport(t *testing.T) { if externalhelper.Want < 1 || helper.Wan
     }
   }, 120_000)
 
+  it("removes a partial module archive when tar fails", async () => {
+    const root = await fixture()
+    await write(root, "PACKAGE.ts", packageWithoutSandbox(await Fs.readFile(NodePath.join(root, "PACKAGE.ts"), "utf8")))
+    const tar = NodePath.join(root, "fake-tar")
+    await Fs.writeFile(
+      tar,
+      "#!/bin/sh\nif [ \"$1\" = \"-cf\" ]; then printf partial > \"$2\"; echo archive-failed >&2; exit 1; fi\necho fixture-tar\n",
+      { mode: 0o755 }
+    )
+    const findOnPath = PackageTree.findOnPath
+    const find = vi.spyOn(PackageTree, "findOnPath").mockImplementation((name) =>
+      name === "tar" ? tar : findOnPath(name)
+    )
+    let result: Awaited<ReturnType<typeof serve>>
+    try {
+      result = await serve(root, ["//:fetch"])
+    } finally {
+      find.mockRestore()
+    }
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toContain("archive-failed")
+    expect(await Fs.readdir(NodePath.join(root, ".flows/tmp"))).toEqual([])
+  }, 120_000)
+
+  it("removes a module archive when capturing its blob fails", async () => {
+    const root = await fixture()
+    await write(root, "PACKAGE.ts", packageWithoutSandbox(await Fs.readFile(NodePath.join(root, "PACKAGE.ts"), "utf8")))
+    const captureFile = PackageTree.captureFile
+    let capturedArchive = false
+    const capture = vi.spyOn(PackageTree, "captureFile").mockImplementation(async (...args) => {
+      if (args[2].startsWith(".flows/tmp/go-mod-")) {
+        expect((await Fs.stat(NodePath.join(root, args[2]))).size).toBeGreaterThan(0)
+        capturedArchive = true
+        throw new Error("fixture capture failure")
+      }
+      return captureFile(...args)
+    })
+    try {
+      const result = await serve(root, ["//:fetch"])
+      expect(capturedArchive, result.output + result.logs).toBe(true)
+      expect(result.exitCode).toBe(1)
+      expect(result.logs).toContain("fixture capture failure")
+      expect(await Fs.readdir(NodePath.join(root, ".flows/tmp"))).toEqual([])
+    } finally {
+      capture.mockRestore()
+    }
+  }, 120_000)
+
   it("captures the module cache as one tar blob and restores it on a hit", async () => {
     const root = await fixture()
+    await write(root, "PACKAGE.ts", packageWithoutSandbox(await Fs.readFile(NodePath.join(root, "PACKAGE.ts"), "utf8")))
     expect((await serve(root, ["//:fetch"])).logs).toContain("//:fetch  ran")
+    expect(await Fs.readdir(NodePath.join(root, ".flows/tmp"))).toEqual([])
     await Fs.rm(NodePath.join(root, ".gomodcache"), { recursive: true, force: true })
     const second = await serve(root, ["//:fetch"])
     expect(second.logs).toContain("//:fetch  hit")
+    expect(await Fs.readdir(NodePath.join(root, ".flows/tmp"))).toEqual([])
     await expect(Fs.stat(NodePath.join(root, ".gomodcache"))).resolves.toMatchObject({})
   }, 120_000)
 })

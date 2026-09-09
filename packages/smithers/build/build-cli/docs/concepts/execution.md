@@ -167,6 +167,9 @@ readiness probe on an interval, and a declared number of consecutive misses
 signal (`SIGTERM` by default) and waits a declared grace period (5 seconds by
 default) before `SIGKILL`.
 
+An interrupt or health failure waits for the consumer body and its write-set
+restoration before releasing the tree permit or deleting the shared stash.
+
 Every probe and hook runs in the service's own working directory under the
 same resolved environment the service process was given. Docker services
 publish their declared ports on `127.0.0.1` only. A service captures a bounded

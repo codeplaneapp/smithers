@@ -633,17 +633,20 @@ export const execute = async (
     const archive = Input.resolvePath(cacheDirectory, `tmp/go-mod-${node.keyPreview}.tar`)
     const absoluteArchive = NodePath.join(root, ...archive.split("/"))
     await Fs.mkdir(NodePath.dirname(absoluteArchive), { recursive: true })
-    const created = await spawnNode(
-      node,
-      root,
-      options.signal,
-      [tar, "-cf", absoluteArchive, "-C", NodePath.join(root, ...node.outDirs[0]!.split("/")), "."]
-    )
-    if (!created.ok) return created.error ?? "tar archive creation failed"
-    const manifest = await PackageTree.captureFile(root, cacheDirectory, archive)
-    await Fs.rm(absoluteArchive, { force: true })
-    await cachePut(node, { kind: "directory-archive", outDir: node.outDirs[0], digest: manifest.digest })
-    return undefined
+    try {
+      const created = await spawnNode(
+        node,
+        root,
+        options.signal,
+        [tar, "-cf", absoluteArchive, "-C", NodePath.join(root, ...node.outDirs[0]!.split("/")), "."]
+      )
+      if (!created.ok) return created.error ?? "tar archive creation failed"
+      const manifest = await PackageTree.captureFile(root, cacheDirectory, archive)
+      await cachePut(node, { kind: "directory-archive", outDir: node.outDirs[0], digest: manifest.digest })
+      return undefined
+    } finally {
+      await Fs.rm(absoluteArchive, { force: true })
+    }
   }
 
   /** Restores a one-blob directory archive after validating every path tar would write. */
@@ -804,6 +807,7 @@ export const execute = async (
     treeRoot: string,
     body: (signal: AbortSignal | undefined) => Promise<A>
   ): Promise<{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: string }> => {
+    let pending: Promise<A> | undefined
     const program = Effect.scoped(Effect.gen(function*() {
       const supervisor = supervisorOf()
       const handles: Array<ServiceSupervisor.ServiceHandle> = []
@@ -815,17 +819,21 @@ export const execute = async (
         log(`${what}  service ${serviceLabel}: ready (pid ${handle.pid})`)
         handles.push(handle)
       }
-      const consumer = Effect.promise((signal) => body(joinSignals(options.signal, signal)))
+      const consumer = Effect.promise((signal) => (pending = body(joinSignals(options.signal, signal))))
       return yield* handles.reduce<Effect.Effect<A, ServiceSupervisor.ServiceError>>(
         (effect, handle) => handle.whileHealthy(effect),
         consumer
       )
     }))
-    return Effect.runPromiseExit(program, { signal: options.signal }).then((exit) =>
-      Exit.isSuccess(exit)
+    return Effect.runPromiseExit(program, { signal: options.signal }).then(async (exit) => {
+      // Interrupting Effect.promise closes the service scope without joining
+      // the consumer. Its process shutdown and write-set restoration must
+      // settle before the caller releases the tree permit and shared stash.
+      await pending?.catch(() => undefined)
+      return Exit.isSuccess(exit)
         ? { ok: true, value: exit.value }
         : { ok: false, error: causeText(exit.cause, `${what} under services`) }
-    )
+    })
   }
 
   /** Runs a consumer node under its declared services, rooted at the real tree. */
@@ -2013,30 +2021,34 @@ export const execute = async (
           // A stale scratch file from an earlier extraction could satisfy an
           // import the page no longer writes, so the directory starts empty.
           await Fs.rm(directory, { recursive: true, force: true })
-          await Fs.mkdir(directory, { recursive: true })
-          const files: Array<string> = []
-          // Context files first, so the page's own titled file wins a name both write.
-          for (const file of contextFiles) {
-            const path = NodePath.join(directory, ...file.path.split("/"))
-            await Fs.mkdir(NodePath.dirname(path), { recursive: true })
-            await Fs.writeFile(path, file.content, "utf8")
+          try {
+            await Fs.mkdir(directory, { recursive: true })
+            const files: Array<string> = []
+            // Context files first, so the page's own titled file wins a name both write.
+            for (const file of contextFiles) {
+              const path = NodePath.join(directory, ...file.path.split("/"))
+              await Fs.mkdir(NodePath.dirname(path), { recursive: true })
+              await Fs.writeFile(path, file.content, "utf8")
+            }
+            for (const file of extracted.files) {
+              const path = NodePath.join(directory, ...file.path.split("/"))
+              await Fs.mkdir(NodePath.dirname(path), { recursive: true })
+              await Fs.writeFile(path, file.content, "utf8")
+              files.push(posix(NodePath.relative(root, path)))
+            }
+            if (files.length > 0) {
+              const checked = await spawnNode(node, root, signal, [...(node.argv ?? []), ...files])
+              if (!checked.ok) return fail(checked.error ?? "Markdown code-block parse failed")
+            }
+            log(
+              `${node.label}  checked ${extracted.blocks} fenced code block(s): ${extracted.standalone} standalone, ` +
+                `${extracted.titled} file(s), ${extracted.fragments} fragment(s) skipped`
+            )
+            await cachePut(node, { kind: "markdown-code-blocks", count: extracted.blocks })
+            return green("ran")
+          } finally {
+            await Fs.rm(directory, { recursive: true, force: true })
           }
-          for (const file of extracted.files) {
-            const path = NodePath.join(directory, ...file.path.split("/"))
-            await Fs.mkdir(NodePath.dirname(path), { recursive: true })
-            await Fs.writeFile(path, file.content, "utf8")
-            files.push(posix(NodePath.relative(root, path)))
-          }
-          if (files.length > 0) {
-            const checked = await spawnNode(node, root, signal, [...(node.argv ?? []), ...files])
-            if (!checked.ok) return fail(checked.error ?? "Markdown code-block parse failed")
-          }
-          log(
-            `${node.label}  checked ${extracted.blocks} fenced code block(s): ${extracted.standalone} standalone, ` +
-              `${extracted.titled} file(s), ${extracted.fragments} fragment(s) skipped`
-          )
-          await cachePut(node, { kind: "markdown-code-blocks", count: extracted.blocks })
-          return green("ran")
         }
         case "Npm.Published": {
           return await withArtifactCache(node, async () => {

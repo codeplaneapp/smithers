@@ -115,6 +115,11 @@ between checks cannot be detected.
 A target's declared `outDir` trees and `outFile` files are captured into
 `<cache-dir>/cas`, keyed by the sha256 of their bytes.
 
+`Go.ModDownload` captures its output directory through a temporary tar archive
+under `<cache-dir>/tmp`. Capture removes the archive on success and failure.
+Markdown code-block checks remove their per-key scratch tree after each run;
+cache hits reuse the result without recreating that tree.
+
 A blob is never trusted by name. An existing one is re-verified against its
 digest and rewritten from the freshly produced file, so a rebuild heals a
 tampered store instead of leaving it poisoned for every later run.

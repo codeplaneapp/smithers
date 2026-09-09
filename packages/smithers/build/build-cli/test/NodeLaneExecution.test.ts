@@ -221,6 +221,17 @@ export const Package = S.Package({ targets: { markdown, tutorial } })
   return root
 }
 
+// These fixtures test extraction and compiler placement with local tool stubs.
+const markdownFixture = async (): Promise<string> => {
+  const root = await fixture()
+  await write(
+    root,
+    "WORKSPACE.ts",
+    workspace.replace("  cache:", "  sandboxes: S.Sandboxes({ default: S.Sandbox.None() }),\n  cache:")
+  )
+  return root
+}
+
 const serve = async (root: string, args: ReadonlyArray<string>) => {
   let exitCode = 0
   let output = ""
@@ -266,7 +277,7 @@ describe("Node lane package execution", () => {
   })
 
   it("compiles Markdown blocks from inside the declaring package", async () => {
-    const root = await fixture()
+    const root = await markdownFixture()
     const result = await serve(root, ["//docs:markdown"])
     expect(result.logs).not.toContain("block outside its package")
     expect(result.exitCode).toBe(0)
@@ -274,15 +285,38 @@ describe("Node lane package execution", () => {
   })
 
   it("concatenates titled Markdown fences into files, writes context pages beside them, and skips fragments", async () => {
-    const root = await fixture()
+    const root = await markdownFixture()
     const result = await serve(root, ["//docs:tutorial"])
     expect(result.logs).not.toContain("fake tsc")
     expect(result.exitCode).toBe(0)
     expect(result.logs).toContain("checked 4 fenced code block(s): 0 standalone, 2 file(s), 1 fragment(s) skipped")
   })
 
+  it("removes Markdown scratch trees across content versions and cache hits", async () => {
+    const root = await markdownFixture()
+    for (const value of [42, 43]) {
+      await write(root, "README.md", "```ts\nconst answer: number = " + value + "\n```\n")
+      const result = await serve(root, ["//:markdown"])
+      expect(result.exitCode, result.output + result.logs).toBe(0)
+      expect(result.logs).toContain("//:markdown  ran")
+    }
+    expect((await serve(root, ["//:markdown"])).logs).toContain("//:markdown  hit")
+    const scratch = await Fs.readdir(NodePath.join(root, "node_modules/.cache/smithers-build"))
+    expect(scratch.filter((name) => name.startsWith("markdown-"))).toEqual([])
+  })
+
+  it("removes Markdown scratch trees when the compiler fails", async () => {
+    const root = await markdownFixture()
+    await write(root, "node_modules/.bin/tsc", "#!/bin/sh\necho compiler-failed >&2\nexit 1\n")
+    const result = await serve(root, ["//:markdown"])
+    expect(result.exitCode).toBe(1)
+    expect(result.logs).toContain("compiler-failed")
+    const scratch = await Fs.readdir(NodePath.join(root, "node_modules/.cache/smithers-build"))
+    expect(scratch.filter((name) => name.startsWith("markdown-"))).toEqual([])
+  })
+
   it("checks Markdown blocks and size budgets with cache hits", async () => {
-    const root = await fixture()
+    const root = await markdownFixture()
     const before = await serve(root, ["//:markdown", "--plan"])
     const markdown = await serve(root, ["//:markdown"])
     expect(markdown.exitCode).toBe(0)
