@@ -75,7 +75,7 @@ const remap = (token: string): string => token.replaceAll("/tmp/.smthrs-sbx", `$
 
 const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = () => undefined) => {
   const calls: Array<Call> = []
-  const containers = new Map<string, { started: boolean; env: Record<string, string> }>()
+  const containers = new Map<string, { started: boolean; env: Record<string, string>; inspect: object }>()
   const canned = (response: Response) =>
     makeHandle({
       pid: ProcessId(1),
@@ -138,13 +138,33 @@ const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = (
             env[line.slice(0, separator)] = line.slice(separator + 1)
           }
         }
-        containers.set(name, { started: false, env })
+        containers.set(name, {
+          started: false,
+          env,
+          inspect: {
+            Config: {
+              Image: args.at(-3),
+              WorkingDir: args[args.indexOf("--workdir") + 1],
+              Labels: Object.fromEntries(args.flatMap((arg, index) =>
+                arg === "--label"
+                  ? [args[index + 1]!.split("=")] :
+                  []
+              ))
+            },
+            HostConfig: {
+              NetworkMode: args[args.indexOf("--network") + 1],
+              Privileged: args.includes("--privileged"),
+              Binds: args.includes("--volume") ? [args[args.indexOf("--volume") + 1]] : []
+            },
+            Mounts: args.includes("--volume") ? [{ Type: "bind", Source: "/", Destination: "/host" }] : []
+          }
+        })
         return canned({ stdout: "0123456789ab\n" })
       }
       if (args[0] === "container" && args[1] === "inspect") {
         const name = args[2]!
         return containers.has(name)
-          ? canned({ stdout: `[{"Id":"0123456789ab","Name":"/${name}"}]\n` })
+          ? canned({ stdout: JSON.stringify([containers.get(name)!.inspect]) })
           : canned({ exitCode: 1, stderr: `Error response from daemon: No such container: ${name}\n` })
       }
       if (args[0] === "start") {
@@ -240,6 +260,96 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("ContainerSandbox", () => {
+  it.effect("rejects unverifiable or altered inspected containers before start or cleanup", () =>
+    Effect.gen(function*() {
+      for (
+        const change of [
+          "labels",
+          "owner",
+          "image",
+          "workdir",
+          "network",
+          "privileged",
+          "binds",
+          "mounts",
+          "json",
+          "multiple",
+          "empty"
+        ] as const
+      ) {
+        let label = ""
+        const fake = engine((args) => {
+          if (args[0] === "create") {
+            label = args[args.indexOf("--label") + 1]!.split("=")[1]!
+            return { exitCode: 125 }
+          }
+          if (args[0] !== "container") return undefined
+          const held = {
+            Config: {
+              Image: change === "image" ? "other" : "img",
+              WorkingDir: change === "workdir" ? "/other" : workdir,
+              Labels: change === "labels"
+                ? {}
+                : { "smithers.dev/sandbox-fingerprint": change === "owner" ? "other" : label }
+            },
+            HostConfig: {
+              NetworkMode: change === "network" ? "host" : "none",
+              Privileged: change === "privileged",
+              Binds: change === "binds" ? ["/:/host"] : null
+            },
+            Mounts: change === "mounts" ? [{ Type: "bind" }] : []
+          }
+          return {
+            stdout: change === "json"
+              ? "{"
+              : JSON.stringify(change === "empty" ? [] : change === "multiple" ? [held, held] : [held])
+          }
+        })
+        const provider = ContainerSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+        expect(yield* Effect.flip(Effect.scoped(provider.acquire("inspect")))).toMatchObject({ code: "unavailable" })
+        expect(fake.calls.some(({ args }) => ["start", "exec", "rm"].includes(args[0]!))).toBe(false)
+      }
+    }))
+
+  it.effect("reattaches matching explicit creation options and reordered environment records", () =>
+    Effect.gen(function*() {
+      for (const createArgs of [[], ["--memory", "1g"], ["--privileged", "--volume", "/:/host"]]) {
+        const fake = engine()
+        const leaked = yield* Scope.make()
+        const options = { spawner: fake.spawner, image: "img", workdir, network: "host", createArgs }
+        const first = yield* Effect.provideService(
+          ContainerSandbox.make({ ...options, env: { A: "a", B: "b" } }).acquire("match"),
+          Scope.Scope,
+          leaked
+        )
+        const second = yield* Effect.scoped(
+          ContainerSandbox.make({ ...options, env: { B: "b", A: "a" } }).acquire("match")
+        )
+        expect(second.remoteId).toBe(first.remoteId)
+        yield* Scope.close(leaked, Exit.void)
+      }
+    }))
+
+  it.effect("refuses a crash-left container with broader isolation", () =>
+    Effect.gen(function*() {
+      const fake = engine()
+      const leaked = yield* Scope.make()
+      const old = ContainerSandbox.make({
+        spawner: fake.spawner,
+        image: "old-image",
+        workdir,
+        network: "host",
+        createArgs: ["--privileged", "--volume", "/:/host"]
+      })
+      yield* Effect.provideService(old.acquire("isolation"), Scope.Scope, leaked)
+      fake.calls.length = 0
+      const next = ContainerSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+      const result = yield* Effect.exit(Effect.scoped(next.acquire("isolation")))
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(fake.calls.some(({ args }) => ["start", "exec", "rm"].includes(args[0]!))).toBe(false)
+      yield* Scope.close(leaked, Exit.void)
+    }))
+
   it.effect("refuses creation env values that the CLI env-file cannot represent before spawning", () =>
     Effect.gen(function*() {
       for (const value of ["first\nsecond", "first\rsecond", "first\u0000second"]) {
@@ -343,6 +453,8 @@ describe("ContainerSandbox", () => {
         "/dev/stdin",
         "--memory",
         "1g",
+        "--label",
+        expect.stringMatching(/^smithers\.dev\/sandbox-fingerprint=v1-[A-Za-z0-9_-]{43}$/),
         "img:tag",
         "sleep",
         "infinity"

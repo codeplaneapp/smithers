@@ -20,7 +20,15 @@ interface Container {
   readonly managedAgents?: ReadonlyArray<ManagedAgent> | undefined
 }
 
+interface Tag {
+  readonly key?: string | undefined
+  readonly value?: string | undefined
+}
+
 interface Task {
+  readonly startedBy?: string | undefined
+  readonly taskDefinitionArn?: string | undefined
+  readonly tags?: ReadonlyArray<Tag> | undefined
   readonly taskArn?: string | undefined
   readonly lastStatus?: string | undefined
   readonly desiredStatus?: string | undefined
@@ -41,6 +49,7 @@ interface AwsVpcConfiguration {
 }
 
 interface RunTaskInput {
+  readonly tags?: Array<Tag> | undefined
   readonly cluster: string
   readonly taskDefinition: string
   readonly count: number
@@ -69,6 +78,7 @@ interface RunTaskOutput {
 }
 
 interface DescribeTasksInput {
+  readonly include?: Array<"TAGS"> | undefined
   readonly cluster: string
   readonly tasks: Array<string>
 }

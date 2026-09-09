@@ -10,6 +10,7 @@ import type { Scope } from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
+import { configurationFingerprint } from "../internal/configurationFingerprint.ts"
 import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelledStatus, cancelMarker, killScript } from "../internal/killScript.ts"
@@ -100,6 +101,8 @@ const attempt = <A>(thunk: () => Promise<A>, code: ProviderError["code"], messag
     catch: (cause) => failure(code, message, cause)
   })
 
+const fingerprintTag = "smithers.dev/sandbox-fingerprint"
+
 const startedByOf = (session: string): string => {
   const slug = sessionSlug(session).replaceAll(/[^A-Za-z0-9/_-]/g, "-")
   if (slug.length <= 36) return slug
@@ -155,7 +158,8 @@ interface Leftover {
 const leftoverTasks = (
   options: AwsSandboxOptions,
   startedBy: string,
-  container: string | undefined
+  container: string | undefined,
+  fingerprint: string
 ): Effect.Effect<{ readonly adopt: Leftover | undefined; readonly stale: ReadonlyArray<string> }, ProviderError> =>
   Effect.gen(function*() {
     const listed = yield* attempt(
@@ -166,15 +170,28 @@ const leftoverTasks = (
     const unique = [...new Set(listed.taskArns ?? [])].sort()
     if (unique.length === 0) return { adopt: undefined, stale: [] }
     const described = yield* attempt(
-      () => options.sdk.describeTasks({ cluster: options.cluster, tasks: unique }),
+      () => options.sdk.describeTasks({ cluster: options.cluster, tasks: unique, include: ["TAGS"] }),
       "unavailable",
       `could not describe the tasks started by ${startedBy}`
     )
-    const live = (described.tasks ?? []).flatMap((task) =>
-      task.taskArn === undefined || task.lastStatus === "STOPPED"
-        ? []
-        : [{ taskArn: task.taskArn, ready: agentReady(task, container) }]
-    ).sort((left, right) => left.taskArn.localeCompare(right.taskArn))
+    // Verify every candidate before registering finalizers or stopping duplicates.
+    const live: Array<Leftover> = []
+    for (const arn of unique) {
+      const task = described.tasks?.find((task) => task.taskArn === arn)
+      if (task?.lastStatus === "STOPPED") continue
+      const definition = options.taskDefinition
+      if (
+        task === undefined || task.startedBy !== startedBy ||
+        !task.tags?.some((tag) => tag.key === fingerprintTag && tag.value === fingerprint) ||
+        (definition !== undefined && (!/:\d+$/.test(definition) ||
+          !(task.taskDefinitionArn === definition ||
+            (!definition.startsWith("arn:") && task.taskDefinitionArn?.endsWith(`/${definition}`)))))
+      ) {
+        return yield* Effect.fail(failure("unavailable", `${arn} does not match the requested configuration or owner`))
+      }
+      live.push({ taskArn: arn, ready: agentReady(task, container) })
+    }
+    live.sort((left, right) => left.taskArn.localeCompare(right.taskArn))
     const [first, ...rest] = live
     if (first === undefined) return { adopt: undefined, stale: [] }
     return { adopt: first, stale: rest.map((task) => task.taskArn) }
@@ -310,7 +327,8 @@ const runTask = (
   options: AwsSandboxOptions,
   taskDefinition: string,
   startedBy: string,
-  container: string | undefined
+  container: string | undefined,
+  fingerprint: string
 ): Effect.Effect<RunTaskOutput, ProviderError> => {
   const roleOverrides = {
     ...options.taskRoleArn === undefined ? {} : { taskRoleArn: options.taskRoleArn },
@@ -340,6 +358,7 @@ const runTask = (
           }
         },
         startedBy,
+        tags: [{ key: fingerprintTag, value: fingerprint }],
         ...options.platformVersion === undefined ? {} : { platformVersion: options.platformVersion },
         ...Object.keys(roleOverrides).length === 0 ? {} : { overrides: roleOverrides }
       }),
@@ -503,6 +522,12 @@ export const make = (options: AwsSandboxOptions): Provider => ({
     Effect.gen(function*() {
       const workdir = options.workdir ?? "/workspace"
       const startedBy = startedByOf(sessionKey)
+      const { sdk: _sdk, exec: _exec, pollIntervalMs: _poll, maxPollAttempts: _attempts, ...configuration } = options
+      const fingerprint = yield* configurationFingerprint({
+        ...configuration,
+        provider: "AwsSandbox/v1",
+        owner: sessionKey
+      })
       const generatedContainer = options.container ?? "sandbox"
       let imageOptions: AwsSandboxImageOptions | undefined
       let taskDefinition: string
@@ -517,7 +542,7 @@ export const make = (options: AwsSandboxOptions): Provider => ({
       // Reattach before provisioning: the same key names the same machine
       // wherever one is still running. An adopted task is released the same
       // way a fresh one is, so closing the scope always leaves nothing behind.
-      const leftover = yield* leftoverTasks(options, startedBy, container)
+      const leftover = yield* leftoverTasks(options, startedBy, container, fingerprint)
       // Duplicates go before anything else: an adopter that provisioned beside
       // them would leave the key owning more machines every incarnation.
       if (leftover.stale.length > 0) yield* stopTasks(options, leftover.stale)
@@ -535,7 +560,7 @@ export const make = (options: AwsSandboxOptions): Provider => ({
         })
         : yield* Effect.gen(function*() {
           const output = yield* Effect.acquireRelease(
-            runTask(options, taskDefinition, startedBy, container),
+            runTask(options, taskDefinition, startedBy, container, fingerprint),
             (output) => stopTasks(options, taskArnsOf(output))
           )
           const started = taskArnsOf(output)[0]

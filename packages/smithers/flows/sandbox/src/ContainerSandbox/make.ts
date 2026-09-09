@@ -5,9 +5,11 @@
  */
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { configurationFingerprint } from "../internal/configurationFingerprint.ts"
 import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelGuard, killScript } from "../internal/killScript.ts"
@@ -55,6 +57,20 @@ const parentOf = (path: string): string | undefined => {
 
 /** The session-private guest directory spawned commands record their pids in. */
 const pidDirectory = "/tmp/.smthrs-sbx"
+const fingerprintLabel = "smithers.dev/sandbox-fingerprint"
+const inspectedContainer = Schema.Array(Schema.Struct({
+  Config: Schema.Struct({
+    Image: Schema.String,
+    WorkingDir: Schema.String,
+    Labels: Schema.Record(Schema.String, Schema.String)
+  }),
+  HostConfig: Schema.Struct({
+    NetworkMode: Schema.String,
+    Privileged: Schema.Boolean,
+    Binds: Schema.optional(Schema.NullOr(Schema.Array(Schema.String)))
+  }),
+  Mounts: Schema.Array(Schema.Struct({ Type: Schema.String }))
+}))
 
 /**
  * Builds a sandbox provider whose machines are containers this host's
@@ -66,7 +82,7 @@ const pidDirectory = "/tmp/.smthrs-sbx"
  * reads stream bytes out through `cat`, writes stream bytes in through the
  * exec's stdin, and closing the scope removes the container with force,
  * which also ends everything running inside it. A container the name already
- * holds — a crashed run's leftover — is reattached rather than refused, so
+ * holds — a crashed run's leftover — is reattached only when its ownership and configuration match, so
  * resuming a session key lands in the machine it had.
  *
  * `spawn` honors the whole session contract, not just the command line. A
@@ -141,6 +157,16 @@ export const make = (options: ContainerSandboxOptions): Provider => {
           creationEnv.map(([key, value]) => `${key}=${value}\n`).join("")
         )
         const name = `${prefix}${sessionSlug(sessionKey)}`
+        const fingerprint = yield* configurationFingerprint({
+          provider: "ContainerSandbox/v1",
+          owner: sessionKey,
+          name,
+          image: options.image,
+          workdir,
+          network,
+          env: options.env ?? {},
+          createArgs: options.createArgs ?? []
+        })
         // CREATION IS ITS OWN RESOURCE, and starting and preparing come after
         // it rather than inside it. `acquireRelease` registers a finalizer only
         // once its acquire SUCCEEDS, so folding `start` and the workspace
@@ -160,6 +186,8 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               network,
               ...envFile === undefined ? [] : ["--env-file", "/dev/stdin"],
               ...options.createArgs ?? [],
+              "--label",
+              `${fingerprintLabel}=${fingerprint}`,
               options.image,
               "sleep",
               "infinity"
@@ -177,6 +205,27 @@ export const make = (options: ContainerSandboxOptions): Provider => {
                 new ProviderError({
                   code: "unavailable",
                   message: `the container ${name} could not be created from ${options.image}: ${created.stderr.trim()}`
+                })
+              )
+            }
+            const inspected = yield* Effect.try({
+              try: () =>
+                Schema.decodeUnknownSync(inspectedContainer)(JSON.parse(new TextDecoder().decode(existing.stdout))),
+              catch: providerFailure("unavailable", `the container ${name} has no verifiable configuration`)
+            })
+            const held = inspected[0]
+            if (
+              held === undefined || inspected.length !== 1 ||
+              held.Config.Labels[fingerprintLabel] !== fingerprint ||
+              held.Config.Image !== options.image || held.Config.WorkingDir !== workdir ||
+              held.HostConfig.NetworkMode !== network ||
+              ((options.createArgs?.length ?? 0) === 0 && (held.HostConfig.Privileged ||
+                (held.HostConfig.Binds?.length ?? 0) > 0 || held.Mounts.some((mount) => mount.Type === "bind")))
+            ) {
+              return yield* Effect.fail(
+                new ProviderError({
+                  code: "unavailable",
+                  message: `the container ${name} does not match the requested configuration or owner`
                 })
               )
             }

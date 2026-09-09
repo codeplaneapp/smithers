@@ -45,6 +45,8 @@ interface Fault {
 type ListTasksInput = Parameters<AwsSandbox.Sdk["listTasks"]>[0]
 
 interface FakeTask {
+  tags?: RunTaskInput["tags"]
+  taskDefinition?: string | undefined
   readonly arn: string
   readonly startedBy: string
   lastStatus: string
@@ -164,6 +166,8 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     fake.running.push({
       arn: taskArn,
       startedBy: input.startedBy,
+      tags: input.tags,
+      taskDefinition: input.taskDefinition,
       lastStatus: "PROVISIONING",
       desiredStatus: "RUNNING"
     })
@@ -204,7 +208,12 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
           stored?.desiredStatus ?? "RUNNING"
         )
         if (stored !== undefined && described.lastStatus !== undefined) stored.lastStatus = described.lastStatus
-        return described
+        return {
+          ...described,
+          startedBy: stored?.startedBy,
+          tags: stored?.tags,
+          taskDefinitionArn: stored?.taskDefinition
+        }
       })
     }
   },
@@ -226,7 +235,10 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     return fake.registerWithoutArn === true
       ? { taskDefinition: {} }
       : {
-        taskDefinition: { taskDefinitionArn: `arn:aws:ecs:us-west-2:123456789012:task-definition/${input.family}:1` }
+        taskDefinition: {
+          taskDefinitionArn:
+            `arn:aws:ecs:us-west-2:123456789012:task-definition/${input.family}:${fake.registerInputs.length}`
+        }
       }
   },
   async deregisterTaskDefinition(input) {
@@ -430,6 +442,104 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("AwsSandbox", () => {
+  it.effect("verifies task tags, owner, and pinned definition before adoption or duplicate cleanup", () =>
+    Effect.gen(function*() {
+      for (
+        const change of [
+          "tags",
+          "fingerprint",
+          "owner",
+          "definition",
+          "missingDefinition",
+          "arnMismatch",
+          "unpinned",
+          "duplicate"
+        ] as const
+      ) {
+        const fake = fakeEcs()
+        const leaked = yield* Scope.make()
+        const provider = taskDefinitionProvider(
+          fake,
+          change === "unpinned"
+            ? { taskDefinition: "family" }
+            : change === "arnMismatch"
+            ? { taskDefinition: "arn:aws:ecs:us-west-2:123:task-definition/family:7" }
+            : {}
+        )
+        yield* Effect.provideService(provider.acquire("verify"), Scope.Scope, leaked)
+        const stored = fake.running[0]!
+        if (change === "tags") stored.tags = undefined
+        if (change === "fingerprint") stored.tags = [{ key: "smithers.dev/sandbox-fingerprint", value: "other" }]
+        if (change === "definition" || change === "arnMismatch") stored.taskDefinition = "family:8"
+        if (change === "missingDefinition") stored.taskDefinition = undefined
+        if (change === "duplicate") fake.running.push({ ...stored, arn: `${stored.arn}-duplicate`, tags: [] })
+        const sdk = sdkOf(fake)
+        const next = change === "owner" ?
+          taskDefinitionProvider(fake, {
+            sdk: {
+              ...sdk,
+              describeTasks: async (input: DescribeTasksInput) => {
+                const output = await sdk.describeTasks(input)
+                return { ...output, tasks: output.tasks?.map((task) => ({ ...task, startedBy: "someone-else" })) }
+              }
+            }
+          }) :
+          provider
+        expect(yield* Effect.flip(Effect.scoped(next.acquire("verify")))).toMatchObject({ code: "unavailable" })
+        expect(fake.describeInputs.at(-1)?.include).toEqual(["TAGS"])
+        expect(fake.runInputs).toHaveLength(1)
+        expect(fake.stopInputs).toHaveLength(0)
+        yield* Scope.close(leaked, Exit.void)
+      }
+    }))
+
+  it.effect("reattaches matching generated definitions and revision-qualified task ARNs", () =>
+    Effect.gen(function*() {
+      for (const generated of [false, true]) {
+        const fake = fakeEcs()
+        const leaked = yield* Scope.make()
+        const provider = generated ?
+          AwsSandbox.make({
+            sdk: sdkOf(fake),
+            image: "img",
+            taskRoleArn: "role",
+            cluster: "cluster-arn",
+            region: "us-west-2",
+            subnets: ["subnet-a"]
+          }) :
+          taskDefinitionProvider(fake)
+        const first = yield* Effect.provideService(provider.acquire("match"), Scope.Scope, leaked)
+        if (!generated) fake.running[0]!.taskDefinition = "arn:aws:ecs:us-west-2:123:task-definition/family:7"
+        const second = yield* Effect.scoped(provider.acquire("match"))
+        expect(second.remoteId).toBe(first.remoteId)
+        expect(fake.runInputs).toHaveLength(1)
+        yield* Scope.close(leaked, Exit.void)
+      }
+    }))
+
+  it.effect("refuses a crash-left task with a different network or role", () =>
+    Effect.gen(function*() {
+      const fake = fakeEcs()
+      const leaked = yield* Scope.make()
+      const options = {
+        sdk: sdkOf(fake),
+        region: "us-west-2",
+        cluster: "cluster-arn",
+        subnets: ["subnet-a"],
+        taskDefinition: "family:7"
+      }
+      yield* Effect.provideService(
+        AwsSandbox.make({ ...options, assignPublicIp: true, taskRoleArn: "administrator" }).acquire("isolation"),
+        Scope.Scope,
+        leaked
+      )
+      const result = yield* Effect.exit(Effect.scoped(AwsSandbox.make(options).acquire("isolation")))
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(fake.runInputs).toHaveLength(1)
+      expect(fake.stopInputs).toHaveLength(0)
+      yield* Scope.close(leaked, Exit.void)
+    }))
+
   it.effect("fails closed before sending sensitive input through a CLI-only transport", () =>
     Effect.gen(function*() {
       const cli = fakeCli()
@@ -982,6 +1092,8 @@ describe("AwsSandbox", () => {
       const orphan = "arn:aws:ecs:us-west-2:123456789012:task/cluster/task-99"
       duplicated.running.push({
         arn: orphan,
+        tags: duplicated.runInputs[0]!.tags,
+        taskDefinition: duplicated.runInputs[0]!.taskDefinition,
         startedBy: duplicated.runInputs[0]!.startedBy,
         lastStatus: "RUNNING",
         desiredStatus: "RUNNING"
@@ -1146,17 +1258,19 @@ describe("AwsSandbox", () => {
       expect(stopped.runInputs).toHaveLength(2)
       yield* Scope.close(leaked, Exit.void)
 
-      // A describe that answers with an empty list, and one that answers with
-      // no `tasks` field at all, both read the same way: nothing to adopt, so
-      // provision.
+      // A listed task missing from describe cannot be verified, so fail
+      // without provisioning beside it or stopping it.
       for (const [step, key] of [["empty", "aws/empty"], ["missing", "aws/missing"]] as const) {
         const bare = fakeEcs()
         const bareProvider = transportProvider(bare, fakeCli())
         const leakedToo = yield* Scope.make()
         yield* Effect.provideService(bareProvider.acquire(key), Scope.Scope, leakedToo)
         bare.describeSteps.push(step)
-        yield* acquired(bareProvider, () => Effect.void, key)
-        expect(bare.runInputs).toHaveLength(2)
+        expect(yield* Effect.flip(acquired(bareProvider, () => Effect.void, key))).toMatchObject({
+          code: "unavailable"
+        })
+        expect(bare.runInputs).toHaveLength(1)
+        expect(bare.stopInputs).toHaveLength(0)
         yield* Scope.close(leakedToo, Exit.void)
       }
     }), 60_000)

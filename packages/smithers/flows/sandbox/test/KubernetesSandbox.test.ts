@@ -13,6 +13,7 @@ import {
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { sessionSlug } from "../src/internal/sessionSlug.ts"
 import * as KubernetesSandbox from "../src/KubernetesSandbox/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "../src/Sandbox/index.ts"
@@ -74,6 +75,10 @@ interface Response {
 }
 
 interface Pod {
+  manifest: {
+    metadata: { labels: Record<string, string> }
+    spec: { containers: Array<{ name: string; image: string }> }
+  }
   phase: string
   readonly env: Record<string, string>
 }
@@ -132,7 +137,14 @@ const cluster = (fault: (args: ReadonlyArray<string>) => Response | undefined = 
           stdout: JSON.stringify({
             apiVersion: "v1",
             kind: "Pod",
-            metadata: { name: args[1] },
+            metadata: {
+              name: args[1],
+              labels: Object.fromEntries(
+                args[args.indexOf("--labels") + 1]!.split(",").map((label) =>
+                  label.split("=")
+                )
+              )
+            },
             spec: {
               containers: [{ name: args[1], image: args[args.indexOf("--image") + 1] }]
             }
@@ -150,13 +162,22 @@ const cluster = (fault: (args: ReadonlyArray<string>) => Response | undefined = 
             entry: { name: string; value: string }
           ) => [entry.name, entry.value])
         )
-        pods.set(name, { phase: "Running", env })
+        pods.set(name, {
+          phase: "Running",
+          env,
+          manifest: manifest ?? {
+            metadata: {
+              labels: args.includes("--labels")
+                ? Object.fromEntries(args[args.indexOf("--labels") + 1]!.split(",").map((label) => label.split("=")))
+                : {}
+            },
+            spec: { containers: [{ name, image: args[args.indexOf("--image") + 1]! }] }
+          }
+        })
         return canned({ stdout: `pod/${name} created\n` })
       }
       if (args[0] === "wait") {
-        const name = args.find((arg) =>
-          arg.startsWith("pod/")
-        )?.slice(4) ?? ""
+        const name = args.find((arg) => arg.startsWith("pod/"))?.slice(4) ?? ""
         const pod = pods.get(name)
         if (pod === undefined) {
           return canned({ exitCode: 1, stderr: `Error from server (NotFound): pods "${name}" not found\n` })
@@ -171,7 +192,11 @@ const cluster = (fault: (args: ReadonlyArray<string>) => Response | undefined = 
         const pod = pods.get(args[2]!)
         return pod === undefined
           ? canned({ exitCode: 1, stderr: `Error from server (NotFound): pods "${args[2]}" not found\n` })
-          : canned({ stdout: pod.phase })
+          : canned({
+            stdout: args.at(-1) === "json"
+              ? JSON.stringify({ ...pod.manifest, status: { phase: pod.phase } })
+              : pod.phase
+          })
       }
       if (args[0] === "delete") {
         const name = args[1]!.slice(4)
@@ -244,6 +269,122 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("KubernetesSandbox", () => {
+  it.effect("rejects missing ownership and altered live or terminal Pod specifications", () =>
+    Effect.gen(function*() {
+      for (
+        const change of [
+          "labels",
+          "owner",
+          "image",
+          "serviceAccount",
+          "hostNetwork",
+          "hostPID",
+          "hostIPC",
+          "privileged",
+          "hostPath",
+          "json"
+        ] as const
+      ) {
+        let label = ""
+        const fake = cluster((args) => {
+          if (args[0] === "run") {
+            label = args[args.indexOf("--labels") + 1]!.split("=")[1]!
+            return { exitCode: 1, stderr: "AlreadyExists" }
+          }
+          if (args[0] !== "get") return undefined
+          return {
+            stdout: change === "json" ? "{" : JSON.stringify({
+              metadata: {
+                labels: change === "labels"
+                  ? {}
+                  : { "smithers.dev/sandbox-fingerprint": change === "owner" ? "other" : label }
+              },
+              spec: {
+                serviceAccountName: change === "serviceAccount" ? "admin" : "runner",
+                hostNetwork: change === "hostNetwork",
+                hostPID: change === "hostPID",
+                hostIPC: change === "hostIPC",
+                containers: [{
+                  name: args[2],
+                  image: change === "image" ? "other" : "img",
+                  securityContext: { privileged: change === "privileged" }
+                }],
+                volumes: change === "hostPath" ? [{ hostPath: { path: "/" } }] : []
+              },
+              status: { phase: "Succeeded" }
+            })
+          }
+        })
+        const provider = KubernetesSandbox.make({
+          spawner: fake.spawner,
+          image: "img",
+          workdir,
+          serviceAccount: "runner"
+        })
+        expect(yield* Effect.flip(Effect.scoped(provider.acquire("inspect")))).toMatchObject({ code: "unavailable" })
+        expect(fake.calls.some(({ args }) => ["wait", "exec", "delete"].includes(args[0]!))).toBe(false)
+      }
+    }))
+
+  it.effect("reattaches matching Pod options and accepts ordinary non-host volumes", () =>
+    Effect.gen(function*() {
+      for (const createArgs of [[], ["--image-pull-policy", "Never"]]) {
+        let label = ""
+        const fake = cluster((args) => {
+          if (args[0] === "run") {
+            label = args[args.indexOf("--labels") + 1]!.split("=")[1]!
+            return { exitCode: 1, stderr: "AlreadyExists" }
+          }
+          if (args[0] === "get") {
+            return {
+              stdout: JSON.stringify({
+                metadata: { labels: { "smithers.dev/sandbox-fingerprint": label } },
+                spec: {
+                  serviceAccountName: "runner",
+                  containers: [
+                    { name: "sidecar", image: "sidecar" },
+                    { name: args[2], image: "img", securityContext: { privileged: false } }
+                  ],
+                  volumes: [{ emptyDir: {} }]
+                },
+                status: { phase: "Running" }
+              })
+            }
+          }
+          return {}
+        })
+        const provider = KubernetesSandbox.make({
+          spawner: fake.spawner,
+          image: "img",
+          workdir,
+          serviceAccount: "runner",
+          createArgs
+        })
+        yield* Effect.scoped(provider.acquire("match"))
+        expect(fake.calls.some(({ args }) => args[0] === "wait")).toBe(true)
+      }
+    }))
+
+  it.effect("refuses a crash-left Pod with a different image or service account", () =>
+    Effect.gen(function*() {
+      const fake = cluster()
+      const leaked = yield* Scope.make()
+      const old = KubernetesSandbox.make({
+        spawner: fake.spawner,
+        image: "old-image",
+        workdir,
+        serviceAccount: "administrator",
+        createArgs: ["--privileged"]
+      })
+      yield* Effect.provideService(old.acquire("isolation"), Scope.Scope, leaked)
+      fake.calls.length = 0
+      const next = KubernetesSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+      const result = yield* Effect.exit(Effect.scoped(next.acquire("isolation")))
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(fake.calls.some(({ args }) => ["wait", "exec", "delete"].includes(args[0]!))).toBe(false)
+      yield* Scope.close(leaked, Exit.void)
+    }))
+
   it.effect(
     "merges creation environment into the stdin manifest and refuses failed rendering",
     () =>
@@ -252,7 +393,12 @@ describe("KubernetesSandbox", () => {
           args.includes("--dry-run=client") ?
             {
               stdout: JSON.stringify({
-                metadata: { name: args[1] },
+                metadata: {
+                  name: args[1],
+                  labels: Object.fromEntries(
+                    args[args.indexOf("--labels") + 1]!.split(",").map((label) => label.split("="))
+                  )
+                },
                 spec: {
                   containers: [
                     { name: "sidecar" },
@@ -400,7 +546,7 @@ describe("KubernetesSandbox", () => {
         "--restart",
         "Never",
         "--labels",
-        "app=sandbox,tier=test",
+        expect.stringMatching(/^app=sandbox,tier=test,smithers\.dev\/sandbox-fingerprint=v1-[A-Za-z0-9_-]{43}$/),
         "--override-type",
         "strategic"
       ])
@@ -467,7 +613,7 @@ describe("KubernetesSandbox", () => {
       expect(Array.from(resumed.bytes)).toEqual([0, 255, 1])
       expect(fake.calls.filter((call) => call.args[0] === "run")).toHaveLength(2)
       // A live leftover is adopted, so its phase was inspected, not assumed.
-      expect(fake.calls.some((call) => call.args[0] === "get" && call.args.includes("jsonpath={.status.phase}")))
+      expect(fake.calls.some((call) => call.args[0] === "get" && call.args.at(-1) === "json"))
         .toBe(true)
       expect(yield* Scope.close(leaked, Exit.void)).toBeUndefined()
     }), 30_000)
@@ -495,16 +641,15 @@ describe("KubernetesSandbox", () => {
         expect(fake.pods.size).toBe(0)
         expect(Exit.isSuccess(yield* Effect.exit(Scope.close(leaked, Exit.void)))).toBe(true)
 
-        // A phase that cannot be read leaves the reattach path as it was, and
-        // the Ready wait reports the unusable machine.
+        // An unreadable Pod is neither adopted nor removed.
         const unreadable = cluster((args) => args[0] === "get" ? { exitCode: 1, stderr: "rbac denied" } : undefined)
         const blindProvider = KubernetesSandbox.make({ spawner: unreadable.spawner, image: "img", workdir })
         const leakedToo = yield* Scope.make()
         const seeded = yield* Effect.provideService(blindProvider.acquire("blind"), Scope.Scope, leakedToo)
         unreadable.pods.get(seeded.remoteId)!.phase = "Succeeded"
         const waitFailure = yield* Effect.flip(acquired(blindProvider, Effect.succeed, "blind"))
-        expect((waitFailure as ProviderError).message).toContain("did not become Ready")
-        expect(unreadable.pods.size).toBe(0)
+        expect((waitFailure as ProviderError).message).toContain("could not be inspected")
+        expect(unreadable.pods.size).toBe(1)
         yield* Scope.close(leakedToo, Exit.void)
 
         // A recreation the server refuses is an acquire failure, with nothing
@@ -819,7 +964,16 @@ describe("KubernetesSandbox", () => {
         resources: {},
         namePrefix: "INVALID_PREFIX_THAT_IS_MUCH_TOO_LONG_TO_FIT_WITH_THE_COMPLETE_SESSION_SLUG_"
       })
-      const session = yield* Effect.scoped(provider.acquire("UPPER_case.with/a/very/long/session/key"))
+      const key = "UPPER_case.with/a/very/long/session/key"
+      const session = yield* Effect.scoped(provider.acquire(key))
+      const otherKey = `${key}/other`
+      const other = yield* Effect.scoped(provider.acquire(otherKey))
+      expect(other.remoteId).not.toBe(session.remoteId)
+      for (const [id, sessionKey] of [[session.remoteId, key], [other.remoteId, otherKey]] as const) {
+        const digest = sessionSlug(sessionKey).slice(-16).toLowerCase()
+        expect(digest).toMatch(/^[a-f0-9]{16}$/)
+        expect(id.endsWith(`-${digest}`)).toBe(true)
+      }
       expect(session.remoteId).toMatch(/^[a-z0-9-]+$/)
       expect(session.remoteId).toHaveLength(63)
       const create = fake.calls[0]!.args

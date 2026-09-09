@@ -5,10 +5,12 @@
  */
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { decodeBase64Bytes, encodeBase64Bytes } from "../internal/base64.ts"
+import { configurationFingerprint } from "../internal/configurationFingerprint.ts"
 import { environmentInput } from "../internal/environmentInput.ts"
 import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelGuard, killScript } from "../internal/killScript.ts"
@@ -67,6 +69,25 @@ const decoder = new TextDecoder()
 const pidDirectory = "/tmp/.smthrs-sbx"
 const readyTimeout = "300s"
 const maximumPodNameLength = 63
+const fingerprintLabel = "smithers.dev/sandbox-fingerprint"
+const inspectedPod = Schema.Struct({
+  metadata: Schema.Struct({ labels: Schema.Record(Schema.String, Schema.String) }),
+  spec: Schema.Struct({
+    hostNetwork: Schema.optional(Schema.Boolean),
+    hostPID: Schema.optional(Schema.Boolean),
+    hostIPC: Schema.optional(Schema.Boolean),
+    serviceAccountName: Schema.optional(Schema.String),
+    containers: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        image: Schema.String,
+        securityContext: Schema.optional(Schema.Struct({ privileged: Schema.optional(Schema.Boolean) }))
+      })
+    ),
+    volumes: Schema.optional(Schema.Array(Schema.Struct({ hostPath: Schema.optional(Schema.Unknown) })))
+  }),
+  status: Schema.Struct({ phase: Schema.String })
+})
 
 /**
  * The phases in which a Pod will never run another command. A leftover in one
@@ -140,7 +161,6 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
   const program = options.program ?? "kubectl"
   const workdir = options.workdir ?? "/workspace"
   const prefix = options.namePrefix ?? "smthrs-sbx-"
-  const labels = Object.entries(options.labels ?? {})
   const globals = [
     ...options.context === undefined ? [] : ["--context", options.context],
     ...options.namespace === undefined ? [] : ["--namespace", options.namespace],
@@ -171,6 +191,23 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
       Effect.gen(function*() {
         const environment = options.env ?? {}
         const name = podNameOf(prefix, sessionKey)
+        const fingerprint = yield* configurationFingerprint({
+          provider: "KubernetesSandbox/v1",
+          owner: sessionKey,
+          name,
+          image: options.image,
+          workdir,
+          namespace: options.namespace,
+          context: options.context,
+          kubeconfig: options.kubeconfig,
+          env: environment,
+          labels: options.labels ?? {},
+          resources: options.resources,
+          serviceAccount: options.serviceAccount,
+          nodeSelector: options.nodeSelector,
+          createArgs: options.createArgs ?? []
+        })
+        const labels = Object.entries({ ...options.labels, [fingerprintLabel]: fingerprint })
         const createArgs = [
           "run",
           name,
@@ -178,9 +215,8 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
           options.image,
           "--restart",
           "Never",
-          ...labels.length === 0
-            ? []
-            : ["--labels", labels.map(([key, value]) => `${key}=${value}`).join(",")],
+          "--labels",
+          labels.map(([key, value]) => `${key}=${value}`).join(","),
           ...overrideArgs(name, options),
           ...options.createArgs ?? [],
           "--command",
@@ -231,10 +267,29 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
             // The name is held by a previous acquire's leftover. A live one
             // is reattached; one in a terminal phase is replaced, because the
             // Ready wait below would otherwise block on it until its timeout.
-            // A phase that cannot be read leaves the reattach path as it was,
-            // and the Ready wait decides whether the machine is usable.
-            const phase = yield* run(["get", "pod", name, "-o", "jsonpath={.status.phase}"])
-            if (phase.code !== 0 || !terminalPhases.has(decoder.decode(phase.stdout).trim())) return
+            // Validate ownership before adopting OR deleting a terminal Pod.
+            const inspected = yield* step(`the pod ${name} could not be inspected`, ["get", "pod", name, "-o", "json"])
+            const held = yield* Effect.try({
+              try: () => Schema.decodeUnknownSync(inspectedPod)(JSON.parse(decoder.decode(inspected.stdout))),
+              catch: providerFailure("unavailable", `the pod ${name} has no verifiable configuration`)
+            })
+            if (
+              held.metadata.labels[fingerprintLabel] !== fingerprint ||
+              !held.spec.containers.some((container) => container.name === name && container.image === options.image) ||
+              (options.serviceAccount !== undefined && held.spec.serviceAccountName !== options.serviceAccount) ||
+              ((options.createArgs?.length ?? 0) === 0 && (held.spec.hostNetwork === true ||
+                held.spec.hostPID === true || held.spec.hostIPC === true ||
+                held.spec.containers.some((container) => container.securityContext?.privileged === true) ||
+                held.spec.volumes?.some((volume) => volume.hostPath !== undefined)))
+            ) {
+              return yield* Effect.fail(
+                new ProviderError({
+                  code: "unavailable",
+                  message: `the pod ${name} does not match the requested configuration or owner`
+                })
+              )
+            }
+            if (!terminalPhases.has(held.status.phase)) return
             yield* step(`the finished pod ${name} could not be replaced`, [
               "delete",
               `pod/${name}`,
