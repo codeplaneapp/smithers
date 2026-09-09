@@ -158,3 +158,34 @@ test("the register exists and every pin in the tree appears in it", () => {
   assert.match(readFileSync(notesPath, "utf8"), /## Known test pins/)
   assert.deepEqual(undocumentedPins(), [])
 })
+
+/**
+ * Every local link in the register resolves to a file in this checkout, and a
+ * link carrying a fragment resolves to a heading in that file.
+ *
+ * The register moved its supporting links to `pages/` before that tree was
+ * deleted, so every one of them pointed at a missing file while still reading
+ * as the authority on the release posture. A link inventory is the only thing
+ * that notices, because prose cannot go stale loudly.
+ */
+test("every local link in the register resolves", () => {
+  const notes = readFileSync(notesPath, "utf8")
+  const slug = (heading) =>
+    heading.toLowerCase().replace(/`/g, "").replace(/[^a-z0-9 -]/g, "").trim().replace(/\s+/g, "-")
+  const dead = []
+  for (const link of notes.matchAll(/\]\(([^)]+)\)/g)) {
+    const [target, fragment] = link[1].split("#")
+    if (target === "" || /^https?:/.test(target)) continue
+    const path = resolve(dirname(notesPath), target)
+    if (!existsSync(path)) {
+      dead.push(`${link[1]}: no such file`)
+      continue
+    }
+    if (fragment === undefined) continue
+    const headings = readFileSync(path, "utf8").matchAll(/^#{1,6}\s+(.+?)\s*$/gm)
+    if (![...headings].some((heading) => slug(heading[1]) === fragment)) {
+      dead.push(`${link[1]}: no such heading`)
+    }
+  }
+  assert.deepEqual(dead, [])
+})

@@ -1,52 +1,62 @@
-# Private alpha notes
+# Test-pin register and release-candidate posture
 
-Smithers release 1 is an engine-group private-alpha pilot: a pre-1.0 durable
-execution library for invited operators, not a general-purpose control-plane
-release. These notes are the one-page ledger of its shipped posture and limits,
-including things a reader would otherwise have to discover from the test tree.
-They are statements of current behavior, not promises of planned behavior.
+This file is the register every test pin must appear in, and the one-page
+ledger of the 1.0.0-rc.0 posture and limits a reader would otherwise have to
+discover from the test tree. The release train packs the `engine`, `agent` and
+`tooling` groups at one synchronized version, and `publishedPackages` in
+`scripts/pack-release.mjs` is the roster. These are statements of current
+behavior, not promises of planned behavior.
 
 ## Support posture
 
-The shipped pilot target is **Node.js 22 with local SQLite**. Package manifests
-require Node.js `>=22.19.0`, and CI pins Node `22.19.0`. The durable database
-backend is `@effect/sql-sqlite-node`; see the [SQLite operating envelope](../pages/sqlite-operating-envelope.md)
+The supported durable target is **Node.js with local SQLite**. Published
+manifests declare `engines.node` as `>=22.19.0` or `^22.19.0 || >=24.11.0`, CI
+pins Node `22.19.0`, and the release workflow runs the candidate tarballs on
+both `22.19.0` and `24.11.0`. The durable database backend is
+`@effect/sql-sqlite-node`; see
+[SQLite only](../packages/smithers/flows/database/docs/concepts/sqlite-only.md)
 before placing a database file on disk.
 
 **PostgreSQL and PGlite are unsupported.** The write-retry seam recognizes
 some of their transient failures, but release 1 ships neither a client layer
 nor a migration ladder for either backend. This accepted parity gap is tracked
-as [issue #78](../pages/release/support-matrix.md#planned-or-incomplete-integration).
+in the [storage boundaries](../apps/site/docs/reference/support-matrix.md#storage).
 
-No other runtime is a supported durable target. The Bun lane runs the
-non-durable package suites and excludes every durable one, and no browser
-execution suite exists, so neither establishes durable-engine support. The
-[support matrix](../pages/release/support-matrix.md#support-matrix) states
-the status of each platform and storage combination.
+Bun is a second runtime rather than a second support claim. `BunRuntime`
+composes the durable engine on the native Bun SQL driver, the adapter declares
+`engines.bun` as `>=1.4.0` while CI pins `1.4.1`, ten packages declare
+`bunTest` targets, and `NativeRuntimeParity` covers a Node/Bun restart in both
+directions; that is package and parity evidence, not a claim that every
+application runs on Bun. Browsers bundle only and no browser execution suite
+exists, so bundling establishes no durable-engine support. The
+[support matrix](../apps/site/docs/reference/support-matrix.md#runtimes) states
+the status of each runtime, platform and storage combination.
 
 The substrate is a release candidate: every release-1 engine manifest pins
 `effect` to exactly `4.0.0-rc.112`. An upstream defect against that pin is not
-fixed by a patch range, so the known ones and their mitigations are tracked in
-[substrate pin and known upstream issues](../pages/release/support-matrix.md#substrate-pin-and-known-upstream-issues).
+fixed by a patch range. `scripts/check-single-effect-version.mjs` enforces the
+one pin across the workspace, and a candidate that moves it records the move as
+a breaking change in [CHANGELOG.md](../CHANGELOG.md).
 
 The alpha control server defaults to loopback (`127.0.0.1`). A non-loopback
 bind requires the explicit `--listen`/`listen: true` opt-in and does not add
 TLS, token rotation, or multi-principal authorization. Keep ordinary alpha
 use localhost-only; if an operator opts into a network bind, they must provide
 the bearer-token and TLS/ingress protections described in the
-[control-plane trust posture](../pages/guides/control-plane-trust.md).
+[serve beyond loopback](../packages/smithers/gateway/docs/guides/serve-beyond-loopback.md).
 
 ### Advisory CI lanes
 
-The required release-1 gate is the `test` job, `workspace graph (coverage gates
-enforced)`, which runs `smithers-build ci '//packages/...'` and
-`smithers-build test '//scripts/...'`. The macOS and Windows package suites,
-`package suites (macOS, advisory)` and `package suites (Windows, advisory)`,
-are the only explicitly advisory lanes (`continue-on-error: true`) while they
-establish a stable green streak; their failures do not establish support for
-those hosts or block the Node/Linux private-alpha target.
+The required release gate is the `test` job, `workspace graph (coverage gates
+enforced)`, whose steps run `pnpm exec smthrs ci '//packages/...'` and
+`pnpm exec smthrs test '//scripts/...'`. Three lanes are advisory. The macOS
+and Windows legs of the one `package suites (${{ matrix.os }})` matrix carry
+`advisory: true` and inherit `continue-on-error: ${{ matrix.advisory }}`, while
+its `ubuntu-latest` leg is required; `model reviews (advisory)` is
+`continue-on-error: true` outright. An advisory failure establishes no support
+for that host and does not block the required Node/Linux target.
 
-One advisory lane remains red. On Windows, the server seed-allowlist test
+The Windows lane remains red. On Windows, the server seed-allowlist test
 constructs a module path with a doubled drive prefix, and the `jj` package's
 symlink/dirent assertions do not yet match Windows behavior. This is a tracked
 CI-portability gap, not a waived required check; promote the Windows lane only
@@ -54,17 +64,21 @@ after its failures are fixed and repeated main-branch runs are green.
 
 ## Not in 1.0.0-rc.0
 
-The release train packs the `engine` and `agent` groups together at one
-synchronized version, and every `tooling` package is private. Membership is no
-longer a proxy for feature scope, so a package can ship and still not be a
-release-candidate feature. The following exist in this repository but are not
-rc.0 features: `@smthrs/triggers` and `@smthrs/evals` (both private at rc.0),
-memory semantic recall, and observability OTLP export. `@smthrs/gateway`
-publishes because consumers need its wire schemas, but its supervision
-runtime is still a noop. The
-[implementation-status scope table](../pages/release/support-matrix.md#not-in-release-1)
-explains the status of each; in particular, the published OTLP layer is
-application-wired rather than a shipped default.
+The release train packs the `engine`, `agent` and `tooling` groups together at
+one synchronized version: the 49 names `publishedPackages` restates in
+`scripts/pack-release.mjs` and checks against what the workspace declares. Four
+tooling packages are public, `@smthrs/build`, `@smthrs/build-cli`,
+`@smthrs/create-app` and `@smthrs/targets`; deployment and repository-local
+tooling stays out of the roster through its manifest `private` flag.
+Membership is not a proxy for feature scope, so a package can ship and still
+not be a release-candidate feature. `@smthrs/triggers`, `@smthrs/evals` and
+`@smthrs/scorers` publish as libraries an application wires itself; no CLI verb
+composes them. Memory semantic recall and observability OTLP export are not
+rc.0 features either, and `@smthrs/gateway` publishes because consumers need
+its wire schemas while its supervision runtime is still a noop. The
+[known limitations and evidence](../apps/site/docs/reference/support-matrix.md#known-limitations-and-evidence)
+table records what each limit rests on; in particular, the published OTLP layer
+is application-wired rather than a shipped default.
 
 ## Cutting a release
 
@@ -130,9 +144,6 @@ only.
 | --- | --- | --- |
 | `smithers/agent/harness` | `workerd smoke` | `describe.skipIf(FLOWS_WORKERD_SMOKE !== "1")` |
 | `smithers/create-app` | `layerTevm against a mainnet fork` | `it.skip` in `template/aomi` |
-| `smithers/migrate` | `migrates a single-file JSX project through the bin (${reason})` | `it.skip` without a seat |
-| `smithers/migrate` | `records what a single-file project could not settle (${reason})` | `it.skip` without a seat |
-| `smithers/migrate` | `refuses what it cannot translate in a multi-workflow pack (${reason})` | `it.skip` without a seat |
 | `smithers/agent/integrations` | `GitHub live contract (GITHUB_TOKEN)` | `describe.skipIf(GITHUB_TOKEN === undefined)` |
 | `smithers/agent/integrations` | `Linear live contract (LINEAR_API_KEY)` | `describe.skipIf(LINEAR_API_KEY === undefined)` |
 | `smithers/agent/integrations` | `Telegram live contract (TELEGRAM_BOT_TOKEN)` | `describe.skipIf(TELEGRAM_BOT_TOKEN === undefined)` |
@@ -185,7 +196,7 @@ Node-only dependency and nothing would notice until an edge deployment. Run it
 with `FLOWS_WORKERD_SMOKE=1 pnpm --filter @smthrs/harness test` after
 installing `workerd`. Closing it for the default gate means adding `workerd` to
 the toolchain the CI lane installs, which the RC does not claim (see the
-[support matrix](pages/release/support-matrix.md)).
+[support matrix](../apps/site/docs/reference/support-matrix.md#runtimes)).
 
 **`migrate` — the three live-model cases.** `MigrateFlow.live.e2e.test.ts`
 runs the migration flow against a real provider, and a real provider costs
@@ -306,7 +317,9 @@ lives. The items an alpha operator hits first:
   recovery-time objective: a run becomes eligible only after its heartbeat is
   older than the cutoff, the sweep re-drives at most 64 stale rows per
   one-second tick, and a caller-supplied `isAlive` can refuse the steal for
-  unbounded time. See [abandoned runs and supervision](../pages/release/support-matrix.md#abandoned-runs-and-supervision).
+  unbounded time. See the
+  [known limitations and evidence](../apps/site/docs/reference/support-matrix.md#known-limitations-and-evidence)
+  table.
 - **Flow registrations are in-memory.** A restarted process resumes nothing
   until it re-registers the handlers for its stored runs, because registration
   is what re-arms durable clocks and deferred wakes.
@@ -320,11 +333,14 @@ lives. The items an alpha operator hits first:
   `shutdownTimeoutMs`. A program that composes `layer` still owes `Crypto`,
   `FileSystem`, and `Jj`, and installs its own signal handlers.
   `examples/src/durable-layer.ts` is the worked composition, and
-  [the barrel's API page](../pages/api/flows.md) lists both entry points.
-- **Detached child flows are not exposed.** Subflows are attached
-  parent/child only; first-class detached execution, automatic durable
-  lineage, and structured parent cancellation policy are planned, not shipped
-  ([subflows](../pages/concepts/subflows.md#detached-children-and-lineage)).
+  [the barrel's API page](../packages/smithers/flows/docs/api.md) lists both
+  entry points.
+- **Detached child flows need a composed child port.** A host that composes
+  `EngineChildren` runs `agent/spawn`, `agent/send` and `agent/await` as real
+  linked runs; a composition that supplies no child port refuses all three with
+  `ChildError` code `unsupported`, and `agent/await` polls the child's run row
+  rather than parking the caller
+  ([subagents](../packages/smithers/agent/docs/guides/subagents.md)).
 - **Cross-process wake is polled.** The in-process `WakeBus` completes a
   resume signal directly; a wake published from another process still lands
   through polling and the stale sweep.
@@ -332,7 +348,7 @@ lives. The items an alpha operator hits first:
   diff bundle to the host itself. The pending-diff review gate is a spec, not
   shipped behavior.
 
-[Implementation status](../pages/release/support-matrix.md) is the
+The [support matrix](../apps/site/docs/reference/support-matrix.md) is the
 authoritative list; this section names only the limits that change how an
 alpha pilot is operated.
 
