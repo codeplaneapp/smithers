@@ -309,14 +309,6 @@ const planStore = async (context: PlanContext): Promise<CacheStore | undefined> 
   }
 }
 
-/** Parses the strict Shell duration syntax admitted by the declaration schema. */
-const durationMs = (text: string): number => {
-  const match = /^(\d+)(ms|s|m|h)$/.exec(text)
-  if (match === null) return Shell.packageExecTimeoutMs
-  const unit = match[2]
-  return Number(match[1]) * (unit === "ms" ? 1 : unit === "s" ? 1_000 : unit === "m" ? 60_000 : 3_600_000)
-}
-
 /**
  * The canonical digest of one closure result: files, packages, and issue
  * rows. Consumers of an ImportClosure key on it.
@@ -1533,7 +1525,7 @@ const visit = async (
     )
   }
   const timeout = attrMember(attrs, "timeout")
-  const timeoutMs = typeof timeout === "string" ? durationMs(timeout) : Shell.packageExecTimeoutMs
+  const timeoutMs = typeof timeout === "string" ? Shell.durationMs(timeout) : Shell.packageExecTimeoutMs
   let commands: ReadonlyArray<ReadonlyArray<string>> | undefined
   let cargoCrates: ReadonlyArray<CrateRow> | undefined
   let cargoOutFiles: ReadonlyArray<string> = []

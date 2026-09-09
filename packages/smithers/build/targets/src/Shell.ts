@@ -207,6 +207,20 @@ export const scriptInterpreterToken = (path: string): string =>
 export const packageExecTimeoutMs = 30 * 60 * 1000
 
 /**
+ * Parses the strict Shell duration syntax admitted by the declaration schema.
+ * Unrecognized durations use the package execution default.
+ *
+ * @category utilities
+ * @since 0.1.0
+ */
+export const durationMs = (text: string): number => {
+  const match = /^(\d+)(ms|s|m|h)$/.exec(text)
+  if (match === null) return packageExecTimeoutMs
+  const unit = match[2]
+  return Number(match[1]) * (unit === "ms" ? 1 : unit === "s" ? 1_000 : unit === "m" ? 60_000 : 3_600_000)
+}
+
+/**
  * The attr fields {@link execPayload} reads. Every Shell flavor and the
  * Generate bin form share this shape.
  *
@@ -222,6 +236,7 @@ export interface ExecAttrs {
   readonly args?: ReadonlyArray<string | Reference.FlagRef> | undefined
   readonly runtimeArgs?: ReadonlyArray<string> | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
+  readonly timeout?: string | undefined
   readonly secrets?: ReadonlyArray<Secret.HttpCredential> | undefined
 }
 
@@ -292,7 +307,7 @@ export const execPayload = (attrs: ExecAttrs): Exec.CallPayload => {
     cwd: ".",
     argv,
     env: environment,
-    timeoutMs: packageExecTimeoutMs
+    timeoutMs: attrs.timeout === undefined ? packageExecTimeoutMs : durationMs(attrs.timeout)
   }
 }
 

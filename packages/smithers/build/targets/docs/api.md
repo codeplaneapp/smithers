@@ -211,3 +211,8 @@ combinations are checked by the declaration schemas and constructor types.
 Targets are opaque declarations. Execute them through the package executor, or
 explicitly lower an action-backed declaration with `Target.plan(target)` inside
 a host-owned Flow. Package-only catalog rules lower to a typed refusal there.
+
+Shell execution accepts `timeout` as an integer followed by `ms`, `s`, `m`, or
+`h`. `Target.plan(Shell.Test({ shell: "true", timeout: "30s" }))` records
+`timeoutMs: 30000` in the exec payload. Omitting `timeout` uses
+`Shell.packageExecTimeoutMs` (30 minutes), matching the package executor.

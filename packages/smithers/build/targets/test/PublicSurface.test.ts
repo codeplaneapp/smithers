@@ -83,6 +83,21 @@ describe("opaque target contract", () => {
     expect(Target.plan(target).ast._tag).toBe("ActionCall")
   })
 
+  it.each(
+    [
+      ["30s", 30_000],
+      ["250ms", 250],
+      ["2m", 120_000],
+      ["1h", 3_600_000],
+      [undefined, Shell.packageExecTimeoutMs]
+    ] as const
+  )("preserves the Shell timeout when explicitly lowering: %s", (timeout, timeoutMs) => {
+    const target = Shell.Test({ shell: "true", ...(timeout === undefined ? {} : { timeout }) })
+    const ast = Target.plan(target).ast
+    expect(ast._tag).toBe("ActionCall")
+    if (ast._tag === "ActionCall") expect(ast.payload).toHaveProperty("timeoutMs", timeoutMs)
+  })
+
   it("lowers package-only catalog rules to their explicit unsupported action", () => {
     const target = S.Shell.Serve({ shell: "node server.js" })
     const ast = Target.plan(target).ast
