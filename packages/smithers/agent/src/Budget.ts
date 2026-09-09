@@ -77,6 +77,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
+import { failureJson } from "./internal/FailureJson.ts"
 
 /**
  * What a composition wants done when a budget runs out.
@@ -592,25 +593,6 @@ const emit = (
   })
 
 /**
- * Makes an accounting cause survive its error schema's encoder.
- *
- * This mirrors the action-boundary idiom in `AgentAction`: render a live error
- * instance to plain JSON so its tag, code, and fields survive, and keep a
- * string approximation only for a value JSON cannot represent.
- */
-const encodableCause = (cause: unknown): unknown => {
-  try {
-    return JSON.parse(JSON.stringify(cause))
-  } catch {
-    // A cyclic object or a BigInt field. The text approximation keeps the
-    // accounting failure reportable: a rendering defect thrown from here would
-    // replace "the ledger could not be written" with "the error could not be
-    // printed", which is the one thing worse than a stringified cause.
-    return String(cause)
-  }
-}
-
-/**
  * The failure a broken half of the ledger reports.
  *
  * One sentence per phase rather than a shared one, because the two are
@@ -630,7 +612,12 @@ const unavailable = (
     message: phase === "record"
       ? `The budget could not durably record run ${runId}'s ledger, so a resumed run could be given that allowance again: ${detail}`
       : `The budget could not read run ${runId}'s ledger, so it cannot say what allowance is left: ${detail}`,
-    ...(cause === undefined ? {} : { cause: encodableCause(cause) })
+    // The package's one failure serializer, so a live `JournalError` keeps its
+    // tag, code, and fields through the accounting error's encoder, a nested
+    // native `Error` keeps its message, and a cyclic or BigInt-bearing cause
+    // falls back to text rather than throwing "the error could not be printed"
+    // over "the ledger could not be written".
+    ...(cause === undefined ? {} : { cause: failureJson(cause) })
   })
 
 /**

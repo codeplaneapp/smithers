@@ -75,6 +75,7 @@ import * as Budget from "./Budget.ts"
 import { EventSink } from "./EventSink.ts"
 import * as FlowEngineLike from "./FlowEngineLike.ts"
 import { agentOutcome } from "./internal/AgentOutcome.ts"
+import { failureJson } from "./internal/FailureJson.ts"
 import * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
 import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
@@ -439,25 +440,22 @@ const budgetFailure = (failure: AgentFailure): AgentFailure =>
  *
  * Rendering the cause to plain JSON keeps every field and loses only the
  * prototype, which no consumer of `cause` may depend on anyway: it is typed
- * `unknown`. A cause that cannot be rendered at all — a cycle, a function — is
- * kept as its string form rather than dropped, because "something failed and we
- * cannot say what" is worse than a rendered approximation.
+ * `unknown`. A cause that cannot be rendered at all — a cycle, a BigInt field
+ * reported by a third-party plugin hook — is kept as its text form rather than
+ * dropped, because "something failed and we cannot say what" is worse than a
+ * rendered approximation.
+ *
+ * The rendering is the package's one failure serializer, shared with the
+ * session settlement and the budget's accounting failure, so a native `Error`
+ * nested in the cause keeps its message here too instead of encoding as `{}`.
  */
 const encodableFailure = (failure: AgentFailure): AgentFailure => {
   if (!(failure instanceof HarnessError) || failure.cause === undefined) return failure
-  const cause = failure.cause
-  let rendered: unknown
-  try {
-    // A primitive cause round-trips to itself, so it needs no branch of its
-    // own; only a value JSON cannot express at all reaches the arm below.
-    rendered = JSON.parse(JSON.stringify(cause))
-  } catch {
-    // Plugin hooks are third-party host code, so their failures can carry
-    // fields such as BigInt offsets that JSON cannot express. Keep the harness
-    // failure instead of replacing it with the renderer's TypeError.
-    rendered = String(cause)
-  }
-  return new HarnessError({ code: failure.code, message: failure.message, cause: rendered })
+  return new HarnessError({
+    code: failure.code,
+    message: failure.message,
+    cause: failureJson(failure.cause)
+  })
 }
 
 /**

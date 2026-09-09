@@ -1469,6 +1469,48 @@ describe("recovering a run's earlier spend", () => {
     })
   })
 
+  it("keeps a native Error nested in a durable-write cause legible", async () => {
+    const ledger = budgetLedger()
+    // `Error.message` is an own property but a NON-ENUMERABLE one, so the bare
+    // JSON round trip this encoder used to run dropped it and the accounting
+    // failure carried `{}` where the storage refusal was. The session
+    // settlement already preserved it, which is the divergence a single shared
+    // serializer removes.
+    const cause = new Journal.JournalError({
+      code: "sink_failed",
+      message: "the usage sink refused this record",
+      cause: { nested: new Error("storage unavailable") }
+    })
+    const journal = Journal.make({
+      ...ledger.journal,
+      emitDurableUnfenced: (input) =>
+        input.eventType === Budget.usageEvent
+          ? Effect.fail(cause)
+          : ledger.journal.emitDurableUnfenced(input)
+    })
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const budget = yield* Budget.make({})
+          yield* budget.record("step-a", { totalTokens: 40 })
+        }).pipe(
+          Effect.provideService(Journal.Journal, journal),
+          Effect.provideService(FlowRuntime.FlowInstance, instanceFor("usage-write-nested-error"))
+        )
+      )
+    )
+
+    expect(failureOf(exit)).toMatchObject({
+      _tag: "flows/agent/BudgetAccountingUnavailable",
+      phase: "record",
+      cause: {
+        _tag: "@smthrs/journal/JournalError",
+        code: "sink_failed",
+        cause: { nested: { message: "storage unavailable" } }
+      }
+    })
+  })
+
   it("keeps a text approximation of a write cause JSON cannot render", async () => {
     const ledger = budgetLedger()
     // A `BigInt` field is the shape `JSON.stringify` refuses outright, and a

@@ -95,6 +95,7 @@ import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
 import type * as Budget from "./Budget.ts"
 import { agentOutcome } from "./internal/AgentOutcome.ts"
+import { failureJson } from "./internal/FailureJson.ts"
 import { failureSummary } from "./internal/FailureSummary.ts"
 import type * as QuotaPolicy from "./QuotaPolicy.ts"
 import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
@@ -659,58 +660,6 @@ const prompt = (text: string, input: unknown): string => {
 }
 
 /**
- * Whether a value is a JSON value, the way `Schema.toCodecJson` means it.
- *
- * A class instance is not one, however plain its fields look, so this walks
- * the structure rather than trusting `JSON.stringify`, which turns an `Error`
- * into `{}` and reports success.
- */
-const jsonDepthLimit = 200
-
-/**
- * Whether the codec would take this value as JSON.
- *
- * The walk runs inside `Effect.mapError` on the failure channel, so it must
- * never throw: a self-referencing failure value or one nested past the stack
- * would turn a clean failure into a defect thrown by the mapper. A cycle and
- * a depth past {@link jsonDepthLimit} both answer "not JSON", which sends the
- * value down the rendering path, where `Cause.pretty` prints it safely.
- */
-const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(), depth = 0): boolean => {
-  if (value === null) return true
-  const kind = typeof value
-  if (kind === "string" || kind === "boolean") return true
-  if (kind === "number") return Number.isFinite(value)
-  if (kind !== "object") return false
-  if (depth >= jsonDepthLimit) return false
-  const object = value as object
-  if (ancestors.has(object)) return false
-  ancestors.add(object)
-  try {
-    if (Array.isArray(value)) return value.every((item) => isJsonValue(item, ancestors, depth + 1))
-    const prototype = Object.getPrototypeOf(value)
-    if (prototype !== Object.prototype && prototype !== null) return false
-    return Object.values(value as Record<string, unknown>).every((member) => isJsonValue(member, ancestors, depth + 1))
-  } finally {
-    // A value repeated in sibling positions is not a cycle, so it leaves the
-    // ancestor set with its own subtree.
-    ancestors.delete(object)
-  }
-}
-
-/**
- * Keeps an `Error`'s message inside the settlement's JSON round trip.
- *
- * `message` is an own property of an `Error` but a NON-ENUMERABLE one, so
- * `JSON.stringify` drops it: a failure carrying `{ cause: new Error("no such
- * file") }` settled as `{ cause: {} }`, which records that something failed
- * and nothing about what. A schema-declared `message` field is enumerable and
- * already survives, so it is spread last and wins.
- */
-const settlementReplacer = (_key: string, value: unknown): unknown =>
-  value instanceof Error && value.message !== "" ? Object.assign({ message: value.message }, value) : value
-
-/**
  * The failure the engine persists as this flow's settlement.
  *
  * `agent/run` declares `error: Schema.Unknown`, and `Schema.toCodecJson`
@@ -721,52 +670,14 @@ const settlementReplacer = (_key: string, value: unknown): unknown =>
  * stack beside the run's own `An agent run failed` (release validation observation
  * N1: two stack traces for one billing refusal).
  *
- * Values already accepted by the JSON codec retain their identity. An OBJECT
- * the codec rejects is then round-tripped through JSON so its enumerable
- * refusal fields, `_tag` above all, survive while its prototype and stack do
- * not, and {@link settlementReplacer} carries an `Error`'s message across with
- * them. Anything else falls back to `Cause.pretty`. That order keeps typed
- * failures machine-readable without letting a cycle throw from the failure
- * mapper, and a defect stays a defect because this maps the failure channel
- * only.
- *
- * The round trip is reserved for objects because `JSON.stringify` does not
- * refuse the non-JSON PRIMITIVES, it rewrites them: `Infinity` and `NaN` both
- * serialize to `null`, so a run that failed on an arithmetic result settled
- * with the same recorded failure as one that failed with a literal `null`, and
- * no reader could tell them apart. `Cause.pretty` is no better on one, printing
- * `Error: null` for either, so a primitive is rendered directly.
+ * The rendering is the package's one failure serializer, shared with the
+ * action and the budget boundaries so a nested `Error` reads the same in every
+ * durable record rather than only in this one.
  *
  * @category conversions
  * @since 1.0.0
  */
-export const settlementFailure = (error: unknown): unknown => {
-  if (isJsonValue(error)) return error
-  // `null` is JSON and has already returned, so anything here that is not an
-  // object is a non-JSON primitive, and neither renderer below can carry one:
-  // `JSON.stringify` rewrites `Infinity` and `NaN` to `null`, and
-  // `Cause.pretty` prints a bare primitive as `Error: null`. The value prints
-  // itself instead.
-  if (typeof error !== "object") return `A failure of type ${typeof error}: ${String(error)}`
-  try {
-    const rendered = JSON.stringify(error, settlementReplacer)
-    if (rendered !== undefined) {
-      const decoded: unknown = JSON.parse(rendered)
-      if (isJsonValue(decoded)) return decoded
-    }
-  } catch {
-    // A cycle, a BigInt field, or excessive depth still has the text fallback
-    // below.
-  }
-  try {
-    return String(Cause.pretty(Cause.fail(error)))
-  } catch {
-    // The renderer walks the value too, and a value deep enough to overflow it
-    // must still not throw from the mapper: the settlement is the last thing
-    // standing between a failed run and a row that never reaches terminal.
-    return `A failure of type ${typeof error} that could not be rendered.`
-  }
-}
+export const settlementFailure = (error: unknown): unknown => failureJson(error)
 
 /**
  * The one durable flow every agent run executes. Its plan-time body is inert;

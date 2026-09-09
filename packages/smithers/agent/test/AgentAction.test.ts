@@ -746,6 +746,52 @@ describe("AgentAction refusals that never reach the provider", () => {
     expect(requests).toEqual([])
   })
 
+  it("keeps a native Error nested in a request-plugin cause legible", async () => {
+    const requests: Array<string> = []
+    // `Error.message` is an own property but a NON-ENUMERABLE one, so the bare
+    // JSON round trip this encoder used to run dropped it: a plugin failure
+    // wrapping a real storage refusal reached the flow as `{}`, which records
+    // that a host extension failed and nothing about why. The session
+    // settlement already preserved the message, so the same refusal read one
+    // way in the run row and another in the step's error.
+    class RequestAuditFailed extends Error {
+      readonly nested = new Error("storage unavailable")
+    }
+    const cause = new RequestAuditFailed("the request audit could not be written")
+    const failingHost: AgentAction.Host = {
+      ...host,
+      plugins: [makePlugin<FlowsHooks>({
+        name: "request-audit",
+        hooks: {
+          cellModelRequest: () => Effect.fail(cause)
+        }
+      })]
+    }
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ReviewFlow.execute({ diff: "-  old" }, { executionId: "request-plugin-nested-error" }).pipe(
+          Effect.provide(stack(
+            Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+            failingHost,
+            scripted([answering(`{"approved":true,"issues":[]}`)], requests)
+          ))
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    const failure = exit._tag === "Failure" ? Cause.squash(exit.cause) : undefined
+    expect(failure).toBeInstanceOf(HarnessError)
+    // The harness wraps the rendered cause in a plain `Error` naming the hook,
+    // and a plain `Error` has no enumerable fields, so the rendering the action
+    // boundary produced is read from both positions rather than from one.
+    const encoded = (failure as HarnessError).cause as { readonly cause?: unknown } | undefined
+    const rendered = JSON.stringify({ cause: encoded, wrapped: encoded?.cause })
+    expect(rendered).toContain(`"nested":{"message":"storage unavailable"}`)
+    expect(rendered).toContain("the request audit could not be written")
+    expect(requests).toEqual([])
+  })
+
   it("does not spend a correction on a provider that refuses", async () => {
     let attempts = 0
     const failing = Model.make({
