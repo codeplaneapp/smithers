@@ -89,7 +89,10 @@ redelivery the same mutation instead of a second one.
    that edits bytes cannot change what the decoder sees after approval.
 4. Look the durable idempotency record up. A match replays the stored receipt.
 5. Decode, map, and dispatch through `Control`.
-6. Record the receipt, unless it was a `Conflict`.
+6. Record the receipt, unless it was a `Conflict` or `Parked`. A parked start
+   leaves the ingress key unsettled: approve its stored plan, then redeliver
+   with the same delivery id to retry the launch. Once accepted, later
+   redeliveries return `AlreadyApplied` for the same run.
 
 The receipt handed back carries the platform's own delivery id as its
 `receiptId`, so a caller correlating against its own logs sees the id it sent.

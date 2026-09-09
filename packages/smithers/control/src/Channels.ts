@@ -372,7 +372,9 @@ const makeWith = (runtime: InboundReceiptStore) =>
                 idempotencyKey: key
               })
             }
-            if (receipt._tag !== "Conflict") {
+            // A parked start has not launched. Leave ingress unsettled so a
+            // redelivery can retry the same Control key after plan approval.
+            if (receipt._tag !== "Conflict" && receipt._tag !== "Parked") {
               yield* runtime.recordMutation(durableKey, bodyFingerprint, receipt)
             }
             return externalReceipt(receipt, externalKey)
