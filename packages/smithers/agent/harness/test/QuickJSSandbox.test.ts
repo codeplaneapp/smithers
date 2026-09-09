@@ -49,6 +49,7 @@ interface Options {
   readonly call?: Sandbox.Handler | undefined
   readonly mint?: Sandbox.Minter | undefined
   readonly limits?: Sandbox.Limits | undefined
+  readonly evaluationLimits?: Sandbox.EvaluationLimits | undefined
 }
 
 /**
@@ -73,7 +74,7 @@ const inRealm = (
       frame: 0,
       call: options.call ?? succeeds,
       ...(options.mint === undefined ? {} : { mint: options.mint }),
-      limits: options.limits
+      limits: options.evaluationLimits
     })
     return frame.outcome
   }).pipe(Effect.scoped) as Effect.Effect<Cell.Outcome, Sandbox.SandboxError | Error>
@@ -99,6 +100,92 @@ const outcomeOf = async (
 const resultOf = (text: string, options: Options = {}) => Effect.runPromise(Effect.result(inRealm(text, options)))
 
 describe("QuickJSSandbox limits", () => {
+  it("validates evaluation overrides before any cell code runs", async () => {
+    let calls = 0
+    await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.make
+      const realm = yield* sandbox.openRealm!({ flows })
+      for (
+        const limits of [
+          { calls: -1 },
+          { calls: 0.5 },
+          { callMs: Number.NaN },
+          { totalMs: Infinity },
+          { timeMs: 0 },
+          { steps: 0 }
+        ]
+      ) {
+        const result = yield* Effect.result(realm.evaluate({
+          cell: Cell.source(`await ctx.call("fs/list", {}); ctx.done("called")`),
+          frame: 0,
+          call: () =>
+            Effect.sync(() => {
+              calls++
+              return new Cell.CallResult({ outcome: "success", value: null })
+            }),
+          limits
+        }))
+        expect(result).toMatchObject({ _tag: "Failure", failure: { code: "unsupported" } })
+      }
+    }).pipe(Effect.scoped, Effect.runPromise)
+    expect(calls).toBe(0)
+  })
+
+  it("applies evaluation compute and step budgets and restores realm defaults", async () => {
+    let now = 0
+    const outcomes = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.makeWithClock
+      const realm = yield* sandbox.openRealm!({ flows, limits: { timeMs: 10_000, steps: 10_000 } })
+      const evaluation = {
+        cell: Cell.source(`let sum = 0; for (let i = 0; i < 1000000; i++) sum += i; ctx.done(String(sum))`),
+        frame: 0,
+        call: succeeds
+      }
+      const timed = yield* realm.evaluate({ ...evaluation, limits: { timeMs: 2 } })
+      const stepped = yield* realm.evaluate({ ...evaluation, frame: 1, limits: { steps: 100 } })
+      const inherited = yield* realm.evaluate({ ...evaluation, frame: 2 })
+      return [timed.outcome, stepped.outcome, inherited.outcome]
+    }).pipe(
+      Effect.provideService(QuickJSSandbox.ComputeClock, { now: () => now++ }),
+      Effect.scoped,
+      Effect.runPromise
+    )
+    expect(outcomes).toMatchObject([
+      {
+        _tag: "rejected",
+        code: "limit_exceeded",
+        message: "This cell exceeded its wall-clock limit of 2 milliseconds"
+      },
+      { _tag: "rejected", code: "limit_exceeded", message: "This cell exceeded its limit of 100 interpreter steps" },
+      { _tag: "settled", transition: { _tag: "complete", output: "499999500000" } }
+    ])
+  })
+
+  it("uses evaluation call and total deadlines independently", async () => {
+    const outcomes = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.make
+      const realm = yield* sandbox.openRealm!({ flows, limits: { callMs: 10, totalMs: 10_000 } })
+      const evaluation = {
+        cell: Cell.source(`const reply = await ctx.call("fs/list", {}); ctx.done(reply.error.message)`),
+        frame: 0,
+        call: () => Effect.never
+      }
+      const call = yield* realm.evaluate({ ...evaluation, limits: { callMs: 0 } })
+      const total = yield* realm.evaluate({ ...evaluation, frame: 1, limits: { callMs: 10_000, totalMs: 20 } })
+      const inherited = yield* realm.evaluate({ ...evaluation, frame: 2, limits: { callMs: undefined } })
+      return [call.outcome, total.outcome, inherited.outcome]
+    }).pipe(Effect.scoped, Effect.runPromise)
+    expect(outcomes).toMatchObject([
+      { _tag: "settled", transition: { _tag: "complete", output: "Flow fs/list timed out after 0 seconds." } },
+      {
+        _tag: "rejected",
+        code: "limit_exceeded",
+        message: "This cell exceeded its wall-clock limit of 20 milliseconds"
+      },
+      { _tag: "settled", transition: { _tag: "complete", output: "Flow fs/list timed out after 0.01 seconds." } }
+    ])
+  })
+
   it("retries a rejected cached module load instead of poisoning the cache", async () => {
     let attempts = 0
     const load = QuickJSSandbox.cacheSuccessful(() => {

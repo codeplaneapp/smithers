@@ -952,14 +952,12 @@ const openRealm = (
   clock: ComputeClockService
 ): Effect.Effect<Sandbox.Realm, Sandbox.SandboxError, Scope.Scope> =>
   Effect.gen(function*() {
-    const limits = Sandbox.withDefaults(capabilities, options.limits)
+    const realmLimits = Sandbox.withDefaults(capabilities, options.limits)
     /* v8 ignore next -- `withDefaults` fills `timeMs` from `defaultLimits` whenever the `timeMs` capability is declared, and this binding declares it, so the coalesce never reaches its fallback; it only discharges the optional type on `Sandbox.Limits` */
-    const timeMs = limits.timeMs ?? Sandbox.defaultLimits.timeMs
-    /* v8 ignore next -- `withDefaults` fills `totalMs` alongside `timeMs`, so this coalesce only discharges the same optional type */
-    const totalMs = limits.totalMs ?? Sandbox.defaultLimits.totalMs
+    let timeMs = realmLimits.timeMs ?? Sandbox.defaultLimits.timeMs
     /* v8 ignore next -- `withDefaults` fills `memoryBytes` whenever the `memoryBytes` capability is declared, and this binding declares it, so the coalesce only discharges the optional type */
-    const memoryBytes = limits.memoryBytes ?? Sandbox.defaultLimits.memoryBytes
-    const stepBudget = limits.steps
+    const memoryBytes = realmLimits.memoryBytes ?? Sandbox.defaultLimits.memoryBytes
+    let stepBudget = realmLimits.steps
 
     let clockBase = clock.now()
     let steps = 0
@@ -978,8 +976,8 @@ const openRealm = (
       Effect.sync(() => {
         const runtime: QuickJSRuntime = module.newRuntime()
         /* v8 ignore else -- `withDefaults` fills `memoryBytes` whenever the `memoryBytes` capability is declared, and this binding declares it, so the heap ceiling is always set */
-        if (limits.memoryBytes !== undefined) {
-          runtime.setMemoryLimit(limits.memoryBytes)
+        if (realmLimits.memoryBytes !== undefined) {
+          runtime.setMemoryLimit(realmLimits.memoryBytes)
         }
         runtime.setInterruptHandler(() => {
           if (clock.now() - clockBase >= timeMs) {
@@ -1208,10 +1206,16 @@ const openRealm = (
     let held = 0
     let unweighed: { readonly root: string; readonly bytes: number } | undefined
 
-    const evaluate = (
-      evaluation: Sandbox.RealmEvaluation
-    ): Effect.Effect<Sandbox.RealmFrame, Sandbox.SandboxError | HarnessError> =>
-      Effect.gen(function*() {
+    const evaluateFrame = (
+      evaluation: Sandbox.RealmEvaluation,
+      limits: Sandbox.EvaluationLimits
+    ): Effect.Effect<Sandbox.RealmFrame, Sandbox.SandboxError | HarnessError> => {
+      /* v8 ignore next -- the validated frame inherits the opening totalMs default */
+      const totalMs = limits.totalMs ?? Sandbox.defaultLimits.totalMs
+      return Effect.gen(function*() {
+        /* v8 ignore next -- the validated frame inherits the opening timeMs default */
+        timeMs = limits.timeMs ?? Sandbox.defaultLimits.timeMs
+        stepBudget = limits.steps
         // Per-frame budgets and per-frame buffers, reset before anything can
         // settle the frame. They are counters, not properties of the runtime, so
         // a realm that outlives one cell still charges each cell its own — and
@@ -1431,6 +1435,12 @@ const openRealm = (
               bindings
             })
         })
+      )
+    }
+
+    const evaluate = (evaluation: Sandbox.RealmEvaluation) =>
+      Sandbox.evaluationLimits(realmLimits, evaluation.limits).pipe(
+        Effect.flatMap((limits) => evaluateFrame(evaluation, limits))
       )
 
     return { evaluate }

@@ -173,7 +173,7 @@ export type Handler = (
 ) => Effect.Effect<Cell.CallResult, HarnessError>
 
 /**
- * Execution limits for one cell evaluation.
+ * Realm memory ceiling and default execution limits for its evaluations.
  *
  * Bindings fill every ceiling they can enforce from {@link defaultLimits} when
  * the caller omits it. A binding that cannot honour an explicitly requested
@@ -233,6 +233,15 @@ export interface Limits {
    */
   readonly callMs?: number | undefined
 }
+
+/**
+ * Per-frame overrides of a realm's opening limits. Omitted or undefined fields
+ * inherit the realm defaults. The memory ceiling remains fixed for the run.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type EvaluationLimits = Omit<Limits, "memoryBytes">
 
 /**
  * Which limits a binding can actually enforce.
@@ -453,6 +462,28 @@ export const withDefaults = (
 })
 
 /**
+ * Merges and validates one frame's limits without changing the realm defaults.
+ * Only per-frame ceilings can be overridden; memory belongs to the realm.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const evaluationLimits = (
+  defaults: Limits,
+  overrides: EvaluationLimits | undefined
+): Effect.Effect<EvaluationLimits, SandboxError> => {
+  const limits: EvaluationLimits = {
+    calls: overrides?.calls ?? defaults.calls,
+    steps: overrides?.steps ?? defaults.steps,
+    timeMs: overrides?.timeMs ?? defaults.timeMs,
+    totalMs: overrides?.totalMs ?? defaults.totalMs,
+    callMs: overrides?.callMs ?? defaults.callMs
+  }
+  const invalid = validateLimits(limits)
+  return invalid === undefined ? Effect.succeed(limits) : Effect.fail(invalid)
+}
+
+/**
  * What a REPL cell asked the controller to do.
  *
  * A cell runs as a global async script in a persistent realm. Top-level
@@ -538,7 +569,8 @@ export interface RealmEvaluation {
    * the unrecorded one wins: the loop's starts first.
    */
   readonly bounded?: boolean | undefined
-  readonly limits?: Limits | undefined
+  /** Validated overrides for this frame only; memory is fixed when the realm opens. */
+  readonly limits?: EvaluationLimits | undefined
 }
 
 /**

@@ -93,7 +93,7 @@ The evaluation options are `Sandbox.RealmEvaluation`:
 | `flows`   | Optional replacement for the frozen `ctx.flows` catalog before this cell runs. Omit to retain the current catalog. |
 | `mint`    | Optional `Sandbox.Minter` that settles `ctx.checkpoint()`. Absent means the run pins no trees.                     |
 | `bounded` | Set when the caller journals and bounds each settlement itself, so the loop adds no `callMs` clock of its own.     |
-| `limits`  | Per-evaluation limit overrides.                                                                                    |
+| `limits`  | Per-frame `Sandbox.EvaluationLimits` overrides; `memoryBytes` is set only when opening the realm.                  |
 
 References retained by earlier cells keep their old frozen catalog snapshots.
 
@@ -162,8 +162,24 @@ is per frame: the host clears it as the next frame opens.
 
 ## Bound the evaluation
 
-`Sandbox.defaultLimits` fills every ceiling a caller omits, and a partial
-override cannot disable the others:
+`Sandbox.defaultLimits` fills omitted ceilings when the realm opens.
+`RealmEvaluation.limits` overrides `calls`, `steps`, `timeMs`, `totalMs`, and
+`callMs` for one frame. Omitted or `undefined` fields inherit the opening
+limits; overrides may tighten or raise them and do not change later frames.
+The merged limits are validated before the cell runs. Invalid values fail
+with `SandboxError` code `unsupported` without invoking a handler.
+`memoryBytes` belongs to `RealmOptions.limits` and stays fixed for the run.
+
+```ts
+const frame = yield * realm.evaluate({
+  cell: Cell.source(text),
+  frame: 0,
+  call: handler,
+  limits: { calls: 0 } // This frame cannot dispatch a flow call or checkpoint.
+})
+```
+
+The defaults are:
 
 | Limit         | Default | Scope                                                                                                      |
 | ------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
@@ -172,7 +188,7 @@ override cannot disable the others:
 | `steps`       | 1,000   | Per frame; interrupt checks, not bytecode operations.                                                      |
 | `timeMs`      | 30,000  | Per frame; the cell's own JavaScript time, excluding time suspended in a `ctx.call` or `ctx.checkpoint()`. |
 | `totalMs`     | 900,000 | Per frame; whole-evaluation time, host calls included.                                                     |
-| `callMs`      | 120,000 | Per call; settles an overrunning call as a resolved `timeout`.                                            |
+| `callMs`      | 120,000 | Per call; settles an overrunning call as a resolved `timeout`.                                             |
 
 `steps` and `timeMs` have typed floors (`Sandbox.minimumSteps`,
 `Sandbox.minimumTimeMs`), and `memoryBytes` has `Sandbox.minimumMemoryBytes`:

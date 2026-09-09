@@ -49,6 +49,7 @@ const evaluate = (
   options: {
     readonly call?: Sandbox.Handler | undefined
     readonly limits?: Sandbox.Limits | undefined
+    readonly evaluationLimits?: Sandbox.EvaluationLimits | undefined
     readonly mint?: Sandbox.Minter | undefined
   } = {}
 ): Promise<Cell.Outcome> =>
@@ -62,7 +63,7 @@ const evaluate = (
       frame: 0,
       call: options.call ?? handler({}, []),
       ...(options.mint === undefined ? {} : { mint: options.mint }),
-      limits: options.limits
+      limits: options.evaluationLimits
     })
     return frame.outcome
   }).pipe(Effect.provide(QuickJSSandbox.layer), Effect.scoped, Effect.runPromise)
@@ -81,6 +82,35 @@ const withRealm = <A, E>(
   }).pipe(Effect.provide(QuickJSSandbox.layer), Effect.scoped) as Effect.Effect<A, E | Sandbox.SandboxError, never>
 
 describe("Sandbox", () => {
+  it("applies call overrides to only the requested evaluation", async () => {
+    const observed: Array<Sandbox.Invocation> = []
+    const frames = await withRealm((realm) =>
+      Effect.gen(function*() {
+        const evaluation = {
+          cell: Cell.source(`await ctx.call("fs/list", {}); ctx.done("called")`),
+          frame: 0,
+          call: handler({}, observed)
+        }
+        const blocked = yield* realm.evaluate({ ...evaluation, limits: { calls: 0 } })
+        expect(observed).toHaveLength(0)
+        const inherited = yield* realm.evaluate({ ...evaluation, frame: 1 })
+        const raised = yield* realm.evaluate({
+          ...evaluation,
+          cell: Cell.source(`await ctx.call("fs/list", {}); await ctx.call("fs/list", {}); ctx.done("twice")`),
+          frame: 2,
+          limits: { calls: 2 }
+        })
+        return [blocked, inherited, raised]
+      }), { calls: 1 }).pipe(Effect.runPromise)
+
+    expect(frames.map((frame) => frame.outcome)).toMatchObject([
+      { _tag: "rejected", code: "limit_exceeded" },
+      { _tag: "settled", transition: { _tag: "complete", output: "called" } },
+      { _tag: "settled", transition: { _tag: "complete", output: "twice" } }
+    ])
+    expect(observed).toHaveLength(3)
+  })
+
   it("runs data-dependent calls in issue order without a round trip between them", async () => {
     const observed: Array<Sandbox.Invocation> = []
     const outcome = await evaluate(
