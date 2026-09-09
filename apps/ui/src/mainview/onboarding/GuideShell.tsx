@@ -1,3 +1,4 @@
+import { Spinner } from "@smthrs/ui"
 import { SidebarRepositoryPicker } from "../Composer"
 import { guideForwardAction } from "./navigation"
 import { useLiveQuery } from "@tanstack/react-db"
@@ -10,7 +11,6 @@ import {
   GitPullRequest,
   History,
   Library,
-  Sparkles,
   Volume2,
   VolumeX,
   X,
@@ -568,14 +568,9 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </button>
             )}
             {stage === 5 && (
-              <div className="guide-flow-example">
-                <button className="guide-secondary" data-flow="onboarding.act" aria-keyshortcuts="R" disabled={guide.demoRun?.status === "running"} onClick={() => runCommandGuide("wait-flow")}>
-                  Run a flow {keyHint("R")}
-                </button>
-                <p role="status" aria-live="polite">
-                  {guide.demoRun?.status === "running" ? "Running · waiting 5 seconds…" : guide.demoRun?.status === "succeeded" ? "Finished successfully." : guide.demoRun?.status === "interrupted" ? "The example was interrupted. Run it again." : "Wait 5 seconds, then finish."}
-                </p>
-              </div>
+              <button className="guide-secondary" data-flow="onboarding.act" aria-keyshortcuts="R" disabled={guide.demoRun?.status === "running"} onClick={() => runCommandGuide("wait-flow")}>
+                Run a flow {keyHint("R")}
+              </button>
             )}
             {stage === 4 ? (
               <button type="submit" form="guide-profile" aria-keyshortcuts="Enter ArrowRight" className="guide-primary" data-flow="onboarding.act">
@@ -682,14 +677,14 @@ export function GuideShell({ children }: { children: ReactNode }) {
           </section>
         </div>
         </div>
-      {!guide.conversationOpen && toasts.length > 0 && (
+      {toasts.length > 0 && (
         <aside className="guide-toasts" aria-label="Notifications">
           {toasts.map((toast) => (
-            <div className="guide-toast" key={toast.id} role="status">
-              <Sparkles size={17} />
+            <div className="guide-toast" key={toast.id} data-toast-status={toast.status} role={toast.status === "failed" ? "alert" : "status"}>
+              {toast.status === "running" ? <Spinner size="sm" aria-label="Working" /> : toast.status === "ok" ? <Check size={17} aria-hidden="true" /> : <X size={17} aria-hidden="true" />}
               <div>
                 <strong>{toast.title}</strong>
-                <p>{toast.detail}</p>
+                {toast.detail && <p>{toast.detail}</p>}
               </div>
               <button
                 aria-label={`Dismiss ${toast.title}`}

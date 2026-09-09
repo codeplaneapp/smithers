@@ -88,7 +88,7 @@ The notification lesson waits for the user: “Send me a notification” display
 
 Optional profile drafts stay local while typing; Continue submits nonempty answers to `https://bug.smithers.sh/api/onboarding-answers`. The form says they are shared with the Smithers team. Cloudflare KV (`BUGS`, `onboarding:` prefix) stores answers and receipt time for operator review; a stable UUID makes retries replace the same record. Failed saves keep the form open. Empty forms still advance. See `apps/bug-worker/ONBOARDING.md` for private review/export. Local reset does not erase submitted answers.
 
-The flows lesson has “Run a flow · R”: a real five-second asynchronous wait through `onboarding.act wait-flow`. It displays Running, then Finished successfully only after the wait completes. Repeat invocation while running does nothing. Navigation is preserved, and a reload marks an unfinished example interrupted so it can be retried.
+The flows lesson has “Run a flow · R”: a real five-second asynchronous wait through `onboarding.act wait-flow`. It creates one toast: “Waiting 5 seconds…” with a spinner, then “Done” with a checkmark. No status text appears beneath the button. Toasts remain visible when the composer is open. Repeat invocation while running does nothing. Navigation is preserved, and a reload marks an unfinished example interrupted so it can be retried.
 
 Command K displays only the composer, including in the Library lesson. There is no greeting, transcript, or “Meet the Library” panel inside the dock. Tutorial and real chat history remain in the main view.
 

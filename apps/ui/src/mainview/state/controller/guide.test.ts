@@ -49,3 +49,8 @@ test("example flow waits five seconds then completes without overwriting navigat
   expect(store.session().guide?.step).toBe(6)
   await store.dispose?.()
 }, 10000)
+  const toastId = `toast-guide-flow-${store.session().guide?.demoRun?.id}`
+  expect(store.collections.toasts.get(toastId)?.title).toBe("Waiting 5 seconds…")
+  expect(store.collections.toasts.get(toastId)?.status).toBe("running")
+  expect(store.collections.toasts.get(toastId)?.title).toBe("Done")
+  expect(store.collections.toasts.get(toastId)?.status).toBe("ok")

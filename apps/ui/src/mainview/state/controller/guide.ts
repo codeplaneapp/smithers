@@ -64,11 +64,17 @@ export function createGuideController(ctx: ControllerContext) {
         if (guide.step !== 5) return "Run this example in the flows lesson."
         if (guide.demoRun?.status === "running") return
         const id = crypto.randomUUID()
+        const key = `guide-flow-${id}`
+        ctx.store.dispatch({ type: "toast.shown", actor: "system", key, title: "Waiting 5 seconds…" })
         guide.demoRun = { id, status: "running", startedAt: Date.now() }
         await ctx.store.dispatch({ type: "guide.changed", actor: ctx.commandActor, guide }).isPersisted.promise
         await new Promise<void>(resolve => setTimeout(resolve, 5000))
         const latest = ctx.store.session().guide
-        if (latest?.demoRun?.id !== id) return
+        if (latest?.demoRun?.id !== id) {
+          ctx.store.dispatch({ type: "toast.resolved", actor: "system", key, status: "failed", title: "Stopped", detail: "" })
+          return
+        }
+        ctx.store.dispatch({ type: "toast.resolved", actor: "system", key, status: "ok", title: "Done", detail: "" })
         await ctx.store.dispatch({ type: "guide.changed", actor: ctx.commandActor, guide: {
           ...latest, demoRun: { ...latest.demoRun, status: "succeeded", finishedAt: Date.now() },
         } }).isPersisted.promise
