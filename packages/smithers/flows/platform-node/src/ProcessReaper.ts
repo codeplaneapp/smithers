@@ -579,15 +579,28 @@ const retained: ReadonlySet<Refusal> = new Set<Refusal>([
 /**
  * One record, and what the reaper decided about it.
  *
+ * The two outcomes are a union rather than one shape with an optional field so
+ * that `killed` narrows the reason: after `if (!entry.killed)` the
+ * {@link Refusal} is there to read, and a killed record cannot be built
+ * carrying a reason it never had. The runtime objects are unchanged — a killed
+ * entry simply omits `refusal`.
+ *
  * @category models
  * @since 0.1.0
  */
-export interface Reaped {
-  readonly record: ProcessLedger.ProcessRecord
-  readonly killed: boolean
-  /** Present exactly when `killed` is `false`. */
-  readonly refusal?: Refusal | undefined
-}
+export type Reaped =
+  | {
+    readonly record: ProcessLedger.ProcessRecord
+    readonly killed: true
+    /** Never present when `killed` is `true`. */
+    readonly refusal?: never
+  }
+  | {
+    readonly record: ProcessLedger.ProcessRecord
+    readonly killed: false
+    /** Present exactly when `killed` is `false`. */
+    readonly refusal: Refusal
+  }
 
 /** The identity half of the decision, split out because it reads as a list. */
 const refuseOnIdentity = (

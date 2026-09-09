@@ -362,6 +362,11 @@ recorded pid started. Either can go unanswered on a host with no usable one, and
 an unanswered guard refuses, because a guard that did not run is not a guard
 that passed. No evidence never authorizes a `SIGKILL`.
 
+`reap` returns one `Reaped` per inherited record. The two outcomes are a union
+discriminated by `killed`: a killed entry carries no reason, and a kept entry
+always carries the `Refusal` that produced it, so one check on `killed` is what
+makes `refusal` readable.
+
 A refusal also decides whether the record is retired. Retiring says in the
 journal that nothing was signalled and stops every later incarnation
 re-examining a number the operating system has moved on from, so only a refusal
