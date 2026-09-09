@@ -1741,6 +1741,13 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           })
           break
 
+        case "guide.changed":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.guide = transition.guide
+            draft.revision = revision
+          })
+          break
+
         case "theme.changed":
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.theme = transition.theme

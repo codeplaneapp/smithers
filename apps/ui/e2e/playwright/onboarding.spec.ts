@@ -1,0 +1,114 @@
+import { expect, test } from "@playwright/test"
+
+test("onboarding persists a real interaction and hands off to the conversation", async ({ page }) => {
+  await page.goto("/")
+  await expect(page.getByRole("heading", { name: "Hello. I’m Smithers." })).toBeVisible()
+  await expect(page.getByTestId("composer-input")).toBeHidden()
+  await expect(page.getByRole("navigation", { name: "Installed capabilities" })).toBeHidden()
+  await page.getByRole("button", { name: "Let’s begin" }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByText("Hello from your notification corner", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await page.getByLabel("How did you hear about Smithers?").fill('A friend called "Sam" ')
+  await expect(page.getByLabel("How did you hear about Smithers?")).toHaveAttribute(
+    "data-saved-value",
+    'A friend called "Sam" ',
+  )
+  await expect(page.getByText("Saved on this device. Both answers are optional.")).toBeVisible()
+  await page.getByLabel("What would you love to build?").focus()
+  await page.reload()
+  await expect(page.getByLabel("How did you hear about Smithers?")).toHaveValue('A friend called "Sam" ')
+  await page.getByRole("button", { name: "Continue, with or without answers" }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await page.getByRole("button", { name: "Run dark-mode flow" }).click()
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark")
+  await page.getByRole("button", { name: "Bring back the light" }).click()
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light")
+  await page.keyboard.press("Control+k")
+  await expect(page.getByRole("dialog", { name: "Talk to Smithers" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
+  await page.getByRole("button", { name: "Install Library" }).click()
+  await expect(page.getByRole("navigation", { name: "Installed capabilities" })).toBeVisible()
+  await page.getByRole("button", { name: "Add Librarian" }).click()
+  await page.getByRole("button", { name: "Let’s make something" }).click()
+  await page.getByRole("button", { name: "Try editing it" }).click()
+  await page.getByLabel("Prototype heading").fill("A garden of possible futures")
+  await expect(page.locator(".guide-board h2")).toHaveText("A garden of possible futures")
+  await page.getByRole("button", { name: "Keep this direction" }).click()
+  await expect(page.locator(".guide-history")).toContainText("A garden of possible futures")
+  await page.getByRole("button", { name: "See the path to a PR" }).click()
+  await expect(page.locator(".guide-pr")).toContainText("nothing has been pushed or published")
+  await page.getByRole("button", { name: "Take me to my workspace" }).click()
+  await page.keyboard.press("Control+k")
+  await expect(page.getByTestId("composer-input")).toBeVisible()
+  await page.getByTestId("composer-input").fill("say ok")
+  await page.getByTestId("composer-send").click()
+  await expect(
+    page.locator('.smithers-chat-message[data-role="assistant"]', { hasText: "stub: say ok" }),
+  ).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "All right. What shall we make?" })).toBeVisible()
+  await expect(page.getByTestId("composer-input")).toBeHidden()
+})
+
+test("small screens and reduced motion preserve the first action", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await page.goto("/")
+  await expect(page.getByRole("button", { name: "Let’s begin" })).toBeVisible()
+  expect(await page.locator(".guide-wordmark").evaluate((el) => getComputedStyle(el).animationName)).toBe(
+    "none",
+  )
+  expect(await page.locator(".guide-shell").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  await page.keyboard.press("Control+k")
+  await expect(page.getByTestId("composer-input")).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
+})
+
+test("the entire introduction is completable with only a keyboard", async ({ page }) => {
+  await page.goto("/")
+  const shell = page.locator(".guide-shell")
+  await expect(shell).toHaveAttribute("data-step", "0")
+  for (let step = 1; step <= 3; step++) {
+    await page.keyboard.press(step % 2 ? "Enter" : "ArrowRight")
+    await expect(shell).toHaveAttribute("data-step", String(step))
+  }
+  await page.keyboard.press("Tab")
+  await expect(page.getByLabel("How did you hear about Smithers?")).toBeFocused()
+  await page.keyboard.type("A friend told me")
+  await page.keyboard.press("ArrowLeft")
+  await page.keyboard.type("!")
+  await expect(page.getByLabel("How did you hear about Smithers?")).toHaveValue("A friend told m!e")
+  await expect(shell).toHaveAttribute("data-step", "3")
+  await page.keyboard.press("Enter")
+  await expect(shell).toHaveAttribute("data-step", "4")
+  for (let step = 5; step <= 7; step++) {
+    await page.keyboard.press("ArrowRight")
+    await expect(shell).toHaveAttribute("data-step", String(step))
+  }
+  await page.keyboard.press("ArrowLeft")
+  await expect(shell).toHaveAttribute("data-step", "6")
+  await page.keyboard.press("ArrowRight")
+  await expect(shell).toHaveAttribute("data-step", "7")
+  await page.keyboard.press("Control+k")
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
+  for (let step = 9; step <= 15; step++) {
+    await page.keyboard.press("ArrowRight")
+    await expect(shell).toHaveAttribute("data-step", String(step))
+  }
+  await page.keyboard.press("Control+k")
+  await expect(page.getByTestId("composer-input")).toBeFocused()
+  await page.keyboard.type("say ok")
+  await page.keyboard.press("Enter")
+  await expect(
+    page.locator('.smithers-chat-message[data-role="assistant"]', { hasText: "stub: say ok" }),
+  ).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
+})

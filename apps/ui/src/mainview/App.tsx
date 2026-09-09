@@ -1,3 +1,4 @@
+import { GuideShell } from "./onboarding/GuideShell"
 import {
   Badge,
   Button,
@@ -1049,4 +1050,4 @@ function App() {
   )
 }
 
-export default App
+export default function GuidedApp() { return <GuideShell><App /></GuideShell> }

@@ -1,3 +1,4 @@
+import { guideFlows } from "./entries/guide"
 /*
  * Every interactive capability in the app, as a flow.
  *
@@ -178,7 +179,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...targetFlows(actions),
   ...smithersFlows(actions),
   ...searchFlows(actions),
-  ...paletteFlows(actions)
+  ...paletteFlows(actions),
+  ...guideFlows(actions)
 ]
 
 /*

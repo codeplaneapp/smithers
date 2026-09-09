@@ -1,5 +1,14 @@
 # Smithers MVP engineering rules
 
+## Keyboard-only access is a product rule (Will, 2026-09-08)
+
+Users must be able to operate all of Smithers without a mouse. Every action needs an accessible keyboard path, visible focus, and predictable focus movement. Use native control semantics, Tab/Shift-Tab navigation, Enter/Space activation, Escape dismissal, and appropriate arrow-key navigation. Preserve normal text editing. No hover-only, drag-only, or pointer-only required action. Keyboard-only completion is a release check for every new workflow, including onboarding.
+
+## Current onboarding brief (Will, 2026-09-08)
+
+The new shell opens with a one-second SMITHERS entrance and progressively introduces capabilities. Chat is a translucent top-of-window conversation summoned with Command-K, hidden by default. This explicit brief supersedes the always-visible-chat and fixed-sidebar requirements below. Outputs still use the existing flows and shared state; the guide is documented in `docs/ONBOARDING.md`.
+
+
 ## ⚖️ THE EMBED LAW — read this before anything else (will, 2026-08-09, permanent)
 
 **Everything embeds in the chat. Nothing opens full-screen unless the user explicitly asks.**

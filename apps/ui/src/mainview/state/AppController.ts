@@ -1,3 +1,4 @@
+import { createGuideController } from "./controller/guide"
 import type { CommandActions } from "../flows/Flows"
 import { createActorBindings } from "./ActorBindings"
 import type { FetchLike } from "@smthrs/rpc/NativeAgent"
@@ -166,6 +167,7 @@ export interface AppController {
   readonly jumpToHeading: (line: string) => string | void
   readonly decideApproval: (id: string, decision: "approved" | "denied") => void
   readonly retryLastTurn: () => string | void
+  readonly guideAct: (action: string, value?: string) => Promise<string | void>
   readonly toggleTheme: () => void
   /** Wear a color theme (/theme) — the axis orthogonal to light/dark. */
   readonly setPalette: (args: string) => string | void
@@ -649,7 +651,11 @@ export const createAppController = (
   services: AppServices = {}
 ): AppController => {
   const ctx = createControllerContext(store, repositories, agent, services)
+  // A reload resumes the lesson and work, with the conversation tucked away.
+  const restoredGuide = store.session().guide
+  if (restoredGuide?.conversationOpen) store.dispatch({ type: "guide.changed", actor: "system", guide: { ...restoredGuide, conversationOpen: false } })
   const actors = createActorBindings(ctx.onDispose)
+  const { guideAct } = actors.pair(ctx, createGuideController)
   if (store.dispose !== undefined) ctx.onDispose(store.dispose)
   const { baseUrl, http } = ctx
   const features: Required<AppFeatures> = {
@@ -1355,6 +1361,7 @@ export const createAppController = (
     netTapEntries,
     resetGrants,
     debugSeams,
+    guideAct,
     toggleTheme,
     setPalette,
     adoptSession,
@@ -1709,6 +1716,7 @@ export const createAppController = (
     netTapEntries,
     resetGrants,
     debugSeams,
+    guideAct,
     toggleTheme,
     setPalette,
     adoptSession,

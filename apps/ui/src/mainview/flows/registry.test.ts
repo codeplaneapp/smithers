@@ -532,6 +532,8 @@ describe("command registry bindings", () => {
       "runs.steps",
       "runs.trace.filter",
       "runs.trace.select",
+      "runs.trace.view",
+      "runs.trace.live",
       "runs.events",
       "flow.run.stop-all",
       "approvals.list",
@@ -749,7 +751,8 @@ describe("command registry bindings", () => {
       "search.people",
       "palette.open",
       "palette.actions",
-      "palette.recent"
+      "palette.recent",
+      "onboarding.act"
     ])
 
     expect((await controller.commands.run("connect")).status).toBe("executed")

@@ -158,6 +158,7 @@ describe("launch-law parity: every affordance is a command", () => {
         .filter(([, count]) => count > 0)
     )
     expect(counts).toEqual({
+      "../onboarding/GuideShell.tsx": 17, // Delegates to the shared onboarding and existing app flows.
       /*
        * The chrome Sign in button (LOCAL-APP.md: sign-in is an option in the
        * chrome, never a gate on the chat) is one of ChromeBar's nine below.

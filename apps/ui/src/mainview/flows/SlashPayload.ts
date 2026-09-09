@@ -425,6 +425,15 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "search.boxes": (args) => required("query", args, "search.boxes needs a query"),
   "search.secrets": (args) => required("query", args, "search.secrets needs a query"),
   "search.people": (args) => required("query", args, "search.people needs a query"),
+  "onboarding.act": (args) => {
+    const [action = "next", ...rest] = trimmed(args).split(" ")
+    const raw = rest.join(" ")
+    if (raw.startsWith('"')) {
+      try { const value: unknown = JSON.parse(raw); return typeof value === "string" ? ok({ action, value }) : no("Expected text") }
+      catch { return no("Expected a quoted text value") }
+    }
+    return ok({ action, value: raw })
+  },
   "palette.open": (args) => optional("prefix", args),
   "palette.actions": (args) => required("ref", args, "palette.actions needs an item ref"),
   "history.show": (args) => repoOnly("history.show", args),

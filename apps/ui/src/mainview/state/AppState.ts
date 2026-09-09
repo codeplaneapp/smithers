@@ -651,7 +651,24 @@ export const DEFAULT_PALETTE: Palette = "night-owl"
 
 export const isPalette = (value: string): value is Palette => (PALETTES as ReadonlyArray<string>).includes(value)
 
+export const GuideSchema = z.object({
+  version: z.literal(1),
+  step: z.number().int().min(0).max(15),
+  conversationOpen: z.boolean(),
+  library: z.boolean(),
+  librarian: z.boolean(),
+  heard: z.string().max(500),
+  project: z.string().max(500),
+  prototypeTitle: z.string().max(100),
+  revised: z.boolean(),
+  sound: z.boolean()
+})
+export type GuideState = z.infer<typeof GuideSchema>
+export const initialGuide = (): GuideState => ({ version: 1, step: 0, conversationOpen: false,
+  library: false, librarian: false, heard: "", project: "", prototypeTitle: "A little room for big ideas", revised: false, sound: false })
+
 export const SessionSchema = z.object({
+  guide: GuideSchema.optional(),
   id: z.literal("main"),
   draft: z.string(),
   phase: z.enum(["idle", "responding"]),
@@ -1119,6 +1136,7 @@ export type AppTransition =
     notes: ReadonlyArray<{ readonly title: string; readonly body: string; readonly confidence: number }>
     interruptedTurnId?: string
   }
+  | { type: "guide.changed"; actor: Actor; guide: GuideState }
   | { type: "theme.changed"; actor: "user" | "system"; theme: Session["theme"] }
   /* The color theme (/theme) — the axis orthogonal to light/dark. */
   | { type: "palette.changed"; actor: "user"; palette: Palette }
