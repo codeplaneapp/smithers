@@ -191,6 +191,51 @@ describe("NodeControl.makeConfig", () => {
     }
   })
 
+  it("preserves MCP connection limits and projection options from the config file", async () => {
+    const file = join(root, "projected-servers.json")
+    const entry = {
+      server: "docs",
+      command: "docs-mcp",
+      args: ["--stdio"],
+      env: { TOKEN: "test-token" },
+      handshakeTimeoutMs: 1,
+      requestTimeoutMs: 2,
+      queueCapacity: 3,
+      maxFrameBytes: 4,
+      maxOutboundFrameBytes: 5,
+      maxStderrBytes: 6,
+      maxTools: 7,
+      maxToolNameBytes: 8,
+      maxCatalogPages: 9,
+      include: ["read", "delete"],
+      exclude: ["delete"],
+      namePrefix: "docs"
+    }
+    await writeFile(file, JSON.stringify([entry]))
+    expect(NodeControl.makeConfig(["--mcp-config", file], {}, "/work").mcpServers).toEqual([entry])
+    expect(NodeControl.makeConfig([], { SMITHERS_MCP_CONFIG: file }, "/work").mcpServers).toEqual([entry])
+  })
+
+  it.each([
+    { maxTools: 0 },
+    { maxOutboundFrameBytes: 0 },
+    { maxStderrBytes: -1 },
+    { maxToolNameBytes: 1.5 },
+    { maxCatalogPages: 0 },
+    { server: "" },
+    { command: "" },
+    { cwd: "" },
+    { env: ["token"] }
+  ])("rejects invalid persisted MCP options at flag parse time: %o", async (options) => {
+    const file = join(root, "invalid-server.json")
+    await writeFile(file, JSON.stringify([{ server: "docs", command: "docs-mcp", args: [], ...options }]))
+    const error = new CliError.UsageError({
+      message: `--mcp-config ${file} must contain a JSON array of MCP server entries`
+    })
+    expect(() => NodeControl.makeConfig(["--mcp-config", file], {}, "/work")).toThrow(error)
+    expect(() => NodeControl.makeConfig([], { SMITHERS_MCP_CONFIG: file }, "/work")).toThrow(error)
+  })
+
   it("refuses a remote whose scheme is not http or https", () => {
     // The transports this configures are HTTP and WebSocket-over-HTTP, so a
     // scheme neither can dial is a usage error at parse time rather than a

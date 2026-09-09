@@ -8,12 +8,12 @@ import { Control, ControlRpcs, ControlRuntime, ControlServer } from "@smthrs/con
 
 
 import * as Journal from "@smthrs/journal/Journal"
-import type * as McpClient from "@smthrs/mcp/McpClient"
+import * as McpClient from "@smthrs/mcp/McpClient"
 import * as MemoryError from "@smthrs/memory/MemoryError"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type { NotificationQueue } from "@smthrs/notifications"
 import * as Registry from "@smthrs/registry/Registry"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Result, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
@@ -67,36 +67,14 @@ const valueFromArguments = (args: ReadonlyArray<string>, flag: string): string |
   return undefined
 }
 
-/** One entry of an `--mcp-config` file, structurally `McpClient.ConnectOptions`. */
-const isMcpServerEntry = (value: unknown): value is McpClient.ConnectOptions => {
-  if (typeof value !== "object" || value === null) return false
-  const entry = value as Record<string, unknown>
-  const positiveInteger = (key: string) =>
-    entry[key] === undefined || (typeof entry[key] === "number" && Number.isInteger(entry[key]) && entry[key] > 0)
-  const env = entry.env
-  return typeof entry.server === "string" &&
-    typeof entry.command === "string" &&
-    Array.isArray(entry.args) && entry.args.every((argument) => typeof argument === "string") &&
-    (entry.cwd === undefined || typeof entry.cwd === "string") &&
-    (env === undefined || (
-      typeof env === "object" && env !== null &&
-      Object.values(env).every((item) => item === undefined || typeof item === "string")
-    )) &&
-    positiveInteger("handshakeTimeoutMs") &&
-    positiveInteger("requestTimeoutMs") &&
-    positiveInteger("queueCapacity") &&
-    positiveInteger("maxFrameBytes")
-}
-
 /**
  * Reads and validates the MCP servers named by `--mcp-config`/`SMITHERS_MCP_CONFIG`.
  *
- * The file is a JSON array of `{server, command, args, cwd?, env?,
- * handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}`
- * entries, exactly `McpClient.ConnectOptions`. Omitting the setting configures
- * no MCP servers. A named path that is missing, unreadable, malformed, or has
- * the wrong shape raises a flag-specific usage error rather than silently
- * changing the executor's tool catalog.
+ * The file is a JSON array decoded with `McpClient.ConnectOptionsSchema`.
+ * Projection fields are preserved for `McpFlows.connected` to check and apply.
+ * Omitting the setting configures no MCP servers. Missing, unreadable, malformed,
+ * or incorrectly shaped files raise a flag-specific usage error rather than
+ * silently changing the executor's tool catalog.
  *
  * @category constructors
  * @since 0.1.0
@@ -124,12 +102,16 @@ const mcpServersFromArguments = (
     const reason = cause instanceof Error ? cause.message : String(cause)
     throw new CliError.UsageError({ message: `--mcp-config ${path} is not valid JSON: ${reason}` })
   }
-  if (!Array.isArray(parsed) || !parsed.every(isMcpServerEntry)) {
+  const decoded = Schema.decodeUnknownResult(Schema.Array(McpClient.ConnectOptionsSchema), {
+    // Projection options are consumed by McpFlows.connected, not the connection schema.
+    onExcessProperty: "preserve"
+  })(parsed)
+  if (Result.isFailure(decoded)) {
     throw new CliError.UsageError({
       message: `--mcp-config ${path} must contain a JSON array of MCP server entries`
     })
   }
-  return parsed
+  return decoded.success
 }
 
 /**

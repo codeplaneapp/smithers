@@ -28,8 +28,7 @@ const source = yield * McpFlows.connected({
 mostly useful server's one dangerous tool out of reach:
 
 ```ts
-exclude: ;
-;["delete_repository"]
+const source = McpFlows.mcp(client, { exclude: ["delete_repository"] })
 ```
 
 Both match exact names. Neither accepts a pattern, because a pattern that

@@ -13,17 +13,38 @@ projects into a run's flow catalog, so a flow can call them.
 `SMITHERS_MCP_CONFIG` sets the same path. The flag wins when both are present,
 and omitting both configures no MCP servers.
 
+## Install the server
+
+Install a reviewed server version and its dependencies before supplying any
+credentials. This example pins the deprecated GitHub server to `2025.4.8`;
+review it for your use before running it. Use a dedicated directory, review and
+retain `package.json` and `package-lock.json`, then install from that lockfile:
+
+```bash
+mkdir -p /path/to/mcp-servers
+env -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN npm install --prefix /path/to/mcp-servers --package-lock-only --ignore-scripts --save-exact @modelcontextprotocol/server-github@2025.4.8
+# Review the pinned package and lockfile before installing.
+env -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN npm ci --prefix /path/to/mcp-servers --ignore-scripts
+```
+
+Both npm commands remove the GitHub credential variables from their environment.
+Launch the installed executable directly and supply the token only in the
+server's `env`. This server reads `GITHUB_PERSONAL_ACCESS_TOKEN`.
+
 ## The file
 
-A JSON array. Each entry is structurally an `McpClient.ConnectOptions`:
+A JSON array. Each entry accepts `McpClient.ConnectOptions` and
+`McpFlows.ProjectionOptions`:
 
 ```json
 [
   {
     "server": "github",
-    "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-github"],
-    "env": { "GITHUB_TOKEN": "ghp_..." }
+    "command": "/path/to/mcp-servers/node_modules/.bin/mcp-server-github",
+    "args": [],
+    "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." },
+    "exclude": ["delete_repository"],
+    "namePrefix": "github"
   },
   {
     "server": "reports",
@@ -35,35 +56,42 @@ A JSON array. Each entry is structurally an `McpClient.ConnectOptions`:
 ]
 ```
 
-Each server's tools arrive as flows named `mcp/<server>/<tool>`, so the `server`
-value is what a model reads and what you steer a run with.
+By default, tools arrive as flows named `mcp/<server>/<tool>`. With the custom
+`namePrefix` above, GitHub tools arrive as `github/<tool>`.
 
 ## What the flag validates
 
-The CLI checks the shape before any layer is built, and a bad file is a usage
-error naming the flag rather than a lower-level exception later:
+The CLI decodes every connection field with `McpClient.ConnectOptionsSchema`
+before any layer is built. A bad file is a usage error naming the flag and path.
 
-| Field                | Requirement                       |
-| -------------------- | --------------------------------- |
-| `server`             | Required string.                  |
-| `command`            | Required string.                  |
-| `args`               | Required array of strings.        |
-| `cwd`                | Optional string.                  |
-| `env`                | Optional object of string values. |
-| `handshakeTimeoutMs` | Optional positive integer.        |
-| `requestTimeoutMs`   | Optional positive integer.        |
-| `queueCapacity`      | Optional positive integer.        |
-| `maxFrameBytes`      | Optional positive integer.        |
+| Field                                                               | Requirement                       |
+| ------------------------------------------------------------------- | --------------------------------- |
+| `server`, `command`                                                 | Required non-empty strings.       |
+| `args`                                                              | Required array of strings.        |
+| `cwd`                                                               | Optional non-empty string.        |
+| `env`                                                               | Optional object of string values. |
+| `handshakeTimeoutMs`, `requestTimeoutMs`                            | Optional positive integers.       |
+| `queueCapacity`, `maxFrameBytes`, `maxOutboundFrameBytes`           | Optional positive integers.       |
+| `maxStderrBytes`, `maxTools`, `maxToolNameBytes`, `maxCatalogPages` | Optional positive integers.       |
 
 Four failures are usage errors that name the path: the file is missing, it
-cannot be read, it is not valid JSON, or it is not an array of entries in that
-shape.
+cannot be read, it is not valid JSON, or it is not an array of entries accepted
+by the schema. For example, `maxTools: 0` fails here before connecting a server.
 
-The client's other limits (`maxOutboundFrameBytes`, `maxStderrBytes`,
-`maxTools`, `maxToolNameBytes`, `maxCatalogPages`) are not checked by the flag.
-They still reach the client, which validates them itself, so a bad value there
-surfaces as a connect-time `protocol_error` naming the option instead of a usage
-error naming the file.
+## Select and name tools
+
+The CLI preserves these projection fields and passes them to
+`McpFlows.connected`:
+
+| Field        | Meaning                                                                   |
+| ------------ | ------------------------------------------------------------------------- |
+| `include`    | Optional array of exact tool names. Omitted or empty includes every tool. |
+| `exclude`    | Optional array of exact tool names to drop, applied after `include`.      |
+| `namePrefix` | Optional replacement for the default `mcp/<server>` flow-name prefix.     |
+
+The checked projection constructor rejects an empty `namePrefix` before
+spawning and unknown `include` names after reading the catalog. These are
+projection errors, separate from the connection schema's file validation.
 
 ## When a bad server fails
 
@@ -95,4 +123,4 @@ share a name and nothing else.
 - [Bound an untrusted server](/guides/bound-an-untrusted-server/): what the numeric
   fields do.
 - [Select the tools a run sees](/guides/select-the-tools-a-run-sees/): narrowing a
-  large catalog, in a composition you control.
+  large catalog and choosing a projection constructor.

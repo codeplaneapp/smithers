@@ -96,13 +96,12 @@ recipe is in
 composes this package for you: `smthrs --mcp-config <path>` reads a JSON array
 of server entries, connects every one of them when the executor starts, and adds
 their tools to the run's flow catalog. Each entry in that file is structurally an
-`McpClient.ConnectOptions`, so the flag and this package describe the same
-connection. See
+`McpClient.ConnectOptions` with optional `include`, `exclude`, and `namePrefix`
+projection fields. The flag supports filtering and renaming tools per server. See
 [Configure servers for the CLI](/guides/configure-servers-for-the-cli/).
 
 Import the package directly when you embed Smithers in a program of your own, or
-when you want a projection the flag does not express: a per-server `include`
-list, a custom flow-name prefix, or a narrowed capability declaration. The
+when you need to customize the projected capability declaration. The
 projected `FlowBinding.Source` is the same type the standard flows return, so it
 composes with them in one array; that contract belongs to
 [`@smthrs/harness`](https://harness.smithers.sh/reference/api/).

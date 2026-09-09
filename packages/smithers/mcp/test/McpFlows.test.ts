@@ -1924,6 +1924,38 @@ describe("McpFlows.mcp", () => {
     expect(Object.isFrozen(McpFlows.capabilities)).toBe(true)
   })
 
+  it("the documented exclude recipe removes the dangerous tool", async () => {
+    const guide = readFileSync(new URL("../docs/guides/select-the-tools-a-run-sees.md", import.meta.url), "utf8")
+    const recipe = guide.split("mostly useful server's one dangerous tool out of reach:")[1]!
+      .match(/```ts\n([\s\S]*?)\n```/)![1]!
+    const client: McpClient.McpClient = {
+      ...projectionClient,
+      tools: [
+        ...projectionClient.tools,
+        { name: "delete_repository", description: undefined, inputSchema: {}, outputSchema: undefined }
+      ]
+    }
+    const source = new Function("McpFlows", "client", `${recipe}\nreturn source`)(McpFlows, client)
+    const bindings = await execute(source.bindings()) as ReadonlyArray<{ descriptor: { name: string } }>
+    expect(bindings.map((binding) => binding.descriptor.name)).toEqual([
+      "mcp/catalog/first",
+      "mcp/catalog/second",
+      "mcp/catalog/third"
+    ])
+  })
+
+  it("documents CLI filtering and naming in the overview and config guide", () => {
+    const overview = readFileSync(new URL("../docs/README.md", import.meta.url), "utf8")
+    const guide = readFileSync(new URL("../docs/guides/configure-servers-for-the-cli.md", import.meta.url), "utf8")
+    expect(overview).not.toContain("a projection the flag does not express")
+    for (const option of ["include", "exclude", "namePrefix"]) {
+      expect(overview).toContain(`\`${option}\``)
+      expect(guide).toContain(`\`${option}\``)
+    }
+    expect(guide).toContain("ConnectOptionsSchema")
+    expect(guide).not.toContain("are not checked by the flag")
+  })
+
   it("applies include in catalog order", async () => {
     const bindings = await execute(McpFlows.mcp(projectionClient, { include: ["third", "first"] }).bindings())
 
