@@ -360,6 +360,24 @@ describe("the default classifier", () => {
     expect(Option.isNone(park)).toBe(true)
   })
 
+  it("takes a wait of exactly the ceiling and refuses the millisecond past it", () => {
+    // The ceiling is inclusive: the comparison is `wait > ceiling`, not `>=`.
+    // A day against ten seconds is far enough over that either comparison
+    // refuses it, so the boundary itself is what says which one this is.
+    const classifier = QuotaPolicy.makeDefault({ maxWaitMillis: 10_000 })
+    const atCeiling = classifier.classify(
+      new ModelError({ code: "quota_exceeded", message: "back soon", retryAfterMillis: 10_000 }),
+      1_000
+    )
+    expect(Option.getOrUndefined(atCeiling)).toEqual({ wakeAt: 11_000, source: "retry-after" })
+
+    const pastCeiling = classifier.classify(
+      new ModelError({ code: "quota_exceeded", message: "back soon", retryAfterMillis: 10_001 }),
+      1_000
+    )
+    expect(Option.isNone(pastCeiling)).toBe(true)
+  })
+
   it("parks an HTTP 529 even when a generic adapter calls it provider_internal", () => {
     const park = classify(
       new ModelError({
@@ -749,8 +767,10 @@ describe("a quota refusal at a model-backed step", () => {
   }, 60_000)
   it("reports the refusal once the step has spent its park allowance", async () => {
     const calls: Array<string> = []
-    const exit = await durable(
+    const maxQuotaParks = 1
+    const observed = await durable(
       Effect.gen(function*() {
+        const quotaParksBefore = yield* Metric.value(ObservabilityMetric.quotaParks)
         const wiring = yield* incarnation(
           "bounded",
           alwaysRefusing(
@@ -758,21 +778,36 @@ describe("a quota refusal at a model-backed step", () => {
             calls
           ),
           QuotaPolicy.layerDefault(),
-          hostWith({ maxQuotaParks: 1 })
+          hostWith({ maxQuotaParks })
         )
         const running = yield* Effect.exit(
           ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "quota-bounded" }).pipe(
             Effect.provide(wiring)
           )
         ).pipe(Effect.forkChild({ startImmediately: true }))
-        return yield* settle(running)
+        const exit = yield* settle(running)
+        const journal = yield* Journal.Journal
+        yield* journal.flush
+        const page = yield* journal.entries({ runId: "quota-bounded" as never, limit: 200 })
+        return {
+          exit,
+          records: parks(page.entries),
+          quotaParksBefore,
+          quotaParks: yield* Metric.value(ObservabilityMetric.quotaParks)
+        }
       }).pipe(Effect.provide(stores))
     )
 
-    expect(Exit.isFailure(exit)).toBe(true)
+    expect(Exit.isFailure(observed.exit)).toBe(true)
     // One allowance, so: the refusal, one park, the ask again, and then the
     // report. A window that is still closed after its own deadline is not one
     // this run waits out forever.
     expect(calls).toHaveLength(2)
+    // The allowance bounds the PARKS, and the call count alone cannot say so:
+    // the retry that re-issues the ask is capped at the same number, so a
+    // bound that let one extra park through would still ask exactly twice.
+    // The park's own evidence is what pins it.
+    expect(observed.records).toHaveLength(maxQuotaParks)
+    expect(observed.quotaParks.count - observed.quotaParksBefore.count).toBe(maxQuotaParks)
   })
 })
