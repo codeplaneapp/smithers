@@ -30,7 +30,7 @@
  *   node apps/docs/shared/sync-content.mjs --all [--check]
  *   node ../shared/sync-content.mjs [--check]   (from apps/docs/<slug>)
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, posix, relative, resolve } from "node:path"
 import { bySlug, docsRoot, repoRoot, sites } from "./manifest.mjs"
 import { fileURLToPath } from "node:url"
@@ -353,12 +353,14 @@ const syncSite = (entry) => {
   // Prune directories a deletion left empty so the tree mirrors the sources.
   if (!checkMode && existsSync(outRoot)) {
     const prune = (dir) => {
-      for (const item of readdirSync(dir, { withFileTypes: true })) {
-        if (item.isDirectory()) {
-          const abs = join(dir, item.name)
-          prune(abs)
-          if (readdirSync(abs).length === 0) rmSync(abs)
+      try {
+        for (const item of readdirSync(dir, { withFileTypes: true })) {
+          if (item.isDirectory()) prune(join(dir, item.name))
         }
+        if (dir !== outRoot && readdirSync(dir).length === 0) rmdirSync(dir)
+      } catch (error) {
+        // Another sync may remove the directory or a writer may refill it.
+        if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error
       }
     }
     prune(outRoot)
