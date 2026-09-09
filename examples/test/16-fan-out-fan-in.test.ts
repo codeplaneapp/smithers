@@ -4,12 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  batches,
   declaredBatches,
   declaredOnDiskPriority,
   declaredPriorities,
   discovered,
   discoveredFlow,
-  main
+  main,
+  specs
 } from "../src/16-fan-out-fan-in.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "flows-examples-"))
@@ -22,6 +24,27 @@ it("declares three batches of at most two, urgent checks first", () => {
     ["lint", "types"],
     ["unit"]
   ])
+})
+
+it("holds every batch to at most the concurrency it is given", () => {
+  expect(batches(specs, 1)).toEqual([["audit"], ["licence"], ["lint"], ["types"], ["unit"]])
+  expect(batches(specs, 4)).toEqual([["audit", "licence", "lint", "types"], ["unit"]])
+  expect(batches(specs, 5)).toEqual([["audit", "licence", "lint", "types", "unit"]])
+  expect(batches(specs, 9)).toEqual([["audit", "licence", "lint", "types", "unit"]])
+  expect(batches([], 2)).toEqual([])
+})
+
+// A bound the loop cannot advance by is refused rather than looped on: zero and
+// negatives never terminate, and a fractional or non-finite bound would group
+// checks the helper's doc line does not describe.
+it("refuses a concurrency that is not a positive integer", () => {
+  for (const concurrency of [0, -1, -2, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(() => batches(specs, concurrency)).toThrow(
+      `batch concurrency must be a positive integer: ${concurrency}`
+    )
+  }
+  // The refusal does not depend on there being checks to batch.
+  expect(() => batches([], 0)).toThrow("batch concurrency must be a positive integer: 0")
 })
 
 it("carries each check's priority into the built plan", () => {

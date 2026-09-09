@@ -48324,11 +48324,20 @@ export const specs: ReadonlyArray<CheckSpec> = [
  * The sort is total, so a plan built twice from the same list is identical.
  * That matters, because the batch a check lands in is part of the topology the
  * step keys are derived from.
+ *
+ * The bound is checked before anything is sorted, because the loop below
+ * advances by it: zero never advances, a negative moves away from termination,
+ * and a fractional or non-finite bound groups checks the doc line above does
+ * not describe. The caller here states a literal, so a refusal is a defect in
+ * this example rather than an error to handle, which is why it throws.
  */
 export const batches = (
   checks: ReadonlyArray<CheckSpec>,
   concurrency: number
 ): ReadonlyArray<ReadonlyArray<string>> => {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new Error(`batch concurrency must be a positive integer: ${concurrency}`)
+  }
   const order = checks
     .map((spec, index) => ({ spec, index }))
     .sort((left, right) => right.spec.priority - left.spec.priority || left.index - right.index)
