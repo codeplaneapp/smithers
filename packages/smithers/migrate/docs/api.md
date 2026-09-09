@@ -856,6 +856,10 @@ to `effect/Schema` text: `z.object`, `z.string`, `z.number`, `z.boolean`,
 `Schema.NullOr`, `Schema.withDecodingDefaultKey`, `.annotate({ description })`,
 and `Schema.check(...)`.
 
+Chained `.int()` adds `Schema.check(Schema.isInt())` to the current schema.
+Numeric bounds from `.min()`, `.max()`, `.positive()`, and `.nonnegative()`
+are preserved before or after `.int()`.
+
 Printed text needs `Schema` in scope, and `Effect` too when a field has a
 default.
 

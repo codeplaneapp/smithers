@@ -260,7 +260,9 @@ const convert = (node: ts.Expression): Converted | undefined => {
         return { ...inner, description: value }
       }
       case "int":
-        return inner.kind === "number" ? { ...inner, text: "Schema.Int" } : undefined
+        return inner.kind === "number"
+          ? { ...inner, text: `${inner.text}.pipe(Schema.check(Schema.isInt()))` }
+          : undefined
       case "nonnegative":
         return inner.kind === "number"
           ? { ...inner, text: `${inner.text}.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))` }

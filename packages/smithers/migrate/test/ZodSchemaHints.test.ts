@@ -80,7 +80,8 @@ describe("ZodSchemaHints.print over the safe subset", () => {
     },
     {
       chain: "z.object({ count: z.number().int().nonnegative() })",
-      text: "Schema.Struct({\n  count: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))\n})",
+      text:
+        "Schema.Struct({\n  count: Schema.Number.pipe(Schema.check(Schema.isInt())).pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))\n})",
       input: { count: 0 },
       output: { count: 0 }
     },
@@ -99,6 +100,29 @@ describe("ZodSchemaHints.print over the safe subset", () => {
       expect(printed).toBe(example.text)
       expect(ZodSchemaHints.classify(example.chain).class).toBe("automatic")
       expect(decodes(printed!, example.input)).toEqual(example.output)
+    })
+  }
+})
+
+describe("ZodSchemaHints.print preserves integer refinements", () => {
+  const cases = [
+    { chain: "z.number().min(5).max(10).int()", valid: [5, 7, 10], invalid: [-1, 4, 11, 7.5] },
+    { chain: "z.number().int().min(5).max(10)", valid: [5, 7, 10], invalid: [-1, 4, 11, 7.5] },
+    { chain: "z.number().min(5).int().max(10)", valid: [5, 7, 10], invalid: [-1, 4, 11, 7.5] },
+    { chain: "z.number().positive().int()", valid: [1, 5], invalid: [-1, 0, 1.5] },
+    { chain: "z.number().int().positive()", valid: [1, 5], invalid: [-1, 0, 1.5] },
+    { chain: "z.number().nonnegative().int().describe(\"count\")", valid: [0, 5], invalid: [-1, 1.5] },
+    { chain: "z.number().int().nonnegative().describe(\"count\")", valid: [0, 5], invalid: [-1, 1.5] }
+  ]
+
+  for (const { chain, invalid, valid } of cases) {
+    it(`keeps every check in ${chain}`, () => {
+      const printed = ZodSchemaHints.print(chain)!
+
+      expect(ZodSchemaHints.classify(chain).class).toBe("automatic")
+      for (const input of valid) expect(decodes(printed, input)).toBe(input)
+      for (const input of invalid) expect(() => decodes(printed, input)).toThrow()
+      if (chain.includes("describe")) expect(printed).toContain(".annotate({ description: \"count\" })")
     })
   }
 })
