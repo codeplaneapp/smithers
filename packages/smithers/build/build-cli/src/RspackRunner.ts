@@ -329,7 +329,7 @@ interface PreparedRun {
   readonly cacheDirectory: string
 }
 
-/** Writes the runner script and one request file into a fresh scratch entry. */
+/** Writes one request into fresh scratch, cleaning up if preparation fails. */
 const prepare = async (
   options: RunnerOptions,
   request: Record<string, unknown>
@@ -338,26 +338,31 @@ const prepare = async (
     throw new Error(`the bundler scratch directory must be absolute: ${options.scratchDirectory}`)
   }
   const directory = NodePath.join(options.scratchDirectory, `bundler-${randomUUID()}`)
-  await Fs.mkdir(directory, { recursive: true })
-  const runnerPath = NodePath.join(directory, "runner.mjs")
-  const requestPath = NodePath.join(directory, "request.json")
-  const responsePath = NodePath.join(directory, "response.json")
-  const distRoot = NodePath.join(directory, "dist")
-  // The bundler's persistent cache is shared across calls so a second resolve
-  // of the same workspace can reuse it; everything else is per call.
-  const cacheDirectory = NodePath.join(options.scratchDirectory, "rspack-cache")
-  await Fs.writeFile(runnerPath, runnerScript, "utf8")
-  await Fs.writeFile(
-    requestPath,
-    JSON.stringify({ ...request, responsePath, distRoot, cacheDirectory }),
-    "utf8"
-  )
-  return {
-    argv: [process.execPath, runnerPath, requestPath],
-    directory,
-    responsePath,
-    distRoot,
-    cacheDirectory
+  try {
+    await Fs.mkdir(directory, { recursive: true })
+    const runnerPath = NodePath.join(directory, "runner.mjs")
+    const requestPath = NodePath.join(directory, "request.json")
+    const responsePath = NodePath.join(directory, "response.json")
+    const distRoot = NodePath.join(directory, "dist")
+    // The bundler's persistent cache is shared across calls so a second resolve
+    // of the same workspace can reuse it; everything else is per call.
+    const cacheDirectory = NodePath.join(options.scratchDirectory, "rspack-cache")
+    await Fs.writeFile(runnerPath, runnerScript, "utf8")
+    await Fs.writeFile(
+      requestPath,
+      JSON.stringify({ ...request, responsePath, distRoot, cacheDirectory }),
+      "utf8"
+    )
+    return {
+      argv: [process.execPath, runnerPath, requestPath],
+      directory,
+      responsePath,
+      distRoot,
+      cacheDirectory
+    }
+  } catch (cause) {
+    await Fs.rm(directory, { recursive: true, force: true })
+    throw cause
   }
 }
 
@@ -404,7 +409,8 @@ const failureMessage = (cause: unknown): string => cause instanceof Error ? caus
  * The settled result is validated row by row and its {@link
  * BundlerTarget.graphDigest} is computed here, from the validated rows, so a
  * child that wrote an inconsistent response can never publish a digest for a
- * graph it did not report.
+ * graph it did not report. The per-call scratch tree is released after the
+ * child exits and the response is read, including on failure or interruption.
  *
  * @category execution
  * @since 0.1.0
@@ -413,7 +419,7 @@ export const resolveGraph = (
   options: RunnerOptions,
   payload: BundlerTarget.ResolvePayload
 ): Effect.Effect<BundlerTarget.ResolveResult, Exec.ExecError> =>
-  Effect.flatMap(
+  Effect.acquireUseRelease(
     Effect.tryPromise({
       try: () =>
         prepare(options, {
@@ -455,7 +461,12 @@ export const resolveGraph = (
             catch: (cause) => execError(prepared.argv, failureMessage(cause))
           })
         )
-      )
+      ),
+    (prepared) =>
+      Effect.tryPromise({
+        try: () => Fs.rm(prepared.directory, { recursive: true, force: true }),
+        catch: (cause) => execError(prepared.argv, failureMessage(cause))
+      })
   )
 
 /**
@@ -473,7 +484,7 @@ export const runBuild = (
   options: RunnerOptions,
   payload: BundlerTarget.BuildPayload
 ): Effect.Effect<Exec.Result, Exec.ExecError> =>
-  Effect.flatMap(
+  Effect.acquireUseRelease(
     Effect.tryPromise({
       try: () =>
         prepare(options, {
@@ -508,7 +519,12 @@ export const runBuild = (
             catch: (cause) => execError(prepared.argv, failureMessage(cause))
           })
         )
-      )
+      ),
+    (prepared) =>
+      Effect.tryPromise({
+        try: () => Fs.rm(prepared.directory, { recursive: true, force: true }),
+        catch: (cause) => execError(prepared.argv, failureMessage(cause))
+      })
   )
 
 /**

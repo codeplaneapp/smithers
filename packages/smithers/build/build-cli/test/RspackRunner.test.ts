@@ -13,12 +13,13 @@
  */
 import * as BundlerTarget from "@smthrs/targets/BundlerTarget"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import { existsSync } from "node:fs"
 import * as Fs from "node:fs/promises"
 import { createRequire } from "node:module"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { resolveGraph, runBuild } from "../src/RspackRunner.ts"
 
 const fixture = NodePath.join(import.meta.dirname, "fixtures", "rsbuild-mini")
@@ -77,11 +78,32 @@ describe("refusals", () => {
         { configPath: "rsbuild.config.mjs", entries: ["main.ts"], mode: "development" }
       ))
       expect(error.stderr).toContain("does not provide @rsbuild/core")
+      expect(await Fs.readdir(scratch)).toEqual([])
     } finally {
       await Fs.rm(root, { recursive: true, force: true })
       await Fs.rm(scratch, { recursive: true, force: true })
     }
   }, 120_000)
+
+  it("removes scratch files when preparing the request fails", async () => {
+    const scratch = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-rspack-prepare-"))
+    try {
+      const entries = ["main.ts"]
+      Object.defineProperty(entries, "0", {
+        get: () => {
+          throw new Error("request serialization failed")
+        }
+      })
+      const error = await flipped(resolveGraph(
+        { workspaceRoot: Os.tmpdir(), scratchDirectory: scratch },
+        { configPath: "rsbuild.config.mjs", entries, mode: "development" }
+      ))
+      expect(error.stderr).toContain("request serialization failed")
+      expect(await Fs.readdir(scratch)).toEqual([])
+    } finally {
+      await Fs.rm(scratch, { recursive: true, force: true })
+    }
+  })
 
   it("refuses a relative scratch directory", async () => {
     const error = await flipped(resolveGraph(
@@ -99,6 +121,7 @@ describe("rsbuild-mini end to end", () => {
   beforeAll(async () => {
     workspace = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-rspack-mini-"))
     scratch = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-rspack-mini-scratch-"))
+    await Fs.mkdir(NodePath.join(scratch, "rspack-cache"))
     await Fs.cp(fixture, workspace, { recursive: true })
     // The fixture runs the linked tree's own bundler, exactly as a real
     // workspace runs its own installed one.
@@ -108,6 +131,10 @@ describe("rsbuild-mini end to end", () => {
   afterAll(async () => {
     await Fs.rm(workspace, { recursive: true, force: true })
     await Fs.rm(scratch, { recursive: true, force: true })
+  })
+
+  afterEach(async () => {
+    expect(await Fs.readdir(scratch)).toEqual(["rspack-cache"])
   })
 
   const options = () => ({
@@ -186,4 +213,84 @@ describe("rsbuild-mini end to end", () => {
     }))
     expect(error.stderr).toContain("is not declared")
   }, 300_000)
+
+  it("includes ..foo modules and hashes their bytes while excluding a real parent escape", async () => {
+    const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-rspack-outside-"))
+    const entryPath = NodePath.join(workspace, "src/main.ts")
+    const original = await Fs.readFile(entryPath, "utf8")
+    const insidePath = NodePath.join(workspace, "..foo/value.ts")
+    try {
+      await Fs.mkdir(NodePath.dirname(insidePath))
+      await Fs.writeFile(insidePath, "export const value = \"inside-before\"\n")
+      await Fs.writeFile(NodePath.join(outside, "value.ts"), "export const value = \"outside\"\n")
+      const outsideImport = NodePath.relative(NodePath.dirname(entryPath), NodePath.join(outside, "value.ts"))
+        .split(NodePath.sep).join("/")
+      await Fs.writeFile(
+        entryPath,
+        [
+          "import { value as inside } from \"../..foo/value.ts\"",
+          `import { value as outside } from ${JSON.stringify(outsideImport)}`,
+          "document.title = inside + outside"
+        ].join("\n")
+      )
+      const payload = { configPath: "rsbuild.config.mjs", entries: ["main.ts"], mode: "development" as const }
+      const first = await Effect.runPromise(resolveGraph(options(), payload))
+      expect(first.files.map((file) => file.path)).toEqual(["..foo/value.ts", "src/main.ts"])
+      // The outside module participates in the compile, but is not a workspace file.
+      expect(first.moduleCount).toBeGreaterThanOrEqual(3)
+      await Fs.writeFile(insidePath, "export const value = \"inside-after\"\n")
+      const second = await Effect.runPromise(resolveGraph(options(), payload))
+      expect(second.files.map((file) => file.path)).toEqual(["..foo/value.ts", "src/main.ts"])
+      expect(second.files.find((file) => file.path === "..foo/value.ts")?.digest)
+        .not.toBe(first.files.find((file) => file.path === "..foo/value.ts")?.digest)
+      expect(second.graphDigest).not.toBe(first.graphDigest)
+    } finally {
+      await Fs.writeFile(entryPath, original)
+      await Fs.rm(NodePath.dirname(insidePath), { recursive: true, force: true })
+      await Fs.rm(outside, { recursive: true, force: true })
+    }
+  }, 300_000)
+
+  it.each(["resolve", "build"] as const)("cleans scratch when a %s response is missing", async (kind) => {
+    const configPath = "no-response.config.mjs"
+    await Fs.writeFile(NodePath.join(workspace, configPath), "process.exit(0)\nexport default {}\n")
+    try {
+      const effect: Effect.Effect<unknown, { readonly stderr: string }> = kind === "resolve"
+        ? resolveGraph(options(), { configPath, entries: ["main.ts"], mode: "development" })
+        : runBuild(options(), { configPath, environment: "web", mode: "development", env: {}, outDirs: ["dist"] })
+      const error = await flipped(effect)
+      expect(error.stderr).toContain("without writing its response file")
+    } finally {
+      await Fs.rm(NodePath.join(workspace, configPath), { force: true })
+    }
+  }, 120_000)
+
+  it.each(["resolve", "build"] as const)("cleans scratch after interrupting a %s child", async (kind) => {
+    const configPath = "waiting.config.mjs"
+    const readyPath = NodePath.join(workspace, "child-ready")
+    await Fs.writeFile(
+      NodePath.join(workspace, configPath),
+      [
+        "import { writeFileSync } from \"node:fs\"",
+        `writeFileSync(${JSON.stringify(readyPath)}, String(process.pid))`,
+        "await new Promise(() => setInterval(() => {}, 1000))",
+        "export default {}"
+      ].join("\n")
+    )
+    const effect: Effect.Effect<unknown, { readonly stderr: string }> = kind === "resolve"
+      ? resolveGraph(options(), { configPath, entries: ["main.ts"], mode: "development" })
+      : runBuild(options(), { configPath, environment: "web", mode: "development", env: {}, outDirs: ["dist"] })
+    const fiber = Effect.runFork(effect)
+    try {
+      await expect.poll(() => existsSync(readyPath), { timeout: 60_000 }).toBe(true)
+      const pid = Number(await Fs.readFile(readyPath, "utf8"))
+      await Effect.runPromise(Fiber.interrupt(fiber))
+      expect(() => process.kill(pid, 0)).toThrow()
+      expect(await Fs.readdir(scratch)).toEqual(["rspack-cache"])
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(fiber))
+      await Fs.rm(readyPath, { force: true })
+      await Fs.rm(NodePath.join(workspace, configPath), { force: true })
+    }
+  }, 120_000)
 })
