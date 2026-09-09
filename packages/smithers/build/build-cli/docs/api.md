@@ -399,7 +399,7 @@ including any UTF-8 byte-order mark.
 | `loadResolverConfig`        | `(options: { workspaceRoot; tsconfig? }) => Promise<ResolverConfig>`               | Loads it from the tsconfig chain.                                                      |
 | `ResolverConfigError`       | class                                                                              | The tsconfig chain could not be read, or an entry lies outside the workspace.          |
 | `extractSpecifiers`         | `(path: string, text: string) => ReadonlyArray<ExtractedImport>`                   | Syntax-only extraction of import, export, require, and dynamic-import sites.           |
-| `ExtractedImport`           | `{ specifier: string; dynamic: boolean }`                                          | One extracted import site.                                                             |
+| `ExtractedImport`           | `{ specifier: string; dynamic: boolean; mode?: "require" }`                        | One extracted import site.                                                             |
 | `resolveSpecifier`          | `(config, reader, fromFile, site) => Promise<RowEdge>`                             | Resolves one import into an explicit row edge.                                         |
 | `RowEdge`                   | `{ specifier; status: EdgeStatus; resolved?; packageName? }`                       | One resolved specifier row.                                                            |
 | `EdgeStatus`                | `"resolved-file" \| "package" \| "builtin" \| "unresolved" \| "dynamic"`           | The outcome of resolving one specifier.                                                |
@@ -419,9 +419,21 @@ including any UTF-8 byte-order mark.
 | `rowCacheKey`               | `(fileDigest: string, configDigest: string) => string`                             | One resolver row's cache key.                                                          |
 | `ImportClosureLive`         | `(options: LiveOptions) => Layer`                                                  | Implements the `smithers-build/import-closure` action.                                 |
 | `CheckFilesDifferenceLive`  | `(options: LiveOptions) => Layer`                                                  | Implements `smithers-build/files-difference`.                                          |
-| `implementationFingerprint` | `"smthrs-resolver/2"`                                                              | This resolver's identity, combined with the compiler version into every config digest. |
+| `implementationFingerprint` | `"smthrs-resolver/3"`                                                              | This resolver's identity, combined with the compiler version into every config digest. |
 | `maximumClosureFiles`       | `number`                                                                           | Maximum files one closure may reach.                                                   |
 | `maximumModuleBytes`        | `number`                                                                           | Maximum bytes of one module admitted to the parser.                                    |
+
+Package `#imports` resolve from the nearest `package.json`. Local targets join the
+source closure with their transitive imports; missing targets produce unresolved
+rows. Exact keys precede wildcard patterns, ordered by prefix and then pattern
+length. Conditions select in declaration order from `types`, `node`, `default`,
+and `import` or `require` according to the import site. External targets resolve
+to the installed package name, and builtin targets produce no file dependency.
+
+The controlling manifest joins the closure with its byte digest, including when
+an alias is unresolved. Its path and digest extend the configuration identity
+used for row-cache keys. Manifest and local target reads stay within the
+workspace boundary and use the resolver's bounded readers.
 
 ## ServiceSupervisor
 

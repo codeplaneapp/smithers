@@ -7,7 +7,8 @@
  * against the workspace: relative paths with extension probing (`.js` maps to
  * its TypeScript sibling), `tsconfig.json` `baseUrl`/`paths`, and node_modules
  * specifiers validated through `package.json` `exports`/`main` to a
- * package-level node, never into the package. Every row outcome is explicit:
+ * package-level node, never into the package. Local package `#imports` targets
+ * join the file closure together with their controlling manifest. Every row outcome is explicit:
  * `resolved-file`, `package`, `builtin`, `unresolved`, or `dynamic`.
  *
  * A closure is a breadth-first walk over rows from a set of entry files. Its
@@ -63,7 +64,7 @@ import { posix, sha256Hex as sha256 } from "./internal/Text.ts"
  * @category constants
  * @since 0.1.0
  */
-export const implementationFingerprint = "smthrs-resolver/2"
+export const implementationFingerprint = "smthrs-resolver/3"
 
 /**
  * Maximum files one closure may reach before it refuses loudly.
@@ -128,6 +129,8 @@ export interface RowEdge {
 export interface ExtractedImport {
   readonly specifier: string
   readonly dynamic: boolean
+  /** Require sites select CommonJS imports-map conditions. */
+  readonly mode?: "require" | undefined
 }
 
 /**
@@ -171,7 +174,8 @@ export class ResolverConfigError extends Error {
  * `baseUrl` and `paths` are workspace-relative; `sources` records the
  * tsconfig chain that produced them; `configDigest` keys rows together with
  * each file's content digest and covers the implementation fingerprint, the
- * TypeScript version, probing order, and the chain's exact bytes.
+ * TypeScript version, probing order, and the chain's exact bytes. Row keys
+ * further include the nearest package manifest's path and exact byte digest.
  *
  * @category models
  * @since 0.1.0
@@ -395,7 +399,7 @@ export const extractSpecifiers = (path: string, text: string): ReadonlyArray<Ext
       const specifier = node.moduleReference.expression === undefined
         ? undefined
         : literalText(node.moduleReference.expression)
-      if (specifier !== undefined) found.push({ specifier, dynamic: false })
+      if (specifier !== undefined) found.push({ specifier, dynamic: false, mode: "require" })
     } else if (ts.isCallExpression(node)) {
       const callee = node.expression
       const isImportCall = callee.kind === ts.SyntaxKind.ImportKeyword
@@ -407,7 +411,7 @@ export const extractSpecifiers = (path: string, text: string): ReadonlyArray<Ext
         const argument = node.arguments[0]
         const specifier = argument === undefined ? undefined : literalText(argument)
         if (specifier !== undefined) {
-          found.push({ specifier, dynamic: false })
+          found.push(isImportCall ? { specifier, dynamic: false } : { specifier, dynamic: false, mode: "require" })
         } else {
           found.push({
             specifier: argument === undefined ? boundedText(node, source) : boundedText(argument, source),
@@ -453,9 +457,19 @@ export interface TreeView {
  */
 class TreeReader implements TreeView {
   private readonly directories = new Map<string, ReadonlyMap<string, EntryKind> | null>()
+  private readonly manifests = new Map<string, Promise<ImportsManifest | null>>()
   readonly root: string
   constructor(root: string) {
     this.root = root
+  }
+
+  importsManifest(fromDirectory: string): Promise<ImportsManifest | null> {
+    let manifest = this.manifests.get(fromDirectory)
+    if (manifest === undefined) {
+      manifest = readImportsManifest(this, fromDirectory)
+      this.manifests.set(fromDirectory, manifest)
+    }
+    return manifest
   }
 
   private async listing(relativeDirectory: string): Promise<ReadonlyMap<string, EntryKind> | null> {
@@ -631,6 +645,86 @@ const ancestorsOf = (relativeDirectory: string): ReadonlyArray<string> => {
   }
 }
 
+interface ImportsManifest {
+  readonly path: string
+  readonly directory: string
+  readonly digest: string
+  readonly imports: unknown
+}
+
+/** The nearest package scope controls #imports, even without a usable map. */
+const readImportsManifest = async (reader: TreeView, fromDirectory: string): Promise<ImportsManifest | null> => {
+  for (const directory of ancestorsOf(fromDirectory)) {
+    const path = directory === "" ? "package.json" : `${directory}/package.json`
+    if (await reader.kind(path) !== "file") continue
+    let content: { readonly text: string; readonly digest: string }
+    try {
+      content = await readWorkspaceText(NodePath.join(reader.root, path), {
+        root: await SafeFs.canonicalRoot(reader.root),
+        limit: SafeFs.defaultTextBytes,
+        what: "package imports manifest"
+      })
+    } catch (cause) {
+      throw new ClosureError(`imports manifest could not be read: ${path}: ${failureMessage(cause)}`)
+    }
+    let imports: unknown
+    try {
+      const value: unknown = JSON.parse(content.text)
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        imports = (value as Record<string, unknown>)["imports"]
+      }
+    } catch {
+      // A malformed nearest manifest still ends the package scope search.
+    }
+    return { path, directory, digest: content.digest, imports }
+  }
+  return null
+}
+
+/** Select conditions in declaration order; undefined permits a later condition. */
+const importsTarget = (target: unknown, mode: "import" | "require", depth = 0): string | null | undefined => {
+  if (depth > 8) return undefined
+  if (target === null || typeof target === "string") return target
+  if (Array.isArray(target)) {
+    for (const entry of target) {
+      const selected = importsTarget(entry, mode, depth + 1)
+      if (typeof selected === "string") return selected
+    }
+    return null
+  }
+  if (typeof target === "object") {
+    for (const [condition, entry] of Object.entries(target)) {
+      if (condition !== "default" && condition !== "types" && condition !== "node" && condition !== mode) continue
+      const selected = importsTarget(entry, mode, depth + 1)
+      if (selected !== undefined) return selected
+    }
+  }
+  return undefined
+}
+
+const matchImportsTarget = (imports: unknown, specifier: string, mode: "import" | "require"): string | null => {
+  if (typeof imports !== "object" || imports === null || Array.isArray(imports)) return null
+  const record = imports as Record<string, unknown>
+  if (Object.hasOwn(record, specifier)) return importsTarget(record[specifier], mode) ?? null
+  let best: { readonly key: string; readonly star: number; readonly matched: string } | undefined
+  for (const key of Object.keys(record)) {
+    if (!key.startsWith("#")) continue
+    const star = key.indexOf("*")
+    if (star === -1 || key.indexOf("*", star + 1) !== -1) continue
+    const suffix = key.slice(star + 1)
+    if (
+      specifier.length > star + suffix.length && specifier.startsWith(key.slice(0, star)) &&
+      specifier.endsWith(suffix) &&
+      (best === undefined || star > best.star || (star === best.star && key.length > best.key.length))
+    ) {
+      best = { key, star, matched: specifier.slice(star, specifier.length - suffix.length) }
+    }
+  }
+  if (best === undefined) return null
+  const target = importsTarget(record[best.key], mode)
+  return typeof target === "string" ? target.split("*").join(best.matched) : null
+}
+
 const resolvePackageSpecifier = async (
   reader: TreeView,
   fromDirectory: string,
@@ -724,23 +818,37 @@ export const resolveSpecifier = async (
     return { specifier: site.specifier, status: "unresolved" }
   }
   if (specifier.startsWith("#")) {
-    for (const ancestor of ancestorsOf(fromDirectory)) {
-      const manifestPath = ancestor === "" ? "package.json" : `${ancestor}/package.json`
-      if (await reader.kind(manifestPath) !== "file") continue
-      const manifest = await readManifest(reader.root, manifestPath)
-      const imports = manifest?.["imports"]
-      if (typeof imports !== "object" || imports === null || Array.isArray(imports)) break
-      const admitted = exportsAdmits(
-        Object.fromEntries(
-          Object.entries(imports as Record<string, unknown>).map(([key, value]) => [`.${key.slice(1)}`, value])
-        ),
-        `.${specifier.slice(1)}`
-      )
-      return admitted
-        ? { specifier: site.specifier, status: "package", packageName: specifier }
-        : { specifier: site.specifier, status: "unresolved" }
+    const unresolved: RowEdge = { specifier: site.specifier, status: "unresolved" }
+    if (specifier === "#" || specifier.startsWith("#/")) return unresolved
+    const manifest = reader instanceof TreeReader
+      ? await reader.importsManifest(fromDirectory)
+      : await readImportsManifest(reader, fromDirectory)
+    if (manifest === null) return unresolved
+    const target = matchImportsTarget(manifest.imports, specifier, site.mode ?? "import")
+    if (target === null) return unresolved
+    if (target.startsWith("./")) {
+      const local = containedJoin(target)
+      if (local === null || local === "") return unresolved
+      const raw = containedJoin(manifest.directory, local)
+      if (raw === null) return unresolved
+      const resolved = await probeModulePath(reader, raw)
+      if (resolved === null) return unresolved
+      await SafeFs.resolveFile(NodePath.join(reader.root, resolved), {
+        root: await SafeFs.canonicalRoot(reader.root),
+        what: "package imports target"
+      })
+      return { specifier: site.specifier, status: "resolved-file", resolved }
     }
-    return { specifier: site.specifier, status: "unresolved" }
+    if (target.startsWith("node:") || builtinNames.has(target)) {
+      return { specifier: site.specifier, status: "builtin" }
+    }
+    if (
+      target === "" || target.startsWith(".") || target.startsWith("/") || target.startsWith("#") || target.includes(":")
+    ) {
+      return unresolved
+    }
+    const edge = await resolvePackageSpecifier(reader, manifest.directory, target)
+    return { ...edge, specifier: site.specifier }
   }
   for (const candidate of pathsCandidates(config, specifier)) {
     const resolved = await probeModulePath(reader, candidate === "" ? "." : candidate)
@@ -766,7 +874,8 @@ const StoredRow = Schema.Struct({
   digest: Schema.String,
   specifiers: Schema.Array(Schema.Struct({
     specifier: Schema.String,
-    dynamic: Schema.Boolean
+    dynamic: Schema.Boolean,
+    mode: Schema.optional(Schema.Literal("require"))
   }))
 })
 
@@ -901,7 +1010,13 @@ export const computeClosure = async (options: {
     }
     files.set(path, digest)
     if (text === undefined) continue
-    const key = rowCacheKey(digest, config.configDigest)
+    const slash = path.lastIndexOf("/")
+    const manifest = await reader.importsManifest(slash === -1 ? "" : path.slice(0, slash))
+    const configDigest = manifest === null ? config.configDigest : sha256(canonicalJson({
+      config: config.configDigest,
+      importsManifest: { path: manifest.path, digest: manifest.digest }
+    }))
+    const key = rowCacheKey(digest, configDigest)
     let specifiers: ReadonlyArray<ExtractedImport> | undefined
     if (cache !== undefined) {
       const stored = await cache.get(key)
@@ -927,6 +1042,12 @@ export const computeClosure = async (options: {
         }
         await cache.put(key, row)
       }
+    }
+    if (manifest !== null && specifiers.some((site) => !site.dynamic && site.specifier.startsWith("#"))) {
+      if (!files.has(manifest.path) && files.size >= maximumFiles) {
+        throw new ClosureError(`import closure exceeds ${maximumFiles} files`)
+      }
+      files.set(manifest.path, manifest.digest)
     }
     for (const site of specifiers) {
       const edge = await resolveSpecifier(config, reader, path, site)

@@ -67,9 +67,9 @@ describe("extractSpecifiers", () => {
       { specifier: "./types", dynamic: false },
       { specifier: "./b", dynamic: false },
       { specifier: "./c", dynamic: false },
-      { specifier: "./legacy", dynamic: false },
-      { specifier: "./d", dynamic: false },
-      { specifier: "./e", dynamic: false },
+      { specifier: "./legacy", dynamic: false, mode: "require" },
+      { specifier: "./d", dynamic: false, mode: "require" },
+      { specifier: "./e", dynamic: false, mode: "require" },
       { specifier: "./f", dynamic: false },
       { specifier: "./g", dynamic: false }
     ])
@@ -399,12 +399,138 @@ describe("determinism", () => {
   })
 })
 
+describe("package imports closure", () => {
+  it("tracks local edits, deletion, transitive imports, and manifest identity with warm rows", async () => {
+    await write("app/package.json", JSON.stringify({ imports: { "#lib": "./lib.ts" } }))
+    await write("app/src/entry.ts", `import "#lib"\n`)
+    await write("app/lib.ts", `import "./nested"\nexport const value = 1\n`)
+    await write("app/nested.ts", `export const nested = 1\n`)
+    const config = await loadResolverConfig({ workspaceRoot: root })
+    const cache = await openCache({ workspaceRoot: root })
+    const run = () => computeClosure({ config, entries: ["app/src/entry.ts"], cache })
+    try {
+      const first = await run()
+      expect(paths(first)).toEqual(["app/lib.ts", "app/nested.ts", "app/package.json", "app/src/entry.ts"])
+      expect(first.result.packages).toEqual([])
+      expect(first.result.unresolved).toEqual([])
+      expect((await run()).stats).toEqual({ parsed: 0, cached: 3 })
+      await write("app/lib.ts", `import "./nested"\nexport const value = 2\n`)
+      const edited = await run()
+      expect(edited.result).not.toEqual(first.result)
+      expect(edited.stats).toEqual({ parsed: 1, cached: 2 })
+      await Fs.unlink(NodePath.join(root, "app/lib.ts"))
+      const deleted = await run()
+      expect(paths(deleted)).toEqual(["app/package.json", "app/src/entry.ts"])
+      expect(deleted.result.unresolved).toEqual([{ file: "app/src/entry.ts", specifier: "#lib" }])
+      await write("app/package.json", JSON.stringify({ imports: { "#lib": "./nested.ts" } }))
+      const remapped = await run()
+      expect(paths(remapped)).toEqual(["app/nested.ts", "app/package.json", "app/src/entry.ts"])
+      expect(remapped.result.unresolved).toEqual([])
+      expect(remapped.stats).toEqual({ parsed: 2, cached: 0 })
+      expect(remapped.result.files.find((file) => file.path === "app/package.json")?.digest)
+        .not.toBe(first.result.files.find((file) => file.path === "app/package.json")?.digest)
+    } finally {
+      await cache.close()
+    }
+  })
+
+  it("selects active nested conditions, arrays, and the most specific wildcard", async () => {
+    await write("package.json", JSON.stringify({ imports: {
+      "#lib/*": "./broad/*.ts",
+      "#lib/*.js": { browser: "./wrong.ts", node: { import: "./lib/*/*.ts", default: "./wrong.ts" } },
+      "#lib/exact.js": "./exact.ts",
+      "#lib/private.js": null,
+      "#fallback": [{ browser: "./wrong.ts" }, { default: "./fallback.ts" }],
+      "#inactive": { browser: "./wrong.ts" },
+      "#blocked": { node: null, default: "./wrong.ts" }
+    } }))
+    await write("entry.ts", `import "#lib/util.js"\nimport "#lib/$&.js"\nimport "#lib/exact.js"\nimport "#lib/private.js"\nimport "#fallback"\nimport "#inactive"\nimport "#blocked"\n`)
+    await write("lib/util/util.ts", `export const value = 1\n`)
+    await write("lib/$&/$&.ts", `export const value = 4\n`)
+    await write("exact.ts", `export const value = 2\n`)
+    await write("fallback.ts", `export const value = 3\n`)
+    const outcome = await closureOf(["entry.ts"])
+    expect(paths(outcome)).toEqual(["entry.ts", "exact.ts", "fallback.ts", "lib/$&/$&.ts", "lib/util/util.ts", "package.json"])
+    expect(outcome.result.packages).toEqual([])
+    expect(outcome.result.unresolved).toEqual([
+      { file: "entry.ts", specifier: "#blocked" },
+      { file: "entry.ts", specifier: "#inactive" },
+      { file: "entry.ts", specifier: "#lib/private.js" }
+    ])
+  })
+
+  it("selects import and require conditions for their respective sites", async () => {
+    await write("package.json", JSON.stringify({ imports: {
+      "#lib": { import: "./esm.ts", require: "./cjs.cts" }
+    } }))
+    await write("entry.ts", `import "#lib"\nconst lib = require("#lib")\n`)
+    await write("esm.ts", `export const value = 1\n`)
+    await write("cjs.cts", `module.exports = 2\n`)
+    const outcome = await closureOf(["entry.ts"])
+    expect(paths(outcome)).toEqual(["cjs.cts", "entry.ts", "esm.ts", "package.json"])
+    expect(outcome.result.unresolved).toEqual([])
+  })
+
+  it("resolves external aliases from the owning package and retains the original unresolved specifier", async () => {
+    await write("package.json", JSON.stringify({ imports: {
+      "#dep/*": "dep/*", "#missing": "absent", "#fs": "node:fs"
+    } }))
+    await write("src/entry.ts", `import "#dep/public"\nimport "#dep/private"\nimport "#missing"\nimport "#fs"\n`)
+    await write("node_modules/dep/package.json", JSON.stringify({ exports: { "./public": "./public.js" } }))
+    await write("src/node_modules/dep/package.json", JSON.stringify({ exports: {} }))
+    const outcome = await closureOf(["src/entry.ts"])
+    expect(paths(outcome)).toEqual(["package.json", "src/entry.ts"])
+    expect(outcome.result.packages).toEqual(["dep"])
+    expect(outcome.result.unresolved).toEqual([
+      { file: "src/entry.ts", specifier: "#dep/private" },
+      { file: "src/entry.ts", specifier: "#missing" }
+    ])
+  })
+
+  it("stops at the nearest package scope even when it has no imports map", async () => {
+    await write("package.json", JSON.stringify({ imports: { "#lib": "./lib.ts" } }))
+    await write("app/package.json", "{}")
+    await write("app/entry.ts", `import "#lib"\n`)
+    await write("lib.ts", `export const value = 1\n`)
+    const outcome = await closureOf(["app/entry.ts"])
+    expect(paths(outcome)).toEqual(["app/entry.ts", "app/package.json"])
+    expect(outcome.result.unresolved).toEqual([{ file: "app/entry.ts", specifier: "#lib" }])
+  })
+
+  it("rejects mapped paths outside the owning package", async () => {
+    await write("app/package.json", JSON.stringify({ imports: { "#lib": "./../outside.ts" } }))
+    await write("app/entry.ts", `import "#lib"\n`)
+    await write("outside.ts", `export const value = 1\n`)
+    const outcome = await closureOf(["app/entry.ts"])
+    expect(paths(outcome)).toEqual(["app/entry.ts", "app/package.json"])
+    expect(outcome.result.unresolved).toEqual([{ file: "app/entry.ts", specifier: "#lib" }])
+  })
+
+  it.each(["manifest", "target"])("refuses an escaping %s symlink before reading its bytes", async (kind) => {
+    const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-imports-outside-"))
+    try {
+      await write("entry.ts", `import "#lib"\n`)
+      const manifest = JSON.stringify({ imports: { "#lib": "./lib.ts" } })
+      const name = kind === "manifest" ? "package.json" : "lib.ts"
+      await Fs.writeFile(NodePath.join(outside, name), kind === "manifest" ? manifest : "export const secret = 1")
+      if (kind === "target") await write("package.json", manifest)
+      await Fs.symlink(NodePath.join(outside, name), NodePath.join(root, name))
+      await expect(closureOf(["entry.ts"])).rejects.toThrow(/workspace/)
+    } finally {
+      await Fs.rm(outside, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("edges and bounds", () => {
   it("resolves #imports through the nearest package.json imports map", async () => {
     await write("package.json", JSON.stringify({ imports: { "#lib/*": "./src/lib/*.js", "#one": "./one.js" } }))
     await write("entry.ts", `import "#lib/util"\nimport "#one"\nimport "#nope"\n`)
+    await write("src/lib/util.ts", `export const util = 1\n`)
+    await write("one.ts", `export const one = 1\n`)
     const outcome = await closureOf(["entry.ts"])
-    expect(outcome.result.packages).toEqual(["#lib/util", "#one"])
+    expect(paths(outcome)).toEqual(["entry.ts", "one.ts", "package.json", "src/lib/util.ts"])
+    expect(outcome.result.packages).toEqual([])
     expect(outcome.result.unresolved).toEqual([{ file: "entry.ts", specifier: "#nope" }])
     const config = await loadResolverConfig({ workspaceRoot: root })
     const view: TreeView = {
@@ -419,7 +545,7 @@ describe("edges and bounds", () => {
       }
     }
     await expect(resolveSpecifier(config, view, "entry.ts", { specifier: "#lib/util", dynamic: false }))
-      .resolves.toEqual({ specifier: "#lib/util", status: "package", packageName: "#lib/util" })
+      .resolves.toEqual({ specifier: "#lib/util", status: "resolved-file", resolved: "src/lib/util.ts" })
   })
 
   it("classifies symlinked files and broken links", async () => {
