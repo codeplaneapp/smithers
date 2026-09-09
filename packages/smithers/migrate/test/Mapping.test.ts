@@ -299,6 +299,25 @@ describe("Mapping.classify", () => {
     expect(Mapping.classify(hit("Approval", ["mode", "options"], { mode: "select" }))).toBe("guided")
   })
 
+  it.each([
+    { allowedUsers: "[\"release-manager\"]" },
+    { allowedScopes: "[\"production\"]" },
+    { allowedUsers: "[\"release-manager\"]", allowedScopes: "[\"production\"]" }
+  ])("requires an explicit approval policy for %j", (restrictions) => {
+    const props = Object.keys(restrictions)
+    // Prop presence must require a decision even without captured values.
+    for (const detail of [{ request: "Deploy production", ...restrictions }, { request: "Deploy production" }]) {
+      const entry = hit("Approval", ["request", ...props], detail)
+      const raised = Mapping.classifyWithReason(entry)
+
+      expect(raised.class).toBe("guided")
+      for (const prop of props) expect(raised.reason).toContain(prop)
+      expect(raised.reason).toContain("operator")
+      expect(raised.reason).toContain("approval flow")
+      expect(Mapping.snippet(entry)).toBeUndefined()
+    }
+  })
+
   it("guides a component whose rewrite the source does not carry", () => {
     // Amendment 1: `automatic` is a promise the tool writes the code. A
     // `<Sequence>` whose children have no ids gives it nothing to write.

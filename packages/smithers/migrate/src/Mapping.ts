@@ -181,7 +181,7 @@ const table: ReadonlyArray<MappingRow> = [
     "Approval",
     "WithApproval.withApproval(inner, { reason, approval })",
     "@smthrs/patterns/WithApproval",
-    "`request` becomes `reason`. `mode: \"select\"` and `mode: \"rank\"` have no decorator form and are recorded.",
+    "`request` becomes `reason`. `mode: \"select\"` and `mode: \"rank\"` have no decorator form and are recorded. `allowedUsers` or `allowedScopes` requires a guided decision: the operator must supply an approval flow that preserves the restrictions.",
     "automatic"
   ),
   row(
@@ -940,6 +940,13 @@ const escalations: ReadonlyArray<{
   },
   {
     construct: "Approval",
+    props: ["allowedUsers", "allowedScopes"],
+    to: "guided",
+    reason:
+      "allowedUsers and allowedScopes have no decorator fields; the operator must supply an approval flow that preserves the restrictions"
+  },
+  {
+    construct: "Approval",
     props: ["mode", "options"],
     to: "guided",
     reason: "select and rank approvals have no decorator form",
@@ -1443,6 +1450,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
     }
     case "Approval":
     case "ApprovalGate": {
+      if (hit.props.includes("allowedUsers") || hit.props.includes("allowedScopes")) return undefined
       const reason = detail["request"] ?? detail["reason"]
       if (reason === undefined) return undefined
       return `WithApproval.withApproval(inner, { reason: ${JSON.stringify(reason)}, approval })`
