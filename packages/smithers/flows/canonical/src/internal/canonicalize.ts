@@ -8,6 +8,7 @@
  *
  * @since 0.1.0
  */
+import { describe } from "./describe.ts"
 
 /**
  * Maximum supported nesting below the root value.
@@ -116,7 +117,7 @@ const caused = (
   code: "canonical_getter_threw" | "canonical_tojson_threw",
   cause: unknown,
   path: string
-): CanonicalError => new CanonicalError(code, cause instanceof Error ? cause.message : String(cause), path, { cause })
+): CanonicalError => new CanonicalError(code, describe(cause), path, { cause })
 
 /**
  * Serializes a value into RFC 8785 canonical JSON.

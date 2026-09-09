@@ -70,6 +70,69 @@ describe("canonicalize errors", () => {
     )
   })
 
+  describe.each(
+    [
+      ["throwing toString", () => ({
+        toString(): never {
+          throw null
+        }
+      })],
+      ["null prototype", () => Object.create(null) as object],
+      ["throwing getPrototypeOf", () =>
+        new Proxy({}, {
+          getPrototypeOf(): never {
+            throw new Error("prototype")
+          }
+        })],
+      ["throwing message getter", () =>
+        Object.defineProperty(new Error(), "message", {
+          get(): never {
+            throw new Error("message")
+          }
+        })]
+    ] as const
+  )("hostile thrown value: %s", (_name, makeCause) => {
+    it.each(["toJSON", "getter", "proxy"] as const)("preserves the cause from %s", (source) => {
+      const cause = makeCause()
+      const fail = (): never => {
+        throw cause
+      }
+      const input = source === "toJSON"
+        ? { item: { toJSON: fail } }
+        : source === "getter"
+        ? {
+          get item(): never {
+            return fail()
+          }
+        }
+        : { item: new Proxy({}, { ownKeys: fail }) }
+      let thrown: unknown
+      try {
+        canonicalize(input)
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBeInstanceOf(CanonicalError)
+      const error = thrown as CanonicalError
+      expect(error.code).toBe(source === "toJSON" ? "canonical_tojson_threw" : "canonical_getter_threw")
+      expect(error.path).toBe("$.item")
+      expect(error.cause).toBe(cause)
+      expect(error.message).toBe(`${error.code}: Unable to describe thrown value at $.item`)
+    })
+  })
+
+  it.each([new Error("x".repeat(2048)), "x".repeat(2048)])("bounds thrown-value details", (cause) => {
+    expect(() =>
+      canonicalize({
+        toJSON(): never {
+          throw cause
+        }
+      })
+    ).toThrow(
+      expect.objectContaining({ message: `canonical_tojson_threw: ${"x".repeat(1024)} at $` })
+    )
+  })
+
   it("wraps an exception raised while coercing an object tag", () => {
     const cause = new Error("tag exploded")
     const value = {

@@ -2,7 +2,7 @@
 
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { Canonical } from "../src/index.ts"
 
 const serialize = (value: unknown): Canonical => Effect.runSync(Schema.decodeUnknownEffect(Canonical)(value))
@@ -14,6 +14,31 @@ const failureMessage = (value: unknown): string => failure(value).message
 describe("Canonical", () => {
   it("canonicalizes through schema decoding", () => {
     expect(Schema.decodeUnknownSync(Canonical)({ b: 2, a: 1 })).toBe("{\"a\":1,\"b\":2}")
+  })
+
+  it.each(
+    [
+      ["null", (): null => null, "null"],
+      ["undefined", (): undefined => undefined, "undefined"],
+      ["throwing toString", () => ({
+        toString(): never {
+          throw null
+        }
+      }), "Unable to describe thrown value"]
+    ] as const
+  )("keeps raw parser failures in the typed error channel: %s", (_name, makeCause, message) => {
+    const cause = makeCause()
+    const parser = vi.spyOn(JSON, "parse").mockImplementation(() => {
+      throw cause
+    })
+    let error: Schema.SchemaError
+    try {
+      error = failure(null)
+    } finally {
+      parser.mockRestore()
+    }
+    expect(error).toBeInstanceOf(Schema.SchemaError)
+    expect(error.message).toContain(message)
   })
 
   it("produces valid JSON", () => {
@@ -121,6 +146,41 @@ describe("toJSON", () => {
         throw "broken"
       }
     })).toContain("broken")
+  })
+
+  it.each(
+    [
+      ["throwing toString", () => ({
+        toString(): never {
+          throw null
+        }
+      })],
+      ["null prototype", () => Object.create(null) as object],
+      ["throwing getPrototypeOf", () =>
+        new Proxy({}, {
+          getPrototypeOf(): never {
+            throw new Error("prototype")
+          }
+        })],
+      ["throwing message getter", () =>
+        Object.defineProperty(new Error(), "message", {
+          get(): never {
+            throw new Error("message")
+          }
+        })]
+    ] as const
+  )("returns a typed SchemaError for a %s", (_name, makeCause) => {
+    const cause = makeCause()
+    const error = failure({
+      item: {
+        toJSON(): never {
+          throw cause
+        }
+      }
+    })
+    // Effect.flip only recovers typed failures; a Die would escape runSync.
+    expect(error).toBeInstanceOf(Schema.SchemaError)
+    expect(error.message).toContain("canonical_tojson_threw: Unable to describe thrown value at $.item")
   })
 
   it("rejects toJSON returning its object", () => {

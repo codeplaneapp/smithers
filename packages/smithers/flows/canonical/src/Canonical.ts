@@ -21,6 +21,7 @@ import * as Schema from "effect/Schema"
 import * as SchemaGetter from "effect/SchemaGetter"
 import * as SchemaIssue from "effect/SchemaIssue"
 import { canonicalize } from "./internal/canonicalize.ts"
+import { describe } from "./internal/describe.ts"
 
 /** @private */
 const CanonicalString = Schema.String.pipe(
@@ -66,7 +67,7 @@ export const Canonical = Schema.Unknown.pipe(
         },
         catch: (cause) =>
           new SchemaIssue.InvalidValue(
-            { message: (cause as Error).message },
+            { message: describe(cause) },
             value,
             parseOptions
           )
