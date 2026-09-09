@@ -196,13 +196,13 @@ script branches on.
 Two of their statements go further than `--help` does, because the parser does
 and the help text does not say so:
 
-They are not ingested into smithers.sh. When one of these pages and the
-smithers.sh page for the same verb disagree, the smithers.sh page is the one to
-follow, because it is the one the binary generates.
-
 `plan` requires a flow id. Omitting it with terminal stdin opens the flow
 picker; with piped stdin it exits 2 and names `flow-id` and `--wizard`.
 `--remote` is a shared global flag, listed under "Global flags" on these pages.
+
+They are not ingested into smithers.sh. When one of these pages and the
+smithers.sh page for the same verb disagree, the smithers.sh page is the one to
+follow, because it is the one the binary generates.
 
 ## Other reference
 

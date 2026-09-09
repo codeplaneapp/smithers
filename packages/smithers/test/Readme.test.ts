@@ -71,3 +71,38 @@ describe("the README example", () => {
     expect(snippets[0]).toBe(compiled)
   })
 })
+
+describe("the CLI documentation contracts", () => {
+  it("documents crash cleanup once", () => {
+    const guide = readFileSync(new URL("../docs/guides/diagnose-a-run.md", import.meta.url), "utf8")
+
+    expect(guide.match(/^## What happens to subprocesses after a crash\?$/gm)).toHaveLength(1)
+  })
+
+  it("keeps both compatibility statements directly after their lead-in", () => {
+    const reference = readFileSync(new URL("../docs/reference/cli/README.md", import.meta.url), "utf8")
+
+    expect(reference).toMatch(
+      /and the help text does not say so:\n\n`plan` requires a flow id\.[\s\S]*?`--remote` is a shared global flag[^\n]*\.\n\nThey are not ingested/
+    )
+  })
+
+  it("does not promise unimplemented legacy environment aliases", () => {
+    expect(Cli.Environment.names.every(({ name }) => name.startsWith("SMITHERS_"))).toBe(true)
+    expect(readme).not.toContain("FLOWS_*")
+  })
+
+  it("describes the manifest's direct Effect dependencies and sole SQLite peer", () => {
+    const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+    const introduction = readme.split("**Documentation:**")[0]!.replace(/\s+/g, " ")
+
+    expect(manifest.dependencies.effect).toBe(manifest.dependencies["@effect/platform-node"])
+    expect(Object.keys(manifest.peerDependencies)).toEqual(["@effect/sql-sqlite-node"])
+    expect(introduction).toContain(
+      `\`effect\` and \`@effect/platform-node\` as exact \`${manifest.dependencies.effect}\` direct dependencies`
+    )
+    expect(introduction).toContain(
+      `\`@effect/sql-sqlite-node\` is the sole peer dependency, required at \`${manifest.peerDependencies["@effect/sql-sqlite-node"]}\``
+    )
+  })
+})
