@@ -6,10 +6,10 @@
  * rounds. {@link ReviewLoop} cannot express it, because a review loop revises
  * one artifact; here each issue gets its own fix.
  *
- * The declaration is {@link Loop} over a {@link MapReduce}-style fan-out: the
- * retry bound and the fan-out bound are both declared, so the plan shows the
- * worst case. {@link run} performs the real fan-out over the issues the
- * scanner actually returned.
+ * The declaration is {@link Loop} over a batched fan-out: the retry bound and
+ * the fan-out bound are both declared, so the plan shows the worst case.
+ * {@link run} performs the real fan-out over the issues the scanner actually
+ * returned.
  *
  * @see https://smithers.sh/docs/reference/api/patterns
  * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
@@ -20,7 +20,6 @@ import { Flow, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Loop from "./Loop.ts"
-import * as MapReduce from "./MapReduce.ts"
 import { PatternError } from "./PatternError.ts"
 
 /**
@@ -90,10 +89,8 @@ export interface Report<Issue, Verification> {
   readonly verifications: ReadonlyArray<Verification>
 }
 
-interface Round<Issue, Fix, Verification> {
+interface Round<Issue> {
   readonly issues: ReadonlyArray<Issue>
-  readonly fixes: ReadonlyArray<Fix>
-  readonly verification: Verification | undefined
   /** True only for a round whose scan came back empty, which is the terminal. */
   readonly resolved: boolean
 }
@@ -218,9 +215,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  * resolved is followed by one confirming rescan, because the scanner is the
  * authority on what is left and a verifier can be wrong. A clean scan ends the
  * loop without fixing or verifying anything, which is why a run whose first
- * scan is clean reports one iteration and no verifications. Fixes fan out
- * through {@link MapReduce.run}, so the concurrency bound is the real in-flight
- * bound.
+ * scan is clean reports one iteration and no verifications. Fixes fan out with
+ * `Effect.forEach` over a snapshot of the issues, so `concurrency` is the real
+ * in-flight bound.
  *
  * @category combinators
  * @since 0.1.0
@@ -240,7 +237,7 @@ export const run = <I, Issue, Fix, Verification, E, R, E2, R2, E3, R3>(
     const verifications: Array<Verification> = []
     const loop = yield* Loop.run<
       I,
-      Round<Issue, Fix, Verification>,
+      Round<Issue>,
       E | E2 | E3 | PatternError,
       R | R2 | R3,
       never,
@@ -251,21 +248,20 @@ export const run = <I, Issue, Fix, Verification, E, R, E2, R2, E3, R3>(
       body: ({ input, iteration }) =>
         Effect.gen(function*() {
           const issues = yield* stages.scan({ input, iteration })
-          if (issues.length === 0) {
-            return { issues, fixes: [], verification: undefined, resolved: true }
-          }
-          const fixes = yield* MapReduce.run({ shards: issues, input }, {
-            concurrency,
-            onEmpty: "reduce",
-            map: ({ index, shard }) => stages.fix({ issue: shard, index, iteration }),
-            reduce: ({ mapped }) => Effect.succeed(mapped)
-          })
+          if (issues.length === 0) return { issues, resolved: true }
+          // A snapshot, so a fix that mutates the array the scan returned
+          // cannot widen this round's fan-out.
+          const fixes = yield* Effect.forEach(
+            [...issues],
+            (issue, index) => stages.fix({ issue, index, iteration }),
+            { concurrency }
+          )
           const verification = yield* stages.verify({ input, issues, fixes, iteration })
           verifications.push(verification)
           // A verification is evidence about the round it ends, not the
           // terminal. The next scan confirms it, and only an empty scan stops
           // the loop.
-          return { issues, fixes, verification, resolved: false }
+          return { issues, resolved: false }
         }),
       until: ({ value }) => Effect.succeed(value.resolved)
     })

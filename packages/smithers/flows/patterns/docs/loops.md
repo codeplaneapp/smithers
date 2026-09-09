@@ -172,10 +172,10 @@ const report = yield* ScanFixVerify.run({ path: "src" }, {
 ```
 
 `scan` receives `{ input, iteration }` and returns the issues. `fix` receives
-`{ issue, index, iteration }` and runs once per issue through `MapReduce.run`,
-so `concurrency` is the real in-flight bound. `verify` receives
-`{ input, issues, fixes, iteration }` and answers `true` or an object carrying
-`resolved: true`; `ScanFixVerify.resolved` is that reader.
+`{ issue, index, iteration }` and runs once per issue over a snapshot of what
+the scan returned, so `concurrency` is the real in-flight bound. `verify`
+receives `{ input, issues, fixes, iteration }` and answers `true` or an
+object carrying `resolved: true`; `ScanFixVerify.resolved` is that reader.
 
 An empty scan is the only terminal. A verification is evidence about the round
 it closes, so a round the verifier calls resolved is followed by one confirming

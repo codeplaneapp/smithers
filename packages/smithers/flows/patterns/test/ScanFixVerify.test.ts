@@ -134,6 +134,31 @@ describe("ScanFixVerify", () => {
       expect(events).toEqual(["start-a", "start-b", "end-a", "start-c", "end-b", "end-c"])
     }))
 
+  it.effect("fans out over the issues the scan returned, not a mid-round mutation", () =>
+    Effect.gen(function*() {
+      const fixed: Array<string> = []
+      // A scanner that hands back a live array, and a fix that appends to it.
+      // The fan-out is a snapshot of what the scan returned, so the appended
+      // issue belongs to the next round's scan and never to this round.
+      const found: Array<Issue> = [{ id: "a" }, { id: "b" }]
+      let round = 0
+      const report = yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 1,
+        concurrency: 1,
+        scan: () => Effect.succeed(round++ === 0 ? found : []),
+        fix: ({ index, issue }) =>
+          Effect.sync(() => {
+            fixed.push(`${index}:${issue.id}`)
+            found.push({ id: `spawned-${issue.id}` })
+            return issue.id
+          }),
+        verify: ({ fixes }) => Effect.succeed({ resolved: fixes.length === 2 })
+      })
+
+      expect(fixed).toEqual(["0:a", "1:b"])
+      expect(report.verifications).toEqual([{ resolved: true }])
+    }))
+
   it.effect("rescans after a resolved verification and ends only on a clean scan", () =>
     Effect.gen(function*() {
       const scanned: Array<number> = []
