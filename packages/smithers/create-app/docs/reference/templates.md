@@ -30,8 +30,7 @@ example; it is not a public scaffold in this release candidate.
 The default template ships its ignore rules as `_gitignore` so npm includes
 them in the tarball. Scaffolding writes that file as `.gitignore`, excluding
 `node_modules`, `dist`, `.wrangler`, `.flows`, and `.dev.vars` from Git.
-The pack regression test extracts an npm tarball, checks every default template
-file and the count above, and scaffolds an app to verify its ignore rules.
+The pack regression test checks every default template file and the count above.
 
 ## Shared shape
 
@@ -50,7 +49,6 @@ Both templates are the same app skeleton:
 | `src/`                               | The browser entry point and styles                                         |
 | `routes.gen.ts`, `routes.ui.gen.ts`  | Generated. Run `pnpm routes` after adding a routed file                    |
 | `.smithers/`                         | Workspace configuration for the Smithers build CLI, not for the app itself |
-| `_gitignore` (`default`)            | Packable ignore rules; scaffold writes `.gitignore`                        |
 
 Both carry the same scripts, and `aomi` adds one:
 
@@ -124,20 +122,6 @@ in-memory EVM fork, six panes, a full Worker, and a Cloudflare deploy.
   credential, a 64 KiB body cap, and a session-id shape.
 - **Tests.** Every flow replays a fixture, plus suites for the wire contract,
   the stream, the turn, the Worker, and the Tevm fork.
-
-### Session transcript order
-
-`GET /api/session?id=` returns `messages`, `cards`, and ordered `entries`.
-Each entry references a `messageId` or `cardId` and has kind `message` or
-`card`. Both tables share a persistent sequence; timestamps do not determine
-new entry order. Updating a card preserves its original position and timestamp.
-The shell resolves these references directly, including when polling a run.
-
-Existing SQLite sessions migrate once in timestamp order, then table-local
-rowid order, with cards before messages for remaining ties. Old rows cannot
-recover cross-table write order within a timestamp tie or a card's timestamp
-before replacement. Responses from older Workers without `entries` retain the
-legacy messages-then-cards display until the Worker is upgraded.
 
 ### The turn is mocked by default
 

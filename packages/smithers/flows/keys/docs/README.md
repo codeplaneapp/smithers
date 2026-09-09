@@ -118,23 +118,10 @@ import { Keys } from "@smthrs/flows"
 const compileKey = Keys.deriveKey({ domain: "cache/compile", version: 1, target: "web" })
 ```
 
-[`@smthrs/flow`](/api/flow) defaults to a fresh UUID for each unkeyed
-invocation. To reattach after a restart, retain and reuse the execution ID,
-declare an idempotency key, or explicitly install
-`Flow.layerExecutionIds(Flow.derived)`. The derived source uses the flow tag
-and canonical encoded payload, so equal invocations identify the same run:
-
-```ts
-import { Flow } from "@smthrs/flow"
-import * as Effect from "effect/Effect"
-
-const withDerivedExecutionIds = <A, E, R>(program: Effect.Effect<A, E, R>) =>
-  program.pipe(Effect.provide(Flow.layerExecutionIds(Flow.derived)))
-```
-
-Apply this wrapper to the effect that drives your flows. Explicit execution
-IDs and declared idempotency keys take precedence over this source.
-
+The engine rests on this operation wherever an identity has to survive a
+restart. [`@smthrs/flow`](/api/flow) mints the default execution id of an
+invocation from the flow tag and the canonical form of its payload, so
+re-driving a crashed program re-attaches to the run it left behind.
 [`@smthrs/engine`](/api/engine) derives the key each action dispatch is
 recorded under. [`@smthrs/plan`](/api/plan) validates those keys with
 `StoredKey` at its store boundary.

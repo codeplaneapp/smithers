@@ -86,14 +86,10 @@ system tells you which one you are holding.
 
 ## Where this is used
 
-[`@smthrs/flow`](/api/flow) defaults to a fresh UUID for each unkeyed
-invocation. To reattach after a restart, retain and reuse the execution ID,
-declare an idempotency key, or explicitly install
-`Flow.layerExecutionIds(Flow.derived)`. This opt-in source derives identity
-from the flow tag and canonical encoded payload. See the
-[layer example](../README.md#how-this-fits-with-smthrsflows).
-
-[`@smthrs/engine`](/api/engine) derives the persisted
+The rest of Smithers is built on this operation. [`@smthrs/flow`](/api/flow)
+mints the default execution id of an invocation from the flow tag and the
+canonical form of its payload, so re-driving a crashed program re-attaches to
+the run it left behind. [`@smthrs/engine`](/api/engine) derives the persisted
 key of every action dispatch, folding in the declaration, the boundary
 descriptor, and the cache environment so a changed declaration misses instead
 of replaying a stale row. [`@smthrs/plan`](/api/plan) validates those keys at
