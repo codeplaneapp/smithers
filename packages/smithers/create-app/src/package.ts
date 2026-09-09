@@ -107,6 +107,7 @@ export const CreateApp = (options: CreateAppOptions): AppTargets => {
   // app's node_modules, so an app never names a path inside this package.
   const routes = S.Generate({
     bin: S.NodeModule.Bin("@smthrs/create-app", "smithers-routes"),
+    args: ["--app", dirs.app, "--flows", dirs.flows, "--tools", dirs.tools],
     data: [routed, S.file("//PACKAGE.ts")],
     changes: ["routes.gen.ts", "routes.ui.gen.ts"]
   })

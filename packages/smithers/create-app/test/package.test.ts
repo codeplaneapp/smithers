@@ -1,13 +1,17 @@
 /**
  * `CreateApp` is the one call an app's PACKAGE.ts makes, so what it derives —
  * the manifest defaults and the five target declarations — is the app's whole
- * build surface. The assertions read target attributes rather than executing
- * anything: an app that declares the wrong data set or the wrong write set
- * fails at plan time, not at run time.
+ * build surface. The assertions read target attributes and drive the routes
+ * bin with its declared arguments to check parity with the Vite plugin.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Target from "@smthrs/targets/Target"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import { type Brand, CreateApp } from "../src/index.ts"
+import { runRoutesBin } from "../src/routesBin.ts"
+import { createApp } from "../src/vite.ts"
 
 const brand: Brand = { name: "Ledger", tokens: { accent: "#5288c2" } }
 
@@ -52,6 +56,59 @@ describe("manifest", () => {
 })
 
 describe("targets", () => {
+  it.each([
+    [{}, ["--app", "app", "--flows", "flows", "--tools", "tools"]],
+    [{ app: "site" }, ["--app", "site", "--flows", "flows", "--tools", "tools"]],
+    [
+      { app: "src/site", flows: "src/pipelines", tools: "src/kit" },
+      ["--app", "src/site", "--flows", "src/pipelines", "--tools", "src/kit"]
+    ]
+  ])("passes the resolved directory layout %j to the routes bin", (dirs, args) => {
+    const attrs = Target.metadata(app({ dirs }).routes).attrs as { readonly args: ReadonlyArray<string> }
+    expect(attrs.args).toEqual(args)
+  })
+
+  it("generates the same custom-directory tables as the Vite plugin", async () => {
+    const targets = app({ dirs: { app: "src/site", flows: "src/pipelines", tools: "src/kit" } })
+    const attrs = Target.metadata(targets.routes).attrs as { readonly args?: ReadonlyArray<string> }
+    const root = mkdtempSync(join(tmpdir(), "smthrs-package-routes-"))
+    try {
+      for (
+        const [path, contents] of Object.entries({
+          "AGENT.ts": "export const Agent = {}\n",
+          "SANDBOX.ts": "export const Sandbox = {}\n",
+          "TOOLS.ts": "export const Tools = {}\n",
+          "src/site/page.tsx": "export default () => null\n",
+          "src/site/panes/balances.tsx": "export const Pane = {}\n",
+          "src/pipelines/chat/flow.ts": "export const Flow = {}\n"
+        })
+      ) {
+        const full = join(root, path)
+        mkdirSync(dirname(full), { recursive: true })
+        writeFileSync(full, contents)
+      }
+      const out: Array<string> = []
+      const err: Array<string> = []
+      expect(runRoutesBin(attrs.args ?? [], {
+        cwd: root,
+        io: { out: (line) => out.push(line), err: (line) => err.push(line) }
+      })).toBe(0)
+      expect(err).toEqual([])
+      const routes = readFileSync(join(root, "routes.gen.ts"), "utf8")
+      const ui = readFileSync(join(root, "routes.ui.gen.ts"), "utf8")
+
+      await createApp({ manifest: async () => targets.manifest }).configResolved({ root })
+      expect(routes).toBe(readFileSync(join(root, "routes.gen.ts"), "utf8"))
+      expect(ui).toBe(readFileSync(join(root, "routes.ui.gen.ts"), "utf8"))
+      expect(out).toEqual(["routes: 1 pages, 1 panes, 1 flows"])
+      expect(routes).toContain("src/pipelines/chat/flow.ts")
+      expect(ui).toContain("src/site/page.tsx")
+      expect(ui).toContain("src/site/panes/balances.tsx")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("generates both route tables from the package's own bin", () => {
     const attrs = Target.metadata(app().routes).attrs as {
       readonly bin: { readonly package: string; readonly bin: string }
