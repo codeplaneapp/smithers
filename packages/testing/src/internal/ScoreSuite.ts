@@ -177,7 +177,7 @@ const graded = (
       ]
     }
   }
-  return combine(verdicts, environmentFaults)
+  return combine(verdicts, [...environmentFaults, ...unmeasured.map((sample) => sample.reason)])
 }
 
 /**
@@ -192,6 +192,11 @@ const graded = (
 export const ciGrade = (report: SuiteReport): { readonly exitCode: 0 | 1 | 5; readonly summary: string } => {
   const graded = grade(report.verdict)
   return graded.exitCode === 0
-    ? { exitCode: 0, summary: `passed: ${report.cases.length} case(s), ${report.samples.length} sample(s)` }
+    ? {
+      exitCode: 0,
+      summary: `passed: ${report.cases.length} case(s), ${
+        report.samples.filter((sample) => sample.kind === "score").length
+      } sample(s)`
+    }
     : graded
 }

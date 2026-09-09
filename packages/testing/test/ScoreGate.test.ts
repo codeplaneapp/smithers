@@ -1,4 +1,6 @@
 import { Effect } from "effect"
+import { readFileSync } from "node:fs"
+import { ScriptTarget, transpileModule } from "typescript"
 import { describe, expect, it } from "vitest"
 import * as ScoreGate from "../src/ScoreGate.ts"
 import { ScoreGateError } from "../src/TestingError.ts"
@@ -276,6 +278,58 @@ describe("ScoreGate.suite", () => {
     const report = await Effect.runPromise(ScoreGate.suite({ cases: [], run: () => Effect.succeed([]) }))
     expect(report.verdict).toEqual({ _tag: "Inconclusive", reasons: ["The suite declared no cases"] })
     expect(ScoreGate.ciGrade(report).exitCode).toBe(5)
+  })
+
+  it("keeps inconclusive observations in a mixed ungated suite", async () => {
+    const report = await Effect.runPromise(
+      ScoreGate.suite({
+        cases: [{ name: "first", input: "a" }],
+        run: () =>
+          Effect.succeed([
+            sampleFor("first", 0.9),
+            {
+              case: "first",
+              stepKey: "first-key",
+              scorer: "safety",
+              kind: "inconclusive",
+              reason: "judge unavailable"
+            } as const
+          ])
+      })
+    )
+    expect(report.samples).toHaveLength(2)
+    expect(ScoreGate.ciGrade(report)).toEqual({
+      exitCode: 5,
+      summary: "inconclusive: judge unavailable"
+    })
+    expect(report.verdict).toEqual({ _tag: "Inconclusive", reasons: ["judge unavailable"] })
+  })
+
+  it("counts only score observations in a clean-pass summary", () => {
+    expect(ScoreGate.ciGrade({
+      cases: [],
+      samples: [
+        sampleFor("first", 0.9),
+        { case: "first", stepKey: "first-key", scorer: "safety", kind: "inconclusive", reason: "judge unavailable" }
+      ],
+      verdict: { _tag: "Passed", inconclusive: [] }
+    })).toEqual({ exitCode: 0, summary: "passed: 0 case(s), 1 sample(s)" })
+  })
+
+  it("runs the guide's suite before grading it for CI", async () => {
+    const guide = readFileSync(new URL("../docs/guides/gate-a-scored-suite.md", import.meta.url), "utf8")
+    const recipe = guide.slice(guide.indexOf("## Run a whole suite"), guide.indexOf("## Validate samples"))
+    const source = [...recipe.matchAll(/```ts\n([\s\S]*?)```/g)]
+      .map((match) => match[1])
+      .join("\n")
+      .replace(/^import .*$/gm, "")
+    const { outputText } = transpileModule(source, { compilerOptions: { target: ScriptTarget.ES2022 } })
+    const output: Array<string> = []
+    const process = { exitCode: undefined as number | undefined }
+    const run = new Function("ScoreGate", "Effect", "console", "process", `return (async () => {${outputText}})()`)
+    await run(ScoreGate, Effect, { log: (line: string) => output.push(line) }, process)
+    expect(process.exitCode).toBe(0)
+    expect(output).toEqual(["passed: 2 case(s), 2 sample(s)"])
   })
 
   it("grades a wholly inconclusive ungated suite inconclusive rather than passed", async () => {
