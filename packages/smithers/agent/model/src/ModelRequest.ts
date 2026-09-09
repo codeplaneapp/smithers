@@ -396,8 +396,17 @@ export const ReasoningEffort = Schema.Literals([
 export type ReasoningEffort = typeof ReasoningEffort.Type
 
 /**
- * The sampling and budget knobs of one request. Every field is optional;
- * an omitted field leaves the provider default in place.
+ * The sampling and budget knobs of one request. Every field is optional; an
+ * omitted field leaves the provider default in place, except that the Anthropic
+ * Messages lowering sends `max_tokens: 4096` for an omitted `maxTokens`,
+ * because that API requires a budget.
+ *
+ * Dropping a knob is a separate rule from defaulting one. A protocol with no
+ * wire field for a stated knob leaves it out of the body, so `topK`,
+ * `stopSequences`, and `thinkingBudget` are absent from both OpenAI bodies. The
+ * one stated knob that fails instead of being dropped is `maxTokens` on the
+ * ChatGPT-subscription route, which `Route.prepare` rejects as
+ * `invalid_request`.
  *
  * @category models
  * @since 0.1.0
