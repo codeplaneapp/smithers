@@ -260,8 +260,26 @@ const files = (initial: Readonly<Record<string, string>>) => {
       return Effect.succeed([...names].sort())
     },
     readFile: (path) => Effect.succeed(new TextEncoder().encode(contents.get(path) ?? "")),
+    stream: (path) => {
+      const content = contents.get(path)
+      return content === undefined ? missing.stream(path) : Stream.succeed(new TextEncoder().encode(content))
+    },
     exists: (path) => Effect.succeed(contents.has(path)),
     makeDirectory: () => Effect.void,
+    // Atomic replacement writes a sibling, then renames it over the target.
+    realPath: (path) => contents.has(path) ? Effect.succeed(path) : missing.realPath(path),
+    rename: (from, to) => {
+      const content = contents.get(from)
+      if (content === undefined) return missing.rename(from, to)
+      return Effect.sync(() => {
+        contents.set(to, content)
+        contents.delete(from)
+      })
+    },
+    remove: (path) =>
+      Effect.sync(() => {
+        contents.delete(path)
+      }),
     writeFile: (path, data) =>
       Effect.sync(() => {
         contents.set(path, new TextDecoder().decode(data))
@@ -457,7 +475,7 @@ ctx.done([
       "apply_patch",
       "recall"
     ])
-    expect(settled.every((event) => event.result.outcome === "success")).toBe(true)
+    expect(settled.filter((event) => event.result.outcome !== "success")).toEqual([])
 
     // Each call reached the host service behind its binding, not a stub of it:
     // the search flows walked the fixture tree, the editing flows wrote to it,
