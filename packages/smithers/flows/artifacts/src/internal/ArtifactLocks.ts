@@ -8,6 +8,7 @@
  * @since 1.0.0-rc.0
  */
 import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
@@ -69,22 +70,31 @@ export const withDigest = <A, E, R, E2>(
   // so the next caller mints a second semaphore for the same digest and the two
   // serialize against nothing.
   Effect.suspend(() => {
-    let byDigest = locks.get(fs)
-    if (byDigest === undefined) {
-      byDigest = new Map()
-      locks.set(fs, byDigest)
+    let byKey = locks.get(fs)
+    if (byKey === undefined) {
+      byKey = new Map()
+      locks.set(fs, byKey)
     }
-    let entry = byDigest.get(digest)
+    const key = JSON.stringify([directory, digest])
+    let entry = byKey.get(key)
     if (entry === undefined) {
       entry = { semaphore: Semaphore.makeUnsafe(1), users: 0 }
-      byDigest.set(digest, entry)
+      byKey.set(key, entry)
     }
     entry.users += 1
     const held = entry
-    const table = byDigest
+    const table = byKey
 
+    // The deadline starts before the semaphore wait and ends once both locks
+    // are held. The protected operation and its release are never timed out.
+    const ready = Deferred.makeUnsafe<void>()
+    const deadline = Deferred.await(ready).pipe(
+      Effect.timeout(acquireWithin),
+      Effect.catchTag("TimeoutError", (cause) => Effect.fail(failure(cause))),
+      Effect.andThen(Effect.never)
+    )
     const coordinated = coordination === "process"
-      ? effect
+      ? Deferred.succeed(ready, undefined).pipe(Effect.andThen(effect))
       : Effect.gen(function*() {
         const owner = yield* token
         const lockDirectory = `${directory}/${directoryName}`
@@ -151,10 +161,7 @@ export const withDigest = <A, E, R, E2>(
             }
             yield* Effect.sleep(retryEvery)
           }
-        }).pipe(
-          Effect.timeout(acquireWithin),
-          Effect.catchTag("TimeoutError", (cause) => Effect.fail(failure(cause)))
-        )
+        })
 
         const release = fs.readFileString(lockPath).pipe(
           Effect.flatMap((found) => found === owner ? fs.remove(lockPath) : Effect.void),
@@ -170,6 +177,7 @@ export const withDigest = <A, E, R, E2>(
         // is still released. A call that never created one owes nothing and must
         // not touch a file another owner holds.
         return yield* acquire.pipe(
+          Effect.andThen(Deferred.succeed(ready, undefined)),
           Effect.andThen(Effect.scoped(Effect.gen(function*() {
             yield* Effect.forkScoped(
               Effect.gen(function*() {
@@ -222,9 +230,10 @@ export const withDigest = <A, E, R, E2>(
       })
 
     return held.semaphore.withPermit(coordinated).pipe(
+      Effect.raceFirst(deadline),
       Effect.ensuring(Effect.sync(() => {
         held.users -= 1
-        if (held.users === 0 && table.get(digest) === held) table.delete(digest)
+        if (held.users === 0 && table.get(key) === held) table.delete(key)
       }))
     )
   })

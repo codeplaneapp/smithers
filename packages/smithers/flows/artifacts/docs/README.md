@@ -30,6 +30,13 @@ network arrive as Effect's `FileSystem` and `HttpClient` services, which is what
 lets the same store code run in Node.js, in Bun, in a browser tab, and inside a
 sandbox.
 
+The two-minute coordination acquisition deadline includes the in-process
+semaphore wait and filesystem lock acquisition. It does not time out the
+protected operation. Semaphores are scoped by filesystem service, objects
+directory, and digest. An interrupted backup acquisition removes the marker
+it created, including interruption during marker creation or gate release.
+Host completion and release finalizers can extend cancellation latency.
+
 ## Install
 
 ```bash

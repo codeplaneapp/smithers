@@ -1,6 +1,6 @@
 ---
 title: "Coordination between processes"
-description: "How one objects directory stays safe when several processes write and sweep it: per-digest lock files, heartbeats, the stale-reclaim window, the backup lease, and the fences that hold when the lock does not."
+description: "How one objects directory stays safe when several processes write and sweep it: per-digest lock files, heartbeats, the stale-reclaim window, the backup lease, and their limits."
 sidebar:
   order: 3
 ---
@@ -33,7 +33,11 @@ before touching the blob:
 
 A holder that crashes stops heartbeating, and the next contender reclaims its
 lock a minute later. A contender that cannot acquire within two minutes fails
-rather than waiting forever.
+rather than waiting forever. This deadline includes the in-process semaphore
+wait, directory creation, and lockfile acquisition. It ends before the protected
+operation starts. Uninterruptible host completion and release finalizers can
+extend cancellation latency. Semaphores are scoped by filesystem service,
+objects directory, and digest; unrelated objects roots do not share permits.
 
 ## The fence is bounded, not absolute
 
@@ -44,17 +48,12 @@ and the second reclaims whatever now sits at that path, including the fresh
 lock the first just took. Releasing has the same shape: read the owner, then
 remove the path.
 
-Both windows open only after a holder has gone stale, and both leave the
-fences that do not depend on this lock standing:
-
-- `ArtifactSweep.RemoveOptions.ifUnmodifiedSinceMs`, which rides inside the
-  deletion rather than in a prior read.
-- The backup lease, which is a separate marker with its own gate.
-
-So treat `required` as a strong guard against the ordinary
-writer-versus-sweeper overlap, not as mutual exclusion that survives a crashed
-holder plus a simultaneous reclaim. A holder whose host stalls past 60 seconds
-can be reaped while it is still running.
+These windows can remove a fresh owner's lock. Neither the mtime check nor the
+backup gate independently protects against this loss of mutual exclusion. The
+mtime check is followed by a separate delete, and the backup gate uses the
+same reclaim protocol. A successful publication can therefore be deleted using
+age evidence collected before publication. A holder whose host stalls past
+60 seconds can also be reaped while it is still running.
 
 ## Both sides must agree
 
@@ -94,7 +93,10 @@ heartbeat-backed marker, `.backup-lease`, for the whole copy, with the same 10
 second heartbeat and 60 second staleness bound as the digest locks. Sweep
 deletion checks that marker while holding a short-lived workspace-global gate,
 `.backup-lease-gate`, so the check and the delete cannot be separated. A
-crashed lease becomes reclaimable once its heartbeat goes stale.
+crashed lease becomes reclaimable once its heartbeat goes stale. Marker cleanup
+is registered before acquisition; interruption during marker creation or gate
+release still removes the marker owned by that acquisition. Failed gate release
+also runs marker cleanup, which may wait for the gate to become reclaimable.
 
 `ArtifactBackupLease.unlessActive` answers `None` when a live backup fenced the
 operation, and `ArtifactSweep.remove` turns that into `false`. See

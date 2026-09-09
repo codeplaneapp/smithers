@@ -102,6 +102,91 @@ const host = (hooks: Hooks = {}) => {
 const failure = (cause: unknown): unknown => cause
 
 describe("ArtifactBackupLease", () => {
+  it.effect("cleans its marker when interrupted after creation before host completion", () =>
+    Effect.gen(function*() {
+      const written = yield* Deferred.make<void>()
+      const complete = yield* Deferred.make<void>()
+      let bodyRan = false
+      const fixture = host({
+        write: (path, value) =>
+          path === marker
+            ? Effect.sync(() => fixture.seed(path, value)).pipe(
+              Effect.andThen(Deferred.succeed(written, undefined)),
+              Effect.andThen(Deferred.await(complete))
+            )
+            : undefined
+      })
+      const running = yield* ArtifactBackupLease.withLease(
+        fixture.fs,
+        directory,
+        Effect.sync(() => {
+          bodyRan = true
+        }),
+        failure
+      ).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(written)
+      const stopping = yield* Fiber.interrupt(running).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(complete, undefined)
+      yield* Fiber.join(stopping)
+      expect(bodyRan).toBe(false)
+      expect(fixture.files.has(marker)).toBe(false)
+    }))
+
+  it.effect("cleans its marker when interrupted while releasing the acquisition gate", () =>
+    Effect.gen(function*() {
+      const releasing = yield* Deferred.make<void>()
+      const complete = yield* Deferred.make<void>()
+      let paused = false
+      let bodyRan = false
+      const fixture = host({
+        remove: (path) => {
+          if (!path.endsWith("/.backup-lease-gate.lock") || paused) return undefined
+          paused = true
+          return Effect.sync(() => {
+            fixture.files.delete(path)
+          }).pipe(
+            Effect.andThen(Deferred.succeed(releasing, undefined)),
+            Effect.andThen(Deferred.await(complete))
+          )
+        }
+      })
+      const running = yield* ArtifactBackupLease.withLease(
+        fixture.fs,
+        directory,
+        Effect.sync(() => {
+          bodyRan = true
+        }),
+        failure
+      ).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(releasing)
+      const stopping = yield* Fiber.interrupt(running).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(complete, undefined)
+      yield* Fiber.join(stopping)
+      expect(bodyRan).toBe(false)
+      expect(fixture.files.has(marker)).toBe(false)
+    }))
+
+  it.effect("cleans its marker when releasing the acquisition gate fails", () =>
+    Effect.gen(function*() {
+      let refused = false
+      const fixture = host({
+        remove: (path) => {
+          if (!path.endsWith("/.backup-lease-gate.lock") || refused) return undefined
+          refused = true
+          return Effect.fail(platformError("PermissionDenied", "remove"))
+        }
+      })
+      const running = yield* ArtifactBackupLease.withLease(fixture.fs, directory, Effect.void, failure).pipe(
+        Effect.exit,
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* TestClock.adjust("3 minutes")
+      expect(Exit.isFailure(yield* Fiber.join(running))).toBe(true)
+      expect(fixture.files.has(marker)).toBe(false)
+    }))
+
   it.effect("fences deletion, heartbeats, releases, and then admits deletion", () =>
     Effect.gen(function*() {
       const fixture = host()

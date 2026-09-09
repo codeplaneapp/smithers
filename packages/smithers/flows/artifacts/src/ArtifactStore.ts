@@ -295,13 +295,11 @@ export interface FileSystemOptions {
    * holder: two processes that both measure the same lock as stale both go on
    * to reclaim it, and the second reclaims whatever now sits at that path,
    * including the fresh lock the first just took. A release is the same shape,
-   * reading the owner and then removing the path. Both windows open only after
-   * some holder has already gone stale, and both leave the deletion fences that
-   * do not depend on this lock — `ArtifactSweep`'s `ifUnmodifiedSinceMs` and the
-   * backup lease — still standing, which is why they bound damage rather than
-   * causing it. Treat `required` as a strong guard against the ordinary
-   * writer-versus-sweeper overlap, not as mutual exclusion that survives a
-   * crashed holder plus a simultaneous reclaim.
+   * reading the owner and then removing the path. Neither the mtime check nor
+   * the backup lease independently protects against loss of mutual exclusion:
+   * the check precedes a separate delete, and the gate uses this same protocol.
+   * A sweep can delete a successful publication using pre-publication age
+   * evidence if another stale reclaimer displaces its lock.
    *
    * It also only fences parties that agree. An `ArtifactSweep` over the same
    * directory must be built with the same `coordination`: a store on `process`

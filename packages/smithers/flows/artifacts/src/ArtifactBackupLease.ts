@@ -85,6 +85,7 @@ export const withLease = <A, E, R, E2>(
     const marker = `${directory}/${markerName}`
     yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.mapError(failure))
 
+    let ownsMarker = false
     const acquire = Effect.gen(function*() {
       while (true) {
         const acquired = yield* gate(
@@ -92,10 +93,15 @@ export const withLease = <A, E, R, E2>(
           directory,
           Effect.gen(function*() {
             if (yield* activeMarker(fs, directory, failure)) return false
-            return yield* fs.writeFileString(marker, owner, { flag: "wx", mode: 0o600 }).pipe(
-              Effect.as(true),
-              Effect.catch((cause): Effect.Effect<boolean, E2> =>
-                isReason(cause, "AlreadyExists") ? Effect.succeed(false) : Effect.fail(failure(cause))
+            return yield* Effect.uninterruptible(
+              fs.writeFileString(marker, owner, { flag: "wx", mode: 0o600 }).pipe(
+                Effect.andThen(Effect.sync(() => {
+                  ownsMarker = true
+                  return true
+                })),
+                Effect.catch((cause): Effect.Effect<boolean, E2> =>
+                  isReason(cause, "AlreadyExists") ? Effect.succeed(false) : Effect.fail(failure(cause))
+                )
               )
             )
           }),
@@ -109,54 +115,59 @@ export const withLease = <A, E, R, E2>(
       Effect.catchTag("TimeoutError", (cause) => Effect.fail(failure(cause)))
     )
 
-    yield* acquire
+    // Install marker cleanup before acquisition, including gate release. The
+    // marker write and ownership bookkeeping complete in one interruption mask.
     return yield* Effect.acquireUseRelease(
       Effect.void,
       () =>
-        Effect.scoped(Effect.gen(function*() {
-          yield* Effect.forkScoped(
-            Effect.forever(
-              Effect.sleep(heartbeatEvery).pipe(
-                Effect.andThen(gate(
-                  fs,
-                  directory,
-                  fs.readFileString(marker).pipe(
-                    Effect.flatMap((found) => {
-                      if (found !== owner) return Effect.void
-                      return Effect.flatMap(Clock.currentTimeMillis, (now) => {
-                        const timestamp = new Date(now)
-                        return fs.utimes(marker, timestamp, timestamp)
-                      })
-                    }),
-                    Effect.mapError(failure)
-                  ),
-                  failure
-                )),
-                Effect.ignore
+        acquire.pipe(Effect.andThen(
+          Effect.scoped(Effect.gen(function*() {
+            yield* Effect.forkScoped(
+              Effect.forever(
+                Effect.sleep(heartbeatEvery).pipe(
+                  Effect.andThen(gate(
+                    fs,
+                    directory,
+                    fs.readFileString(marker).pipe(
+                      Effect.flatMap((found) => {
+                        if (found !== owner) return Effect.void
+                        return Effect.flatMap(Clock.currentTimeMillis, (now) => {
+                          const timestamp = new Date(now)
+                          return fs.utimes(marker, timestamp, timestamp)
+                        })
+                      }),
+                      Effect.mapError(failure)
+                    ),
+                    failure
+                  )),
+                  Effect.ignore
+                )
               )
             )
-          )
-          return yield* effect
-        })),
+            return yield* effect
+          }))
+        )),
       () =>
-        gate(
-          fs,
-          directory,
-          fs.readFileString(marker).pipe(
-            Effect.flatMap((found) => found === owner ? fs.remove(marker) : Effect.void),
-            // A backup whose heartbeat lapsed has its marker reaped by whoever
-            // noticed, so `NotFound` is the ordinary end of a slow lease, not a
-            // fault: there is nothing left to release and nothing left to leak.
-            // The sibling release in `internal/ArtifactLocks.ts` classifies the
-            // same cause the same way.
-            Effect.catch((cause): Effect.Effect<void, PlatformError.PlatformError> =>
-              isReason(cause, "NotFound") ? Effect.void : Effect.fail(cause)
-            )
-          ),
-          failure
-        ).pipe(
-          Effect.catch((cause) => Effect.logWarning("Artifact backup lease release failed", cause))
-        )
+        ownsMarker
+          ? gate(
+            fs,
+            directory,
+            fs.readFileString(marker).pipe(
+              Effect.flatMap((found) => found === owner ? fs.remove(marker) : Effect.void),
+              // A backup whose heartbeat lapsed has its marker reaped by whoever
+              // noticed, so `NotFound` is the ordinary end of a slow lease, not a
+              // fault: there is nothing left to release and nothing left to leak.
+              // The sibling release in `internal/ArtifactLocks.ts` classifies the
+              // same cause the same way.
+              Effect.catch((cause): Effect.Effect<void, PlatformError.PlatformError> =>
+                isReason(cause, "NotFound") ? Effect.void : Effect.fail(cause)
+              )
+            ),
+            failure
+          ).pipe(
+            Effect.catch((cause) => Effect.logWarning("Artifact backup lease release failed", cause))
+          )
+          : Effect.void
     )
   })
 

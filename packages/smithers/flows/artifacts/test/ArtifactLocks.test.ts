@@ -64,6 +64,65 @@ const capture = () => {
 }
 
 describe("artifact lockfile failure and race handling", () => {
+  it.effect("includes same-process semaphore contention in the acquisition deadline", () =>
+    Effect.gen(function*() {
+      const fixture = host()
+      const entered = yield* Deferred.make<void>()
+      const holder = yield* run(
+        fixture.fs,
+        Deferred.succeed(entered, undefined).pipe(
+          Effect.andThen(Effect.never)
+        )
+      ).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      const waiter = yield* run(fixture.fs, Effect.void).pipe(
+        Effect.exit,
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* TestClock.adjust("3 minutes")
+      expect(waiter.pollUnsafe()).toBeDefined()
+      expect(Exit.isFailure(yield* Fiber.join(waiter))).toBe(true)
+      expect(holder.pollUnsafe()).toBeUndefined()
+      const next = yield* run(fixture.fs, Effect.void).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      expect(next.pollUnsafe()).toBeUndefined()
+      yield* Fiber.interrupt(holder)
+      yield* Fiber.join(next)
+    }))
+
+  it.effect("includes directory creation in the acquisition deadline", () =>
+    Effect.gen(function*() {
+      const fixture = host({ makeDirectory: (() => Effect.never) as never })
+      const waiter = yield* run(fixture.fs, Effect.void).pipe(
+        Effect.exit,
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* TestClock.adjust("2 minutes")
+      expect(Exit.isFailure(yield* Fiber.join(waiter))).toBe(true)
+      expect(fixture.removes()).toBe(0)
+    }))
+
+  it.effect("does not serialize the same digest across objects directories", () =>
+    Effect.gen(function*() {
+      const fixture = host()
+      const entered = yield* Deferred.make<void>()
+      const holder = yield* ArtifactLocks.withDigest(
+        fixture.fs,
+        "objects-A",
+        digest,
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+        (cause) => cause,
+        "process"
+      ).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      const other = yield* ArtifactLocks.withDigest(fixture.fs, "objects-B", digest, Effect.void, (cause) =>
+        cause, "process").pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      expect(other.pollUnsafe()).toBeDefined()
+      yield* Fiber.interrupt(holder)
+      yield* Fiber.join(other)
+    }))
+
   it.effect("propagates an atomic-create failure other than AlreadyExists", () =>
     Effect.gen(function*() {
       const fixture = host({
