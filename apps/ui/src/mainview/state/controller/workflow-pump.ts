@@ -107,7 +107,7 @@ export const createWorkflowPumpController = (
   }
 
   /** The approval cards a run is waiting on, bound to the existing round trip. */
-  const upsertRunApprovals = (runId: string, repo: string, rows: ReadonlyArray<ApprovalRow>): number => {
+  const upsertRunApprovals = (runId: string, repo: string, workspaceId: string | undefined, rows: ReadonlyArray<ApprovalRow>): number => {
     let found = 0
     for (const approval of rows) {
       if (approval.runId !== runId || approval.status !== "pending") continue
@@ -128,7 +128,7 @@ export const createWorkflowPumpController = (
           // The submit-ready envelope the gateway published: the decision goes
           // back with it unchanged, so no client reconstructs authority.
           approval: approval.payload as Record<string, unknown>,
-          repo
+          repo, ...(workspaceId === undefined ? {} : { workspaceId })
         }
       }
       store.dispatch({ type: "card.upsert", actor: "system", card })
@@ -181,7 +181,7 @@ export const createWorkflowPumpController = (
         const quietFor = Date.now() - lastProgressAt
         if (quietFor >= RUN_QUIET_AFTER_MS) {
           patchRunCard(cardId, alreadyTerminal
-            ? { error: "The run has settled, but its recorded engine evidence has not finished synchronizing." }
+            ? { observationError: "The run has settled, but its recorded engine evidence has not finished synchronizing." }
             : { phase: "quiet", quietForMs: quietFor })
           return
         }
@@ -193,7 +193,7 @@ export const createWorkflowPumpController = (
           failures += 1
           if (failures >= 2 && !pump.stopped) {
             if (alreadyTerminal) {
-              patchRunCard(cardId, { error: "The run has settled, but its latest engine evidence could not be read." })
+              patchRunCard(cardId, { observationError: "The run has settled, but its latest engine evidence could not be read." })
               return
             }
             patchRunCard(cardId, { phase: "reconnecting" })
@@ -204,7 +204,7 @@ export const createWorkflowPumpController = (
         failures = 0
         const row = summary.value
         const words = progressWords(row, previous)
-        const newSteps = words === undefined ? [] : [words]
+        const newSteps = words === undefined || card.payload.steps.includes(words) ? [] : [words]
 
         if (row.status === "waiting-approval" || row.waitingReason === "approval") approvalPending = true
         if (approvalPending) {
@@ -212,7 +212,7 @@ export const createWorkflowPumpController = (
           if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
           // Keep asking until the gate is actually in hand: a parked run can
           // be readable a beat before its approval row is.
-          if (approvals.status === "ok" && upsertRunApprovals(runId, repo, approvals.value) > 0) {
+          if (approvals.status === "ok" && upsertRunApprovals(runId, repo, card.payload.workspaceId, approvals.value) > 0) {
             approvalPending = false
           }
         }
@@ -272,8 +272,8 @@ export const createWorkflowPumpController = (
         const phase = PHASE_OF_STATUS[row.status]
         if (TERMINAL_PHASES.has(phase)) {
           const steps = [...card.payload.steps, ...newSteps].slice(-RUN_STEPS_TAIL)
-          const observationError = eventReadError === undefined ? {} : {
-            error: `The run has settled, but its recorded engine evidence could not be read: ${eventReadError}`
+          const observationError = eventReadError === undefined ? { observationError: undefined } : {
+            observationError: `The run has settled, but its recorded engine evidence could not be read: ${eventReadError}`
           }
           if (phase === "completed") {
             // The run summary's own verdict, which is what `whatHappened`
@@ -383,7 +383,8 @@ export const createWorkflowPumpController = (
     if (card === undefined) return "That isn't a run card."
     patchRunCard(cardId, {
       phase: TERMINAL_PHASES.has(card.payload.phase) ? card.payload.phase : "running",
-      error: undefined,
+      ...(TERMINAL_PHASES.has(card.payload.phase) ? {} : { error: undefined }),
+      observationError: undefined,
       steps: [...card.payload.steps, "Checking the run again…"].slice(-RUN_STEPS_TAIL)
     })
     void pumpWorkflowRun(cardId, true)

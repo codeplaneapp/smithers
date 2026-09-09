@@ -27,9 +27,14 @@ const decodeAttempt = Schema.decodeUnknownOption(EngineEvent.AttemptPayload, { o
 const decodeState = Schema.decodeUnknownOption(EngineEvent.StatePayload, { onExcessProperty: "error" })
 const decodeMarker = Schema.decodeUnknownOption(EngineEvent.CurrentAttempt)
 const decodeDecision = Schema.decodeUnknownOption(Schema.Struct({
-  decision: Schema.Literals(["created", "transitioned"]),
+  decision: Schema.Literals(["created", "transitioned", "handed-off", "lineage-exhausted", "round-invalid", "quarantined", "interrupt-released"]),
   status: Schema.optionalKey(Schema.Literals(["pending", "running", "suspended", "completed", "failed", "cancelled"])),
   state: RunState
+}))
+// RunDriver's durable cancellation record has no run-decision counterpart.
+const decodeCancellation = Schema.decodeUnknownOption(Schema.Struct({
+  outcome: Schema.Literal("cancelled"), interruptedAtMs: JournalEvent.TimestampMs,
+  owner: Schema.String, cascadedTo: Schema.optionalKey(Schema.Array(JournalEvent.RunId))
 }))
 const decodeResult = Schema.decodeUnknownOption(ResultEncoded, { onExcessProperty: "error" })
 
@@ -170,7 +175,7 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
       execution.parentId = recorded.value.lineage.parentRunId ?? undefined
       if (recorded.value.event._tag !== "Execution") { generic(); continue }
       const { lifecycle } = recorded.value.event
-      execution.span.detail = { ...detail(row, envelope), sequence: execution.span.detail.sequence }
+      execution.span.detail = { ...detail(row, envelope), sequence: execution.span.detail.sequence, input: execution.span.detail.input }
       if (lifecycle.state === "completed") {
         execution.span.status = lifecycle.result._tag === "Success" ? "completed" : "failed"
         execution.span.endedAt = envelope.emittedAtMs
@@ -181,6 +186,14 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
       } else execution.span.status = lifecycle.state === "suspended" ? "waiting" : "running"
       continue
     }
+    if (envelope.eventType === "flows.engine.interrupted") {
+      const cancelled = decodeCancellation(envelope.payload)
+      if (Option.isNone(cancelled)) { generic(); continue }
+      execution.span.status = "cancelled"
+      execution.span.endedAt = cancelled.value.interruptedAtMs
+      execution.span.detail = { ...detail(row, envelope), sequence: execution.span.detail.sequence, input: execution.span.detail.input }
+      continue
+    }
     if (envelope.eventType === "flows.engine.run-decision") {
       const decision = decodeDecision(envelope.payload)
       if (Option.isNone(decision)) { generic(); continue }
@@ -189,10 +202,19 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
       execution.parentId = state.parentExecutionId
       execution.span.detail = { ...detail(row, envelope), sequence: execution.span.detail.sequence, input: state.payload }
       if (decision.value.decision === "created") execution.span.status = "pending"
+      // RunDriver commits this decision with suspended even when its payload
+      // omits status/result (a released host scope can retain no suspension).
+      else if (decision.value.decision === "interrupt-released") execution.span.status = "waiting"
       else if (status === "running" || status === "pending" || status === "suspended") {
         execution.span.status = status === "suspended" ? "waiting" : status
       } else if (status !== undefined) {
         const result = decodeResult(state.result)
+        if (Option.isSome(result) && result.value._tag === "Handoff" && status === "completed" && decision.value.decision === "handed-off") {
+          // A round handed off; its raw result describes the successor, not an output.
+          execution.span.status = "completed"
+          execution.span.endedAt = envelope.emittedAtMs
+          continue
+        }
         if (Option.isNone(result) || result.value._tag !== "Complete" ||
           (status === "completed") !== (result.value.exit._tag === "Success")) {
           execution.span.status = "unknown"

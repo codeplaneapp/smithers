@@ -185,11 +185,11 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     const payload: Record<string, string> = {}
     const positional: Array<string> = []
     for (const token of tokensOf(rest)) {
-      const keyed = /^(by|lineage)=(.+)$/.exec(token)
+      const keyed = /^(by|lineage|sourceCard)=(.+)$/.exec(token)
       if (keyed !== null) payload[keyed[1]!] = keyed[2]!
       else positional.push(token)
     }
-    if (positional.length > 2) return no("runs.list takes [status] [flow] [by=…] [lineage=…] [owner/repo]")
+    if (positional.length > 2) return no("runs.list takes [status] [flow] [by=…] [lineage=…] [sourceCard=…] [owner/repo]")
     const [status, flow] = positional
     if (status !== undefined) payload["status"] = status
     if (flow !== undefined) payload["flow"] = flow

@@ -46,7 +46,7 @@ export const WorkflowRunCardBody = ({
   readonly onRunCommand: (name: string, args?: string) => void
   readonly debugVerbose?: boolean
 }) => {
-  const { phase, steps, result, error, runId, kind } = card.payload
+  const { phase, steps, result, error, observationError, runId, kind } = card.payload
   const facet = card.payload.facet ?? "steps"
   return (
     <div className="flow-run-card" data-run-kind={kind}>
@@ -161,7 +161,8 @@ export const WorkflowRunCardBody = ({
           </p>
         ) :
         null}
-      {TERMINAL_RUN_PHASES.has(phase) && (error !== undefined || card.payload.events?.some((event) => event.kind === "control.engine.projection-gap")) ? (
+      {observationError !== undefined ? <p className="sui-approval-error" role="alert">{observationError}</p> : null}
+      {TERMINAL_RUN_PHASES.has(phase) && (error !== undefined || observationError !== undefined || card.payload.events?.some((event) => event.kind === "control.engine.projection-gap")) ? (
         <Button size="sm" data-flow="flow.run.retry" onClick={() => onRetryRun(card.id)}>
           Check again
         </Button>

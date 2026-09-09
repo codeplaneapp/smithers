@@ -111,7 +111,7 @@ describe("the run card as a trace", () => {
   test("an observation refusal keeps the completed verdict and offers the existing keyboard-reachable retry", () => {
     const retried: Array<string> = []
     const host = render(<WorkflowRunCardBody
-      card={runCard({ phase: "completed", result: "Finished the implementation.", error: "Engine evidence could not be read." })}
+      card={runCard({ phase: "completed", result: "Finished the implementation.", observationError: "Engine evidence could not be read." })}
       onStopRun={noop} onRetryRun={(id) => retried.push(id)} onRunCommand={noop}
     />)
     expect(host.textContent).toContain("Finished the implementation.")

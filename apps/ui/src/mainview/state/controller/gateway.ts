@@ -249,8 +249,8 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
       decodeRunSummaryRow(await projection(repo, { _tag: "run-summary", runId }, binding)),
 
     /** Every gate this run has asked for, decided ones included. */
-    approvals: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
-      decodeApprovalRows(await projection(repo, { _tag: "approvals", runId })),
+    approvals: async (repo: string, runId: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
+      decodeApprovalRows(await projection(repo, { _tag: "approvals", runId }, binding)),
 
     /**
      * Decide one gate.
@@ -263,8 +263,9 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     submitApproval: (
       repo: string,
       approval: ApprovalRow["payload"],
-      decision: "approve" | "deny"
-    ): Promise<GatewayResult<unknown>> => call(repo, "Approval.Submit", { ...approval, decision }),
+      decision: "approve" | "deny",
+      binding?: GatewayWorkspaceBinding
+    ): Promise<GatewayResult<unknown>> => call(repo, "Approval.Submit", { ...approval, decision }, binding),
 
     /** What one node produced. */
     nodeOutput: async (
@@ -349,12 +350,12 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
     },
 
     /** Every run on the workspace, one summary row each (the run inbox's read). */
-    workspaceRuns: async (repo: string): Promise<GatewayResult<ReadonlyArray<RunSummaryRow>>> =>
-      decodeRunSummaryRows(await projection(repo, { _tag: "workspace-runs" })),
+    workspaceRuns: async (repo: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<RunSummaryRow>>> =>
+      decodeRunSummaryRows(await projection(repo, { _tag: "workspace-runs" }, binding)),
 
     /** The approvals inbox: every pending gate across the workspace's runs. */
-    approvalsInbox: async (repo: string): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
-      decodeApprovalRows(await projection(repo, { _tag: "approvals" })),
+    approvalsInbox: async (repo: string, binding?: GatewayWorkspaceBinding): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
+      decodeApprovalRows(await projection(repo, { _tag: "approvals" }, binding)),
 
     /** One run's turn-by-turn transcript. */
     transcript: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<TranscriptRow>>> =>

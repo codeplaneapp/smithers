@@ -40,21 +40,32 @@ authoritative parent-edge store or scheduling decisions.
 
 The control run can settle before the native driver commits its final result.
 The private host bridge's observation contract uses
-`control.engine.projection-started` before accepting the native launch and
+`control.engine.projection-started` before the wrapped accepted launch returns and
 `control.engine.projection-settled` after its terminal drain. Both carry
 `{ version: 1, executionId, generation }`. They describe the reader's
 completeness, not another execution outcome. Host supervision must supply these
-markers; projecting native events alone does not complete this handshake.
+markers; projecting native events alone does not complete this handshake. If the
+marker write fails after native acceptance, the host preserves that real acceptance,
+records a gap when possible, and recovers from native roots on restart.
 
 The existing run pump preserves the real terminal phase while continuing to read
 until the matching generation is settled. It does not repeat the completion
 message. Reload restarts this observation when persisted records still show it
 pending. A projection gap remains visible evidence; a transport refusal or the
 existing quiet deadline leaves a visible observation error without changing the
-run's actual verdict. The existing retry gesture can try the observation again.
+run's actual verdict. The optional persisted `run-trace.payload.observationError`
+keeps this reader failure separate from `error`, the run's actual diagnosis.
+Retry clears only the reader error for terminal runs. Reload does not repeat an
+already recorded progress summary. The existing retry gesture can try the observation again.
 Legacy runs without a started marker keep their existing terminal behavior.
 
 The compact rows are native buttons with visible existing focus styles. They
 enter the same slash/button/agent selection flow; rendering introduces no React
 effect or component-owned application state. The current onboarding shell and its
 Command-K composer remain the owning presentation.
+
+Native handoff rounds use the recorded `Handoff` result and finish without a
+fabricated output. `lineage-exhausted`, `round-invalid`, and the driver’s durable
+cancellation record retain their actual terminal states and raw details. Recorded
+`quarantined` and `interrupt-released` decisions retain the driver’s parked state;
+cancellation keeps previously recorded input visible.

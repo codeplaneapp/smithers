@@ -1,3 +1,6 @@
+import { isGatewayWorkspaceId } from "@smthrs/rpc/GatewayWorkspace"
+export { isGatewayWorkspaceId } from "@smthrs/rpc/GatewayWorkspace"
+
 /*
  * Wave 11 — the per-user gateway seam. The product Worker provisions (or
  * resumes) the signed-in user's workspace gateway on Smithers Cloud and
@@ -176,9 +179,6 @@ const memoryRecords = new Map<string, GatewayRecord>()
  */
 const workspaceRecordKey = (repo: string, workspaceId?: string): string =>
   workspaceId === undefined ? repo : `${repo}\u0000${workspaceId}`
-export const isGatewayWorkspaceId = (value: unknown): value is string =>
-  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) &&
-  value !== "00000000-0000-0000-0000-000000000000"
 const recordKey = (login: string, repo: string, workspaceId?: string): string => `${login}\u0000${workspaceRecordKey(repo, workspaceId)}`
 
 const readRecord = async (env: GatewayEnv, login: string, repo: string, workspaceId?: string): Promise<GatewayRecord | undefined> => {

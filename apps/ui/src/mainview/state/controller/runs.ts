@@ -24,13 +24,14 @@ import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import type { RunSummaryRow } from "./gateway"
 import type { WorkflowController } from "./workflows"
-import { gatewayBindingFor } from "../RepoContext"
+import { gatewayBindingFor, gatewayRunContextFor } from "../RepoContext"
 
 export interface RunsController {
   readonly listRuns: (args: {
     readonly status?: string
     readonly flow?: string
     readonly lineage?: string
+    readonly sourceCard?: string
     readonly by?: string
     readonly repo?: string
   }) => Promise<CommandResult>
@@ -109,8 +110,8 @@ export const createRunsController = (
     preferred?: string
   ): { readonly repo: string } | { readonly error: string } => {
     if (preferred !== undefined) return { repo: preferred }
-    const card = runCardFor(runId)
-    if (card !== undefined) return { repo: card.payload.repo }
+    const recorded = gatewayRunContextFor(store, runId)
+    if (recorded !== undefined) return recorded
     return workflows.workflowTargetRepo()
   }
 
@@ -118,6 +119,7 @@ export const createRunsController = (
     readonly status?: string
     readonly flow?: string
     readonly lineage?: string
+    readonly sourceCard?: string
     readonly by?: string
     readonly repo?: string
   }): Promise<CommandResult> => {
@@ -134,9 +136,17 @@ export const createRunsController = (
     const target = workflows.workflowTargetRepo(args.repo)
     if ("error" in target) return target.error
     const repo = target.repo
-    const provisioned = await workflows.provisionWorkspace(repo)
+    const source = args.sourceCard === undefined ? undefined : store.collections.cards.get(args.sourceCard)
+    if (args.sourceCard !== undefined && (source?.kind !== "run-list" || source.payload.repo !== repo)) {
+      return "The run list is unavailable or belongs to another repository."
+    }
+    const binding = source?.kind === "run-list"
+      ? (source.payload.workspaceId === undefined ? {} : { workspaceId: source.payload.workspaceId })
+      : gatewayBindingFor(store, repo)
+    if ("error" in binding) return binding.error
+    const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
-    const listed = await gateway.workspaceRuns(repo)
+    const listed = await gateway.workspaceRuns(repo, binding)
     if (listed.status !== "ok") return listed.message
     const rows = listed.value
       .filter((row) =>
@@ -145,7 +155,7 @@ export const createRunsController = (
         (args.lineage === undefined || row.lineageId === args.lineage)
       )
       .sort((left, right) => right.createdAt - left.createdAt)
-    const cardId = `run-list-${repo}`
+    const cardId = `run-list-${repo}${binding.workspaceId === undefined ? "" : `-${binding.workspaceId}`}`
     const existing = store.collections.cards.get(cardId)
     const card: Card = {
       id: cardId,
@@ -155,7 +165,7 @@ export const createRunsController = (
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: existing?.ordinal ?? nextTranscriptOrdinal(),
       payload: {
-        repo,
+        repo, ...binding,
         ...(args.status === undefined ? {} : { status: args.status }),
         ...(args.flow === undefined ? {} : { flow: args.flow }),
         ...(args.lineage === undefined ? {} : { lineage: args.lineage }),
@@ -514,12 +524,14 @@ export const createRunsController = (
     const target = workflows.workflowTargetRepo(repoArg)
     if ("error" in target) return target.error
     const repo = target.repo
-    const provisioned = await workflows.provisionWorkspace(repo)
+    const binding = gatewayBindingFor(store, repo)
+    if ("error" in binding) return binding.error
+    const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
-    const inbox = await gateway.approvalsInbox(repo)
+    const inbox = await gateway.approvalsInbox(repo, binding)
     if (inbox.status !== "ok") return inbox.message
     const pending = inbox.value.filter((row) => row.status === "pending")
-    const cardId = `approvals-inbox-${repo}`
+    const cardId = `approvals-inbox-${repo}${binding.workspaceId === undefined ? "" : `-${binding.workspaceId}`}`
     const existing = store.collections.cards.get(cardId)
     const prior = existing?.kind === "approvals-inbox" ? existing.payload.approvals : []
     const card: Card = {
@@ -530,7 +542,7 @@ export const createRunsController = (
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: existing?.ordinal ?? nextTranscriptOrdinal(),
       payload: {
-        repo,
+        repo, ...binding,
         approvals: pending.map((row) => {
           // A row's recorded decision survives a refresh: the freeze is the
           // server's answer, not something a re-list may thaw.
@@ -567,6 +579,8 @@ export const createRunsController = (
     const target = repoForRun(runId)
     if ("error" in target) return target.error
     const repo = target.repo
+    const binding = gatewayBindingFor(store, repo, runId)
+    if ("error" in binding) return binding.error
     const alreadyOpen = [...store.collections.cards.values()].filter(
       (card) =>
         store.approvalRequest(card.id) !== undefined && card.kind === "approval" && card.payload.runId === runId &&
@@ -579,9 +593,9 @@ export const createRunsController = (
         } already open for run ${runId}.`
       }
     }
-    const provisioned = await workflows.provisionWorkspace(repo)
+    const provisioned = await workflows.provisionWorkspace(repo, binding)
     if (provisioned !== true) return provisioned
-    const approvals = await gateway.approvals(repo, runId)
+    const approvals = await gateway.approvals(repo, runId, binding)
     if (approvals.status !== "ok") return approvals.message
     const pending = approvals.value.filter((row) => row.status === "pending")
     if (pending.length === 0) return `Run ${runId} has no approvals pending.`
@@ -598,7 +612,7 @@ export const createRunsController = (
           runId,
           requestId: approval.requestId,
           approval: approval.payload as Record<string, unknown>,
-          repo
+          repo, ...binding
         }
       }
       store.dispatch({ type: "card.upsert", actor: "system", card })

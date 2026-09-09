@@ -215,6 +215,8 @@ export const traceFromJournal = (run: TraceRun, records: ReadonlyArray<JournalRe
     switch (kind) {
       case "control.engine.event":
       case "control.engine.projection-gap":
+      case "control.engine.projection-started":
+      case "control.engine.projection-settled":
         // Native records have their own identities and lifecycle. Never put
         // them under whichever agent frame happened to be open at ingestion.
         break

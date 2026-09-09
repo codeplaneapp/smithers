@@ -515,10 +515,13 @@ export const createWorkflowController = (
       })
       return
     }
-    const submitted = await gateway.submitApproval(
+    const binding = trusted.payload.workspaceId !== undefined ? { workspaceId: trusted.payload.workspaceId }
+      : trusted.payload.runId === undefined ? {} : gatewayBindingFor(store, repo, trusted.payload.runId)
+    const submitted = "error" in binding ? { status: "error" as const, message: binding.error } : await gateway.submitApproval(
       repo,
       approval as Parameters<typeof gateway.submitApproval>[1],
-      decision === "approved" ? "approve" : "deny"
+      decision === "approved" ? "approve" : "deny",
+      binding
     )
     if (submitted.status !== "ok") {
       store.dispatch({
@@ -570,10 +573,13 @@ export const createWorkflowController = (
         }
       }
     })
-    const submitted = await gateway.submitApproval(
+    const binding = trusted.payload.workspaceId !== undefined ? { workspaceId: trusted.payload.workspaceId }
+      : gatewayBindingFor(store, trusted.payload.repo, row.runId)
+    const submitted = "error" in binding ? { status: "error" as const, message: binding.error } : await gateway.submitApproval(
       trusted.payload.repo,
       row.approval as Parameters<typeof gateway.submitApproval>[1],
-      decision === "approved" ? "approve" : "deny"
+      decision === "approved" ? "approve" : "deny",
+      binding
     )
     const latest = store.collections.cards.get(cardId)
     if (latest === undefined || latest.kind !== "approvals-inbox") return

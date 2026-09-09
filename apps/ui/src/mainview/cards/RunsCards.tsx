@@ -43,7 +43,7 @@ export const RunListCardBody = ({
   /* The filter chips: every status the unfiltered workspace could carry, each re-invoking runs.list with its argument. */
   const chips = [...new Set([...(card.payload.statuses ?? []), ...runs.map((run) => run.status)])].sort()
   const listArgs = (status?: string): string =>
-    [status, card.payload.flow, card.payload.lineage === undefined ? undefined : `lineage=${card.payload.lineage}`, repo]
+    [status, card.payload.flow, card.payload.lineage === undefined ? undefined : `lineage=${card.payload.lineage}`, `sourceCard=${card.id}`, repo]
       .filter((part) => part !== undefined)
       .join(" ")
   const liveCount = runs.filter((run) => LIVE_STATUSES.has(run.status)).length

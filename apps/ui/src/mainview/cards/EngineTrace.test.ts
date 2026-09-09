@@ -40,6 +40,56 @@ describe("recorded engine evidence in the run trace", () => {
     expect(engineProjectionPending([...records, { sequence: 5, kind: "control.engine.projection-gap", payload: {} }])).toBe(false)
     expect(engineProjectionPending([...records, marker(5, "control.engine.projection-settled", 1)])).toBe(false)
   })
+  test("reads durable handoff, lineage failures and cancellation without inventing outputs", () => {
+    const terminal = (id: string, choice: string, status: string, result: unknown) => {
+      const record = JournalRecords.runDecision({ runId: id, sourceId: "engine", lineageId: id }, {
+        decision: choice, status, state: { version: 1, flowName: "round", payload: {}, result }
+      })
+      return wrap(1, id, record.eventType, record.payload)
+    }
+    const failure = { _tag: "Complete", exit: { _tag: "Failure", cause: [{ _tag: "Die", defect: "round refused" }] } }
+    const cancelled = JournalRecords.interrupted({ runId: "cancel", sourceId: "engine", lineageId: "cancel" }, {
+      outcome: "cancelled", interruptedAtMs: 40, owner: "driver"
+    })
+    const records = [
+      terminal("handoff", "handed-off", "completed", { _tag: "Handoff", flow: "next", payload: { round: 2 } }),
+      terminal("exhausted", "lineage-exhausted", "failed", failure),
+      terminal("invalid", "round-invalid", "failed", failure),
+      decision(2, "cancel"),
+      wrap(3, "cancel", cancelled.eventType, cancelled.payload),
+      wrap(4, "fenced", cancelled.eventType, { outcome: "fenced", interruptedAtMs: 45, owner: "driver" })
+    ]
+    const roots = traceFromJournal(run, records).root.children
+    expect(roots.map((row) => row.status)).toEqual(["completed", "failed", "failed", "cancelled", "recorded"])
+    expect(roots[1]?.detail.message).toContain("round refused")
+    expect(roots[3]?.endedAt).toBe(40)
+    expect(roots[3]?.detail.input).toEqual({ target: "typecheck" })
+    expect(roots.every((row) => row.detail.output === undefined)).toBe(true)
+    expect(roots[0]?.detail.fields?.payload).toMatchObject({ state: { result: { _tag: "Handoff" } } })
+  })
+
+  test("quarantine and host release preserve the writer’s recorded parked execution", () => {
+    for (const chosen of [{ decision: "quarantined", status: "suspended" }, { decision: "interrupt-released" }]) {
+      const record = JournalRecords.runDecision({ runId: "native", sourceId: "engine", lineageId: "native" }, {
+        ...chosen, state: { version: 1, flowName: "native", payload: { input: "retained" } }
+      })
+      const root = traceFromJournal(run, [wrap(1, "native", record.eventType, record.payload)]).root.children[0]!
+      expect(root.status).toBe("waiting")
+      expect(root.detail.input).toEqual({ input: "retained" })
+      expect(root.detail.output).toBeUndefined()
+      expect(root.endedAt).toBeUndefined()
+    }
+  })
+
+  test("observation lifecycle markers do not become work inside the open agent turn", () => {
+    const model = traceFromJournal(run, [
+      { sequence: 1, kind: "control.agent.turn-opened", occurredAt: 1, payload: { turn: 1 } },
+      { sequence: 2, kind: "control.engine.projection-started", payload: { version: 1, executionId: "native", generation: 0 } },
+      { sequence: 3, kind: "control.engine.projection-settled", payload: { version: 1, executionId: "native", generation: 0 } }
+    ])
+    expect(model.rows.some((row) => row.detail.event?.startsWith("control.engine.projection-"))).toBe(false)
+  })
+
   test("uses recorded child ancestry and real terminal result bytes without making a check verdict from native completion", () => {
     const records = [
       decision(1, "native"),

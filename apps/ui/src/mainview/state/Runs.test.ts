@@ -14,6 +14,7 @@ import type { StorageApi } from "@tanstack/db"
 import { CODING_PLAN } from "../cards/fixtures/CodingPlan"
 import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
+import { gatewayRunContextFor } from "./RepoContext"
 import type { NativeRepositories } from "../native/NativeBridge"
 import type { AgentPort } from "../runtime/AgentPort"
 import { scopedControllers } from "./ControllerTestScope"
@@ -798,17 +799,106 @@ describe("typed coding launch and plan inspection", () => {
 
 describe("workspace-bound run cards", () => {
   const workspaceId = "83e75ae5-0920-4000-8000-000000000001"
-  const selectWorkspace = async (store: Awaited<ReturnType<typeof webStore>>) => {
+  const selectWorkspace = async (store: Awaited<ReturnType<typeof webStore>>, id = workspaceId) => {
     await store.dispatch({
       type: "workspace.updated", actor: "system", workspace: {
-        id: workspaceId, repoId: REPO, name: "Coding", status: "running", targetBookmark: "main",
+        id, repoId: REPO, name: "Coding", status: "running", targetBookmark: "main",
         provisioningStage: null, suspendedAt: null, createdAt: null, head: null
       }
     }).isPersisted.promise
     await settle(2)
-    store.dispatch({ type: "repo.selected", actor: "user", id: `${REPO}#workspace:${workspaceId}` })
-    expect(store.session().activeRepoKey).toBe(`${REPO}#workspace:${workspaceId}`)
+    store.dispatch({ type: "repo.selected", actor: "user", id: `${REPO}#workspace:${id}` })
+    expect(store.session().activeRepoKey).toBe(`${REPO}#workspace:${id}`)
   }
+
+  test("list and inbox cards retain their gateway across provision, reload, filters and uncarded row actions", async () => {
+    const storage = memoryStorage()
+    let store = await createAppStore({ kind: "localStorage", storage })
+    const double = relay({
+      runs: [{ runId: "listed", flowId: "review-pr", status: "completed" }],
+      approvals: [approvalRow("gated", "gate-a", "Review the change"), approvalRow("direct", "gate-b", "Apply the change")]
+    })
+    const fetch = double.services.fetchImpl!
+    const services = { ...double.services, fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith("/api/workflow/provision")) store.dispatch({ type: "repo.selected", actor: "user", id: REPO })
+      return fetch(input, init)
+    } }
+    let controller = createAppController(store, unavailableRepositories, silentAgent(), services)
+    await signIn(store)
+    await selectWorkspace(store)
+    expect((await controller.commands.run("runs.list", REPO)).status).toBe("executed")
+    await selectWorkspace(store)
+    expect((await controller.commands.run("approvals.list", REPO)).status).toBe("executed")
+    const listId = `run-list-${REPO}-${workspaceId}`
+    const inboxId = `approvals-inbox-${REPO}-${workspaceId}`
+    expect(store.collections.cards.get(listId)).toMatchObject({ payload: { workspaceId } })
+    expect(store.collections.cards.get(inboxId)).toMatchObject({ payload: { workspaceId } })
+    await settle(10)
+    await controller.dispose()
+    store = await createAppStore({ kind: "localStorage", storage })
+    controller = createAppController(store, unavailableRepositories, silentAgent(), services)
+    await signIn(store)
+    await selectWorkspace(store, "ffffffff-ffff-ffff-ffff-ffffffffffff")
+    await controller.commands.run("runs.list", `completed sourceCard=${listId} ${REPO}`)
+    await controller.commands.run("runs.open", "listed")
+    await controller.commands.run("approvals.open", "gated")
+    expect(store.collections.cards.get("flow-run-listed")).toMatchObject({ payload: { workspaceId } })
+    expect(store.collections.cards.get("approval-gated-gate-a")).toMatchObject({ payload: { workspaceId } })
+    await controller.commands.run("approval.approve", "approval-gated-gate-a")
+    await controller.commands.run("approval.approve", `${inboxId}:gate-b`)
+    await waitFor(() => double.state.submitted.length === 2, 10_000)
+    for (const call of double.calls.filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).toMatchObject({ workspaceId })
+  })
+
+  test("older ancillary omissions use the already-recorded bound run after persistence reload", async () => {
+    const storage = memoryStorage()
+    let store = await createAppStore({ kind: "localStorage", storage })
+    const double = relay({ runs: [{ runId: "run-1", flowId: "review-pr", status: "completed" }], approvals: [approvalRow("run-1", "old-gate", "Approve")] })
+    let controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    // This is the pre-fix persisted shape: ancillary cards lack a binding.
+    await controller.commands.run("runs.list", REPO)
+    await controller.commands.run("approvals.list", REPO)
+    await controller.commands.run("approvals.open", "run-1")
+    await selectWorkspace(store)
+    await controller.commands.run("flow.run", "review-pr")
+    await settle(10)
+    await controller.dispose()
+    store = await createAppStore({ kind: "localStorage", storage })
+    controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await selectWorkspace(store, "ffffffff-ffff-ffff-ffff-ffffffffffff")
+    expect(gatewayRunContextFor(store, "run-1")).toEqual({ repo: REPO, workspaceId })
+    const before = double.calls.length
+    const submittedBefore = double.state.submitted.length
+    await controller.commands.run("approval.approve", "approval-run-1-old-gate")
+    await controller.commands.run("approval.approve", `approvals-inbox-${REPO}:old-gate`)
+    await waitFor(() => double.state.submitted.length === submittedBefore + 2, 10_000)
+    await controller.commands.run("runs.resume", "run-1")
+    for (const call of double.calls.slice(before).filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).toMatchObject({ workspaceId })
+  })
+
+  test("legacy list rows stay unbound and conflicting recorded workspace identities refuse", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "legacy", flowId: "review-pr", status: "completed" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("runs.list", REPO)
+    await selectWorkspace(store)
+    await controller.commands.run("runs.open", "legacy")
+    expect(gatewayRunContextFor(store, "legacy")).toEqual({ repo: REPO })
+    for (const call of double.calls.filter((call) => call.path.startsWith("/api/workflow/"))) expect(call.body).not.toHaveProperty("workspaceId")
+    const listed = store.collections.cards.get(`run-list-${REPO}`)!
+    if (listed.kind !== "run-list") throw new Error("missing list")
+    store.dispatch({ type: "card.upsert", actor: "system", card: {
+      ...listed, id: "conflicting-list", payload: { ...listed.payload, workspaceId }
+    } })
+    expect(gatewayRunContextFor(store, "legacy")).toMatchObject({ error: expect.stringContaining("conflicting") })
+    const callsBefore = double.calls.length
+    await controller.commands.run("runs.resume", "legacy")
+    expect(double.calls.length).toBe(callsBefore)
+  })
 
   for (const command of ["flow.run", "runs.open"] as const) {
     test(`${command} keeps its owning workspace across selection changes during provision and later resumption`, async () => {

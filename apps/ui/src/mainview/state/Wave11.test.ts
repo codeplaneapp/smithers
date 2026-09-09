@@ -528,10 +528,14 @@ describe("wave 11 — the run card never silently stalls", () => {
     const double = relay({ events: () => events, eventReadsFail: () => unavailable })
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store)
-    double.finish()
+    double.state.turns = 2
+    double.state.calls = 3
+    double.state.runStatus = "failed"
+    double.state.verdict = "Typecheck rejected the implementation."
     await controller.commands.run("flow.run", "review-pr")
     await settle(20)
-    expect(runCard(store)?.payload.phase).toBe("completed")
+    expect(runCard(store)?.payload.phase).toBe("failed")
+    const stepsBeforeReload = runCard(store)?.payload.steps
     await controller.dispose()
     unavailable = true
     store = await createAppStore({ kind: "localStorage", storage })
@@ -539,11 +543,40 @@ describe("wave 11 — the run card never silently stalls", () => {
     // Session reconciliation invokes this after the account is authenticated.
     resumed.resumeWorkflowRuns()
     await settle(25)
-    expect(runCard(store)?.payload.phase).toBe("completed")
-    expect(runCard(store)?.payload.error).toContain("engine evidence unavailable")
+    expect(runCard(store)?.payload.phase).toBe("failed")
+    expect(runCard(store)?.payload.error).toBe(double.state.verdict)
+    expect(runCard(store)?.payload.steps).toEqual(stepsBeforeReload)
+    expect(runCard(store)?.payload.observationError).toContain("engine evidence unavailable")
     const reads = double.calls.length
     await settle(15)
     expect(double.calls.length).toBe(reads)
+    unavailable = false
+    events.push({ sequence: 2, occurredAt: 2, kind: "control.engine.projection-settled", payload: { version: 1, executionId: "run-w11", generation: 0 } })
+    await resumed.commands.run("flow.run.retry", "flow-run-run-w11")
+    expect(runCard(store)?.payload.error).toBe(double.state.verdict)
+    await settle(25)
+    expect(runCard(store)?.payload.error).toBe(double.state.verdict)
+    expect(runCard(store)?.payload.observationError).toBeUndefined()
+  })
+
+  test("reload does not repeat the same counters for a still-running run", async () => {
+    const storage = memoryStorage()
+    let store = await createAppStore({ kind: "localStorage", storage })
+    const double = relay()
+    double.advance(2, 3)
+    let controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("flow.run", "review-pr")
+    await settle(25)
+    const before = runCard(store)?.payload.steps
+    expect(before).toContain("2 turns · 3 calls")
+    await controller.dispose()
+    store = await createAppStore({ kind: "localStorage", storage })
+    controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    controller.resumeWorkflowRuns()
+    await settle(25)
+    expect(runCard(store)?.payload.phase).toBe("running")
+    expect(runCard(store)?.payload.steps).toEqual(before)
   })
 
   test("stream loss flips the card to the honest reconnecting state, then it catches up", async () => {

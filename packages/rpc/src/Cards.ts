@@ -4,6 +4,7 @@
  * @since 1.0.0
  */
 import { z } from "zod"
+import { GatewayWorkspaceIdSchema } from "./GatewayWorkspace.ts"
 import { AgentRoleIdSchema, AgentRoleModelSchema } from "./AgentRoles.ts"
 import {
   ChangeAnalyzerRunSchema,
@@ -593,6 +594,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       approval: z.record(z.string(), z.unknown()).optional(),
       /** The loaded repository whose per-user gateway the run lives on. */
       repo: z.string().optional(),
+      /** Owning gateway; omission keeps legacy cards unbound. */
+      workspaceId: GatewayWorkspaceIdSchema.optional(),
       decision: z.enum(["approved", "denied"]).optional(),
       decidedAt: z.number().optional(),
       /** A decision is in flight to the backend: the card must not be re-decided. */
@@ -745,7 +748,7 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
     payload: z.object({
       repo: z.string(),
       /** Owning Plue gateway binding; omission identifies a legacy unbound run. */
-      workspaceId: z.string().uuid().optional(),
+      workspaceId: GatewayWorkspaceIdSchema.optional(),
       runId: z.string(),
       workflow: z.string(),
       phase: z.enum([
@@ -775,6 +778,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
       steps: z.array(z.string()),
       result: z.string().nullable(),
       error: z.string().optional(),
+      /** Failure to observe evidence; never replaces the run’s recorded diagnosis. */
+      observationError: z.string().optional(),
       lastSeq: z.number().int().nonnegative(),
       /** How long the run had gone without progress when it went quiet. */
       quietForMs: z.number().int().nonnegative().optional(),
@@ -924,6 +929,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("run-list"),
     payload: z.object({
       repo: z.string(),
+      /** Owning gateway; omission keeps legacy cards unbound. */
+      workspaceId: GatewayWorkspaceIdSchema.optional(),
       /** Every status the unfiltered workspace carried when listed; the filter chips read it. Optional for older cards. */
       statuses: z.array(z.string()).optional(),
       status: z.string().optional(),
@@ -953,6 +960,8 @@ const CurrentCardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("approvals-inbox"),
     payload: z.object({
       repo: z.string(),
+      /** Owning gateway; omission keeps legacy cards unbound. */
+      workspaceId: GatewayWorkspaceIdSchema.optional(),
       approvals: z.array(
         z.object({
           runId: z.string(),
