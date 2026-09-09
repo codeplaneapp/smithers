@@ -8,7 +8,7 @@ import * as Migrations from "../src/Migrations.ts"
 const previous = {
   ...Migrations.set,
   migrations: Object.fromEntries(
-    Object.entries(Migrations.set.migrations).filter(([id]) => id !== "0003_startup_index")
+    Object.entries(Migrations.set.migrations).filter(([id]) => id < "0003_startup_index")
   )
 }
 const other: DatabaseMigrations.MigrationSet = {
@@ -34,7 +34,10 @@ describe("journal startup ordering", () => {
         { detail: string }
       >`EXPLAIN QUERY PLAN SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json FROM flows_journal_events ORDER BY emitted_at_ms DESC, run_id DESC, seq DESC LIMIT 20`
       expect(before.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(true)
-      expect(yield* DatabaseMigrations.run([Migrations.set, other])).toEqual([[3, "journal_startup_index"]])
+      expect(yield* DatabaseMigrations.run([Migrations.set, other])).toEqual([[3, "journal_startup_index"], [
+        4,
+        "journal_dedup"
+      ]])
       const after = yield* sql<
         { detail: string }
       >`EXPLAIN QUERY PLAN SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json FROM flows_journal_events ORDER BY emitted_at_ms DESC, run_id DESC, seq DESC LIMIT 20`

@@ -174,6 +174,45 @@ const seed = (journal: Service, count: number) =>
   )
 
 describe("SqlJournal reader and compactor on one file", () => {
+  it.effect("retains compacted identities and producer floors after reopening the file", () =>
+    withTempFile((filename) =>
+      Effect.gen(function*() {
+        yield* claim(filename)
+        yield* Effect.scoped(Effect.gen(function*() {
+          const journal = yield* connection(filename)
+          yield* journal.emitDurableUnfenced(input(7))
+          yield* journal.emitDurableUnfenced(new Input({ ...input(0), sourceId: sourceId("checkpoint") }))
+          yield* journal.checkpoint({ runId: run, seq: 1 as Seq, state: { applied: 2 } }, owner)
+          yield* journal.compact({ runId: run }, owner)
+        }))
+        yield* Effect.scoped(Effect.gen(function*() {
+          const journal = yield* connection(filename)
+          expect(yield* journal.emitDurableUnfenced(input(7))).toEqual({
+            _tag: "Duplicate",
+            seq: 0,
+            sourceSeq: 7,
+            status: "committed"
+          })
+          yield* journal.emitLossy(input(7))
+          yield* journal.flush
+          expect((yield* journal.entries({ runId: run, after: 1 as Seq, limit: 10 })).entries).toEqual([])
+        }))
+        // Reopen again so the explicit retry cannot seed the producer floor.
+        yield* Effect.scoped(Effect.gen(function*() {
+          const journal = yield* connection(filename)
+          const next = yield* journal.emitDurableUnfenced(
+            new Input({
+              runId: run,
+              sourceId: source,
+              eventType: "event",
+              payload: { next: true }
+            })
+          )
+          expect(next).toEqual({ _tag: "Accepted", seq: 2, sourceSeq: 8 })
+        }))
+      })
+    ))
+
   it.effect(
     "drops a queued entry when another connection advances the floor past it",
     () =>

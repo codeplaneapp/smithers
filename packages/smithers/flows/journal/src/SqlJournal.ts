@@ -228,10 +228,9 @@ interface Prepared {
   readonly metaJson: string
 }
 
-interface Commit {
-  readonly entry: Entry
-  readonly inserted: boolean
-}
+type Commit =
+  | { readonly entry: Entry; readonly inserted: true }
+  | { readonly entry: Pick<Entry, "seq">; readonly inserted: false }
 
 interface SettledCommit {
   readonly queued: QueuedEntry
@@ -569,6 +568,17 @@ export const layer = (
       /** One encoder for the layer: constructing one per emit measured slower. */
       const byteCounter = new TextEncoder()
 
+      // Hash the same encoded content the ordinary dedup check compares.
+      // A JSON tuple keeps boundaries unambiguous without retaining payloads.
+      const contentFingerprint = (eventType: string, payloadJson: string, metaJson: string) =>
+        Effect.tryPromise({
+          try: () =>
+            crypto.subtle.digest("SHA-256", byteCounter.encode(JSON.stringify([eventType, payloadJson, metaJson]))),
+          catch: (cause) => error("sink_failed", "could not fingerprint journal content", cause)
+        }).pipe(Effect.map((digest) =>
+          Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+        ))
+
       const queue = yield* Queue.dropping<QueuedEntry>(options.capacity)
       const changes = yield* PubSub.sliding<Entry>(options.capacity)
       const wakes = new Map<RunId, Set<PubSub.PubSub<void>>>()
@@ -595,7 +605,9 @@ export const layer = (
         ORDER BY emitted_at_ms DESC, run_id DESC, seq DESC
         LIMIT ${sourceEventCache}
       `.pipe(
-        Effect.mapError((cause) => error("sink_failed", "could not initialize journal source events", cause))
+        Effect.mapError((cause) =>
+          error("sink_failed", "could not initialize journal source events", cause)
+        )
       )
       const durableEntries = yield* Effect.forEach(sourceEventRows, decodeRow)
       const initialized = yield* Effect.fromResult(
@@ -1379,7 +1391,10 @@ export const layer = (
         })
 
       /**
-       * Reads the row a duplicate emit collides with.
+       * Reads the row or compacted identity a duplicate emit collides with.
+       * The insert guard in migration 0004 extends the event table's unique
+       * constraints to identities retained by compaction. Tombstones return
+       * only a receipt sequence and never produce a replayable entry.
        *
        * On the queued channel this runs only AFTER the insert, on the row that
        * insert's `ON CONFLICT DO NOTHING` actually refused: the unique index is
@@ -1403,10 +1418,20 @@ export const layer = (
         queued: QueuedEntry
       ): Effect.Effect<Commit | undefined, JournalError | SqlError.SqlError> =>
         Effect.gen(function*() {
-          const existing = yield* sql<JournalRow>`
+          const existing = yield* sql<JournalRow & { readonly content_hash: string | null }>`
             SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
-              event_type, payload_json, meta_json
+              event_type, payload_json, meta_json, NULL AS content_hash
             FROM flows_journal_events
+            WHERE event_id = ${queued.eventId}
+              OR (
+                run_id = ${queued.runId}
+                AND source_id = ${queued.sourceId}
+                AND source_seq = ${queued.sourceSeq}
+              )
+            UNION ALL
+            SELECT run_id, seq, event_id, source_id, source_seq, 0 AS emitted_at_ms,
+              '' AS event_type, '' AS payload_json, '' AS meta_json, content_hash
+            FROM flows_journal_dedup
             WHERE event_id = ${queued.eventId}
               OR (
                 run_id = ${queued.runId}
@@ -1422,9 +1447,12 @@ export const layer = (
           const row = existing[0]!
           if (
             queued.dedupe !== "identity" && (
-              row.event_type !== queued.eventType ||
-              row.payload_json !== queued.payloadJson ||
-              row.meta_json !== queued.metaJson
+              row.content_hash === null
+                ? row.event_type !== queued.eventType ||
+                  row.payload_json !== queued.payloadJson ||
+                  row.meta_json !== queued.metaJson
+                : row.content_hash !==
+                  (yield* contentFingerprint(queued.eventType, queued.payloadJson, queued.metaJson))
             )
           ) {
             return yield* Effect.fail(
@@ -1435,7 +1463,7 @@ export const layer = (
             )
           }
           return {
-            entry: yield* decodeRow(row),
+            entry: row.content_hash === null ? yield* decodeRow(row) : { seq: Number(row.seq) as Seq },
             inserted: false
           }
         })
@@ -1699,8 +1727,13 @@ export const layer = (
               SELECT MAX(seq) + 1 AS next FROM flows_journal_events WHERE run_id = ${runId}
             `
             : sql<{ readonly next: number | null }>`
-              SELECT MAX(source_seq) + 1 AS next FROM flows_journal_events
-              WHERE run_id = ${runId} AND source_id = ${sourceId!}
+              SELECT MAX(source_seq) + 1 AS next FROM (
+                SELECT MAX(source_seq) AS source_seq FROM flows_journal_events
+                WHERE run_id = ${runId} AND source_id = ${sourceId!}
+                UNION ALL
+                SELECT MAX(source_seq) AS source_seq FROM flows_journal_dedup
+                WHERE run_id = ${runId} AND source_id = ${sourceId!}
+              )
             `,
           (rows) => Number(rows[0]?.next ?? 0)
         )
@@ -2105,6 +2138,29 @@ export const layer = (
               SELECT COUNT(*) AS total FROM flows_journal_events
               WHERE run_id = ${compactOptions.runId} AND seq < ${checkpointSeq}
             `
+              // Retain identities atomically with deletion, in bounded pages.
+              // These records never participate in replay, but preserve exact
+              // retries and producer allocation floors after a fresh open.
+              let after = -1
+              while (true) {
+                const retiring = yield* sql<JournalRow>`
+                  SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                    event_type, payload_json, meta_json
+                  FROM flows_journal_events
+                  WHERE run_id = ${compactOptions.runId} AND seq > ${after} AND seq < ${checkpointSeq}
+                  ORDER BY seq ASC LIMIT 256
+                `
+                if (retiring.length === 0) break
+                for (const entry of retiring) {
+                  const fingerprint = yield* contentFingerprint(entry.event_type, entry.payload_json, entry.meta_json)
+                  yield* sql`
+                    INSERT INTO flows_journal_dedup (run_id, source_id, source_seq, event_id, seq, content_hash)
+                    VALUES (${entry.run_id}, ${entry.source_id}, ${entry.source_seq}, ${entry.event_id},
+                      ${entry.seq}, ${fingerprint})
+                  `
+                }
+                after = Number(retiring[retiring.length - 1]!.seq)
+              }
               // Strictly below the checkpoint: the checkpointed entry survives,
               // holding the run's `MAX(seq)` allocation floor. Superseded
               // checkpoints go with their entries; the truncation and the floor

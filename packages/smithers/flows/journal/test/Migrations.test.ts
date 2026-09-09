@@ -11,7 +11,7 @@ import * as Migrations from "../src/Migrations.ts"
 
 interface SqliteMasterRow {
   readonly name: string
-  readonly type: "index" | "table"
+  readonly type: "index" | "table" | "trigger"
   readonly sql: string | null
 }
 
@@ -36,6 +36,7 @@ describe("journal migrations", () => {
 
       expect(master.filter((row) => row.type === "table").map((row) => row.name).sort()).toEqual([
         "flows_journal_checkpoints",
+        "flows_journal_dedup",
         "flows_journal_events",
         "flows_migrations"
       ])
@@ -45,6 +46,10 @@ describe("journal migrations", () => {
       const journalSql = master.find((row) => row.name === "flows_journal_events")?.sql ?? ""
       expect(journalSql).toContain("PRIMARY KEY (run_id, seq)")
       expect(journalSql).toContain("UNIQUE (run_id, source_id, source_seq)")
+      expect(master.some((row) => row.name === "flows_journal_dedup_insert_guard" && row.type === "trigger")).toBe(true)
+      const dedupSql = master.find((row) => row.name === "flows_journal_dedup")?.sql ?? ""
+      expect(dedupSql).toContain("PRIMARY KEY (run_id, source_id, source_seq)")
+      expect(dedupSql).toContain("content_hash")
       const checkpointSql = master.find((row) => row.name === "flows_journal_checkpoints")?.sql ?? ""
       expect(checkpointSql).toContain("PRIMARY KEY (run_id, seq)")
       expect(checkpointSql).toContain("compacted_at_ms")
@@ -53,6 +58,9 @@ describe("journal migrations", () => {
   it.effect("namespaces its migration identity by package", () =>
     Effect.gen(function*() {
       const applied = yield* (Migrations.run.pipe(Effect.provide(TestDatabase.layer)))
-      expect(applied).toEqual([[1, "journal_initial"], [2, "journal_checkpoints"], [3, "journal_startup_index"]])
+      expect(applied).toEqual([[1, "journal_initial"], [2, "journal_checkpoints"], [3, "journal_startup_index"], [
+        4,
+        "journal_dedup"
+      ]])
     }))
 })

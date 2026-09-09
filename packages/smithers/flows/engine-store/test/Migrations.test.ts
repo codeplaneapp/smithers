@@ -72,6 +72,7 @@ describe("durable engine migrations", () => {
         "flows_clock_deadlines",
         "flows_deferred_completions",
         "flows_journal_checkpoints",
+        "flows_journal_dedup",
         "flows_journal_events",
         "flows_migrations",
         "flows_plan_edges",
@@ -129,6 +130,7 @@ describe("durable engine migrations", () => {
           "seq",
           "state_json"
         ],
+        flows_journal_dedup: ["content_hash", "event_id", "run_id", "seq", "source_id", "source_seq"],
         flows_journal_events: [
           "emitted_at_ms",
           "event_id",

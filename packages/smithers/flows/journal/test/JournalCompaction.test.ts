@@ -360,6 +360,72 @@ const replayView = (service: Service) =>
     }
   })
 
+describe("compacted producer identities", () => {
+  effect(
+    "deduplicates compacted events after cache eviction and preserves producer floors",
+    () =>
+      Effect.gen(function*() {
+        const service = yield* Journal
+        yield* claim(owner)
+        const original = yield* service.emitDurableUnfenced(input(7))
+        yield* service.emitDurableUnfenced(new Input({ ...input(0), sourceId: sourceId("checkpoint") }))
+        yield* service.checkpoint({ runId: run, seq: seqOf(1), state: { applied: 2 } }, owner)
+        yield* service.compact({ runId: run }, owner)
+
+        yield* service.emitLossy(input(7))
+        yield* service.flush
+        expect(yield* eventCount).toBe(1)
+        for (const retry of [service.emitDurableUnfenced(input(7)), service.emitDurable(input(7), owner)]) {
+          expect(yield* retry).toEqual({ _tag: "Duplicate", seq: original.seq, sourceSeq: 7, status: "committed" })
+        }
+        yield* service.emitLossy(input(7))
+        yield* service.flush
+        expect(yield* eventCount).toBe(1)
+        expect(yield* replayView(service)).toEqual({ state: { applied: 2 }, tail: [] })
+
+        for (
+          const changed of [
+            new Input({ ...input(7), payload: { changed: true } }),
+            new Input({ ...input(7), meta: { changed: true } }),
+            new Input({ ...input(7), eventType: "changed" })
+          ]
+        ) {
+          const conflict = yield* service.emitDurableUnfenced(changed).pipe(Effect.flip)
+          expect(conflict.code).toBe("idempotency_conflict")
+        }
+        expect(
+          yield* service.emitDurableUnfenced(
+            new Input({
+              ...input(7),
+              payload: { changed: true },
+              dedupe: "identity"
+            })
+          )
+        ).toEqual({ _tag: "Duplicate", seq: original.seq, sourceSeq: 7, status: "committed" })
+        const stale = yield* service.emitDurable(input(7), { ...owner, nonce: "stale" }).pipe(Effect.flip)
+        expect(stale.code).toBe("fence_lost")
+        const next = yield* service.emitDurableUnfenced(
+          new Input({
+            runId: run,
+            sourceId: source,
+            eventType: "event",
+            payload: { next: true }
+          })
+        )
+        expect(next.sourceSeq).toBe(8)
+        yield* service.checkpoint({ runId: run, seq: next.seq, state: { applied: 3 } }, owner)
+        yield* service.compact({ runId: run }, owner)
+        expect(yield* service.emitDurableUnfenced(input(7))).toEqual({
+          _tag: "Duplicate",
+          seq: original.seq,
+          sourceSeq: 7,
+          status: "committed"
+        })
+        expect(yield* replayView(service)).toEqual({ state: { applied: 3 }, tail: [] })
+      }).pipe(Effect.provide(journal({ sourceEventCache: 1 })), Effect.scoped)
+  )
+})
+
 describe("Journal.checkpoint", () => {
   effect("captures replay state at a committed sequence and reads it back", () =>
     Effect.gen(function*() {
@@ -520,6 +586,8 @@ describe("Journal.compact", () => {
       ).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
       expect(yield* eventCount).toBe(6)
+      const sql = yield* SqlClient.SqlClient
+      expect(yield* sql`SELECT * FROM flows_journal_dedup WHERE run_id = ${run}`).toEqual([])
       const page = yield* service.entries({ runId: run, limit: 100 })
       expect(page.entries.map((entry) => entry.seq)).toEqual([0, 1, 2, 3, 4, 5])
     }).pipe(Effect.provide(journal()), Effect.scoped))

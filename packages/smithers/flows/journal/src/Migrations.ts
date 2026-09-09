@@ -1,10 +1,10 @@
 /**
  * Journal schema migrations.
  *
- * The journal owns two tables: `flows_journal_events` and its event-type
+ * The journal owns three tables: `flows_journal_events` and its event-type
  * index in `0001_initial`, and `flows_journal_checkpoints` in
  * `0002_checkpoints`, plus the bounded startup ordering index in
- * `0003_startup_index`. Run and
+ * `0003_startup_index` and compacted producer identities in `0004_dedup`. Run and
  * attempt state migrate from `@smthrs/run-store`, the step cache from
  * `@smthrs/step-cache`, and the durable deferred/clock tables from
  * `@smthrs/engine-store`; an application composes those sets with this one
@@ -17,6 +17,7 @@ import * as Layer from "effect/Layer"
 import { startupIndex } from "./internal/startupIndex.ts"
 import { initial } from "./migrations/0001_initial.ts"
 import { checkpoints } from "./migrations/0002_checkpoints.ts"
+import { dedup } from "./migrations/0004_dedup.ts"
 
 /**
  * The journal's namespaced migration set, for composition with the other
@@ -31,7 +32,8 @@ export const set: DatabaseMigrations.MigrationSet = {
   migrations: {
     "0001_initial": initial,
     "0002_checkpoints": checkpoints,
-    "0003_startup_index": startupIndex
+    "0003_startup_index": startupIndex,
+    "0004_dedup": dedup
   }
 }
 
