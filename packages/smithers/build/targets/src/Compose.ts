@@ -935,7 +935,13 @@ const generateDefinition = Target.make("Generate", {
   // the package executor.
   attrsForKind: (kind, attrs) =>
     kind === "lint" && attrs.mode === "write" ? { ...attrs, mode: "check" as const } : attrs,
-  implementation: (attrs): Node.Node<unknown, unknown, GenerateRequires> => {
+  implementation: (
+    attrs
+  ): Node.Node<
+    void | Exec.Result,
+    Exec.ExecError | GeneratedFile.DriftError | Target.NotImplemented,
+    GenerateRequires
+  > => {
     const payload = generatePayload(attrs)
     if (payload === undefined) return Target.notImplemented("Generate")
     // A declaration with no `changes` is the stdout form, whose output only
@@ -1378,8 +1384,8 @@ const testDefinition = Target.make("Test", {
   implementation: (
     attrs
   ): Node.Node<
-    unknown,
-    unknown,
+    void,
+    FilesTestError | Target.NotImplemented,
     Action.Requirement<"smithers-build/not-implemented"> | Action.Requirement<"smithers-build/files-difference">
   > => {
     if (attrs.expect._tag === "FilesDigest") {
@@ -1464,8 +1470,8 @@ const importClosureDefinition = Target.make(importClosureRuleId, {
     attrs,
     context
   ): Node.Node<
-    unknown,
-    unknown,
+    ClosureResult,
+    ImportClosureError | Target.NotImplemented,
     Action.Requirement<"smithers-build/not-implemented"> | Action.Requirement<"smithers-build/import-closure">
   > => {
     const entries = closureEntrySources(attrs.entries, context)

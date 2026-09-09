@@ -320,18 +320,24 @@ const planExec = (attrs: ExecAttrs) =>
 
 const buildDefinition = Target.make("Shell.Build", {
   attrs: BuildAttrs,
+  success: Exec.Result,
+  error: Exec.ExecError,
   kinds: ["build"],
   implementation: (attrs) => planExec(attrs)
 })
 
 const testDefinition = Target.make("Shell.Test", {
   attrs: TestAttrs,
+  success: Exec.Result,
+  error: Exec.ExecError,
   kinds: ["test"],
   implementation: (attrs) => planExec(attrs)
 })
 
 const runDefinition = Target.make("Shell.Run", {
   attrs: RunAttrs,
+  success: Exec.Result,
+  error: Exec.ExecError,
   kinds: ["run"],
   implementation: (attrs) => planExec(attrs)
 })
@@ -344,6 +350,8 @@ const serveDefinition = Target.make("Shell.Serve", {
 
 const diffDefinition = Target.make("Shell.Diff", {
   attrs: DiffAttrs,
+  success: Exec.Result,
+  error: Exec.ExecError,
   kinds: ["run", "lint"],
   implementation: (attrs) => planExec(attrs)
 })

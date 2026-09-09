@@ -101,7 +101,7 @@ export const PackageLint = Target.make("PackageLint", {
           cwd: attrs.cwd,
           argv: PackageManager.exec(attrs.packageManager, ["attw", "--pack", "."]),
           after: publint
-        }).pipe(Node.map((attw) => ({ publint, attw })))
+        }).pipe(Node.bindPlanned((attw) => Node.succeed({ publint, attw })))
       )
     )
   }

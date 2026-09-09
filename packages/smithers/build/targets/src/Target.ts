@@ -407,7 +407,7 @@ export const plan = <
   if (typeof implementation !== "function") throw new TypeError("target has no registered plan implementation")
   return implementation(
     attrs === undefined ? metadata(target).attrs : metadata(target).attrsSchema.make(attrs, strictMake)
-  ) as Node.Node<Success["Type"], Error["Type"], Requires>
+  )
 }
 
 /**
@@ -510,6 +510,7 @@ export class NotImplemented extends Schema.TaggedError<NotImplemented>()(
  */
 export const NotImplementedAction = Action.make("smithers-build/not-implemented", {
   payload: { target: Schema.NonEmptyString },
+  success: Schema.Never,
   error: NotImplemented,
   tier: "sealed"
 })
@@ -536,7 +537,7 @@ export const layerNotImplemented: Layer.Layer<
  */
 export const notImplemented = (
   target: string
-): Node.Node<void, NotImplemented, Action.Requirement<"smithers-build/not-implemented">> =>
+): Node.Node<never, NotImplemented, Action.Requirement<"smithers-build/not-implemented">> =>
   NotImplementedAction.call({ target })
 
 /**
@@ -803,6 +804,8 @@ export interface ImplementationContext {
   readonly packageDirectory: string | undefined
 }
 
+type ResultSchema<S extends Schema.Top, A> = [S] extends [never] ? Schema.Schema<A> : S
+
 /**
  * Options accepted by {@link make}.
  *
@@ -827,7 +830,7 @@ export interface MakeOptions<
   readonly implementation: (
     attrs: Attrs["Type"],
     context: ImplementationContext
-  ) => Node.Node<unknown, unknown, Requires>
+  ) => Node.Node<ResultSchema<Success, unknown>["Type"], ResultSchema<Error, unknown>["Type"], Requires>
   readonly inputs?: ((attrs: Attrs["Type"]) => ReadonlyArray<Input.Declared>) | undefined
   /**
    * The complete output tree this target promises to produce, derived from
@@ -1334,22 +1337,35 @@ const sourceIdentity = (operation: unknown): Node.FunctionIdentity => {
 /**
  * Creates an opaque target with validated attrs and a pure plan implementation.
  *
+ * Supplied success and error schemas constrain the implementation node. An
+ * omitted channel is inferred from the node and uses Unknown at runtime,
+ * preserving its value without applying schema validation.
+ *
  * @category constructors
  * @since 0.1.0
  */
 export const make = <
   const Id extends string,
   Attrs extends Flow.AnyStructSchema,
-  Success extends Schema.Top = typeof Schema.Void,
-  Error extends Schema.Top = typeof Schema.Never,
-  Requires = never
+  Success extends Schema.Top = never,
+  Error extends Schema.Top = never,
+  Requires = never,
+  Implementation extends Node.Node<unknown, unknown, Requires> = Node.Node<unknown, unknown, Requires>
 >(
   id: Id,
-  options: MakeOptions<Attrs, Success, Error, Requires>
-): Definition<Id, Attrs, Success, Error, Requires> => {
+  options: MakeOptions<Attrs, Success, Error, Requires> & {
+    readonly implementation: (attrs: Attrs["Type"], context: ImplementationContext) => Implementation
+  }
+): Definition<
+  Id,
+  Attrs,
+  ResultSchema<Success, Node.Success<Implementation>>,
+  ResultSchema<Error, Node.Error<Implementation>>,
+  Requires
+> => {
   const workspaceAttrs: ReadonlyArray<WorkspaceAttr> = Object.freeze([...new Set(options.workspaceAttrs ?? [])])
-  const successSchema = options.success ?? (Schema.Void as unknown as Success)
-  const errorSchema = options.error ?? (Schema.Never as unknown as Error)
+  const successSchema = options.success ?? Schema.Unknown
+  const errorSchema = options.error ?? Schema.Unknown
   const decodeSuccess = Schema.decodeUnknownSync(Schema.toType(successSchema))
   const schemaIdentity = freezeDocument({
     attrs: Schema.toJsonSchemaDocument(options.attrs),
@@ -1482,7 +1498,13 @@ export const make = <
       value,
       writable: false
     })
-    const declaration = target as unknown as Target<Id, Attrs, Success, Error, Requires>
+    const declaration = target as unknown as Target<
+      Id,
+      Attrs,
+      ResultSchema<Success, Node.Success<Implementation>>,
+      ResultSchema<Error, Node.Error<Implementation>>,
+      Requires
+    >
     Object.defineProperty(declaration, PlanTypeId, {
       configurable: false,
       enumerable: false,

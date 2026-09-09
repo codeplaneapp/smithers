@@ -198,7 +198,9 @@ export const TargetIndex = Target.make("TargetIndex", {
   }),
   attrsForKind: (kind, attrs) =>
     kind === "lint" && attrs.mode === "write" ? { ...attrs, mode: "check" as const } : attrs,
-  implementation: (attrs): Node.Node<unknown, unknown, Requires> =>
+  implementation: (
+    attrs
+  ): Node.Node<void, GeneratedFile.WriteFileError | GeneratedFile.DriftError | Target.NotImplemented, Requires> =>
     attrs.targets === undefined
       ? Target.notImplemented("TargetIndex outside the package planner, which fills the rows")
       : GeneratedFile.generateFile(attrs.mode, {

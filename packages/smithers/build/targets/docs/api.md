@@ -24,6 +24,16 @@ participates in. Every catalog rule is a `Definition`, including the ones that
 refuse something the schema cannot express; those are wrapped with
 `Target.guard`, which runs the refusal first and keeps the definition's shape.
 
+`success` and `error` schemas constrain the implementation node's result and
+failure types. A mismatched implementation is a type error. When a schema is
+omitted, that channel is inferred from the implementation and accepts unknown
+values at runtime; supply schemas when results need runtime validation.
+`Target.plan` preserves those channels and the node's service requirements.
+`Shell.Build`, `Shell.Test`, `Shell.Run`, and `Shell.Diff` declare `Exec.Result`
+and `Exec.ExecError`. `ToolRun` uses the same schemas; `ToolBuild` declares
+`ToolBuild.Outputs` and `ToolBuild.BuildError` because it captures output files.
+Catalog stubs infer a `never` success and `Target.NotImplemented` failure.
+
 A declaration is read exactly once, as data. The author's object is snapshotted
 before the schema sees it: a `Proxy` is refused, an accessor is refused by name,
 and a value carrying a prototype of its own is refused before the schema decodes

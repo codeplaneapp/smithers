@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import * as Exec from "../src/Exec.ts"
 import * as Shell from "../src/Shell.ts"
 import * as S from "../src/Smithers.ts"
 import * as Target from "../src/Target.ts"
@@ -73,6 +74,17 @@ describe("shell executable contract", () => {
 })
 
 describe("opaque target contract", () => {
+  it.each([
+    Shell.Test({ shell: "true" }),
+    Shell.Build({ shell: "true", outFiles: ["report.txt"] }),
+    Shell.Run({ shell: "true" }),
+    Shell.Diff({ shell: "true", changes: [] })
+  ])("keeps the execution report for $_tag", (target) => {
+    const report = Exec.Result.make({ exitCode: 0, stdout: "report", stderr: "" })
+    expect(Target.metadata(target).decodeSuccess(report)).toEqual(report)
+    expect(() => Target.metadata(target).decodeSuccess("invalid report")).toThrow()
+  })
+
   it("exposes explicit lowering without inherited Flow execution methods", () => {
     const target = S.Shell.Test({ shell: "true" })
     expect(Target.isTarget(target)).toBe(true)

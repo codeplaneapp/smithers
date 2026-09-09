@@ -409,7 +409,7 @@ const definition = Target.make("Docs.Check", {
   // `Github.CiGen`: an unattended verb checks, an explicit flag applies.
   kinds: ["lint", "docs"],
   attrs: Attrs,
-  error: StaleError,
+  error: Schema.Union([StaleError, Target.NotImplemented]),
   // Everything the verdict depends on is key material: the stamp, the page,
   // and every input are declared inputs of this node, and a Filegroup
   // member's key covers its files.

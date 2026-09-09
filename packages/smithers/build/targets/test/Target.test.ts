@@ -1,7 +1,11 @@
 import * as Node from "@smthrs/plan/Node"
 import * as Schema from "effect/Schema"
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
+import * as Exec from "../src/Exec.ts"
+import * as Shell from "../src/Shell.ts"
 import * as Target from "../src/Target.ts"
+import * as ToolBuild from "../src/ToolBuild.ts"
+import * as ToolRun from "../src/ToolRun.ts"
 
 const Leaf = Target.make("RuleTestLeaf", {
   attrs: Schema.Struct({}),
@@ -221,14 +225,14 @@ describe("Target metadata traversal", () => {
       attrs: Schema.Struct({ value: Schema.String }),
       kinds: ["build"],
       success: Schema.String,
-      error: Schema.String,
+      error: Target.NotImplemented,
       implementation
     })
     const NumberResult = Target.make("RuleTestSchemaIdentity", {
       attrs: Schema.Struct({ value: Schema.String }),
       kinds: ["build"],
       success: Schema.Number,
-      error: Schema.String,
+      error: Target.NotImplemented,
       implementation
     })
 
@@ -283,3 +287,108 @@ describe("Target metadata traversal", () => {
       .not.toBe(Target.metadata(definition("second")({})).implementationDigest)
   })
 })
+
+describe("Target implementation contract", () => {
+  it("preserves inferred results when schemas are omitted", () => {
+    const Inferred = Target.make("InferredResult", {
+      attrs: Schema.Struct({}),
+      kinds: ["test"],
+      implementation: () => Node.succeed("report")
+    })
+    const target = Inferred({})
+    expectTypeOf(Target.plan(target)).toEqualTypeOf<Node.Node<string>>()
+    expect(Target.metadata(target).decodeSuccess("report")).toBe("report")
+  })
+
+  it("infers catalog refusal errors when no error schema is supplied", () => {
+    const plan = Target.plan(Leaf({}))
+    expectTypeOf<Node.Success<typeof plan>>().toEqualTypeOf<never>()
+    expectTypeOf<Node.Error<typeof plan>>().toEqualTypeOf<Target.NotImplemented>()
+  })
+
+  it("infers either omitted channel while retaining the supplied schema", () => {
+    const implementation = () => Target.runTool({ cwd: ".", argv: ["true"], env: {} })
+    const SuccessOnly = Target.make("SuccessOnly", {
+      attrs: Schema.Struct({}),
+      kinds: ["test"],
+      success: Exec.Result,
+      implementation
+    })
+    const ErrorOnly = Target.make("ErrorOnly", {
+      attrs: Schema.Struct({}),
+      kinds: ["test"],
+      error: Exec.ExecError,
+      implementation
+    })
+    expectTypeOf(Target.plan(SuccessOnly({}))).toEqualTypeOf<ReturnType<typeof implementation>>()
+    expectTypeOf(Target.plan(ErrorOnly({}))).toEqualTypeOf<ReturnType<typeof implementation>>()
+    const report = { exitCode: 0, stdout: "report", stderr: "" }
+    expect(Target.metadata(SuccessOnly({})).decodeSuccess(report)).toEqual(report)
+    expect(() => Target.metadata(SuccessOnly({})).decodeSuccess("wrong")).toThrow()
+    expect(Target.metadata(ErrorOnly({})).decodeSuccess(report)).toEqual(report)
+  })
+
+  it("infers every implementation branch with or without a supplied schema", () => {
+    const attrs = Schema.Struct({ numeric: Schema.Boolean })
+    const implementation = (value: typeof attrs.Type) => {
+      if (value.numeric) return Node.succeed(42)
+      return Node.succeed("report")
+    }
+    const Inferred = Target.make("InferredBranches", { attrs, kinds: ["test"], implementation })
+    const Declared = Target.make("DeclaredBranches", {
+      attrs,
+      kinds: ["test"],
+      success: Schema.Union([Schema.Number, Schema.String]),
+      implementation
+    })
+    expectTypeOf(Target.plan(Inferred({ numeric: true }))).toEqualTypeOf<Node.Node<number | string>>()
+    expectTypeOf(Target.plan(Declared({ numeric: false }))).toEqualTypeOf<Node.Node<number | string>>()
+    expect(Target.metadata(Inferred({ numeric: true })).decodeSuccess(42)).toBe(42)
+    expect(Target.metadata(Declared({ numeric: false })).decodeSuccess("report")).toBe("report")
+  })
+
+  it("retains the declared tool rule contracts", () => {
+    const run = Target.plan(ToolRun.ToolRun({ command: "true", args: [], inputs: [], deps: [] }))
+    expectTypeOf<Node.Success<typeof run>>().toEqualTypeOf<Exec.Result>()
+    expectTypeOf<Node.Error<typeof run>>().toEqualTypeOf<Exec.ExecError>()
+    const build = Target.plan(ToolBuild.ToolBuild({
+      tool: "true",
+      command: "true",
+      args: [],
+      inputs: [],
+      deps: [],
+      outputs: [],
+      env: {},
+      cache: false
+    }))
+    expectTypeOf<Node.Success<typeof build>>().toEqualTypeOf<ToolBuild.Outputs>()
+    expectTypeOf<Node.Error<typeof build>>().toEqualTypeOf<typeof ToolBuild.BuildError.Type>()
+  })
+
+  it("preserves Shell result and error types", () => {
+    const plan = Target.plan(Shell.Test({ shell: "true" }))
+    expectTypeOf<Node.Success<typeof plan>>().toEqualTypeOf<Exec.Result>()
+    expectTypeOf<Node.Error<typeof plan>>().toEqualTypeOf<Exec.ExecError>()
+    expectTypeOf(plan).toEqualTypeOf<ReturnType<typeof Target.runTool>>()
+  })
+})
+
+// Compiled by tsconfig.test.json without executing invalid declarations.
+const implementationContract = () => {
+  Target.make("MismatchedSuccess", {
+    attrs: Schema.Struct({}),
+    kinds: ["test"],
+    success: Schema.Number,
+    // @ts-expect-error A string implementation cannot satisfy a Number schema.
+    implementation: () => Node.succeed("wrong")
+  })
+  Target.make("MismatchedError", {
+    attrs: Schema.Struct({}),
+    kinds: ["test"],
+    success: Exec.Result,
+    error: Schema.Never,
+    // @ts-expect-error An ExecError implementation cannot satisfy a Never schema.
+    implementation: () => Target.runTool({ cwd: ".", argv: ["true"], env: {} })
+  })
+}
+void implementationContract

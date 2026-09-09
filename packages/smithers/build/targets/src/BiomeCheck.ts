@@ -142,7 +142,7 @@ export const BiomeCheck = Target.make("BiomeCheck", {
           cwd: attrs.cwd,
           argv: PackageManager.exec(attrs.packageManager, ["biome", "format", ...shared]),
           after: check
-        }).pipe(Node.map((format) => ({ check, format })))
+        }).pipe(Node.bindPlanned((format) => Node.succeed({ check, format })))
       )
     )
   }
