@@ -50,6 +50,10 @@ const indexed = (): ReadonlyArray<string> =>
 const tabled = (): ReadonlyArray<string> =>
   [...read("../docs/api.md").matchAll(/^\| `([A-Za-z]+\.[A-Za-z0-9_$]+)` *\| /gmu)].map(([, name]) => name!)
 
+/** The namespace column of a page's "exports these namespaces" table, in row order. */
+const listed = (path: string): ReadonlyArray<string> =>
+  [...read(path).matchAll(/^\| `(\w+)` *\| /gmu)].map(([, name]) => name!)
+
 describe("documentation", () => {
   it("requires a shared selection for paired scorer comparisons", async () => {
     const sampling = { ratio: 0.5, seed: "same" }
@@ -101,17 +105,30 @@ describe("documentation", () => {
   })
 
   it("keeps repository-only install instructions out of the reader-facing docs", () => {
-    // The changelog is where a version belongs. Prose that names one goes
-    // stale, and this package versions independently of the release train, so
-    // naming that train's version would be wrong as well as stale.
+    // The changelog is where a version belongs, and it belongs under its own
+    // release heading: a substring match also passes on prose that merely
+    // mentions the version, including prose that denies the release.
     const version = (JSON.parse(read("../package.json")) as { readonly version: string }).version
-    expect(read("../CHANGELOG.md")).toContain(version)
+    const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    expect(read("../CHANGELOG.md")).toMatch(new RegExp(`^## \\[${escaped}\\]`, "mu"))
     for (const path of ["../README.md", "../docs/README.md", "../docs/installation.md"]) {
       const page = read(path)
       expect(page).not.toContain("1.0.0-rc.0")
       // `workspace:*` resolves only inside the source tree, so it is not an
       // install instruction anyone reading the package can follow.
       expect(page).not.toContain("workspace:*")
+    }
+  })
+
+  // Both READMEs hand-maintain a copy of the namespace table, and the copies
+  // have drifted from the barrel before.
+  it("lists every root namespace in both namespace tables", () => {
+    const roots = [...namespaces().map(([namespace]) => namespace)].sort()
+    expect(roots.length).toBeGreaterThan(0)
+    for (const path of ["../README.md", "../docs/README.md"]) {
+      const rows = listed(path)
+      expect([...new Set(rows)]).toEqual(rows)
+      expect([...rows].sort()).toEqual(roots)
     }
   })
 

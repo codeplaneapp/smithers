@@ -1,11 +1,14 @@
 # Changelog
 
-`@smthrs/scorers` is workspace-private at `0.1.0` and versioned independently of
-the published `1.0.0-rc.0` packages, so every `@since` tag in `src/` reads
-`0.1.0`. `publishConfig` is staged for a later publish and is inert while
-`private` is set.
+`@smthrs/scorers` is public at `1.0.0-rc.0` and versioned with the rest of the
+`1.0.0-rc.0` train; `publishConfig` publishes it under the `next` tag. Every
+`@since` tag in `src/` still reads `0.1.0`, the version the package carried
+while it was workspace-private. Those tags date a member's first appearance and
+are history, not the release that carries it.
 
 ## [Unreleased]
+
+## [1.0.0-rc.0] - 2026-09-01
 
 ### Added
 
