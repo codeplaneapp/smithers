@@ -6,9 +6,11 @@
 import type * as Flow from "@smthrs/core/Flow"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as CommandTree from "./CommandTree.ts"
 import * as FlowInvoker from "./FlowInvoker.ts"
-import type { FsError } from "./FsError.ts"
+import { FsError } from "./FsError.ts"
+import * as Boundary from "./internal/Boundary.ts"
 import * as CommandLine from "./internal/CommandLine.ts"
 import * as SchemaBridge from "./internal/SchemaBridge.ts"
 import * as Route from "./Route.ts"
@@ -49,7 +51,7 @@ export interface CommandSurface {
   readonly parse: (commandString: string) => Effect.Effect<ParsedCommand, FsError>
   /** Parses, invokes, and output-encodes an agent command string. */
   readonly execute: (commandString: string) => Effect.Effect<unknown, FsError, FlowInvoker.FlowInvoker>
-  /** Loads and invokes an exact named route using snapshotted input. */
+  /** Validates decoded input and output for an exact named route. */
   readonly call: <N extends Route.Name>(
     name: N,
     input: Route.Input<N>
@@ -62,6 +64,32 @@ interface Prepared {
   readonly argv: ReadonlyArray<string>
   readonly input: unknown
 }
+
+// Native decoded values cannot be copied as JSON without changing their type.
+const snapshotDecoded = (value: unknown): unknown => {
+  const admitted = Boundary.admitJson(value)
+  return admitted.ok ? admitted.value : value
+}
+
+const validateDecoded = (
+  schema: Schema.Top,
+  value: unknown,
+  field: "input" | "output"
+): Effect.Effect<unknown, FsError> =>
+  Effect.matchCauseEffect(
+    Effect.suspend(() => Schema.decodeUnknownEffect(Schema.toType(schema))(value)),
+    {
+      onFailure: () =>
+        Effect.fail(
+          new FsError({
+            code: "decode_failed",
+            method: "Command.call",
+            description: `The decoded flow ${field} did not satisfy its schema`
+          })
+        ),
+      onSuccess: (decoded) => Effect.succeed(snapshotDecoded(decoded))
+    }
+  )
 
 const descriptionOf = (route: Route.Route): string | undefined => Option.getOrUndefined(route.description)
 
@@ -104,8 +132,7 @@ export const make = (routes: ReadonlyArray<Route.Route>): Effect.Effect<CommandS
     ): Effect.Effect<unknown, FsError, FlowInvoker.FlowInvoker> =>
       Effect.gen(function*() {
         const invoker = yield* Effect.service(FlowInvoker.FlowInvoker)
-        const output = yield* invoker.invoke(Object.freeze({ name: route.name, flow, input }))
-        return yield* SchemaBridge.encodeOutput(flow.output, output)
+        return yield* invoker.invoke(Object.freeze({ name: route.name, flow, input }))
       })
 
     const listed = Object.freeze(
@@ -124,16 +151,13 @@ export const make = (routes: ReadonlyArray<Route.Route>): Effect.Effect<CommandS
         FlowInvoker.FlowInvoker
       > =>
         Effect.gen(function*() {
-          const input = yield* SchemaBridge.snapshotInput(candidate)
+          const input = snapshotDecoded(candidate)
           const segments = typeof name === "string" ? name.split("/") : []
           const route = yield* CommandTree.resolveExact(tree, segments)
           const flow = yield* Route.load(route)
-          const decoded = yield* SchemaBridge.decodeInput(flow.input, input)
-          return yield* (invoke(route, flow, decoded) as Effect.Effect<
-            Route.Output<N>,
-            FsError,
-            FlowInvoker.FlowInvoker
-          >)
+          const decoded = yield* validateDecoded(flow.input, input, "input")
+          const output = yield* invoke(route, flow, decoded)
+          return (yield* validateDecoded(flow.output, output, "output")) as Route.Output<N>
         })
     )
 
@@ -142,7 +166,11 @@ export const make = (routes: ReadonlyArray<Route.Route>): Effect.Effect<CommandS
       parse: (commandString: string) =>
         Effect.map(prepare(commandString), ({ argv, input, route }) => Object.freeze({ route, argv, input })),
       execute: Effect.fn("Command.execute")((commandString) =>
-        Effect.flatMap(prepare(commandString), ({ flow, input, route }) => invoke(route, flow, input))
+        Effect.flatMap(
+          prepare(commandString),
+          ({ flow, input, route }) =>
+            Effect.flatMap(invoke(route, flow, input), (output) => SchemaBridge.encodeOutput(flow.output, output))
+        )
       ),
       call
     })

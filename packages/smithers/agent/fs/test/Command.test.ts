@@ -1,6 +1,8 @@
+import { Flow } from "@smthrs/core"
 import { Cause, Effect, Option, Schema } from "effect"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Command from "../src/Command.ts"
+import * as FlowInvoker from "../src/FlowInvoker.ts"
 import * as CommandLine from "../src/internal/CommandLine.ts"
 import * as SchemaBridge from "../src/internal/SchemaBridge.ts"
 import * as Route from "../src/Route.ts"
@@ -175,6 +177,59 @@ describe("Command", () => {
     if (exit._tag === "Failure") {
       const failure = Cause.findErrorOption(exit.cause)
       expect(Option.isSome(failure) && failure.value.code).toBe("encode_failed")
+    }
+  })
+})
+
+describe("Command.call decoded boundary", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const surfaceFor = async (input: Schema.Top, output: Schema.Top) => {
+    const flow = Flow.make({ name: "scalar", input, output })
+    vi.spyOn(Route, "load").mockReturnValue(Effect.succeed(flow))
+    return Effect.runPromise(Command.make([makeRoute("scalar")]))
+  }
+
+  it("returns decoded output from call and encoded output from execute", async () => {
+    const surface = await surfaceFor(Schema.Number, Schema.NumberFromString)
+    const invoker = FlowInvoker.layerNoop({ invoke: () => Effect.succeed(42) })
+    expect(await Effect.runPromise(surface.call("scalar", 1).pipe(Effect.provide(invoker)))).toBe(42)
+    expect(await Effect.runPromise(surface.execute("scalar 1").pipe(Effect.provide(invoker)))).toBe("42")
+  })
+
+  it("accepts decoded transforming input in call and encoded input in execute", async () => {
+    const surface = await surfaceFor(Schema.NumberFromString, Schema.Number)
+    const invoke = vi.fn(({ input }: FlowInvoker.Invocation) => Effect.succeed(input))
+    const invoker = FlowInvoker.layerNoop({ invoke })
+    expect(await Effect.runPromise(surface.call("scalar", 42).pipe(Effect.provide(invoker)))).toBe(42)
+    expect(await Effect.runPromise(surface.execute("scalar 42").pipe(Effect.provide(invoker)))).toBe(42)
+    expect(invoke.mock.calls.map(([invocation]) => invocation.input)).toEqual([42, 42])
+    const exit = await Effect.runPromise(Effect.exit(surface.call("scalar", "42").pipe(Effect.provide(invoker))))
+    expect(exit._tag).toBe("Failure")
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
+  it("preserves native decoded values on both sides of call", async () => {
+    const surface = await surfaceFor(Schema.DateFromString, Schema.DateFromString)
+    const date = new Date("2026-01-01T00:00:00.000Z")
+    const invoker = FlowInvoker.layerNoop({ invoke: ({ input }) => Effect.succeed(input) })
+    const output = await Effect.runPromise(surface.call("scalar", date).pipe(Effect.provide(invoker)))
+    expect(output).toBeInstanceOf(Date)
+    expect(output).toEqual(date)
+  })
+
+  it("rejects invalid decoded output with a sanitized typed error", async () => {
+    const surface = await surfaceFor(Schema.Number, Schema.NumberFromString)
+    const exit = await Effect.runPromise(Effect.exit(
+      surface.call("scalar", 1).pipe(
+        Effect.provide(FlowInvoker.layerNoop({ invoke: () => Effect.succeed("TOP-SECRET") }))
+      )
+    ))
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      const error = Option.getOrThrow(Cause.findErrorOption(exit.cause))
+      expect(error).toMatchObject({ code: "decode_failed", method: "Command.call" })
+      expect(JSON.stringify(error)).not.toContain("TOP-SECRET")
     }
   })
 })

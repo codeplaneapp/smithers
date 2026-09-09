@@ -86,7 +86,7 @@ export interface Route {
 
 /**
  * Generated applications augment this map with route-specific input and output
- * types.
+ * types from the loaded schemas (Schema.Type, not Schema.Encoded).
  *
  * @example
  * ```ts
@@ -113,7 +113,7 @@ export interface Manifest {}
 export type Name = keyof Manifest extends never ? string : Extract<keyof Manifest, string>
 
 /**
- * The decoded input accepted by a named route.
+ * The decoded input accepted by Command.call for a named route.
  *
  * @category models
  * @since 0.1.0
@@ -123,7 +123,7 @@ export type Input<N extends Name> = N extends keyof Manifest
   : unknown
 
 /**
- * The decoded output returned by a named route.
+ * The decoded output returned by Command.call for a named route.
  *
  * @category models
  * @since 0.1.0
