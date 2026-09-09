@@ -332,7 +332,7 @@
     "kinds": [
       "review"
     ],
-    "summary": "A cheap Codex review of changed public APIs against the hand-written reference and concept pages.",
+    "summary": "A cheap Codex review of changed public APIs against package prose and matching site API references.",
     "featured": true,
     "cacheable": false,
     "inputs": [
@@ -367,17 +367,7 @@
       },
       {
         "kind": "glob",
-        "pattern": "packages/*/docs/*.md",
-        "exclude": []
-      },
-      {
-        "kind": "glob",
         "pattern": "packages/*/*/README.md",
-        "exclude": []
-      },
-      {
-        "kind": "glob",
-        "pattern": "packages/*/*/docs/*.md",
         "exclude": []
       },
       {
@@ -387,17 +377,42 @@
       },
       {
         "kind": "glob",
-        "pattern": "packages/*/*/*/docs/*.md",
+        "pattern": "apps/site/src/content/docs/docs/concepts/*.mdx",
         "exclude": []
       },
       {
         "kind": "glob",
-        "pattern": "apps/site/src/content/docs/**/*.md",
+        "pattern": "apps/site/src/content/docs/docs/reference/api/flows.mdx",
         "exclude": []
       },
       {
         "kind": "glob",
-        "pattern": "apps/site/src/content/docs/**/*.mdx",
+        "pattern": "apps/site/src/content/docs/docs/reference/api/flow.mdx",
+        "exclude": []
+      },
+      {
+        "kind": "glob",
+        "pattern": "apps/site/src/content/docs/docs/reference/api/plan.mdx",
+        "exclude": []
+      },
+      {
+        "kind": "glob",
+        "pattern": "apps/site/src/content/docs/docs/reference/api/journal.mdx",
+        "exclude": []
+      },
+      {
+        "kind": "glob",
+        "pattern": "apps/site/src/content/docs/docs/reference/api/targets.mdx",
+        "exclude": []
+      },
+      {
+        "kind": "glob",
+        "pattern": "apps/site/src/content/docs/docs/reference/api/build.mdx",
+        "exclude": []
+      },
+      {
+        "kind": "glob",
+        "pattern": "apps/site/src/content/docs/docs/reference/api/build-cli.mdx",
         "exclude": []
       }
     ],
@@ -5687,6 +5702,18 @@
       },
       {
         "kind": "file",
+        "path": "apps/site/src/content/docs/docs/guides/sync-followers.mdx"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/src/content/docs/docs/concepts/sync.mdx"
+      },
+      {
+        "kind": "file",
+        "path": "packages/smithers/flows/sync/src/SyncProtocol.ts"
+      },
+      {
+        "kind": "file",
         "path": "apps/site/scripts/check-built-site.mjs"
       },
       {
@@ -5778,6 +5805,51 @@
     }
   },
   {
+    "label": "//apps/site:projectCopyTest",
+    "package": "apps/site",
+    "name": "projectCopyTest",
+    "rule": "Shell.Test",
+    "kinds": [
+      "test"
+    ],
+    "cacheable": false,
+    "inputs": [
+      {
+        "kind": "file",
+        "path": "apps/site/scripts/generate-project-copy.mjs"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/scripts/generate-project-copy.test.mjs"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/src/data/project.json"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/src/content/docs/docs/developers.mdx"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/src/content/docs/docs/index.mdx"
+      },
+      {
+        "kind": "file",
+        "path": "README.md"
+      },
+      {
+        "kind": "file",
+        "path": "package.json"
+      }
+    ],
+    "outputs": [],
+    "dependencies": [],
+    "source": {
+      "file": "apps/site/PACKAGE.ts"
+    }
+  },
+  {
     "label": "//apps/site:recordTapeTest",
     "package": "apps/site",
     "name": "recordTapeTest",
@@ -5837,6 +5909,39 @@
       "//packages/smithers/flows/engine:referencePages",
       "//packages/smithers/flows/flow:referencePages"
     ],
+    "source": {
+      "file": "apps/site/PACKAGE.ts"
+    }
+  },
+  {
+    "label": "//apps/site:repoStatsTest",
+    "package": "apps/site",
+    "name": "repoStatsTest",
+    "rule": "Shell.Test",
+    "kinds": [
+      "test"
+    ],
+    "cacheable": false,
+    "inputs": [
+      {
+        "kind": "file",
+        "path": "apps/site/scripts/repo-stats.test.mjs"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/src/components/repoStats.ts"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/src/components/AvailableRepos.astro"
+      },
+      {
+        "kind": "file",
+        "path": "apps/site/src/components/ComingSoonRepo.astro"
+      }
+    ],
+    "outputs": [],
+    "dependencies": [],
     "source": {
       "file": "apps/site/PACKAGE.ts"
     }
@@ -11631,8 +11736,12 @@
       },
       {
         "kind": "glob",
-        "pattern": "packages/smithers/build/build-cli/docs/*.md",
+        "pattern": "packages/smithers/build/build-cli/docs/**/*.md",
         "exclude": []
+      },
+      {
+        "kind": "file",
+        "path": "packages/smithers/build/build-cli/README.md"
       },
       {
         "kind": "glob",
@@ -13533,6 +13642,29 @@
     ],
     "outputs": [],
     "dependencies": [],
+    "source": {
+      "file": "packages/smithers/flows/canonical/PACKAGE.ts"
+    }
+  },
+  {
+    "label": "//packages/smithers/flows/canonical:distSmoke",
+    "package": "packages/smithers/flows/canonical",
+    "name": "distSmoke",
+    "rule": "NodeTest",
+    "kinds": [
+      "test"
+    ],
+    "cacheable": false,
+    "inputs": [
+      {
+        "kind": "file",
+        "path": "packages/smithers/flows/canonical/test/dist-smoke.mjs"
+      }
+    ],
+    "outputs": [],
+    "dependencies": [
+      "//packages/smithers/flows/canonical:lib"
+    ],
     "source": {
       "file": "packages/smithers/flows/canonical/PACKAGE.ts"
     }
@@ -17998,20 +18130,24 @@
     "label": "//packages/smithers/flows/platform-bun:bunTest",
     "package": "packages/smithers/flows/platform-bun",
     "name": "bunTest",
-    "rule": "Vitest",
+    "rule": "NodeTest",
     "kinds": [
       "test"
     ],
     "cacheable": false,
     "inputs": [
       {
-        "kind": "glob",
-        "pattern": "packages/smithers/flows/platform-bun/test/**/*.test.ts",
-        "exclude": []
+        "kind": "file",
+        "path": "packages/smithers/flows/platform-bun/scripts/run-bun-tests.mjs"
       },
       {
         "kind": "glob",
         "pattern": "packages/smithers/flows/platform-bun/src/**/*.ts",
+        "exclude": []
+      },
+      {
+        "kind": "glob",
+        "pattern": "packages/smithers/flows/platform-bun/test/**/*.ts",
         "exclude": []
       },
       {
@@ -19776,6 +19912,36 @@
       {
         "kind": "file",
         "path": "eslint.jsdoc.js"
+      }
+    ],
+    "outputs": [],
+    "dependencies": [],
+    "source": {
+      "file": "packages/smithers/flows/time-travel/PACKAGE.ts"
+    }
+  },
+  {
+    "label": "//packages/smithers/flows/time-travel:reviewTagsMigrationsAndKeys",
+    "package": "packages/smithers/flows/time-travel",
+    "name": "reviewTagsMigrationsAndKeys",
+    "rule": "LlmLint",
+    "kinds": [
+      "review"
+    ],
+    "summary": "A cheap Codex review of the diff against origin/main for identity strings, migrations, persisted schemas and durable keys.",
+    "cacheable": false,
+    "inputs": [
+      {
+        "kind": "git-diff",
+        "base": "origin/main",
+        "paths": [
+          "packages/smithers/flows/time-travel/src/**"
+        ]
+      },
+      {
+        "kind": "glob",
+        "pattern": "packages/smithers/flows/time-travel/src/**",
+        "exclude": []
       }
     ],
     "outputs": [],

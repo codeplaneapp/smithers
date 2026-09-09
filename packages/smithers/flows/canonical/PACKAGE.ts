@@ -20,6 +20,14 @@ const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheck
  */
 const bunTest = Smithers.BunSuite({ cwd: "packages/smithers/flows/canonical" })
 
+/** Exercises the emitted ESM and CommonJS exports after building the library. */
+const distSmoke = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("test/dist-smoke.mjs")]),
+  srcs: [],
+  deps: [lib],
+  cwd: "packages/smithers/flows/canonical"
+})
+
 export const Package = Smithers.Package({
-  targets: { bunTest, check, circular, docs, docsFiles, fmt, lib, lint, test }
+  targets: { bunTest, check, circular, distSmoke, docs, docsFiles, fmt, lib, lint, test }
 })
