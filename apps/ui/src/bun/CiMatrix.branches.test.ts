@@ -8,9 +8,10 @@
  * asking what CI will do with their change.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { renderCiMatrix } from "./CiMatrix"
 import { currentSandboxHost, sandboxEnforced } from "./Sandbox"
 
@@ -158,25 +159,46 @@ writeFileSync(".github/workflows/generated.yml", \`name: generated\\njobs:\\n  b
 })
 
 test("an import that escapes the repository is not copied into the scratch", async () => {
-  const outside = await mkdtemp(join(tmpdir(), "smithers-outside-"))
+  /*
+   * The repository and its neighbour are siblings under one fixture parent, so
+   * `../<neighbour>/secret.ts` names a file that really exists. Without the
+   * containment check the copy loop follows it to
+   * `join(scratch, "../<neighbour>/secret.ts")`: beside the scratch, in the
+   * system temporary directory the scratch itself was made in.
+   */
+  const parent = await mkdtemp(join(tmpdir(), "smithers-ci-escape-"))
+  const neighbour = `neighbour-${basename(parent)}`
+  const contained = join(parent, "repo")
+  const secret = join(parent, neighbour, "secret.ts")
+  /* Where a followed `../` import lands, because `scratch` is a direct child of `tmpdir()`. */
+  const escapee = join(tmpdir(), neighbour, "secret.ts")
   try {
-    await writeFile(join(outside, "secret.ts"), "export const secret = 'do not copy me'\n")
-    await writeFile(join(repo, "PACKAGE.ts"), `import '${join(outside, "secret.ts")}'\nimport '../secret.ts'\nexport const x = 1\n`)
-    const cli = join(repo, "list-cli.mjs")
+    await mkdir(join(parent, neighbour), { recursive: true })
+    await mkdir(contained, { recursive: true })
+    await writeFile(secret, "export const secret = 'do not copy me'\n")
+    /* The absolute specifier is inert: the scanner only follows `./` and `../`. */
+    await writeFile(
+      join(contained, "PACKAGE.ts"),
+      `import '${secret}'\nimport '../${neighbour}/secret.ts'\nexport const x = 1\n`
+    )
+    const cli = join(contained, "list-cli.mjs")
     await writeFile(
       cli,
       `import { mkdirSync, writeFileSync, existsSync } from "node:fs"
 mkdirSync(".github/workflows", { recursive: true })
-writeFileSync(".github/workflows/generated.yml", \`name: generated\\njobs:\\n  build:\\n    steps:\\n      - run: echo escaped=\${existsSync("../secret.ts")}\\n\`)
+writeFileSync(".github/workflows/generated.yml", \`name: generated\\njobs:\\n  build:\\n    steps:\\n      - run: echo escaped=\${existsSync("../${neighbour}/secret.ts")}\\n\`)
 `
     )
     const result = await renderCiMatrix({
-      repoId: "force", repo, labels: ["//.github:github"], declarationFiles: ["PACKAGE.ts"], cli,
+      repoId: "force", repo: contained, labels: ["//.github:github"], declarationFiles: ["PACKAGE.ts"], cli,
       node: { path: process.execPath, version: "v22.19.0" }
     })
     /* A `../` specifier resolves outside the repo and is refused, not followed. */
+    expect(existsSync(secret)).toBe(true)
+    expect(existsSync(escapee)).toBe(false)
     expect(result.workflows[0]?.yaml).toContain("escaped=false")
   } finally {
-    await rm(outside, { recursive: true, force: true })
+    await rm(parent, { recursive: true, force: true })
+    await rm(join(tmpdir(), neighbour), { recursive: true, force: true })
   }
 })
