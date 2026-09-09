@@ -30,6 +30,9 @@ pnpm dev        # vite, with workerd in the loop
 adding a page, a pane, a flow, or a layer file. `vite` regenerates them while
 it runs, and `pnpm routes:check` exits 1 on drift.
 
+The scaffolded `.gitignore` excludes `node_modules`, `dist`, `.wrangler`,
+`.flows`, and local credentials in `.dev.vars` from Git.
+
 The build graph reads the workspace's Git index. Initialize the repository and
 stage the generated app before running its routes target:
 

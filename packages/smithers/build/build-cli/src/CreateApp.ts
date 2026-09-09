@@ -93,7 +93,8 @@ const copy = async (from: string, to: string, name: string): Promise<number> => 
   for (const entry of await NodeFs.readdir(from, { withFileTypes: true })) {
     if (skipped.has(entry.name)) continue
     const source = NodePath.join(from, entry.name)
-    const target = NodePath.join(to, entry.name)
+    // npm drops literal .gitignore files from packages; templates ship _gitignore instead.
+    const target = NodePath.join(to, entry.name === "_gitignore" ? ".gitignore" : entry.name)
     if (entry.isDirectory()) {
       files += await copy(source, target, name)
       continue

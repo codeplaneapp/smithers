@@ -70,6 +70,23 @@ describe("scaffold", () => {
     expect(await Fs.readFile(NodePath.join(directory, "logo.svg"), "utf8")).toContain("__APP_NAME__")
   })
 
+  it("restores a packed template's _gitignore filename", async () => {
+    const source = await fixture()
+    const contents = "node_modules\ndist\n.wrangler\n.flows\n.dev.vars\n"
+    await Fs.writeFile(NodePath.join(source.templates, "demo", "_gitignore"), contents)
+    const parent = await temporary("smthrs-scaffold-")
+    const directory = NodePath.join(parent, "ledger")
+    try {
+      const report = await scaffold({ directory, template: "demo", templateRoot: source.templates })
+      expect(report.files).toBe(5)
+      expect(await Fs.readFile(NodePath.join(directory, ".gitignore"), "utf8")).toBe(contents)
+      await expect(Fs.access(NodePath.join(directory, "_gitignore"))).rejects.toThrow()
+    } finally {
+      await Fs.rm(parent, { recursive: true, force: true })
+      await Fs.rm(NodePath.resolve(source.templates, "../../../.."), { recursive: true, force: true })
+    }
+  })
+
   it("preserves the release dependency versions", async () => {
     const source = await fixture()
     const directory = NodePath.join(await temporary("smthrs-scaffold-"), "ledger")
@@ -155,6 +172,9 @@ describe("the create-app verb", () => {
     expect(exitCode).toBe(0)
     expect(output).toContain("ledger")
     expect(await Fs.readFile(NodePath.join(directory, "AGENT.ts"), "utf8")).toContain("ledger's agent")
+    const ignored = (await Fs.readFile(NodePath.join(directory, ".gitignore"), "utf8")).trim().split("\n")
+    expect(ignored).toEqual(expect.arrayContaining(["node_modules", "dist", ".wrangler", ".flows", ".dev.vars"]))
+    await expect(Fs.access(NodePath.join(directory, "_gitignore"))).rejects.toThrow()
   })
 
   it("exits non-zero and says why when the template is unknown", async () => {

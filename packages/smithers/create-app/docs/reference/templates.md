@@ -15,7 +15,7 @@ pnpm exec smithers-build create-app ledger                 # default
 
 |                          | `default`   | `aomi`                        |
 | ------------------------ | ----------- | ----------------------------- |
-| Files copied             | 28          | 96                            |
+| Files copied             | 29          | 96                            |
 | Pages                    | 1           | 12                            |
 | Panes                    | 1           | 6                             |
 | Flows                    | 1           | 2                             |
@@ -26,6 +26,11 @@ pnpm exec smithers-build create-app ledger                 # default
 
 Use `default` to start an app. Read `aomi` in the repository as a worked UI
 example; it is not a public scaffold in this release candidate.
+
+The default template ships its ignore rules as `_gitignore` so npm includes
+them in the tarball. Scaffolding writes that file as `.gitignore`, excluding
+`node_modules`, `dist`, `.wrangler`, `.flows`, and `.dev.vars` from Git.
+The pack regression test checks every default template file and the count above.
 
 ## Shared shape
 
