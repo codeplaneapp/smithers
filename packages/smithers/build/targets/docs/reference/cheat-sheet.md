@@ -552,6 +552,12 @@ const sizeBudgets = S.Size.Budgets({
 })
 ```
 
+`TsBuild.distributionLayout` owns the output directories and publish entry paths.
+The `tsc` and `program` tools use format subdirectories under `outDir`.
+Dual builds use declarations beside ESM; CJS-only builds use declarations beside CJS.
+`PackageJson.publishFields` derives entry points from this layout during declaration expansion.
+The tsup tool declares one flat output tree and does not request declarations, so it cannot serve as a `PackageJson` publish entry.
+
 ## Shell, tools, Node, and bundling
 
 ```ts

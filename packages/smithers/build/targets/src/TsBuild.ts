@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as NodePath from "node:path"
 import * as Input from "./Input.ts"
 import * as PackageManager from "./PackageManager.ts"
 import * as Runtime from "./Runtime.ts"
@@ -109,9 +110,10 @@ export type Tool = typeof Tool.Type
  *
  * `entries` and `format` sit beside `tool` rather than inside its `tsup`
  * variant because `PackageJson` derives a published package's `exports` from
- * them whichever tool built the distribution. That derivation is the reason
- * `format` is checked rather than trusted: it publishes a `require` condition
- * for every `dual` entry, so a target that declares `dual` and emits one half
+ * the distribution layout for compiler and program builds. Tsup has no
+ * declaration output and cannot supply automatic publish fields. The
+ * derivation is the reason `format` is checked rather than trusted: it publishes
+ * a `require` condition for every `dual` entry, so a target that declares `dual` and emits one half
  * ships a manifest whose CommonJS entry point does not exist.
  *
  * The check refuses `tsc` with `dual`. One `tsc -p` invocation emits one
@@ -179,17 +181,50 @@ const buildArgv = (attrs: Attrs): ReadonlyArray<string> => {
 }
 
 /**
- * The subdirectory of `outDir` each declared module format lands in.
+ * One format's declared output tree and publishable primary entry.
  *
- * This is the dual-output layout the repository publishes and the one
- * `PackageJson.publishFields` derives `exports` from: `dist/esm/index.js`
- * beside its declarations, and `dist/cjs/index.js`.
+ * Entry paths are package-relative. A null entry means the tool has no
+ * publishable entry contract; a null declaration means it does not emit types
+ * for this format. In a dual build, declarations belong to ESM only.
+ *
+ * @category models
+ * @since 0.1.0
  */
-const formatDirectories = {
-  esm: ["esm"],
-  cjs: ["cjs"],
-  dual: ["esm", "cjs"]
-} as const
+export interface DistributionLayout {
+  readonly format: "esm" | "cjs"
+  readonly directory: string
+  readonly entry: string | null
+  readonly declaration: string | null
+}
+
+/**
+ * Describes the distribution used by output capture and manifest derivation.
+ *
+ * Compiler and program builds use the repository's per-format layout. Tsup
+ * owns a flat tree and is invoked without declaration emission, so it has no
+ * publishable entry contract. Its JavaScript filenames also depend on package
+ * configuration, which these attrs do not describe.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const distributionLayout = (attrs: Attrs): ReadonlyArray<DistributionLayout> => {
+  const formats: ReadonlyArray<"esm" | "cjs"> = attrs.format === "dual" ? ["esm", "cjs"] : [attrs.format]
+  const source = attrs.entries[0]
+  const base = source === undefined ? undefined : NodePath.basename(source.path).replace(/\.(?:m|c)?tsx?$/, "")
+  return formats.map((format) => {
+    const directory = attrs.tool.name === "tsup" ? attrs.outDir : `${attrs.outDir}/${format}`
+    const entry = attrs.tool.name === "tsup" || base === undefined ? null : `${directory}/${base}.js`
+    return {
+      format,
+      directory,
+      entry,
+      declaration: entry === null || (attrs.format === "dual" && format === "cjs")
+        ? null
+        : `${directory}/${base}.d.ts`
+    }
+  })
+}
 
 /**
  * The output paths one distribution build must produce.
@@ -206,9 +241,7 @@ const formatDirectories = {
  * @since 0.1.0
  */
 export const outputPaths = (attrs: Attrs): ReadonlyArray<string> =>
-  attrs.tool.name === "tsup"
-    ? [attrs.outDir]
-    : formatDirectories[attrs.format].map((directory) => `${attrs.outDir}/${directory}`)
+  [...new Set(distributionLayout(attrs).map((layout) => layout.directory))]
 
 /**
  * Builds a JavaScript distribution with `tsc -p <tsconfig>`, `tsup`, or the

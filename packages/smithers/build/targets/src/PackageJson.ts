@@ -50,6 +50,7 @@ import * as ManifestJson from "./ManifestJson.ts"
 import { assertNotManagerOwned, isTemplate, managerOwnedFields, type Template } from "./PackageJsonTemplate.ts"
 import * as SafeFs from "./SafeFs.ts"
 import * as Target from "./Target.ts"
+import * as TsBuild from "./TsBuild.ts"
 
 /**
  * The SPDX identifiers a package may declare, `MIT` by default.
@@ -349,16 +350,6 @@ export const scriptCommand = (script: string, target: Target.AnyTarget, label: s
   return `smithers-build ${verb} ${label}`
 }
 
-/**
- * The subdirectory of a build's `outDir` each module format lands in.
- *
- * This is the dual-output layout the repository already publishes:
- * `dist/esm/index.js`, `dist/cjs/index.js`, and the declarations beside the
- * ESM output. A target that emits somewhere else is not describable by this
- * derivation, which is why {@link publishFields} refuses rather than guesses.
- */
-const formatDirectory = { esm: "esm", cjs: "cjs" } as const
-
 /** Reads one string property of a decoded attrs value, or undefined. */
 const attrString = (attrs: unknown, key: string): string | undefined => {
   if (typeof attrs !== "object" || attrs === null || !(key in attrs)) return undefined
@@ -366,8 +357,8 @@ const attrString = (attrs: unknown, key: string): string | undefined => {
   return typeof value === "string" ? value : undefined
 }
 
-/** The declared entry basename of a build target, without its extension. */
-const entryBase = (attrs: unknown, label: string): string => {
+/** Requires a declared primary entry before deriving the build layout. */
+const assertEntry = (attrs: unknown, label: string): void => {
   const entries = typeof attrs === "object" && attrs !== null && "entries" in attrs
     ? (attrs as { readonly entries: unknown }).entries
     : undefined
@@ -383,7 +374,6 @@ const entryBase = (attrs: unknown, label: string): string => {
   if (typeof path !== "string" || path === "") {
     throw new Error(`PackageJson: publish entry ${label} declares an entry without a path`)
   }
-  return NodePath.basename(path).replace(/\.(?:m|c)?tsx?$/, "")
 }
 
 /**
@@ -395,7 +385,8 @@ const entryBase = (attrs: unknown, label: string): string => {
  * not exist, and npm reports that to a user rather than to the repository. The
  * derivation refuses a target whose `outDir` attr is absent or empty, whose
  * `format` attr is absent or is not one of `esm`, `cjs`, and `dual`, and one
- * that declares no entry.
+ * that declares no entry. Only TsBuild layouts with declarations support this
+ * derivation; tsup is refused because its invocation does not emit types.
  *
  * @category rendering
  * @since 0.1.0
@@ -420,20 +411,26 @@ export const publishFields = (
         `entry points can only be derived from "esm", "cjs", or "dual"`
     )
   }
-  const base = entryBase(metadata.attrs, label)
+  assertEntry(metadata.attrs, label)
+  if (metadata.target !== "TsBuild" || !Schema.is(TsBuild.Attrs)(metadata.attrs)) {
+    throw new Error(`PackageJson: publish entry ${label} has no supported TsBuild distribution layout`)
+  }
   const root = resolveOutputPath(outDir)
-  const at = (kind: "esm" | "cjs", extension: string): string =>
-    `./${root}/${formatDirectory[kind]}/${base}${extension}`
-  // Declarations sit beside the ESM output for `esm` and `dual`, and beside the
-  // CommonJS output for a package that only emits CommonJS.
-  const types = at(format === "cjs" ? "cjs" : "esm", ".d.ts")
+  const layout = TsBuild.distributionLayout({ ...metadata.attrs, outDir: root })
+  const declaration = layout.find((output) => output.declaration !== null)?.declaration
+  if (declaration === undefined || declaration === null) {
+    throw new Error(`PackageJson: publish entry ${label} declares no declarations to derive types from`)
+  }
+  const types = `./${declaration}`
+  const esm = layout.find((output) => output.format === "esm")?.entry
+  const cjs = layout.find((output) => output.format === "cjs")?.entry
   const conditions: Record<string, unknown> = { types }
-  if (format !== "cjs") conditions["import"] = at("esm", ".js")
-  if (format !== "esm") conditions["require"] = at("cjs", ".js")
+  if (esm != null) conditions["import"] = `./${esm}`
+  if (cjs != null) conditions["require"] = `./${cjs}`
   return {
     exports: { "./package.json": "./package.json", ".": conditions },
-    main: format === "esm" ? at("esm", ".js") : at("cjs", ".js"),
-    ...(format === "cjs" ? {} : { module: at("esm", ".js") }),
+    main: `./${cjs ?? esm}`,
+    ...(esm == null ? {} : { module: `./${esm}` }),
     types,
     files: [root, "README.md"],
     publishConfig: { access: options.access, provenance: options.provenance }

@@ -26,7 +26,7 @@ import {
 } from "../src/PackageJson.ts"
 import * as PackageJsonTemplate from "../src/PackageJsonTemplate.ts"
 import * as Target from "../src/Target.ts"
-import { TsBuild } from "../src/TsBuild.ts"
+import { Attrs as TsBuildAttrs, distributionLayout, type Tool, TsBuild } from "../src/TsBuild.ts"
 import { Vitest } from "../src/Vitest.ts"
 import { packageManager } from "./toolchain.ts"
 
@@ -47,14 +47,18 @@ afterEach(async () => {
  * both halves: one `tsc -p` invocation emits one module format, and `TsBuild`
  * refuses to declare `dual` over it.
  */
-const build = (cwd: string, format: "esm" | "cjs" | "dual" = "dual") =>
+const build = (
+  cwd: string,
+  format: "esm" | "cjs" | "dual" = "dual",
+  tool: Tool = { name: "program", entry: Input.file("scripts/build.mjs") }
+) =>
   TsBuild({
     packageManager,
     srcs: [Input.glob("src/**/*.ts")],
     entries: [Input.file("src/index.ts")],
     deps: [],
     tsconfig: Input.file("tsconfig.json"),
-    tool: { name: "program", entry: Input.file("scripts/build.mjs") },
+    tool,
     format,
     outDir: "dist",
     cwd
@@ -266,6 +270,44 @@ describe("script resolution", () => {
 })
 
 describe("publish derivation", () => {
+  it.each(["esm", "cjs", "dual"] as const)("refuses tsup %s without declared types", (format) => {
+    const lib = build("packages/widget", format, { name: "tsup", external: [] })
+    expect(Target.metadata(lib).outputs).toEqual({ cwd: "packages/widget", paths: ["dist"] })
+    const layout = distributionLayout(Schema.decodeUnknownSync(TsBuildAttrs)(Target.metadata(lib).attrs))
+    expect(layout.map((output) => output.directory)).toEqual(format === "dual" ? ["dist", "dist"] : ["dist"])
+    expect(layout.every((output) => output.entry === null && output.declaration === null)).toBe(true)
+    expect(() => publishFields(lib, "//packages/widget:lib", { access: "public", provenance: true }))
+      .toThrow(/publish entry .*lib.*no declarations/)
+    expect(() => manifest(
+      PackageJson({ name: "widget", version: "0.1.0", publish: { entry: lib } }),
+      [[lib, "//packages/widget:lib"]]
+    )).toThrow(/no declarations/)
+  })
+
+  it.each([
+    ["tsc", "esm"],
+    ["tsc", "cjs"],
+    ["program", "esm"],
+    ["program", "cjs"],
+    ["program", "dual"]
+  ] as const)("derives %s %s entry paths within the build outputs", (name, format) => {
+    const tool: Tool = name === "tsc" ? { name } : { name, entry: Input.file("scripts/build.mjs") }
+    const lib = build("packages/widget", format, tool)
+    const fields = publishFields(lib, "//packages/widget:lib", { access: "public", provenance: true })
+    const conditions = (fields["exports"] as Record<string, Record<string, string>>)["."]!
+    const paths = [fields["main"], fields["module"], fields["types"], ...Object.values(conditions)]
+      .filter((path): path is string => typeof path === "string")
+    const outputs = Target.metadata(lib).outputs!.paths
+    const layout = distributionLayout(Schema.decodeUnknownSync(TsBuildAttrs)(Target.metadata(lib).attrs))
+    const declaredEntries = layout.flatMap((output) => [output.entry, output.declaration])
+      .filter((path): path is string => path !== null).map((path) => `./${path}`)
+    for (const path of paths) {
+      expect(outputs.some((output) => path.startsWith(`./${output}/`))).toBe(true)
+      expect(declaredEntries).toContain(path)
+    }
+    expect(conditions["types"]).toBe(`./dist/${format === "cjs" ? "cjs" : "esm"}/index.d.ts`)
+  })
+
   it("derives dual entry points from the build target's own attrs", () => {
     const lib = build("packages/widget")
     const fields = manifest(
