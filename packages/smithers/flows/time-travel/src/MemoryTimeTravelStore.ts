@@ -20,7 +20,7 @@ import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import { forkCreatedEventType, type Frame, type LineageEdge } from "./Frame.ts"
+import { forkCreatedEventType, Frame, type LineageEdge } from "./Frame.ts"
 import { error, TimeTravelError } from "./TimeTravelError.ts"
 import * as TimeTravelStore from "./TimeTravelStore.ts"
 
@@ -378,7 +378,9 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     ),
     archiveAndTruncate: Effect.fn("TimeTravelStore.archiveAndTruncate")(
       (runId, frame, newReceipts, owner, childOwners) =>
-        Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
+        Schema.decodeUnknownEffect(Frame)(frame).pipe(
+          Effect.mapError((cause) => error("invalid", "invalid archive frame", cause)),
+          Effect.tap(() => Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq })),
           Effect.andThen(atomic(() => {
             fail("archiveAndTruncate:start")
             // The same commit-time owner predicate the SQL store asserts: a

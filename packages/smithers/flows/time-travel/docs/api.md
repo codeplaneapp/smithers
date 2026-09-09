@@ -135,8 +135,10 @@ interface RewindOptions {
 ```
 
 `pageSize` is a throughput knob only and never changes a derived answer; it
-defaults to 100. `maxHistoryEntries` overrides `Options.maxHistoryEntries` for
-one call. `workspaceRoot` defaults to `.flows/forks` and only moves which lane
+defaults to 100. In `ReplayOptions` and `RewindOptions`, it must be a safe integer
+from 1 through `Journal.maxEntriesLimit` (10,000). Larger pages are refused
+with `invalid` before reading the journal. `maxHistoryEntries` overrides
+`Options.maxHistoryEntries` for one call. `workspaceRoot` defaults to `.flows/forks` and only moves which lane
 the derived workspace name lands in. `detachedChildren` defaults to `"block"`.
 
 ### ForkResult and RewindResult
@@ -341,7 +343,7 @@ from either.
 | `writeAudit(audit)`                                               | Opens the audit trail for a rewind, before anything is compensated or truncated.                                                                                                                                                                      |
 | `updateAudit(id, patch)`                                          | Advances an open audit row. Any key outside `AuditPatch` is refused `invalid`.                                                                                                                                                                        |
 | `pendingAudits()`                                                 | Every audit row still `in_progress`. Recovery drains this on layer build.                                                                                                                                                                             |
-| `archiveAndTruncate(runId, frame, receipts, owner, childOwners?)` | Truncates a run back to a frame, archiving rather than deleting, removing deferred completions and clock deadlines named by archived records, and persisting the receipts. Fenced on the caller's ownership and on every non-terminal attached child. |
+| `archiveAndTruncate(runId, frame, receipts, owner, childOwners?)` | Refuses malformed frames with `invalid`. Truncates a run back to a frame, archiving rather than deleting, removing deferred completions and clock deadlines named by archived records, and persisting the receipts. Fenced on the caller's ownership and on every non-terminal attached child. |
 | `archivedAt(runId, seq)`                                          | Whether the archive holds a record at that coordinate. Recovery's commit-point evidence.                                                                                                                                                              |
 | `nextForkId(parentRunId, frame)`                                  | Mints and durably reserves the run id the next fork off that frame will carry, without creating a run.                                                                                                                                                |
 | `abandonForkIntents(staleBeforeMs)`                               | Every reservation older than `staleBeforeMs` whose fork never committed, handed back exactly once.                                                                                                                                                    |

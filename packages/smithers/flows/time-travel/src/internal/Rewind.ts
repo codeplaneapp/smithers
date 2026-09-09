@@ -371,6 +371,11 @@ export const validate = (options: {
         error("invalid", `rewind pageSize must be a positive integer, not ${String(options.pageSize)}`)
       )
     }
+    if (options.pageSize !== undefined && options.pageSize > Journal.maxEntriesLimit) {
+      return yield* Effect.fail(
+        error("invalid", `rewind pageSize must be at most ${Journal.maxEntriesLimit}, not ${String(options.pageSize)}`)
+      )
+    }
     const maxEntries = options.maxEntries ?? HistoryLimit.defaultMaxHistoryEntries
     const journal = yield* Journal.Journal
     const coordinate = `${options.frame.lineageId}@${options.frame.seq}`

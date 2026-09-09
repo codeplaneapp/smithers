@@ -26,7 +26,7 @@
  */
 import { Jj } from "@smthrs/jj"
 import type * as EngineEvent from "@smthrs/journal/EngineEvent"
-import type * as Journal from "@smthrs/journal/Journal"
+import * as Journal from "@smthrs/journal/Journal"
 import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import type * as RunStore from "@smthrs/run-store/RunStore"
@@ -214,6 +214,42 @@ export class ReadOnlyTimeTravel extends Context.Service<ReadOnlyTimeTravel, Pick
   "@smthrs/time-travel/ReadOnlyTimeTravel"
 ) {}
 
+/** Decode caller coordinates before reading history or starting a mutation. */
+const validatePosition = (position: Position) =>
+  Schema.decodeUnknownEffect(Position)(position).pipe(
+    Effect.mapError((cause) => error("invalid", "invalid history position", cause))
+  )
+
+/** The shared fold and input contract behind both history-reading layers. */
+const replayWith =
+  (historyLimit: number) => <S>(position: Position, projection: Projection<S>, options?: ReplayOptions) =>
+    Effect.gen(function*() {
+      const decoded = yield* validatePosition(position)
+      yield* Effect.annotateCurrentSpan({
+        runId: decoded.runId,
+        lineageId: decoded.frame.lineageId,
+        seq: decoded.frame.seq
+      })
+      const pageSize = options?.pageSize
+      if (pageSize !== undefined && (!Number.isSafeInteger(pageSize) || pageSize < 1)) {
+        return yield* Effect.fail(
+          error("invalid", `replay pageSize must be a positive integer, not ${String(pageSize)}`)
+        )
+      }
+      if (pageSize !== undefined && pageSize > Journal.maxEntriesLimit) {
+        return yield* Effect.fail(
+          error("invalid", `replay pageSize must be at most ${Journal.maxEntriesLimit}, not ${String(pageSize)}`)
+        )
+      }
+      const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, historyLimit)
+      return yield* Replay.rederive(decoded.frame, projection, {
+        runId: decoded.runId,
+        engineEvents: options?.engineEvents,
+        ...(pageSize === undefined ? {} : { pageSize }),
+        maxEntries
+      })
+    })
+
 /**
  * Composes history reads without startup recovery or mutation dependencies.
  * A viewer can provide a read-only database connection underneath this layer.
@@ -227,25 +263,9 @@ export const readOnly: Layer.Layer<
   Journal.Journal | CacheStore.CacheStore
 > = Layer.effect(ReadOnlyTimeTravel)(Effect.gen(function*() {
   const services = yield* Effect.context<Journal.Journal | CacheStore.CacheStore>()
+  const rederive = replayWith(defaultMaxHistoryEntries)
   const replay = <S>(position: Position, projection: Projection<S>, options?: ReplayOptions) =>
-    Effect.gen(function*() {
-      const decoded = yield* Schema.decodeUnknownEffect(Position)(position).pipe(
-        Effect.mapError((cause) => error("invalid", "invalid history position", cause))
-      )
-      const pageSize = options?.pageSize
-      if (pageSize !== undefined && (!Number.isSafeInteger(pageSize) || pageSize < 1)) {
-        return yield* Effect.fail(
-          error("invalid", `replay pageSize must be a positive integer, not ${String(pageSize)}`)
-        )
-      }
-      const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, defaultMaxHistoryEntries)
-      return yield* Replay.rederive(decoded.frame, projection, {
-        runId: decoded.runId,
-        engineEvents: options?.engineEvents,
-        ...(pageSize === undefined ? {} : { pageSize }),
-        maxEntries
-      })
-    }).pipe(Effect.provideContext(services))
+    rederive(position, projection, options).pipe(Effect.provideContext(services))
   return { replay, inspect: <S>(position: Position, projection: Projection<S>) => replay(position, projection) }
 }))
 
@@ -504,38 +524,9 @@ export const makeWith = (
         )
       )
 
-    /**
-     * The one fold behind `replay` and `inspect`. The read knobs are refused
-     * before the journal is touched, the same way a rewind refuses its page
-     * size: a malformed option is a caller error, not a read failure.
-     */
-    const rederive = <S>(
-      position: Position,
-      projection: Projection<S>,
-      options: ReplayOptions | undefined
-    ): Effect.Effect<S, TimeTravelError> =>
-      Effect.gen(function*() {
-        yield* Effect.annotateCurrentSpan({
-          runId: position.runId,
-          lineageId: position.frame.lineageId,
-          seq: position.frame.seq
-        })
-        const pageSize = options?.pageSize
-        if (pageSize !== undefined && (!Number.isSafeInteger(pageSize) || pageSize < 1)) {
-          return yield* Effect.fail(
-            error("invalid", `replay pageSize must be a positive integer, not ${String(pageSize)}`)
-          )
-        }
-        const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, historyLimit)
-        return yield* provided(
-          Replay.rederive(position.frame, projection, {
-            runId: position.runId,
-            engineEvents: options?.engineEvents,
-            ...(pageSize === undefined ? {} : { pageSize }),
-            maxEntries
-          })
-        )
-      })
+    const replay = replayWith(historyLimit)
+    const rederive = <S>(position: Position, projection: Projection<S>, options?: ReplayOptions) =>
+      provided(replay(position, projection, options))
 
     return {
       replay: <S>(position: Position, projection: Projection<S>, options?: ReplayOptions) =>
@@ -544,19 +535,20 @@ export const makeWith = (
         Effect.fn("TimeTravel.inspect")(() => rederive(position, projection, undefined))(),
       fork: (position, options) =>
         Effect.fn("TimeTravel.fork")(function*() {
+          const decoded = yield* validatePosition(position)
           yield* Effect.annotateCurrentSpan({
-            runId: position.runId,
-            lineageId: position.frame.lineageId,
-            seq: position.frame.seq
+            runId: decoded.runId,
+            lineageId: decoded.frame.lineageId,
+            seq: decoded.frame.seq
           })
           const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, historyLimit)
           return yield* provided(
             // The anchors a fork restores from are a projection of the engine's
             // own records, folded on demand: an ordinary engine run writes
             // journal rows, never this package's tables.
-            refreshAnchors(position.runId).pipe(Effect.andThen(ForkOperation.fork({
-              parentRunId: position.runId,
-              frame: position.frame,
+            refreshAnchors(decoded.runId).pipe(Effect.andThen(ForkOperation.fork({
+              parentRunId: decoded.runId,
+              frame: decoded.frame,
               workspaceRoot: options?.workspaceRoot ?? workspaceRoot,
               retainWorkspace: options?.retainWorkspace,
               maxEntries
@@ -565,10 +557,11 @@ export const makeWith = (
         })(),
       rewind: (position, options) =>
         Effect.fn("TimeTravel.rewind")(function*() {
+          const decoded = yield* validatePosition(position)
           yield* Effect.annotateCurrentSpan({
-            runId: position.runId,
-            lineageId: position.frame.lineageId,
-            seq: position.frame.seq
+            runId: decoded.runId,
+            lineageId: decoded.frame.lineageId,
+            seq: decoded.frame.seq
           })
           const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, historyLimit)
           return yield* provided(
@@ -591,16 +584,16 @@ export const makeWith = (
               ),
               Effect.flatMap((detachedChildPolicy) =>
                 Rewind.validate({
-                  runId: position.runId,
-                  frame: position.frame,
+                  runId: decoded.runId,
+                  frame: decoded.frame,
                   maxEntries,
                   ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
                 }).pipe(
                   Effect.flatMap((expectedTail) =>
-                    refreshAnchors(position.runId).pipe(
+                    refreshAnchors(decoded.runId).pipe(
                       Effect.andThen(Rewind.rewind({
-                        runId: position.runId,
-                        frame: position.frame,
+                        runId: decoded.runId,
+                        frame: decoded.frame,
                         owner,
                         compensationTimeout,
                         detachedChildPolicy,

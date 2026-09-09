@@ -25,25 +25,6 @@ const reader = TimeTravel.readOnly.pipe(Layer.provide([
 ]))
 
 describe("read-only time travel", () => {
-  it("refuses malformed positions with the original decode cause", async () => {
-    await Effect.runPromise(
-      Effect.gen(function*() {
-        const service = yield* ReadOnlyTimeTravel
-        for (
-          const position of [
-            { runId: "", frame: { lineageId: "lineage", seq: 1 } },
-            { runId: "run", frame: { lineageId: "", seq: 1 } },
-            { runId: "run", frame: { lineageId: "lineage", seq: -1 } }
-          ]
-        ) {
-          const failure = yield* Effect.flip(service.inspect(position, { initial: 0, reduce: (value) => value }))
-          expect(failure.code).toBe("invalid")
-          expect(failure.cause).toBeDefined()
-        }
-      }).pipe(Effect.provide(reader))
-    )
-  })
-
   it("reads without a TimeTravelStore, RunStore, jj, or recovery service", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function*() {

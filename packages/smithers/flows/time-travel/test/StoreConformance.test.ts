@@ -2,7 +2,9 @@ import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as EngineMigrations from "@smthrs/engine-store/Migrations"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { forkCreatedEventType, type LineageEdge } from "../src/Frame.ts"
@@ -190,6 +192,31 @@ describe("TimeTravelStore conformance", () => {
         archivedAfterRefusal: false,
         archivedAfter: true
       })
+    }))
+
+  it.effect("refuses a negative archive frame identically without changing history", () =>
+    Effect.gen(function*() {
+      const refuse = (store: TimeTravelStore.Service) =>
+        Effect.gen(function*() {
+          const before = yield* store.stateAt("run", { ...frame, seq: 2 })
+          const exit = yield* Effect.exit(store.archiveAndTruncate("run", { ...frame, seq: -1 }, [], owner))
+          return {
+            failure: Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined,
+            before,
+            after: yield* store.stateAt("run", { ...frame, seq: 2 }),
+            archived: [yield* store.archivedAt("run", 0), yield* store.archivedAt("run", 2)]
+          }
+        })
+      const memory = memorySeed()
+      const before = memory.state()
+      const memoryResult = yield* refuse(memory)
+      const sqlResult = yield* withSql((store, sql) => seedSql(sql).pipe(Effect.andThen(refuse(store))))
+      for (const result of [memoryResult, sqlResult]) {
+        expect(result.failure).toMatchObject({ code: "invalid", message: "invalid archive frame" })
+        expect(result.after).toEqual(result.before)
+        expect(result.archived).toEqual([false, false])
+      }
+      expect(memory.state()).toEqual(before)
     }))
 
   // `stranger` differs from `owner` in all three fields, so it cannot tell

@@ -13,10 +13,12 @@ import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as EffectBoundary from "../src/EffectBoundary.ts"
+import * as Rewind from "../src/internal/Rewind.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
-import { makeWith, TimeTravel } from "../src/TimeTravel.ts"
+import { makeWith, ReadOnlyTimeTravel, TimeTravel } from "../src/TimeTravel.ts"
+import type { TimeTravelError } from "../src/TimeTravelError.ts"
 import { TimeTravelStore } from "../src/TimeTravelStore.ts"
 
 const entries: ReadonlyArray<JournalEvent.Entry> = [
@@ -92,6 +94,7 @@ const makeHarness = () => {
   let claims = 0
   let workspaces = 0
   let writes = 0
+  let reads = 0
   const runs = RunStore.makeNoop({
     get: () => Effect.succeed(row()),
     claim: (_runId, _expected, _owner, nowMs) =>
@@ -102,33 +105,141 @@ const makeHarness = () => {
     activate: () => Effect.succeed({ _tag: "Activated" as const }),
     transitionOwned: () => Effect.succeed({ _tag: "Transitioned" as const })
   })
-  const layer = TimeTravel.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.succeed(TimeTravelStore)(store),
-        Layer.succeed(RunStore.RunStore)(runs),
-        Layer.succeed(Journal.Journal)({
-          ...journal,
-          emitDurable: (input) =>
-            Effect.sync(() => {
-              writes += 1
-              return {
-                _tag: "Accepted" as const,
-                seq: 3 as JournalEvent.Seq,
-                sourceSeq: input.sourceSeq ?? 0 as JournalEvent.SourceSeq
-              }
-            })
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(TimeTravelStore)(store),
+    Layer.succeed(RunStore.RunStore)(runs),
+    Layer.succeed(Journal.Journal)({
+      ...journal,
+      entries: (options) =>
+        Effect.suspend(() => {
+          reads += 1
+          return journal.entries(options)
         }),
-        Layer.succeed(Jj.Jj)(Jj.makeNoop({
-          workspaceAdd: () => Effect.sync(() => void (workspaces += 1)),
-          workspaceForget: () => Effect.void,
-          snapshot: () => Effect.succeed({ changeId: "current" })
-        })),
-        CacheStore.layerNoop()
-      )
-    )
+      emitDurable: (input) =>
+        Effect.sync(() => {
+          writes += 1
+          return {
+            _tag: "Accepted" as const,
+            seq: 3 as JournalEvent.Seq,
+            sourceSeq: input.sourceSeq ?? 0 as JournalEvent.SourceSeq
+          }
+        })
+    }),
+    Layer.succeed(Jj.Jj)(Jj.makeNoop({
+      workspaceAdd: () => Effect.sync(() => void (workspaces += 1)),
+      workspaceForget: () => Effect.void,
+      snapshot: () => Effect.succeed({ changeId: "current" })
+    })),
+    CacheStore.layerNoop()
   )
-  return { claims: () => claims, layer, store, workspaces: () => workspaces, writes: () => writes }
+  const layer = TimeTravel.layer.pipe(Layer.provide(dependencies))
+  const reader = TimeTravel.readOnly.pipe(Layer.provide(dependencies))
+  return {
+    claims: () => claims,
+    layer,
+    reader,
+    reads: () => reads,
+    store,
+    workspaces: () => workspaces,
+    writes: () => writes
+  }
+}
+
+const malformedInputs = [
+  { name: "negative seq", position: { runId: "run", frame: { lineageId: "run/root", seq: -1 } } },
+  { name: "fractional seq", position: { runId: "run", frame: { lineageId: "run/root", seq: 1.5 } } },
+  { name: "NaN seq", position: { runId: "run", frame: { lineageId: "run/root", seq: NaN } } },
+  { name: "empty lineage", position: { runId: "run", frame: { lineageId: "", seq: 0 } } },
+  { name: "empty run", position: { runId: "", frame: { lineageId: "run/root", seq: 0 } } },
+  {
+    name: "oversized page",
+    position: { runId: "run", frame: { lineageId: "run/root", seq: 0 } },
+    options: { pageSize: 20_000 }
+  }
+] as const
+
+const projection = { initial: 0, reduce: (value: number) => value + 1 }
+
+for (const mode of ["readOnly", "full"] as const) {
+  for (const input of malformedInputs) {
+    for (const verb of ["replay", "inspect", "fork", "rewind"] as const) {
+      if (mode === "readOnly" && (verb === "fork" || verb === "rewind")) continue
+      if ("options" in input && (verb === "inspect" || verb === "fork")) continue
+      it.effect(`${mode}.${verb} refuses ${input.name} before reads, claims or writes`, () =>
+        Effect.scoped(Effect.gen(function*() {
+          const harness = makeHarness()
+          const before = harness.store.state()
+          const exit = yield* Effect.gen(function*() {
+            const service = yield* TimeTravel
+            const options = "options" in input ? input.options : undefined
+            const operation: Effect.Effect<unknown, TimeTravelError> = verb === "replay" ?
+              service.replay(input.position, projection, options)
+              : verb === "inspect" ?
+              service.inspect(input.position, projection)
+              : verb === "fork" ?
+              service.fork(input.position)
+              : service.rewind(input.position, options)
+            return yield* Effect.exit(operation)
+          }).pipe(Effect.provide(
+            mode === "full" ? harness.layer : Layer.effect(TimeTravel)(
+              Effect.map(ReadOnlyTimeTravel, (reader) => ({
+                ...reader,
+                fork: () => Effect.die("readOnly has no fork"),
+                rewind: () => Effect.die("readOnly has no rewind")
+              }))
+            ).pipe(Layer.provide(harness.reader))
+          ))
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (Exit.isFailure(exit)) {
+            const failure = Cause.squash(exit.cause)
+            expect(failure).toMatchObject({ code: "invalid" })
+            if (!("options" in input)) expect(failure).toMatchObject({ cause: expect.anything() })
+          }
+          expect(harness.reads()).toBe(0)
+          expect(harness.claims()).toBe(0)
+          expect(harness.workspaces()).toBe(0)
+          expect(harness.writes()).toBe(0)
+          expect(harness.store.state()).toEqual(before)
+        })))
+    }
+  }
+}
+
+it.effect("Rewind.validate refuses oversized pages before reading the journal", () =>
+  Effect.gen(function*() {
+    const failure = yield* Effect.flip(
+      Rewind.validate({
+        runId: "run",
+        frame: { lineageId: "run/root", seq: 0 },
+        pageSize: 20_000
+      }).pipe(Effect.provideService(
+        Journal.Journal,
+        Journal.makeNoop({
+          entries: () => Effect.die("validation must not read the journal")
+        })
+      ))
+    )
+    expect(failure.code).toBe("invalid")
+  }))
+
+for (const mode of ["readOnly", "full"] as const) {
+  it.effect(`${mode} accepts the journal page-size ceiling`, () =>
+    Effect.scoped(Effect.gen(function*() {
+      const harness = makeHarness()
+      const result = yield* Effect.gen(function*() {
+        const service = yield* ReadOnlyTimeTravel
+        return yield* service.replay(
+          { runId: "run", frame: { lineageId: "run/root", seq: 2 } },
+          projection,
+          { pageSize: Journal.maxEntriesLimit }
+        )
+      }).pipe(Effect.provide(
+        mode === "readOnly" ? harness.reader : Layer.effect(ReadOnlyTimeTravel)(TimeTravel).pipe(
+          Layer.provide(harness.layer)
+        )
+      ))
+      expect(result).toBe(2)
+    })))
 }
 
 const rewind = (

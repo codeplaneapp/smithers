@@ -34,7 +34,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import { forkCreatedEventType, type LineageEdge } from "./Frame.ts"
+import { forkCreatedEventType, Frame, type LineageEdge } from "./Frame.ts"
 import * as Migrations from "./Migrations.ts"
 import { error, TimeTravelError } from "./TimeTravelError.ts"
 import * as TimeTravelStore from "./TimeTravelStore.ts"
@@ -660,68 +660,71 @@ export const make: Effect.Effect<
       ),
       archiveAndTruncate: Effect.fn("TimeTravelStore.archiveAndTruncate")(
         (runId, frame, receipts, owner, childOwners) =>
-          Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(Effect.andThen(
-            writer.write(
-              Effect.gen(function*() {
-                // The commit-time owner predicate: the whole archive+truncate
-                // only commits while `flows_runs` still records this owner, so
-                // a superseded rewinder can never truncate history behind the
-                // live owner — the same fence the journal's `emitDurable`
-                // asserts, one store up.
-                const fence = yield* sql<{ readonly ok: number }>`
+          Schema.decodeUnknownEffect(Frame)(frame).pipe(
+            Effect.mapError((cause) => error("invalid", "invalid archive frame", cause)),
+            Effect.tap(() => Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq })),
+            Effect.andThen(
+              writer.write(
+                Effect.gen(function*() {
+                  // The commit-time owner predicate: the whole archive+truncate
+                  // only commits while `flows_runs` still records this owner, so
+                  // a superseded rewinder can never truncate history behind the
+                  // live owner — the same fence the journal's `emitDurable`
+                  // asserts, one store up.
+                  const fence = yield* sql<{ readonly ok: number }>`
             SELECT 1 AS ok FROM flows_runs
             WHERE run_id = ${runId}
               AND owner_host_id = ${owner.hostId}
               AND owner_pid = ${owner.pid}
               AND owner_nonce = ${owner.nonce}
           `
-                if (fence.length === 0) {
-                  return yield* Effect.fail(
-                    error(
-                      "fence_lost",
-                      `run ${runId} is no longer owned by ${owner.hostId}:${owner.pid}:${owner.nonce}`
+                  if (fence.length === 0) {
+                    return yield* Effect.fail(
+                      error(
+                        "fence_lost",
+                        `run ${runId} is no longer owned by ${owner.hostId}:${owner.pid}:${owner.nonce}`
+                      )
                     )
-                  )
-                }
-                const rows = yield* edgesUnder(runId)
-                const descendants = descendantsFrom(rows, runId, frame)
-                // Attached journals are part of this transaction, so every
-                // non-terminal child is fenced here too. Assessment and claims
-                // happen before the commit, but only this read can catch a child
-                // that was re-owned or newly attached in the intervening window.
-                for (const childRunId of descendants.attachedRunIds) {
-                  const childRows = yield* sql<{
-                    readonly status: string
-                    readonly owner_host_id: string | null
-                    readonly owner_pid: number | null
-                    readonly owner_nonce: string | null
-                  }>`
+                  }
+                  const rows = yield* edgesUnder(runId)
+                  const descendants = descendantsFrom(rows, runId, frame)
+                  // Attached journals are part of this transaction, so every
+                  // non-terminal child is fenced here too. Assessment and claims
+                  // happen before the commit, but only this read can catch a child
+                  // that was re-owned or newly attached in the intervening window.
+                  for (const childRunId of descendants.attachedRunIds) {
+                    const childRows = yield* sql<{
+                      readonly status: string
+                      readonly owner_host_id: string | null
+                      readonly owner_pid: number | null
+                      readonly owner_nonce: string | null
+                    }>`
                   SELECT status, owner_host_id, owner_pid, owner_nonce
                   FROM flows_runs
                   WHERE run_id = ${childRunId}
                 `
-                  const child = childRows[0]
-                  if (
-                    child === undefined ||
-                    isTerminalRunStatus(child.status as RunStatus)
-                  ) {
-                    continue
+                    const child = childRows[0]
+                    if (
+                      child === undefined ||
+                      isTerminalRunStatus(child.status as RunStatus)
+                    ) {
+                      continue
+                    }
+                    const childOwner = childOwners?.get(childRunId)
+                    if (
+                      childOwner === undefined ||
+                      child.owner_host_id !== childOwner.hostId ||
+                      child.owner_pid !== childOwner.pid ||
+                      child.owner_nonce !== childOwner.nonce
+                    ) {
+                      return yield* Effect.fail(
+                        error("fence_lost", `attached child ${childRunId} is not owned by this rewind`)
+                      )
+                    }
                   }
-                  const childOwner = childOwners?.get(childRunId)
-                  if (
-                    childOwner === undefined ||
-                    child.owner_host_id !== childOwner.hostId ||
-                    child.owner_pid !== childOwner.pid ||
-                    child.owner_nonce !== childOwner.nonce
-                  ) {
-                    return yield* Effect.fail(
-                      error("fence_lost", `attached child ${childRunId} is not owned by this rewind`)
-                    )
-                  }
-                }
-                const nowMs = yield* Clock.currentTimeMillis
-                const parentGeneration = yield* currentGeneration(runId)
-                yield* sql`
+                  const nowMs = yield* Clock.currentTimeMillis
+                  const parentGeneration = yield* currentGeneration(runId)
+                  yield* sql`
             INSERT INTO flows_time_travel_archive
               (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms,
                event_type, payload_json, meta_json, archived_at_ms)
@@ -730,54 +733,54 @@ export const make: Effect.Effect<
             FROM flows_journal_events
             WHERE run_id = ${runId} AND seq > ${frame.seq}
           `
-                const parentChanges = yield* sql<{ readonly count: number }>`SELECT changes() AS count`
-                let archived = Number(parentChanges[0]!.count)
-                yield* sql`
+                  const parentChanges = yield* sql<{ readonly count: number }>`SELECT changes() AS count`
+                  let archived = Number(parentChanges[0]!.count)
+                  yield* sql`
                   INSERT INTO flows_journal_generations (run_id, generation, after_seq)
                   VALUES (${runId}, 1, ${frame.seq})
                   ON CONFLICT (run_id) DO UPDATE SET generation = generation + 1, after_seq = excluded.after_seq
                 `
-                yield* sql`DELETE FROM flows_time_travel_snapshots WHERE run_id = ${runId} AND seq > ${frame.seq}`
-                yield* deleteProjectedWaits(runId, frame.seq)
-                yield* sql`
+                  yield* sql`DELETE FROM flows_time_travel_snapshots WHERE run_id = ${runId} AND seq > ${frame.seq}`
+                  yield* deleteProjectedWaits(runId, frame.seq)
+                  yield* sql`
             DELETE FROM flows_journal_events
             WHERE run_id = ${runId} AND seq > ${frame.seq}
           `
-                /**
-                 * THE ATTEMPT ROWS FOLLOW THE JOURNAL THEY EXPLAIN.
-                 *
-                 * Truncation archived the `attempt-started` records above the
-                 * frame but left `flows_attempts` untouched, so a resumed run's
-                 * `probeAttempts` restored the counter and the retry origin from
-                 * rows its own journal no longer records: a step whose attempts
-                 * were archived came back at attempt N+1, or stayed exhausted.
-                 * `createFork` already derives exactly this set for the child
-                 * (`attemptsAtFrame`), and the two now agree about which attempts
-                 * a prefix can explain.
-                 */
-                const survivors = new Set(
-                  (yield* attemptsAtFrame(runId, frame)).map((ref) => `${ref.stepKeyDigest}:${ref.attempt}`)
-                )
-                const present = yield* sql<
-                  { readonly step_key_digest: string; readonly attempt: number }
-                >`
+                  /**
+                   * THE ATTEMPT ROWS FOLLOW THE JOURNAL THEY EXPLAIN.
+                   *
+                   * Truncation archived the `attempt-started` records above the
+                   * frame but left `flows_attempts` untouched, so a resumed run's
+                   * `probeAttempts` restored the counter and the retry origin from
+                   * rows its own journal no longer records: a step whose attempts
+                   * were archived came back at attempt N+1, or stayed exhausted.
+                   * `createFork` already derives exactly this set for the child
+                   * (`attemptsAtFrame`), and the two now agree about which attempts
+                   * a prefix can explain.
+                   */
+                  const survivors = new Set(
+                    (yield* attemptsAtFrame(runId, frame)).map((ref) => `${ref.stepKeyDigest}:${ref.attempt}`)
+                  )
+                  const present = yield* sql<
+                    { readonly step_key_digest: string; readonly attempt: number }
+                  >`
             SELECT step_key_digest, attempt FROM flows_attempts WHERE run_id = ${runId}
           `
-                for (const row of present) {
-                  if (survivors.has(`${row.step_key_digest}:${row.attempt}`)) continue
-                  yield* sql`
+                  for (const row of present) {
+                    if (survivors.has(`${row.step_key_digest}:${row.attempt}`)) continue
+                    yield* sql`
               DELETE FROM flows_attempts
               WHERE run_id = ${runId}
                 AND step_key_digest = ${row.step_key_digest}
                 AND attempt = ${row.attempt}
             `
-                }
-                for (const childRunId of descendants.attachedRunIds) {
-                  // An archived child's journal no longer explains any attempt,
-                  // so none of its attempt rows may survive it.
-                  yield* sql`DELETE FROM flows_attempts WHERE run_id = ${childRunId}`
-                  const childGeneration = yield* currentGeneration(childRunId)
-                  yield* sql`
+                  }
+                  for (const childRunId of descendants.attachedRunIds) {
+                    // An archived child's journal no longer explains any attempt,
+                    // so none of its attempt rows may survive it.
+                    yield* sql`DELETE FROM flows_attempts WHERE run_id = ${childRunId}`
+                    const childGeneration = yield* currentGeneration(childRunId)
+                    yield* sql`
               INSERT INTO flows_time_travel_archive
                 (run_id, generation, seq, event_id, source_id, source_seq, emitted_at_ms,
                  event_type, payload_json, meta_json, archived_at_ms)
@@ -785,23 +788,23 @@ export const make: Effect.Effect<
                      event_type, payload_json, meta_json, ${nowMs}
               FROM flows_journal_events WHERE run_id = ${childRunId}
             `
-                  const childChanges = yield* sql<{ readonly count: number }>`SELECT changes() AS count`
-                  archived += Number(childChanges[0]!.count)
-                  yield* sql`
+                    const childChanges = yield* sql<{ readonly count: number }>`SELECT changes() AS count`
+                    archived += Number(childChanges[0]!.count)
+                    yield* sql`
                     INSERT INTO flows_journal_generations (run_id, generation, after_seq)
                     VALUES (${childRunId}, 1, -1)
                     ON CONFLICT (run_id) DO UPDATE SET generation = generation + 1, after_seq = -1
                   `
-                  yield* sql`DELETE FROM flows_time_travel_snapshots WHERE run_id = ${childRunId}`
-                  yield* deleteProjectedWaits(childRunId, -1)
-                  yield* sql`DELETE FROM flows_journal_events WHERE run_id = ${childRunId}`
-                }
-                for (const edge of descendants.attached) {
-                  yield* sql`DELETE FROM flows_time_travel_edges WHERE child_run_id = ${edge.childRunId}`
-                }
-                for (const receipt of receipts) {
-                  const receiptJson = yield* encodeJson(receipt.receipt)
-                  yield* sql`
+                    yield* sql`DELETE FROM flows_time_travel_snapshots WHERE run_id = ${childRunId}`
+                    yield* deleteProjectedWaits(childRunId, -1)
+                    yield* sql`DELETE FROM flows_journal_events WHERE run_id = ${childRunId}`
+                  }
+                  for (const edge of descendants.attached) {
+                    yield* sql`DELETE FROM flows_time_travel_edges WHERE child_run_id = ${edge.childRunId}`
+                  }
+                  for (const receipt of receipts) {
+                    const receiptJson = yield* encodeJson(receipt.receipt)
+                    yield* sql`
               INSERT INTO flows_time_travel_receipts
                 (id, audit_id, effect_id, receipt_json)
               VALUES (
@@ -811,17 +814,18 @@ export const make: Effect.Effect<
                 ${receiptJson}
               )
             `
-                }
-                return { archived, orphaned: descendants.detached, forgotten: [runId, ...descendants.attachedRunIds] }
-              }).pipe(Effect.mapError(mapError))
-            ).pipe(
-              Effect.tap(({ forgotten }) =>
-                JournalGeneration.forget(forgotten).pipe(Effect.provideService(SqlClient.SqlClient, sql))
-              ),
-              Effect.map(({ archived, orphaned }) => ({ archived, orphaned })),
-              Effect.mapError(mapError)
+                  }
+                  return { archived, orphaned: descendants.detached, forgotten: [runId, ...descendants.attachedRunIds] }
+                }).pipe(Effect.mapError(mapError))
+              ).pipe(
+                Effect.tap(({ forgotten }) =>
+                  JournalGeneration.forget(forgotten).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+                ),
+                Effect.map(({ archived, orphaned }) => ({ archived, orphaned })),
+                Effect.mapError(mapError)
+              )
             )
-          ))
+          )
       ),
       archivedAt: Effect.fn("TimeTravelStore.archivedAt")((runId, seq) =>
         Effect.annotateCurrentSpan({ runId, seq }).pipe(Effect.andThen(
