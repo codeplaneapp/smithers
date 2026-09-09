@@ -17,12 +17,20 @@ One delivery decodes to one event:
 
 | Field           | What it is                                                                    |
 | --------------- | ----------------------------------------------------------------------------- |
-| `source`        | The source that produced it: `github`, `linear`, `telegram`.                  |
+| `source`        | The channel or source id that produced it, not the provider.                  |
 | `eventName`     | `integration:<service>:<event>`, the most specific form the payload supports. |
 | `correlationId` | What the event is about, or `null` when it addresses nothing narrower.        |
 | `payload`       | The provider payload, as delivered.                                           |
 | `dedupeKey`     | The provider's stable delivery identity, so a redelivery is recognizable.     |
 | `receivedAtMs`  | When the event was received, in Unix milliseconds.                            |
+
+`source` is the id of the channel or polling source, and every provider
+follows that rule. A channel or source that is not named takes the provider
+name, so one GitHub channel produces `github` and a second one named
+`github-secondary` produces `github-secondary`. `GitHub.Webhook.channel`,
+`Linear.Webhook.channel`, and `Telegram.Source.make` all stamp their own id,
+so a listener can tell two installations or two bots apart without reading
+the payload.
 
 The schema refuses a name `Core.SignalName.eventName` could not have built,
 such as one whose event segment carries a second colon. A name that reaches

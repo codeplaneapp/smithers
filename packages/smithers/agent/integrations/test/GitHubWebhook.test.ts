@@ -119,6 +119,15 @@ describe("decode", () => {
     expect(() => decode(raw(pullRequest, { "x-github-delivery": undefined }), pullRequest))
       .toThrow(/X-GitHub-Delivery/)
   })
+
+  it("takes the source id the channel was named with", () => {
+    expect(decode(raw(pullRequest), pullRequest, 1_700_000_000_000, { source: "github-secondary" }).source)
+      .toBe("github-secondary")
+  })
+
+  it("falls back to the service as the source id", () => {
+    expect(decode(raw(pullRequest), pullRequest, 1_700_000_000_000).source).toBe("github")
+  })
 })
 
 describe("sender policy", () => {
@@ -243,6 +252,21 @@ describe("sender policy", () => {
     expect(refusal._tag).toBe("Failure")
     const accepted = await Effect.runPromise(Effect.exit(admitted.decode(delivery) as Effect.Effect<unknown, unknown>))
     expect(accepted._tag).toBe("Success")
+  })
+})
+
+describe("channel", () => {
+  it("stamps its own name on every event it decodes", async () => {
+    const channel = GitHubWebhook.channel({
+      name: "github-secondary",
+      credential: Redacted.make({ id: "c", name: "github-webhook" }),
+      secret: Core.constantSecret(Redacted.make(SECRET)),
+      route: Core.startFlow("triage")
+    })
+    const event = await Effect.runPromise(
+      channel.decode(raw(pullRequest)) as Effect.Effect<{ readonly source: string }, unknown>
+    )
+    expect(event.source).toBe("github-secondary")
   })
 })
 

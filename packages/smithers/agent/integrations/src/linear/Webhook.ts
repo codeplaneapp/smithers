@@ -196,7 +196,7 @@ export const decode = (
  * @since 1.0.0
  */
 export interface ChannelOptions extends VerifyOptions {
-  /** The channel name. Defaults to `linear`. */
+  /** The channel name, which is every decoded event's source. Defaults to `linear`. */
   readonly name?: string | undefined
   readonly credential: Redacted.Redacted<CredentialRef>
   readonly secret: Core.SecretResolver

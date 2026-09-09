@@ -178,7 +178,25 @@ export const senderRefusal = (
 }
 
 /**
+ * What {@link decode} takes beyond the delivery itself.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface DecodeOptions extends SenderPolicy {
+  /**
+   * The decoded event's `source`, which is the channel id rather than the
+   * provider. Defaults to {@link SERVICE}, so two channels over the same
+   * provider stay distinguishable downstream.
+   */
+  readonly source?: string | undefined
+}
+
+/**
  * Decodes one verified delivery.
+ *
+ * The event's `source` is the channel id, the same rule `Linear.Webhook` and
+ * `Telegram.Source` follow, and it defaults to {@link SERVICE}.
  *
  * Throws an `IntegrationError` when GitHub's own headers are missing: without
  * `X-GitHub-Event` there is no signal name, and without `X-GitHub-Delivery`
@@ -195,8 +213,9 @@ export const decode = (
   raw: RawInbound,
   payload: unknown,
   receivedAtMs: number = Date.now(),
-  policy?: SenderPolicy
+  options?: DecodeOptions
 ): ExternalEvent => {
+  const source = options?.source ?? SERVICE
   const event = readHeader(raw, "x-github-event")
   if (event === undefined || event.length === 0) {
     throw new IntegrationError("decode-failed", "GitHub webhook is missing the X-GitHub-Event header.", {
@@ -210,12 +229,12 @@ export const decode = (
       event
     })
   }
-  const refusal = senderRefusal(event, payload, policy)
+  const refusal = senderRefusal(event, payload, options)
   if (refusal !== undefined) throw refusal
   const eventName = names(event, payload)[0] as string
   const correlationId = correlations(payload)[0] as string | null
   return {
-    source: SERVICE,
+    source,
     eventName,
     correlationId,
     payload: payload as ExternalEvent["payload"],
@@ -251,7 +270,7 @@ export const idempotencyKey = (raw: HasHeaders): string | undefined => {
  * @since 1.0.0
  */
 export interface ChannelOptions {
-  /** The channel name. Defaults to `github`. */
+  /** The channel name, which is every decoded event's source. Defaults to `github`. */
   readonly name?: string | undefined
   readonly credential: Redacted.Redacted<CredentialRef>
   readonly secret: Core.SecretResolver
@@ -270,14 +289,17 @@ export interface ChannelOptions {
  * @category constructors
  * @since 1.0.0
  */
-export const channel = (options: ChannelOptions): Channel =>
-  Core.make({
-    name: options.name ?? SERVICE,
+export const channel = (options: ChannelOptions): Channel => {
+  const name = options.name ?? SERVICE
+  return Core.make({
+    name,
     credential: options.credential,
     secret: options.secret,
     fingerprintHeaders: ["x-github-delivery", "x-github-event"],
     verify,
-    decode: (raw, payload) => decode(raw, payload, undefined, { allowedAssociations: options.allowedAssociations }),
+    decode: (raw, payload) =>
+      decode(raw, payload, undefined, { source: name, allowedAssociations: options.allowedAssociations }),
     route: options.route,
     project: options.project
   })
+}

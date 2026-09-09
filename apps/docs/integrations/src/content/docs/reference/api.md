@@ -69,7 +69,8 @@ nothing.
 
 ### Core.ExternalEvent
 
-The normalized event every source produces. Fields: `source`, `eventName`
+The normalized event every source produces. Fields: `source` (the channel
+or polling source id, defaulting to the provider name), `eventName`
 (refined to a name `SignalName.eventName` could build), `correlationId`
 (string or `null`), `payload` (JSON), `dedupeKey`, and `receivedAtMs`.
 
@@ -305,6 +306,10 @@ missing associations are refused before routing. Comments and reviews use
 their own association, never a parent issue or pull request's association.
 Events without an association, including `push`, fail closed.
 
+`DecodeOptions` extends `SenderPolicy` with `source`, the decoded event's
+source id, which defaults to `github` and which `channel` sets to its own
+name.
+
 `SenderPolicy` and `ChannelOptions` accept `allowedAssociations`; an empty
 list admits nobody. `defaultAllowedAssociations` exposes the default.
 `senderRefusal(event, payload, policy?)` returns `SenderRefused | undefined`.
@@ -313,15 +318,15 @@ in `skipReason`: `bot-sender`, `missing-association`, or
 `association-not-allowed`. `decode` throws the refusal; the channel converts
 it to `InvalidInput` before it can start or signal a run.
 
-| Export           | Signature                                                                                            | Notes                                                                                                                                                                      |
-| ---------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `verify`         | `(raw: RawInbound, secret: string) => boolean`                                                       | The signature check over `raw.body`, never a re-serialized copy.                                                                                                           |
-| `decode`         | `(raw: RawInbound, payload: unknown, receivedAtMs?: number, policy?: SenderPolicy) => ExternalEvent` | Throws an `IntegrationError` `decode-failed` when `X-GitHub-Event` or `X-GitHub-Delivery` is missing. The dedupe key is `<deliveryId>:<eventName>:<correlationId or "*">`. |
-| `names`          | `(event: string, payload: unknown) => readonly string[]`                                             | The signal names a delivery answers to, most specific first: the per-action variant ahead of the bare event name.                                                          |
-| `correlations`   | `(payload: unknown) => readonly (string \| null)[]`                                                  | `owner/repo#number`, then `owner/repo`, then `null`.                                                                                                                       |
-| `idempotencyKey` | `(raw: HasHeaders) => string \| undefined`                                                           | `github:<X-GitHub-Delivery>`, or `undefined` when the header is absent.                                                                                                    |
-| `channel`        | `(options: ChannelOptions) => Channel`                                                               | A control-plane channel for GitHub webhooks. The channel name defaults to `github`; fingerprint headers are `x-github-delivery` and `x-github-event`.                      |
-| `SERVICE`        | `"github"`                                                                                           | The service segment of every GitHub signal name.                                                                                                                           |
+| Export           | Signature                                                                                              | Notes                                                                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `verify`         | `(raw: RawInbound, secret: string) => boolean`                                                         | The signature check over `raw.body`, never a re-serialized copy.                                                                                                                        |
+| `decode`         | `(raw: RawInbound, payload: unknown, receivedAtMs?: number, options?: DecodeOptions) => ExternalEvent` | Throws an `IntegrationError` `decode-failed` when `X-GitHub-Event` or `X-GitHub-Delivery` is missing. The dedupe key is `<deliveryId>:<eventName>:<correlationId or "*">`.              |
+| `names`          | `(event: string, payload: unknown) => readonly string[]`                                               | The signal names a delivery answers to, most specific first: the per-action variant ahead of the bare event name.                                                                       |
+| `correlations`   | `(payload: unknown) => readonly (string \| null)[]`                                                    | `owner/repo#number`, then `owner/repo`, then `null`.                                                                                                                                    |
+| `idempotencyKey` | `(raw: HasHeaders) => string \| undefined`                                                             | `github:<X-GitHub-Delivery>`, or `undefined` when the header is absent.                                                                                                                 |
+| `channel`        | `(options: ChannelOptions) => Channel`                                                                 | A control-plane channel for GitHub webhooks. The channel name is the decoded event's source and defaults to `github`; fingerprint headers are `x-github-delivery` and `x-github-event`. |
+| `SERVICE`        | `"github"`                                                                                             | The service segment of every GitHub signal name.                                                                                                                                        |
 
 `ChannelOptions` fields: optional `name`, `credential`, `secret`, `route`,
 and optional `project`.
@@ -454,18 +459,18 @@ Linear webhook ingress. Verification checks two things: the
 freshness window, because a valid signature never expires and a captured
 delivery would otherwise be replayable forever.
 
-| Export                      | Signature                                                                                      | Notes                                                                                                                                           |
-| --------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `verify`                    | `(raw: RawInbound, secret: string, options?: VerifyOptions) => boolean`                        | Fails closed: a skew that is not a finite integer from 0 to `MAX_TIMESTAMP_SKEW_MS` refuses rather than disabling the replay check.             |
-| `decode`                    | `(raw: RawInbound, payload: unknown, source?: string, receivedAtMs?: number) => ExternalEvent` | The dedupe key is `<deliveryId>#<eventName>#<correlationId or "">`.                                                                             |
-| `names`                     | `(payload: unknown) => readonly string[]`                                                      | `integration:linear:<type>.<action>`, then `integration:linear:<type>`, lowercased.                                                             |
-| `correlations`              | `(payload: unknown) => readonly (string \| null)[]`                                            | The issue identifier (`ENG-123`), the team key (`ENG`), then `null`. A comment delivery carries the issue one level down, under `data.issue`.   |
-| `idempotencyKey`            | `(raw: HasHeaders, payload: unknown) => string`                                                | `linear:<deliveryId>`, where the delivery id is the `Linear-Delivery` header or, in its absence, the webhook id, entity, action, and timestamp. |
-| `channel`                   | `(options: ChannelOptions) => Channel`                                                         | A control-plane channel for Linear webhooks. The channel name defaults to `linear`; the fingerprint header is `linear-delivery`.                |
-| `timestampMs`               | `(value: unknown) => number \| null`                                                           | Reads `webhookTimestamp` as milliseconds; older payloads send seconds.                                                                          |
-| `DEFAULT_TIMESTAMP_SKEW_MS` | `60000`                                                                                        | The default freshness window.                                                                                                                   |
-| `MAX_TIMESTAMP_SKEW_MS`     | `3600000`                                                                                      | The largest accepted freshness window: one hour.                                                                                                |
-| `SERVICE`                   | `"linear"`                                                                                     |                                                                                                                                                 |
+| Export                      | Signature                                                                                      | Notes                                                                                                                                                              |
+| --------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `verify`                    | `(raw: RawInbound, secret: string, options?: VerifyOptions) => boolean`                        | Fails closed: a skew that is not a finite integer from 0 to `MAX_TIMESTAMP_SKEW_MS` refuses rather than disabling the replay check.                                |
+| `decode`                    | `(raw: RawInbound, payload: unknown, source?: string, receivedAtMs?: number) => ExternalEvent` | The dedupe key is `<deliveryId>#<eventName>#<correlationId or "">`.                                                                                                |
+| `names`                     | `(payload: unknown) => readonly string[]`                                                      | `integration:linear:<type>.<action>`, then `integration:linear:<type>`, lowercased.                                                                                |
+| `correlations`              | `(payload: unknown) => readonly (string \| null)[]`                                            | The issue identifier (`ENG-123`), the team key (`ENG`), then `null`. A comment delivery carries the issue one level down, under `data.issue`.                      |
+| `idempotencyKey`            | `(raw: HasHeaders, payload: unknown) => string`                                                | `linear:<deliveryId>`, where the delivery id is the `Linear-Delivery` header or, in its absence, the webhook id, entity, action, and timestamp.                    |
+| `channel`                   | `(options: ChannelOptions) => Channel`                                                         | A control-plane channel for Linear webhooks. The channel name is the decoded event's source and defaults to `linear`; the fingerprint header is `linear-delivery`. |
+| `timestampMs`               | `(value: unknown) => number \| null`                                                           | Reads `webhookTimestamp` as milliseconds; older payloads send seconds.                                                                                             |
+| `DEFAULT_TIMESTAMP_SKEW_MS` | `60000`                                                                                        | The default freshness window.                                                                                                                                      |
+| `MAX_TIMESTAMP_SKEW_MS`     | `3600000`                                                                                      | The largest accepted freshness window: one hour.                                                                                                                   |
+| `SERVICE`                   | `"linear"`                                                                                     |                                                                                                                                                                    |
 
 `VerifyOptions` fields: `maxTimestampSkewMs` and `nowMs`. `ChannelOptions`
 extends them with `name`, `credential`, `secret`, `route`, and `project`.
