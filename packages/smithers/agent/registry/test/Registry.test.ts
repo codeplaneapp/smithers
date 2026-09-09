@@ -1,6 +1,7 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
-import { Effect, FileSystem, Layer, Option } from "effect"
+import * as Digest from "@smthrs/core/Digest"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 import {
@@ -604,89 +605,6 @@ describe("Registry", () => {
     expect(error.cause).toMatchObject({ _tag: "PlatformError" })
   })
 
-  it("refreshes all sources atomically for same-session rediscovery", async () => {
-    const before = new FlowDescriptor({
-      name: "before",
-      description: "Present before refresh.",
-      body: new BodyRefMarkdown({
-        path: `${fixtures}/before.md`,
-        baseDirectory: fixtures
-      }),
-      input: new SchemaRefMarkdownArgs({}),
-      output: new SchemaRefMarkdownOutput({}),
-      model: Option.none(),
-      flows: [],
-      capabilities: [],
-      effects: {
-        reads: [],
-        writes: [],
-        mode: "hermetic",
-        onConflict: "serialize",
-        tier: "sealed"
-      },
-      placement: Option.none(),
-      modelInvocable: true,
-      path: `${fixtures}/before.md`,
-      frontmatter: {},
-      provenance: new Provenance({ source: "test", root: fixtures })
-    })
-    const after = new FlowDescriptor({
-      name: "after",
-      description: "Present after refresh.",
-      body: new BodyRefMarkdown({
-        path: `${fixtures}/after.md`,
-        baseDirectory: fixtures
-      }),
-      input: new SchemaRefMarkdownArgs({}),
-      output: new SchemaRefMarkdownOutput({}),
-      model: Option.none(),
-      flows: [],
-      capabilities: [],
-      effects: {
-        reads: [],
-        writes: [],
-        mode: "hermetic",
-        onConflict: "serialize",
-        tier: "sealed"
-      },
-      placement: Option.none(),
-      modelInvocable: true,
-      path: `${fixtures}/after.md`,
-      frontmatter: {},
-      provenance: new Provenance({ source: "test", root: fixtures })
-    })
-    let scans = 0
-    const discovery = Discovery.makeNoop({
-      scan: () => {
-        scans++
-        return scans <= 2
-          ? Effect.succeed(new SourceScan({ entries: scans === 1 ? [before] : [after], warnings: [] }))
-          : Effect.fail(discoveryError({ code: "read_failed", method: "scan" }))
-      }
-    })
-
-    const result = await Effect.runPromise(
-      Effect.gen(function*() {
-        const registry = yield* Registry.Registry
-        const initial = yield* registry.list()
-        yield* registry.refresh()
-        const refreshed = yield* registry.list()
-        const refreshError = yield* Effect.flip(registry.refresh())
-        const preserved = yield* registry.list()
-        return { initial, refreshed, refreshError, preserved }
-      }).pipe(
-        Effect.provide(Registry.layer({ sources: [{ source: "test", root: fixtures, naming: "path" }] })),
-        Effect.provide(Layer.succeed(Discovery.Discovery)(discovery)),
-        Effect.provide(platformLayer)
-      )
-    )
-
-    expect(result.initial.map((entry) => entry.name)).toEqual(["before"])
-    expect(result.refreshed.map((entry) => entry.name)).toEqual(["after"])
-    expect(result.refreshError.code).toBe("read_failed")
-    expect(result.preserved.map((entry) => entry.name)).toEqual(["after"])
-  })
-
   it("returns an optional lookup for a known and an unknown name", async () => {
     const result = await Effect.runPromise(
       provideRegistry(
@@ -754,43 +672,150 @@ describe("Registry", () => {
     })
   })
 
-  it("reads one complete snapshot per operation while a refresh replaces it", async () => {
-    const before = descriptor("before")
-    const after = descriptor("after")
-    let scans = 0
-    const discovery = Discovery.makeNoop({
-      scan: () =>
-        Effect.sync(() => {
-          scans++
-          return new SourceScan({ entries: scans === 1 ? [before] : [after], warnings: [] })
+  it.each(["success", "failure", "overlapping body load"] as const)(
+    "publishes two-source refreshes atomically: %s",
+    async (outcome) => {
+      await Effect.runPromise(Effect.gen(function*() {
+        const aPending = yield* Deferred.make<void>()
+        const releaseA = yield* Deferred.make<void>()
+        const bPending = yield* Deferred.make<void>()
+        const releaseB = yield* Deferred.make<void>()
+        const bodyPending = yield* Deferred.make<void>()
+        const releaseBody = yield* Deferred.make<void>()
+        const beforeText = "---\ndescription: Before refresh.\n---\nOld body."
+        const afterText = "---\ndescription: After refresh.\n---\nNew body."
+        const bodyDescriptor = (version: string, text: string) => {
+          const path = `${fixtures}/${version}-body.md`
+          return new FlowDescriptor({
+            ...descriptor("body", { path }),
+            description: version,
+            body: new BodyRefMarkdown({
+              path,
+              baseDirectory: fixtures,
+              contentDigest: Digest.digest(new TextEncoder().encode(text))
+            })
+          })
+        }
+        const beforeBody = bodyDescriptor("before", beforeText)
+        const afterBody = bodyDescriptor("after", afterText)
+        const beforeA = [descriptor("before-a"), beforeBody]
+        const beforeB = [descriptor("before-b", { modelInvocable: false })]
+        const afterA = [descriptor("after-a", { modelInvocable: false }), afterBody]
+        const afterB = [descriptor("after-b")]
+        const warning = (version: string, source: string) =>
+          new DiscoveryWarning({
+            code: "unreadable",
+            path: `${fixtures}/${source}/${version}`,
+            message: `${source}: ${version}`
+          })
+        const oldWarnings = [warning("before", "a"), warning("before", "b")]
+        const newWarnings = [warning("after", "a"), warning("after", "b")]
+        const scans: Array<string> = []
+        let refreshing = false
+        let failB = outcome === "failure"
+        const discovery = Discovery.makeNoop({
+          scan: (source) =>
+            Effect.gen(function*() {
+              scans.push(`${refreshing ? "refresh" : "initial"}:${source.source}`)
+              if (refreshing && source.source === "a") {
+                yield* Deferred.succeed(aPending, undefined)
+                yield* Deferred.await(releaseA)
+              }
+              if (refreshing && source.source === "b") {
+                // Reaching B proves A returned and was folded into the pending scan.
+                yield* Deferred.succeed(bPending, undefined)
+                yield* Deferred.await(releaseB)
+                if (failB) {
+                  return yield* discoveryError({ code: "read_failed", method: "scan", description: "source B failed" })
+                }
+              }
+              const index = source.source === "a" ? 0 : 1
+              return new SourceScan({
+                entries: (refreshing ? [afterA, afterB] : [beforeA, beforeB])[index]!,
+                warnings: [(refreshing ? newWarnings : oldWarnings)[index]!]
+              })
+            })
         })
-    })
-
-    const result = await Effect.runPromise(
-      Effect.gen(function*() {
-        const registry = yield* Registry.Registry
-        const [names, refreshed] = yield* Effect.all(
-          [
-            Effect.all(
-              Array.from({ length: 8 }, () => Effect.map(registry.list(), (entries) => entries.map((e) => e.name))),
-              { concurrency: "unbounded" }
-            ),
-            registry.refresh()
-          ],
-          { concurrency: "unbounded" }
+        const fs = FileSystem.makeNoop({
+          readFile: (path) =>
+            Effect.gen(function*() {
+              if (path === beforeBody.body.path) {
+                yield* Deferred.succeed(bodyPending, undefined)
+                yield* Deferred.await(releaseBody)
+                return new TextEncoder().encode(beforeText)
+              }
+              expect(path).toBe(afterBody.body.path)
+              return new TextEncoder().encode(afterText)
+            })
+        })
+        const registry = yield* Registry.make({
+          sources: [
+            { source: "a", root: `${fixtures}/a`, naming: "path" },
+            { source: "b", root: `${fixtures}/b`, naming: "path" }
+          ]
+        }).pipe(
+          Effect.provideService(Discovery.Discovery, discovery),
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provide(NodePath.layer)
         )
-        return { names, refreshed, final: yield* registry.list() }
-      }).pipe(
-        Effect.provide(Registry.layer({ sources: [{ source: "test", root: fixtures, naming: "path" }] })),
-        Effect.provide(Layer.succeed(Discovery.Discovery)(discovery)),
-        Effect.provide(platformLayer)
-      )
-    )
+        const assertSnapshot = (
+          entries: ReadonlyArray<FlowDescriptor>,
+          warnings: ReadonlyArray<DiscoveryWarning>,
+          absent: ReadonlyArray<string>
+        ) =>
+          Effect.gen(function*() {
+            expect(yield* registry.list()).toEqual(entries)
+            expect(yield* registry.visible()).toEqual(entries.filter((entry) => entry.modelInvocable))
+            expect(yield* registry.warnings()).toEqual(warnings)
+            for (const entry of entries) {
+              expect(yield* registry.get(entry.name)).toEqual(entry)
+              expect(yield* registry.getOption(entry.name)).toEqual(Option.some(entry))
+            }
+            for (const name of absent) {
+              expect(yield* registry.getOption(name)).toEqual(Option.none())
+              expect((yield* Effect.flip(registry.get(name))).code).toBe("not_found")
+            }
+          })
+        yield* assertSnapshot([...beforeA, ...beforeB], oldWarnings, ["after-a", "after-b"])
+        refreshing = true
+        const refresh = yield* registry.refresh().pipe(Effect.result, Effect.forkChild)
+        yield* Deferred.await(aPending)
+        yield* assertSnapshot([...beforeA, ...beforeB], oldWarnings, ["after-a", "after-b"])
+        yield* Deferred.succeed(releaseA, undefined)
+        yield* Deferred.await(bPending)
+        expect(scans).toEqual(["initial:a", "initial:b", "refresh:a", "refresh:b"])
+        yield* assertSnapshot([...beforeA, ...beforeB], oldWarnings, ["after-a", "after-b"])
 
-    expect(result.names.every((names) => names.length === 1)).toBe(true)
-    expect(result.names.every((names) => names[0] === "before" || names[0] === "after")).toBe(true)
-    expect(result.final.map((entry) => entry.name)).toEqual(["after"])
-  })
+        const body = outcome === "overlapping body load"
+          ? yield* registry.loadBody("body").pipe(Effect.forkChild)
+          : undefined
+        if (body !== undefined) {
+          yield* Deferred.await(bodyPending)
+          yield* assertSnapshot([...beforeA, ...beforeB], oldWarnings, ["after-a", "after-b"])
+        }
+        yield* Deferred.succeed(releaseB, undefined)
+        const refreshed = yield* Fiber.join(refresh)
+        if (outcome === "failure") {
+          expect(refreshed).toMatchObject({ _tag: "Failure", failure: { code: "read_failed" } })
+          yield* assertSnapshot([...beforeA, ...beforeB], oldWarnings, ["after-a", "after-b"])
+        } else {
+          expect(refreshed).toMatchObject({ _tag: "Success" })
+          yield* assertSnapshot([...afterA, ...afterB], newWarnings, ["before-a", "before-b"])
+        }
+        if (body !== undefined) {
+          yield* Deferred.succeed(releaseBody, undefined)
+          // The read began in the old snapshot and finishes after publication.
+          expect(yield* Fiber.join(body)).toMatchObject({ _tag: "Prompt", text: "Old body." })
+          expect(yield* registry.loadBody("body")).toMatchObject({ _tag: "Prompt", text: "New body." })
+        }
+        if (outcome !== "failure") {
+          failB = true
+          expect((yield* Effect.flip(registry.refresh())).code).toBe("read_failed")
+          yield* assertSnapshot([...afterA, ...afterB], newWarnings, ["before-a", "before-b"])
+        }
+      }))
+    }
+  )
 
   it("preserves lenient discovery warnings without logging or throwing", async () => {
     const warnings = await Effect.runPromise(

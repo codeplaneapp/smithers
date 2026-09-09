@@ -1,89 +1,13 @@
 import * as NodePath from "@effect/platform-node/NodePath"
-import { Effect, FileSystem, Layer, Option, Path, PlatformError } from "effect"
+import { Effect, FileSystem, Layer, Path } from "effect"
 import { describe, expect, it } from "vitest"
 import type { Source } from "../src/Descriptor.ts"
 import * as Discovery from "../src/Discovery.ts"
 import * as Registry from "../src/Registry.ts"
 
-/**
- * A virtual host tree. Discovery reads directories, inspects entries, and
- * reads entry metadata, so the stub models exactly those three operations plus
- * the failures each of them can report.
- */
-type Node =
-  | { readonly kind: "file"; readonly contents: string; readonly reportedSize?: number }
-  | { readonly kind: "unreadable-file" }
-  | { readonly kind: "directory"; readonly entries: ReadonlyArray<string> }
-  | { readonly kind: "unreadable-directory" }
-  | { readonly kind: "special"; readonly type: FileSystem.File.Type }
-  | { readonly kind: "unstattable" }
+import { type FileSystemCalls, type Node, virtualFileSystem } from "./support/VirtualFileSystem.ts"
 
 type FileNode = Extract<Node, { readonly kind: "file" }>
-
-const denied = (method: string, path: string) =>
-  PlatformError.systemError({
-    _tag: "PermissionDenied",
-    module: "FileSystem",
-    method,
-    pathOrDescriptor: path
-  })
-
-const info = (type: FileSystem.File.Type, size: number): FileSystem.File.Info => ({
-  type,
-  mtime: Option.none(),
-  atime: Option.none(),
-  birthtime: Option.none(),
-  dev: 0,
-  ino: Option.none(),
-  mode: 0o644,
-  nlink: Option.none(),
-  uid: Option.none(),
-  gid: Option.none(),
-  rdev: Option.none(),
-  size: FileSystem.Size(size),
-  blksize: Option.none(),
-  blocks: Option.none()
-})
-
-interface FileSystemCalls {
-  readonly readFile: Array<string>
-}
-
-const virtualFileSystem = (nodes: Map<string, Node>, calls?: FileSystemCalls): FileSystem.FileSystem =>
-  FileSystem.makeNoop({
-    exists: (path) => Effect.succeed(nodes.has(path)),
-    stat: (path) => {
-      const node = nodes.get(path)
-      switch (node?.kind) {
-        case "file":
-          return Effect.succeed(info("File", node.reportedSize ?? node.contents.length))
-        case "unreadable-file":
-          return Effect.succeed(info("File", 0))
-        case "directory":
-        case "unreadable-directory":
-          return Effect.succeed(info("Directory", 0))
-        case "special":
-          return Effect.succeed(info(node.type, 0))
-        default:
-          return Effect.fail(denied("stat", path))
-      }
-    },
-    readDirectory: (path) => {
-      const node = nodes.get(path)
-      return node?.kind === "directory" ? Effect.succeed([...node.entries]) : Effect.fail(denied("readDirectory", path))
-    },
-    readFile: (path) => {
-      calls?.readFile.push(path)
-      const node = nodes.get(path)
-      return node?.kind === "file"
-        ? Effect.succeed(new TextEncoder().encode(node.contents))
-        : Effect.fail(denied("readFile", path))
-    },
-    readFileString: (path) => {
-      const node = nodes.get(path)
-      return node?.kind === "file" ? Effect.succeed(node.contents) : Effect.fail(denied("readFileString", path))
-    }
-  })
 
 const root = "/vfs"
 const expectedEntrySizeLimit = 4 * 1024 * 1024
@@ -412,88 +336,89 @@ describe("Discovery traversal", () => {
     })])
   })
 
-  it("skips an oversized entry before reading its bytes", async () => {
-    const location = `${root}/huge/SKILL.md`
-    const calls: FileSystemCalls = { readFile: [] }
-    const result = await scan(
-      tree({
-        [root]: { kind: "directory", entries: ["huge"] },
-        [`${root}/huge`]: { kind: "directory", entries: ["SKILL.md"] },
-        [location]: {
-          ...skill("Too large to read."),
-          reportedSize: expectedEntrySizeLimit + 1
-        }
-      }),
-      {},
-      calls
-    )
-
-    expect(result.entries).toEqual([])
-    expect(result.warnings).toEqual([expect.objectContaining({
-      code: "entry_too_large",
-      path: location,
-      message: expect.stringContaining(String(expectedEntrySizeLimit + 1))
-    })])
-    expect(calls.readFile).toEqual([])
-  })
-
-  /**
-   * The stat pre-check is a fast path, not the bound. A host whose `stat`
-   * under-reports or omits a size — an in-memory or remote FileSystem, a
-   * special file — walks straight past it, so the bytes actually read decide.
-   * `readFile` IS called here; the guarantee is that an oversized entry is
-   * refused with the same code before it is hashed, parsed, or registered.
-   */
-  it("refuses an oversized entry whose reported size was wrong", async () => {
-    const location = `${root}/lying/SKILL.md`
-    const body = "x".repeat(expectedEntrySizeLimit)
-    const calls: FileSystemCalls = { readFile: [] }
-    const contents = [
-      "---",
-      "description: The host under-reported this entry.",
-      "capabilities: []",
-      "---",
-      body,
-      ""
-    ].join("\n")
-    const result = await scan(
-      tree({
-        [root]: { kind: "directory", entries: ["lying"] },
-        [`${root}/lying`]: { kind: "directory", entries: ["SKILL.md"] },
-        [location]: { kind: "file", contents, reportedSize: 0 }
-      }),
-      {},
-      calls
-    )
-
-    expect(result.entries).toEqual([])
-    expect(result.warnings).toEqual([expect.objectContaining({
-      code: "entry_too_large",
-      path: location,
-      message: expect.stringContaining(String(new TextEncoder().encode(contents).length))
-    })])
-    expect(calls.readFile).toEqual([location])
-  })
-
-  it("still discovers an entry reported just below the input ceiling", async () => {
+  it.each([-1, 0, 1])("checks the reported size at the input ceiling %i", async (offset) => {
     const location = `${root}/bounded/SKILL.md`
     const calls: FileSystemCalls = { readFile: [] }
     const result = await scan(
       tree({
         [root]: { kind: "directory", entries: ["bounded"] },
         [`${root}/bounded`]: { kind: "directory", entries: ["SKILL.md"] },
-        [location]: {
-          ...skill("Within the input ceiling."),
-          reportedSize: expectedEntrySizeLimit - 1
-        }
+        [location]: { ...skill("Within the input ceiling."), reportedSize: expectedEntrySizeLimit + offset }
       }),
       {},
       calls
     )
 
-    expect(result.entries.map((entry) => entry.name)).toEqual(["bounded"])
-    expect(result.warnings).toEqual([])
+    if (offset <= 0) {
+      expect(result.entries.map((entry) => entry.name)).toEqual(["bounded"])
+      expect(result.warnings).toEqual([])
+      expect(calls.readFile).toEqual([location])
+    } else {
+      expect(result.entries).toEqual([])
+      expect(result.warnings).toEqual([expect.objectContaining({
+        code: "entry_too_large",
+        path: location,
+        message: expect.stringContaining(String(expectedEntrySizeLimit + offset))
+      })])
+      expect(calls.readFile).toEqual([])
+    }
+  })
+
+  it.each([-1, 0, 1])("checks actual UTF-8 bytes at the input ceiling %i with under-reported stat", async (offset) => {
+    const location = `${root}/bounded/SKILL.md`
+    const prefix = skill("The host under-reported this entry.").contents
+    const size = expectedEntrySizeLimit + offset
+    const padding = size - new TextEncoder().encode(prefix).length
+    const contents = prefix + "é".repeat(Math.floor(padding / 2)) + "x".repeat(padding % 2)
+    expect(new TextEncoder().encode(contents).length).toBe(size)
+    expect(contents.length).toBeLessThan(expectedEntrySizeLimit)
+    const calls: FileSystemCalls = { readFile: [] }
+    const result = await scan(
+      tree({
+        [root]: { kind: "directory", entries: ["bounded"] },
+        [`${root}/bounded`]: { kind: "directory", entries: ["SKILL.md"] },
+        [location]: { kind: "file", contents, reportedSize: 0 }
+      }),
+      {},
+      calls
+    )
+
     expect(calls.readFile).toEqual([location])
+    if (offset <= 0) {
+      expect(result.entries.map((entry) => entry.name)).toEqual(["bounded"])
+      expect(result.warnings).toEqual([])
+    } else {
+      expect(result.entries).toEqual([])
+      expect(result.warnings).toEqual([expect.objectContaining({
+        code: "entry_too_large",
+        path: location,
+        message: expect.stringContaining(String(size))
+      })])
+    }
+  })
+
+  it.each([31, 32, 33])("checks the traversal ceiling at %i segments", async (depth) => {
+    const segments = Array.from({ length: depth }, (_, index) => `d${index}`)
+    const nodes = tree({})
+    let directory = root
+    for (const segment of segments) {
+      nodes.set(directory, { kind: "directory", entries: [segment] })
+      directory += `/${segment}`
+    }
+    nodes.set(directory, { kind: "directory", entries: ["SKILL.md"] })
+    nodes.set(`${directory}/SKILL.md`, skill("At the traversal ceiling."))
+    const calls: FileSystemCalls = { readFile: [] }
+    const result = await scan(nodes, {}, calls)
+
+    if (depth <= 32) {
+      expect(result.entries.map((entry) => entry.name)).toEqual([segments.join("/")])
+      expect(result.warnings).toEqual([])
+      expect(calls.readFile).toEqual([`${directory}/SKILL.md`])
+    } else {
+      expect(result.entries).toEqual([])
+      expect(result.warnings).toEqual([expect.objectContaining({ code: "max_depth_exceeded", path: directory })])
+      expect(calls.readFile).toEqual([])
+    }
   })
 })
 

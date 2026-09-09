@@ -23,59 +23,7 @@ import * as Executable from "../src/Executable.ts"
 import * as Pack from "../src/Pack.ts"
 import * as Registry from "../src/Registry.ts"
 
-type Node =
-  | { readonly kind: "file"; readonly contents: string }
-  | { readonly kind: "directory"; readonly entries: ReadonlyArray<string> }
-
-const denied = (method: string, path: string) =>
-  PlatformError.systemError({
-    _tag: "PermissionDenied",
-    module: "FileSystem",
-    method,
-    pathOrDescriptor: path
-  })
-
-const info = (type: FileSystem.File.Type, size: number): FileSystem.File.Info => ({
-  type,
-  mtime: Option.none(),
-  atime: Option.none(),
-  birthtime: Option.none(),
-  dev: 0,
-  ino: Option.none(),
-  mode: 0o644,
-  nlink: Option.none(),
-  uid: Option.none(),
-  gid: Option.none(),
-  rdev: Option.none(),
-  size: FileSystem.Size(size),
-  blksize: Option.none(),
-  blocks: Option.none()
-})
-
-const virtualFileSystem = (nodes: Map<string, Node>): FileSystem.FileSystem =>
-  FileSystem.makeNoop({
-    exists: (path) => Effect.succeed(nodes.has(path)),
-    stat: (path) => {
-      const node = nodes.get(path)
-      if (node?.kind === "file") return Effect.succeed(info("File", node.contents.length))
-      if (node?.kind === "directory") return Effect.succeed(info("Directory", 0))
-      return Effect.fail(denied("stat", path))
-    },
-    readDirectory: (path) => {
-      const node = nodes.get(path)
-      return node?.kind === "directory" ? Effect.succeed([...node.entries]) : Effect.fail(denied("readDirectory", path))
-    },
-    readFile: (path) => {
-      const node = nodes.get(path)
-      return node?.kind === "file"
-        ? Effect.succeed(new TextEncoder().encode(node.contents))
-        : Effect.fail(denied("readFile", path))
-    },
-    readFileString: (path) => {
-      const node = nodes.get(path)
-      return node?.kind === "file" ? Effect.succeed(node.contents) : Effect.fail(denied("readFileString", path))
-    }
-  })
+import { type Node, virtualFileSystem } from "./support/VirtualFileSystem.ts"
 
 const flowFile = (description: string, body: string): Node => ({
   kind: "file",
@@ -463,7 +411,12 @@ describe("pack discovery confinement", () => {
           ...fs,
           realPath: (location) =>
             location.endsWith("flow.mdx")
-              ? Effect.fail(denied("realPath", location))
+              ? Effect.fail(PlatformError.systemError({
+                _tag: "PermissionDenied",
+                module: "FileSystem",
+                method: "realPath",
+                pathOrDescriptor: location
+              }))
               : Effect.succeed(location)
         }, path).scan({ source: "confined", root: "/pack", confinementRoot: "/pack", naming: "path" })
       }).pipe(Effect.provide(NodePath.layer))

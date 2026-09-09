@@ -31,13 +31,14 @@ import { Node, Plan } from "@smthrs/plan"
 import { type Ownership, RunStore } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { TestClock } from "effect/testing"
 import { existsSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import type * as Descriptor from "../src/Descriptor.ts"
+import * as Descriptor from "../src/Descriptor.ts"
 import * as Discovery from "../src/Discovery.ts"
 import * as Executable from "../src/Executable.ts"
 
@@ -112,6 +113,17 @@ const runLayer = Run.toLayer((payload) =>
   })
 )
 
+/** Makes an incorrectly reused bridge result observable in the returned value. */
+const invocationResult = (payload: Pick<Executable.Invocation, "input" | "model" | "placement">): string =>
+  JSON.stringify({ input: payload.input, model: payload.model, placement: payload.placement })
+
+const inputDependentRunLayer = Run.toLayer((payload) =>
+  Effect.sync(() => {
+    spawned.push(payload)
+    return invocationResult(payload)
+  })
+)
+
 const stubJj = Layer.succeed(
   Jj.Jj,
   Jj.make({
@@ -175,8 +187,8 @@ const durable = <A, E, R>(filename: string, hostId: string, registration: Layer.
     Layer.provideMerge(platform)
   )
 
-const registrationFor = (executable: Executable.Executable) =>
-  Layer.mergeAll(runLayer, Interpreter.layer(Echo), Interpreter.layer(Agent), executable.layer).pipe(
+const registrationFor = (executable: Executable.Executable, implementation = runLayer) =>
+  Layer.mergeAll(implementation, Interpreter.layer(Echo), Interpreter.layer(Agent), executable.layer).pipe(
     Layer.provideMerge(Action.layerImplementations)
   ) as Layer.Layer<unknown, never, never>
 
@@ -186,7 +198,8 @@ const execute = (
   filename: string,
   hostId: string,
   executionId: string,
-  input: Schema.Json
+  input: Schema.Json,
+  implementation = runLayer
 ) =>
   Effect.gen(function*() {
     const result = yield* executable.flow.execute({ input }, { executionId })
@@ -195,7 +208,7 @@ const execute = (
     const page = yield* journal.entries({ runId: executionId as JournalEvent.RunId, limit: 200 })
     return { result, events: page.entries.map((entry) => entry.eventType) }
   }).pipe(
-    Effect.provide(durable(filename, hostId, registrationFor(executable))),
+    Effect.provide(durable(filename, hostId, registrationFor(executable, implementation))),
     Effect.scoped,
     Effect.orDie
   )
@@ -275,6 +288,45 @@ describe("the annotation golden", () => {
       expect(spawned.length).toBe(1)
       expect(executions).toBe(1)
     }))
+
+  for (const partition of ["input", "model", "placement"] as const) {
+    it.effect(`partitions the persisted bridge cache by ${partition} across A, B, A runs`, () =>
+      Effect.gen(function*() {
+        spawned.length = 0
+        const filename = join(workspace(`cache-${partition}`), "engine.db")
+        const base = yield* descriptorNamed("cacheable")
+        const results: Array<unknown> = []
+        for (const [index, variant] of ["A", "B", "A"].entries()) {
+          const input = { name: partition === "input" ? variant : "same" }
+          const model = partition === "model" ? (variant === "A" ? "smart" : "fast") : null
+          const placement = partition === "placement" ? (variant === "A" ? "local" : "sandbox") : null
+          // Reconstruct the bridge and reopen the same SQLite file in a fresh
+          // runtime for every distinct execution.
+          const executable = yield* Executable.fromDescriptor(
+            new Descriptor.FlowDescriptor({
+              ...base,
+              model: Option.fromNullishOr(model),
+              placement: Option.fromNullishOr(placement)
+            }),
+            { delegates: [Echo, Agent] }
+          ).pipe(Effect.provide(platform))
+          const observed = yield* execute(
+            executable,
+            filename,
+            `registry-${partition}-${index}`,
+            `${partition}-${index}`,
+            input,
+            inputDependentRunLayer
+          )
+          expect(observed.result).toBe(invocationResult({ input, model, placement }))
+          expect(spawned.length).toBe(index === 0 ? 1 : 2)
+          results.push(observed.result)
+        }
+        expect(results[0]).not.toBe(results[1])
+        expect(results[2]).toBe(results[0])
+        expect(spawned).toHaveLength(2)
+      }))
+  }
 
   it.effect("runs the delegate again when the descriptor declares no policy", () =>
     Effect.gen(function*() {
