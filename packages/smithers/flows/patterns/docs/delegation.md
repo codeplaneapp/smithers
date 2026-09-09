@@ -165,9 +165,10 @@ bound is refused `fanout_exceeded`. Raise `maxDepth` to widen all three at once.
 4. Each leaf climbs the tier ladder weakest first. A tier spends `maxAttempts`
    retries before the next tier is admitted, and a tier whose result `review`
    rejects escalates exactly the way a tier that failed does. The runtime
-   consumes `Escalation.run`'s `Reached` and `Exhausted` results directly:
-   only a reached attempt contributes its output, and exhaustion becomes
-   `leaf_failed` before the leaf can reach settlement.
+   consumes `Escalation.run`'s `Reached` and `Exhausted` results directly and
+   branches on their `exhausted` field: only a reached attempt contributes its
+   output, and exhaustion becomes `leaf_failed` before the leaf can reach
+   settlement.
 5. `review` sees the assembled leaf outputs, then `settle` receives the prompt,
    goal, plan, leaf outputs in plan order, the review, and whether derisk was
    exhausted.

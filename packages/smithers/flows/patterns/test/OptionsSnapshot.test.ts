@@ -595,7 +595,7 @@ describe("options are snapshotted at the call", () => {
       options.accept = () => Effect.succeed(false)
       options.fallback = record("swapped fallback")
 
-      expect(yield* running).toEqual({ level: 0, result: "rung" })
+      expect(yield* running).toEqual({ level: 0, result: "rung", exhausted: false })
       expect(trace).toEqual(["rung"])
     }))
 
@@ -615,7 +615,7 @@ describe("options are snapshotted at the call", () => {
       options.revise = record("swapped revise")
       options.maxRounds = 3
 
-      expect(yield* running).toBe("produce")
+      expect(yield* running).toEqual({ _tag: "Approved", output: "produce" })
       expect(trace).toEqual(["produce"])
     }))
 

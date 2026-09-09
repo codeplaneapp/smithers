@@ -95,7 +95,7 @@ describe("Saga", () => {
     expect(catches).toHaveLength(11)
     expect(Graph.nodes(graph).at(-1)?.keyMaterial.body).toEqual({
       _tag: "Succeed",
-      value: { compensated: true, failure: { _tag: "PlannedInput", path: ["failure"] } }
+      value: { _tag: "Compensated", failure: { _tag: "PlannedInput", path: ["failure"] } }
     })
   })
 
@@ -186,10 +186,10 @@ describe("Saga", () => {
         const result = TestRuntime.evaluateInline(declaration.body!("order"))
         expect(result).toEqual(
           failsAt === -1
-            ? Result.succeed({ one: "done", two: "done" })
+            ? Result.succeed({ _tag: "Completed", values: { one: "done", two: "done" } })
             : onFailure === "fail" || onFailure === "compensate-and-fail"
             ? Result.fail(failure)
-            : Result.succeed({ compensated: true, failure })
+            : Result.succeed({ _tag: "Compensated", failure })
         )
       }
     })
@@ -243,7 +243,7 @@ describe("Saga", () => {
       })
 
       expect(trace).toEqual(["do-one", "do-two"])
-      expect(result).toEqual({ one: "one-done", two: "two-done" })
+      expect(result).toEqual({ _tag: "Completed", values: { one: "one-done", two: "two-done" } })
     }))
 
   it.effect("copies and returns own completed values for prototype-shaped step ids", () =>
@@ -267,13 +267,35 @@ describe("Saga", () => {
           expect(completed[id]).toBe(`${id}-value`)
         }
       }
-      expect("compensated" in result).toBe(false)
-      const completed = result as Readonly<Record<string, string>>
+      expect(result._tag).toBe("Completed")
+      const completed = (result as Saga.Completed<string>).values
       expect(Object.getPrototypeOf(completed)).toBe(Object.prototype)
       for (const id of ids) {
         expect(Object.hasOwn(completed, id)).toBe(true)
         expect(completed[id]).toBe(`${id}-value`)
       }
+    }))
+
+  // A saga names its own steps, so the settled arm cannot be a bare record:
+  // steps called `_tag` and `failure` would otherwise return exactly the
+  // compensated shape.
+  it.effect("tells a completed run from a compensated one whose step ids forge it", () =>
+    Effect.gen(function*() {
+      const completed = yield* Saga.run("order", {
+        onFailure: "compensate",
+        steps: [
+          { id: "_tag", action: () => Effect.succeed("Compensated"), compensation: () => Effect.void },
+          { id: "failure", action: () => Effect.succeed("boom"), compensation: () => Effect.void }
+        ]
+      })
+      const unwound = yield* Saga.run("order", {
+        onFailure: "compensate",
+        steps: [{ id: "a", action: () => Effect.fail("boom"), compensation: () => Effect.void }]
+      })
+
+      expect(completed).toEqual({ _tag: "Completed", values: { _tag: "Compensated", failure: "boom" } })
+      expect(unwound).toEqual({ _tag: "Compensated", failure: "boom" })
+      expect(completed._tag).not.toBe(unwound._tag)
     }))
 
   it.effect("compensates completed steps in reverse and settles under compensate", () =>
@@ -285,7 +307,7 @@ describe("Saga", () => {
       })
 
       expect(trace).toEqual(["do-one", "do-two", "do-three", "undo-two", "undo-one"])
-      expect(result).toEqual({ compensated: true, failure: new Boom({ step: "three" }) })
+      expect(result).toEqual({ _tag: "Compensated", failure: new Boom({ step: "three" }) })
     }))
 
   it.effect("re-fails with the original error under compensate-and-fail", () =>
@@ -427,7 +449,7 @@ describe("Saga", () => {
       const result = yield* Saga.run("order", { steps, onFailure: "fail" })
 
       expect(trace).toEqual(["one"])
-      expect(result).toEqual({ one: "one-done" })
+      expect(result).toEqual({ _tag: "Completed", values: { one: "one-done" } })
     }))
 
   it.effect("compensates completed steps when the forward chain is interrupted", () =>
@@ -523,7 +545,7 @@ describe("Saga", () => {
       })
 
       expect(trace).toEqual(["do-one", "do-two", "do-three", "undo-two", "undo-one"])
-      expect(result).toEqual({ compensated: true, failure: new Boom({ step: "three" }) })
+      expect(result).toEqual({ _tag: "Compensated", failure: new Boom({ step: "three" }) })
     }))
 
   // A compensation that DIES is a failed compensation: the step's undo did not
@@ -579,6 +601,6 @@ describe("Saga", () => {
 
       const result = yield* saga
       expect(trace).toEqual(["do-one"])
-      expect(result).toEqual({ one: "one-done" })
+      expect(result).toEqual({ _tag: "Completed", values: { one: "one-done" } })
     }))
 })

@@ -124,7 +124,7 @@ describe("Escalation", () => {
         accept: (value) => Effect.succeed(value === "accepted")
       })
 
-      expect(reached).toEqual({ level: 1, result: "accepted" })
+      expect(reached).toEqual({ level: 1, result: "accepted", exhausted: false })
       expect(attempted).toEqual(["first", "second"])
     }))
 
@@ -160,8 +160,8 @@ describe("Escalation", () => {
         expect(Escalation.accepted(decision)).toBe(true)
         expect(ReviewLoop.accepted(decision)).toBe(true)
         expect(DelegationChain.accepted(decision)).toBe(true)
-        expect(reached).toEqual({ level: 0, result: "cheap" })
-        expect(reviewed).toBe("draft")
+        expect(reached).toEqual({ level: 0, result: "cheap", exhausted: false })
+        expect(reviewed).toEqual({ _tag: "Approved", output: "draft" })
       }
 
       for (const decision of nearMisses) {
@@ -186,10 +186,9 @@ describe("Escalation", () => {
           exhausted: true
         })
         expect(reviewed).toEqual({
+          _tag: "Exhausted",
           output: "draft-revised",
-          review: decision,
-          approved: false,
-          exhausted: true
+          review: decision
         })
       }
     }))
@@ -212,7 +211,7 @@ describe("Escalation", () => {
         ]
       })
 
-      expect(reached).toEqual({ level: 1, result: { ok: true } })
+      expect(reached).toEqual({ level: 1, result: { ok: true }, exhausted: false })
       expect(attempted).toEqual([0, 1])
     }))
 
@@ -248,7 +247,7 @@ describe("Escalation", () => {
         accept: () => Effect.succeed(false)
       })
 
-      expect(reached).toEqual({ level: 0, result: "cheap" })
+      expect(reached).toEqual({ level: 0, result: "cheap", exhausted: false })
       expect(attempted).toEqual([0])
     }))
 
@@ -278,14 +277,14 @@ describe("Escalation", () => {
         rungs: [() => Effect.succeed({ ok: false }), () => Effect.succeed({ ok: false })],
         fallback
       })
-      expect(reached).toEqual({ level: 2, result: "human" })
+      expect(reached).toEqual({ level: 2, result: "human", exhausted: false })
       expect(fallbacks).toBe(1)
 
       const early = yield* Escalation.run("request", {
         rungs: [() => Effect.succeed({ ok: true }), () => Effect.succeed({ ok: false })],
         fallback
       })
-      expect(early).toEqual({ level: 0, result: { ok: true } })
+      expect(early).toEqual({ level: 0, result: { ok: true }, exhausted: false })
       expect(fallbacks).toBe(1)
     }))
 

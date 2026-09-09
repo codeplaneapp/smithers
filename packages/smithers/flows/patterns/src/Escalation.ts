@@ -88,7 +88,8 @@ export interface RuntimeOptions<I, A, E, R, E2, R2, F = A, E3 = never, R3 = neve
  * The rung that produced the settled result, and the result itself.
  *
  * `level` is the rung's index. A `fallback` result carries the rung count,
- * one past the last declared rung.
+ * one past the last declared rung. `exhausted` is always `false` here, so a
+ * caller reads it on either arm without a property check.
  *
  * @category models
  * @since 0.1.0
@@ -96,6 +97,7 @@ export interface RuntimeOptions<I, A, E, R, E2, R2, F = A, E3 = never, R3 = neve
 export interface Reached<A> {
   readonly level: number
   readonly result: A
+  readonly exhausted: false
 }
 
 /**
@@ -105,10 +107,23 @@ export interface Reached<A> {
  * @category models
  * @since 0.1.0
  */
-export interface Exhausted<A> extends Reached<A> {
+export interface Exhausted<A> {
+  readonly level: number
+  readonly result: A
   readonly accepted: false
   readonly exhausted: true
 }
+
+/**
+ * One unambiguous ladder outcome: a rung settled, or every rung escalated.
+ *
+ * `exhausted` discriminates the two arms and the rung's own value stays
+ * nested under `result`.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Settled<A, F = A> = Reached<A> | Reached<F> | Exhausted<A>
 
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
@@ -185,7 +200,10 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
           ? Node.succeed({ level, result: last, accepted: false, exhausted: true })
           : Node.andThen(
             call(fallback, input),
-            Node.capture({ level: rungs.length }, (result) => Node.succeed({ level: rungs.length, result }))
+            Node.capture(
+              { level: rungs.length },
+              (result) => Node.succeed({ level: rungs.length, result, exhausted: false })
+            )
           )
       const visit = (index: number, last: unknown): Node.Node<unknown, unknown> => {
         const rung = rungs[index]
@@ -193,7 +211,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
         return Node.andThen(
           call(rung.flow, input),
           Node.capture({ rung: index }, (result) => {
-            const settle = Node.succeed({ level: index, result })
+            const settle = Node.succeed({ level: index, result, exhausted: false })
             if (rung.escalateIf !== undefined) {
               return Node.andThen(
                 call(rung.escalateIf, { result, level: index }),
@@ -231,6 +249,9 @@ const escalates = <I, A, E, R, E2, R2>(
  * Executes an escalation ladder and stops at the first rung that does not
  * escalate.
  *
+ * Every outcome carries `exhausted`: `false` on a rung that settled and on a
+ * fallback result, `true` on the last rung's result when every rung escalated.
+ *
  * This is the operational boundary for value-dependent branching. Core graph
  * planning intentionally evaluates `Node.andThen` builders with symbolic
  * values, so the flow declaration remains a conservative topology while this
@@ -242,7 +263,7 @@ const escalates = <I, A, E, R, E2, R2>(
 export const run = <I, A, E, R, E2 = never, R2 = never, F = A, E3 = never, R3 = never>(
   input: I,
   options: RuntimeOptions<I, A, E, R, E2, R2, F, E3, R3>
-): Effect.Effect<Reached<A> | Reached<F> | Exhausted<A>, E | E2 | E3 | PatternError, R | R2 | R3> => {
+): Effect.Effect<Settled<A, F>, E | E2 | E3 | PatternError, R | R2 | R3> => {
   // Snapshots taken at the call: the effect may run later, and a caller's
   // edit to the array, a rung record, or the option object in between must
   // not reach it.
@@ -260,12 +281,17 @@ export const run = <I, A, E, R, E2 = never, R2 = never, F = A, E3 = never, R3 = 
     for (const rung of rungs) {
       const result = yield* rung.run(input)
       last = result
-      if (!(yield* escalates(rung, accept, result, level))) return { level, result }
+      if (!(yield* escalates(rung, accept, result, level))) {
+        const settled: Reached<A> = { level, result, exhausted: false }
+        return settled
+      }
       level = level + 1
     }
     if (fallback !== undefined) {
-      return { level: rungs.length, result: yield* fallback(input) }
+      const settled: Reached<F> = { level: rungs.length, result: yield* fallback(input), exhausted: false }
+      return settled
     }
-    return { level: rungs.length - 1, result: last as A, accepted: false, exhausted: true }
+    const spent: Exhausted<A> = { level: rungs.length - 1, result: last as A, accepted: false, exhausted: true }
+    return spent
   })
 }

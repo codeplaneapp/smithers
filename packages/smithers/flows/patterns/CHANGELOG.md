@@ -18,6 +18,16 @@
 
 ### Changed
 
+- `Saga`, `ReviewLoop`, and `Escalation` return discriminated settled results,
+  the way `Quarantine` and `Supervisor` already did. `Saga` returns
+  `{ _tag: "Completed", values }` or `{ _tag: "Compensated", failure }`,
+  `ReviewLoop` returns `{ _tag: "Approved", output }` or
+  `{ _tag: "Exhausted", output, review }`, and every `Escalation` result
+  carries `exhausted`, `false` on a rung that settled. Step values and produced
+  values are nested, so a saga whose step ids are `_tag` and `failure`, or an
+  approved draft shaped like the exhausted envelope, can no longer be mistaken
+  for the settled arm. `DelegationChain` reads the tags instead of duck typing
+  the results.
 - Every `@see` in the package JSDoc is an absolute `https://smithers.sh` URL.
   The repository paths the source used to name are not part of the npm
   package, so an installed copy could not follow them.

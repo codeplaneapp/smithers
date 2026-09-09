@@ -211,12 +211,13 @@ describe("pattern declaration execution", () => {
         rungs: [{ flow: first, escalateIf: doNotEscalate }, second]
       }),
       "input"
-    )).toEqual({ level: 0, result: "first" })
+    )).toEqual({ level: 0, result: "first", exhausted: false })
 
     const accept = flow("accept", () => true)
     expect(evaluate(Escalation.make({ rungs: [first, second], accept }), "input")).toEqual({
       level: 0,
-      result: "first"
+      result: "first",
+      exhausted: false
     })
 
     const loopBody = flow("loop-body", () => "value")
@@ -230,7 +231,10 @@ describe("pattern declaration execution", () => {
     const produce = flow("produce", () => "draft")
     const approve = flow("approve", () => ({ approved: true }))
     const revise = flow("revise", () => "revised")
-    expect(evaluate(ReviewLoop.make({ produce, review: approve, revise, maxRounds: 2 }), "input")).toBe("draft")
+    expect(evaluate(ReviewLoop.make({ produce, review: approve, revise, maxRounds: 2 }), "input")).toEqual({
+      _tag: "Approved",
+      output: "draft"
+    })
 
     const refine = flow("refine", () => "goal")
     const author = flow("author", () => ({ agent: { goal: "leaf" } }))

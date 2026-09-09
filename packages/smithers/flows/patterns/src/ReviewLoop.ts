@@ -47,17 +47,44 @@ export interface RuntimeOptions<I, A, Review, E, R, E2, R2, E3, R3> {
 }
 
 /**
- * An unapproved result returned after the round bound is reached.
+ * An approved result, returned at the round whose review accepted it.
+ *
+ * The produced value is nested under `output` so it can never forge the
+ * unapproved arm, however it is shaped.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Approved<A> {
+  readonly _tag: "Approved"
+  readonly output: A
+}
+
+/**
+ * An unapproved result returned after the round bound is reached, with the
+ * review that refused it.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Exhausted<A, Review> {
+  readonly _tag: "Exhausted"
   readonly output: A
   readonly review: Review
-  readonly approved: false
-  readonly exhausted: true
 }
+
+/**
+ * One unambiguous loop outcome: a review approved the output, or the rounds
+ * ran out.
+ *
+ * Both arms carry `_tag` and nest the produced value under `output`, so a
+ * caller branches on the discriminator rather than on the shape of the value
+ * the loop produced.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Settled<A, Review> = Approved<A> | Exhausted<A, Review>
 
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
@@ -104,9 +131,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
               Node.andThen(
                 call(stages.review, output),
                 Node.capture({ maxRounds, round }, (review) => {
-                  if (accepted(review)) return Node.succeed(output)
+                  if (accepted(review)) return Node.succeed({ _tag: "Approved", output })
                   if (round >= maxRounds) {
-                    return Node.succeed({ output, review, approved: false, exhausted: true })
+                    return Node.succeed({ _tag: "Exhausted", output, review })
                   }
                   return Node.andThen(
                     call(stages.revise, { output, review, round }),
@@ -124,6 +151,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 /**
  * Executes produce-review-revise rounds and short-circuits on approval.
  *
+ * Both outcomes are tagged: an accepted review returns {@link Approved} and a
+ * spent round bound returns {@link Exhausted} with the review that refused it.
+ *
  * This Effect is the operational value-dependent branch; the flow declaration
  * remains a conservative topology because core plans continuations against
  * symbolic values. Fiber interruption propagates normally.
@@ -134,7 +164,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 export const run = <I, A, Review, E, R, E2, R2, E3, R3>(
   input: I,
   options: RuntimeOptions<I, A, Review, E, R, E2, R2, E3, R3>
-): Effect.Effect<A | Exhausted<A, Review>, E | E2 | E3 | PatternError, R | R2 | R3> => {
+): Effect.Effect<Settled<A, Review>, E | E2 | E3 | PatternError, R | R2 | R3> => {
   // Snapshots taken at the call: the effect may run later, and a caller's
   // edit to the option object in between must not reach it.
   const stages = { produce: options.produce, review: options.review, revise: options.revise }
@@ -152,9 +182,13 @@ export const run = <I, A, Review, E, R, E2, R2, E3, R3>(
     let round = 1
     while (true) {
       const review = yield* stages.review(output, round)
-      if (accepted(review)) return output
+      if (accepted(review)) {
+        const approved: Approved<A> = { _tag: "Approved", output }
+        return approved
+      }
       if (round === maxRounds) {
-        return { output, review, approved: false, exhausted: true }
+        const spent: Exhausted<A, Review> = { _tag: "Exhausted", output, review }
+        return spent
       }
       output = yield* stages.revise({ output, review, round })
       round += 1

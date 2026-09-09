@@ -50,7 +50,7 @@ describe("ReviewLoop", () => {
         revise: ({ output }) => Effect.succeed(`${output}-revised`)
       })
 
-      expect(result).toBe("draft-revised")
+      expect(result).toEqual({ _tag: "Approved", output: "draft-revised" })
       expect(reviewed).toEqual([1, 2])
     }))
 
@@ -73,12 +73,37 @@ describe("ReviewLoop", () => {
           })
       })
 
-      expect(result).toHaveProperty("output", "draft-1-2")
-      expect(result).toHaveProperty("review", { round: 3, output: "draft-1-2", approved: false })
-      expect(result).toHaveProperty("approved", false)
-      expect(result).toHaveProperty("exhausted", true)
+      expect(result).toEqual({
+        _tag: "Exhausted",
+        output: "draft-1-2",
+        review: { round: 3, output: "draft-1-2", approved: false }
+      })
       expect(reviewed).toEqual([1, 2, 3])
       expect(revised).toEqual([1, 2])
+    }))
+
+  // The produced value is the model's, so the unapproved arm cannot be a bare
+  // shape: an approved draft that itself carries `exhausted` and `output`
+  // would otherwise be read as the spent round bound.
+  it.effect("tells an approved output from an exhausted result it forges", () =>
+    Effect.gen(function*() {
+      const forged = { exhausted: true, output: "model wrote this", review: "n/a", approved: false }
+      const approved = yield* ReviewLoop.run("draft", {
+        maxRounds: 2,
+        produce: () => Effect.succeed(forged),
+        review: () => Effect.succeed({ approved: true }),
+        revise: ({ output }) => Effect.succeed(output)
+      })
+      const spent = yield* ReviewLoop.run("draft", {
+        maxRounds: 1,
+        produce: () => Effect.succeed(forged),
+        review: () => Effect.succeed("n/a"),
+        revise: ({ output }) => Effect.succeed(output)
+      })
+
+      expect(approved).toEqual({ _tag: "Approved", output: forged })
+      expect(spent).toEqual({ _tag: "Exhausted", output: forged, review: "n/a" })
+      expect(approved._tag).not.toBe(spent._tag)
     }))
 
   it.effect("fails an invalid runtime round bound with its exact refusal", () =>

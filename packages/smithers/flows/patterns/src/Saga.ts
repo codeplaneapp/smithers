@@ -24,7 +24,8 @@ import { PatternError } from "./PatternError.ts"
  * Both {@link make} and {@link run} default to `compensate` when the caller
  * names no policy.
  *
- * `compensate` unwinds and returns a settled {@link Compensated} outcome.
+ * `compensate` unwinds and returns a settled {@link Compensated} outcome; the
+ * other two policies only ever settle as {@link Completed}.
  * `compensate-and-fail` unwinds and re-raises the original failure.
  * `fail` leaves the completed work alone.
  *
@@ -94,15 +95,41 @@ export interface RuntimeOptions<I, A, E, R, E2, R2> {
 }
 
 /**
+ * A saga whose forward chain ran to the end.
+ *
+ * The step values are nested under `values` so a step id can never forge the
+ * settled arm: a saga with steps named `_tag` and `failure` still returns a
+ * `Completed` envelope.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Completed<A> {
+  readonly _tag: "Completed"
+  readonly values: Readonly<Record<string, A>>
+}
+
+/**
  * The settled outcome of a saga that unwound cleanly under `compensate`.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Compensated<E> {
-  readonly compensated: true
+  readonly _tag: "Compensated"
   readonly failure: E
 }
+
+/**
+ * One unambiguous saga outcome: the forward chain completed, or it unwound.
+ *
+ * Both arms carry `_tag`, so a caller branches on the discriminator rather
+ * than on the shape of its own step values.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Settled<A, E> = Completed<A> | Compensated<E>
 
 // Only action failures enter this envelope. Each undo extends it immutably,
 // so graph planning and repeated evaluations cannot share mutable residue.
@@ -197,7 +224,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     body: Node.capture({ steps: steps.map((step) => step.id), onFailure: policy }, (input) => {
       const visit = (index: number, completed: Readonly<Record<string, unknown>>): Node.Node<unknown, unknown> => {
         const step = steps[index]
-        if (step === undefined) return Node.succeed(completed)
+        if (step === undefined) return Node.succeed({ _tag: "Completed", values: completed })
         const action = call(step.action, { input, completed })
         const guarded = policy === "fail" ? action : Node.catch(action, {
           onFailure: Node.capture(
@@ -264,7 +291,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
         error: CleanUnwind,
         onFailure: Node.capture({ settled: true, onFailure: policy }, (unwind) =>
           policy === "compensate"
-            ? Node.succeed({ compensated: true, failure: unwind.failure })
+            ? Node.succeed({ _tag: "Compensated", failure: unwind.failure })
             : Node.fail(unwind.failure))
       })
     })
@@ -275,7 +302,10 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  * Runs the forward chain, unwinding completed steps on a failure or an
  * interruption.
  *
- * The policy defaults to `compensate`.
+ * The policy defaults to `compensate`. Both outcomes are tagged: a chain that
+ * ran to the end returns {@link Completed} with its step values nested under
+ * `values`, and a clean unwind under `compensate` returns
+ * {@link Compensated}.
  *
  * Each completed step registers a scope finalizer, so the unwind is LIFO and
  * runs on interruption as well as on failure. A compensation that fails does
@@ -295,7 +325,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 export const run = <I, A, E, R, E2, R2>(
   input: I,
   options: RuntimeOptions<I, A, E, R, E2, R2>
-): Effect.Effect<Readonly<Record<string, A>> | Compensated<E>, E | PatternError, R | R2> => {
+): Effect.Effect<Settled<A, E>, E | PatternError, R | R2> => {
   // Snapshots taken at the call, ahead of the suspend: the effect may run
   // later, and a caller's edit to the array, a step record, or the option
   // object in between must not reach it.
@@ -333,7 +363,7 @@ export const run = <I, A, E, R, E2, R2>(
     })
     const settle = (
       exit: Exit.Exit<Readonly<Record<string, A>>, E>
-    ): Effect.Effect<Readonly<Record<string, A>> | Compensated<E>, E | PatternError> => {
+    ): Effect.Effect<Settled<A, E>, E | PatternError> => {
       const failure = Exit.findErrorOption(exit)
       if (residue.length > 0) {
         const sorted = [...residue].sort((left, right) => left.id.localeCompare(right.id))
@@ -348,10 +378,12 @@ export const run = <I, A, E, R, E2, R2>(
           })
         )
       }
-      if (Exit.isSuccess(exit) || policy !== "compensate") return exit
-      return Option.isSome(failure)
-        ? Effect.succeed<Compensated<E>>({ compensated: true, failure: failure.value })
-        : exit
+      if (!Exit.isSuccess(exit) && policy === "compensate" && Option.isSome(failure)) {
+        return Effect.succeed<Settled<A, E>>({ _tag: "Compensated", failure: failure.value })
+      }
+      // A failure exit short-circuits the map and re-raises; a success exit
+      // becomes the completed envelope.
+      return Effect.map(exit, (values): Settled<A, E> => ({ _tag: "Completed", values }))
     }
     return Effect.flatMap(Effect.exit(Effect.scoped(forward)), settle)
   })

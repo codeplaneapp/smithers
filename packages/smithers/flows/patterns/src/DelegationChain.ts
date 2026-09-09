@@ -227,15 +227,6 @@ const refuse = (code: DelegationErrorCode, message: string): DelegationError =>
 
 const isPatternError = (error: unknown): error is PatternError => error instanceof PatternError
 
-const exhaustedRound = (value: unknown): { readonly output: unknown } | undefined =>
-  typeof value === "object" &&
-    value !== null &&
-    "exhausted" in value &&
-    value.exhausted === true &&
-    "output" in value
-    ? { output: value.output }
-    : undefined
-
 const checkBounds = (
   bounds: Bounds & { readonly concurrency?: number | undefined },
   tiers: ReadonlyArray<string>
@@ -519,9 +510,8 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
         (error) => Effect.fail(refuse("derisk_failed", error.message))
       )
     )
-    const unapproved = exhaustedRound(derisked)
-    const exhausted = unapproved !== undefined
-    const authored = unapproved === undefined ? derisked : unapproved.output
+    const exhausted = derisked._tag === "Exhausted"
+    const authored = derisked.output
     const refusals = Trellis.validate(authored, envelope)
     if (refusals.length > 0) {
       const refusal = refusals[0] as Trellis.TrellisError
@@ -567,7 +557,7 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
           accept: (attempt) => Effect.succeed(!attempt.failed && !attempt.rejected)
         }).pipe(
           Effect.flatMap((reached) =>
-            "accepted" in reached && reached.accepted === false
+            reached.exhausted
               ? Effect.fail(
                 new DelegationError({
                   code: "leaf_failed",

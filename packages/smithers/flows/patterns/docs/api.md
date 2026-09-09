@@ -164,7 +164,7 @@ empty and `remaining` is the envelope fuel because execution has not started.
 | `depth_exceeded`   | the node      | A node nests deeper than the envelope `depth`                                                                                                                                    |
 | `fanout_exceeded`  | the container | A container holds more members than the envelope `fanout`                                                                                                                        |
 | `fuel_exhausted`   | `root`        | A plan needs more leaf calls than the envelope `fuel`, or than the fuel left after earlier rounds                                                                                |
-| `leaf_failed`      | the leaf      | A leaf effect fails during `Trellis.run` |
+| `leaf_failed`      | the leaf      | A leaf effect fails during `Trellis.run`                                                                                                                                         |
 
 ### `DelegationError`
 
@@ -246,11 +246,11 @@ The input must explicitly declare effects with `mode: "hermetic"` and a
 `"sealed"` or omitted tier. A pure body without an effects declaration is
 rejected. Every option is optional:
 
-| Field | Contract |
-| --- | --- |
-| `ttlMs` | Positive safe integer in milliseconds, measured from when the result was recorded. Omit for no age bound. |
-| `scope` | `"run"`, `"flow"`, or `"shared"`. Omit to retain the composition's reach. |
-| `version` | Nonblank string naming the body revision. Omit for no extra revision in the key. |
+| Field     | Contract                                                                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------- |
+| `ttlMs`   | Positive safe integer in milliseconds, measured from when the result was recorded. Omit for no age bound. |
+| `scope`   | `"run"`, `"flow"`, or `"shared"`. Omit to retain the composition's reach.                                 |
+| `version` | Nonblank string naming the body revision. Omit for no extra revision in the key.                          |
 
 Invalid effects, TTL, or version throw `PatternError` with code
 `invalid_decorator` synchronously when the decorator is applied.
@@ -280,7 +280,10 @@ const echo = Flow.make({
   input: Schema.String,
   output: Schema.String,
   effects: Effects.make({
-    reads: [], writes: [], mode: "hermetic", onConflict: "serialize"
+    reads: [],
+    writes: [],
+    mode: "hermetic",
+    onConflict: "serialize"
   }),
   body: (input) => Node.succeed(input)
 })
@@ -387,9 +390,12 @@ round.
 
 `review` receives `(output, round)` and `revise` receives
 `{ output, review, round }`. `ReviewLoop.accepted` is the acceptance reader:
-`true`, `"approved"`, `{ approved: true }`, or `{ accepted: true }`. A run that
-spends every round returns `{ output, review, approved: false, exhausted: true }`
-rather than failing, so the caller decides what an unapproved result is worth.
+`true`, `"approved"`, `{ approved: true }`, or `{ accepted: true }`. Both
+outcomes are tagged and nest the produced value: an approved round returns
+`{ _tag: "Approved", output }` and a run that spends every round returns
+`{ _tag: "Exhausted", output, review }` rather than failing, so the caller
+branches on `_tag` and decides what an unapproved result is worth. The value
+the loop produced never forges the other arm, whatever shape it has.
 `maxRounds` must be a positive safe integer.
 
 Use `ReviewLoop` when one artifact is revised in place. When every issue needs
@@ -403,10 +409,12 @@ rung decides for itself. `accept` decides every rung that declares no
 `escalateIf`; `fallback` is the last rung and runs only after all of them
 escalated, which is where a human approval flow belongs.
 
-`Escalation.run(input, options)` returns `{ level, result }` naming the rung
-that settled, counting from zero. A fallback result carries the rung count. If
-every rung escalates and no fallback is declared, the last result comes back as
-`{ level, result, accepted: false, exhausted: true }`.
+`Escalation.run(input, options)` returns `{ level, result, exhausted: false }`
+naming the rung that settled, counting from zero. A fallback result carries the
+rung count. If every rung escalates and no fallback is declared, the last
+result comes back as `{ level, result, accepted: false, exhausted: true }`.
+`exhausted` is present on both arms, so a caller reads it without a property
+check.
 
 `defaultEscalate` is the predicate used by `Escalation.run` when a rung has
 neither an `escalateIf` nor a shared `accept`. `Escalation.make` instead
@@ -448,9 +456,12 @@ compensation calls in reverse order. `onFailure` defaults to `compensate` in
 both halves. `make` refuses a step whose action or compensation is not a flow.
 Both compensation policies continue unwinding after an undo fails and report
 `PatternError { code: "compensation_failed" }`. Its cause holds the original
-`failure` and the failed undos in `residue`, sorted by step id. A clean unwind
-returns `{ compensated: true, failure }` under `compensate` and re-raises the
-original failure under `compensate-and-fail`.
+`failure` and the failed undos in `residue`, sorted by step id. A chain that
+runs to the end returns `{ _tag: "Completed", values }`, where `values` holds
+each step's value keyed by step id. A clean unwind returns
+`{ _tag: "Compensated", failure }` under `compensate` and re-raises the
+original failure under `compensate-and-fail`. Step values are nested under
+`values`, so a step id can never forge the compensated arm.
 
 `Saga.run(input, { steps, onFailure })` registers one scope finalizer per
 completed step, so the unwind is LIFO and runs on interruption as well as on
