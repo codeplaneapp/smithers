@@ -16,16 +16,26 @@ Getting both right is the whole skill.
 | Compile or generate artifacts                    | `build`                     |
 | Run test suites                                  | `test`                      |
 | Run linters and drift checks                     | `lint`                      |
-| Check documentation parity                       | `docs`                      |
-| All four at once, over one graph                 | `ci`                        |
+| Check documentation or run page writers          | `docs`                      |
+| CI-safe targets from all four, over one graph    | `ci`                        |
 | Run a generator, publish, agent task, or commit  | `run`                       |
 | Run model reviews                                | `review`                    |
 | Run one label whose kind you do not want to name | `target`, or the bare label |
 
 A target participates in a verb when its rule declares that kind. A generator
 target participates in both `build` and `lint`, and the two forms differ: the
-`lint` form checks for drift and the `build` form writes. That is why `ci`
-plans lint first, and why `--write` exists on `target`.
+`lint` form checks for drift and the `build` form writes. The `ci` merge gives
+the lint view priority regardless of plan order. `--write` on `target` selects
+the writing form.
+
+`Docs.Page` writers run a model CLI with its host executable and credentials,
+and write the declared page after their gates pass, without `--write`.
+Explicit `docs` selections, including wildcards, can run these writers.
+`Docs.Check` checks freshness without a model; `docs --write` refreshes its
+stamp from the existing page and inputs instead of checking it. It does not
+regenerate the page or enable page writers. `ci` excludes attended `Docs.Page`
+writers from its selection. See the [command reference](../cli.md#docs) for
+options and examples.
 
 If you select a target under a verb it does not support, the command reports
 the unsupported rule rather than returning a false green.

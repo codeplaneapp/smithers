@@ -1,6 +1,6 @@
 ---
 title: "@smthrs/build-cli"
-description: "The smithers-build command line: fourteen verbs that select declared targets by label, plan them, consult a content-addressed cache, and run only what is missing."
+description: "The smithers-build command line: commands that select declared targets by label, plan them, consult a content-addressed cache, and run only what is missing."
 ---
 
 `@smthrs/build-cli` is the `smithers-build` command line and everything behind
@@ -11,7 +11,7 @@ of it on the command line and the CLI runs it:
 pnpm exec smithers-build ci '//packages/...'
 ```
 
-That command selects every lint, build, test, and documentation target under
+That command selects CI-safe lint, build, test, and documentation targets under
 `packages/`, plans them as one graph, checks a content-addressed cache, and
 spawns work only for the targets whose inputs moved.
 
@@ -132,21 +132,11 @@ instead and drive the same commands with injected terminals, an injected
 environment, and an `AbortSignal` they own. See
 [Embed the CLI in another program](./guides/embed-the-cli.md).
 
-## The verbs at a glance
+## Commands
 
-| Verb                            | What it does                                                                 |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `build`, `test`, `lint`, `docs` | Execute the targets a pattern selects under that kind.                       |
-| `review`                        | Execute model-review targets, skipping the ones whose engine CLI is absent.  |
-| `ci`                            | Execute lint, build, test, and docs over one merged graph.                   |
-| `run`                           | Execute run targets: generators, publishes, agent tasks, commits.            |
-| `target`                        | Execute one label under the verb its rule implies. Also the bare-label form. |
-| `query`, `graph`, `owners`      | Read the workspace without executing anything.                               |
-| `install`                       | Plan and execute the workspace install flow.                                 |
-| `gitHooks`                      | Check the declared git hooks against `.git/hooks`, or install them.          |
-| `create-app`                    | Scaffold a Smithers app from a template.                                     |
-
-Every flag of every verb is on the [command reference](./cli.md).
+The [command reference](./cli.md) is the complete inventory of commands,
+aliases, arguments, and options. The [selection guide](./guides/select-targets.md)
+helps choose a verb and pattern for a task.
 
 ## Where to go next
 

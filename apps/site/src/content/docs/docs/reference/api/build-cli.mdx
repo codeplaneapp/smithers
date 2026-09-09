@@ -62,9 +62,9 @@ platform and parent-crash limits.
 const makeCli: (config?: RuntimeConfig) => Cli
 ```
 
-Creates the configured `smithers-build` CLI with all fourteen commands
-registered. `serve(argv, { exit, stdout })` runs one invocation. Every field
-of `config` replaces something the process would otherwise read for itself,
+Creates the configured `smithers-build` CLI. The [command reference](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/build-cli/docs/cli.md)
+is the complete command inventory. `serve(argv, { exit, stdout })` runs one
+invocation. Every field of `config` replaces something the process would otherwise read for itself,
 which is what makes an invocation testable. See
 [Embed the CLI in another program](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/build-cli/docs/guides/embed-the-cli.md).
 
@@ -566,7 +566,7 @@ scope refuses with `unrelated_changes` and names the paths it does not own.
 
 ## GitHooks
 
-The `gitHooks` implementation. From `@smthrs/build-cli/GitHooks`.
+The `git-hooks` implementation. From `@smthrs/build-cli/GitHooks`.
 
 | Export              | Signature                                                                             | What it is                                                                        |
 | ------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -709,3 +709,10 @@ than driving them directly.
 | `PackageError`                                                                                                             | The typed discovery and index refusals.                                 |
 | `MarkdownCodeBlocks`                                                                                                       | The `Markdown.CodeBlocks` rule implementation.                          |
 | `DockerExec`, `FetchExec`, `FoundryExec`, `GitSubmoduleExec`, `GoExec`, `NixExec`, `OverlayExec`, `StampExec`, `AnvilExec` | One rule family's execution each.                                       |
+
+`OverlayExec.apply` confines replacement sources and destinations to the canonical
+scratch root. It refuses destination directory symlinks, dangling destination
+links, and file links that resolve outside scratch, including absolute links back
+to the original workspace. An internal destination file link is replaced with a
+regular file without changing its target. Replacement files are staged beside the
+destination and renamed into place.

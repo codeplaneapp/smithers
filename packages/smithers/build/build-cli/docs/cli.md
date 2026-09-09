@@ -7,7 +7,7 @@ description: "Every smithers-build command, argument, option, exit code, and err
 smithers-build <command> [arguments] [options]
 ```
 
-`makeCli` registers 24 commands, including the `gitHooks` alias and grouped
+`makeCli` registers 24 commands, including the alias for `git-hooks` and grouped
 `cache` and `show` surfaces. `normalizeArgv` adds another spelling: an argv
 whose first token starts with `//` or `:` is rewritten to `target <label>`, so
 `smithers-build //packages/api:lint` runs the bare-label form.
@@ -79,13 +79,13 @@ execution options.
 | `build`  | `<pattern>` |                                                               |
 | `test`   | `<pattern>` |                                                               |
 | `lint`   | `<pattern>` | `--fix`                                                       |
-| `docs`   | `<pattern>` |                                                               |
+| `docs`   | `<pattern>` | `--write`                                                     |
 | `review` | `<pattern>` |                                                               |
 | `ci`     | `<pattern>` |                                                               |
 | `run`    | `<pattern>` | `--name, -n`, `--message, -m`, `--sweep`, `--input, -i`       |
 | `target` | `<label>`   | `--write`, `--fix`, `--message, -m`, `--sweep`, `--input, -i` |
 
-### build, test, lint, docs
+### build, test, lint
 
 Execute the targets a pattern selects under that kind. A target participates
 in a verb when its rule declares that kind, so `lint` over a package selects
@@ -100,6 +100,30 @@ pnpm exec smithers-build lint '//packages/api:lint'
 
 `--fix` lets an agent lint target write inside its declared `fixes` write set.
 Without it the target checks and reports.
+
+### docs
+
+Executes documentation parity checks, `Docs.Check` freshness checks, and
+`Docs.Page` writers selected by the pattern.
+
+`Docs.Page` runs the declared model CLI and needs its executable and
+credentials on the host. It writes the declared output page after its gates
+accept the candidate, without `--write`. An explicit `docs` invocation,
+including a wildcard pattern, can therefore invoke a model and rewrite pages.
+Use `--plan` to inspect the selection without executing it.
+
+`Docs.Check` checks page and input freshness against a recorded stamp without
+invoking a model. `docs --write` refreshes the selected `Docs.Check` stamps
+from the existing pages and current inputs; it does not regenerate those pages.
+A missing page must be generated before it can be stamped. This flag does not
+control `Docs.Page` writes. `ci` excludes attended `Docs.Page` writers from its
+selection and checks freshness without refreshing stamps.
+
+```bash
+pnpm exec smithers-build docs '//:page'
+pnpm exec smithers-build docs '//:pageCheck'
+pnpm exec smithers-build docs '//:pageCheck' --write
+```
 
 ### review
 
@@ -122,11 +146,10 @@ it once, so a target two verbs select runs a single time.
 pnpm exec smithers-build ci '//packages/...'
 ```
 
-Plans merge in that order and the first occurrence of a label wins. Lint comes
-first on purpose: a generator target participates in both `build` and `lint`,
-and its `lint` form is the non-mutating one. Planning `build` first made
-`ci` rewrite checked-in manifests and workflow files as a side effect of
-asking whether the repository was green.
+Plans merge in that order. Views with the same label and `keyPreview` are
+deduplicated. When keys differ, the lint view takes priority regardless of
+plan order; conflicting non-lint views are rejected. A generator selected by
+both `build` and `lint` therefore uses its non-mutating lint form.
 
 `review` and `run` are absent for the same reason. Planning a review on a
 shallow pull-request checkout kills the aggregate before any target runs, and

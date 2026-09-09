@@ -55,9 +55,9 @@ platform and parent-crash limits.
 const makeCli: (config?: RuntimeConfig) => Cli
 ```
 
-Creates the configured `smithers-build` CLI with all fourteen commands
-registered. `serve(argv, { exit, stdout })` runs one invocation. Every field
-of `config` replaces something the process would otherwise read for itself,
+Creates the configured `smithers-build` CLI. The [command reference](./cli.md)
+is the complete command inventory. `serve(argv, { exit, stdout })` runs one
+invocation. Every field of `config` replaces something the process would otherwise read for itself,
 which is what makes an invocation testable. See
 [Embed the CLI in another program](./guides/embed-the-cli.md).
 
@@ -559,7 +559,7 @@ scope refuses with `unrelated_changes` and names the paths it does not own.
 
 ## GitHooks
 
-The `gitHooks` implementation. From `@smthrs/build-cli/GitHooks`.
+The `git-hooks` implementation. From `@smthrs/build-cli/GitHooks`.
 
 | Export              | Signature                                                                             | What it is                                                                        |
 | ------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |

@@ -596,7 +596,7 @@ export const runPackageVerb = async (
 }
 
 /**
- * The `gitHooks` command: renders the WORKSPACE.ts hook bindings to
+ * The `git-hooks` command: renders the WORKSPACE.ts hook bindings to
  * `.git/hooks` scripts, byte-checks them by default, installs them under
  * `--write`. Drift is a red exit, like every other generated file.
  */
@@ -633,16 +633,12 @@ export const runVerb = async (
 }
 
 /**
- * The verbs `ci` merges, LINT FIRST.
+ * The verbs `ci` merges, in planning order.
  *
- * `mergePlans` deduplicates on label and first occurrence wins, so the plan a
- * target contributes to `ci` is the one from the first verb that selected it.
- * A generator target participates in both `build` and `lint`, and its `lint`
- * form is the non-mutating one (`attrsForKind` maps write to check). Planning
- * `build` first therefore made `smithers-build ci` rewrite checked-in package
- * manifests and workflow files as a side effect of asking whether the
- * repository was green. Lint first makes the merged graph the checking form,
- * which is the only correct posture for a CI verb.
+ * Views with the same label and `keyPreview` are deduplicated by `mergePlans`.
+ * When keys differ, the lint view takes priority regardless of plan order;
+ * conflicting non-lint views are rejected. A generator selected by both
+ * `build` and `lint` therefore uses its non-mutating lint form.
  *
  * `review` is absent for the same reason `run` is. A review target expands a
  * git diff against a base revision at plan time and then spawns a model CLI,

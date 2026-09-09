@@ -54,8 +54,8 @@ unchanged. That one rule is the whole bare-label form.
 
 ## 3. The command surface
 
-`makeCli(config)` builds the [incur](https://github.com/wevm/incur) CLI: 14
-commands, each with a schema for its arguments and its options. The
+`makeCli(config)` builds the [incur](https://github.com/wevm/incur) CLI. The
+[command reference](../cli.md) lists its commands, arguments, and options. The
 `RuntimeConfig` it takes is everything process-scoped that a command must not
 reach for on its own:
 

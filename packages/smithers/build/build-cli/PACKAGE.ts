@@ -19,8 +19,9 @@ const tests = Smithers.glob("test/**/*.test.ts")
 const fixtures = Smithers.glob("test/fixtures/**/*")
 const routedFixture = Smithers.file("test/fixtures/force-spec/.github/PACKAGE.ts")
 
-/** `Docs.test.ts` reads the colocated command reference, so it is key material. */
-const prose = Smithers.glob("docs/*.md")
+/** `Docs.test.ts` reads the package documentation, so it is key material. */
+const prose = Smithers.glob("docs/**/*.md")
+const readme = Smithers.file("README.md")
 
 /**
  * The W4 package-API sweep harness. `SweepHarness.test.ts` imports its
@@ -51,7 +52,7 @@ const check = Smithers.Typecheck({
 
 const test = Smithers.Vitest({
   tests: [tests],
-  sources: [sources, javascript, fixtures, routedFixture, prose, sweep],
+  sources: [sources, javascript, fixtures, routedFixture, prose, readme, sweep],
   deps: [lib],
   config: Smithers.file("vitest.config.ts"),
   environment: "node",

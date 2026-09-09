@@ -239,7 +239,7 @@ This is the programmatic `runInstall`, whose store boundary is fixed at
 **`git hooks drift (run with --write to install): pre-commit=stale`**
 
 The scripts in `.git/hooks` do not match what the workspace declaration
-renders. `smithers-build gitHooks --write` installs the rendered scripts.
+renders. `smithers-build git-hooks --write` installs the rendered scripts.
 
 ## The scaffold refused
 
