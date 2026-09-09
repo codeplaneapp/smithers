@@ -97,6 +97,25 @@ describe("Runtime.satisfies", () => {
     expect(Runtime.satisfies("", "24.9.0")).toBe("unsupported_requirement")
     expect(Runtime.satisfies("24.9.0", "not-a-version")).toBe("unsupported_requirement")
   })
+
+  it.each([
+    ">=22.0.0-rc.1 <23",
+    ">=22.0.0+build <23",
+    ">=22.0.0-rc.1 || <23",
+    ">=22.0.0+build || <23",
+    "22.0.0-rc.1 24.11.0",
+    "22.0.0-",
+    "22.0.0+",
+    "22.0.0-rc..1",
+    "22.0.0-rc.",
+    "22.0.0+build..1",
+    "22.0.0+build.",
+    "22.0.0-rc!1",
+    "22.0.0+build+other"
+  ])("refuses the entire malformed version token %s", (requirement) => {
+    expect(Runtime.satisfies(requirement, "24.11.0")).toBe("unsupported_requirement")
+    expect(Runtime.satisfies(">=22", requirement.replace(/^>=/, ""))).toBe("unsupported_requirement")
+  })
 })
 
 describe("Runtime.makeNoop", () => {
@@ -153,6 +172,17 @@ describe("Runtime.makeNoop", () => {
     const withGetter = { ...base }
     Object.defineProperty(withGetter, "requirement", { enumerable: true, get: () => ">=22.19.0" })
     expect(() => Runtime.makeNoop("node", withGetter)).toThrow(/enumerable data property/)
+  })
+
+  it.each([0, -1, 1.5, NaN, Infinity, 30_001, "100"])("refuses invalid probeTimeoutMs %s", (probeTimeoutMs) => {
+    expect(() =>
+      Runtime.makeNoop("node", {
+        requirement: "1.0.0",
+        version: "1.0.0",
+        platform,
+        probeTimeoutMs
+      } as never)
+    ).toThrow(/probe timeout must be an integer from 1 to 30000/)
   })
 
   /**
@@ -322,6 +352,21 @@ describe("Runtime measurement", () => {
     })
   })
 
+  it("bounds a hanging interpreter version probe", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "hanging.mjs")
+      await writeExecutable(executable, "setInterval(() => {}, 1000)")
+      const error = await refusalOf(
+        Runtime.make("node", { requirement: "1.0.0", platform, executable, probeTimeoutMs: 100 }).pipe(
+          Effect.flatMap((service) => service.version),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(error.code).toBe("probe_failed")
+      expect(error.message).toContain("did not finish within 100ms")
+    })
+  })
+
   it("fails when the probe prints no version", async () => {
     await withFixture(async (root) => {
       const executable = NodePath.join(root, "silent.mjs")
@@ -482,17 +527,7 @@ describe("Runtime measurement", () => {
     })
   })
 
-  /**
-   * The gap this package cannot close on its own, pinned so it stays visible.
-   *
-   * With no `environment` the child inherits the whole process environment,
-   * which on CI is the job's entire secret set. An empty environment is not an
-   * alternative, because a child given one cannot resolve a bare executable
-   * name through `PATH`, so only a composition root can supply the four
-   * bootstrap names. `layerRuntime` in `@smthrs/build-cli` is the one that has
-   * to; when it does, this test's expectation becomes the one above.
-   */
-  it("inherits the ambient environment when no environment is supplied", async () => {
+  it("selects only ambient lookup variables when no environment is supplied", async () => {
     await withFixture(async (root) => {
       const executable = NodePath.join(root, "inheriting.mjs")
       const observed = NodePath.join(root, "observed.json")
@@ -504,6 +539,7 @@ describe("Runtime measurement", () => {
           }, JSON.stringify(process.env.SMITHERS_BUILD_PROBE_MARKER ?? null))\n` +
           `process.stdout.write("1.0.0\\n")`
       )
+      const previous = process.env.SMITHERS_BUILD_PROBE_MARKER
       process.env.SMITHERS_BUILD_PROBE_MARKER = "ambient"
       try {
         await Effect.runPromise(
@@ -513,9 +549,10 @@ describe("Runtime measurement", () => {
           )
         )
       } finally {
-        delete process.env.SMITHERS_BUILD_PROBE_MARKER
+        if (previous === undefined) delete process.env.SMITHERS_BUILD_PROBE_MARKER
+        else process.env.SMITHERS_BUILD_PROBE_MARKER = previous
       }
-      expect(JSON.parse(await Fs.readFile(observed, "utf8"))).toBe("ambient")
+      expect(JSON.parse(await Fs.readFile(observed, "utf8"))).toBeNull()
     })
   })
 

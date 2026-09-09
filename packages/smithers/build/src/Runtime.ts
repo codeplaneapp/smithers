@@ -15,10 +15,10 @@
  * anything needing an interpreter takes as a dependency.
  *
  * Host access is Effect's own: `effect/unstable/process/ChildProcessSpawner`
- * for the version probe. The platform and the host environment arrive as layer
- * construction options rather than from `globalThis.process`, because this
- * module has to stay browser-bundleable even though the interpreters it
- * measures do not.
+ * for the version probe. Platform facts arrive as layer construction options.
+ * The live service defaults to the host environment when available and forwards
+ * only executable-lookup variables. No Node imports are needed, so this module
+ * stays browser-bundleable even though the interpreters it measures do not.
  *
  * @since 0.1.0
  */
@@ -155,7 +155,7 @@ export class RuntimeError extends Schema.TaggedError<RuntimeError>()(
 export const maximumVersionOutputBytes = BoundedOutput.maximumVersionOutputBytes
 
 /**
- * Wall-clock deadline for one version probe.
+ * Default and maximum wall-clock deadline for one version probe.
  *
  * @category constants
  * @since 0.1.0
@@ -218,11 +218,9 @@ export interface Options {
    */
   readonly platform: Platform
   /**
-   * Host environment capability, for the same reason the platform is an option.
-   *
-   * A version probe selects the four executable-lookup names out of it and
-   * gives the child nothing else. Supplying it is what makes the probe
-   * hermetic: see {@link measureVersion} for what an omitted environment costs.
+   * Host environment capability. A version probe selects only the four
+   * executable-lookup names. When omitted, the live service selects those names
+   * from `globalThis.process?.env`, or uses an empty environment without a host.
    *
    * Because it is the host's environment, its names are held to the host's own
    * rule rather than to the portable one. Windows names `ProgramFiles(x86)`,
@@ -231,6 +229,8 @@ export interface Options {
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   /** The interpreter executable, when it is not on `PATH` under its own name. */
   readonly executable?: string | undefined
+  /** Version-probe deadline in milliseconds, an integer from 1 to 30,000. Defaults to 30,000. */
+  readonly probeTimeoutMs?: number | undefined
 }
 
 /** The comparators a declared requirement may use. */
@@ -242,11 +242,13 @@ const comparators = [">=", "<=", ">", "<", "="] as const
  * A trailing prerelease or build suffix is dropped, so `1.3.0-canary.2` and
  * `1.3.0+build.7` both compare as `1.3.0`. Ordering prereleases correctly is a
  * semver problem this seam does not need. What it does need is that an exact
- * pin never accepts one, and {@link satisfies} states that separately rather
+ * stable pin never accepts one, and {@link satisfies} states that separately rather
  * than by pretending the suffix was not there.
  */
 const numericParts = (value: string): ReadonlyArray<number> | undefined => {
-  const core = value.trim().replace(/^v/, "").split(/[-+]/)[0]
+  const token = value.trim()
+  if (!versionToken.test(token)) return undefined
+  const core = token.replace(/^v/, "").split(/[-+]/)[0]
   if (core === undefined || core === "") return undefined
   const parts = core.split(".")
   const numbers: Array<number> = []
@@ -383,11 +385,8 @@ const probeFailed = (label: string, cause: unknown): RuntimeError =>
  * Nothing else is forwarded. A `--version` run needs no proxy, no certificate
  * bundle, and no temporary directory, so it is given none.
  *
- * Exported because only a composition root can read the host environment, and
- * the one that does should hand {@link Options.environment} these four names
- * rather than restate them: a second copy of the list is a list that drifts,
- * and passing the whole of `process.env` puts every ambient name through this
- * module's normalization for four values it keeps.
+ * Exported so a composition root can supply these names explicitly through
+ * {@link Options.environment} without maintaining a separate lookup list.
  *
  * @category constants
  * @since 0.1.0
@@ -400,6 +399,7 @@ interface NormalizedOptions {
   /** Absent, not empty, when the composition supplied no environment. */
   readonly environment: ReadonlyMap<string, string> | undefined
   readonly executable: string | undefined
+  readonly probeTimeoutMs: number
 }
 
 /**
@@ -415,7 +415,7 @@ const normalizeOptions = (value: Options, extraKeys: ReadonlyArray<string> = [])
   const options = Validate.plainRecord(value, "runtime options")
   Validate.exactKeys(
     options,
-    new Set(["requirement", "platform", "environment", "executable", ...extraKeys]),
+    new Set(["requirement", "platform", "environment", "executable", "probeTimeoutMs", ...extraKeys]),
     "runtime options"
   )
   const requirement = Validate.ownData(options, "requirement", "runtime options")
@@ -440,6 +440,10 @@ const normalizeOptions = (value: Options, extraKeys: ReadonlyArray<string> = [])
   if (executable !== undefined && !Validate.usableText(executable, 32 * 1024)) {
     throw new TypeError("runtime executable must be usable non-empty text")
   }
+  const timeout = Validate.ownData(options, "probeTimeoutMs", "runtime options") ?? probeTimeoutMs
+  if (typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout < 1 || timeout > probeTimeoutMs) {
+    throw new TypeError(`runtime probe timeout must be an integer from 1 to ${probeTimeoutMs}`)
+  }
   const platform = Object.freeze<Platform>({ os, arch, libc })
   const environment = Validate.ownData(options, "environment", "runtime options")
   return Object.freeze({
@@ -448,17 +452,22 @@ const normalizeOptions = (value: Options, extraKeys: ReadonlyArray<string> = [])
     environment: environment === undefined
       ? undefined
       : Validate.normalizeEnvironment(environment, platform.os === "win32", "runtime environment"),
-    executable
+    executable,
+    probeTimeoutMs: timeout
   })
 }
 
 /** Selects the executable-lookup names out of a normalized host environment. */
-const probeEnvironment = (options: NormalizedOptions): Record<string, string> | undefined => {
-  if (options.environment === undefined) return undefined
+const probeEnvironment = (options: NormalizedOptions): Record<string, string> => {
   const windows = options.platform.os === "win32"
+  const environment = options.environment ?? Validate.normalizeEnvironment(
+    globalThis.process?.env ?? {},
+    windows,
+    "runtime environment"
+  )
   const selected: Record<string, string> = Object.create(null)
   for (const name of lookupEnvironmentNames) {
-    const value = Validate.sourceValue(options.environment, name, windows)
+    const value = Validate.sourceValue(environment, name, windows)
     if (value !== undefined) selected[name] = value
   }
   return selected
@@ -474,24 +483,14 @@ const probeEnvironment = (options: NormalizedOptions): Record<string, string> | 
  * no real interpreter could ever satisfy. Every quantifier is over a single
  * character class, so a long hostile token costs one linear scan.
  */
-const versionToken = /^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$/
+const versionToken = /^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 
 /**
  * Measures the interpreter version by running it.
  *
- * When the composition supplied an `environment`, the child receives the four
- * executable-lookup names selected from it and nothing else. A `--version` run
- * needs no other capability, and inheriting the process environment hands it
- * every secret a build holds.
- *
- * When no `environment` was supplied the child inherits this process's
- * environment. `extendEnv: false` on its own does not prevent that:
- * `resolveEnvironment` in `@effect/platform-node-shared` returns the absent
- * `env` unchanged, and `spawn` reads an absent `env` as "inherit everything".
- * An empty environment is not an alternative either, because a child given one
- * cannot resolve a bare executable name through `PATH`. Only a composition root
- * knows the host environment, so only a composition root can close this: pass
- * `environment`, selecting {@link lookupEnvironmentNames} out of the host's own.
+ * The child receives only executable-lookup names from the supplied environment
+ * or the live host's environment. An explicit `env` and `extendEnv: false`
+ * prevent the spawner from inheriting unrelated ambient variables.
  *
  * Standard output is collected under {@link maximumVersionOutputBytes} and
  * decoded afterwards, so an executable that prints megabytes is refused at the
@@ -502,7 +501,8 @@ const versionToken = /^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-
 const measureVersion = (
   spawner: ChildProcessSpawner["Service"],
   executable: string,
-  environment: Record<string, string> | undefined
+  environment: Record<string, string>,
+  timeoutMs: number
 ): Effect.Effect<string, RuntimeError> => {
   const label = `${executable} --version`
   const shape = {
@@ -512,9 +512,7 @@ const measureVersion = (
     stderr: "inherit",
     killSignal: "SIGKILL"
   } as const
-  const command = environment === undefined
-    ? ChildProcess.make(executable, ["--version"], shape)
-    : ChildProcess.make(executable, ["--version"], { ...shape, env: environment })
+  const command = ChildProcess.make(executable, ["--version"], { ...shape, env: environment })
   const captured = Effect.scoped(
     Effect.flatMap(spawner.spawn(command), (handle) =>
       Effect.all(
@@ -525,12 +523,12 @@ const measureVersion = (
   return captured.pipe(
     Effect.mapError((cause) => probeFailed(label, cause)),
     Effect.timeoutOrElse({
-      duration: probeTimeoutMs,
+      duration: timeoutMs,
       orElse: () =>
         Effect.fail(
           new RuntimeError({
             code: "probe_failed",
-            message: `${label} did not finish within ${probeTimeoutMs}ms`
+            message: `${label} did not finish within ${timeoutMs}ms`
           })
         )
     }),
@@ -585,7 +583,9 @@ export const make = (
     const spawner = yield* ChildProcessSpawner
     const normalized = normalizeOptions(options)
     const executable = normalized.executable ?? name
-    const version = yield* Effect.cached(measureVersion(spawner, executable, probeEnvironment(normalized)))
+    const version = yield* Effect.cached(
+      measureVersion(spawner, executable, probeEnvironment(normalized), normalized.probeTimeoutMs)
+    )
     return Object.freeze(
       {
         name,

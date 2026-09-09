@@ -114,7 +114,8 @@ import * as Runtime from "@smthrs/build/Runtime"
 
 const layer = Runtime.layerNode({
   requirement: ">=22.19.0",
-  platform: { os: "linux", arch: "x64", libc: "glibc" }
+  platform: { os: "linux", arch: "x64", libc: "glibc" },
+  environment: process.env
 })
 ```
 
@@ -126,16 +127,25 @@ const layer = Runtime.layerNode({
 | `satisfies`                                              | The comparator a declared requirement is checked with.            |
 | `RuntimeError`, `ErrorCode`                              | The tagged error and its code union.                              |
 | `Platform`, `Name`                                       | The host facts schema, and the runtime union `"node"` or `"bun"`. |
-| `probeTimeoutMs`, `maximumVersionOutputBytes`            | The bounds a version probe runs under.                            |
+| `probeTimeoutMs`, `maximumVersionOutputBytes`            | The default probe deadline and maximum stdout bytes.                            |
 
-The platform and the environment are options rather than reads of
-`globalThis.process`, so this module never touches the host outside a service
-call. A version probe selects only the executable-lookup variables out of the
-environment and gives the child nothing else.
+`Options.environment` supplies the host environment. A version probe receives
+only `PATH`, `PATHEXT`, `SYSTEMROOT`, and `WINDIR` from that record. When omitted,
+the live service selects those names from `globalThis.process?.env` at
+construction, or uses an empty environment on hosts without `process`.
+Other ambient variables are never forwarded. Windows lookup is case-insensitive.
 
-An exact pin never accepts a prerelease: `satisfies` compares
-`1.3.0-canary.2` as `1.3.0` for ordering, and states the prerelease rule
-separately rather than pretending the suffix was not there.
+`Options.probeTimeoutMs` sets the version-probe deadline in milliseconds. It
+must be an integer from 1 to 30,000 and defaults to `probeTimeoutMs` (30,000).
+A deadline failure reports `code: "probe_failed"` and `did not finish within`.
+
+`satisfies` accepts an exact version or one comparator (`=`, `>=`, `>`, `<=`,
+`<`). It rejects compound ranges, unions, whitespace-separated terms, and
+malformed suffixes as `unsupported_requirement`.
+An exact stable pin rejects prereleases. An exact prerelease pin accepts only
+the same numeric version and prerelease identity; build metadata is ignored.
+For ordering comparators, valid prerelease and build suffixes are ignored:
+`>=1.3.0` accepts `1.3.0-canary.2`.
 
 ## Related packages
 

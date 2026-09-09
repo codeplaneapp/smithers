@@ -578,6 +578,17 @@ describe("PackageManager.storeRoot", () => {
     })
   })
 
+  it("bounds a hanging package-manager version probe", async () => {
+    await withFixture("package-manager-version-timeout", async (root) => {
+      const executable = NodePath.join(root, "hanging.mjs")
+      await writeExecutable(executable, "setInterval(() => {}, 1000)")
+      const manager = await makePnpm(root, executable, { timeoutMs: 100 })
+      const error = await Effect.runPromise(Effect.flip(manager.version))
+      expect(error.code).toBe("command_failed")
+      expect(error.message).toContain("did not finish within 100ms")
+    })
+  })
+
   it("pins pnpm fetch to the canonical project store and non-mutating flags", async () => {
     await withFixture("package-manager-fetch-args", async (root) => {
       const executable = NodePath.join(root, "pnpm.mjs")
