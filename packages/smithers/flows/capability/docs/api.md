@@ -3,11 +3,12 @@ title: "API reference"
 description: "Every public export of @smthrs/capability: the Capability value and its glob pattern, the closed action vocabulary, effect tiers, policy rules and evaluate, and the three typed permission failures."
 ---
 
-`@smthrs/capability` exports two modules from its root entry point, and each is
-also importable from `@smthrs/capability/<Module>`:
+`@smthrs/capability` exports `decodePermissionError` and two modules from its
+root entry point. Each module is also importable from
+`@smthrs/capability/<Module>`:
 
 ```ts
-import { Capability, Permission } from "@smthrs/capability"
+import { Capability, decodePermissionError, Permission } from "@smthrs/capability"
 // or
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
@@ -478,16 +479,47 @@ Constructs a denied permission failure.
 ### Permission.isPermissionError
 
 ```ts
-const isPermissionError: (input: unknown) => input is PermissionError
+const isPermissionError: (input: unknown) => input is PermissionErrorPayload
 ```
 
-Refines an unknown value to a kernel permission failure. It validates the whole
-enumerable shape rather than the `_tag` alone, because the package ships dual
-CommonJS and ESM and class identity is not stable for a dual-package consumer.
-It accepts a structurally valid failure produced by another copy of the package
-and rejects an excess field, a wrong-typed field, a missing `meta`, non-JSON
-metadata, an unknown grant-store code, or an overlong nested capability
-resource.
+Refines an unknown value to `PermissionErrorPayload`, a union of data fields.
+It accepts complete structural records and instances from another copy of the
+package. It rejects excess enumerable fields, missing required fields, invalid
+field types, overlong capability resources, accessors on known fields, and
+non-JSON or cyclic metadata. Metadata descriptors are checked at every depth
+without invoking getters. Required fields must be own data properties. Optional
+fields cannot be inherited, except the empty default `Error.message` on a
+schema-identified grant-store error. The grant-store `cause` is opaque context;
+its own property must be data, but its contents are not inspected.
+
+### Permission.PermissionErrorPayload
+
+```ts
+type PermissionErrorPayload =
+  | { readonly _tag: "@smthrs/capability/PermissionRequired"; /* request data */ }
+  | { readonly _tag: "@smthrs/capability/PermissionDenied"; /* denial data */ }
+  | { readonly _tag: "@smthrs/capability/GrantStoreError"; /* store data */ }
+```
+
+The fields of the corresponding error schemas, with structural
+`{ action, resource }` capabilities and optional grant-store `message` and
+`cause`. This type has no Error methods, Effect iterator, or schema brand.
+It is suitable for rendering and branching on `_tag`.
+
+### decodePermissionError
+
+```ts
+import { decodePermissionError } from "@smthrs/capability"
+
+const decodePermissionError: (input: unknown) => Option.Option<PermissionError>
+```
+
+Validates with `isPermissionError`, then constructs a yieldable error instance
+and any nested capability. Returns `Option.none()` for an invalid payload or
+metadata exceeding the `PermissionRequired` constructor limits. Accepts
+instances from another copy of the package without relying on `instanceof`.
+Metadata is copied and frozen by the constructor; grant-store causes remain
+opaque context.
 
 ### Permission.maxDisplayFieldLength
 
@@ -501,7 +533,7 @@ included. It bounds unattended log output while preserving ordinary Unicode.
 ### Permission.formatError
 
 ```ts
-const formatError: (error: PermissionError) => string
+const formatError: (error: PermissionErrorPayload) => string
 ```
 
 Renders a permission failure as the one-line `description` a `SystemError`
@@ -542,14 +574,16 @@ or could not decide it; `description` carries the `formatError` rendering; and
 ### Permission.fromPlatformError
 
 ```ts
-const fromPlatformError: (error: PlatformError) => Option.Option<PermissionError>
+const fromPlatformError: (error: PlatformError) => Option.Option<PermissionErrorPayload>
 ```
 
-Recovers the structured failure a `toPlatformError` projection carries, so an
-attended surface can still reply to the request and an unattended report can
-still name the capability. It unwraps only a `PermissionDenied` reason and
-validates the cause with `isPermissionError`, so a foreign platform error's
-`cause` never reaches the refinement.
+Returns the original cause as a data-only payload when the reason tag is
+`PermissionDenied` and the cause passes `isPermissionError`. Returns
+`Option.none()` otherwise. Foreign errors with complete structural causes are
+accepted even if `toPlatformError` was never called. Recovery validates
+structure and the reason tag, not origin. Across a trust boundary, callers must
+establish producer or request identity separately. Use `decodePermissionError`
+when a yieldable error instance is required.
 
 ## Related
 

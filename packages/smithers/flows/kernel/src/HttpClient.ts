@@ -30,7 +30,13 @@
  */
 
 import { type Capability, make as makeCapability } from "@smthrs/capability/Capability"
-import { formatError, isPermissionError, PermissionDenied, type PermissionError } from "@smthrs/capability/Permission"
+import {
+  formatError,
+  isPermissionError,
+  PermissionDenied,
+  type PermissionError,
+  type PermissionErrorPayload
+} from "@smthrs/capability/Permission"
 import { Context, Effect, Layer, Option } from "effect"
 import * as Headers from "effect/unstable/http/Headers"
 import * as HttpBody from "effect/unstable/http/HttpBody"
@@ -173,13 +179,17 @@ export const toHttpClientError = (options: {
  * projection carries, so an attended surface can still reply to the request
  * and an unattended report can still name the capability.
  *
+ * Recovery validates data fields and the transport reason tag, not origin or
+ * class operations. Establish producer or request identity separately across
+ * a trust boundary.
+ *
  * @category refinements
  * @since 1.0.0-rc.0
  * @slop
  */
 export const fromHttpClientError = (
   error: HttpClientError.HttpClientError
-): Option.Option<PermissionError> =>
+): Option.Option<PermissionErrorPayload> =>
   error.reason._tag === "TransportError" && isPermissionError(error.reason.cause)
     ? Option.some(error.reason.cause)
     : Option.none()

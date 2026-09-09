@@ -80,23 +80,33 @@ refused, suspended, or could not decide it. `description` carries the
 an attended surface still gets back the original `capability`, `tier`,
 `requestId`, and `reason`.
 
-`fromPlatformError` returns `Option.none()` for any other platform error,
-including a foreign one whose `cause` happens to look like a permission
-failure. It unwraps only a `PermissionDenied` reason, and it validates the
-cause's whole shape.
+`fromPlatformError` accepts any `PermissionDenied` reason whose cause passes
+`isPermissionError`, including a foreign error never passed to `toPlatformError`.
+It returns the original cause as `PermissionErrorPayload`, or `Option.none()`
+when the reason tag or structure does not match. Recovery validates structure,
+not origin. Across a trust boundary, establish the producer or request identity
+separately before acting on the recovered request.
 
 ## Recognize a failure at a boundary
 
 Use `Permission.isPermissionError` where a value arrives as `unknown`: a caught
 defect, an RPC payload, a journal row. It checks the exact enumerable shape,
 not the `_tag` alone, so it accepts a structurally valid failure produced by
-another copy of this dual-published package and rejects a forgery carrying an
-extra field, a wrong-typed field, a missing `meta`, or an overlong capability
-resource.
+another copy of this dual-published package and rejects an extra field, a
+wrong-typed field, a missing `meta`, or an overlong capability resource. It
+rejects accessors on known fields and checks metadata descriptors at every
+depth without calling getters. Required fields must be own data properties;
+optional inherited fields are rejected except the empty default `Error.message`
+on a schema-identified grant-store error. The grant-store `cause` remains
+opaque context.
 
-`Permission.PermissionError` is also exported as a schema value, so you can
-decode a payload rather than refine a value when you need the parsed failure
-back.
+The refinement promises data fields through `Permission.PermissionErrorPayload`.
+A wire record has no Effect iterator or class operations. Import
+`decodePermissionError` from `@smthrs/capability` and call
+`decodePermissionError(payload)` to construct an error you can
+`yield*` in `Effect.gen`; it returns `Option.none()` for invalid data or metadata
+exceeding the constructor limits. The resulting instance also passes
+`Schema.is(Permission.PermissionError)`.
 
 ## Render one line for a log
 

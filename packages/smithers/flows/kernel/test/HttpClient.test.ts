@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
-import { PermissionDenied, PermissionRequired, Rule } from "@smthrs/capability/Permission"
+import { PermissionDenied, type PermissionError, PermissionRequired, Rule } from "@smthrs/capability/Permission"
 import { Effect, Fiber, Option, Stream } from "effect"
 import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as EffectHttpClient from "effect/unstable/http/HttpClient"
@@ -239,6 +239,30 @@ describe("HttpClient", () => {
       // The second hop never left the host: only the authorized URL was fetched.
       expect(calls).toEqual(["https://first.test/start"])
     }).pipe((effect) => protectedClient(effect, redirecting(calls), onlyFirst))
+  })
+
+  it("recovers foreign permission data without promising a yieldable error", () => {
+    const cause = { _tag: "@smthrs/capability/GrantStoreError", code: "store_closed" }
+    const failure = new HttpClientErrorModule.HttpClientError({
+      reason: new HttpClientErrorModule.TransportError({
+        request: HttpClientRequest.get("https://example.test"),
+        cause
+      })
+    })
+    const recovered = Option.getOrThrow(HttpClient.fromHttpClientError(failure))
+    expect(recovered).toBe(cause)
+    // @ts-expect-error HTTP recovery establishes data fields, not an Effect error instance.
+    const instance: PermissionError = recovered
+    void instance
+    let calls = 0
+    Object.defineProperty(cause, "message", {
+      get() {
+        calls++
+        throw new Error("untrusted getter")
+      }
+    })
+    expect(HttpClient.fromHttpClientError(failure)).toEqual(Option.none())
+    expect(calls).toBe(0)
   })
 
   itEffect("leaves a native transport failure untouched", () => {

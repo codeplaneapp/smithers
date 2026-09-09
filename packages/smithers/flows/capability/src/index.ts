@@ -32,3 +32,5 @@ export * as Capability from "./Capability.ts"
  * @slop
  */
 export * as Permission from "./Permission.ts"
+
+export { decodePermissionError } from "./decodePermissionError.ts"

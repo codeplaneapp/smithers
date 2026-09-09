@@ -1,14 +1,16 @@
-import { Option, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Schema } from "effect"
 import { badArgument, type PlatformError, systemError } from "effect/PlatformError"
 import { describe, expect, it } from "vitest"
 import { make as makeCapability, maxResourceLength } from "../src/Capability.ts"
 import * as Index from "../src/index.ts"
+import { decodePermissionError } from "../src/index.ts"
 import {
   formatError,
   fromPlatformError,
   GrantStoreError,
   isPermissionError,
   maxDisplayFieldLength,
+  PermissionDenied,
   permissionDenied,
   PermissionError,
   permissionRequired,
@@ -187,6 +189,223 @@ describe("permission failures", () => {
     })).toBe(true)
   })
 
+  const boundaryCases = [
+    ["required tag", "required", ["_tag"], "@smthrs/capability/PermissionRequired"],
+    ["required requestId", "required", ["requestId"], "r"],
+    ["optional runId", "required", ["runId"], "run"],
+    ["wrong-typed runId", "required", ["runId"], 42],
+    ["optional message", "store", ["message"], "message"],
+    ["optional cause", "store", ["cause"], undefined],
+    ["capability resource", "required", ["capability", "resource"], "/a"],
+    ["metadata root", "required", ["meta"], {}],
+    ["nested metadata", "required", ["meta", "nested", "value"], "value"],
+    ["array metadata", "required", ["meta", "array", "0"], "value"]
+  ] as const
+
+  describe.each(["own", "throwing", "inherited", "inherited data"] as const)("%s boundary fields", (kind) => {
+    it.each(boundaryCases)("rejects %s without invoking getters", (_name, variant, path, value) => {
+      const input: Record<string, unknown> = variant === "store"
+        ? { _tag: "@smthrs/capability/GrantStoreError", code: "store_closed" }
+        : {
+          _tag: "@smthrs/capability/PermissionRequired",
+          code: "permission_required",
+          requestId: "r",
+          capability: { action: "fs:read", resource: "/a" },
+          tier: "sealed",
+          meta: { nested: { value: "ok" }, array: ["ok"] }
+        }
+      let target = input
+      for (const key of path.slice(0, -1)) target = target[key] as Record<string, unknown>
+      const key = path[path.length - 1]!
+      let calls = 0
+      const getter = {
+        enumerable: true,
+        get() {
+          calls++
+          if (kind === "throwing") throw new Error("untrusted getter")
+          return value
+        }
+      }
+      if (kind === "inherited" || kind === "inherited data") {
+        delete target[key]
+        const descriptor = kind === "inherited data" ? { value, enumerable: true } : getter
+        Object.setPrototypeOf(target, Object.create(Object.getPrototypeOf(target), { [key]: descriptor }))
+      } else {
+        Object.defineProperty(target, key, getter)
+      }
+      const projected = systemError({ _tag: "PermissionDenied", module: "foreign", method: "x", cause: input })
+      expect.soft(() => expect(isPermissionError(input)).toBe(false)).not.toThrow()
+      expect.soft(calls).toBe(0)
+      expect.soft(() => expect(fromPlatformError(projected)).toEqual(Option.none())).not.toThrow()
+      expect(decodePermissionError(input)).toEqual(Option.none())
+      expect(calls).toBe(0)
+    })
+  })
+
+  it("rejects an inconsistent inherited message descriptor", () => {
+    const input = new Proxy({ _tag: "@smthrs/capability/GrantStoreError", code: "store_closed" }, {
+      has: (_target, key) => key === "message",
+      getPrototypeOf: () => null
+    })
+    expect(isPermissionError(input)).toBe(false)
+    expect(fromPlatformError(systemError({ _tag: "PermissionDenied", module: "m", method: "x", cause: input })))
+      .toEqual(Option.none())
+  })
+
+  it("refines wire records without promising yieldable class behavior", () => {
+    const wire: unknown = {
+      _tag: "@smthrs/capability/PermissionDenied",
+      code: "permission_denied",
+      capability: { action: "fs:read", resource: "/a" },
+      reason: "no"
+    }
+    expect(isPermissionError(wire)).toBe(true)
+    expect(Schema.is(PermissionError)(wire)).toBe(false)
+    if (isPermissionError(wire)) {
+      // @ts-expect-error A structural payload is not a yieldable Effect error.
+      const instance: PermissionError = wire
+      void instance
+      // @ts-expect-error A nested structural capability has no schema brand.
+      const branded: typeof capability = wire._tag === "@smthrs/capability/PermissionDenied"
+        ? wire.capability
+        : capability
+      void branded
+      expect(formatError(wire)).toBe("permission_denied: fs:read:/a: no")
+    }
+  })
+
+  it.each([
+    ["undefined", { value: undefined }],
+    ["function", { value: () => "no" }],
+    ["non-finite number", { value: Infinity }],
+    ["date", { value: new Date() }],
+    ["symbol key", { [Symbol("value")]: "no" }],
+    ["array extra property", { value: Object.assign([1], { extra: true }) }],
+    ["sparse array", { value: new Array(2) }],
+    ["inherited record", Object.create({ inherited: "no" })]
+  ])("rejects %s metadata at both boundaries", (_name, meta) => {
+    const input = {
+      _tag: "@smthrs/capability/PermissionRequired",
+      code: "permission_required",
+      requestId: "r",
+      capability: { action: "fs:read", resource: "/a" },
+      tier: "sealed",
+      meta
+    }
+    expect(isPermissionError(input)).toBe(false)
+    expect(fromPlatformError(systemError({ _tag: "PermissionDenied", module: "m", method: "x", cause: input })))
+      .toEqual(Option.none())
+    expect(decodePermissionError(input)).toEqual(Option.none())
+  })
+
+  it("rejects cyclic metadata and accepts a shared JSON graph", () => {
+    const shared = { value: [null, true, 1, "ok"] }
+    const input = {
+      _tag: "@smthrs/capability/PermissionRequired",
+      code: "permission_required",
+      requestId: "r",
+      capability: { action: "fs:read", resource: "/a" },
+      tier: "sealed",
+      meta: { a: shared, b: shared }
+    }
+    expect(isPermissionError(input)).toBe(true)
+    Object.assign(shared, { cycle: input.meta })
+    expect(isPermissionError(input)).toBe(false)
+    expect(fromPlatformError(systemError({ _tag: "PermissionDenied", module: "m", method: "x", cause: input })))
+      .toEqual(Option.none())
+  })
+
+  it("rejects non-enumerable metadata getters without reading them", () => {
+    let calls = 0
+    const meta = {
+      nested: Object.defineProperty({}, "hidden", {
+        get() {
+          calls++
+          return "no"
+        }
+      })
+    }
+    const input = {
+      _tag: "@smthrs/capability/PermissionRequired",
+      code: "permission_required",
+      requestId: "r",
+      capability: { action: "fs:read", resource: "/a" },
+      tier: "sealed",
+      meta
+    }
+    expect(isPermissionError(input)).toBe(false)
+    expect(fromPlatformError(systemError({ _tag: "PermissionDenied", module: "m", method: "x", cause: input })))
+      .toEqual(Option.none())
+    expect(calls).toBe(0)
+  })
+
+  it.each([
+    {
+      _tag: "@smthrs/capability/PermissionRequired",
+      code: "permission_required",
+      requestId: "r",
+      runId: "run",
+      capability: { action: "fs:read", resource: "/a" },
+      tier: "sealed",
+      meta: { value: [null, true, 1] }
+    },
+    {
+      _tag: "@smthrs/capability/PermissionDenied",
+      code: "permission_denied",
+      capability: { action: "fs:read", resource: "/a" },
+      reason: "no"
+    },
+    {
+      _tag: "@smthrs/capability/GrantStoreError",
+      code: "journal_failed",
+      message: "disk full",
+      cause: new Error("disk")
+    }
+  ])("decodes $_tag into a yieldable schema instance", (input) => {
+    const decoded = Option.getOrThrow(decodePermissionError(input))
+    expect(Schema.is(PermissionError)(decoded)).toBe(true)
+    expect(decoded).toMatchObject(input)
+    expect(decoded).not.toBe(input)
+    const result = Effect.runSyncExit(Effect.gen(function*() {
+      yield* decoded
+    }))
+    expect(Exit.isFailure(result)).toBe(true)
+    if (Exit.isFailure(result)) expect(Cause.squash(result.cause)).toBe(decoded)
+  })
+
+  it("decodes foreign schema identities and their default Error message", () => {
+    class ForeignStoreError extends Schema.TaggedError<ForeignStoreError>()(
+      "@smthrs/capability/GrantStoreError",
+      GrantStoreError.fields
+    ) {}
+    const foreign = new ForeignStoreError({ code: "store_closed" })
+    expect(foreign instanceof GrantStoreError).toBe(false)
+    expect(Schema.is(GrantStoreError)(foreign)).toBe(true)
+    expect(isPermissionError(foreign)).toBe(true)
+    expect(Option.getOrThrow(fromPlatformError(systemError({
+      _tag: "PermissionDenied",
+      module: "foreign",
+      method: "x",
+      cause: foreign
+    })))).toBe(foreign)
+    expect(Schema.is(PermissionError)(Option.getOrThrow(decodePermissionError(foreign)))).toBe(true)
+    expect(Schema.is(PermissionDenied)(Option.getOrThrow(decodePermissionError(permissionDenied(capability, "no")))))
+      .toBe(true)
+  })
+
+  it("returns None when decoded metadata exceeds constructor limits", () => {
+    const input = {
+      _tag: "@smthrs/capability/PermissionRequired",
+      code: "permission_required",
+      requestId: "r",
+      capability: { action: "fs:read", resource: "/a" },
+      tier: "sealed",
+      meta: { value: "x".repeat(65_536) }
+    }
+    expect(isPermissionError(input)).toBe(true)
+    expect(decodePermissionError(input)).toEqual(Option.none())
+  })
+
   it("exports validators for rule effects and permission failures", () => {
     expect(Schema.is(RuleEffect)("allow")).toBe(true)
     expect(Schema.is(RuleEffect)("maybe")).toBe(false)
@@ -280,11 +499,17 @@ describe("the PlatformError projection", () => {
     expect(Option.getOrThrow(fromPlatformError(projected))).toBe(error)
   })
 
-  it("recovers nothing from a platform error the kernel did not raise", () => {
+  it("recovers nothing from unrelated platform reason tags", () => {
     const system: PlatformError = systemError({ _tag: "NotFound", module: "FileSystem", method: "readFile" })
     expect(fromPlatformError(system)).toStrictEqual(Option.none())
     expect(fromPlatformError(badArgument({ module: "FileSystem", method: "readFile" })))
       .toStrictEqual(Option.none())
+  })
+
+  it("recovers a complete foreign cause without establishing provenance", () => {
+    const cause = { _tag: "@smthrs/capability/GrantStoreError", code: "store_closed" }
+    const foreign = systemError({ _tag: "PermissionDenied", module: "foreign", method: "x", cause })
+    expect(Option.getOrThrow(fromPlatformError(foreign))).toBe(cause)
   })
 
   it("does not inspect the cause of a foreign system-error reason", () => {

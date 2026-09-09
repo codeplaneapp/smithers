@@ -1027,12 +1027,17 @@ const toHttpClientError: (options: {
   readonly error: PermissionError
 }) => HttpClientError
 
-const fromHttpClientError: (error: HttpClientError) => Option.Option<PermissionError>
+const fromHttpClientError: (error: HttpClientError) => Option.Option<PermissionErrorPayload>
 ```
 
 The projection and its inverse. The reason is always a `TransportError`,
 because the request did not leave the host; `description` carries
-`Permission.formatError` and `cause` carries the structured failure.
+`Permission.formatError` and `cause` carries the structured failure. Recovery
+returns the original cause as data-only `PermissionErrorPayload` when a
+`TransportError` cause passes `Permission.isPermissionError`. This validates
+structure, not origin; establish producer or request identity separately across
+a trust boundary. Import `decodePermissionError` from `@smthrs/capability`
+for a yieldable instance.
 
 ### HttpClient.makeNoop and layerNoop
 

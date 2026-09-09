@@ -1,5 +1,19 @@
 # @smthrs/capability
 
+## Unreleased
+
+- Fixed permission-error boundary validation to reject optional accessors and
+  inherited fields, and inspect metadata descriptors at every depth without
+  invoking getters. Cyclic metadata is rejected; shared JSON references remain
+  valid. Schema-identified grant-store errors retain their default empty message.
+- **Breaking.** `isPermissionError` and `fromPlatformError` now return the
+  data-only `PermissionErrorPayload` type. `formatError` accepts that payload.
+  Added `decodePermissionError` to construct yieldable error instances explicitly.
+  Kernel HTTP recovery uses the same payload type.
+- Corrected recovery documentation: valid foreign causes are accepted by
+  structure and reason tag. Producer or request identity requires a separate
+  check across a trust boundary.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Added

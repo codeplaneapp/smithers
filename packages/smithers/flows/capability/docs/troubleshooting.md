@@ -149,15 +149,17 @@ context a person needs to answer the request.
 
 ## `fromPlatformError` returns `Option.none()`
 
-**What happened.** The platform error was not produced by
-`Permission.toPlatformError`. It unwraps only a reason tagged
-`PermissionDenied`, and it validates the cause with the same refinement above,
-so a foreign system error whose `cause` merely looks like a permission failure
-is not unwrapped, and neither is a forged one missing a field.
+**What happened.** The reason tag is not `PermissionDenied`, or the cause
+failed `isPermissionError`. Recovery validates structure and the reason tag,
+not origin. A foreign error with a complete structural cause is accepted even
+if `toPlatformError` was never called.
 
 **What to change.** Make sure the guarded call is the one you think it is. If
 you are projecting failures yourself, go through `toPlatformError` so the
 reason tag and the structured cause both land where the recovery expects them.
+Across a trust boundary, establish producer or request identity separately.
+The recovered value is a data-only `PermissionErrorPayload`; use
+`decodePermissionError` when class or Effect operations are required.
 
 ## A log line ends in `…[truncated]`
 
