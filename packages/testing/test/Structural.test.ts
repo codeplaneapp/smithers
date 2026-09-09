@@ -13,6 +13,43 @@ const deeplyNested = (depth: number): Record<string, unknown> => {
 }
 
 describe("same", () => {
+  const cyclic: Record<string, unknown> = {}
+  cyclic.self = cyclic
+  const accessor = Object.defineProperty({}, "answer", { enumerable: true, get: () => 1 })
+  class Ticket {}
+  it.each([
+    ["undefined", undefined],
+    ["NaN", NaN],
+    ["positive infinity", Infinity],
+    ["negative infinity", -Infinity],
+    ["negative zero", -0],
+    ["bigint", 1n],
+    ["symbol", Symbol("marker")],
+    ["function", () => 1],
+    ["date", new Date(0)],
+    ["invalid date", new Date(NaN)],
+    ["regexp", /a/g],
+    ["map", new Map([["a", 1]])],
+    ["set", new Set([1])],
+    ["error", new Error("failure")],
+    ["foreign", new Ticket()],
+    ["accessor", accessor],
+    ["cycle", cyclic],
+    ["depth limit", deeplyNested(130)],
+    ["array hole", new Array(1)],
+    [
+      "opaque",
+      new Proxy({}, {
+        ownKeys: () => {
+          throw new Error("opaque")
+        }
+      })
+    ]
+  ])("separates %s from an ordinary record containing its markers", (_name, value) => {
+    const ordinary: unknown = JSON.parse(canonical(value).replaceAll("!{", "{"))
+    expect(same(value, ordinary)).toBe(false)
+  })
+
   it("separates the values Object.keys collapsed to an empty record", () => {
     expect(same(new Date(0), new Date(1))).toBe(false)
     expect(same(new Map([["a", 1]]), new Set([1]))).toBe(false)
@@ -57,6 +94,42 @@ describe("compare", () => {
 })
 
 describe("canonical", () => {
+  it("compares failed inspection by stable reference identity", () => {
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    const other = new Proxy({}, {
+      getPrototypeOf: () => {
+        throw new Error("opaque")
+      }
+    })
+    expect(canonical(revoked.proxy)).toContain("\"_tag\":\"Opaque\"")
+    expect(canonical(revoked.proxy)).toBe(canonical(revoked.proxy))
+    expect(same(revoked.proxy, other)).toBe(false)
+    expect(same([revoked.proxy], [revoked.proxy])).toBe(true)
+  })
+
+  it("separates holes, undefined, and accessor elements without reading inherited values", () => {
+    let reads = 0
+    const getter = () => {
+      reads++
+      throw new Error("must not run")
+    }
+    const left = Object.defineProperty([], "0", { get: getter })
+    const right = Object.defineProperty([], "0", { get: getter })
+    expect(same(left, right)).toBe(true)
+    expect(same(left, [undefined])).toBe(false)
+    expect(same(new Array(1), [])).toBe(false)
+    expect(same(new Array(1), [undefined])).toBe(false)
+    const inherited = Object.setPrototypeOf(
+      new Array(1),
+      Object.create(Array.prototype, {
+        0: { get: getter }
+      })
+    )
+    expect(canonical(inherited)).toBe(canonical(new Array(1)))
+    expect(reads).toBe(0)
+  })
+
   it("tags every value JSON cannot express instead of dropping it", () => {
     expect(canonical(undefined)).toContain("Undefined")
     expect(canonical(1n)).toContain("BigInt")
@@ -113,6 +186,45 @@ describe("canonical", () => {
 })
 
 describe("snapshot", () => {
+  it("passes failed proxy inspection through for the encoder to reject", () => {
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    expect(snapshot(revoked.proxy)).toBe(revoked.proxy)
+  })
+
+  it("preserves an own __proto__ data key without changing the prototype", () => {
+    const source = JSON.parse("{\"__proto__\":{\"polluted\":true},\"type\":\"object\"}")
+    const copied = snapshot(source)
+    expect(Object.hasOwn(copied, "__proto__")).toBe(true)
+    expect(Object.getPrototypeOf(copied)).toBe(Object.prototype)
+    expect(copied.polluted).toBeUndefined()
+    expect(copied.__proto__).toEqual({ polluted: true })
+    expect(copied.__proto__).not.toBe(source.__proto__)
+  })
+
+  it("preserves accessors and enumerability without reading them", () => {
+    let reads = 0
+    const source = Object.defineProperties({}, {
+      answer: {
+        enumerable: true,
+        get: () => {
+          reads++
+          throw new Error("must not run")
+        }
+      },
+      hidden: { value: { nested: 1 }, enumerable: false }
+    })
+    const copied = snapshot(source)
+    expect(reads).toBe(0)
+    expect(Object.getOwnPropertyDescriptor(copied, "answer")).toEqual(
+      Object.getOwnPropertyDescriptor(source, "answer")
+    )
+    expect(Object.keys(copied)).toEqual(["answer"])
+    expect(Object.getOwnPropertyDescriptor(copied, "hidden")!.value).not.toBe(
+      Object.getOwnPropertyDescriptor(source, "hidden")!.value
+    )
+  })
+
   it("deep-copies the plain spine", () => {
     const source = { a: { b: [1, { c: 2 }] } }
     const copied = snapshot(source)

@@ -419,25 +419,42 @@ const canonicalize = (value: unknown, path = "$", ancestors = new Set<object>(),
   if (value === null || typeof value === "string" || typeof value === "boolean") return value
   if (typeof value === "number") return Number.isFinite(value) ? value : invalid(path, "non-finite-number")
   if (depth >= maximumDepth) return invalid(path, "too-deep")
-  if (Array.isArray(value)) {
-    if (ancestors.has(value)) return invalid(path, "cycle")
-    ancestors.add(value)
-    const result = value.map((item, index) => canonicalize(item, `${path}[${index}]`, ancestors, depth + 1))
-    ancestors.delete(value)
-    return result
-  }
-  if (typeof value === "object" && value !== null) {
+  if (typeof value !== "object" || value === null) return invalid(path, "unsupported-type")
+  if (ancestors.has(value)) return invalid(path, "cycle")
+  ancestors.add(value)
+  try {
+    const array = Array.isArray(value)
     const prototype = Object.getPrototypeOf(value)
-    if (prototype !== Object.prototype && prototype !== null) return invalid(path, "non-plain-object")
-    if (ancestors.has(value)) return invalid(path, "cycle")
+    if (!array && prototype !== Object.prototype && prototype !== null) return invalid(path, "non-plain-object")
     if (Object.getOwnPropertySymbols(value).length > 0) return invalid(path, "symbol-key")
-    ancestors.add(value)
-    const result: Record<string, unknown> = {}
-    for (const key of Object.keys(value).sort(compare)) {
-      result[key] = canonicalize((value as Record<string, unknown>)[key], `${path}.${key}`, ancestors, depth + 1)
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    const field = (key: string, memberPath: string): unknown => {
+      const descriptor = descriptors[key]
+      if (descriptor === undefined || !("value" in descriptor)) return invalid(memberPath, "unsupported-type")
+      return canonicalize(descriptor.value, memberPath, ancestors, depth + 1)
     }
-    ancestors.delete(value)
+    if (array) {
+      const result: Array<unknown> = []
+      for (let index = 0; index < descriptors.length!.value; index++) {
+        result.push(field(String(index), `${path}[${index}]`))
+      }
+      return result
+    }
+    const result: Record<string, unknown> = {}
+    for (const key of Object.keys(descriptors).sort(compare)) {
+      if (!descriptors[key]!.enumerable) continue
+      Object.defineProperty(result, key, {
+        value: field(key, `${path}.${key}`),
+        enumerable: true,
+        writable: true,
+        configurable: true
+      })
+    }
     return result
+  } catch (error) {
+    if (error instanceof FixtureEncodingError) throw error
+    return invalid(path, "unsupported-type")
+  } finally {
+    ancestors.delete(value)
   }
-  return invalid(path, "unsupported-type")
 }

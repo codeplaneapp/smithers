@@ -507,9 +507,13 @@ are not the same journal.
 
 Values are compared through the shared canonical rendering, which distinguishes
 two different `Date`s, a `Map` from a `Set`, `-0` from `0`, `NaN` from
-`Infinity`, and two instances of the same class, and which reports a cycle
-rather than recursing into it. The rendering is total, so no journal value can
-throw out of the typed error channel `assertNoDivergence` declares.
+`Infinity`, and ordinary records from special-value markers. Record and array
+accessors compare by getter/setter identity without invocation. Cycles use
+markers. Sparse array holes differ from `undefined`. Objects at the 128-level
+depth limit or whose inspection throws compare by process-local reference
+identity. Value rendering does not throw; differing values fail through
+`assertNoDivergence` with `FixtureDivergenceError`. Entries must satisfy the
+`JournalEntryLike` data shape.
 
 ### Divergence.assertNoDivergence
 
@@ -1083,6 +1087,10 @@ The canonical JSON encoding of a request, and its replay identity. Object keys
 sort recursively, array order is retained, and non-JSON values are rejected
 with a typed `FixtureEncodingError` naming the offending path. A value nested
 more than 128 levels deep is rejected rather than overflowing the stack.
+Enumerable record accessors, array element accessors, sparse array holes, and
+failed object inspection are rejected with reason `unsupported-type`.
+Accessors are never invoked while encoding tool parameters. Own `__proto__`
+keys are preserved as data properties; non-enumerable record fields are ignored.
 
 It returns the canonical **encoding** rather than a fixed-length hash, despite
 the name. A fixture cache selects the recorded call to replay by this value, so

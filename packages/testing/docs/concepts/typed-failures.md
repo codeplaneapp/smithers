@@ -51,7 +51,9 @@ package:
 
 - The fixture encoder raises `FixtureEncodingError` with the `path` of the
   offending value and the `reason` it broke, rather than letting `JSON.stringify`
-  throw a bare `TypeError`.
+  throw a bare `TypeError`. Tool parameter accessors and sparse array holes
+  fail with `unsupported-type` without invoking getters. Snapshotting preserves
+  accessors for this validation rather than reading or dropping them.
 - Every polling loop is bounded, so exhaustion is a typed failure rather than a
   hang. `FlowEngineLike` gives a runtime 1000 scheduler passes to publish a
   result whose body has already exited, then fails typed. Conformance pins wait

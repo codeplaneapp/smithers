@@ -37,9 +37,11 @@ const entryIndex = (
  * not the same journal. Values are compared through the shared canonical
  * rendering, which distinguishes two different `Date`s, a `Map` from a `Set`,
  * `-0` from `0`, `NaN` from `Infinity`, and two instances of the same class,
- * and which reports a cycle rather than recursing into it. The rendering is
- * total, so no journal value can throw out of the typed error channel
- * {@link assertNoDivergence} declares.
+ * and ordinary records from special-value markers. Record and array accessors
+ * compare by getter/setter identity without invocation. Cycles use markers;
+ * objects at the depth limit or whose inspection throws compare by reference
+ * identity. Value rendering does not throw. Journal entries themselves must
+ * satisfy the {@link JournalEntryLike} data shape.
  *
  * @category assertions
  * @since 0.0.0

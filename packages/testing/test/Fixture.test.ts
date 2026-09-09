@@ -19,6 +19,78 @@ const call = (events: unknown): unknown => ({
 })
 
 describe("Fixture", () => {
+  it("ignores non-enumerable record properties instead of promoting them", () => {
+    const parameters = Object.defineProperty({ type: "object" }, "hidden", {
+      get: () => {
+        throw new Error("hidden accessor ran")
+      }
+    })
+    const input = request({ tools: [{ name: "schema", description: "schema", parameters }] })
+    expect(JSON.parse(canonicalRequestDigest(input)).tools[0].parameters).toEqual({ type: "object" })
+  })
+
+  it.each([
+    ["sparse array", () => new Array(1), "$.tools[0].parameters.value[0]"],
+    ["revoked proxy", () => {
+      const revoked = Proxy.revocable({}, {})
+      revoked.revoke()
+      return revoked.proxy
+    }, "$.tools[0].parameters.value"]
+  ])("rejects %s through the encoding error", (_name, make, path) => {
+    const input = request({ tools: [{ name: "schema", description: "schema", parameters: { value: make() } }] })
+    let failure: unknown
+    try {
+      canonicalRequestDigest(input)
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(FixtureEncodingError)
+    expect(failure).toMatchObject({ reason: "unsupported-type", path })
+  })
+
+  it.effect("round-trips an own __proto__ tool parameter through snapshot, digest, and decode", () =>
+    Effect.gen(function*() {
+      const parameters = JSON.parse("{\"type\":\"object\",\"__proto__\":{\"type\":\"string\"}}")
+      const input = request({ tools: [{ name: "schema", description: "schema", parameters }] })
+      const recorded = recordedRequest(input)
+      expect(Object.hasOwn(recorded.tools[0]!.parameters, "__proto__")).toBe(true)
+      const digest = canonicalRequestDigest(recorded)
+      const decoded = yield* decode({
+        calls: [{ request: JSON.parse(digest), model: input.modelId, events: [] }]
+      })
+      const restored = decoded.calls[0]!.request
+      expect(Object.hasOwn(restored.tools[0]!.parameters, "__proto__")).toBe(true)
+      expect(Object.getPrototypeOf(restored.tools[0]!.parameters)).toBe(Object.prototype)
+      expect(restored.tools[0]!.parameters).toEqual(parameters)
+      expect(canonicalRequestDigest(restored)).toBe(digest)
+    }))
+
+  it.each([false, true])("rejects a throwing accessor with a typed encoding error (array: %s)", (array) => {
+    let reads = 0
+    const value = Object.defineProperty(array ? [] : {}, array ? "0" : "answer", {
+      enumerable: true,
+      get: () => {
+        reads++
+        throw new Error("accessor ran")
+      }
+    })
+    const input = request({ tools: [{ name: "schema", description: "schema", parameters: { value } }] })
+    const recorded = recordedRequest(input)
+    expect(reads).toBe(0)
+    let failure: unknown
+    try {
+      canonicalRequestDigest(recorded)
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(FixtureEncodingError)
+    expect(failure).toMatchObject({
+      reason: "unsupported-type",
+      path: `$.tools[0].parameters.value${array ? "[0]" : ".answer"}`
+    })
+    expect(reads).toBe(0)
+  })
+
   it("carries toolChoice in the request digest", () => {
     expect(canonicalRequestDigest(request({ toolChoice: "none" })))
       .not.toBe(canonicalRequestDigest(request()))

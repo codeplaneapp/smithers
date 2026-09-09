@@ -57,6 +57,47 @@ describe("JournalAssertions", () => {
 })
 
 describe("Divergence", () => {
+  it("keeps failed proxy inspection in the declared divergence channel", async () => {
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    const assertion = assertNoDivergence(
+      [{ ...entries[0]!, value: revoked.proxy }],
+      [{ ...entries[0]!, value: {} }]
+    )
+    expect(Effect.isEffect(assertion)).toBe(true)
+    expect(await Effect.runPromise(Effect.flip(assertion))).toBeInstanceOf(FixtureDivergenceError)
+    await Effect.runPromise(assertNoDivergence(
+      [{ ...entries[0]!, value: revoked.proxy }],
+      [{ ...entries[0]!, value: revoked.proxy }]
+    ))
+  })
+
+  it("reports a throwing array accessor through the declared failure channel", async () => {
+    let reads = 0
+    const value = Object.defineProperty([], "0", {
+      enumerable: true,
+      get: () => {
+        reads++
+        throw new Error("array accessor escaped")
+      }
+    })
+    const assertion = assertNoDivergence([{ ...entries[0]!, value }], [{ ...entries[0]!, value: [1] }])
+    expect(Effect.isEffect(assertion)).toBe(true)
+    const error = await Effect.runPromise(Effect.flip(assertion))
+    expect(error).toBeInstanceOf(FixtureDivergenceError)
+    expect(error.field).toBe("value")
+    expect(reads).toBe(0)
+  })
+
+  it("detects a value changing from undefined to its ordinary tagged record", async () => {
+    const error = await Effect.runPromise(Effect.flip(assertNoDivergence(
+      [{ ...entries[0]!, value: undefined }],
+      [{ ...entries[0]!, value: { _tag: "Undefined" } }]
+    )))
+    expect(error).toBeInstanceOf(FixtureDivergenceError)
+    expect(error.field).toBe("value")
+  })
+
   it("attributes an outcome difference", () => {
     const actual = [...entries.slice(0, 2), { ...entries[2]!, outcome: "failed" as const }]
     expect(Option.getOrThrow(firstDivergence(entries, actual))).toEqual({

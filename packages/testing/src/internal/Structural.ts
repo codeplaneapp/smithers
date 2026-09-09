@@ -80,7 +80,7 @@ const member = (
 ): string =>
   "value" in descriptor
     ? render(descriptor.value, ancestors, depth)
-    : `{"_tag":"Accessor","get":${render(descriptor.get, ancestors, depth)},"set":${
+    : `!{"_tag":"Accessor","get":${render(descriptor.get, ancestors, depth)},"set":${
       render(descriptor.set, ancestors, depth)
     }}`
 
@@ -100,15 +100,38 @@ const record = (
 
 /** Distinguishes the numbers `JSON.stringify` collapses. */
 const number = (value: number): string => {
-  if (Number.isNaN(value)) return `{"_tag":"NaN"}`
-  if (value === Number.POSITIVE_INFINITY) return `{"_tag":"Infinity","sign":1}`
-  if (value === Number.NEGATIVE_INFINITY) return `{"_tag":"Infinity","sign":-1}`
+  if (Number.isNaN(value)) return `!{"_tag":"NaN"}`
+  if (value === Number.POSITIVE_INFINITY) return `!{"_tag":"Infinity","sign":1}`
+  if (value === Number.NEGATIVE_INFINITY) return `!{"_tag":"Infinity","sign":-1}`
   // `Object.is` separates the two zeros; `JSON.stringify` renders both as `0`.
-  return Object.is(value, -0) ? `{"_tag":"NegativeZero"}` : JSON.stringify(value)
+  return Object.is(value, -0) ? `!{"_tag":"NegativeZero"}` : JSON.stringify(value)
+}
+
+// An exclamation mark starts only internal markers; ordinary records, arrays,
+// and JSON scalars cannot produce it at a value boundary.
+const objectIdentities = new WeakMap<object, number>()
+let nextObjectIdentity = 0
+
+const objectIdentity = (value: object): number => {
+  const existing = objectIdentities.get(value)
+  if (existing !== undefined) return existing
+  const identity = nextObjectIdentity++
+  objectIdentities.set(value, identity)
+  return identity
 }
 
 const render = (value: unknown, ancestors: Set<object>, depth: number): string => {
-  if (value === undefined) return `{"_tag":"Undefined"}`
+  try {
+    return renderValue(value, ancestors, depth)
+  } catch {
+    // Proxies and exotic objects can throw even during descriptor/prototype
+    // inspection. Keep them comparable by reference without inspecting again.
+    return `!{"_tag":"Opaque","identity":${objectIdentity(value as object)}}`
+  }
+}
+
+const renderValue = (value: unknown, ancestors: Set<object>, depth: number): string => {
+  if (value === undefined) return `!{"_tag":"Undefined"}`
   if (value === null) return "null"
   switch (typeof value) {
     case "number":
@@ -117,37 +140,45 @@ const render = (value: unknown, ancestors: Set<object>, depth: number): string =
     case "boolean":
       return JSON.stringify(value)
     case "bigint":
-      return `{"_tag":"BigInt","value":${JSON.stringify(String(value))}}`
+      return `!{"_tag":"BigInt","value":${JSON.stringify(String(value))}}`
     case "symbol":
-      return `{"_tag":"Symbol","description":${JSON.stringify(value.description ?? null)},"identity":${
+      return `!{"_tag":"Symbol","description":${JSON.stringify(value.description ?? null)},"identity":${
         symbolIdentity(value)
       }}`
     case "function":
-      return `{"_tag":"Function","name":${JSON.stringify(value.name)},"identity":${functionIdentity(value)}}`
+      return `!{"_tag":"Function","name":${JSON.stringify(value.name)},"identity":${functionIdentity(value)}}`
   }
-  if (depth >= maximumDepth) return `{"_tag":"TooDeep"}`
+  if (depth >= maximumDepth) return `!{"_tag":"TooDeep","identity":${objectIdentity(value)}}`
   const object: object = value
   // A cycle is reported rather than followed. The unbounded recursion this
   // replaces threw `RangeError: Maximum call stack size exceeded` out of an
   // `Effect` declared to fail only with its own typed error.
-  if (ancestors.has(object)) return `{"_tag":"Circular"}`
+  if (ancestors.has(object)) return `!{"_tag":"Circular"}`
   ancestors.add(object)
   try {
-    if (Array.isArray(value)) return `[${value.map((item) => render(item, ancestors, depth + 1)).join(",")}]`
+    if (Array.isArray(value)) {
+      const descriptors: Record<string, PropertyDescriptor> = Object.getOwnPropertyDescriptors(value)
+      const items: Array<string> = []
+      for (let index = 0; index < descriptors.length!.value; index++) {
+        const descriptor = descriptors[index]
+        items.push(descriptor === undefined ? `!{"_tag":"Hole"}` : member(descriptor, ancestors, depth + 1))
+      }
+      return `[${items.join(",")}]`
+    }
     if (value instanceof Date) {
       const time = value.getTime()
-      return `{"_tag":"Date","value":${Number.isNaN(time) ? `"Invalid Date"` : String(time)}}`
+      return `!{"_tag":"Date","value":${Number.isNaN(time) ? `"Invalid Date"` : String(time)}}`
     }
-    if (value instanceof RegExp) return `{"_tag":"RegExp","value":${JSON.stringify(String(value))}}`
+    if (value instanceof RegExp) return `!{"_tag":"RegExp","value":${JSON.stringify(String(value))}}`
     if (value instanceof Map) {
       const entries = [...value].map(([key, item]) =>
         `[${render(key, ancestors, depth + 1)},${render(item, ancestors, depth + 1)}]`
       )
-      return `{"_tag":"Map","entries":[${[...entries].sort().join(",")}]}`
+      return `!{"_tag":"Map","entries":[${[...entries].sort().join(",")}]}`
     }
     if (value instanceof Set) {
       const items = [...value].map((item) => render(item, ancestors, depth + 1))
-      return `{"_tag":"Set","values":[${[...items].sort().join(",")}]}`
+      return `!{"_tag":"Set","values":[${[...items].sort().join(",")}]}`
     }
     if (value instanceof Error) {
       // `name` and `message` are the identity-bearing parts and are not own
@@ -155,7 +186,7 @@ const render = (value: unknown, ancestors: Set<object>, depth: number): string =
       // every construction, so including it would report a divergence between
       // two runs that failed identically.
       const { stack: _stack, ...own } = value as Error & Record<string, unknown>
-      return `{"_tag":"Error","name":${JSON.stringify(value.name)},"message":${
+      return `!{"_tag":"Error","name":${JSON.stringify(value.name)},"message":${
         JSON.stringify(value.message)
       },"fields":${record(own, Object.keys(own), ancestors, depth)}}`
     }
@@ -169,7 +200,7 @@ const render = (value: unknown, ancestors: Set<object>, depth: number): string =
     const name = typeof (prototype as { constructor?: { name?: unknown } })?.constructor?.name === "string"
       ? (prototype as { constructor: { name: string } }).constructor.name
       : "Object"
-    return `{"_tag":"Foreign","constructor":${JSON.stringify(name)},"fields":${
+    return `!{"_tag":"Foreign","constructor":${JSON.stringify(name)},"fields":${
       record(fields, Object.keys(fields), ancestors, depth)
     }}`
   } finally {
@@ -198,30 +229,36 @@ export const same = (left: unknown, right: unknown): boolean =>
   Object.is(left, right) || canonical(left) === canonical(right)
 
 const copy = (value: unknown, ancestors: Set<object>, depth: number): unknown => {
-  if (depth >= maximumDepth) return value
-  if (Array.isArray(value)) {
-    if (ancestors.has(value)) return value
-    ancestors.add(value)
-    const result = value.map((item) => copy(item, ancestors, depth + 1))
-    ancestors.delete(value)
-    return result
-  }
-  if (typeof value !== "object" || value === null) return value
-  const prototype: unknown = Object.getPrototypeOf(value)
-  // Anything that is not a plain record passes through by reference. A fixture
-  // cannot store it anyway, and `Fixture.canonicalize` must still see the
-  // original so it can reject it with the path that reached it.
-  if (prototype !== Object.prototype && prototype !== null) return value
+  if (depth >= maximumDepth || typeof value !== "object" || value === null) return value
   if (ancestors.has(value)) return value
   ancestors.add(value)
-  const result: Record<PropertyKey, unknown> = {}
-  // `Reflect.ownKeys`, not `Object.keys`: a symbol-keyed property must survive
-  // the copy so the encoder rejects it instead of silently dropping it.
-  for (const key of Reflect.ownKeys(value)) {
-    result[key] = copy((value as Record<PropertyKey, unknown>)[key], ancestors, depth + 1)
+  try {
+    const array = Array.isArray(value)
+    const prototype: unknown = Object.getPrototypeOf(value)
+    // Leave unsupported values for the fixture encoder to reject at their path.
+    if (!array && prototype !== Object.prototype && prototype !== null) return value
+    const result = array ? [] : {}
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    // Symbols and accessors must survive so the fixture encoder can reject
+    // them. Defining data properties also keeps __proto__ an ordinary own key.
+    for (const key of Reflect.ownKeys(descriptors)) {
+      const descriptor = descriptors[key as keyof typeof descriptors]!
+      Object.defineProperty(
+        result,
+        key,
+        "value" in descriptor
+          ? { ...descriptor, value: copy(descriptor.value, ancestors, depth + 1) }
+          : descriptor
+      )
+    }
+    return result
+  } catch {
+    // Reflective operations on a proxy may throw. Keep the original for the
+    // encoder's guarded inspection, as with other unsupported values.
+    return value
+  } finally {
+    ancestors.delete(value)
   }
-  ancestors.delete(value)
-  return result
 }
 
 /**
