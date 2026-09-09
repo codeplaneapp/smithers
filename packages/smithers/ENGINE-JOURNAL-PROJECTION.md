@@ -100,6 +100,46 @@ writes, lost local wakeups, newly linked children, and rewinds below an old curs
 `catchUp` and following serialize within one helper. Ordering across different
 native executions is observation order, not an invented global execution clock.
 
+## Host supervision
+
+`internal/EngineJournalSupervisor` is a private scoped composition helper. Its
+`make` accepts the already-materialized native journal, native RunStore and
+DurableEngineState, plus the control journal and ControlRuntime. Construct it
+outside admission transactions, wrap the existing ControlExecutor with `wrap`,
+and run `recover` in the same host scope. It adds no service tag, public package
+export, database, table, checkpoint, or executor protocol.
+
+Accepted launches durably record `control.engine.projection-started` before the
+wrapper returns. Pending or rejected launches record no observation. Following
+begins through the existing journal `whenCommitted` hook and a captured clean
+host context, so neither native reads nor background following inherit an open
+control transaction. A rolled-back admission starts no follower. At most one
+follower per root/generation runs in this host; a replacement generation stops
+its predecessor. Scope shutdown leaves incomplete observation available for
+restart instead of recording a false execution failure.
+
+Before copying any native event, the supervisor validates the actual native
+`agent/run` row, matching control `planId`, no native parent execution, and no
+recorded run-parent edges. Fork ancestry and copied input `runId` are not root
+identity. A missing row after acceptance is awaited; a control run that settles
+without a native row produces a visible gap. Foreign rows never disclose their
+events through a coincidentally equal control ID.
+
+The settled marker is written only after the projector sees the native terminal
+commit and drains its final events. Both markers carry
+`{ version: 1, executionId, generation }` and reuse deterministic producer IDs.
+Recovery includes terminal control/native rows with missing observation, checks
+native identity before paging control history, and skips already-settled current
+generations. Operational observation failures write a gap. Failure to persist
+the marker or gap is logged, while an executor's actual accepted launch remains
+accepted; observation failure does not reverse execution that already started.
+Restart can recover these roots without relying on a surviving started marker.
+
+This lifetime covers the authorized native root and its recorded children. A
+root-terminal marker does not assert that detached descendants have finished.
+The helper does not enforce shared cross-process execution budgets or replace
+workspace executor ownership.
+
 ## Validation
 
 Tests use real SQLite journal/store layers. They cover native outcome preservation,
@@ -112,3 +152,8 @@ Settlement coverage commits final evidence between the earlier page read and the
 terminal run-row read, so only the final drain can include that record. It also
 starts following before the native run row exists and verifies source transaction
 and generation failures remain visible without inventing a current generation.
+Supervisor tests use separate real SQLite journals and native stores for
+admission/commit ordering, rollback isolation, native terminal drain, missing and
+foreign roots, pending/rejected acceptance, restart after scope shutdown, terminal
+recovery without markers, generation changes, deduplication, and marker-write
+failure that preserves actual accepted execution.
