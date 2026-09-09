@@ -2,7 +2,6 @@ import { guideForwardAction } from "./navigation"
 import { useLiveQuery } from "@tanstack/react-db"
 import { useRef, useState, type ReactNode, type CSSProperties } from "react"
 import {
-  ArrowRight,
   BookOpen,
   Check,
   ChevronLeft,
@@ -10,9 +9,7 @@ import {
   GitPullRequest,
   History,
   Library,
-  Moon,
   Sparkles,
-  Sun,
   Volume2,
   VolumeX,
   X,
@@ -30,86 +27,22 @@ const WORDMARK = [
   "╚══════╝╚═╝     ╚═╝╚═╝╚═╝   ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝",
 ]
 const lessons = [
-  [
-    "",
-    "Hello. I’m Smithers.",
-    "Let me show how Smithers works",
-  ],
-  [
-    "A conversation",
-    "We can just talk.",
-    "I can speak to you normally like this, in a normal chat message. Whenever this soft glow appears, it means I’m controlling that part of your workspace.",
-  ],
-  [
-    "A gentle tap on the shoulder",
-    "I’ll keep you in the loop.",
-    "I can send you notifications from time to time, like this. You don’t need to watch every flow to know what’s happening.",
-  ],
-  [
-    "More than words",
-    "Sometimes, a little UI helps.",
-    "I can talk to you with UI widgets, too. Here’s a small form so I can get to know you. Everything here is optional.",
-  ],
-  [
-    "The thing that makes it all work",
-    "Everything begins with a flow.",
-    "But the coolest thing I can do is run flows. Flows are instructions that can be executed to get work done. Everything in this app is modeled as a flow.",
-  ],
-  [
-    "A very small flow",
-    "Let’s turn down the lights.",
-    "Some flows are simple, like changing from light mode to dark mode. Watch the whole workspace.",
-  ],
-  [
-    "And back again",
-    "A little daylight.",
-    "Or back to light mode. That’s a real change to your app, made through a flow. The same idea scales all the way up to building a feature.",
-  ],
-  [
-    "Always close by",
-    "A conversation, when you need it.",
-    "Your work gets the whole window. I’ll stay out of the way until you call me. Press ⌘K (or Ctrl K) to bring me back.",
-  ],
-  [
-    "Make this place your own",
-    "Let’s open the Library.",
-    "Plugins give this workspace its abilities. Start with the Library: a place to discover the flows and specialists you want to work with.",
-  ],
-  [
-    "Your first specialist",
-    "Meet the Librarian.",
-    "The Librarian learns a codebase and makes it easier for both of us to understand. Add it, and I’ll walk you through its first two background flows.",
-  ],
-  [
-    "Two things, quietly taking shape",
-    "Here’s what happens next.",
-    "On your codebase, the Librarian will ask to build a wiki and a mythical history in the background. You can inspect either run while you work. Let’s rehearse that in a small practice project.",
-  ],
-  [
-    "An idea you can touch",
-    "First, a quick proof of concept.",
-    "Before committing to an implementation, we try the idea. Here’s our little idea board. This prototype is disposable; what we learn is what we keep.",
-  ],
-  [
-    "Make it yours",
-    "Try a small change.",
-    "Change the heading below. You’ll see the prototype update immediately. When it feels right, we’ll carry your feedback into the real plan.",
-  ],
-  [
-    "From experiment to intention",
-    "A better story for the code.",
-    "We keep your feedback, discard the prototype code, and plan the implementation with hindsight. A logical Change groups the atomic changes. Mythical history puts stable foundations first.",
-  ],
-  [
-    "The last mile",
-    "From a Change to a pull request.",
-    "Implementation, review, and checks come first. When you say it feels right, cleanup turns the accepted work into append-only main history. Delivery can then open a real PR.",
-  ],
-  [
-    "Your story starts here",
-    "All right. What shall we make?",
-    "You’ve met flows, plugins, and the path from a quick idea to a reviewed change. I’ll sometimes suggest new flows that could help. You decide what to add.",
-  ],
+  "Hello. I’m Smithers. Let me show how Smithers works",
+  "I can speak to you normally like this, in a normal chat message. Whenever this soft glow appears, it means I’m controlling that part of your workspace.",
+  "I can send you notifications from time to time, like this. You don’t need to watch every flow to know what’s happening.",
+  "I can talk to you with UI widgets, too. Here’s a small form so I can get to know you. Everything here is optional.",
+  "But the coolest thing I can do is run flows. Flows are instructions that can be executed to get work done. Everything in this app is modeled as a flow.",
+  "Some flows are simple, like changing from light mode to dark mode. Watch the whole workspace.",
+  "Or back to light mode. That’s a real change to your app, made through a flow. The same idea scales all the way up to building a feature.",
+  "Your work gets the whole window. I’ll stay out of the way until you call me. Press ⌘K (or Ctrl K) to bring me back.",
+  "Plugins give this workspace its abilities. Start with the Library: a place to discover the flows and specialists you want to work with.",
+  "The Librarian learns a codebase and makes it easier for both of us to understand. Add it, and I’ll walk you through its first two background flows.",
+  "On your codebase, the Librarian will ask to build a wiki and a mythical history in the background. You can inspect either run while you work. Let’s rehearse that in a small practice project.",
+  "Before committing to an implementation, we try the idea. Here’s our little idea board. This prototype is disposable; what we learn is what we keep.",
+  "Change the heading below. You’ll see the prototype update immediately. When it feels right, we’ll carry your feedback into the real plan.",
+  "We keep your feedback, discard the prototype code, and plan the implementation with hindsight. A logical Change groups the atomic changes. Mythical history puts stable foundations first.",
+  "Implementation, review, and checks come first. When you say it feels right, cleanup turns the accepted work into append-only main history. Delivery can then open a real PR.",
+  "You’ve met flows, plugins, and the path from a quick idea to a reviewed change. I’ll sometimes suggest new flows that could help. You decide what to add.",
 ] as const
 
 /** An original, short opt-in interval; no autoplay or copyrighted game audio. */
@@ -147,7 +80,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const { data: toasts } = useLiveQuery(controller.store.collections.toasts)
   const guide = sessions[0]?.guide ?? initialGuide()
   const stage = guide.step
-  const [eyebrow, title, body] = lessons[stage]!
+  const body = lessons[stage]!
   const opener = useRef<HTMLButtonElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
   // Transient save acknowledgement only; field values and progression live in the store.
@@ -189,16 +122,19 @@ export function GuideShell({ children }: { children: ReactNode }) {
     if (!controller.runCommand(name)) controller.send(`/${name}`)
   }
   const runCommandNext = () => runCommandGuide("next")
-  const primary = (label: string, action = "next", icon: ReactNode = <ArrowRight size={16} />) => (
+  const keyHint = (keys = "↵ Enter") => (
+    <kbd className="guide-button-key" aria-hidden="true" title={keys === "Tab ↵" ? "Tab to this button, then press Enter" : undefined}>{keys}</kbd>
+  )
+  const primary = (label: string, action = "next") => (
     <button
       className="guide-primary"
       data-flow="onboarding.act"
       data-action={action}
-      aria-keyshortcuts={stage === 0 ? "Enter" : undefined}
+      aria-keyshortcuts="Enter ArrowRight"
       onClick={() => runCommandGuide(action)}
     >
       {label}
-      {stage === 0 ? <kbd className="guide-button-key" aria-hidden="true">↵ Enter</kbd> : icon}
+      {keyHint()}
     </button>
   )
   return (
@@ -273,18 +209,18 @@ export function GuideShell({ children }: { children: ReactNode }) {
           <span className="guide-section-label">YOUR PLUGINS</span>
           <button data-flow="flows" onClick={() => runCommandLive("flows")}>
             <Library size={17} />
-            Library
+            Library {keyHint("Tab ↵")}
             <span className="guide-plugin-dot" />
           </button>
           {guide.librarian && (
             <>
               <button data-flow="wiki" onClick={() => runCommandLive("wiki")}>
                 <BookOpen size={17} />
-                Wiki
+                Wiki {keyHint("Tab ↵")}
               </button>
               <button data-flow="history.show" onClick={() => runCommandLive("history.show")}>
                 <History size={17} />
-                Mythical history
+                Mythical history {keyHint("Tab ↵")}
               </button>
             </>
           )}
@@ -296,31 +232,14 @@ export function GuideShell({ children }: { children: ReactNode }) {
         </nav>
       )}
       <main className="guide-main" inert={guide.conversationOpen ? true : undefined}>
-        <div className="guide-chapter">
-          <span className="guide-chapter-line" />
-          {stage < 8
-            ? "MEET SMITHERS"
-            : stage < 11
-              ? "BUILD YOUR WORKSPACE"
-              : stage < 15
-                ? "MAKE YOUR FIRST CHANGE"
-                : "READY WHEN YOU ARE"}
-          <span className="guide-chapter-line" />
-        </div>
-        <section key={stage} className="guide-lesson" aria-labelledby="guide-title">
-          <div className="guide-sigil" aria-hidden="true">
-            <Sparkles size={22} strokeWidth={1.2} />
-          </div>
-          {eyebrow && <p className="guide-eyebrow">{eyebrow}</p>}
-          <h1 id="guide-title">{title}</h1>
+        <section key={stage} className="guide-lesson" aria-label={`Lesson ${stage + 1}`}>
           <div className="guide-dialogue smithers-control" data-controlled={stage < 7 || stage === 10}>
             <div className="guide-speaker">
               <span />
               SMITHERS
             </div>
             <p aria-live="polite" aria-atomic="true">
-              <span className="guide-accessible-text">{body}</span>
-              <span aria-hidden="true">{body.split(" ").map((word, index, words) => {
+              <span>{body.split(" ").map((word, index, words) => {
                 const pauses = words.slice(0, index).filter(part => /[.!?]$/.test(part)).length
                 return <span key={index} className="guide-word" style={{ "--word-delay": `${index * .065 + pauses * .35}s` } as CSSProperties}>{word}{" "}</span>
               })}</span>
@@ -331,7 +250,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 data-flow="onboarding.act"
                 onClick={() => runCommandGuide("notify")}
               >
-                Send me a notification <Sparkles size={14} />
+                Send me a notification {keyHint("Tab ↵")}
               </button>
             )}
           </div>
@@ -516,7 +435,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 </div>
                 <p className="guide-review-explanation">Review the direction you chose. You can go back and refine it before accepting this practice change.</p>
                 <button className="guide-text-button" data-flow="onboarding.act" onClick={() => runCommandGuide("request-changes")}>
-                  I’d like to change something <ChevronLeft size={14} />
+                  I’d like to change something {keyHint("Tab ↵")}
                 </button>
                 <small>Practice PR preview · nothing has been pushed or published.</small>
               </div>
@@ -527,7 +446,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               {guide.acceptedPracticeTitle && <p className="guide-review-accepted"><Check size={14} /> Practice accepted: “{guide.acceptedPracticeTitle}”</p>}
               <button className="guide-primary" data-flow="connect" onClick={() => runCommandLive("connect")}>
                 Choose a repository
-                <ArrowRight size={16} />
+                {keyHint("Tab ↵")}
               </button>
               <button
                 className="guide-secondary"
@@ -535,7 +454,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 onClick={() => runCommandLive("feature.prototype")}
               >
                 Start a real prototype
-                <Sparkles size={16} />
+                {keyHint("Tab ↵")}
               </button>
               <p>
                 Sign in when requested. Real runs show their actual progress and any missing setup in the
@@ -545,32 +464,33 @@ export function GuideShell({ children }: { children: ReactNode }) {
           )}
           <div className="guide-actions">
             {stage === 3 ? (
-              <button type="submit" form="guide-profile" className="guide-primary" data-flow="onboarding.act">
-                Continue, with or without answers <ArrowRight size={16} />
+              <button type="submit" form="guide-profile" aria-keyshortcuts="Enter ArrowRight" className="guide-primary" data-flow="onboarding.act">
+                Continue, with or without answers {keyHint()}
               </button>
             ) : stage === 5 ? (
-              primary("Run dark-mode flow", "dark", <Moon size={16} />)
+              primary("Run dark-mode flow", "dark")
             ) : stage === 6 ? (
-              primary("Bring back the light", "light", <Sun size={16} />)
+              primary("Bring back the light", "light")
             ) : stage === 7 ? (
               <button
                 ref={opener}
-                className="guide-key-button"
+                className="guide-primary"
+                aria-keyshortcuts="Meta+k Control+k Enter ArrowRight"
                 data-flow="onboarding.act"
                 onClick={runCommandOpen}
               >
-                <kbd>⌘</kbd>
-                <kbd>K</kbd>
                 <span>Call Smithers</span>
+                {keyHint("⌘ K")}
+                {keyHint()}
               </button>
             ) : stage === 8 ? (
-              primary("Install Library", "library", <Library size={16} />)
+              primary("Install Library", "library")
             ) : stage === 9 ? (
-              primary("Add Librarian", "librarian", <BookOpen size={16} />)
+              primary("Add Librarian", "librarian")
             ) : stage === 12 ? (
-              primary("Keep this direction", "revise", <Check size={16} />)
+              primary("Keep this direction", "revise")
             ) : stage === 14 ? (
-              primary("Accept practice change", "accept-practice", <Check size={16} />)
+              primary("Accept practice change", "accept-practice")
             ) : stage === 15 ? null : (
               primary(
                 stage === 0
@@ -591,24 +511,16 @@ export function GuideShell({ children }: { children: ReactNode }) {
             {stage > 0 && stage < 15 && (
               <button
                 className="guide-back"
+                aria-keyshortcuts="ArrowLeft"
                 data-flow="onboarding.act"
                 onClick={() => runCommandGuide("back")}
               >
                 <ChevronLeft size={13} />
-                Back
+                Back {keyHint("←")}
               </button>
             )}
           </div>
-          {stage > 0 && <p className="guide-key-hint">
-            <kbd>←</kbd> back <span>·</span> <kbd>→</kbd> or <kbd>enter</kbd>{" "}
-            {stage === 5 || stage === 6
-              ? "run flow"
-              : stage === 8 || stage === 9
-                ? "install"
-                : stage === 7 || stage === 15
-                  ? "call Smithers"
-                  : "continue"}
-          </p>}
+
         </section>
       </main>
       <footer className="guide-footer">
@@ -622,6 +534,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
         >
           {guide.sound ? <Volume2 size={15} /> : <VolumeX size={15} />}
           <span>Sound {guide.sound ? "on" : "off"}</span>
+          {keyHint("Tab ↵")}
         </button>
         <div className="guide-progress" aria-label={`Lesson ${stage + 1} of 16`}>
           {Array.from({ length: 16 }, (_, i) => (
@@ -631,12 +544,13 @@ export function GuideShell({ children }: { children: ReactNode }) {
         {stage >= 7 && (
           <button ref={opener} data-flow="onboarding.act" onClick={runCommandOpen}>
             <Command size={14} />
-            <span>K · Talk to Smithers</span>
+            <span>Talk to Smithers</span>
+            {keyHint("⌘ K")}
           </button>
         )}
         {stage === 15 && (
           <button data-flow="onboarding.act" onClick={() => runCommandGuide("restart")}>
-            Replay introduction
+            Replay introduction {keyHint("Tab ↵")}
           </button>
         )}
       </footer>
@@ -684,20 +598,19 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 Smithers
               </span>
               <button data-flow="onboarding.act" aria-label="Close conversation" onClick={runCommandClose}>
-                <span>esc</span>
+                {keyHint("Esc")}
                 <X size={16} />
               </button>
             </div>
             {stage === 8 && (
               <div className="guide-summoned">
-                <p>There you are. This is where we’ll talk.</p>
                 <p>
-                  Press Escape when you want your space back. Now let’s give your workspace its first
+                  There you are. This is where we’ll talk. Press Escape when you want your space back. Now let’s give your workspace its first
                   capability.
                 </p>
                 <button className="guide-primary" data-flow="onboarding.act" onClick={runCommandClose}>
                   Meet the Library
-                  <ArrowRight size={15} />
+                  {keyHint("Esc")}
                 </button>
               </div>
             )}
@@ -720,6 +633,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 onClick={() => controller.runCommandArgs("toast.dismiss", toast.id)}
               >
                 <X size={14} />
+                {keyHint("Tab ↵")}
               </button>
             </div>
           ))}

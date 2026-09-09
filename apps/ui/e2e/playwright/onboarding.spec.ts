@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test"
 
 test("onboarding persists a real interaction and hands off to the conversation", async ({ page }) => {
   await page.goto("/")
-  await expect(page.getByRole("heading", { name: "Hello. I’m Smithers." })).toBeVisible()
+  await expect(page.locator(".guide-dialogue > p")).toHaveText("Hello. I’m Smithers. Let me show how Smithers works")
+  await expect(page.locator(".guide-lesson h1, .guide-sigil")).toHaveCount(0)
   await expect(page.getByTestId("composer-input")).toBeHidden()
   await expect(page.getByRole("navigation", { name: "Installed capabilities" })).toBeHidden()
   await page.getByRole("button", { name: "Let’s begin" }).click()
@@ -57,7 +58,7 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toBeHidden()
   await page.reload()
-  await expect(page.getByRole("heading", { name: "All right. What shall we make?" })).toBeVisible()
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "15")
   await expect(page.getByTestId("composer-input")).toBeHidden()
 })
 
@@ -80,9 +81,16 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   await page.goto("/")
   const shell = page.locator(".guide-shell")
   await expect(shell).toHaveAttribute("data-step", "0")
+  await expect(page.locator(".guide-actions .guide-primary .guide-button-key")).toHaveText("↵ Enter")
   for (let step = 1; step <= 3; step++) {
     await page.keyboard.press(step % 2 ? "Enter" : "ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
+    await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
+    await expect(page.locator(".guide-dialogue > p")).toHaveCount(1)
+    if (step < 15) {
+      await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
+      await expect(page.locator(".guide-back .guide-button-key")).toHaveText("←")
+    }
   }
   await page.keyboard.press("Tab")
   await expect(page.getByLabel("How did you hear about Smithers?")).toBeFocused()
@@ -96,6 +104,12 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   for (let step = 5; step <= 7; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
+    await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
+    await expect(page.locator(".guide-dialogue > p")).toHaveCount(1)
+    if (step < 15) {
+      await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
+      await expect(page.locator(".guide-back .guide-button-key")).toHaveText("←")
+    }
   }
   await page.keyboard.press("ArrowLeft")
   await expect(shell).toHaveAttribute("data-step", "6")
@@ -108,6 +122,12 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   for (let step = 9; step <= 15; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
+    await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
+    await expect(page.locator(".guide-dialogue > p")).toHaveCount(1)
+    if (step < 15) {
+      await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
+      await expect(page.locator(".guide-back .guide-button-key")).toHaveText("←")
+    }
   }
   await page.keyboard.press("Control+k")
   await expect(page.getByTestId("composer-input")).toBeFocused()

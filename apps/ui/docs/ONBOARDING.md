@@ -58,13 +58,13 @@ Does the first second feel intentional? Is the glow understandable? Does the use
 
 ## Keyboard-first refinement (Will, September 8)
 
-Enter and Right Arrow perform the current lesson's primary action, including theme demonstrations and plugin activation. Left Arrow returns to the preceding lesson. A focused button keeps its own native Enter action; text fields retain arrow editing. Enter submits the optional widget without requiring an answer, and accepts the prototype heading. Command K / Control K summons the conversation, Escape closes it, and Tab traverses every interactive control. Repeated held navigation keys do not skip lessons. The lesson itself displays the shortcuts; mouse use is never required.
+Enter and Right Arrow perform the current lesson's primary action, including theme demonstrations and plugin activation. Left Arrow returns to the preceding lesson. A focused button keeps its own native Enter action; text fields retain arrow editing. Enter submits the optional widget without requiring an answer, and accepts the prototype heading. Command K / Control K summons the conversation, Escape closes it, and Tab traverses every interactive control. Repeated held navigation keys do not skip lessons. Every lesson displays shortcuts inline inside its buttons: Enter for the primary action, Left Arrow for Back, and Escape for closing the conversation. Secondary actions show Tab ↵: Tab to the button, then Enter. Mouse use is never required.
 
 Keyboard-only operation is a rule for the whole product. Required interactions must never depend on hovering, dragging, or pointer coordinates. All new workflows must have a tested keyboard completion path, including visible focus, native activation, text editing, and modal focus restoration.
 
 ## Opening pace refinement
 
-The wordmark still settles in about one second. The rest is deliberately slower: sigil at 1.15s, greeting at 1.9s, dialogue at 2.65s, words from 3.05s with pauses between sentences, and the invitation at 5.4s. Subsequent lesson messages reveal word by word. Layout reserves the full message space; assistive technology receives one complete message, not a stream of word announcements. Reduced motion is immediate. Enter/Right can advance immediately for a returning or fast reader.
+The wordmark still settles in about one second. The rest is deliberately slower: one introduction message at 2.65s, words from 3.05s with pauses between sentences, and the invitation at 5.4s. Subsequent lesson messages reveal word by word. Layout reserves the full message space; assistive technology receives one complete message, not a stream of word announcements. Reduced motion is immediate. Enter/Right can advance immediately for a returning or fast reader.
 
 ## Practice review
 
@@ -75,3 +75,5 @@ The PR lesson shows the original and proposed headings, offers a return to editi
 Onboarding runs automatically when this app has no saved guide progress. At any step, press Command K / Control K and type `/tut` to replay from the opening animation. The conversation input remains available during the Library introduction too.
 
 Use `/debug.reset` for a fresh-user test: sign out of active app sessions, clear all local app collections (including messages, optional answers, plugin activation, frames, workspace selections, cards and guide progress), restore the initial appearance, and reload into onboarding. The reset waits for persistence, fences late writes from the old session, and closes its subscriptions before reloading. Repository files and remote work are not deleted. Agent-triggered resets require confirmation; typing the command yourself performs the requested reset.
+
+The opening message is “Hello. I’m Smithers. Let me show how Smithers works”. Every lesson uses the same minimal structure: one Smithers message, its interactive example when needed, and buttons with inline key hints. No separate greeting headings, eyebrows, decorative top icons, or chapter labels. Message text appears once in the DOM, with the same accessible text animating visually.
