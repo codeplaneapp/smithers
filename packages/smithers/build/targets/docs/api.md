@@ -80,6 +80,23 @@ grants before creating output directories; each sandbox renderer revalidates
 before emitting its mounts or profile. The workspace must remain stable until
 the operating system consumes those paths.
 
+Native sandbox reads start from an allowlist: declared inputs (including their
+resolved symlink targets), declared write directories, private temporary
+storage, and enumerated system and runtime paths. Linux uses an empty
+bubblewrap root; macOS denies host file reads before adding grants. Both
+supply a private `HOME`. Credential locations in the real home (`.aws`, `.ssh`,
+`.gnupg`, `.azure`, `.kube`, `.docker`, `.config/gcloud`, `.config/gh`, `.npmrc`,
+`.netrc`, `.git-credentials`) are masked under broader grants. Explicit
+`externalReads` can admit individual host files, including credentials.
+
+The runtime set includes `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/nix/store`,
+`/opt/homebrew`, macOS system libraries, dyld caches and developer tools, and
+specific loader, TLS, DNS and timezone configuration files. Resolved Node/Bun
+executables, their sibling `lib/node_modules`, and the default Corepack binary
+cache are readable when present. Other host toolchains, caches and configuration
+require `externalReads`; changing `PATH`, `COREPACK_HOME` or another environment
+variable does not grant filesystem access.
+
 `SafeFs` is the confined filesystem seam: no-follow reads, bounded sizes, and
 one meaning for absent. Directory listings recheck workspace confinement and
 device/inode identity after enumeration, refusing entries if the directory was

@@ -1,11 +1,11 @@
 /**
- * The sandbox contract, platform by platform, without spawning anything.
+ * The sandbox contract, platform by platform.
  *
- * Every mechanism's argv is built from a plan and a fake host, so the Linux
- * argv is checked on macOS and the seatbelt profile on Linux. Real enforcement
- * is proven end to end in `@smthrs/build-cli`'s sandbox suites, which run the
- * host's own mechanism.
+ * Fake hosts check Linux argv on macOS and seatbelt profiles on Linux. A
+ * native enforcement probe verifies credential denial and explicit grants
+ * using only synthetic files; broader end-to-end suites live in @smthrs/build-cli.
  */
+import { spawnSync } from "node:child_process"
 import * as NodeFs from "node:fs"
 import * as NodeOs from "node:os"
 import * as NodePath from "node:path"
@@ -456,12 +456,179 @@ describe("plan", () => {
   })
 })
 
+describe("native host read confinement", () => {
+  it.each(["linux", "darwin"] as const)("closes undeclared host credentials on %s", (platform) => {
+    const { base, workspaceRoot, outside, facts } = writeFixture()
+    try {
+      const credential = NodePath.join(outside, ".aws/credentials")
+      NodeFs.mkdirSync(NodePath.dirname(credential))
+      NodeFs.writeFileSync(credential, "synthetic-secret")
+      const native = { ...facts, platform }
+      const render = (externalReads: ReadonlyArray<string>) => {
+        const result = ExecSandbox.plan(
+          { policy: {}, reads: [], writes: [], externalReads },
+          { workspaceRoot, cwd: workspaceRoot, tmp: NodePath.join(workspaceRoot, ".tmp") },
+          native
+        )
+        if (result === undefined || ExecSandbox.isUnenforceable(result)) throw new Error("expected a plan")
+        return platform === "linux"
+          ? ExecSandbox.bubblewrap(result, ["/bin/cat", credential], native).join(" ")
+          : ExecSandbox.seatbelt(result, native)
+      }
+      const closed = render([])
+      const coversCredential = (path: string) =>
+        credential === path || credential.startsWith(path.replace(/\/$/, "") + "/")
+      if (platform === "linux") {
+        // Inspect every bind, so a new broad grant cannot silently reopen the fixture.
+        const mounts = [...closed.matchAll(/--(?:ro-bind|bind)(?:-try)? (\S+) (\S+)/g)]
+        expect(mounts.some((match) => coversCredential(match[1]!))).toBe(false)
+        expect(closed).not.toContain("--ro-bind / / ")
+        expect(closed).not.toContain(`--ro-bind ${outside}`)
+        expect(render([credential])).toContain(`--ro-bind ${credential} ${credential}`)
+      } else {
+        expect(closed).toContain("(deny file-read*)")
+        const grants = [...closed.matchAll(/\(allow file-read\* ((?:\((?:subpath|literal) "[^"]*"\) *)+)\)/g)]
+        for (const grant of grants) {
+          const subpaths = [...grant[1]!.matchAll(/\(subpath "([^"]*)"\)/g)]
+          expect(subpaths.some((match) => coversCredential(match[1]!))).toBe(false)
+        }
+        expect(closed).not.toContain(`(subpath "${outside}")`)
+        expect(render([credential])).toContain(`(allow file-read* (subpath "${credential}"))`)
+      }
+    } finally {
+      NodeFs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it("masks home credentials inside runtime grants and restores only explicit external reads", () => {
+    const home = "/usr/local/dev"
+    const ssh = `${home}/.ssh`
+    const key = `${ssh}/key`
+    const npmrc = `${home}/.npmrc`
+    const facts: ExecSandbox.Host = {
+      ...host("linux", { bwrap: "/usr/bin/bwrap", node: `${home}/bin/node`, bun: "/custom/bun" }, [
+        key,
+        npmrc,
+        `${home}/bin/node`,
+        "/custom/bun"
+      ], ["/usr", ssh, `${home}/lib/node_modules`]),
+      home
+    }
+    const result = planned(facts, { reads: [], writes: [], writeFiles: [], externalReads: [key] })
+    const argv = ExecSandbox.bubblewrap(result, ["true"], facts).join(" ")
+    expect(argv).toContain("--ro-bind /usr /usr")
+    expect(argv).toContain(`--tmpfs ${ssh} --ro-bind ${key} ${key} --remount-ro ${ssh}`)
+    expect(argv).toContain(`--ro-bind /dev/null ${npmrc}`)
+    expect(argv).toContain("--ro-bind /custom/bun /custom/bun")
+    expect(argv).not.toContain("--ro-bind /custom /custom")
+    const broad = ExecSandbox.bubblewrap(planned(facts, { externalReads: [ssh] }), ["true"], facts).join(" ")
+    expect(broad).toContain(`--ro-bind ${ssh} ${ssh}`)
+    expect(broad).not.toContain(`--tmpfs ${ssh}`)
+    const profile = ExecSandbox.seatbelt(
+      { ...result, mechanism: { _tag: "seatbelt", executable: "sandbox-exec" } },
+      facts
+    )
+    const deny = profile.indexOf("(deny file-read* (subpath")
+    expect(profile.indexOf("(allow file-read* (subpath \"/usr\")")).toBeLessThan(deny)
+    expect(profile).toContain(`(subpath "${ssh}")`)
+    expect(profile.endsWith(`(allow file-read* (subpath "${key}"))`)).toBe(true)
+  })
+
+  it("resolves runtime aliases without admitting their parent or unrelated install files", () => {
+    const facts: ExecSandbox.Host = {
+      ...host("linux", { bwrap: "/usr/bin/bwrap", node: "/tools/node", bun: "/tools/bun" }, [
+        "/tools/node",
+        "/tools/bun",
+        "/installed/bin/node",
+        "/installed/bin/bun"
+      ], ["/installed/lib/node_modules", "/home/dev/.cache/node/corepack"]),
+      home: "/home/dev",
+      realpath: (path) =>
+        path === "/tools/node" ? "/installed/bin/node" : path === "/tools/bun" ? "/installed/bin/bun" : path
+    }
+    const argv = ExecSandbox.bubblewrap(planned(facts), ["true"], facts).join(" ")
+    for (
+      const path of [
+        "/tools/node",
+        "/tools/bun",
+        "/installed/bin/node",
+        "/installed/bin/bun",
+        "/installed/lib/node_modules",
+        "/home/dev/.cache/node/corepack"
+      ]
+    ) {
+      expect(argv).toContain(`--ro-bind ${path} ${path}`)
+    }
+    expect(argv).not.toContain("--ro-bind /installed /installed")
+    expect(argv).not.toContain("--ro-bind /home/dev /home/dev")
+    const unresolved = ExecSandbox.bubblewrap(planned(facts, { writes: [], writeFiles: [] }), ["true"], {
+      ...facts,
+      realpath: undefined
+    }).join(" ")
+    expect(unresolved).toContain("--ro-bind /tools/node /tools/node")
+  })
+
+  it.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
+    "enforces default denial and explicit external reads with the native kernel sandbox",
+    () => {
+      const { base, workspaceRoot, outside } = writeFixture()
+      try {
+        const credential = NodePath.join(outside, ".aws/credentials")
+        NodeFs.mkdirSync(NodePath.dirname(credential))
+        NodeFs.writeFileSync(credential, "synthetic-secret")
+        const tmp = NodePath.join(workspaceRoot, ".tmp")
+        NodeFs.mkdirSync(NodePath.join(tmp, "home"), { recursive: true })
+        const run = (
+          externalReads: ReadonlyArray<string>,
+          broadHome = false,
+          command: ReadonlyArray<string> = ["/bin/cat", credential]
+        ) => {
+          const result = ExecSandbox.plan(
+            { policy: {}, reads: broadHome ? ["."] : [], writes: [], externalReads },
+            { workspaceRoot: broadHome ? outside : workspaceRoot, cwd: workspaceRoot, tmp },
+            { ...ExecSandbox.host(), home: outside }
+          )
+          if (result === undefined || ExecSandbox.isUnenforceable(result)) throw new Error("native sandbox unavailable")
+          const wrapped = ExecSandbox.wrap(result, command, {}, {
+            ...ExecSandbox.host(),
+            home: outside
+          })
+          return spawnSync(wrapped.argv[0]!, wrapped.argv.slice(1), {
+            encoding: "utf8",
+            timeout: 10_000,
+            env: { ...process.env, ...wrapped.env }
+          })
+        }
+        const runtime = run([], false, [process.execPath, "-e", "process.stdout.write(\"runtime-ok\")"])
+        expect(runtime.error).toBeUndefined()
+        expect(runtime.status, runtime.stderr).toBe(0)
+        expect(runtime.stdout).toBe("runtime-ok")
+        const allowed = run([credential])
+        expect(allowed.error).toBeUndefined()
+        expect(allowed.status, allowed.stderr).toBe(0)
+        expect(allowed.stdout).toBe("synthetic-secret")
+        const denied = run([])
+        expect(denied.error).toBeUndefined()
+        expect(denied.status, denied.stderr).toBe(1)
+        expect(denied.stdout).not.toContain("synthetic-secret")
+        const masked = run([], true)
+        expect(masked.error).toBeUndefined()
+        expect(masked.status, masked.stderr).toBe(1)
+        expect(masked.stdout).not.toContain("synthetic-secret")
+      } finally {
+        NodeFs.rmSync(base, { recursive: true, force: true })
+      }
+    }
+  )
+})
+
 describe("bubblewrap argv", () => {
-  it("binds the root read-only, shadows the workspace, binds the declared set, and remounts read-only last", () => {
+  it("starts with an empty root, shadows the workspace, binds the declared set, and remounts read-only last", () => {
     const argv = ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"], linux)
     const text = argv.join(" ")
     expect(argv[0]).toBe("/usr/bin/bwrap")
-    expect(text).toContain("--ro-bind / /")
+    expect(text).toContain("--tmpfs / ")
+    expect(text).not.toContain("--ro-bind / /")
     expect(text).toContain("--tmpfs /work/ws")
     expect(text).toContain("--ro-bind /work/ws/src/a.ts /work/ws/src/a.ts")
     expect(text).toContain("--bind /work/ws/dist /work/ws/dist")
@@ -513,7 +680,8 @@ describe("bubblewrap argv", () => {
     const argv = ExecSandbox.bubblewrap(rootWrite, ["true"], linux)
     const text = argv.join(" ")
     expect(text).toContain("--bind /work/ws /work/ws")
-    expect(text).not.toContain("--remount-ro")
+    expect(text).not.toContain("--remount-ro /work/ws")
+    expect(text).toContain("--remount-ro / --chdir")
     // A write below the root keeps the tmpfs at the root re-closed.
     const nested = ExecSandbox.bubblewrap(planned(linux), ["true"], linux).join(" ")
     expect(nested).toContain("--remount-ro /work/ws")
@@ -781,6 +949,7 @@ describe("every mechanism renders the same text on any host", () => {
         "(allow file-write* (subpath \"/dev\") (subpath \"/work/ws/out\") (subpath \"/work/ws/dist\")" +
         " (subpath \"/work/ws/.flows/sandbox/run1\"))" +
         "(deny file-write* (subpath \"/work/ws/.flows/cache\"))" +
+        "(deny file-read*)(allow file-read* (literal \"/\") (subpath \"/dev\"))" +
         "(deny file-read* (subpath \"/work/ws\"))" +
         "(allow file-read-metadata (subpath \"/work/ws\"))" +
         "(allow file-read* (literal \"/work/ws\") (literal \"/work/ws/.flows\") (literal \"/work/ws/.flows/sandbox\")" +
@@ -792,8 +961,7 @@ describe("every mechanism renders the same text on any host", () => {
   it("emits the bubblewrap argv verbatim", () => {
     expect(ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"], linux)).toEqual([
       "/usr/bin/bwrap",
-      "--ro-bind",
-      "/",
+      "--tmpfs",
       "/",
       "--dev",
       "/dev",
@@ -807,6 +975,8 @@ describe("every mechanism renders the same text on any host", () => {
       "/tmp/cache",
       "--tmpfs",
       "/work/ws",
+      "--dir",
+      "/work/ws/pkg",
       "--ro-bind",
       "/work/ws/src/a.ts",
       "/work/ws/src/a.ts",
@@ -821,6 +991,8 @@ describe("every mechanism renders the same text on any host", () => {
       "/work/ws/dist",
       "--remount-ro",
       "/work/ws",
+      "--remount-ro",
+      "/",
       "--chdir",
       "/work/ws/pkg",
       "--unshare-all",

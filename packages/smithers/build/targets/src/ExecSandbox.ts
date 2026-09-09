@@ -10,19 +10,14 @@
  *
  * Three mechanisms, one contract:
  *
- * - Linux: bubblewrap. The host root is bind-mounted read-only, a tmpfs covers
- *   the workspace, declared reads are bound read-only at their own paths,
- *   declared writes read-write, the tmpfs is remounted read-only, and the
- *   network namespace is unshared unless the policy opens it. A loopback-only
- *   request is refused because bubblewrap cannot admit the host loopback
- *   interface without granting the whole host network.
- * - macOS: seatbelt (`sandbox-exec`). Reads under the workspace are denied
- *   except the declared set (ancestor directories stay listable), writes are
- *   denied except the declared set and a private tmp, and the network is
- *   denied except what the policy opens. The operating system and the
- *   toolchain outside the workspace stay readable; that is where the dynamic
- *   loader and the interpreters live, and denying them kills every process
- *   before it prints a byte.
+ * - Linux: bubblewrap. An empty root contains only enumerated system/runtime
+ *   paths and declared reads and writes. The workspace and root are remounted
+ *   read-only after mounting grants. A private tmp supplies HOME. The network
+ *   namespace is unshared unless explicitly opened; loopback-only is refused.
+ * - macOS: seatbelt (`sandbox-exec`). Host reads are denied except enumerated
+ *   system/runtime paths, declared inputs, external reads, writes and private
+ *   tmp. Host credential locations are re-closed under broad grants. Writes
+ *   and network access are denied except what the policy opens.
  * - Docker: `docker run` with a read-only root, declared reads mounted
  *   read-only at their host paths, declared writes read-write, `--network
  *   none` unless the policy opens it. The image supplies the toolchain. It is
@@ -109,6 +104,8 @@ export interface Request {
  */
 export interface Host {
   readonly platform: NodeJS.Platform
+  /** The real host home, used to mask credentials and locate runtime caches. */
+  readonly home?: string | undefined
   /** Resolves an executable name on `PATH` to an absolute path, or nothing. */
   readonly executable: (name: string) => string | undefined
   /** Whether a host path exists. */
@@ -217,8 +214,8 @@ export interface Plan {
    * bytes the host sees, which is what declaring the read asked for. Docker
    * mounts them for the same reason: the image supplies everything outside
    * the workspace, and these paths are on the host. Seatbelt leaves the host
-   * filesystem in place and needs no second spelling. The request's own
-   * `externalReads` land here too.
+   * filesystem in place but must grant the resolved spelling too. The
+   * request's own `externalReads` land here too.
    */
   readonly externalReads: ReadonlyArray<string>
   /** A host directory the run may scribble in; created by the caller, removed after. */
@@ -262,6 +259,7 @@ export const host = (env: Readonly<Record<string, string | undefined>> = process
   const extensions = platform === "win32" ? (env["PATHEXT"] ?? ".EXE;.CMD;.BAT").split(";") : [""]
   return {
     platform,
+    home: NodeOs.homedir(),
     executable: (name) => {
       if (NodePath.isAbsolute(name)) return isExecutable(name) ? name : undefined
       for (const entry of entries) {
@@ -576,12 +574,8 @@ export const plan = (
     return insideRoot(root, absolute) ? absolute : undefined
   }
   const declared: Array<string> = []
-  // A declared read that is a link out of the workspace is admitted at both
-  // spellings: the path the tool opens, and the place the bytes live. Only
-  // bubblewrap renders the second one, because only bubblewrap hides the
-  // host's `/tmp` (the scratch tree's `node_modules` points back at the real
-  // workspace, and a fixture workspace under `os.tmpdir()` points nowhere
-  // else); seatbelt and docker leave the host filesystem in place.
+  // A declared link grants its target as well: native read allowlists and
+  // Docker's image filesystem otherwise hide bytes outside the workspace.
   const externalReads: Array<string> = []
   for (const relative of request.reads) {
     const absolute = anchor(relative)
@@ -678,7 +672,8 @@ const corepackHome = (env: Readonly<Record<string, string | undefined>>, home: s
  * `COREPACK_HOME` is the one host cache kept: it holds the package-manager
  * program a corepack shim execs, the run may only read it (the mechanisms
  * deny writes outside the workspace), and without it a confined `pnpm` is a
- * shim with nothing to run.
+ * shim with nothing to run. A non-default cache location requires an explicit
+ * `externalReads` grant; preserving the variable does not grant access.
  *
  * @category rendering
  * @since 0.1.0
@@ -700,13 +695,77 @@ export const environment = (
   }
 }
 
+/** The fixed runtime surface, never the host root, home, PATH, or arbitrary env paths. */
+const runtimeReads = (hostFacts: Host): ReadonlyArray<string> => {
+  const paths = [
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/nix/store",
+    "/opt/homebrew",
+    "/System/Library",
+    "/System/Volumes/Preboot/Cryptexes/OS",
+    "/private/var/db/dyld",
+    "/Library/Apple",
+    "/Library/Developer",
+    "/Applications/Xcode.app/Contents/Developer",
+    "/etc/ld.so.cache",
+    "/etc/ld.so.conf",
+    "/etc/ld.so.conf.d",
+    "/etc/localtime",
+    "/etc/ssl",
+    "/etc/hosts",
+    "/etc/resolv.conf",
+    "/etc/nsswitch.conf"
+  ]
+  if (hostFacts.home !== undefined) paths.push(NodePath.join(hostFacts.home, ".cache/node/corepack"))
+  for (const name of ["node", "bun"]) {
+    const executable = hostFacts.executable(name)
+    if (executable !== undefined) {
+      paths.push(executable)
+      const real = hostFacts.realpath?.(executable) ?? executable
+      paths.push(real)
+      // Node distributions keep npm/corepack here; never grant the install
+      // prefix itself, which can be the real home for a custom installation.
+      paths.push(NodePath.resolve(NodePath.dirname(real), "../lib/node_modules"))
+    }
+  }
+  const present = paths.filter((path) => hostFacts.exists(path))
+  return collapse(present.flatMap((path) => [path, hostFacts.realpath?.(path) ?? path]))
+}
+
+/** Credentials remain closed even when a workspace or runtime grant contains the home. */
+const credentialPaths = (hostFacts: Host): ReadonlyArray<string> => {
+  const home = hostFacts.home
+  if (home === undefined) return []
+  return collapse([
+    ".aws",
+    ".ssh",
+    ".gnupg",
+    ".azure",
+    ".kube",
+    ".docker",
+    ".config/gcloud",
+    ".config/gh",
+    ".npmrc",
+    ".netrc",
+    ".git-credentials"
+  ].flatMap((relative) => {
+    const path = NodePath.join(home, relative)
+    return [path, hostFacts.realpath?.(path) ?? path]
+  }))
+}
+
 /**
  * The bubblewrap argv for a plan.
  *
  * Order matters: bubblewrap applies operations in argument order, so the
- * read-only root goes first, the workspace tmpfs shadows it, declared paths
- * are bound on top, re-closed subtrees are bound read-only over their writable
- * parents, and the tmpfs is remounted read-only last so an undeclared write
+ * empty root goes first, runtime paths are bound, the workspace tmpfs shadows
+ * any broad runtime grant, declared paths are bound on top, and re-closed
+ * subtrees are bound read-only over their writable parents. The tmpfs is
+ * remounted read-only last so an undeclared write
  * under the workspace fails with `EROFS` instead of vanishing into the tmpfs.
  *
  * @category rendering
@@ -722,9 +781,12 @@ export const bubblewrap = (
   const home = "/tmp/home"
   const out: Array<string> = [
     confinement.mechanism.executable,
-    "--ro-bind",
-    "/",
-    "/",
+    "--tmpfs",
+    "/"
+  ]
+  const runtime = runtimeReads(hostFacts)
+  for (const read of runtime) out.push("--ro-bind", read, read)
+  out.push(
     "--dev",
     "/dev",
     "--proc",
@@ -736,8 +798,10 @@ export const bubblewrap = (
     "--dir",
     "/tmp/cache",
     "--tmpfs",
-    confinement.workspaceRoot
-  ]
+    confinement.workspaceRoot,
+    "--dir",
+    confinement.cwd
+  )
   // The target of a link that leaves the workspace is bound first, so the
   // link a declared read then binds resolves to the same bytes the host sees
   // even when `/tmp` above the target has just become a private tmpfs.
@@ -749,12 +813,27 @@ export const bubblewrap = (
       out.push("--ro-bind-try", closed, closed)
     }
   }
+  const granted = [...runtime, ...confinement.reads, ...confinement.writes, ...confinement.externalReads]
+  for (const path of credentialPaths(hostFacts)) {
+    if (!hostFacts.exists(path) || !granted.some((parent) => insideRoot(parent, path))) continue
+    // An explicit external read can name a credential or a file inside it.
+    // Mask first, then restore only those explicit paths below the mask.
+    if (confinement.externalReads.some((parent) => insideRoot(parent, path))) continue
+    const directory = hostFacts.isDirectory(path)
+    if (directory) out.push("--tmpfs", path)
+    else out.push("--ro-bind", "/dev/null", path)
+    for (const read of confinement.externalReads) {
+      if (insideRoot(path, read)) out.push("--ro-bind", read, read)
+    }
+    if (directory) out.push("--remount-ro", path)
+  }
   // `--remount-ro` acts on the mount at that exact path. When the root itself
   // is a declared write (a declared output file at the top level opens its
   // parent), that mount is the writable bind, and remounting it would deny
   // every write the declaration admitted; the tmpfs it replaced needs no
   // re-closing.
   if (!confinement.writes.includes(confinement.workspaceRoot)) out.push("--remount-ro", confinement.workspaceRoot)
+  out.push("--remount-ro", "/")
   out.push("--chdir", confinement.cwd, "--unshare-all", "--new-session", "--die-with-parent")
   // Bubblewrap cannot expose only the host loopback interface. Planning
   // refuses that posture on Linux, so only an explicit full-network opening
@@ -787,11 +866,10 @@ const ancestors = (root: string, paths: ReadonlyArray<string>): ReadonlyArray<st
 /**
  * The seatbelt profile for a plan.
  *
- * Later rules win, so the profile opens everything, closes the network and
- * the writes, closes reads under the workspace, then reopens exactly the
- * declared set. Reads outside the workspace stay open: the loader, the
- * interpreters, and the package manager live there, and the workspace tree is
- * what the content key covers.
+ * File reads start closed, then enumerated runtime paths and declared sets
+ * are opened. The workspace is re-closed before its grants so a workspace
+ * under a runtime root does not inherit the broad runtime grant. Credentials
+ * are re-closed before explicit external reads, which can opt into them.
  *
  * @category rendering
  * @since 0.1.0
@@ -818,6 +896,9 @@ export const seatbelt = (confinement: Plan, hostFacts: Host = host()): string =>
   if (confinement.readOnly.length > 0) {
     lines.push(`(deny file-write* ${confinement.readOnly.map((path) => `(subpath ${sbpl(path)})`).join(" ")})`)
   }
+  lines.push("(deny file-read*)", "(allow file-read* (literal \"/\") (subpath \"/dev\"))")
+  const runtime = runtimeReads(hostFacts)
+  if (runtime.length > 0) lines.push(`(allow file-read* ${runtime.map((path) => `(subpath ${sbpl(path)})`).join(" ")})`)
   const readable = [...confinement.reads, ...confinement.writes, confinement.tmp]
   const listable = ancestors(
     confinement.workspaceRoot,
@@ -832,6 +913,13 @@ export const seatbelt = (confinement: Plan, hostFacts: Host = host()): string =>
   )
   if (confinement.readDenies.length > 0) {
     lines.push(`(deny file-read* ${confinement.readDenies.map((path) => `(subpath ${sbpl(path)})`).join(" ")})`)
+  }
+  const credentials = credentialPaths(hostFacts)
+  if (credentials.length > 0) {
+    lines.push(`(deny file-read* ${credentials.map((path) => `(subpath ${sbpl(path)})`).join(" ")})`)
+  }
+  if (confinement.externalReads.length > 0) {
+    lines.push(`(allow file-read* ${confinement.externalReads.map((path) => `(subpath ${sbpl(path)})`).join(" ")})`)
   }
   return lines.join("")
 }
