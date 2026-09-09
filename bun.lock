@@ -2401,6 +2401,7 @@
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/canonical": "1.0.0-rc.0",
+        "@smthrs/core": "1.0.0-rc.0",
         "@smthrs/crypto": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/keys": "1.0.0-rc.0",

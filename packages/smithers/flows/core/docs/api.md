@@ -471,6 +471,22 @@ nonce. Capture data must be finite, inert, plain data; anything else raises a
 compared structurally, so aliasing is not identity. Capture composes: capturing
 an already-captured function nests the two capture sets.
 
+### Node.functionIdentity
+
+```ts
+const functionIdentity: (operation: unknown) => {
+  readonly _tag: "FunctionIdentity"
+  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4"
+  readonly digest: string
+}
+```
+
+Returns the same identity recorded by node combinators. Captured operations
+use their original source and all nested capture sets. Uncaptured operations
+receive process-local, per-function entropy. Non-functions throw a `TypeError`.
+`@smthrs/plan/Node` shares this implementation and recognizes the same captured
+wrappers.
+
 ### Node.within
 
 ```ts

@@ -5,9 +5,10 @@ import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
  * `cwd` anchors every emitted tool run in this package directory.
  */
 import { Smithers } from "@smthrs/targets"
+import { Package as corePackage } from "../core/PACKAGE.ts"
 
 const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheckTypeScriptPackage({
-  deps: [],
+  deps: [corePackage.lib],
   cwd: "packages/smithers/flows/plan"
 })
 

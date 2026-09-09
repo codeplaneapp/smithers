@@ -24,6 +24,7 @@
  * @since 0.1.0
  */
 import { isRecord } from "@smthrs/canonical/Record"
+import * as CoreNode from "@smthrs/core/Node"
 import { digestSync } from "@smthrs/crypto"
 import { identity } from "effect/Function"
 import type * as Pipeable from "effect/Pipeable"
@@ -239,145 +240,13 @@ export interface FunctionIdentity {
   readonly digest: string
 }
 
-/** @private */
-const CapturedTypeId = Symbol.for("@smthrs/plan/Node/CapturedFunction")
-
-/** @private */
-interface CapturedMetadata {
-  readonly source: string
-  readonly captures: string
-}
-
-/** @private */
-type CapturedFunction = { readonly [CapturedTypeId]?: CapturedMetadata }
-
-const ephemeralIdentities = new WeakMap<object, string>()
-let ephemeralOrdinal = 0
-let ephemeralNonce: string | undefined
-
 /**
- * Returns the process-local nonce, seeding it on first use.
- *
- * The seed is deliberately lazy. Cloudflare Workers rejects any script that
- * calls `crypto.getRandomValues` while the module evaluates, with upload error
- * 10021, so reading entropy at module scope would stop every bundle containing
- * this package from deploying.
- *
- * @private
- */
-const nonce = (): string => {
-  if (ephemeralNonce === undefined) {
-    const bytes = new Uint8Array(16)
-    globalThis.crypto.getRandomValues(bytes)
-    ephemeralNonce = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
-  }
-  return ephemeralNonce
-}
-
-/** @private */
-const captureError = (path: string, reason: string): TypeError =>
-  new TypeError(`Node.capture: capture at ${path} ${reason}; captures must be finite, inert data`)
-
-/** The maximum member nesting accepted in a declared capture. @private */
-const captureDepthLimit = 256
-
-/** @private */
-const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<object>, depth: number): string => {
-  if (depth > captureDepthLimit) throw captureError(path, `exceeds maximum depth ${captureDepthLimit}`)
-  if (input === null) return "null"
-  switch (typeof input) {
-    case "boolean":
-      return input ? "true" : "false"
-    case "number":
-      if (!Number.isFinite(input)) throw captureError(path, "is not finite")
-      return Object.is(input, -0) ? "[\"number\",\"-0\"]" : `["number",${JSON.stringify(input)}]`
-    case "string":
-      return `["string",${JSON.stringify(input)}]`
-    case "undefined":
-    case "bigint":
-    case "symbol":
-    case "function":
-      throw captureError(path, `has unsupported type ${typeof input}`)
-  }
-
-  if (ancestors.has(input)) throw captureError(path, "is cyclic")
-  const prototype = Object.getPrototypeOf(input)
-  if (!Array.isArray(input) && prototype !== Object.prototype && prototype !== null) {
-    throw captureError(path, "has a non-plain prototype")
-  }
-  ancestors.add(input)
-  try {
-    if (Array.isArray(input)) {
-      const descriptors = Object.getOwnPropertyDescriptors(input)
-      for (const key of Reflect.ownKeys(descriptors)) {
-        if (key === "length") continue
-        if (typeof key === "symbol" || !/^(0|[1-9]\d*)$/.test(key)) {
-          throw captureError(path, `has unsupported array key ${String(key)}`)
-        }
-      }
-      const items: Array<string> = []
-      for (let index = 0; index < input.length; index++) {
-        const descriptor = descriptors[String(index)]
-        if (descriptor === undefined) throw captureError(`${path}[${index}]`, "is an array hole")
-        if (!("value" in descriptor)) throw captureError(`${path}[${index}]`, "is an accessor")
-        items.push(canonicalCapture(descriptor.value, `${path}[${index}]`, ancestors, depth + 1))
-      }
-      return `["array",[${items.join(",")}]]`
-    }
-    const members = Object.getOwnPropertyDescriptors(input)
-    const keys = Reflect.ownKeys(members)
-    const symbol = keys.find((key) => typeof key === "symbol")
-    if (symbol !== undefined) throw captureError(path, `has symbol key ${String(symbol)}`)
-    const encoded = (keys as Array<string>).sort().map((key) => {
-      const descriptor = members[key]!
-      if (!("value" in descriptor)) throw captureError(`${path}.${key}`, "is an accessor")
-      return `${JSON.stringify(key)}:${canonicalCapture(descriptor.value, `${path}.${key}`, ancestors, depth + 1)}`
-    })
-    return `["object",{${encoded.join(",")}}]`
-  } finally {
-    ancestors.delete(input)
-  }
-}
-
-/** @private */
-const freezeCapture = (input: unknown, seen: WeakSet<object>): void => {
-  if (typeof input !== "object" || input === null || seen.has(input)) return
-  seen.add(input)
-  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(input))) {
-    // canonicalCapture already bounded this graph, so freezing cannot recurse
-    // beyond captureDepthLimit.
-    /* v8 ignore else -- canonicalCapture rejects every accessor before freezing starts */
-    if ("value" in descriptor) freezeCapture(descriptor.value, seen)
-  }
-  Object.freeze(input)
-}
-
-/**
- * Brands an operation with every inert value it closes over. Capture members
- * may be nested through at most 256 levels.
+ * Uses core's canonical captures, nested metadata, and freezing contract.
  *
  * @since 0.1.0
  * @private
- * @slop
  */
-export const capture = <Args extends ReadonlyArray<unknown>, A>(
-  captures: Readonly<Record<string, unknown>>,
-  operation: (...args: Args) => A
-): (...args: Args) => A => {
-  const source = Function.prototype.toString.call(operation)
-  const canonical = canonicalCapture(captures, "$", new WeakSet(), 0)
-  freezeCapture(captures, new WeakSet())
-  const wrapped = function(this: unknown, ...args: ReadonlyArray<unknown>): unknown {
-    return Reflect.apply(operation, this, args)
-  }
-  Object.defineProperty(wrapped, CapturedTypeId, {
-    configurable: false,
-    enumerable: false,
-    value: { source, captures: canonical } satisfies CapturedMetadata,
-    writable: false
-  })
-  return wrapped as (...args: Args) => A
-}
+export const capture = CoreNode.capture
 
 /**
  * The serializable form of a planned value embedded in an AST value or
@@ -656,21 +525,7 @@ export const value = (
  * @private
  * @slop
  */
-export const functionIdentity = (operation: unknown): FunctionIdentity => {
-  if (typeof operation !== "function") throw new TypeError("function identity requires a function")
-  const metadata = (operation as CapturedFunction)[CapturedTypeId]
-  const source = metadata?.source ?? Function.prototype.toString.call(operation)
-  let ephemeral = ephemeralIdentities.get(operation)
-  if (metadata === undefined && ephemeral === undefined) {
-    ephemeral = `${nonce()}:${ephemeralOrdinal++}`
-    ephemeralIdentities.set(operation, ephemeral)
-  }
-  return {
-    _tag: "FunctionIdentity",
-    algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v4",
-    digest: digestSync(metadata === undefined ? `${source}\0${ephemeral}` : `${source}\0${metadata.captures}`)
-  }
-}
+export const functionIdentity: (operation: unknown) => FunctionIdentity = CoreNode.functionIdentity
 
 /**
  * The pipeable wrapper around an AST.

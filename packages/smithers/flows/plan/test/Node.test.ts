@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
+import * as CoreNode from "@smthrs/core/Node"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
@@ -673,6 +674,46 @@ describe("internal/node call factories", () => {
     expect(() => nested.threshold.value++).toThrow(TypeError)
   })
 
+  it("preserves inner function identity when captures are nested", () => {
+    const make = (offset: number) => Node.capture({ offset }, (value: number) => value + offset)
+    const one = Node.capture({ outer: true }, make(1))
+    const two = Node.capture({ outer: true }, make(999))
+
+    expect(one(1)).toBe(2)
+    expect(two(1)).toBe(1000)
+    expect(Node.functionIdentity(one)).not.toEqual(Node.functionIdentity(two))
+    expect(Node.functionIdentity(one)).toEqual(Node.functionIdentity(Node.capture({ outer: true }, make(1))))
+    expect(Node.functionIdentity(one)).not.toEqual(Node.functionIdentity(Node.capture({ outer: false }, make(1))))
+  })
+
+  it("shares captured and raw function identities with core", () => {
+    const operation = (value: number) => value + 1
+    const coreIdentity = (fn: (value: number) => number) => {
+      const ast = CoreNode.map(CoreNode.succeed(1), fn).ast
+      if (ast._tag !== "Map") throw new Error("expected Map")
+      expect(CoreNode.functionIdentity(fn)).toEqual(ast.mapper)
+      return ast.mapper
+    }
+    const plan = Node.capture({ offset: 1 }, operation)
+    const core = CoreNode.capture({ offset: 1 }, operation)
+    expect(Node.functionIdentity(plan)).toEqual(coreIdentity(core))
+    expect(Node.functionIdentity(Node.capture({ outer: true }, plan))).toEqual(
+      coreIdentity(CoreNode.capture({ outer: true }, core))
+    )
+    expect(Node.functionIdentity(core)).toEqual(coreIdentity(core))
+    expect(coreIdentity(plan)).toEqual(Node.functionIdentity(plan))
+    expect(Node.functionIdentity(operation)).toEqual(coreIdentity(operation))
+    expect(Node.functionIdentity(Node.capture({ outer: true }, core))).toEqual(
+      coreIdentity(CoreNode.capture({ outer: true }, plan))
+    )
+  })
+
+  it("rejects non-function capture operations explicitly", () => {
+    expect(() => Node.capture({}, null as unknown as () => void)).toThrow(
+      new TypeError("Node.capture requires a function operation")
+    )
+  })
+
   it("canonicalizes capture records without erasing observable values", () => {
     const operation = (value: number) => value
     expect(Node.functionIdentity(Node.capture({ a: 1, b: 2 }, operation))).toEqual(
@@ -740,7 +781,7 @@ describe("internal/node call factories", () => {
     expect(error).toBeInstanceOf(TypeError)
     expect(error).not.toBeInstanceOf(RangeError)
     expect((error as TypeError).message).toBe(
-      `Node.capture: capture at $${".next".repeat(257)} exceeds maximum depth 256; ` +
+      `Node.capture: capture at $${".next".repeat(257)} exceeds the maximum capture depth of 256; ` +
         "captures must be finite, inert data"
     )
   })
@@ -750,7 +791,7 @@ describe("internal/node call factories", () => {
     expect(error).toBeInstanceOf(TypeError)
     expect(error).not.toBeInstanceOf(RangeError)
     expect((error as TypeError).message).toBe(
-      `Node.capture: capture at $${".next".repeat(257)} exceeds maximum depth 256; ` +
+      `Node.capture: capture at $${".next".repeat(257)} exceeds the maximum capture depth of 256; ` +
         "captures must be finite, inert data"
     )
   })

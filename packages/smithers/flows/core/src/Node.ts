@@ -90,6 +90,15 @@ export const capture = <Args extends ReadonlyArray<unknown>, A>(
 ): (...args: Args) => A => internal.capture(captures, operation)
 
 /**
+ * Identifies an operation by its source and declared captures, or by
+ * process-local entropy when its captures are undeclared.
+ *
+ * @category utilities
+ * @since 1.0.0
+ */
+export const functionIdentity: typeof internal.functionIdentity = internal.functionIdentity
+
+/**
  * Extracts the success type of a `Node`.
  *
  * @category utility types

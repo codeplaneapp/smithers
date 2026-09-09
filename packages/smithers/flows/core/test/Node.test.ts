@@ -234,6 +234,7 @@ describe("Node", () => {
     expect(identity(one.node)).toEqual(identity(same.node))
     expect(identity(one.node)).not.toEqual(identity(two.node))
     expect(identity(one.node).algorithm).toBe("sha256-source-captures/v4")
+    expect(Node.functionIdentity(one.operation)).toEqual(identity(one.node))
     expect(Object.isFrozen(one.captures)).toBe(true)
     expect(Object.isFrozen(one.captures.nested)).toBe(true)
     expect(() => Node.capture({ value: Number.NaN }, () => undefined)).toThrow(/is not finite/)

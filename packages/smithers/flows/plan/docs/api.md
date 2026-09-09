@@ -840,6 +840,8 @@ const capture: <Args extends ReadonlyArray<unknown>, A>(
 
 Declares the inert values a plan-time function closes over, which gives that function deterministic identity instead of process-local entropy. The capture record is canonicalized into function identity and deeply frozen immediately. Unsupported values, accessors, exotic prototypes, symbols, cycles, and member nesting beyond 256 levels throw a `TypeError` naming the path, instead of producing an identity that cannot describe the function's behavior.
 
+Plan uses the capture and function-identity implementation from `@smthrs/core/Node`. Capturing an already-captured function preserves its original source and folds both capture sets into the identity. Wrappers can be captured and identified interchangeably by either package. A non-function operation throws `TypeError("Node.capture requires a function operation")`.
+
 ### Node.plannedReference
 
 ```ts
