@@ -1,13 +1,20 @@
 /**
  * Stream a response directly through the model package.
  *
- * `ask` accepts a question, model ID, compatible endpoint, and API key. It
+ * `ask` accepts a question, model ID, compatible endpoint, and redacted API key. It
  * constructs a route, calls `Model.stream`, and collects response text. This
  * isolates model transport from the agent's cell loop and structured completion
  * protocol.
  *
- * Running the file directly uses its command-line arguments and contacts the
- * selected endpoint. The defaults target a local model server.
+ * Usage: `node examples/src/15-model-layer-smoke.ts [modelId] [baseUrl]`.
+ * Running the file directly contacts the selected endpoint. The defaults are
+ * `qwen2.5-coder:1.5b` and `http://localhost:11434`.
+ *
+ * Supply credentials through `SMITHERS_EXAMPLE_API_KEY` in the environment,
+ * populated by your secret manager or a hidden shell prompt. The key is wrapped
+ * in `Redacted` as it is read and defaults to the non-secret value `local` when
+ * unset. Positional keys are rejected. The regression tests use a local HTTP
+ * fixture and require no provider credentials.
  *
  * @since 0.1.0
  */
@@ -41,9 +48,9 @@ export const executorLayer = RequestExecutor.layer.pipe(
  * @category constructors
  * @since 0.1.0
  */
-export const ask = (question: string, modelId: string, baseUrl: string, apiKey: string) =>
+export const ask = (question: string, modelId: string, baseUrl: string, apiKey: Redacted.Redacted<string>) =>
   Effect.gen(function*() {
-    const routeConfig = yield* Effect.fromResult(Route.openaiChatCompatible({ id: "smoke", baseUrl, apiKey: Redacted.make(apiKey) }))
+    const routeConfig = yield* Effect.fromResult(Route.openaiChatCompatible({ id: "smoke", baseUrl, apiKey }))
     const model = yield* Route.toModel(routeConfig)
     const request = ModelRequest.make({
       modelId,
@@ -64,14 +71,21 @@ export const ask = (question: string, modelId: string, baseUrl: string, apiKey: 
   }).pipe(Effect.provide(executorLayer))
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , modelId = "qwen2.5-coder:1.5b", baseUrl = "http://localhost:11434", apiKey = "local"] = process.argv
-  Effect.runPromise(ask("What is the capital of France? Answer in one word.", modelId, baseUrl, apiKey)).then(
-    (answer) => {
-      console.log("ANSWER:", answer)
-    },
-    (error) => {
-      console.error("FAILED:", error)
-      process.exitCode = 1
-    }
-  )
+  if (process.argv.length > 4) {
+    console.error("API keys must not be passed as positional arguments. Set SMITHERS_EXAMPLE_API_KEY in the environment.")
+    console.error("Usage: node examples/src/15-model-layer-smoke.ts [modelId] [baseUrl]")
+    process.exitCode = 1
+  } else {
+    const [, , modelId = "qwen2.5-coder:1.5b", baseUrl = "http://localhost:11434"] = process.argv
+    const apiKey = Redacted.make(process.env.SMITHERS_EXAMPLE_API_KEY ?? "local")
+    Effect.runPromise(ask("What is the capital of France? Answer in one word.", modelId, baseUrl, apiKey)).then(
+      (answer) => {
+        console.log("ANSWER:", answer)
+      },
+      (error) => {
+        console.error("FAILED:", error)
+        process.exitCode = 1
+      }
+    )
+  }
 }
