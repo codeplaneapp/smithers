@@ -236,26 +236,6 @@ export interface ScaffoldIo {
   readonly remove?: (path: string) => Promise<void>
 }
 
-const directorySyncUnsupported = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL", "ENOSYS"])
-
-/** Flushes one directory entry where the host exposes a portable descriptor. */
-const syncDirectory = async (path: string): Promise<void> => {
-  if (process.platform === "win32") return
-  const handle = await Fs.open(path, "r")
-  let primary: unknown
-  try {
-    await handle.sync()
-  } catch (cause) {
-    if (!directorySyncUnsupported.has(SafeFs.errorCode(cause) ?? "")) primary = cause
-  }
-  try {
-    await handle.close()
-  } catch (cause) {
-    primary ??= cause
-  }
-  if (primary !== undefined) throw primary
-}
-
 /** Creates a workspace directory one component at a time without following links. */
 const ensureDirectory = async (root: string, relative: string): Promise<string> => {
   let current = root
@@ -274,7 +254,7 @@ const ensureDirectory = async (root: string, relative: string): Promise<string> 
       } catch (mkdirCause) {
         if (SafeFs.errorCode(mkdirCause) !== "EEXIST") throw mkdirCause
       }
-      if (created) await syncDirectory(parent)
+      if (created) await SafeFs.syncDirectory(parent)
       stats = await Fs.lstat(candidate)
     }
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
@@ -347,11 +327,11 @@ export const scaffold = (
           await write(root, { path: `${temporaryRelative}/${relative}`, contents }, signal)
           files.push(`${created}/${relative}`)
         }
-        await syncDirectory(temporary)
+        await SafeFs.syncDirectory(temporary)
         if (!await absent(destination)) throw new Error(`${created} already exists; scaffolding never overwrites`)
         await rename(temporary, destination)
         published = true
-        await syncDirectory(parent)
+        await SafeFs.syncDirectory(parent)
       } catch (cause) {
         primary = cause
       }

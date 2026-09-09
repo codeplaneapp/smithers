@@ -1,17 +1,23 @@
 import { existsSync, readFileSync } from "node:fs"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import * as NodePath from "node:path"
 import { fileURLToPath } from "node:url"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { deploy, resolveDeployOptions } from "./deploy.ts"
-import { redactAlchemyState } from "./redact-state.ts"
+import { defaultStateDirectory, redactAlchemyState } from "./redact-state.ts"
+import { acquireStateOwnership } from "./state-ownership.ts"
 
 const infraRoot = NodePath.resolve(fileURLToPath(new URL("..", import.meta.url).href))
 
 let directory: string
 
 const script = (name: string): string => NodePath.join(directory, `${name}.mjs`)
+
+/** A state directory under the fixture, so no test touches the real deployment state. */
+const stateDirectory = (name = "state"): string => NodePath.join(directory, name)
+
+const lockFileIn = (state: string): string => NodePath.join(state, ".smithers-state-owner.lock")
 
 const write = (name: string, body: string): Promise<void> =>
   writeFile(NodePath.join(directory, `${name}.mjs`), body, "utf8")
@@ -32,7 +38,9 @@ const withIsolatedSignals = async <A>(run: () => Promise<A>): Promise<A> => {
 }
 
 beforeAll(async () => {
-  directory = await mkdtemp(NodePath.join(tmpdir(), "smithers-deploy-"))
+  // Redaction refuses a state root reached through a link, and the macOS
+  // temporary directory is one, so the fixture is its resolved path.
+  directory = await realpath(await mkdtemp(NodePath.join(tmpdir(), "smithers-deploy-")))
   await write("exit-zero", "process.exit(0)\n")
   await write("exit-seven", "process.exit(7)\n")
   // The wrapper spawns [cli, "deploy", "alchemy.run.ts", ...args], so the
@@ -96,6 +104,7 @@ describe("deploy wrapper", () => {
           running = deploy([marker], {
             cli: script("exiting-leader"),
             cwd: directory,
+            stateDirectory: stateDirectory(),
             escalationDelayMs: mode === "second-signal" ? 10_000 : 300,
             redact: async () => {
               ticksAtRedaction = readFileSync(`${marker}.tick`, "utf8")
@@ -148,7 +157,9 @@ describe("deploy wrapper", () => {
     expect(resolved.cli).toBe(NodePath.join(infraRoot, "node_modules", "alchemy", "bin", "cli.js"))
     expect(existsSync(resolved.cli)).toBe(true)
     expect(resolved.cwd).toBe(infraRoot)
+    expect(resolved.stateDirectory).toBe(defaultStateDirectory)
     expect(resolved.redact).toBe(redactAlchemyState)
+    expect(resolveDeployOptions({ stateDirectory: "state" }).stateDirectory).toBe("state")
     expect(resolved.escalationDelayMs).toBe(10_000)
     expect(resolveDeployOptions({ cli: "cli", cwd: "cwd", escalationDelayMs: 1 }).escalationDelayMs).toBe(1)
   })
@@ -156,7 +167,7 @@ describe("deploy wrapper", () => {
   it("reports a command that ended on a signal of its own", async () => {
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
     try {
-      const options = { cli: script("self-signal"), cwd: directory, redact: async () => 0 }
+      const options = { cli: script("self-signal"), cwd: directory, stateDirectory: stateDirectory(), redact: async () => 0 }
 
       // 128 + SIGHUP for a termination signal the wrapper maps, and the
       // generic failure code for one it does not.
@@ -176,6 +187,7 @@ describe("deploy wrapper", () => {
       const code = await deploy([], {
         cli: script("exit-zero"),
         cwd: `${directory}\u0000`,
+        stateDirectory: stateDirectory(),
         redact: async () => (redactions += 1, 0)
       })
 
@@ -199,6 +211,7 @@ describe("deploy wrapper", () => {
         const running = deploy([marker], {
           cli: script("ignores-sigterm"),
           cwd: directory,
+          stateDirectory: stateDirectory(),
           escalationDelayMs: 10_000,
           redact: async () => 0
         })
@@ -225,6 +238,7 @@ describe("deploy wrapper", () => {
         deploy([], {
           cli: script("exit-zero"),
           cwd: directory,
+          stateDirectory: stateDirectory(),
           redact: async () => {
             // The command is over, so there is nothing to forward the signal
             // to; the wrapper still reports it once cleanup completes.
@@ -246,23 +260,36 @@ describe("deploy wrapper", () => {
     let redactions = 0
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    const kill = vi.spyOn(process, "kill")
     try {
       const code = await withIsolatedSignals(() => {
-        const running = deploy([], {
+        const originalOn = process.on.bind(process)
+        const on = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
+          const registered = originalOn(event, listener)
+          if (event === "SIGTERM") {
+            on.mockRestore()
+            // The wrapper installs its handlers and spawns in one synchronous
+            // run, so a microtask lands once the spawn has failed and left a
+            // child without a pid; the signal must be dropped rather than
+            // sent to process group zero.
+            queueMicrotask(() => process.emit("SIGTERM"))
+          }
+          return registered
+        }) as typeof process.on)
+        return deploy([], {
           cli: script("exit-zero"),
           cwd: NodePath.join(directory, "absent-directory"),
+          stateDirectory: stateDirectory(),
           escalationDelayMs: 100,
           redact: async () => (redactions += 1, 0)
         })
-        // The spawn has already failed, so the child has no pid; the signal
-        // must be dropped rather than sent to process group zero.
-        process.emit("SIGTERM")
-        return running
       })
 
       expect(code).toBe(1)
       expect(redactions).toBe(1)
+      expect(kill).not.toHaveBeenCalled()
     } finally {
+      kill.mockRestore()
       stderr.mockRestore()
       stdout.mockRestore()
     }
@@ -279,6 +306,7 @@ describe("deploy wrapper", () => {
         const running = deploy([marker], {
           cli: script("ignores-sigterm"),
           cwd: directory,
+          stateDirectory: stateDirectory(),
           escalationDelayMs: 300,
           redact: async () => 0
         })
@@ -311,6 +339,7 @@ describe("deploy wrapper", () => {
         const running = deploy([marker], {
           cli: script("ignores-sigterm"),
           cwd: directory,
+          stateDirectory: stateDirectory(),
           escalationDelayMs: 300,
           redact: async () => 0
         })
@@ -327,6 +356,100 @@ describe("deploy wrapper", () => {
     }
   }, 30_000)
 
+  it("refuses to start while another deployment owns the state", async () => {
+    const state = stateDirectory("state-owned")
+    const marker = NodePath.join(directory, "refused")
+    await mkdir(state, { recursive: true })
+    const held = await acquireStateOwnership(state)
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    let redactions = 0
+    try {
+      const code = await deploy([marker], {
+        cli: script("ignores-sigterm"),
+        cwd: directory,
+        stateDirectory: state,
+        redact: async () => (redactions += 1, 0)
+      })
+
+      expect(code).toBe(1)
+      // Neither Alchemy nor redaction ran: the command never started.
+      expect(existsSync(`${marker}.ready`)).toBe(false)
+      expect(redactions).toBe(0)
+      expect(stderr.mock.calls.map((call) => String(call[0])).join("")).toContain(
+        `Alchemy deployment refused: Alchemy state is owned by another deployment (pid ${process.pid})`
+      )
+      expect(readFileSync(lockFileIn(state), "utf8")).toBe(`${process.pid}\n`)
+    } finally {
+      stderr.mockRestore()
+      await held.release()
+    }
+  })
+
+  it.skipIf(process.platform === "win32")(
+    "owns the state from before the command starts until after redaction",
+    async () => {
+      const state = stateDirectory("state-held")
+      const marker = NodePath.join(directory, "held")
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+      let lockDuringRedaction: string | undefined
+      try {
+        const code = await withIsolatedSignals(async () => {
+          const running = deploy([marker], {
+            cli: script("ignores-sigterm"),
+            cwd: directory,
+            stateDirectory: state,
+            escalationDelayMs: 300,
+            redact: async (options) => {
+              lockDuringRedaction = readFileSync(lockFileIn(state), "utf8")
+              expect(options.directory).toBe(state)
+              expect(options.ownership?.directory).toBe(state)
+              return 0
+            }
+          })
+          try {
+            await vi.waitFor(() => expect(existsSync(`${marker}.ready`)).toBe(true), { timeout: 10_000 })
+            // The directory was created and owned before Alchemy started, so a
+            // standalone redaction cannot replace state under the running command.
+            expect(readFileSync(lockFileIn(state), "utf8")).toBe(`${process.pid}\n`)
+            await expect(redactAlchemyState({ directory: state, bearerToken: "token" })).rejects.toThrow(
+              /owned by another deployment \(pid \d+\)/
+            )
+          } finally {
+            process.emit("SIGTERM")
+          }
+          return await running
+        })
+
+        expect(code).toBe(143)
+        expect(lockDuringRedaction).toBe(`${process.pid}\n`)
+        expect(existsSync(lockFileIn(state))).toBe(false)
+        await expect(redactAlchemyState({ directory: state, bearerToken: "token" })).resolves.toBe(0)
+      } finally {
+        stdout.mockRestore()
+      }
+    }
+  )
+
+  it("hands its ownership to the real redaction", async () => {
+    const state = stateDirectory("state-real")
+    const file = NodePath.join(state, "CacheWorker.json")
+    await mkdir(state, { recursive: true })
+    await writeFile(file, JSON.stringify({ props: { env: { CACHE_TOKEN: { __redacted__: "raw-token" } } } }))
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      const code = await deploy([], { cli: script("exit-zero"), cwd: directory, stateDirectory: state })
+
+      expect(code).toBe(0)
+      expect(stdout.mock.calls.map((call) => String(call[0]))).toContain(
+        "Redacted 1 Alchemy Worker state file(s).\n"
+      )
+      expect(readFileSync(file, "utf8")).not.toContain("raw-token")
+      expect(existsSync(lockFileIn(state))).toBe(false)
+    } finally {
+      stdout.mockRestore()
+    }
+  })
+
   it("returns the command's exit code and redacts state afterwards", async () => {
     let redactions = 0
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
@@ -334,11 +457,13 @@ describe("deploy wrapper", () => {
       const success = await deploy([], {
         cli: script("exit-zero"),
         cwd: directory,
+        stateDirectory: stateDirectory(),
         redact: async () => (redactions += 1, 3)
       })
       const failure = await deploy([], {
         cli: script("exit-seven"),
         cwd: directory,
+        stateDirectory: stateDirectory(),
         redact: async () => (redactions += 1, 0)
       })
 
@@ -361,6 +486,7 @@ describe("deploy wrapper", () => {
       const code = await deploy([], {
         cli: script("exit-zero"),
         cwd: directory,
+        stateDirectory: stateDirectory(),
         redact: async () => {
           throw new Error("state directory is read-only")
         }
@@ -384,6 +510,7 @@ describe("deploy wrapper", () => {
       const code = await deploy([], {
         cli: script("exit-zero"),
         cwd: NodePath.join(directory, "absent-directory"),
+        stateDirectory: stateDirectory(),
         redact: async () => (redactions += 1, 0)
       })
 
@@ -406,6 +533,7 @@ describe("deploy wrapper", () => {
         const running = deploy([marker], {
           cli: script("ignores-sigterm"),
           cwd: directory,
+          stateDirectory: stateDirectory(),
           escalationDelayMs: 300,
           redact: async () => (redactions += 1, 0)
         })
@@ -439,6 +567,7 @@ describe("deploy wrapper", () => {
         const running = deploy([marker], {
           cli: script("ignores-sigterm"),
           cwd: directory,
+          stateDirectory: stateDirectory(),
           escalationDelayMs: 300,
           redact: async () => 0
         })

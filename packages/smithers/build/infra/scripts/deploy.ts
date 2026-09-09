@@ -4,10 +4,12 @@
  * @since 0.1.0
  */
 import { type ChildProcess, spawn } from "node:child_process"
+import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { failureMessage } from "./failure-message.ts"
-import { redactAlchemyState } from "./redact-state.ts"
+import { defaultStateDirectory, redactAlchemyState, type RedactAlchemyStateOptions } from "./redact-state.ts"
+import { acquireStateOwnership, type StateOwnership } from "./state-ownership.ts"
 
 const infraDirectory = NodePath.dirname(NodePath.dirname(fileURLToPath(import.meta.url)))
 const alchemyCli = NodePath.join(infraDirectory, "node_modules", "alchemy", "bin", "cli.js")
@@ -69,7 +71,9 @@ const processGroupExists = (pid: number): boolean => {
 export interface DeployOptions {
   readonly cli?: string | undefined
   readonly cwd?: string | undefined
-  readonly redact?: (() => Promise<number>) | undefined
+  /** The Alchemy state directory the wrapper owns for the whole run. */
+  readonly stateDirectory?: string | undefined
+  readonly redact?: ((options: RedactAlchemyStateOptions) => Promise<number>) | undefined
   readonly escalationDelayMs?: number | undefined
 }
 
@@ -82,13 +86,14 @@ export interface DeployOptions {
 export interface ResolvedDeployOptions {
   readonly cli: string
   readonly cwd: string
-  readonly redact: () => Promise<number>
+  readonly stateDirectory: string
+  readonly redact: (options: RedactAlchemyStateOptions) => Promise<number>
   readonly escalationDelayMs: number
 }
 
 /**
  * Fills every omitted substitution from the production deployment: the pinned
- * Alchemy CLI, this directory, and real state redaction.
+ * Alchemy CLI, this directory, its state directory, and real state redaction.
  *
  * @category constructors
  * @since 0.1.0
@@ -96,6 +101,7 @@ export interface ResolvedDeployOptions {
 export const resolveDeployOptions = (options: DeployOptions): ResolvedDeployOptions => ({
   cli: options.cli ?? alchemyCli,
   cwd: options.cwd ?? infraDirectory,
+  stateDirectory: options.stateDirectory ?? defaultStateDirectory,
   redact: options.redact ?? redactAlchemyState,
   escalationDelayMs: options.escalationDelayMs ?? escalationDelayMs
 })
@@ -138,7 +144,10 @@ const runAlchemy = (
 /**
  * Runs Alchemy and always scrubs legacy local state before returning.
  *
- * Termination signals are held while cleanup runs and are forwarded to the
+ * The wrapper owns the state directory from before Alchemy starts until
+ * redaction has published its last file, so no other deployment or standalone
+ * redaction can replace state under either of them; a second deployment of
+ * the same state is refused. Termination signals are held while cleanup runs and are forwarded to the
  * complete detached Alchemy process group. After interruption, the group is
  * tracked until it is observed gone, even if its leader exits first. Surviving
  * members receive SIGKILL after a bounded grace period, before redaction and
@@ -152,8 +161,18 @@ export const deploy = async (
   args: ReadonlyArray<string> = process.argv.slice(2),
   options: DeployOptions = {}
 ): Promise<number> => {
-  const { cli, cwd, escalationDelayMs: escalationDelay, redact } = resolveDeployOptions(options)
+  const { cli, cwd, escalationDelayMs: escalationDelay, redact, stateDirectory } = resolveDeployOptions(options)
   const target = { cli, cwd }
+  let ownership: StateOwnership
+  try {
+    // Alchemy creates the state directory on first use; creating it here lets
+    // ownership exist before Alchemy writes anything into it.
+    await Fs.mkdir(stateDirectory, { recursive: true })
+    ownership = await acquireStateOwnership(stateDirectory)
+  } catch (error) {
+    process.stderr.write(`Alchemy deployment refused: ${failureMessage(error)}\n`)
+    return 1
+  }
   let activeChild: ChildProcess | undefined
   let requestedSignal: NodeJS.Signals | undefined
   let escalationTimer: ReturnType<typeof setTimeout> | undefined
@@ -218,7 +237,7 @@ export const deploy = async (
     clearEscalation()
 
     try {
-      const redactedFiles = await redact()
+      const redactedFiles = await redact({ directory: stateDirectory, ownership })
       process.stdout.write(`Redacted ${redactedFiles} Alchemy Worker state file(s).\n`)
     } catch (error) {
       redactionFailure = error
@@ -226,6 +245,7 @@ export const deploy = async (
   } finally {
     clearEscalation()
     for (const [signal, handler] of handlers) process.off(signal, handler)
+    await ownership.release()
   }
 
   if (commandFailure !== undefined) {

@@ -4,6 +4,7 @@
  * @since 0.1.0
  */
 import { isRecord } from "@smthrs/canonical/Record"
+import { errorCode, syncDirectory } from "@smthrs/targets/SafeFs"
 import { createHash, randomUUID } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
@@ -11,6 +12,7 @@ import * as NodePath from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { stackName } from "../deployment.ts"
 import { failureMessage } from "./failure-message.ts"
+import { acquireStateOwnership, type StateOwnership } from "./state-ownership.ts"
 
 const redacted = "__SMITHERS_CACHE_TOKEN_REDACTED__"
 
@@ -64,6 +66,8 @@ const maximumJsonMembers = 100_000
 export interface RedactAlchemyStateOptions {
   readonly directory?: string | undefined
   readonly bearerToken?: string | undefined
+  /** Ownership already held by the caller for the whole deployment; the run takes its own when absent. */
+  readonly ownership?: StateOwnership | undefined
 }
 
 interface FileIdentity {
@@ -84,6 +88,7 @@ export interface RedactionTargets {
   /** The values a credential binding may hold: the sentinel and every current verifier. */
   readonly permitted: ReadonlySet<string>
   readonly directory: string
+  readonly ownership: StateOwnership | undefined
 }
 
 /**
@@ -109,13 +114,13 @@ export const resolveRedactionOptions = (value: RedactAlchemyStateOptions): Redac
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError("redaction options must be a plain record")
   }
-  const allowed = new Set(["directory", "bearerToken"])
+  const allowed = new Set(["directory", "bearerToken", "ownership"])
   for (const key of keys) {
     if (typeof key !== "string" || !allowed.has(key)) {
       throw new TypeError(`redaction options contain an unknown property: ${String(key)}`)
     }
   }
-  const read = (key: "directory" | "bearerToken"): unknown => {
+  const read = (key: "directory" | "bearerToken" | "ownership"): unknown => {
     let descriptor: PropertyDescriptor | undefined
     try {
       descriptor = Object.getOwnPropertyDescriptor(value, key)
@@ -129,6 +134,10 @@ export const resolveRedactionOptions = (value: RedactAlchemyStateOptions): Redac
   const configuredDirectory = read("directory")
   const directory = configuredDirectory ?? defaultStateDirectory
   const configuredToken = read("bearerToken")
+  const ownership = read("ownership")
+  if (ownership !== undefined && !isStateOwnership(ownership)) {
+    throw new TypeError("redaction option ownership must be a state ownership")
+  }
   if (typeof directory !== "string" || !NodePath.isAbsolute(directory)) {
     throw new TypeError("Alchemy state directory must be an absolute path")
   }
@@ -154,20 +163,18 @@ export const resolveRedactionOptions = (value: RedactAlchemyStateOptions): Redac
     redacted,
     ...bearerTokens.map((token) => createHash("sha256").update(token, "utf8").digest("hex"))
   ])
-  return { permitted, directory }
+  return { permitted, directory, ownership }
 }
 
-const errorCode = (value: unknown): string | undefined => {
-  try {
-    if (!isRecord(value)) return undefined
-    const descriptor = Object.getOwnPropertyDescriptor(value, "code")
-    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string"
-      ? descriptor.value
-      : undefined
-  } catch {
-    return undefined
-  }
+const dataProperty = (value: Record<string, unknown>, key: string): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key)
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
 }
+
+const isStateOwnership = (value: unknown): value is StateOwnership =>
+  isRecord(value) &&
+  typeof dataProperty(value, "directory") === "string" &&
+  typeof dataProperty(value, "release") === "function"
 
 const optionalOpenFlag = (name: "O_NOFOLLOW" | "O_NONBLOCK"): number =>
   (NodeFs.constants as Partial<Record<string, number>>)[name] ?? 0
@@ -492,20 +499,6 @@ const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): bool
   return changed
 }
 
-const directorySyncUnsupported = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL", "ENOSYS"])
-
-const syncDirectory = async (directory: string): Promise<void> => {
-  if (process.platform === "win32") return
-  const handle = await Fs.open(directory, "r")
-  await usingHandle(handle, async () => {
-    try {
-      await handle.sync()
-    } catch (error) {
-      if (!directorySyncUnsupported.has(errorCode(error) ?? "")) throw error
-    }
-  })
-}
-
 const createTemporaryFile = async (
   directory: string,
   base: string
@@ -586,9 +579,8 @@ const redactFile = async (
   return true
 }
 
-const discoverWorkerStates = async (
-  directory: string
-): Promise<{ readonly files: ReadonlyArray<string>; readonly root: string } | null> => {
+/** The canonical state root, or `null` when the deployment has no state yet. */
+const resolveStateRoot = async (directory: string): Promise<string | null> => {
   const requestedRoot = NodePath.resolve(directory)
   let root: string
   try {
@@ -601,7 +593,10 @@ const discoverWorkerStates = async (
     throw new TypeError(`symbolic links are not allowed in the Alchemy state root: ${directory}`)
   }
   if (!(await Fs.lstat(root)).isDirectory()) throw new TypeError(`Alchemy state root is not a directory: ${root}`)
+  return root
+}
 
+const discoverWorkerStates = async (root: string): Promise<ReadonlyArray<string>> => {
   const directories = [root]
   const files: Array<string> = []
   let entries = 0
@@ -636,7 +631,7 @@ const discoverWorkerStates = async (
     }
   }
   files.sort()
-  return { files, root }
+  return files
 }
 
 /**
@@ -653,13 +648,32 @@ const discoverWorkerStates = async (
  * @since 0.1.0
  */
 export const redactAlchemyState = async (options: RedactAlchemyStateOptions = {}): Promise<number> => {
-  const { directory, permitted } = resolveRedactionOptions(options)
-  const discovered = await discoverWorkerStates(directory)
-  if (discovered === null) return 0
-  let changed = 0
-  for (const file of discovered.files) {
-    if (await redactFile(discovered.root, file, permitted)) changed += 1
+  const { directory, ownership: held, permitted } = resolveRedactionOptions(options)
+  const root = await resolveStateRoot(directory)
+  if (root === null) return 0
+  if (held !== undefined && held.directory !== root) {
+    throw new TypeError(`Alchemy state ownership is for another directory: ${held.directory}`)
   }
+  // Ownership fences every writer of this state, Alchemy included through
+  // the deploy wrapper, from discovery to the last directory sync. Identity
+  // checks alone leave the rename able to bury state published after them.
+  const ownership = held ?? await acquireStateOwnership(root)
+  let changed = 0
+  try {
+    for (const file of await discoverWorkerStates(root)) {
+      if (await redactFile(root, file, permitted)) changed += 1
+    }
+  } catch (error) {
+    if (held === undefined) {
+      try {
+        await ownership.release()
+      } catch {
+        // The redaction failure is the report; a lock left behind is reclaimed.
+      }
+    }
+    throw error
+  }
+  if (held === undefined) await ownership.release()
   return changed
 }
 

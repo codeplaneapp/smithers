@@ -12,6 +12,7 @@ import {
   redactAlchemyState,
   resolveRedactionOptions
 } from "./redact-state.ts"
+import { acquireStateOwnership } from "./state-ownership.ts"
 
 const sentinel = "__SMITHERS_CACHE_TOKEN_REDACTED__"
 const infraRoot = NodePath.resolve(fileURLToPath(new URL("..", import.meta.url).href))
@@ -792,6 +793,14 @@ describe("redactAlchemyState", () => {
     ["a value that is not a record", 5, /must be a plain record/],
     ["a record with a foreign prototype", Object.create({ directory: "/state" }), /must be a plain record/],
     ["an unknown option", { directory: "/state", extra: true }, /unknown property: extra/],
+    ["an ownership that is not a record", { ownership: "held" }, /ownership must be a state ownership/],
+    ["an ownership without a directory", { ownership: { release: async () => {} } }, /must be a state ownership/],
+    ["an ownership without a release", { ownership: { directory: "/state" } }, /must be a state ownership/],
+    [
+      "an ownership whose directory is an accessor",
+      { ownership: { get directory() { return "/state" }, release: async () => {} } },
+      /must be a state ownership/
+    ],
     ["a relative directory", { directory: "relative" }, /must be an absolute path/],
     ["a directory that is not a string", { directory: 5 }, /must be an absolute path/],
     ["a bearer token that is not a string", { bearerToken: 5 }, /must be a string when supplied/]
@@ -905,17 +914,92 @@ describe("redactAlchemyState", () => {
     })
   })
 
-  it.skipIf(process.platform === "win32")("reports a state directory it cannot publish into", async () => {
+  it.skipIf(process.platform === "win32")("reports a state directory it cannot publish into", async (context) => {
     await withFixture(async (root) => {
       const file = NodePath.join(root, "CacheWorker.json")
       await Fs.writeFile(file, workerState("CACHE_TOKEN", "raw-token"))
       await Fs.chmod(root, 0o500)
       try {
+        // A privileged process overrides the mode bits and creates the file
+        // anyway; the refused temporary-file case in the identity suite
+        // covers that boundary on every host, so this real-permission case
+        // only runs where the host demonstrably denies the write.
+        let denied = false
+        try {
+          await Fs.writeFile(NodePath.join(root, "probe"), "")
+        } catch {
+          denied = true
+        }
+        if (!denied) context.skip("this process creates files in a directory without write permission")
         await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(/EACCES|EPERM/)
       } finally {
         await Fs.chmod(root, 0o700)
       }
       expect(await Fs.readFile(file, "utf8")).toContain("raw-token")
+    })
+  })
+
+  it("owns the state for the whole run and releases it afterwards", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      const lock = NodePath.join(root, ".smithers-state-owner.lock")
+      await Fs.writeFile(file, workerState("CACHE_TOKEN", "raw-token"))
+
+      expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(1)
+      expect(await Fs.readdir(root)).toEqual(["CacheWorker.json"])
+
+      await Fs.writeFile(file, workerState("CACHE_TOKEN", "raw-token"))
+      const held = await acquireStateOwnership(root)
+      try {
+        // Another writer holds the state: the run refuses rather than
+        // publishing over whatever that writer is about to install.
+        await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+          /owned by another deployment/
+        )
+        expect(await Fs.readFile(file, "utf8")).toContain("raw-token")
+        // The holder itself redacts under its own ownership and keeps it.
+        expect(await redactAlchemyState({ directory: root, bearerToken: "token", ownership: held })).toBe(1)
+        expect(await Fs.readFile(file, "utf8")).not.toContain("raw-token")
+        expect(await Fs.readFile(lock, "utf8")).toBe(`${process.pid}\n`)
+      } finally {
+        await held.release()
+      }
+      expect(await Fs.readdir(root)).toEqual(["CacheWorker.json"])
+    })
+  })
+
+  it("refuses ownership taken for another state directory", async () => {
+    await withFixture(async (root) => {
+      await withFixture(async (other) => {
+        await Fs.writeFile(NodePath.join(root, "CacheWorker.json"), workerState("CACHE_TOKEN", "raw-token"))
+        const held = await acquireStateOwnership(other)
+        try {
+          await expect(redactAlchemyState({ directory: root, bearerToken: "token", ownership: held })).rejects
+            .toThrow(/ownership is for another directory/)
+        } finally {
+          await held.release()
+        }
+        expect(await Fs.readdir(root)).toEqual(["CacheWorker.json"])
+      })
+    })
+  })
+
+  it("releases only the ownership it took when redaction fails", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(NodePath.join(root, "CacheWorker.json"), "not json")
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow()
+      expect(await Fs.readdir(root)).toEqual(["CacheWorker.json"])
+
+      const held = await acquireStateOwnership(root)
+      try {
+        await expect(redactAlchemyState({ directory: root, bearerToken: "token", ownership: held })).rejects
+          .toThrow()
+        // The deployment that owns the state keeps it until its own release.
+        expect(await Fs.readdir(root)).toEqual([".smithers-state-owner.lock", "CacheWorker.json"])
+      } finally {
+        await held.release()
+      }
     })
   })
 

@@ -3305,6 +3305,9 @@ importers:
       '@smthrs/canonical':
         specifier: 1.0.0-rc.0
         version: link:../../flows/canonical
+      '@smthrs/targets':
+        specifier: 1.0.0-rc.0
+        version: link:../targets
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20260903.1

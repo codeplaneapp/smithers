@@ -267,6 +267,12 @@ runs state redaction after success, failure, or signal. Redaction uses bounded
 descriptor-stable reads and atomic durable publication; use the wrapper instead
 of invoking Alchemy deploy directly.
 
+The wrapper owns the state directory for the whole run, from before Alchemy
+starts until redaction has published its last file, through a lock file
+inside that directory holding its process id. A second deployment or a
+standalone `scripts/redact-state.ts` run against the same state is refused
+while it runs; a lock left by a process that no longer exists is reclaimed.
+
 ## Self-host instead
 
 Use [`../terraform/`](../terraform/) when cache data must remain on

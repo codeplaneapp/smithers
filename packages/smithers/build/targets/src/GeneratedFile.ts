@@ -229,8 +229,6 @@ export const maximumGeneratedFileBytes = 16 * 1024 * 1024
 const maximumGeneratedPathBytes = 16 * 1024
 const maximumGeneratedPathDepth = 256
 
-const directorySyncUnsupported = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL", "ENOSYS"])
-
 const validatePayload = (payload: FilePayload): { readonly path: string; readonly bytes: number } => {
   const path = resolveOutputPath(payload.path)
   const pathBytes = Buffer.byteLength(path, "utf8")
@@ -252,23 +250,6 @@ const validatePayload = (payload: FilePayload): { readonly path: string; readonl
 }
 
 const identity = (stats: NodeFs.BigIntStats): string => `${stats.dev}:${stats.ino}`
-
-const syncDirectory = async (directory: string): Promise<void> => {
-  if (process.platform === "win32") return
-  const handle = await Fs.open(directory, "r")
-  let primary: unknown
-  try {
-    await handle.sync()
-  } catch (cause) {
-    if (!directorySyncUnsupported.has(SafeFs.errorCode(cause) ?? "")) primary = cause
-  }
-  try {
-    await handle.close()
-  } catch (cause) {
-    primary ??= cause
-  }
-  if (primary !== undefined) throw primary
-}
 
 interface ParentDirectory {
   readonly path: string
@@ -305,7 +286,7 @@ const prepareParent = async (
       } catch (mkdirCause) {
         if (SafeFs.errorCode(mkdirCause) !== "EEXIST") throw mkdirCause
       }
-      if (created) await syncDirectory(current)
+      if (created) await SafeFs.syncDirectory(current)
       stats = await Fs.lstat(candidate, { bigint: true })
     }
     if (stats.isSymbolicLink()) throw new Error(`generated output parent is a symbolic link: ${candidate}`)
@@ -417,7 +398,7 @@ const writeFile = async (
       await checkParent(root, parent, signal)
       await Fs.rename(temp.path, absolute)
       consumed = true
-      await syncDirectory(parent.path)
+      await SafeFs.syncDirectory(parent.path)
     } catch (cause) {
       primary = cause
     }

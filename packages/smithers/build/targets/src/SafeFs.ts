@@ -706,9 +706,41 @@ export const readText = async (
       throw new Error(`${what} changed while it was being read: ${path}`)
     }
     try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, total))
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(buffer.subarray(0, total))
     } catch {
       throw new Error(`${what} is not valid UTF-8: ${path}`)
     }
   })
+}
+
+const directorySyncUnsupported = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL", "ENOSYS"])
+
+/**
+ * Flushes one directory entry so a rename inside it survives power loss.
+ *
+ * Windows exposes no directory descriptor to sync, and a filesystem that
+ * reports directory sync as unsupported has nothing to flush; both count as
+ * done. Any other sync failure, and a close failure after the sync, is
+ * reported, because the entry the caller just published may not be durable.
+ * Every durable publication in the workspace, generated files, scaffolded
+ * packages, and redacted deployment state, ends with this call.
+ *
+ * @category publication
+ * @since 0.1.0
+ */
+export const syncDirectory = async (directory: string): Promise<void> => {
+  if (process.platform === "win32") return
+  const handle = await Fs.open(directory, "r")
+  let primary: unknown
+  try {
+    await handle.sync()
+  } catch (cause) {
+    if (!directorySyncUnsupported.has(errorCode(cause) ?? "")) primary = cause
+  }
+  try {
+    await handle.close()
+  } catch (cause) {
+    primary ??= cause
+  }
+  if (primary !== undefined) throw primary
 }

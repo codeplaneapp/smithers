@@ -25,8 +25,12 @@ const { fault, initialFault } = vi.hoisted(() => {
     },
     /** Which operation on the read handle for `target` misbehaves. */
     read: { target: undefined as string | undefined, kind: undefined as "length" | "changed" | "close" | undefined },
-    /** How many exclusive creates collide, and which operation on the temporary handle fails. */
-    write: { collisions: 0, kind: undefined as "write" | "close" | undefined },
+    /** How many exclusive creates collide, the code an exclusive create is refused with, and which operation on the temporary handle fails. */
+    write: { collisions: 0, refused: undefined as string | undefined, kind: undefined as "write" | "close" | undefined },
+    /** Runs `during` once, after the last identity check, while `target` is being renamed over. */
+    rename: { target: undefined as string | undefined, during: undefined as (() => Promise<void>) | undefined },
+    /** Refuses to remove `target`. */
+    remove: { target: undefined as string | undefined },
     /** How the directory handle for `target` misbehaves during the sync. */
     directorySync: {
       target: undefined as string | undefined,
@@ -106,6 +110,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         fault.write.collisions -= 1
         throw Object.assign(new Error("temporary collision"), { code: "EEXIST" })
       }
+      if (flags === "wx" && fault.write.refused !== undefined) {
+        throw Object.assign(new Error(`${fault.write.refused}: temporary file refused`), { code: fault.write.refused })
+      }
       const handle = await original.open(path, flags, mode)
       if (flags === "wx" && fault.write.kind !== undefined) {
         return fault.write.kind === "write"
@@ -137,6 +144,20 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         })
       }
       return handle
+    },
+    rename: async (from: Parameters<typeof original.rename>[0], to: Parameters<typeof original.rename>[1]) => {
+      const during = fault.rename.during
+      if (during !== undefined && String(to) === fault.rename.target) {
+        fault.rename.during = undefined
+        await during()
+      }
+      return original.rename(from, to)
+    },
+    rm: async (path: Parameters<typeof original.rm>[0], options?: Parameters<typeof original.rm>[1]) => {
+      if (String(path) === fault.remove.target) {
+        throw Object.assign(new Error("removal refused"), { code: "EACCES" })
+      }
+      return original.rm(path, options)
     }
   }
 })
@@ -261,6 +282,56 @@ describe("Alchemy state file identity", () => {
       await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(expected)
       expect(await RealFs.readFile(file, "utf8")).toBe(rawState)
       expect(await temporaryFilesIn(root)).toEqual([])
+    })
+  })
+
+  it("refuses a competing redaction that arrives after the last identity check", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      await RealFs.writeFile(file, rawState)
+      let competitor: Promise<number> | undefined
+      fault.rename.target = file
+      // Ownership is what fences this window: the identity checks are all
+      // behind us, and only the rename of the redacted snapshot remains.
+      fault.rename.during = async () => {
+        competitor = redactAlchemyState({ directory: root, bearerToken: "token" })
+        await competitor.catch(() => undefined)
+      }
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).resolves.toBe(1)
+      await expect(competitor).rejects.toThrow(/owned by another deployment \(pid \d+\)/)
+      expect(JSON.parse(await RealFs.readFile(file, "utf8")).props.env.CACHE_TOKEN.__redacted__).toBe(sentinel)
+      expect(await temporaryFilesIn(root)).toEqual([])
+      expect(await RealFs.readdir(root)).toEqual(["CacheWorker.json"])
+    })
+  })
+
+  it("reports a temporary file the host refuses to create and releases the state", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      await RealFs.writeFile(file, rawState)
+      fault.write.refused = "EACCES"
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(/EACCES/)
+      expect(await RealFs.readFile(file, "utf8")).toBe(rawState)
+      expect(await RealFs.readdir(root)).toEqual(["CacheWorker.json"])
+    })
+  })
+
+  it("keeps the redaction failure when releasing the state also fails", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      const lock = NodePath.join(root, ".smithers-state-owner.lock")
+      await RealFs.writeFile(file, rawState)
+      fault.write.kind = "write"
+      fault.remove.target = lock
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /temporary write failed/
+      )
+      expect(await RealFs.readFile(file, "utf8")).toBe(rawState)
+      // The lock a dead process leaves behind is reclaimed by the next owner.
+      expect(await RealFs.readFile(lock, "utf8")).toBe(`${process.pid}\n`)
     })
   })
 
