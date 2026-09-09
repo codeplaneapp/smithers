@@ -546,10 +546,10 @@ describe("coverage conformance", () => {
       // match, so the fallback only discharges the optional type on a
       // capture.
       "smithers/agent/harness/src/CellTurn.ts": 1,
-      // Four defend limits filled by `withDefaults`; the fifth handles a
-      // compile error whose Error shape QuickJS guarantees. The bridge-drain
-      // directive is no longer present.
-      "smithers/agent/harness/src/QuickJSSandbox.ts": 5,
+      // Five defend opening or per-frame limits filled by `withDefaults`
+      // and `evaluationLimits`; the sixth handles a compile error whose
+      // Error shape QuickJS guarantees. The bridge-drain directive is absent.
+      "smithers/agent/harness/src/QuickJSSandbox.ts": 6,
       // One coalesce over `validate`'s closed two-member answer. The five
       // beside it belonged to the same-realm binding — its `with` scope proxy
       // and the host cell's failure path — and left with it when the filing
