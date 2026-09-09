@@ -10,8 +10,14 @@ derivation belongs in the middle of a decode you are already running, and for
 `deriveKey` when you want the typed failure directly. Both perform the same
 three steps and produce the same key.
 
-This is the form the rest of Smithers uses. [`@smthrs/flow`](/api/flow) decodes
-an encoded payload through it to mint an execution id, and
+This is the form the rest of Smithers uses. With the opt-in derived source,
+[`@smthrs/flow`](/api/flow) decodes an encoded payload through it as part of
+deriving an execution ID from the flow tag and payload. Flow defaults to a
+fresh UUID for each unkeyed invocation. To reattach after a restart, retain and reuse
+the execution ID, declare an idempotency key, or explicitly install
+`Flow.layerExecutionIds(Flow.derived)`; see the
+[layer example](../README.md#how-this-fits-with-smthrsflows).
+
 [`@smthrs/engine`](/api/engine) decodes an action's key material through it to
 derive the key the dispatch is recorded under.
 
