@@ -44,7 +44,7 @@ import {
 import { dirname, resolve as resolvePath } from "node:path"
 import { IntegrationError, isIntegrationError } from "../core/IntegrationError.ts"
 import * as Environment from "../Environment.ts"
-import { DEFAULT_API_BASE_URL, resolve as resolveConfig } from "./Config.ts"
+import { resolve as resolveConfig } from "./Config.ts"
 import { type GitHubClient, make as makeClient } from "./GitHubClient.ts"
 import { fullNamePath } from "./Repository.ts"
 
@@ -772,22 +772,6 @@ export interface ReconcileResult extends ReconcilePlan {
   readonly skipped: ReadonlyArray<PlanAction>
 }
 
-const listenerConfig = (
-  options: ReconcileOptions,
-  env: Readonly<Record<string, string | undefined>>
-): { readonly token: string | undefined; readonly apiBaseUrl: string } => {
-  if (options.env === undefined) {
-    const resolved = resolveConfig({ token: options.token, apiBaseUrl: options.apiBaseUrl })
-    return { token: resolved.token, apiBaseUrl: resolved.apiBaseUrl }
-  }
-  const firstNonEmpty = (candidates: ReadonlyArray<string | undefined>): string | undefined =>
-    candidates.find((candidate) => typeof candidate === "string" && candidate.trim().length > 0)?.trim()
-  return {
-    token: firstNonEmpty([options.token, env["SMITHERS_GITHUB_TOKEN"], env["GITHUB_TOKEN"]]),
-    apiBaseUrl: firstNonEmpty([options.apiBaseUrl, env["SMITHERS_GITHUB_API_BASE_URL"]]) ?? DEFAULT_API_BASE_URL
-  }
-}
-
 const permissionError = (repository: string, cause: IntegrationError): IntegrationError => {
   const status = cause.details?.["status"]
   if (status === 401 || status === 403 || status === 404) {
@@ -951,7 +935,7 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
     const registry = options.registry ?? (yield* attempt(() => readRegistry(workspaceRoot)))
     const state = yield* attempt(() => readOwnershipState(workspaceRoot))
     const env = options.env ?? Environment.ambientEnvironment()
-    const resolved = listenerConfig(options, env)
+    const resolved = resolveConfig({ token: options.token, apiBaseUrl: options.apiBaseUrl }, env)
     // An injected client carries its own credential, so the ambient token is
     // neither read nor required: requiring one would be a check about a
     // request this module is not going to make.

@@ -761,6 +761,99 @@ describe("reconcile", () => {
   })
 })
 
+describe("reconcile credential resolution", () => {
+  const withAmbient = async <A>(values: Record<string, string | undefined>, run: () => Promise<A>): Promise<A> => {
+    const previous = new Map(Object.keys(values).map((key) => [key, process.env[key]]))
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    try {
+      return await run()
+    } finally {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  }
+
+  it("prefers SMITHERS_GITHUB_TOKEN over GITHUB_TOKEN in the explicit environment", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    const result = await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      env: {
+        SMITHERS_GITHUB_TOKEN: "smithers-token",
+        GITHUB_TOKEN: "generic-token",
+        SMITHERS_GITHUB_API_BASE_URL: fixture.origin,
+        TRIAGE_WEBHOOK_SECRET: "hook-secret"
+      }
+    }))
+    expect(result.changes).toBe(1)
+    expect(fixture.requests[0]?.headers["authorization"]).toBe("Bearer smithers-token")
+  })
+
+  it("falls back to GITHUB_TOKEN, and past a blank SMITHERS_GITHUB_TOKEN", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      env: {
+        SMITHERS_GITHUB_TOKEN: "   ",
+        GITHUB_TOKEN: "  generic-token  ",
+        SMITHERS_GITHUB_API_BASE_URL: fixture.origin,
+        TRIAGE_WEBHOOK_SECRET: "hook-secret"
+      }
+    }))
+    expect(fixture.requests[0]?.headers["authorization"]).toBe("Bearer generic-token")
+  })
+
+  it("prefers explicit options over the explicit environment", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      token: "option-token",
+      apiBaseUrl: fixture.origin,
+      env: {
+        SMITHERS_GITHUB_TOKEN: "env-token",
+        SMITHERS_GITHUB_API_BASE_URL: "http://127.0.0.1:1/unused",
+        TRIAGE_WEBHOOK_SECRET: "hook-secret"
+      }
+    }))
+    expect(fixture.requests[0]?.headers["authorization"]).toBe("Bearer option-token")
+  })
+
+  it("does not read an ambient token when an explicit environment is supplied", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    const failure = await withAmbient(
+      { GITHUB_TOKEN: "ambient-token", SMITHERS_GITHUB_TOKEN: undefined },
+      () =>
+        Effect.runPromise(Effect.flip(reconcile({
+          workspaceRoot: root,
+          env: { TRIAGE_WEBHOOK_SECRET: "hook-secret" }
+        })))
+    )
+    expect(failure.reason).toBe("credentials-missing")
+    expect(failure.message).toContain("SMITHERS_GITHUB_TOKEN")
+  })
+
+  it("resolves the ambient environment when no explicit one is supplied", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    const origin = fixture.origin
+    const result = await withAmbient({
+      GITHUB_TOKEN: "ambient-token",
+      SMITHERS_GITHUB_TOKEN: undefined,
+      SMITHERS_GITHUB_API_BASE_URL: origin,
+      TRIAGE_WEBHOOK_SECRET: "hook-secret"
+    }, () => Effect.runPromise(reconcile({ workspaceRoot: root })))
+    expect(result.changes).toBe(1)
+    expect(fixture.requests[0]?.headers["authorization"]).toBe("Bearer ambient-token")
+  })
+})
+
 describe("workspace apply lock", () => {
   const env = { GITHUB_TOKEN: "token", TRIAGE_WEBHOOK_SECRET: "hook-secret" }
   const lockPath = (root: string) => join(root, DEFAULT_LOCK_PATH)
