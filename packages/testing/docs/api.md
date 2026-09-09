@@ -1121,6 +1121,11 @@ on every append rather than mutating it, so a recorded call is visible to the
 next lookup; a caller that instead mutates a fixture's `calls` in place would
 read a stale index. First writer wins on a duplicate digest.
 
+A recorded request is memoized on its own identity as well, so an append does
+not force the next lookup to re-encode the calls already recorded. Only a
+frozen request is memoized: a store's own copy of a recorded call is frozen,
+and a fixture the caller still owns is re-encoded per fixture.
+
 ### Fixture.recordedRequest
 
 ```ts

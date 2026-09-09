@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as CachedModel from "../src/CachedModel.ts"
-import { decode } from "../src/Fixture.ts"
+import { decode, type Fixture, type RecordedCall, recordedRequest } from "../src/Fixture.ts"
 import * as FixtureStore from "../src/FixtureStore.ts"
 
 const request = (text: string, modelId = "openai:gpt-5-mini"): ModelRequest.ModelRequest =>
@@ -46,6 +46,44 @@ const withTempDir = <A, E>(use: (directory: string) => Effect.Effect<A, E>): Eff
     use,
     (directory) => Effect.sync(() => rmSync(directory, { recursive: true, force: true }))
   )
+
+/**
+ * A store that publishes a new fixture per append, as the built-in stores do,
+ * over frozen copies of the calls it is given, and counts how often each of
+ * those copies is canonically encoded.
+ *
+ * `recordedRequest` reads `modelId` exactly once per encoding, so an accessor
+ * there counts the digests a recording run pays for.
+ */
+const countingStore = () => {
+  const counters: Array<() => number> = []
+  let fixture: Fixture | undefined
+  const owned = (call: RecordedCall): RecordedCall => {
+    const projected = recordedRequest(call.request)
+    let encodings = 0
+    counters.push(() => encodings)
+    return {
+      ...call,
+      request: Object.freeze({
+        ...projected,
+        get modelId() {
+          encodings += 1
+          return projected.modelId
+        }
+      })
+    }
+  }
+  return {
+    store: FixtureStore.make({
+      load: () => Effect.sync(() => Option.fromUndefinedOr(fixture)),
+      append: (call) =>
+        Effect.sync(() => {
+          fixture = Object.freeze({ calls: Object.freeze([...(fixture?.calls ?? []), owned(call)]) })
+        })
+    }),
+    encodings: () => counters.map((count) => count())
+  }
+}
 
 describe("CachedModel", () => {
   it.effect("runs the live model on a miss and records the call", () =>
@@ -179,6 +217,22 @@ describe("FixtureStore", () => {
       const seeded = { calls: [{ request: request("Balance?"), model: "openai:gpt-5-mini", events }] }
       const store = yield* FixtureStore.makeMemory(seeded)
       expect(Option.getOrThrow(yield* store.load()).calls).toHaveLength(1)
+    }))
+
+  it.effect("encodes each recorded call once across the appends of one recording run", () =>
+    Effect.gen(function*() {
+      const counting = countingStore()
+      const live = yield* countingLive
+      const model = CachedModel.make({ live: live.live, fixture: counting.store })
+      const prompts = ["Prompt 1", "Prompt 2", "Prompt 3", "Prompt 4", "Prompt 5"]
+      yield* Effect.forEach(prompts, (prompt) => Stream.runDrain(model.stream(request(prompt))))
+      // Every append publishes a new fixture, so a lookup that re-encoded the
+      // calls already recorded charged the whole transcript to every turn. The
+      // last call is first indexed by the replay this cache exists for.
+      const replayed = yield* Stream.runCollect(model.stream(request(prompts[0]!)))
+      expect([...replayed]).toEqual(events)
+      expect(yield* live.count()).toBe(prompts.length)
+      expect(counting.encodings()).toEqual(prompts.map(() => 1))
     }))
 
   it.effect("reports no fixture for a file that does not exist", () =>

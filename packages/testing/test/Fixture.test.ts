@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ProductionModelRequest from "@smthrs/model/ModelRequest"
 import { Effect } from "effect"
-import { canonicalRequestDigest, decode, recordedRequest } from "../src/Fixture.ts"
+import { canonicalRequestDigest, decode, index, recordedRequest } from "../src/Fixture.ts"
+import type { RecordedCall } from "../src/Fixture.ts"
 import type { ModelRequestLike } from "../src/ModelLike.ts"
 import { FixtureEncodingError } from "../src/TestingError.ts"
 
@@ -16,6 +17,38 @@ const request = (overrides: Partial<ModelRequestLike> = {}): ModelRequestLike =>
 
 const call = (events: unknown): unknown => ({
   calls: [{ request: request(), model: "openai:gpt-5-mini", events }]
+})
+
+/**
+ * A request whose every canonical encoding is counted.
+ *
+ * `recordedRequest` reads `modelId` exactly once per encoding, so an accessor
+ * there counts how often a call is digested. The accessor survives freezing,
+ * and reading it is what a store's own frozen copy of a request is: a value
+ * nothing can change under the encoder.
+ */
+const counted = (overrides: Partial<ModelRequestLike> = {}): {
+  readonly request: ModelRequestLike
+  readonly encodings: () => number
+} => {
+  const projected = request(overrides)
+  let encodings = 0
+  return {
+    request: {
+      ...projected,
+      get modelId() {
+        encodings += 1
+        return projected.modelId
+      }
+    },
+    encodings: () => encodings
+  }
+}
+
+const recordedCall = (request: ModelRequestLike): RecordedCall => ({
+  request,
+  model: "openai:gpt-5-mini",
+  events: []
 })
 
 describe("Fixture", () => {
@@ -89,6 +122,31 @@ describe("Fixture", () => {
       path: `$.tools[0].parameters.value${array ? "[0]" : ".answer"}`
     })
     expect(reads).toBe(0)
+  })
+
+  it("encodes a frozen recorded request once across the fixtures an append publishes", () => {
+    const first = counted({ messages: [{ role: "user", content: [{ type: "text", text: "First." }] }] })
+    const second = counted({ messages: [{ role: "user", content: [{ type: "text", text: "Second." }] }] })
+    const calls = [recordedCall(Object.freeze(first.request)), recordedCall(Object.freeze(second.request))]
+    // Every append publishes a fixture the index memo has never seen, so this
+    // is one recording run: one call, then two, then two read back.
+    index({ calls: calls.slice(0, 1) })
+    index({ calls })
+    index({ calls })
+    expect([first.encodings(), second.encodings()]).toEqual([1, 1])
+  })
+
+  it("re-encodes a request the caller can still mutate", () => {
+    const owned: { -readonly [K in keyof ModelRequestLike]: ModelRequestLike[K] } = { ...request() }
+    const call = recordedCall(owned)
+    const before = canonicalRequestDigest(owned)
+    expect(index({ calls: [call] }).has(before)).toBe(true)
+    owned.system = [{ type: "text", text: "Rewritten." }]
+    const after = canonicalRequestDigest(owned)
+    expect(after).not.toBe(before)
+    // A caller still owns this request, so the second fixture reads what the
+    // request says now rather than a memo of what it used to say.
+    expect(index({ calls: [call] }).has(after)).toBe(true)
   })
 
   it("carries toolChoice in the request digest", () => {

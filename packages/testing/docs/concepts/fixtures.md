@@ -70,6 +70,15 @@ on every append rather than mutating it, so a recorded call is visible to the
 next lookup. A caller that instead mutates a fixture's `calls` in place would
 read a stale index.
 
+That replacement is why the index alone was not enough while a run was still
+recording. Every append published a fixture the memo had never seen, and the
+rebuild re-encoded every call already recorded, so recording a hundred-turn
+agent charged the whole transcript to every turn. Each recorded request is
+therefore also memoized on its own identity, and that memo outlives the append.
+It applies only to a frozen request, which is what a store's copy of a recorded
+call is and what a fixture the caller still owns is not: an unfrozen request is
+re-encoded, because nothing stops the caller rewriting it between two lookups.
+
 Strings are compared by code unit throughout, never by locale, and
 `canonicalRequestDigest` rejects a value nested more than 128 levels deep
 rather than overflowing the stack.

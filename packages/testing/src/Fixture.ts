@@ -313,7 +313,11 @@ export const canonicalRequestDigest = (request: ModelRequestLike): string =>
  * The memo is keyed by object identity. `FixtureStore` replaces the whole
  * fixture on every append rather than mutating it, so a recorded call is
  * visible to the next lookup; a caller that instead mutates a fixture's `calls`
- * in place would read a stale index.
+ * in place would read a stale index. That replacement is also why the index
+ * alone was not enough while a run was still recording: every append made a
+ * fixture this memo had never seen, and the rebuild re-encoded every call
+ * already recorded. {@link recordedDigest} carries those encodings across the
+ * append.
  *
  * @category encoding
  * @since 0.0.0
@@ -323,7 +327,7 @@ export const index = (fixture: Fixture): ReadonlyMap<string, RecordedCall> => {
   if (memoized !== undefined) return memoized
   const built = new Map<string, RecordedCall>()
   for (const call of fixture.calls) {
-    const digest = canonicalRequestDigest(call.request)
+    const digest = recordedDigest(call.request)
     // First writer wins, matching the `find`-based lookup this replaces.
     if (!built.has(digest)) built.set(digest, call)
   }
@@ -332,6 +336,32 @@ export const index = (fixture: Fixture): ReadonlyMap<string, RecordedCall> => {
 }
 
 const indexes = new WeakMap<Fixture, ReadonlyMap<string, RecordedCall>>()
+
+/**
+ * The canonical encoding of an already-recorded request, encoded once.
+ *
+ * Memoized on the request rather than on the fixture holding it, because the
+ * fixture is not stable while a run records: `FixtureStore` publishes a new
+ * fixture per append, so {@link index} missed on every recorded call and paid
+ * to re-encode every earlier conversation again. That made recording a
+ * hundred-turn agent through `CachedModel` cost the whole run's transcript
+ * once per turn.
+ *
+ * A request is memoized only when it is frozen, which is what a store's own
+ * copy of a recorded call is and what an arbitrary caller's fixture is not:
+ * nothing stops a caller mutating a fixture it still owns between two lookups,
+ * and a memo over that value would answer with an encoding of the request as
+ * it used to be.
+ */
+const recordedDigest = (request: ModelRequestLike): string => {
+  const memoized = digests.get(request)
+  if (memoized !== undefined) return memoized
+  const digest = canonicalRequestDigest(request)
+  if (Object.isFrozen(request)) digests.set(request, digest)
+  return digest
+}
+
+const digests = new WeakMap<ModelRequestLike, string>()
 
 const optional = <K extends string, A>(key: K, value: A | undefined): { readonly [P in K]?: A } =>
   value === undefined ? {} : { [key]: value } as { readonly [P in K]?: A }
