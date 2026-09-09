@@ -39,9 +39,13 @@ export interface JsonRpcOptions {
 export interface JsonRpc {
   request<T>(method: string, params: unknown, timeoutMs: number): Promise<T>
   notify(method: string, params: unknown): void
-  /** Rejects every pending request and stops reading. The child is the caller's to end. */
+  /**
+   * Rejects every pending request and cancels the stdout reader, so a read
+   * suspended on a pipe the child still holds open stops. The child is the
+   * caller's to end.
+   */
   close(): void
-  /** Settles when stdout ends or `close` runs. */
+  /** Settles once the reader has stopped, after stdout ends or `close` runs. */
   readonly closed: Promise<void>
 }
 
@@ -52,6 +56,10 @@ interface Pending {
 }
 
 const HEADER_END = "\r\n\r\n"
+/** A header block without a terminator within this many bytes is not a frame. */
+const MAX_HEADER_BYTES = 8 * 1024
+/** The largest `Content-Length` body accepted; beyond it the transport is retired. */
+const MAX_FRAME_BYTES = 32 * 1024 * 1024
 const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8")
 
@@ -116,52 +124,130 @@ export const createJsonRpc = (io: JsonRpcIo, options: JsonRpcOptions): JsonRpc =
     entry.resolve(message.result as never)
   }
 
+  /**
+   * Unframed stdout bytes, kept as chunks so a read never copies the backlog;
+   * they are joined once, when a whole header block or body is present.
+   */
+  const chunks: Array<Uint8Array> = []
+  let buffered = 0
+  /** The declared body length of a parsed header whose body has not fully arrived. */
+  let awaitingBody: number | undefined
+  let activeReader: ReadableStreamDefaultReader<Uint8Array> | undefined
+
+  /** The byte offset of the header terminator across the chunks, or -1. */
+  const findHeaderEnd = (): number => {
+    let base = 0
+    let matched = 0
+    for (const chunk of chunks) {
+      for (let index = 0; index < chunk.byteLength; index += 1) {
+        const byte = chunk[index]
+        if (byte === HEADER_END.charCodeAt(matched)) matched += 1
+        else matched = byte === HEADER_END.charCodeAt(0) ? 1 : 0
+        if (matched === HEADER_END.length) return base + index + 1 - HEADER_END.length
+      }
+      base += chunk.byteLength
+    }
+    return -1
+  }
+
+  /** The first `count` buffered bytes, removed from the front. */
+  const take = (count: number): Uint8Array => {
+    const out = new Uint8Array(count)
+    let filled = 0
+    while (filled < count) {
+      const chunk = chunks[0]
+      const wanted = count - filled
+      if (chunk.byteLength <= wanted) {
+        out.set(chunk, filled)
+        filled += chunk.byteLength
+        chunks.shift()
+      } else {
+        out.set(chunk.subarray(0, wanted), filled)
+        chunks[0] = chunk.subarray(wanted)
+        filled = count
+      }
+    }
+    buffered -= count
+    return out
+  }
+
+  /** Dispatches every whole frame in the buffer; false once a limit retired the transport. */
+  const frame = (): boolean => {
+    for (;;) {
+      if (awaitingBody === undefined) {
+        const headerEnd = findHeaderEnd()
+        if (headerEnd < 0) {
+          if (buffered <= MAX_HEADER_BYTES) return true
+          log(`json-rpc: a header ran past ${MAX_HEADER_BYTES} bytes without a terminator`)
+          close()
+          return false
+        }
+        const header = decoder.decode(take(headerEnd + HEADER_END.length).subarray(0, headerEnd))
+        const match = /content-length:\s*(\d+)/i.exec(header)
+        // A block without a length is not a frame; the next block may be.
+        if (match === null) continue
+        const length = Number(match[1])
+        if (!Number.isSafeInteger(length) || length > MAX_FRAME_BYTES) {
+          log(`json-rpc: a frame declared ${match[1]} bytes, past the ${MAX_FRAME_BYTES} byte cap`)
+          close()
+          return false
+        }
+        awaitingBody = length
+      }
+      if (buffered < awaitingBody) return true
+      const body = decoder.decode(take(awaitingBody))
+      awaitingBody = undefined
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        log("json-rpc: a frame was not JSON")
+        continue
+      }
+      if (isRecord(parsed)) dispatch(parsed)
+    }
+  }
+
   const read = async (): Promise<void> => {
-    const reader = io.stdout.getReader()
-    let buffer = new Uint8Array(0)
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
     try {
+      reader = io.stdout.getReader()
+      activeReader = reader
       while (!closed) {
         const { value, done } = await reader.read()
         if (done) break
-        const joined = new Uint8Array(buffer.byteLength + value.byteLength)
-        joined.set(buffer)
-        joined.set(value, buffer.byteLength)
-        buffer = joined
-        while (true) {
-          const headerEnd = indexOf(buffer, HEADER_END)
-          if (headerEnd < 0) break
-          const header = decoder.decode(buffer.subarray(0, headerEnd))
-          const match = /content-length:\s*(\d+)/i.exec(header)
-          if (match === null) {
-            buffer = buffer.subarray(headerEnd + HEADER_END.length)
-            continue
-          }
-          const length = Number(match[1])
-          const bodyStart = headerEnd + HEADER_END.length
-          if (buffer.byteLength < bodyStart + length) break
-          const body = decoder.decode(buffer.subarray(bodyStart, bodyStart + length))
-          buffer = buffer.subarray(bodyStart + length)
-          let parsed: unknown
-          try {
-            parsed = JSON.parse(body)
-          } catch {
-            log("json-rpc: a frame was not JSON")
-            continue
-          }
-          if (isRecord(parsed)) dispatch(parsed)
-        }
+        if (value.byteLength === 0) continue
+        chunks.push(value)
+        buffered += value.byteLength
+        if (!frame()) break
       }
     } catch (error) {
       if (!closed) log(`json-rpc read failed: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
-      reader.releaseLock()
+      activeReader = undefined
+      try {
+        reader?.releaseLock()
+      } catch {
+        // A cancel from close already dropped the lock.
+      }
       close()
+      resolveClosed()
     }
   }
 
   const close = (): void => {
     if (closed) return
     closed = true
+    // A read suspended on a stdout the child still holds open only wakes on cancel.
+    const reader = activeReader
+    activeReader = undefined
+    if (reader !== undefined) {
+      void reader.cancel().catch(() => {
+        // The stream was already errored or cancelled with the child.
+      })
+    }
+    chunks.length = 0
+    buffered = 0
     for (const [id, entry] of pending) {
       pending.delete(id)
       clearTimeout(entry.timer)
@@ -172,7 +258,6 @@ export const createJsonRpc = (io: JsonRpcIo, options: JsonRpcOptions): JsonRpc =
     } catch {
       // Already closed with the child.
     }
-    resolveClosed()
   }
 
   void read()
@@ -201,17 +286,4 @@ export const createJsonRpc = (io: JsonRpcIo, options: JsonRpcOptions): JsonRpc =
     close,
     closed: closedPromise
   }
-}
-
-/** The byte offset of an ASCII needle in the buffer, or -1. */
-const indexOf = (haystack: Uint8Array, needle: string): number => {
-  const first = needle.charCodeAt(0)
-  outer: for (let index = 0; index <= haystack.byteLength - needle.length; index += 1) {
-    if (haystack[index] !== first) continue
-    for (let offset = 1; offset < needle.length; offset += 1) {
-      if (haystack[index + offset] !== needle.charCodeAt(offset)) continue outer
-    }
-    return index
-  }
-  return -1
 }
