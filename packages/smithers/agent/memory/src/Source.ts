@@ -7,6 +7,11 @@
  * it, caps it, and degrades to no text after a two-second timeout or typed
  * failure.
  *
+ * The fence is a delimiter, not a trust boundary. Rows are model-written, so
+ * fence tokens, attribution prefixes, and line terminators inside a row are
+ * rendered as visible `\uXXXX` escapes: one row is always one line, and only
+ * this function writes a fence or a `[primer:bank]` / `[bank/key]` label.
+ *
  * ## What "once per `(lineageId, iteration)`" actually promises
  *
  * Every source has an in-process memo. With no
@@ -92,14 +97,24 @@ const encoder = new TextEncoder()
 const openingFence = "<flows_memory_context>"
 const closingFence = "</flows_memory_context>"
 
+// Memory rows are model-written, so every character that could open a fence,
+// start an attribution label, or end the row is replaced with its visible
+// `\uXXXX` escape before rendering. `\` is in the set, so an escape written
+// here can never be confused with one the row already contained.
+const textEscapes = /[\\<[\r\n\u0085\u2028\u2029]/g
+const labelEscapes = /[\\<[\]:/\r\n\u0085\u2028\u2029]/g
+const escapeUnit = (character: string): string => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+const escapeText = (text: string): string => text.replace(textEscapes, escapeUnit)
+const escapeLabel = (label: string): string => label.replace(labelEscapes, escapeUnit)
+
 const render = (
   primers: ReadonlyArray<{ readonly bank: string; readonly text: string }>,
   recalled: Recall.Output,
   maxBytes: number
 ): string => {
   const lines = [
-    ...primers.map((primer) => `[primer:${primer.bank}] ${primer.text}`),
-    ...recalled.map((result) => `[${result.bank}/${result.key}] ${result.text}`)
+    ...primers.map((primer) => `[primer:${escapeLabel(primer.bank)}] ${escapeText(primer.text)}`),
+    ...recalled.map((result) => `[${escapeLabel(result.bank)}/${escapeLabel(result.key)}] ${escapeText(result.text)}`)
   ]
   if (lines.length === 0) return ""
   const shell = `${openingFence}\n\n${closingFence}`
